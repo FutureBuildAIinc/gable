@@ -347,6 +347,15 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            ISO 4217 code, three capital letters. Reports never add two currencies
+            (ADR 0005 4.2): omitted, every currency's rows are returned, each row naming its currency; given, that currency alone.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
       responses:
         "200":
           description: The trial balance rows.
@@ -387,6 +396,15 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            ISO 4217 code, three capital letters. Reports never add two currencies
+            (ADR 0005 4.2): defaults to the dealer's default currency; the report is in that one currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
       responses:
         "200":
           description: The income statement in cents.
@@ -419,6 +437,15 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            ISO 4217 code, three capital letters. Reports never add two currencies
+            (ADR 0005 4.2): defaults to the dealer's default currency; the sheet is in that one currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
       responses:
         "200":
           description: The statement of financial position in cents.
@@ -752,9 +779,12 @@ components:
         $ref: "#/components/schemas/GlFiscalPeriod"
     GlTrialBalanceRow:
       type: object
-      required: [account_id, account_code, account_name, account_type, debit, credit]
-      description: One trial balance row (gl.TrialBalanceRow). debit and credit are int64 cents.
+      required: [account_id, account_code, account_name, account_type, currency, debit, credit]
+      description: One trial balance row (gl.TrialBalanceRow), per account and currency. debit and credit are int64 cents.
       properties:
+        currency:
+          type: string
+          description: The ISO 4217 code of the entries summed in this row.
         account_id:
           type: string
           format: uuid
@@ -793,9 +823,11 @@ components:
           description: Cents.
     GlProfitAndLossReport:
       type: object
-      required: [start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
-      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents.
+      required: [currency, start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
+      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency.
       properties:
+        currency:
+          type: string
         start_date:
           type: string
           description: YYYY-MM-DD.
@@ -832,9 +864,11 @@ components:
           format: int64
     GlBalanceSheetReport:
       type: object
-      required: [as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
-      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents.
+      required: [currency, as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
+      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency.
       properties:
+        currency:
+          type: string
         as_of_date:
           type: string
           description: YYYY-MM-DD.

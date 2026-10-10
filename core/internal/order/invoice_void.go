@@ -107,8 +107,17 @@ func (s *Service) ReturnBilled(ctx context.Context, orderID uuid.UUID, billed []
 		return res, err
 	}
 	res.Status = updated.Status.Status()
-	if from != StatusBackordered && next == StatusBackordered {
+	switch {
+	case from != StatusBackordered && next == StatusBackordered:
 		ev, err := s.eventFor(updated, EventBackordered, from.Status())
+		if err != nil {
+			return res, err
+		}
+		res.Events = append(res.Events, ev)
+	case from == StatusFulfilled && next == StatusConfirmed:
+		// A fulfilled order the void brought back to confirmed is a reopen
+		// (ADR 0005 section 12: order.reopened); C2-3 wrote no event for it.
+		ev, err := s.eventFor(updated, EventReopened, from.Status())
 		if err != nil {
 			return res, err
 		}

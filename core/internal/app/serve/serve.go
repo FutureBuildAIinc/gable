@@ -34,7 +34,6 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
-	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
@@ -62,6 +61,7 @@ import (
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
@@ -244,6 +244,17 @@ func Run() {
 	productHandler := product.NewHandler(productSvc)
 	wall.products(mux, productHandler)
 
+	// Unit catalogue (ADR 0006 section 2, item C3-2A-units): the rows the
+	// unit set service and the quote module read. Read for every desk
+	// role, write for admin and owner; the catalogue is dealer wide, so
+	// no branch wall applies.
+	unitSvc := unit.NewService(unit.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
+	unit.NewHandler(unitSvc).RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
+		middleware.RequireRole("admin", "owner"))
+
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
 	// product image generation. Base URL and per-task model slugs are admin-overridable.
@@ -319,12 +330,6 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(auditLog))
 
-	// Account Module
-	accountRepo := account.NewRepository(db)
-	accountSvc := account.NewService(accountRepo, db, logger)
-	accountHandler := account.NewHandler(accountSvc)
-	accountHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance"))
-
 	quoteRepo := quote.NewRepository(db)
 	// The quote module is the wire template (docs/refactor/MODULE-RECIPE.md):
 	// its writes run in one transaction with their quote.* outbox event as the
@@ -341,6 +346,14 @@ func Run() {
 	glHandler := gl.NewHandler(glSvc)
 	glHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
+	// Account Module: the AR core, the single writer of the subledger, the
+	// balance, the applications and the AR columns of the documents (ADR 0005
+	// section 9.3), and the aging, statement and reconciliation reads.
+	accountSvc := account.NewService(db, glSvc, logger).
+		WithAuditLog(auditLog).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
+	wall.accounts(mux, accountSvc)
+
 	// Invoice Module
 	invoiceRepo := invoice.NewRepository(db)
 	invoiceSvc := invoice.NewService(invoiceRepo, glSvc, accountSvc, db)
@@ -348,13 +361,6 @@ func Run() {
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
 		WithStock(inventorySvc)
 	wall.invoices(mux, invoiceSvc)
-
-	// Deposit Module (customer prepayments held as 2200 liability, applied to AR)
-	depositRepo := deposit.NewRepository(db)
-	depositSvc := deposit.NewService(db, depositRepo, glSvc, accountSvc, logger)
-	depositSvc.WithAuditLog(auditLog)
-	depositHandler := deposit.NewHandler(depositSvc)
-	depositHandler.RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"))
 
 	// Pricing Module
 	pricingRepo := pricing.NewRepository(db)
@@ -457,6 +463,7 @@ func Run() {
 		AuditLog:   auditLog,
 		Inventory:  inventorySvc,
 		Invoices:   invoiceSvc,
+		Accounts:   accountSvc,
 		Pricing:    pricingSvc,
 		Customers:  customerSvc,
 		Escalators: escalatorRepo,
@@ -492,8 +499,8 @@ func Run() {
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
-	paymentSvc := payment.NewService(db, paymentRepo, invoiceRepo, accountSvc)
-	paymentSvc.WithAuditLog(auditLog)
+	paymentSvc := payment.NewService(db, paymentRepo, accountSvc)
+	paymentSvc.WithAuditLog(auditLog).WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
 
 	// Run Payments gateway — always constructed; credentials resolve at call
 	// time, DB-first (system_settings run_payments_* keys, settable in Tech
@@ -535,8 +542,7 @@ func Run() {
 		logger.Warn("Run Payments key not set (env or settings) — card charges will fail until run_payments_api_key is configured")
 	}
 
-	paymentHandler := payment.NewHandler(paymentSvc)
-	paymentHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "finance", "cashier"))
+	wall.payments(mux, paymentSvc)
 
 	// POS Module (Retail Counter Sales)
 	posRepo := pos.NewRepository(db)

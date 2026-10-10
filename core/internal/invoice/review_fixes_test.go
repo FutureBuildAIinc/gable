@@ -40,7 +40,7 @@ func TestVoidReversesTheLegacyEntryOfAnInvoiceWithNoGLEntryID(t *testing.T) {
 	// the counter's own invoices are refused (TestVoidOfACounterInvoice...);
 	// the case here is the entry lookup, so the invoice is reclassified as an
 	// order's, as an invoice from before C2-2 would be.
-	mustExec(t, db, `UPDATE invoices SET origin = 'ORDER' WHERE id = $1`, id)
+	mustExec(t, db, `UPDATE invoices SET origin = 'ORDER', gl_entry_id = NULL WHERE id = $1`, id)
 	if n, _ := f.entryLegs(id); n != 1 {
 		t.Fatalf("%d entries for the legacy invoice, want the one SyncInvoice posted", n)
 	}
@@ -112,19 +112,14 @@ type legacyDoc struct {
 	totalCents int64
 }
 
-// A deposit applied to the invoice is an application: the void is refused until C2-4.
+// A deposit applied to the invoice is a live application (a PAYMENT application of
+// a payment that carries an order): the void is refused with has_applications.
 func TestVoidIsRefusedWhileADepositIsApplied(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	invID, _ := f.invoice("1")
-	dep := uuid.New()
-	mustExec(t, db, `INSERT INTO customer_deposits (id, customer_id, amount, applied_amount, status) VALUES ($1, $2, 10, 10, 'APPLIED')`, dep, f.customerID)
-	mustExec(t, db, `INSERT INTO customer_deposit_applications (deposit_id, customer_id, amount, invoice_id) VALUES ($1, $2, 10, $3)`, dep, f.customerID, invID)
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM customer_deposit_applications WHERE deposit_id = $1`, dep)
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM customer_deposits WHERE id = $1`, dep)
-	})
+	f.liveApplication(invID, 1000)
 	r := f.voidInvoice(invID, rev(t, f.getInvoice(invID)), "deposit applied")
 	if _, blockers, _ := errorOf(t, r); r.status != 409 || fmt.Sprint(blockers) != "[has_applications]" {
 		t.Errorf("void with a deposit applied = %d %v, want has_applications", r.status, blockers)

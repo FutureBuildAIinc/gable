@@ -1,0 +1,113 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package units
+
+import (
+	"math/big"
+	"testing"
+
+	"github.com/gablelbm/gable/internal/platform/httpx"
+)
+
+// TestTallyArithmetic covers section 4.3's worked cases: the linear feet sum,
+// the exact board feet (including 200/3) and the display rounding of R4.3.
+func TestTallyArithmetic(t *testing.T) {
+	// 10 at 8 and 5 at 14: 150 linear feet, exactly 100 board feet of a 2x4.
+	rows := []TallyRow{{Pieces: 10, LengthFT: q("8")}, {Pieces: 5, LengthFT: q("14")}}
+	lf, err := LinearFeet(rows)
+	if err != nil || lf != q("150") {
+		t.Fatalf("linear feet = %s, %v; want 150", lf.WireString(), err)
+	}
+	bf, err := BoardFeet(lf, q("2"), q("4"))
+	if err != nil {
+		t.Fatalf("board feet: %v", err)
+	}
+	if bf.Cmp(big.NewRat(100, 1)) != 0 {
+		t.Errorf("board feet = %s; want exactly 100", bf.RatString())
+	}
+	if d := DisplayBoardFeet(bf); d != q("100") {
+		t.Errorf("display board feet = %s; want 100", d.WireString())
+	}
+
+	// 10 at 10: 100 linear feet, exactly 200/3 board feet, displayed 66.6667.
+	rows = []TallyRow{{Pieces: 10, LengthFT: q("10")}}
+	lf, _ = LinearFeet(rows)
+	bf, _ = BoardFeet(lf, q("2"), q("4"))
+	if bf.Cmp(big.NewRat(200, 3)) != 0 {
+		t.Errorf("board feet = %s; want exactly 200/3", bf.RatString())
+	}
+	if d := DisplayBoardFeet(bf); d != q("66.6667") {
+		t.Errorf("display board feet = %s; want 66.6667 (R4.3's one rounding)", d.WireString())
+	}
+
+	// Negative exact values round half away from zero too (R4.3; a credit
+	// memo line carries a negative quantity): -200/3 is -66.6667, not
+	// -66.6666, and -1/20000 is -0.0001, not zero.
+	neg := new(big.Rat).Neg(big.NewRat(200, 3))
+	if d := DisplayBoardFeet(neg); d != -q("66.6667") {
+		t.Errorf("display board feet of -200/3 = %s; want -66.6667 (half away from zero)", d.WireString())
+	}
+	if d := DisplayBoardFeet(big.NewRat(-1, 20000)); d != -q("0.0001") {
+		t.Errorf("display board feet of -1/20000 = %s; want -0.0001 (half away from zero)", d.WireString())
+	}
+	if d := DisplayBoardFeet(big.NewRat(-1, 30000)); d != 0 {
+		t.Errorf("display board feet of -1/30000 = %s; want 0 (below half rounds toward zero)", d.WireString())
+	}
+
+	// A 2x6 tally of 10 at 12 and 6 at 16: 216 linear feet, 216 board feet
+	// (a 2x6 is 1 BF per LF: 2 x 6 / 12).
+	rows = []TallyRow{{Pieces: 10, LengthFT: q("12")}, {Pieces: 6, LengthFT: q("16")}}
+	lf, _ = LinearFeet(rows)
+	if lf != q("216") {
+		t.Fatalf("linear feet = %s; want 216", lf.WireString())
+	}
+	bf, _ = BoardFeet(lf, q("2"), q("6"))
+	if bf.Cmp(big.NewRat(216, 1)) != 0 {
+		t.Errorf("board feet = %s; want exactly 216", bf.RatString())
+	}
+
+	// Fractional lengths are exact at scale 4: 2 pieces at 12.5 are 25 LF.
+	rows = []TallyRow{{Pieces: 2, LengthFT: q("12.5")}}
+	if lf, err = LinearFeet(rows); err != nil || lf != q("25") {
+		t.Errorf("linear feet = %s, %v; want 25", lf.WireString(), err)
+	}
+
+	// A row without a cross section has no board feet: the extension goes
+	// through the line's pair alone (a random length moulding).
+	if _, err := BoardFeet(q("150"), q("0"), q("0")); err == nil {
+		t.Errorf("a cross section is positive")
+	}
+
+	// The sum cannot overflow into a small quantity: 19 rows of 1,000,000
+	// pieces within the row limits sum to exactly 2^64 + 448384 scaled
+	// units, which a plain int64 accumulator would wrap to 44.8384.
+	var wrap []TallyRow
+	for i := 0; i < 18; i++ {
+		wrap = append(wrap, TallyRow{Pieces: 1_000_000, LengthFT: httpx.Quantity(999999999983 - i)})
+	}
+	wrap = append(wrap, TallyRow{Pieces: 1_000_000, LengthFT: httpx.Quantity(446744074169)})
+	if _, err := LinearFeet(wrap); err != ErrOutOfBound {
+		t.Errorf("a sum past 2^64 is refused, got err %v", err)
+	}
+	// A sum past the bound inside int64 is refused too, and one at the bound
+	// is served.
+	bound := []TallyRow{{Pieces: 1_000_000, LengthFT: httpx.Quantity(999999999)}}
+	if _, err := LinearFeet(bound); err != ErrOutOfBound {
+		t.Errorf("a sum past the quantity bound is refused, got err %v", err)
+	}
+	atBound := []TallyRow{{Pieces: 999_999, LengthFT: httpx.Quantity(1_000_001)}}
+	if lf, err := LinearFeet(atBound); err != nil || lf != httpx.QuantityMax {
+		t.Errorf("a sum at the quantity bound is served, got %s, %v", lf.WireString(), err)
+	}
+
+	// The extension of the tallied line is Extend(linear_feet, pair, price):
+	// 150 LF at 500.00 per MBF with pair (1500, 1) is 5000 cents, and the
+	// 200/3 tally's 100 LF is 3333 cents (R4.1 the only rounding).
+	if cents, err := httpx.Extend(q("150"), q("1500"), q("1"), 5000000); err != nil || cents != 5000 {
+		t.Errorf("150 LF at 500 per MBF extends to %d cents, %v; want 5000", cents, err)
+	}
+	if cents, err := httpx.Extend(q("100"), q("1500"), q("1"), 5000000); err != nil || cents != 3333 {
+		t.Errorf("the 200/3 tally's 100 LF extends to %d cents, %v; want 3333", cents, err)
+	}
+}

@@ -69,6 +69,9 @@
             "quantity": "20",
             "quote_id": "<id-2>",
             "sku": "LUM-248-PREM",
+            "stock_quantity": "20",
+            "stock_uom": "PCS",
+            "tally": null,
             "unit_cost_ten_thousandths": 35000,
             "unit_price_ten_thousandths": 55000,
             "uom": "PCS",
@@ -159,6 +162,131 @@
     }
   },
   {
+    "name": "machine_key.units_key",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/keys",
+      "body": {
+        "name": "golden-units-key",
+        "scopes": [
+          "units:read"
+        ]
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "api_key": "<api-key>",
+        "key": {
+          "created_at": "<ts+0d>",
+          "id": "<id-8>",
+          "last_used_at": null,
+          "name": "golden-units-key",
+          "prefix": "<api-key>",
+          "revoked_at": null,
+          "scopes": [
+            "units:read"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.units_read",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/units/EA",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "code": "EA",
+        "created_at": "<ts-106751d>",
+        "dimension": "count",
+        "is_active": true,
+        "is_system": true,
+        "name": "Each",
+        "revision": 1,
+        "std_ref_qty": "1",
+        "std_unit_qty": "1",
+        "updated_at": "<ts-106751d>"
+      }
+    }
+  },
+  {
+    "name": "machine_key.units_write_refused",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/units",
+      "headers": {
+        "Authorization": "Bearer <api-key>"
+      },
+      "body": {
+        "code": "SKID",
+        "dimension": "count",
+        "name": "Skid"
+      }
+    },
+    "response": {
+      "status": 403,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "forbidden",
+          "message": "machine key lacks required scope units:write"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "machine_key.units_refusal_audit_row",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT action, entity_type, entity_id::text AS entity_id, actor_kind, actor_id, user_id, changes FROM audit_log WHERE entity_type = 'api_key' AND entity_id = '<id-8>'::uuid ORDER BY created_at, id"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "action": "key.created",
+          "actor_id": null,
+          "actor_kind": "anonymous",
+          "changes": {
+            "name": "golden-units-key",
+            "scopes": [
+              "units:read"
+            ]
+          },
+          "entity_id": "<id-8>",
+          "entity_type": "api_key",
+          "user_id": null
+        },
+        {
+          "action": "key.scope_refused",
+          "actor_id": "<id-8>",
+          "actor_kind": "key",
+          "changes": {
+            "method": "POST",
+            "path": "/api/v1/units",
+            "scope": "units:write"
+          },
+          "entity_id": "<id-8>",
+          "entity_type": "api_key",
+          "user_id": null
+        }
+      ]
+    }
+  },
+  {
     "name": "machine_key.user_only_refused",
     "request": {
       "method": "GET",
@@ -176,7 +304,7 @@
           "message": "key management requires a user"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -200,7 +328,7 @@
         "api_key": "<api-key>",
         "key": {
           "created_at": "<ts+0d>",
-          "id": "<id-9>",
+          "id": "<id-11>",
           "last_used_at": null,
           "name": "golden-settings-key",
           "prefix": "<api-key>",
@@ -251,7 +379,7 @@
           "message": "machine key lacks required scope admin:staff"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -275,7 +403,7 @@
         "api_key": "<api-key>",
         "key": {
           "created_at": "<ts+0d>",
-          "id": "<id-11>",
+          "id": "<id-13>",
           "last_used_at": null,
           "name": "golden-coarse-key",
           "prefix": "<api-key>",
@@ -305,7 +433,7 @@
           "message": "machine key lacks required scope admin:settings"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -314,7 +442,7 @@
     "name": "machine_key.coarse_admin_key.refusal_audit_row",
     "request": {
       "method": "SQL",
-      "path": "SELECT action, changes->>'scope' AS refused_scope FROM audit_log WHERE entity_type = 'api_key' AND entity_id = '<id-11>'::uuid ORDER BY created_at, id"
+      "path": "SELECT action, changes->>'scope' AS refused_scope FROM audit_log WHERE entity_type = 'api_key' AND entity_id = '<id-13>'::uuid ORDER BY created_at, id"
     },
     "response": {
       "status": 200,
@@ -349,7 +477,7 @@
           "message": "invalid machine key"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-15>"
         }
       }
     }

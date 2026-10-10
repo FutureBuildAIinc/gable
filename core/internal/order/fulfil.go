@@ -10,7 +10,9 @@ import (
 	"math/big"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -36,6 +38,16 @@ type InvoiceWriter interface {
 }
 
 func (s *Service) WithInvoices(w InvoiceWriter) *Service { s.invoices = w; return s }
+
+// DepositApplier applies the order's unapplied payments to the invoice a
+// fulfilment created, oldest first, up to the invoice's total (ADR 0005 5.6
+// step 7). account.Service satisfies it.
+type DepositApplier interface {
+	ApplyDeposits(ctx context.Context, invoiceID uuid.UUID, paymentIDs []uuid.UUID, on time.Time, actor string) (*account.Effects, error)
+}
+
+// WithDeposits wires the deposit application of a fulfilment.
+func (s *Service) WithDeposits(d DepositApplier) *Service { s.deposits = d; return s }
 
 // FulfilLineRequest names one order line and the quantity to bill.
 type FulfilLineRequest struct {
@@ -418,6 +430,12 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 		if err := s.fulfilChecks(ctx, cur, req); err != nil {
 			return err
 		}
+		// Step 2: the order's payments with an unapplied amount, in id order,
+		// before stock (section 11, step 2).
+		deposits, err := s.repo.LockOrderPayments(ctx, cur.ID)
+		if err != nil {
+			return err
+		}
 
 		plan, err := planFulfilment(cur, req)
 		if err != nil {
@@ -574,6 +592,21 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 		if err := s.invoices.CreateFulfilmentInvoice(ctx, inv); err != nil {
 			return err
 		}
+		// Step 7: apply the order's deposits to the invoice just billed, oldest
+		// first, up to its total (the AR core caps each at what is open).
+		fx := inv.Effects
+		if len(deposits) > 0 && s.deposits != nil && inv.TotalCents > 0 {
+			on := inv.InvoiceDate
+			dfx, err := s.deposits.ApplyDeposits(ctx, inv.ID, deposits, on, req.Actor)
+			if err != nil {
+				return err
+			}
+			if fx == nil {
+				fx = dfx
+			} else {
+				fx.Merge(dfx)
+			}
+		}
 
 		// Update the lines and derive the status.
 		for _, it := range plan.items {
@@ -599,6 +632,13 @@ func (s *Service) fulfil(ctx context.Context, id uuid.UUID, pre *Precondition, r
 		// Events last: invoice.created, then the order's.
 		if err := s.recordInvoice(ctx, updated, inv); err != nil {
 			return err
+		}
+		if fx != nil {
+			for _, ev := range fx.Events() {
+				if err := s.recordEvent(ctx, ev); err != nil {
+					return err
+				}
+			}
 		}
 		event := EventPartiallyFulfilled
 		if updated.Status == StatusFulfilled {
@@ -804,6 +844,14 @@ func nonStockRelief(rc NonStockReceipts, billedBefore, qty httpx.Quantity) httpx
 // recordInvoice writes invoice.created through the transaction's executor, and
 // invoice.paid after it for a zero total (ADR 0005 6.2: an invoice with
 // nothing owed is created paid).
+// recordEvent writes one event the AR core's act produced, last.
+func (s *Service) recordEvent(ctx context.Context, ev outbox.Event) error {
+	if s.events == nil {
+		return nil
+	}
+	return s.events.Write(ctx, ev)
+}
+
 func (s *Service) recordInvoice(ctx context.Context, o *Order, inv *invoice.FulfilmentInvoice) error {
 	if s.events == nil {
 		return nil

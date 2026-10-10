@@ -73,7 +73,7 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 
 	logger := slog.Default()
 	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
-	acct := account.NewService(account.NewRepository(db), db, logger)
+	acct := account.NewService(db, glSvc, logger)
 	stock := inventory.NewService(inventory.NewRepository(db))
 	f.invoices = invoice.NewService(invoice.NewRepository(db), glSvc, acct, db).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(outbox.NewWriter(db, "")).WithStock(stock)
@@ -132,7 +132,9 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM customer_transactions WHERE customer_id = $1`, f.customerID)
 	exec(`DELETE FROM credit_memo_lines WHERE credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM credit_memos WHERE customer_id = $1`, f.customerID)
-	exec(`DELETE FROM payments WHERE invoice_id IN `+invs, f.customerID)
+	exec(`DELETE FROM payment_refunds WHERE payment_id IN (SELECT id FROM payments WHERE customer_id = $1) OR credit_memo_id IN `+cms, f.customerID)
+	exec(`DELETE FROM ar_applications WHERE customer_id = $1`, f.customerID)
+	exec(`DELETE FROM payments WHERE customer_id = $1`, f.customerID)
 	exec(`DELETE FROM invoice_lines WHERE invoice_id IN `+invs, f.customerID)
 	exec(`DELETE FROM invoices WHERE customer_id = $1`, f.customerID)
 	exec(`DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
@@ -141,6 +143,26 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM locations WHERE id = $1`, f.yardID)
 	exec(`DELETE FROM products WHERE id = $1`, f.productID)
 	exec(`DELETE FROM customers WHERE id = $1`, f.customerID)
+}
+
+// liveApplication writes a payment of the fixture's customer and a live PAYMENT
+// application of cents on the invoice, by raw SQL: the refusals under test read
+// the application rows, not the money that made them.
+func (f *fixture) liveApplication(invoiceID string, cents int64) {
+	f.t.Helper()
+	pay := uuid.New()
+	mustExec(f.t, f.db, `INSERT INTO payments (id, customer_id, branch_id, currency, method, amount, amount_unapplied, received_on)
+		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'CASH', $3::bigint::numeric / 100, 0, CURRENT_DATE)`, pay, f.customerID, cents)
+	mustExec(f.t, f.db, `INSERT INTO ar_applications (customer_id, currency, kind, payment_id, invoice_id, amount, applied_on, act_id)
+		VALUES ($1, 'USD', 'PAYMENT', $2, $3, $4::bigint::numeric / 100, CURRENT_DATE, gen_random_uuid())`, f.customerID, pay, invoiceID, cents)
+}
+
+// liveCreditApplication writes a live CREDIT_MEMO application of the invoice's
+// applied credit memo.
+func (f *fixture) liveCreditApplication(invoiceID string) {
+	f.t.Helper()
+	mustExec(f.t, f.db, `INSERT INTO ar_applications (customer_id, currency, kind, credit_memo_id, invoice_id, amount, applied_on, act_id)
+		SELECT $1, 'USD', 'CREDIT_MEMO', id, $2, 5, CURRENT_DATE, gen_random_uuid() FROM credit_memos WHERE invoice_id = $2 AND status = 'APPLIED'`, f.customerID, invoiceID)
 }
 
 type resp struct {

@@ -806,7 +806,7 @@ components:
         its price unit, the conversion pair, and the extension in cents
         (quantity x unit price x price_uom_qty / uom_qty, rounded once, half
         away from zero).
-      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, unit_cost_ten_thousandths, created_at]
+      required: [id, quote_id, product_id, sku, description, customer_note, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, line_total_cents, stock_uom, stock_quantity, tally, unit_cost_ten_thousandths, created_at]
       properties:
         id:
           type: string
@@ -818,6 +818,25 @@ components:
           type: [string, "null"]
           format: uuid
           description: Null for a special order line the dealer does not stock.
+        stock_uom:
+          type: [string, "null"]
+          description: >-
+            The product's stocking unit at the line's create (ADR 0006
+            section 3.4); null on a line without a product.
+        stock_quantity:
+          description: >-
+            The quantity converted into the stocking unit, exact at scale 4
+            (R5); null on a line without a product.
+          oneOf:
+            - $ref: "#/components/schemas/Quantity"
+            - type: "null"
+        tally:
+          description: >-
+            The pieces by length a random length line carries (ADR 0006
+            section 4); null on every other line.
+          oneOf:
+            - $ref: "#/components/schemas/Tally"
+            - type: "null"
         sku:
           type: string
         description:
@@ -856,8 +875,64 @@ components:
       description: A plain decimal string with at most four fraction digits, never a JSON number.
     QuoteUom:
       type: string
-      enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
-      description: Units of measure keep their standard uppercase codes.
+      pattern: '^[A-Z]{1,6}$'
+      description: >-
+        A unit code of the catalogue (ADR 0006 section 2); on a product line,
+        a sale unit of the product's set.
+    Tally:
+      type: object
+      description: >-
+        A random length line's tally (ADR 0006 section 4.3): pieces by
+        length, the cross section snapshotted from the product, the exact
+        linear feet the line's quantity carries, and the board feet display
+        rounding of R4.3 (read by nothing). Pieces are JSON integers; the
+        lengths and derived fields are decimal strings.
+      required: [thickness_in, width_in, rows, linear_feet, board_feet]
+      properties:
+        thickness_in:
+          oneOf:
+            - $ref: "#/components/schemas/Quantity"
+            - type: "null"
+        width_in:
+          description: "Null beside a null thickness: a tally without a cross section."
+          oneOf:
+            - $ref: "#/components/schemas/Quantity"
+            - type: "null"
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/TallyRow"
+        linear_feet:
+          $ref: "#/components/schemas/Quantity"
+        board_feet:
+          description: Linear feet x thickness x width / 12, rounded once to scale 4 for display.
+          oneOf:
+            - $ref: "#/components/schemas/Quantity"
+            - type: "null"
+    TallyRow:
+      type: object
+      required: [pieces, length_ft]
+      properties:
+        pieces:
+          type: integer
+          minimum: 1
+          maximum: 1000000
+        length_ft:
+          $ref: "#/components/schemas/Quantity"
+    TallyRequest:
+      type: object
+      required: [rows]
+      description: >-
+        The tally a line carries: rows only. thickness_in, width_in,
+        linear_feet and board_feet are read only, and one in a request is a
+        400 naming it. Allowed on a random length product line only, its
+        sale unit LF; the linear feet are the line's quantity.
+      properties:
+        rows:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/TallyRow"
     QuoteRequest:
       type: object
       required: [customer_id, lines]
@@ -917,13 +992,19 @@ components:
             $ref: "#/components/schemas/QuoteLineRequest"
     QuoteLineRequest:
       type: object
-      required: [quantity, unit_price_ten_thousandths]
+      required: [unit_price_ten_thousandths]
       description: >-
-        uom defaults from the product's own unit when the line names a
+        uom defaults to the product's sale unit when the line names a
         product; a line with neither uom nor product_id is a 400 naming
         lines[i].uom. sku and description default from product_id and are
-        required without one. price_uom defaults to uom; when it differs,
-        uom_qty and price_uom_qty (both) are required.
+        required without one. price_uom defaults to the product's price unit
+        on a product line and to uom on the others. The pair is resolved by
+        the server from the product's unit set on a product line (ADR 0006
+        section 3.3); a sent pair must equal the resolved one as a ratio. A
+        line without a product carries the client's pair, required when the
+        two units differ unless their standard sizes derive it. quantity is
+        required unless the line carries a tally, whose linear feet are the
+        quantity.
       properties:
         id:
           type: string
@@ -953,6 +1034,8 @@ components:
           type: integer
           format: int64
           minimum: 0
+        tally:
+          $ref: "#/components/schemas/TallyRequest"
     QuoteTransitionRequest:
       type: object
       required: [to]

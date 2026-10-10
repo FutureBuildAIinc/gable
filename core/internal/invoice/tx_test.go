@@ -374,7 +374,7 @@ func TestSaturationNeedsNoSecondConnection(t *testing.T) {
 
 	logger := slog.Default()
 	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
-	acct := account.NewService(account.NewRepository(db), db, logger)
+	acct := account.NewService(db, glSvc, logger)
 	stock := inventory.NewService(inventory.NewRepository(db))
 	phase := func(name string, run func(svc *invoice.Service, i int) error) {
 		t.Helper()
@@ -451,8 +451,9 @@ func TestPaymentAndVoidRaceLeavesNoVoidInvoiceWithAPayment(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
 	f := newFixture(t, db)
-	acct := account.NewService(account.NewRepository(db), db, slog.Default())
-	pay := payment.NewService(db, payment.NewRepository(db), invoice.NewRepository(db), acct)
+	glSvc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	acct := account.NewService(db, glSvc, slog.Default())
+	pay := payment.NewService(db, payment.NewRepository(db), acct)
 	voided, paid := 0, 0
 	for i := 0; i < 16; i++ {
 		invID, _ := f.invoice("1")
@@ -474,11 +475,12 @@ func TestPaymentAndVoidRaceLeavesNoVoidInvoiceWithAPayment(t *testing.T) {
 			if i%2 == 0 {
 				time.Sleep(skew)
 			}
-			_, payErr = pay.ProcessPayment(context.Background(), uuid.MustParse(invID), 100, payment.PaymentMethodCash, "race", "")
+			_, payErr = pay.Create(context.Background(), &payment.Input{CustomerID: f.customerID, AmountCents: 100, Method: payment.PaymentMethodCash,
+				Reference: "race", Applications: []account.ApplyLine{{InvoiceID: uuid.MustParse(invID), AmountCents: 100}}}, payment.Caller{})
 		}()
 		wg.Wait()
 		status := str(t, f.getInvoice(invID).body, "status")
-		payments := countOf(t, db, `SELECT count(*) FROM payments WHERE invoice_id = $1`, invID)
+		payments := countOf(t, db, `SELECT count(*) FROM ar_applications WHERE invoice_id = $1 AND reversed_at IS NULL`, invID)
 		switch {
 		case status == "void" && payments == 0 && voidStatus == 200 && payErr != nil:
 			voided++

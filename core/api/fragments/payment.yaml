@@ -1,19 +1,93 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The payment module, transcribed from internal/payment/handler.go and
-# model.go as they behave today: cents money, a card charge whose gateway
-# call succeeded but persistence failed answers a generic 402, and the
-# intent response echoing amount under a cents name while the request
-# carries it under a bare name.
+# The payment module on the wire contract (ADR 0001; ADR 0005 sections 9 and 12,
+# item C2-4): a payment is the cash received, held in 2200 until applications
+# settle invoices; the cursor list envelope with working filters, the one error
+# envelope, a lowercase status and method, integer _cents money, a PAY- number
+# and a revision with its ETag. Unapplied cash exists without an invoice and
+# applies later (POST /payments/{id}/applications); a void reverses every
+# application; a refund pays back unapplied cash. The card route charges the
+# gateway before the transaction and answers 502 charge_not_reversed when the
+# system refused the payment, the charge could not be given back, and finance
+# must reconcile the named gateway transaction.
 paths:
   /api/v1/payments:
+    get:
+      operationId: paymentList
+      tags: [payment]
+      summary: List payments
+      description: >-
+        The cursor list envelope, newest first (created_at, then id). customer_id,
+        order_id and job_id filter on their document; status and method take comma
+        separated lowercase lists; unapplied=true lists the posted payments that
+        still hold unapplied cash and unapplied=false the rest. total appears only
+        under include=total. A parameter the route does not declare, a value outside
+        its vocabulary, a malformed cursor or an out of range limit is a 400.
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          required: false
+          description: Comma separated lowercase statuses (posted, voided).
+          schema: {type: string}
+        - name: unapplied
+          in: query
+          required: false
+          schema: {type: string, enum: ["true", "false"]}
+        - name: order_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: job_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: method
+          in: query
+          required: false
+          description: Comma separated lowercase methods (cash, card, check, ach, other, account).
+          schema: {type: string}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of payments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: paymentCreate
       tags: [payment]
-      summary: Record a non card payment
-      description: Cash, check or account payments against an invoice.
+      summary: Record a payment
+      description: >-
+        Records a posted payment for a customer (cash, check, ach or other; a card is
+        taken through POST /payments/card, and account is not a payment). The whole
+        amount is posted to 2200 (DR 1010 / CR 2200). Without applications the payment
+        is unapplied cash. With applications each invoice takes its cash (and an early
+        pay discount, on or before the invoice's discount date, up to what its terms
+        allow) in the same transaction, each application its own entry (DR 2200 / CR
+        1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied,
+        exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch,
+        discount_not_available, period_closed. Writes payment.recorded, then
+        payment.applied and invoice.partial or invoice.paid per invoice, then
+        customer.updated (part balance).
       parameters:
+        - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -22,8 +96,15 @@ paths:
             schema:
               $ref: "#/components/schemas/PaymentCreateRequest"
       responses:
-        "200":
+        "201":
           description: The recorded payment.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+            Location:
+              description: The payment's route.
+              schema: {type: string}
           content:
             application/json:
               schema:
@@ -33,13 +114,254 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/{id}:
+    get:
+      operationId: paymentGet
+      tags: [payment]
+      summary: Get one payment with its applications and refunds
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The payment.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+  /api/v1/payments/{id}/applications:
+    post:
+      operationId: paymentApply
+      tags: [payment]
+      summary: Apply a payment's unapplied cash to invoices
+      description: >-
+        Applies unapplied cash later, partly, across many invoices; each application
+        posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The
+        precondition is the payment's revision. Refused with 409 exceeds_unapplied,
+        exceeds_open_amount, invoice_void, payment_voided, customer_mismatch,
+        currency_mismatch, discount_not_available or period_closed. Writes payment.applied,
+        invoice.partial or invoice.paid per invoice, and customer.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentApplyRequest"
+      responses:
+        "200":
+          description: The payment after the applications.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/{id}/transitions:
+    post:
+      operationId: paymentTransition
+      tags: [payment]
+      summary: Void a payment
+      description: >-
+        The only client transition is voided (roles admin, owner, finance; a reason is
+        required). It reverses every live application (with its discounts), then
+        posts the void entry (DR 2200 / CR 1010) for the amount still unapplied, which is
+        the amount less refunds; a payment with refunds can be voided and the void covers
+        only what was not refunded. A card payment is refused with 409 card_payment (it is
+        refunded through the gateway). Writes payment.unapplied per reversed application,
+        invoice.reopened per invoice, customer.updated and payment.voided.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentTransitionRequest"
+      responses:
+        "200":
+          description: The payment after the void.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/{id}/refunds:
+    post:
+      operationId: paymentRefund
+      tags: [payment]
+      summary: Refund a payment's unapplied cash
+      description: >-
+        Pays unapplied cash back out (DR 2200 / CR 1010), limited to the unapplied amount
+        (409 exceeds_unapplied). A card payment is refunded through the gateway before the
+        transaction. The precondition is the payment's revision. Writes payment.refunded.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRefundRequest"
+      responses:
+        "201":
+          description: The refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/credit-memos/{id}/refunds:
+    post:
+      operationId: creditMemoRefund
+      tags: [payment]
+      summary: Pay a credit memo's open credit out
+      description: >-
+        Roles admin, owner, finance. Pays the open credit of an open or partial credit
+        memo out (DR 1020 / CR 1010) by check, ach, other or card (a card refund names the
+        card payment it goes back to and goes through the gateway before the transaction),
+        limited to the open credit (409 exceeds_open_credit). The credit leaves the
+        receivable: a REFUND subledger row. The precondition is the credit memo's revision.
+        Writes credit_memo.refunded, then credit_memo.partial or credit_memo.applied, and
+        customer.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditMemoRefundRequest"
+      responses:
+        "201":
+          description: The refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/payments/intent:
@@ -58,7 +380,7 @@ paths:
               $ref: "#/components/schemas/PaymentIntentRequest"
       responses:
         "200":
-          description: The public key and the echoed invoice and amount.
+          description: The public key and the echoed amount.
           content:
             application/json:
               schema:
@@ -68,24 +390,31 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ForbiddenEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          $ref: "#/components/responses/WireServiceUnavailable"
   /api/v1/payments/card:
     post:
       operationId: paymentCard
       tags: [payment]
       summary: Charge a tokenized card
       description: >-
-        A charge captured at the gateway whose persistence then fails is a
-        generic 402; the token is never echoed back.
+        Charges the gateway (outside the transaction, in the customer's currency), then
+        records and applies the payment as POST /payments does. An invoice that cannot take
+        the payment (void, over open) is refused before the card is charged. When the system
+        refuses the payment after the gateway approved the charge (409), the charge is voided
+        (same day) or refunded before the refusal returns, and the message says which. When
+        the void and the refund both fail the route answers 502 with code charge_not_reversed
+        and a message saying the card was charged and finance must reconcile the named
+        gateway transaction id (the id and nothing else about the card); the attempt is on
+        record as the audit row payment.charge_reversal. A declined card or a gateway fault
+        before anything is recorded is 402 payment_required. The token is never echoed back.
       parameters:
+        - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -94,8 +423,15 @@ paths:
             schema:
               $ref: "#/components/schemas/CardPaymentRequest"
       responses:
-        "200":
-          description: The processed payment.
+        "201":
+          description: The recorded card payment.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+            Location:
+              description: The payment's route.
+              schema: {type: string}
           content:
             application/json:
               schema:
@@ -104,210 +440,225 @@ paths:
           $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
         "402":
-          $ref: "#/components/responses/PaymentRequired"
+          $ref: "#/components/responses/WirePaymentRequired"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
-  /api/v1/payments/refund:
-    post:
-      operationId: paymentRefund
-      tags: [payment]
-      summary: Refund a card payment in part or full
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefundRequest"
-      responses:
-        "200":
-          description: The processed refund.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Refund"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/invoices/{id}/payments:
-    get:
-      operationId: paymentHistory
-      tags: [payment]
-      summary: List an invoice's payments
-      description: Registered by the payment module on the invoice's path.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: The payments, a bare array that is null when the invoice has none.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaymentList"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/ChargeNotReversed"
+        "503":
+          $ref: "#/components/responses/WireServiceUnavailable"
 components:
+  responses:
+    WirePaymentRequired:
+      description: The card was declined or the gateway could not take the charge; nothing was recorded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireServiceUnavailable:
+      description: The payment gateway is not configured or cannot be reached.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    ChargeNotReversed:
+      description: >-
+        The card was charged, the system refused the payment, and neither the gateway void
+        nor the refund went through. The message names the gateway transaction id finance
+        must reconcile; it is the one 5xx whose message reaches the client.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
   schemas:
     PaymentMethod:
       type: string
-      enum: [CASH, CARD, CHECK, ACCOUNT]
-    Payment:
-      type: object
-      required: [id, invoice_id, amount, method, reference, notes, created_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        invoice_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        method:
-          $ref: "#/components/schemas/PaymentMethod"
-        reference:
-          type: string
-        notes:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        gateway_tx_id:
-          type: string
-        gateway_status:
-          type: string
-        card_last4:
-          type: string
-        card_brand:
-          type: string
-        auth_code:
-          type: string
-    PaymentCreateRequest:
-      type: object
-      required: [invoice_id, amount, method]
-      properties:
-        invoice_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        method:
-          $ref: "#/components/schemas/PaymentMethod"
-        reference:
-          type: string
-        notes:
-          type: string
-    PaymentIntentRequest:
-      type: object
-      required: [invoice_id, amount]
-      properties:
-        invoice_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-    PaymentIntentResponse:
-      type: object
-      required: [public_key, invoice_id, amount_cents]
-      properties:
-        public_key:
-          type: string
-        invoice_id:
-          type: string
-        amount_cents:
-          type: integer
-          format: int64
-          description: "Cents, echoed from the request's amount field under this name."
-    CardPaymentRequest:
-      type: object
-      required: [invoice_id, token_id, amount]
-      properties:
-        invoice_id:
-          type: string
-          format: uuid
-        token_id:
-          type: string
-          description: The Runner.js tokenization result; required.
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        notes:
-          type: string
-    RefundRequest:
-      type: object
-      required: [payment_id, amount]
-      properties:
-        payment_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents, partial or full.
-        reason:
-          type: string
+      enum: [cash, card, check, ach, other, account]
+      description: account stays for history and is refused on a new payment.
+    PaymentStatus:
+      type: string
+      enum: [posted, voided]
     Refund:
       type: object
-      required: [id, payment_id, amount, reason, status, created_at]
+      required: [id, payment_id, credit_memo_id, amount_cents, reason, method, gateway_refund_id, status, gl_entry_id, refunded_on, created_at]
       properties:
-        id:
-          type: string
-          format: uuid
-        payment_id:
-          type: string
-          format: uuid
-        amount:
+        id: {type: string, format: uuid}
+        payment_id: {type: [string, "null"], format: uuid}
+        credit_memo_id: {type: [string, "null"], format: uuid}
+        amount_cents: {type: integer, format: int64}
+        reason: {type: [string, "null"]}
+        method: {$ref: "#/components/schemas/PaymentMethod"}
+        gateway_refund_id: {type: [string, "null"]}
+        status: {type: string, enum: [PENDING, COMPLETE, FAILED]}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        refunded_on: {type: string, format: date}
+        created_at: {type: string, format: date-time}
+    PaymentSummary:
+      type: object
+      required: [id, number, customer_id, customer_name, branch_id, status, revision, currency, method, amount_cents, unapplied_cents, received_on, reference, notes, order_id, job_id, gl_entry_id, card_last4, card_brand, gateway_tx_id, auth_code, voided_at, voided_by, void_reason, created_at, updated_at]
+      description: A payment's head, a list item; the invoice a legacy payment named is not on the wire.
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "PAY-000001, human readable."}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        branch_id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/PaymentStatus"}
+        revision: {type: integer, format: int64}
+        currency: {type: string, description: "ISO 4217, the customer's at record time."}
+        method: {$ref: "#/components/schemas/PaymentMethod"}
+        amount_cents: {type: integer, format: int64}
+        unapplied_cents: {type: integer, format: int64, description: "amount less live applications and refunds; held in 2200."}
+        received_on: {type: string, format: date, description: "The business date."}
+        reference: {type: [string, "null"]}
+        notes: {type: [string, "null"]}
+        order_id: {type: [string, "null"], format: uuid, description: "Set on a deposit against an order."}
+        job_id: {type: [string, "null"], format: uuid}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        card_last4: {type: [string, "null"]}
+        card_brand: {type: [string, "null"]}
+        gateway_tx_id: {type: [string, "null"]}
+        auth_code: {type: [string, "null"]}
+        voided_at: {type: [string, "null"], format: date-time}
+        voided_by: {type: [string, "null"]}
+        void_reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Payment:
+      type: object
+      required: [id, number, customer_id, customer_name, branch_id, status, revision, currency, method, amount_cents, unapplied_cents, received_on, reference, notes, order_id, job_id, gl_entry_id, card_last4, card_brand, gateway_tx_id, auth_code, voided_at, voided_by, void_reason, created_at, updated_at, applications, refunds]
+      description: The full payment document - the head with its applications and its refunds.
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "PAY-000001, human readable."}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        branch_id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/PaymentStatus"}
+        revision: {type: integer, format: int64}
+        currency: {type: string, description: "ISO 4217, the customer's at record time."}
+        method: {$ref: "#/components/schemas/PaymentMethod"}
+        amount_cents: {type: integer, format: int64}
+        unapplied_cents: {type: integer, format: int64, description: "amount less live applications and refunds; held in 2200."}
+        received_on: {type: string, format: date, description: "The business date."}
+        reference: {type: [string, "null"]}
+        notes: {type: [string, "null"]}
+        order_id: {type: [string, "null"], format: uuid, description: "Set on a deposit against an order."}
+        job_id: {type: [string, "null"], format: uuid}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        card_last4: {type: [string, "null"]}
+        card_brand: {type: [string, "null"]}
+        gateway_tx_id: {type: [string, "null"]}
+        auth_code: {type: [string, "null"]}
+        voided_at: {type: [string, "null"], format: date-time}
+        voided_by: {type: [string, "null"]}
+        void_reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        applications:
+          type: array
+          items: {$ref: "#/components/schemas/ArApplication"}
+        refunds:
+          type: array
+          items: {$ref: "#/components/schemas/Refund"}
+    PaymentPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PaymentSummary"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    PaymentApplicationRequest:
+      type: object
+      required: [invoice_id, amount_cents]
+      properties:
+        invoice_id: {type: string, format: uuid}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        discount_cents:
           type: integer
           format: int64
-          description: Cents.
-        reason:
-          type: string
-        gateway_refund_id:
-          type: string
-        status:
-          type: string
-          enum: [PENDING, COMPLETE, FAILED]
-        created_at:
-          type: string
-          format: date-time
-    PaymentList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/Payment"
+          minimum: 0
+          description: The early pay discount taken beside this cash (a DISCOUNT application, DR 4050 / CR 1020).
+    PaymentCreateRequest:
+      type: object
+      required: [customer_id, amount_cents, method]
+      properties:
+        customer_id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid, description: "Defaults to the caller's branch, else the customer's primary branch."}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        method: {type: string, enum: [cash, check, ach, other]}
+        reference: {type: string, maxLength: 128}
+        notes: {type: string, maxLength: 2000}
+        received_on: {type: string, format: date, description: "Defaults to the branch's business date."}
+        order_id: {type: string, format: uuid, description: "A deposit against this order."}
+        job_id: {type: string, format: uuid}
+        applications:
+          type: array
+          items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
+    CardPaymentRequest:
+      type: object
+      required: [customer_id, token_id, amount_cents]
+      properties:
+        customer_id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        token_id: {type: string, description: "The gateway tokenizer's result; required."}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        notes: {type: string, maxLength: 2000}
+        order_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        applications:
+          type: array
+          items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
+    PaymentApplyRequest:
+      type: object
+      required: [applications]
+      properties:
+        applications:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+    PaymentTransitionRequest:
+      type: object
+      required: [to, reason]
+      properties:
+        to: {$ref: "#/components/schemas/PaymentStatus"}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    PaymentRefundRequest:
+      type: object
+      required: [amount_cents, reason]
+      properties:
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+    CreditMemoRefundRequest:
+      type: object
+      required: [amount_cents, reason, method]
+      properties:
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        method: {type: string, enum: [card, check, ach, other]}
+        payment_id: {type: string, format: uuid, description: "The card payment a card refund goes back to; only for method card."}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+    PaymentIntentRequest:
+      type: object
+      required: [amount_cents]
+      properties:
+        amount_cents: {type: integer, format: int64, minimum: 1}
+    PaymentIntentResponse:
+      type: object
+      required: [public_key, amount_cents]
+      properties:
+        public_key: {type: string}
+        amount_cents: {type: integer, format: int64}

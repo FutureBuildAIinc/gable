@@ -19,7 +19,6 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
-	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
@@ -49,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
@@ -68,6 +68,8 @@ var modelBoundSchemas = []struct {
 	{"Quote", quote.Quote{}},
 	{"QuoteSummary", quote.QuoteSummary{}},
 	{"QuoteLine", quote.QuoteLine{}},
+	{"Tally", quote.Tally{}},
+	{"TallyRow", quote.TallyRow{}},
 	// order
 	{"Order", order.Order{}},
 	{"OrderSummary", order.OrderSummary{}},
@@ -95,6 +97,7 @@ var modelBoundSchemas = []struct {
 	{"CreditMemoLine", invoice.CreditLine{}},
 	// payment
 	{"Payment", payment.Payment{}},
+	{"PaymentSummary", payment.Summary{}},
 	{"Refund", payment.Refund{}},
 	{"PaymentIntentResponse", payment.PaymentIntentResponse{}},
 	// product
@@ -105,6 +108,10 @@ var modelBoundSchemas = []struct {
 	{"PimCollateral", pim.PIMCollateral{}},
 	{"ProductDetail", pim.ProductDetail{}},
 	{"ProductView", product.View{}},
+	{"UnitSetDoc", product.UnitSetDoc{}},
+	{"UnitSetRow", product.UnitSetRowView{}},
+	// units (C3-2A-units, ADR 0006 section 2)
+	{"Unit", unit.Unit{}},
 	// location
 	{"Location", location.Location{}},
 	{"BranchSummary", location.BranchSummary{}},
@@ -130,12 +137,20 @@ var modelBoundSchemas = []struct {
 	// inventory
 	{"InventoryLevel", inventory.Level{}},
 	{"InventoryProductSummary", inventory.ProductSummary{}},
-	// deposits
-	{"Deposit", deposit.CustomerDeposit{}},
-	{"DepositApplication", deposit.DepositApplication{}},
-	// accounts
-	{"AccountSummary", account.AccountSummary{}},
-	{"CustomerTransaction", account.CustomerTransaction{}},
+	// accounts and the AR core (C2-4)
+	{"AccountSummary", account.Summary{}},
+	{"AccountTransaction", account.Transaction{}},
+	{"ArApplication", account.Application{}},
+	{"ArAgingItem", account.AgingItem{}},
+	{"ArAgingTotal", account.AgingTotal{}},
+	{"ArAgingSummary", account.AgingSummary{}},
+	{"ArStatement", account.Statement{}},
+	{"ArStatementCurrency", account.StatementCurrency{}},
+	{"ArStatementLine", account.StatementLine{}},
+	{"ArOpenDocument", account.OpenDocument{}},
+	{"ArReconciliation", account.Reconciliation{}},
+	{"ArDriftRow", account.DriftRow{}},
+	{"ArLedgerRow", account.LedgerRow{}},
 	// vendors
 	{"Vendor", vendor.Vendor{}},
 	// sales-team

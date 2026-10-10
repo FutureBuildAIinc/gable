@@ -17,14 +17,16 @@ import (
 // Account codes the sales postings name (ADR 0005 section 8.1), beside the
 // codes above.
 const (
-	AccountCodeInventory    = "1030"
-	AccountCodeSalesTax     = "2020"
-	AccountCodeCOGS         = "5010"
-	AccountCodeDeliveryRev  = "4020"
-	SourceCreditMemo        = "CREDIT_MEMO"
-	SourceWriteOff          = "WRITE_OFF"
-	postedBySystemFallback  = "system"
-	closedPeriodMessagePart = "closed fiscal period"
+	AccountCodeInventory      = "1030"
+	AccountCodeSalesTax       = "2020"
+	AccountCodeCOGS           = "5010"
+	AccountCodeDeliveryRev    = "4020"
+	AccountCodeSalesDiscounts = "4050"
+	AccountCodeBadDebt        = "5040"
+	SourceCreditMemo          = "CREDIT_MEMO"
+	SourceWriteOff            = "WRITE_OFF"
+	postedBySystemFallback    = "system"
+	closedPeriodMessagePart   = "closed fiscal period"
 )
 
 var (

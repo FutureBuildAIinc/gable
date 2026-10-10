@@ -159,10 +159,11 @@ func seedClockWindowFixtures(t *testing.T, dbURL string) {
 		{-8, "808.08", "GOLD-WIN-P08", arInvoices[0].id},
 	}
 	for i, p := range payments {
-		mustExec(t, db, `INSERT INTO payments (id, invoice_id, amount, method, reference, notes, created_at,
-			gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
-		VALUES ($1, $2, $3, 'CHECK', $4, 'golden clock window fixture', $5,
-			NULL, NULL, NULL, NULL, NULL, NULL)`,
+		mustExec(t, db, `INSERT INTO payments (id, invoice_id, customer_id, branch_id, currency, amount, amount_unapplied, method, reference, notes,
+			created_at, received_on, gateway_tx_id, gateway_status, token_id, card_last4, card_brand, auth_code)
+		SELECT $1, i.id, i.customer_id, i.branch_id, i.currency, $3::numeric, 0, 'CHECK', $4, 'golden clock window fixture', $5,
+			($5::timestamptz AT TIME ZONE 'UTC')::date, NULL, NULL, NULL, NULL, NULL, NULL
+		FROM invoices i WHERE i.id = $2`,
 			fmt.Sprintf("11111111-1111-4111-8111-11111111%04d", 400+i), p.invID, p.amount, p.ref, stamp(p.days))
 	}
 
