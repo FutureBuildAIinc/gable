@@ -294,31 +294,37 @@ BEGIN
 END $$;
 
 -- amount_open: what the vendor is still owed, by the insert trigger's rule:
--- zero on a voided or paid bill, the total less what was paid (clamped at
--- zero) otherwise. A short-paid PAID bill and an overpaid PARTIAL one are
--- each named by a notice, so an operator can mend the row. The upper bound
--- (never more than the total) holds only while the bill owes: a voided or
--- paid bill owes zero by rule at any total, a negative one included (the
--- base accepted any sign).
+-- zero on a voided or paid bill, the total less what was paid (clamped
+-- between zero and the total) otherwise. A short-paid PAID bill, an overpaid
+-- APPROVED or PARTIAL one and a negative amount paid (a hand edit: the base's
+-- own pay never wrote one on a positive bill) are each named by a notice, so
+-- an operator can mend the row. The range CHECK says the rule exactly: a
+-- voided or paid bill owes zero at any total (a negative one included, the
+-- base accepted any sign); any other owes between zero and its total.
 DO $$
-DECLARE shortPaid BIGINT; overpaid BIGINT;
+DECLARE shortPaid BIGINT; overpaid BIGINT; negPaid BIGINT;
 BEGIN
     SELECT count(*) INTO shortPaid FROM vendor_invoices WHERE status = 'PAID' AND amount_paid < total;
     IF shortPaid > 0 THEN
         RAISE NOTICE 'migration 106: % PAID vendor invoice(s) were paid less than their total and owe nothing', shortPaid;
     END IF;
-    SELECT count(*) INTO overpaid FROM vendor_invoices WHERE status = 'PARTIAL' AND amount_paid > total;
+    SELECT count(*) INTO overpaid FROM vendor_invoices WHERE status IN ('APPROVED', 'PARTIAL') AND amount_paid > total;
     IF overpaid > 0 THEN
-        RAISE NOTICE 'migration 106: % PARTIAL vendor invoice(s) were paid past their total', overpaid;
+        RAISE NOTICE 'migration 106: % APPROVED or PARTIAL vendor invoice(s) were paid past their total and owe nothing', overpaid;
+    END IF;
+    SELECT count(*) INTO negPaid FROM vendor_invoices WHERE amount_paid < 0;
+    IF negPaid > 0 THEN
+        RAISE NOTICE 'migration 106: % vendor invoice(s) carry a negative amount paid; each owes at most its total', negPaid;
     END IF;
 END $$;
 ALTER TABLE vendor_invoices ADD COLUMN IF NOT EXISTS amount_open NUMERIC(12, 2) NULL;
-UPDATE vendor_invoices SET amount_open = CASE WHEN status IN ('VOIDED', 'PAID') THEN 0 ELSE GREATEST(0, total - amount_paid) END
+UPDATE vendor_invoices SET amount_open = CASE WHEN status IN ('VOIDED', 'PAID') THEN 0
+    ELSE LEAST(total, GREATEST(0, total - amount_paid)) END
 WHERE amount_open IS NULL;
 ALTER TABLE vendor_invoices ALTER COLUMN amount_open SET NOT NULL;
 ALTER TABLE vendor_invoices DROP CONSTRAINT IF EXISTS vendor_invoices_amount_open_range;
 ALTER TABLE vendor_invoices ADD CONSTRAINT vendor_invoices_amount_open_range
-    CHECK (amount_open >= 0 AND (status IN ('VOIDED', 'PAID') OR amount_open <= total));
+    CHECK (amount_open >= 0 AND CASE WHEN status IN ('VOIDED', 'PAID') THEN amount_open = 0 ELSE amount_open <= total END);
 
 -- 2. vendor_invoice_lines ---------------------------------------------------
 
