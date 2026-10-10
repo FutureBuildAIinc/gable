@@ -7377,7 +7377,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The grants, a bare array that is null when none exist.
+          description: The grants, a bare array, [] when none exist (no paging).
           content:
             application/json:
               schema:
@@ -7399,7 +7399,7 @@ paths:
         The caller's grants with the home flag. Without auth claims (dev mode) every active branch is returned with the first marked home.
       responses:
         "200":
-          description: The branch summaries, a bare array that is null when none exist.
+          description: The branch summaries, a bare array, [] when none exist (no paging).
           content:
             application/json:
               schema:
@@ -7418,7 +7418,7 @@ paths:
       description: The union of distinct user subjects from grants and the audit log; feeds the admin user picker.
       responses:
         "200":
-          description: The subject strings, a bare array that is null when none exist.
+          description: The subject strings, a bare array, [] when none exist (no paging).
           content:
             application/json:
               schema:
@@ -20565,7 +20565,7 @@ components:
         timezone:
           type: string
     BranchSummaryList:
-      type: [array, "null"]
+      type: array
       items:
         $ref: "#/components/schemas/BranchSummary"
     UserLocation:
@@ -20585,7 +20585,7 @@ components:
         granted_by:
           type: string
     UserLocationList:
-      type: [array, "null"]
+      type: array
       items:
         $ref: "#/components/schemas/UserLocation"
     UserBranchGrant:
@@ -20605,7 +20605,7 @@ components:
           type: string
           format: uuid
     StringList:
-      type: [array, "null"]
+      type: array
       items:
         type: string
     MatchingStatus:
