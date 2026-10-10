@@ -174,6 +174,39 @@ func TestKeyBranchPin_CategoryTierRefusals(t *testing.T) {
 		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", tier(), nil, http.StatusCreated)
 	}
 
+	// A tier rule that also names the pin's own customer is still a tier rule:
+	// it prices every branch's customers of that tier, so the wall refuses the
+	// element however many branches of the named customer hold the pin (round
+	// 6 P1-1). The handler and the migration keep the same invariant: a tier
+	// rule carries no customer, an account rule no tier.
+	tierNamingCustomer := func(customer uuid.UUID) string {
+		return fmt.Sprintf(`{"target_type":"tier","tier":"PIN-TIER","customer_id":%q,"category_id":%q,"rule_type":"markup","value_pct":"5"}`,
+			customer.String(), f.freshCategory(t).String())
+	}
+	for _, customer := range []uuid.UUID{f.custID, f.custB} {
+		f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", tierNamingCustomer(customer), nil)
+	}
+	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules/bulk",
+		"["+tierNamingCustomer(f.custID)+","+categoryRuleBody(f.custID, f.freshCategory(t))+"]", nil)
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM category_pricing_rules WHERE tier = 'PIN-TIER' AND customer_id IS NOT NULL`).Scan(&tierRows); err != nil {
+		t.Fatal(err)
+	}
+	if tierRows != 0 {
+		t.Errorf("refused tier rule naming a customer wrote %d rows", tierRows)
+	}
+	// A target that names no customer and no tier is neither an account rule
+	// nor a tier rule: refused for the bound key, and the handler's own 400
+	// answers everyone else.
+	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules",
+		fmt.Sprintf(`{"target_type":"account","category_id":%q,"rule_type":"markup","value_pct":"5"}`, f.freshCategory(t).String()), nil)
+	// The unbound key and the user pass the wall on the same body and meet the
+	// handler's own invariant answer: a tier rule that names a customer is a
+	// 400 naming customer_id, never a write.
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", tierNamingCustomer(f.custID), nil, http.StatusBadRequest)
+	}
+
 	putBody := `{"rule_type":"markdown","value_pct":"2"}`
 	f.refuseForeign(t, "PUT", "/api/v1/pricing/category-rules/"+f.catRuleT.String(), putBody,
 		map[string]string{"If-Match": f.catRuleRev(t, f.catRuleT)})

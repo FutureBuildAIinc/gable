@@ -409,10 +409,17 @@ func (req *categoryRuleWriteRequest) parse(v *httpx.Validator) CategoryPricingRu
 		}
 	}
 	req.categoryRuleValues.parseValues(v, &rule)
+	// A rule targets exactly one kind of customer scope: an account rule names
+	// a customer and carries no tier, a tier rule names a tier and carries no
+	// customer (the invariant migration 107 puts on the table). A tier rule
+	// that also names a customer would price every branch's customers of that
+	// tier, so the pair is refused here and by the key branch wall.
 	if rule.TargetType == TargetTypeAccount {
 		v.Check(rule.CustomerID != nil, "customer_id", "is required on an account rule")
+		v.Check(rule.Tier == "", "tier", "an account rule carries no tier")
 	} else {
 		v.Check(rule.Tier != "", "tier", "is required on a tier rule")
+		v.Check(rule.CustomerID == nil, "customer_id", "a tier rule carries no customer")
 	}
 	return rule
 }

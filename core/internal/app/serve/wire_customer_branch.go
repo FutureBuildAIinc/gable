@@ -11,17 +11,22 @@ package serve
 // request names, or that the rows it acts on belong to, holds the pin among
 // that customer's branches. A request that names no customer passes, except
 // where the write would then be dealer wide: a pricing rule that names
-// neither a customer nor a job, and a category rule (or a bulk element) that
-// names no customer, price every branch's customers, so the resolver refuses
-// them (ErrBodyRefused). The routes no customer can confine (the unfiltered
-// lists, the matrix) are REFUSED by the route allowlist gate before these
-// walls run.
+// neither a customer nor a job, and a category rule (or a bulk element) whose
+// target is not an account rule or that carries a tier, price every branch's
+// customers, so the resolver refuses them (ErrBodyRefused). The routes no
+// customer can confine (the unfiltered lists, the matrix) are REFUSED by the
+// route allowlist gate before these walls run.
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -238,6 +243,68 @@ func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Requ
 	}
 }
 
+// categoryRuleBodyCustomers resolves the customers a category rule create (or
+// a bulk element) names, holding the request to the same target the handler
+// parses: every element must be an account rule (target_type "account") that
+// carries no tier. A tier rule prices every branch's customers of that tier
+// whether or not it also names a customer, so a tier element is refused
+// however many branches of the customer it names hold the pin (round 6 P1-1);
+// a target that is not an account rule names no branch the wall can hold and
+// is refused with it. Both refusals are ErrBodyRefused, so the bound key
+// never reaches the handler on them.
+func categoryRuleBodyCustomers(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("key branch wall: read body: %w", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	element := func(e struct {
+		TargetType string `json:"target_type"`
+		CustomerID string `json:"customer_id"`
+		Tier       string `json:"tier"`
+	}) ([]uuid.UUID, error) {
+		if t, ok := pricing.ParseTargetType(e.TargetType); !ok || t != pricing.TargetTypeAccount {
+			return nil, middleware.ErrBodyRefused
+		}
+		if e.Tier != "" {
+			return nil, middleware.ErrBodyRefused
+		}
+		id, err := uuid.Parse(e.CustomerID)
+		if err != nil {
+			return nil, middleware.ErrBodyRefused
+		}
+		return []uuid.UUID{id}, nil
+	}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		var many []struct {
+			TargetType string `json:"target_type"`
+			CustomerID string `json:"customer_id"`
+			Tier       string `json:"tier"`
+		}
+		if err := json.Unmarshal(raw, &many); err != nil {
+			return nil, middleware.ErrBodyRefused
+		}
+		out := make([]uuid.UUID, 0, len(many))
+		for _, m := range many {
+			ids, err := element(m)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, ids...)
+		}
+		return out, nil
+	}
+	var one struct {
+		TargetType string `json:"target_type"`
+		CustomerID string `json:"customer_id"`
+		Tier       string `json:"tier"`
+	}
+	if err := json.Unmarshal(raw, &one); err != nil {
+		return nil, middleware.ErrBodyRefused
+	}
+	return element(one)
+}
+
 // taxCustomerWall composes the tax role guard with the customer branch wall:
 // the exemption create's body names the customer, the delete's row belongs
 // to one, the read's path names one, and the preview's body names one when
@@ -302,7 +369,7 @@ func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB
 // route allowlist gate; the categories routes are stated limits.
 func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	body := middleware.Compose(role, keyWall.CustomerBodyBranchRequired())
+	body := middleware.Compose(role, keyWall.CustomerBranch(categoryRuleBodyCustomers))
 	byRow := middleware.Compose(role, keyWall.CustomerBranch(categoryRuleRowCustomerOf(db)))
 	byBulkIDs := middleware.Compose(role, keyWall.CustomerBranch(bulkRuleCustomersOf(db)))
 	list := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", true)))
