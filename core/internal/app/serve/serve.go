@@ -319,11 +319,13 @@ func Run() {
 		WithAudit(customeraudit.New(auditLog))
 	wall.customers(mux, customerSvc)
 
-	// Sales Team Module
+	// Sales Team Module: the roster spans every branch, so a branch bound
+	// key is refused it outright by the route allowlist gate (ADR 0007
+	// section 5.5).
 	salesTeamRepo := salesteam.NewRepository(db)
 	salesTeamHandler := salesteam.NewHandler(salesTeamRepo)
 	salesTeamHandler.RegisterRoutes(mux,
-		wall.dealerWideReads("the sales team roster spans every branch", "admin", "owner", "sales"))
+		middleware.RequireRole("admin", "owner", "sales"))
 
 	// CRM Module: on the wire contract, its writes in one transaction with
 	// their audit row and activity.* event, every route behind the branch
@@ -343,12 +345,14 @@ func Run() {
 		WithAudit(auditLog)
 	wall.quotes(mux, quoteSvc)
 
-	// GL Module (Full General Ledger)
+	// GL Module (Full General Ledger): the books span every branch, so a
+	// branch bound key is refused the whole surface outright by the route
+	// allowlist gate (ADR 0007 section 5.5).
 	glAdapter := glint.NewMockGLAdapter()
 	glRepo := gl.NewRepository(db)
 	glSvc := gl.NewService(glRepo, glAdapter, logger)
 	glHandler := gl.NewHandler(glSvc)
-	glHandler.RegisterRoutes(mux, wall.dealerWideReads("the general ledger spans every branch", "admin", "owner"))
+	glHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Account Module: the AR core, the single writer of the subledger, the
 	// balance, the applications and the AR columns of the documents (ADR 0005
@@ -667,23 +671,25 @@ func Run() {
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 
-	// Accounts Payable Module
+	// Accounts Payable Module: payables span every branch, so a branch bound
+	// key is refused the whole surface outright by the route allowlist gate.
 	apRepo := ap.NewRepository(db)
 	apSvc := ap.NewService(db, apRepo, glSvc, logger)
 	apHandler := ap.NewHandler(apSvc)
-	apHandler.RegisterRoutes(mux, wall.dealerWideReads("payables span every branch", "admin", "owner", "finance"))
+	apHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// 3-Way PO Matching Module
 	matchingRepo := matching.NewRepository(db)
 	matchingSvc := matching.NewService(db, matchingRepo, poSvc, apSvc, logger)
 	wall.matching(mux, matchingSvc)
 
-	// Bank Reconciliation Module
+	// Bank Reconciliation Module: bank reconciliation spans every branch, so
+	// a branch bound key is refused the whole surface outright by the route
+	// allowlist gate.
 	bankreconRepo := bankrecon.NewRepository(db)
 	bankreconSvc := bankrecon.NewService(db, bankreconRepo, glSvc, logger)
 	bankreconHandler := bankrecon.NewHandler(bankreconSvc)
-	bankreconHandler.RegisterRoutes(mux,
-		wall.dealerWideReads("bank reconciliation spans every branch", "admin", "owner", "finance"))
+	bankreconHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 
 	// Reporting Module
 	reportingRepo := reporting.NewRepository(db)

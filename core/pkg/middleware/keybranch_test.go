@@ -95,10 +95,6 @@ func TestKeyBranchWall_NoPinPasses(t *testing.T) {
 				return &foreign, nil
 			})
 		}, nil},
-		{"refuse bound", func(t *testing.T) func(http.Handler) http.Handler {
-			w, _ := pinWall(t)
-			return w.RefuseBound("the reason")
-		}, nil},
 		{"customer body", func(t *testing.T) func(http.Handler) http.Handler {
 			w, _ := pinWall(t)
 			return w.CustomerBodyBranch()
@@ -248,24 +244,6 @@ func TestKeyBranchWall_RowBranch(t *testing.T) {
 	}
 	if code != http.StatusInternalServerError {
 		t.Errorf("nil database: %d, want 500", code)
-	}
-}
-
-// TestKeyBranchWall_RefuseBound refuses a bound key outright whatever the
-// request carries, and passes everyone else.
-func TestKeyBranchWall_RefuseBound(t *testing.T) {
-	wall, auditor := pinWall(t)
-	mux := wall.RefuseBound("the reason")
-	pinned := uuid.New()
-	code, ran := wallPath(t, mux, &pinned, http.MethodPost, "/api/v1/branches", `{"code":"x"}`)
-	if code != http.StatusForbidden || ran {
-		t.Errorf("bound key: %d ran %v, want 403 and not run", code, ran)
-	}
-	if len(auditor.rows) != 1 {
-		t.Errorf("audit rows: %v, want one", auditor.rows)
-	}
-	if code, ran := wallPath(t, mux, nil, http.MethodPost, "/api/v1/branches", `{"code":"x"}`); code != http.StatusOK || !ran {
-		t.Errorf("no pin: %d ran %v, want 200 and run", code, ran)
 	}
 }
 

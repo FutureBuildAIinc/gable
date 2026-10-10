@@ -16,8 +16,16 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -195,7 +203,6 @@ func TestKeyBranchPin_StatedLimits(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{"PUT", "/api/v1/market-indices/" + idx},
 		{"GET", "/api/v1/market-indices/" + idx + "/history"},
-		{"GET", "/api/v1/market-indices"},
 	} {
 		sb, bb := f.key(t, f.bound, c.method, c.path, "", nil)
 		sk, _ := f.key(t, f.unbound, c.method, c.path, "", nil)
@@ -206,4 +213,171 @@ func TestKeyBranchPin_StatedLimits(t *testing.T) {
 			t.Errorf("%s %s: bound %d, unbound %d, want the same answer", c.method, c.path, sb, sk)
 		}
 	}
+}
+
+// allowlistGateFixture is the allowlist gate over the whole census: a stub
+// handler registered for every machine key reachable census route, behind the
+// production chain (buildChain) and the real machine key core, with one key
+// bound to branch A and one unbound, each holding every scope the grammar can
+// grant. A stub answers 200, so the only 403 a bound key can meet is the
+// gate's, and the test says exactly which routes the allowlist refuses.
+type allowlistGateFixture struct {
+	t       *testing.T
+	srv     *httptest.Server
+	bound   string
+	unbound string
+}
+
+func newAllowlistGateFixture(t *testing.T) *allowlistGateFixture {
+	t.Helper()
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	t.Setenv("AUTH_MODE", "dev")
+	ctx := context.Background()
+	branchA := uuid.New()
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'pin gate branch')`,
+		branchA, "pin-gate-"+branchA.String()[:8]); err != nil {
+		t.Fatalf("seed branch: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, branchA)
+	})
+
+	// One stub per machine key reachable census route: the pattern the gate
+	// resolves is the registered one, exactly as the census names it.
+	mux := http.NewServeMux()
+	stub := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"stub":true}`))
+	})
+	for _, line := range allowlistCensusLines(t) {
+		fields := strings.Split(line, "\t")
+		mux.HandleFunc(fields[0]+" "+fields[1], stub)
+	}
+
+	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
+	mint := func(name string, branch *uuid.UUID) string {
+		t.Helper()
+		raw, _, err := keys.GenerateKey(ctx, name, middleware.ValidScopeGrammar(), branch)
+		if err != nil {
+			t.Fatalf("mint %s: %v", name, err)
+		}
+		return raw
+	}
+	f := &allowlistGateFixture{t: t,
+		bound:   mint("pin gate bound", &branchA),
+		unbound: mint("pin gate unbound", nil),
+	}
+	mkAuth := middleware.NewMachineKeyAuth(pinKeyValidator{svc: keys}, audit.NewLogger(db), []string{"/api/integration/"}, nil)
+	chain := buildChain(ChainDeps{Mux: mux, DB: db, AuditLog: audit.NewLogger(db), MachineKeyAuth: mkAuth})
+	f.srv = httptest.NewServer(pinClaims(chain))
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+// allowlistCensusLines reads the committed census from the serve package.
+func allowlistCensusLines(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "api", "ROUTES.txt"))
+	if err != nil {
+		t.Fatalf("read api/ROUTES.txt: %v", err)
+	}
+	var out []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 || !middleware.KeyBranchRouteReachable(fields[0], fields[1]) {
+			continue
+		}
+		out = append(out, line)
+	}
+	if len(out) == 0 {
+		t.Fatal("the census carries no machine key reachable routes")
+	}
+	return out
+}
+
+func (f *allowlistGateFixture) call(t *testing.T, key, method, path string) int {
+	t.Helper()
+	req, err := http.NewRequest(method, f.srv.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	return res.StatusCode
+}
+
+// TestKeyBranchPin_AllowlistGateCoversCensus drives every machine key
+// reachable census route through the production chain: the bound key is
+// refused exactly the REFUSED entries and passes everything else, the
+// unbound key and the user pass everything. This is the one test that says
+// the gate and the table agree with the census on every route at once, so a
+// route reclassified, unclassified or misclassified fails here by name.
+func TestKeyBranchPin_AllowlistGateCoversCensus(t *testing.T) {
+	f := newAllowlistGateFixture(t)
+	refused, admitted := 0, 0
+	for _, line := range allowlistCensusLines(t) {
+		fields := strings.Split(line, "\t")
+		method, pattern := fields[0], fields[1]
+		// A census pattern is the registered shape; drive one instance of it.
+		path := allowlistInstantiate(pattern)
+		want403 := false
+		if class, ok := middleware.KeyBranchRouteClassFor(method, pattern); ok {
+			want403 = class == middleware.KeyBranchClassRefused
+		}
+		if got := f.call(t, f.bound, method, path); (got == http.StatusForbidden) != want403 {
+			t.Errorf("bound key %s %s: %d, want %s", method, pattern, got, allowlistWant(want403))
+		}
+		if got := f.call(t, f.unbound, method, path); got != http.StatusOK {
+			t.Errorf("unbound key %s %s: %d, want 200 (the stub answers)", method, pattern, got)
+		}
+		if want403 {
+			refused++
+		} else {
+			admitted++
+		}
+	}
+	if refused == 0 || admitted == 0 {
+		t.Fatalf("the census drove %d refused and %d admitted routes; both halves must be exercised", refused, admitted)
+	}
+	t.Logf("allowlist gate over the census: %d routes, %d refused to the bound key, %d admitted", refused+admitted, refused, admitted)
+}
+
+// allowlistInstantiate replaces a census pattern's wildcards with instance
+// values the router accepts.
+func allowlistInstantiate(pattern string) string {
+	out := pattern
+	out = strings.ReplaceAll(out, "{id}", "11111111-1111-1111-1111-111111111111")
+	out = strings.ReplaceAll(out, "{customerId}", "22222222-2222-2222-2222-222222222222")
+	out = strings.ReplaceAll(out, "{customerID}", "22222222-2222-2222-2222-222222222222")
+	out = strings.ReplaceAll(out, "{sub}", "pin-sub")
+	out = strings.ReplaceAll(out, "{branch_id}", "33333333-3333-3333-3333-333333333333")
+	out = strings.ReplaceAll(out, "{module_id}", "m")
+	out = strings.ReplaceAll(out, "{code}", "EA")
+	out = strings.ReplaceAll(out, "{key}", "millwork")
+	out = strings.ReplaceAll(out, "{entity}", "customers")
+	out = strings.ReplaceAll(out, "{po_id}", "44444444-4444-4444-4444-444444444444")
+	out = strings.ReplaceAll(out, "{delivery_id}", "44444444-4444-4444-4444-444444444444")
+	out = strings.ReplaceAll(out, "{itemId}", "1")
+	out = strings.ReplaceAll(out, "{freightId}", "55555555-5555-5555-5555-555555555555")
+	out = strings.ReplaceAll(out, "{collateralId}", "66666666-6666-6666-6666-666666666666")
+	out = strings.ReplaceAll(out, "{mediaId}", "77777777-7777-7777-7777-777777777777")
+	return out
+}
+
+func allowlistWant(refused bool) string {
+	if refused {
+		return "403 (the allowlist refuses it)"
+	}
+	return "200 (the stub answers)"
 }

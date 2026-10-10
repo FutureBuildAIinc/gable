@@ -52,12 +52,14 @@ func (h *Handler) WithBranchWall(g LocationGuard, branchMw func(http.Handler) ht
 
 // WithKeyBranchWall puts the key branch wall on the routes that mount no
 // branch middleware (ADR 0007 section 5.5): the by id location writes, the
-// branch directory verbs and the user grant routes hold a branch bound key
+// branch directory writes and the user grant routes hold a branch bound key
 // to its pin, refusing it another branch with the key.branch_refused row.
 // The branch reads the wall narrows are /branches/{id}/users (refused for
-// another branch) and /users/{sub}/branches (filtered to the pin), and the
-// known users list (/users, every branch's subs) refuses a bound key
-// outright. Without it nothing changes, so serve always sets it.
+// another branch) and /users/{sub}/branches (filtered to the pin). The
+// directory create and the known users list (/users, every branch's subs)
+// refuse a bound key outright through the route allowlist gate, which covers
+// every registration of these routes. Without it nothing changes, so serve
+// always sets it.
 func (h *Handler) WithKeyBranchWall(w *middleware.KeyBranchWall) *Handler {
 	h.keyWall = w
 	return h
@@ -99,9 +101,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	// The key branch wall on the routes that mount no branch middleware: the
 	// by id location writes hold the row's branch to a bound key's pin, the
-	// directory create refuses one outright, the directory writes and the
-	// branch users read hold the path branch to it, and the grant routes hold
-	// the body or path branch to it (ADR 0007 section 5.5).
+	// branch directory writes and the branch users read hold the path branch
+	// to it, and the grant routes hold the body or path branch to it (ADR
+	// 0007 section 5.5). The directory create (POST /api/v1/branches) and the
+	// known users list (GET /api/v1/users) refuse a bound key outright, which
+	// the route allowlist gate does for every registration of these routes.
 	wall := func(mw func(http.Handler) http.Handler) func(http.HandlerFunc) http.HandlerFunc {
 		if mw == nil || h.keyWall == nil {
 			return func(hf http.HandlerFunc) http.HandlerFunc { return hf }
@@ -112,8 +116,6 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	branchIdWall := wall(h.keyWall.NamedBranch("id"))
 	bodyBranchWall := wall(h.keyWall.BodyBranch())
 	branchIdPathWall := wall(h.keyWall.NamedBranch("branch_id"))
-	directoryWall := wall(h.keyWall.RefuseBound("the branch directory is outside a branch bound key"))
-	knownUsersWall := wall(h.keyWall.RefuseBound("the known users list spans every branch"))
 
 	// Legacy / shared location endpoints.
 	create := http.HandlerFunc(h.CreateLocation)
@@ -132,7 +134,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	// Branch CRUD.
 	mux.HandleFunc("GET /api/v1/branches", guard(h.ListBranches))
-	mux.HandleFunc("POST /api/v1/branches", adminGuard(directoryWall(h.CreateBranch)))
+	mux.HandleFunc("POST /api/v1/branches", adminGuard(h.CreateBranch))
 	mux.HandleFunc("GET /api/v1/branches/{id}", guard(h.GetBranch))
 	mux.HandleFunc("PUT /api/v1/branches/{id}", adminGuard(branchIdWall(h.UpdateBranch)))
 	mux.HandleFunc("DELETE /api/v1/branches/{id}", adminGuard(branchIdWall(h.DeleteBranch)))
@@ -145,7 +147,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// User-branch grants.
 	if h.userRepo != nil {
 		mux.HandleFunc("GET /api/v1/me/branches", guard(h.ListMyBranches))
-		mux.HandleFunc("GET /api/v1/users", adminGuard(knownUsersWall(h.ListKnownUsers)))
+		mux.HandleFunc("GET /api/v1/users", adminGuard(h.ListKnownUsers))
 		mux.HandleFunc("GET /api/v1/users/{sub}/branches", adminGuard(h.ListUserBranches))
 		mux.HandleFunc("POST /api/v1/users/{sub}/branches", adminGuard(bodyBranchWall(h.GrantUserBranch)))
 		mux.HandleFunc("DELETE /api/v1/users/{sub}/branches/{branch_id}", adminGuard(branchIdPathWall(h.RevokeUserBranch)))

@@ -189,17 +189,6 @@ func (w *KeyBranchWall) branchOfLocation(ctx context.Context, id uuid.UUID) (*uu
 	return branch, nil
 }
 
-// RefuseBound wraps a handler a branch bound key may never reach: a route
-// that administers the branch directory or acts across every branch and so
-// cannot be confined to one. reason says why in the refusal message.
-func (w *KeyBranchWall) RefuseBound(reason string) func(http.Handler) http.Handler {
-	return w.wrap("", reason, func(ctx context.Context, r *http.Request) (uuid.UUID, bool, error) {
-		// A branch is named that no pin can equal, so every bound key is
-		// refused whatever the request carries.
-		return uuid.Nil, true, nil
-	})
-}
-
 // CustomerBranch wraps a handler whose request writes one or more customers'
 // data: the tax exemption writes and the customer priced rules. A branch
 // bound key may reach it only while every customer the request names holds

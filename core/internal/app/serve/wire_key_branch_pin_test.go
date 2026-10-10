@@ -246,20 +246,22 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 
 	// The dealer wide modules exactly as serve registers them: the reporting
 	// surface in its three registrations, the events feed, the GL, AP and bank
-	// reconciliation books and the sales team reads.
+	// reconciliation books and the sales team reads. A branch bound key is
+	// refused them by the route allowlist gate in the chain, not by these
+	// mounts.
 	reportingHandler := reporting.NewHandler(reporting.NewService(reporting.NewRepository(db)))
 	wall.reporting(mux, reportingHandler)
 	wall.reportingSchedules(mux, reportingHandler, nil)
 	wall.reportingBIIntegration(mux, reportingHandler)
 	wall.eventsFeed(mux, events.NewHandler(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
-	gl.NewHandler(glSvc).RegisterRoutes(mux, wall.dealerWideReads("the general ledger spans every branch", "admin", "owner"))
+	gl.NewHandler(glSvc).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	ap.NewHandler(ap.NewService(db, ap.NewRepository(db), glSvc, slog.Default())).
-		RegisterRoutes(mux, wall.dealerWideReads("payables span every branch", "admin", "owner", "finance"))
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 	bankrecon.NewHandler(bankrecon.NewService(db, bankrecon.NewRepository(db), glSvc, slog.Default())).
-		RegisterRoutes(mux, wall.dealerWideReads("bank reconciliation spans every branch", "admin", "owner", "finance"))
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 	salesteam.NewHandler(salesteam.NewRepository(db)).
-		RegisterRoutes(mux, wall.dealerWideReads("the sales team roster spans every branch", "admin", "owner", "sales"))
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// The staff roster surface exactly as serve registers it.
 	wireStaffAdmin(mux, db, audit.NewLogger(db), "")
@@ -832,12 +834,17 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 	}
 
 	// A route the router resolves to no pattern at all is refused the same
-	// way: an unregistered path inside a machine key module fails closed for
-	// a bound key, and answers 404 to everyone else.
+	// way: a method no route registers on that path (the mux answers 405) or
+	// a path no route registers (404) fails closed for a bound key, and the
+	// unbound key and the user keep the router's own answer, never a refusal.
 	f.refuseForeign(t, "GET", "/api/v1/tax/exemptions", "", nil)
 	sk := f.parity(t, "GET", "/api/v1/tax/exemptions", "")
-	if sk != http.StatusNotFound {
-		t.Errorf("GET /api/v1/tax/exemptions: unbound and user answer %d, want 404 both", sk)
+	if sk == http.StatusForbidden {
+		t.Errorf("GET /api/v1/tax/exemptions: unbound and user answer 403; the router own answer was expected")
+	}
+	f.refuseForeign(t, "GET", "/api/v1/quotes/analytics/unregistered/deeper", "", nil)
+	if sk := f.parity(t, "GET", "/api/v1/quotes/analytics/unregistered/deeper", ""); sk != http.StatusNotFound {
+		t.Errorf("GET /api/v1/quotes/analytics/unregistered/deeper: unbound and user answer %d, want 404 both", sk)
 	}
 }
 
