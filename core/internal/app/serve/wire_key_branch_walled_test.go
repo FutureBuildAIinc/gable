@@ -223,7 +223,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 	f := newKeyPinFixture(t)
 	// The sweep's key is the document family mint: the families it drives
 	// live in the second scope list.
-	f.bound, f.unbound = f.bound2, f.unbound2
+	f.bound, f.unbound, f.boundKeyID = f.bound2, f.unbound2, f.bound2KeyID
 	w := f.seedWalledTwins(t)
 	missing := uuid.NewString()
 	A, B := f.branchA.String(), f.branchB.String()

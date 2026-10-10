@@ -164,7 +164,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/admin/staff":                                     {KeyBranchClassRefused, "the staff roster and its module grants span every branch"},
 	"POST /api/v1/admin/staff/{id}/modules":                        {KeyBranchClassRefused, "the staff roster and its module grants span every branch"},
 	"POST /api/v1/ap/invoices":                                     {KeyBranchClassRefused, "payables span every branch"},
-	"POST /api/v1/ap/invoices/{id}/approve":                        {KeyBranchClassRefused, "payables span every branch"},
+	"POST /api/v1/ap/invoices/{id}/transitions":                    {KeyBranchClassRefused, "payables span every branch"},
 	"POST /api/v1/ap/payments":                                     {KeyBranchClassRefused, "payables span every branch"},
 	"POST /api/v1/apps/{key}/disable":                              {KeyBranchClassRefused, "an app enablement switch is a dealer wide write"},
 	"POST /api/v1/apps/{key}/enable":                               {KeyBranchClassRefused, "an app enablement switch is a dealer wide write"},

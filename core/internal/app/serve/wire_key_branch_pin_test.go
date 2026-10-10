@@ -80,44 +80,46 @@ import (
 // routes through branchWall.locations and the exposure routes through
 // registerExposureRoutes, both behind the real machine key core.
 type keyPinFixture struct {
-	t         *testing.T
-	db        *database.DB
-	srv       *httptest.Server
-	branchA   uuid.UUID
-	branchB   uuid.UUID
-	branchC   uuid.UUID
-	branchC2  uuid.UUID
-	yardA     uuid.UUID
-	yardB     uuid.UUID
-	quoteA    uuid.UUID
-	quoteB    uuid.UUID
-	custID    uuid.UUID
-	yardNull  uuid.UUID // a legacy row that names no branch
-	custB     uuid.UUID // a customer whose branches hold branch B only
-	category  uuid.UUID // one product category the priced rules hang on
-	catRuleA  uuid.UUID // a category rule scoped to the pin's customer
-	catRuleB  uuid.UUID // a category rule scoped to the foreign customer
-	catRuleT  uuid.UUID // a tier category rule that names no customer
-	taxExempt uuid.UUID // a tax exemption row of the foreign customer
-	jobA      uuid.UUID // a project of the pin's customer
-	jobB      uuid.UUID // a project of the foreign customer
-	regA      string    // a POS register per branch, on the branch's yard
-	regB      string
-	tillA     uuid.UUID // an OPEN till session per register
-	tillB     uuid.UUID
-	txnA      uuid.UUID // an OPEN POS transaction per branch
-	txnB      uuid.UUID
-	lineA     uuid.UUID // one line item on each transaction
-	lineB     uuid.UUID
-	retA      uuid.UUID // a completed POS return per branch
-	retB      uuid.UUID
-	zrA       uuid.UUID // a frozen Z report per branch's session
-	zrB       uuid.UUID
-	posProd   uuid.UUID // the product the POS lines carry
-	bound     string    // the key pinned to branch A
-	unbound   string    // the same scopes, no pin
-	bound2    string    // a second bound key holding the document family scopes the mint cap keeps off the first
-	unbound2  string    // the same scopes, no pin
+	t           *testing.T
+	db          *database.DB
+	srv         *httptest.Server
+	branchA     uuid.UUID
+	branchB     uuid.UUID
+	branchC     uuid.UUID
+	branchC2    uuid.UUID
+	yardA       uuid.UUID
+	yardB       uuid.UUID
+	quoteA      uuid.UUID
+	quoteB      uuid.UUID
+	custID      uuid.UUID
+	yardNull    uuid.UUID // a legacy row that names no branch
+	custB       uuid.UUID // a customer whose branches hold branch B only
+	category    uuid.UUID // one product category the priced rules hang on
+	catRuleA    uuid.UUID // a category rule scoped to the pin's customer
+	catRuleB    uuid.UUID // a category rule scoped to the foreign customer
+	catRuleT    uuid.UUID // a tier category rule that names no customer
+	taxExempt   uuid.UUID // a tax exemption row of the foreign customer
+	jobA        uuid.UUID // a project of the pin's customer
+	jobB        uuid.UUID // a project of the foreign customer
+	regA        string    // a POS register per branch, on the branch's yard
+	regB        string
+	tillA       uuid.UUID // an OPEN till session per register
+	tillB       uuid.UUID
+	txnA        uuid.UUID // an OPEN POS transaction per branch
+	txnB        uuid.UUID
+	lineA       uuid.UUID // one line item on each transaction
+	lineB       uuid.UUID
+	retA        uuid.UUID // a completed POS return per branch
+	retB        uuid.UUID
+	zrA         uuid.UUID // a frozen Z report per branch's session
+	zrB         uuid.UUID
+	posProd     uuid.UUID // the product the POS lines carry
+	bound       string    // the key pinned to branch A
+	unbound     string    // the same scopes, no pin
+	bound2      string    // a second bound key holding the document family scopes the mint cap keeps off the first
+	unbound2    string    // the same scopes, no pin
+	boundKeyID  string    // the bound key's id, the actor its refusal audit rows name
+	bound2KeyID string    // the second bound key's id
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
@@ -564,22 +566,22 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	techadmin.NewHandler(keys).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
-	mint := func(name string, branch *uuid.UUID) string {
+	mint := func(name string, branch *uuid.UUID) (string, string) {
 		t.Helper()
 		scopes := pinKeyScopes
 		if strings.Contains(name, "documents") {
 			scopes = pinDocumentScopes
 		}
-		raw, _, err := keys.GenerateKey(ctx, name, scopes, branch)
+		raw, key, err := keys.GenerateKey(ctx, name, scopes, branch)
 		if err != nil {
 			t.Fatalf("mint %s: %v", name, err)
 		}
-		return raw
+		return raw, key.ID.String()
 	}
-	f.bound = mint("pin bound to A", &f.branchA)
-	f.unbound = mint("pin unbound", nil)
-	f.bound2 = mint("pin bound to A, documents", &f.branchA)
-	f.unbound2 = mint("pin unbound, documents", nil)
+	f.bound, f.boundKeyID = mint("pin bound to A", &f.branchA)
+	f.unbound, _ = mint("pin unbound", nil)
+	f.bound2, f.bound2KeyID = mint("pin bound to A, documents", &f.branchA)
+	f.unbound2, _ = mint("pin unbound, documents", nil)
 	mkAuth := middleware.NewMachineKeyAuth(pinKeyValidator{svc: keys}, audit.NewLogger(db), []string{"/api/integration/"}, nil)
 	// The production chain, built by the same builder Run uses, so every test
 	// here drives the wiring serve serves: the machine key core, the request
@@ -645,15 +647,15 @@ func (s pinPOSource) GetPOBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID,
 // answer before any invoice is needed.
 type pinAPSource struct{}
 
-func (pinAPSource) ListVendorInvoices(context.Context, *uuid.UUID, string) ([]ap.VendorInvoice, error) {
+func (pinAPSource) ListVendorInvoices(context.Context, *uuid.UUID, string) ([]ap.Invoice, error) {
 	return nil, nil
 }
 
-func (pinAPSource) GetVendorInvoice(context.Context, uuid.UUID) (*ap.VendorInvoice, error) {
+func (pinAPSource) GetVendorInvoice(context.Context, uuid.UUID) (*ap.Invoice, error) {
 	return nil, nil
 }
 
-func (pinAPSource) ApproveInvoice(context.Context, uuid.UUID, uuid.UUID) (*ap.VendorInvoice, error) {
+func (pinAPSource) ApproveInvoice(context.Context, uuid.UUID, uuid.UUID) (*ap.Invoice, error) {
 	return nil, nil
 }
 
@@ -723,11 +725,16 @@ func (f *keyPinFixture) user(t *testing.T, method, path, body string, hdr map[st
 	return res.StatusCode, buf
 }
 
+// auditRows counts the pin key's refusal rows: scoped to the bound key's
+// own id, so another package's test writing a refusal row for its own key
+// into the shared database between two reads cannot look like this key's
+// second refusal (the packages run in parallel against one database).
 func (f *keyPinFixture) auditRows(t *testing.T) int {
 	t.Helper()
 	var n int
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM audit_log WHERE action = 'key.branch_refused'`).Scan(&n); err != nil {
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'key.branch_refused' AND actor_id = $1`,
+		f.boundKeyID).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
