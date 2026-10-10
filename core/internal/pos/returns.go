@@ -6,6 +6,7 @@ package pos
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
@@ -135,6 +136,20 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	for i := range saleLines {
 		byID[saleLines[i].ID] = saleLines[i]
 	}
+	// The bearer of the legacy (unlinked) returns of each product: its first
+	// line by position, stable across requests (sixth review P1-1 and P3-2).
+	// A legacy return names no sale line, so its quantity and cents are
+	// attributed here once, to one line of the product, instead of counting
+	// against every line of it; whichever line bears them, the sale's goods
+	// bound its refunds.
+	legacyBearer := map[uuid.UUID]uuid.UUID{}
+	for i := range saleLines {
+		if saleLines[i].ProductID != nil {
+			if _, ok := legacyBearer[*saleLines[i].ProductID]; !ok {
+				legacyBearer[*saleLines[i].ProductID] = saleLines[i].ID
+			}
+		}
+	}
 	// First pass: fill each line from the sale line it names, so the product
 	// lookup covers the resolved products too.
 	resolved := make([]ReturnLineIn, len(in.Lines))
@@ -239,40 +254,50 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	// what the sale was paid; the tax is capped the same way. Read before the
 	// transaction (the guards) and again under the sale row lock (the
 	// authority the memo is written from).
-	var taxAlreadyBack int64
-	applyRemainders := func(ctx context.Context) error {
-		if in.OriginalSaleID == nil {
+		var taxAlreadyBack int64
+		applyRemainders := func(ctx context.Context) error {
+			if in.OriginalSaleID == nil {
+				return nil
+			}
+			returned, err := s.repo.ReturnedQtyByLine(ctx, *in.OriginalSaleID)
+			if err != nil {
+				return err
+			}
+			refunded, err := s.repo.RefundedCentsByLine(ctx, *in.OriginalSaleID)
+			if err != nil {
+				return err
+			}
+			if taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *in.OriginalSaleID); err != nil {
+				return err
+			}
+			legacyCents, err := s.repo.LegacyRefundedCentsByProduct(ctx, *in.OriginalSaleID)
+			if err != nil {
+				return err
+			}
+			for i := range priced {
+				p := &priced[i]
+				if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
+					continue
+				}
+				sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
+				remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
+				// the legacy refund of the product lowers the bearer line's
+				// remaining money, so the rounded shares of later linked
+				// returns cannot pass what the sale took
+				if p.saleLine.ProductID != nil && legacyBearer[*p.saleLine.ProductID] == p.saleLine.ID {
+					remaining -= legacyCents[*p.saleLine.ProductID]
+				}
+				if back+int64(p.in.Quantity) >= sold {
+					p.lineTotal = remaining
+				} else if p.lineTotal > remaining {
+					p.lineTotal = remaining
+				}
+				if p.lineTotal < 0 {
+					p.lineTotal = 0
+				}
+			}
 			return nil
 		}
-		returned, err := s.repo.ReturnedQtyByLine(ctx, *in.OriginalSaleID)
-		if err != nil {
-			return err
-		}
-		refunded, err := s.repo.RefundedCentsByLine(ctx, *in.OriginalSaleID)
-		if err != nil {
-			return err
-		}
-		if taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *in.OriginalSaleID); err != nil {
-			return err
-		}
-		for i := range priced {
-			p := &priced[i]
-			if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
-				continue
-			}
-			sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
-			remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
-			if back+int64(p.in.Quantity) >= sold {
-				p.lineTotal = remaining
-			} else if p.lineTotal > remaining {
-				p.lineTotal = remaining
-			}
-			if p.lineTotal < 0 {
-				p.lineTotal = 0
-			}
-		}
-		return nil
-	}
 	if err := applyRemainders(ctx); err != nil {
 		return nil, err
 	}
@@ -820,13 +845,35 @@ func (s *Service) checkReturnCaps(ctx context.Context, saleID *uuid.UUID, priced
 	if err != nil {
 		return err
 	}
+	// The bearer of each product's legacy returns: its first line by
+	// position among the sale's lines (the same rule the caller priced by),
+	// so a sale of several lines of one product loses headroom on one line
+	// only, and always the same one.
+	ordered := make([]salesdoc.Line, 0, len(byID))
+	for _, l := range byID {
+		ordered = append(ordered, l)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Position != ordered[j].Position {
+			return ordered[i].Position < ordered[j].Position
+		}
+		return ordered[i].ID.String() < ordered[j].ID.String()
+	})
+	bearer := map[uuid.UUID]uuid.UUID{}
+	for _, l := range ordered {
+		if l.ProductID != nil {
+			if _, ok := bearer[*l.ProductID]; !ok {
+				bearer[*l.ProductID] = l.ID
+			}
+		}
+	}
 	for lineID, want := range requested {
 		src, ok := byID[lineID]
 		if !ok || src.Quantity == nil {
 			continue
 		}
 		already := int64(returned[lineID])
-		if src.ProductID != nil {
+		if src.ProductID != nil && bearer[*src.ProductID] == lineID {
 			already += int64(legacy[*src.ProductID])
 		}
 		if want+already > int64(*src.Quantity) {

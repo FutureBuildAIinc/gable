@@ -17,6 +17,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -395,4 +397,84 @@ func TestMigration105_RefusesALegacyAccountReturnWithNoCustomer(t *testing.T) {
 	if !strings.Contains(err.Error(), "no customer") {
 		t.Errorf("the up's refusal = %v, want it to name the customerless rows", err)
 	}
+}
+
+// mig105ServiceDB builds the schema to 104 in a scratch database, writes the
+// legacy rows in the base shape, applies 105, and answers a live database
+// handle the fixture can serve on (sixth review P1-1: the seeded database
+// test through 105).
+func mig105ServiceDB(t *testing.T) *database.DB {
+	t.Helper()
+	conn, url := mig105ScratchDB(t)
+	before, target, _ := mig105Files(t)
+	for _, f := range before {
+		mig105Apply(t, conn, f)
+	}
+	mig105Legacy(t, conn)
+	// a completed sale of lines 2 and 1 of the legacy product with an
+	// unlinked legacy return of half a unit: the exact rows a dealer's
+	// pre contract database holds, in the positive shape the base commit
+	// wrote them (and 105 leaves: it negates only while copying into the
+	// credit memos). The seeded CASH return a4 becomes that half return.
+	legacy := `
+		INSERT INTO pos_return_lines (id, return_id, product_id, description, quantity, uom, unit_price,
+		                              line_total, restock, created_at)
+		VALUES ('00000000-0000-0000-0000-0000000000a6', '00000000-0000-0000-0000-0000000000a4',
+		        '00000000-0000-0000-0000-0000000000f1', '2x4x8', 0.5, 'PCS', 5.50, 2.75, FALSE, '2026-02-03T12:00:00Z');
+		UPDATE pos_returns SET original_transaction_id = '00000000-0000-0000-0000-0000000000b1',
+		                       subtotal = 2.75, tax_amount = 0.24, total = 2.99
+		 WHERE id = '00000000-0000-0000-0000-0000000000a4';`
+	if _, err := conn.Exec(context.Background(), legacy); err != nil {
+		t.Fatalf("seed the unlinked legacy half: %v", err)
+	}
+	mig105Apply(t, conn, target)
+	conn.Close(context.Background())
+	db, err := database.Connect(url)
+	if err != nil {
+		t.Fatalf("connect the migrated scratch database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// RULE (sixth review P1-1): on a database migration 105 really migrated, a
+// sale partly returned before the contract cannot be returned for more than
+// it sold: the legacy half the migration leaves positive counts against the
+// cap, and the later linked returns bring back no more than the rest.
+func TestMigration105_ALegacyReturnMigratedBoundsTheLaterReturns(t *testing.T) {
+	db := mig105ServiceDB(t)
+	f := newFixture(t, db)
+	f.openTill(0)
+	saleID := "00000000-0000-0000-0000-0000000000b1"
+	lines := f.getSale(t, saleID)["lines"].([]any)
+	first := lines[0].(map[string]any)["id"].(string)
+	second := lines[1].(map[string]any)["id"].(string)
+	// the second line's one unit comes back (the legacy half bears on the
+	// first line): 5.50 of line with its tax share of the sale's 98
+	r := f.returnOn(t, saleID, second, "1", map[string]any{"restock": false})
+	if r.status != http.StatusCreated {
+		t.Fatalf("return of the second line = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "total_cents"); got != -583 {
+		t.Errorf("return of the second line total = %d, want -583", got)
+	}
+	// the first line's whole two units are refused: half already came home
+	r = f.returnOn(t, saleID, first, "2", map[string]any{"restock": false})
+	if r.status != http.StatusConflict {
+		t.Fatalf("return of the first line whole = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "exceeds_sold" {
+		t.Errorf("blockers = %v, want exceeds_sold", blockers)
+	}
+	// one and a half of it still come back, the line's remainder less the
+	// legacy refund: 1100 less the 275 the legacy half took
+	r = f.returnOn(t, saleID, first, "1.5", map[string]any{"restock": false})
+	if r.status != http.StatusCreated {
+		t.Fatalf("return of the first line's remainder = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "subtotal_cents"); got != -825 {
+		t.Errorf("return of the first line's remainder subtotal = %d, want -825", got)
+	}
+	f.assertARInvariants(t)
 }

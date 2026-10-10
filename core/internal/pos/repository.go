@@ -58,10 +58,13 @@ type Repository interface {
 	// what the card returns took, for the card refund's cap.
 	// LegacyReturnedQtyByProduct sums the unlinked (pre contract) return
 	// lines of a sale by product, so the cap counts them too.
+	// LegacyRefundedCentsByProduct sums the cents those lines refunded, so
+	// the remainder rule counts them too.
 	RefundedCentsByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
 	RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error)
 	CardRefundedCents(ctx context.Context, saleID uuid.UUID) (int64, error)
 	LegacyReturnedQtyByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
+	LegacyRefundedCentsByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
 	// InvoiceLineCosts reads an invoice's lines with the unit cost the sale
 	// relieved (a linked return's restock cost, found by the stored link).
@@ -603,12 +606,14 @@ func (r *PostgresRepository) RefundedCentsByLine(ctx context.Context, saleID uui
 	return out, rows.Err()
 }
 
-// RefundedTaxCents sums the tax every earlier return of the sale took back
-// (the stored amounts are negative, so the sum is negated back).
+// RefundedTaxCents sums the tax every earlier return of the sale took back.
+// Each row is read with its own sign: the contract writes negative amounts,
+// the legacy rows migration 105 leaves carry positive ones (105 negates only
+// while copying into credit memos), and either way the tax came back.
 func (r *PostgresRepository) RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error) {
 	var cents int64
 	err := r.ex(ctx).QueryRow(ctx,
-		`SELECT COALESCE(-ROUND(SUM(tax_amount) * 100)::bigint, 0) FROM pos_returns WHERE original_transaction_id = $1`,
+		`SELECT COALESCE(ROUND(SUM(ABS(tax_amount)) * 100)::bigint, 0) FROM pos_returns WHERE original_transaction_id = $1`,
 		saleID).Scan(&cents)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read the sale's refunded tax: %w", err)
@@ -616,13 +621,14 @@ func (r *PostgresRepository) RefundedTaxCents(ctx context.Context, saleID uuid.U
 	return cents, nil
 }
 
-// CardRefundedCents sums the cents the card returns of the sale already took
-// (the stored totals are negative, so the sum is negated back): a card
-// return is capped at the card tender less this.
+// CardRefundedCents sums the cents the card returns of the sale already
+// took, each row with its own sign (the contract negative, the legacy rows
+// migration 105 leaves positive): a card return is capped at the card tender
+// less this.
 func (r *PostgresRepository) CardRefundedCents(ctx context.Context, saleID uuid.UUID) (int64, error) {
 	var cents int64
 	err := r.ex(ctx).QueryRow(ctx,
-		`SELECT COALESCE(-ROUND(SUM(total) * 100)::bigint, 0) FROM pos_returns
+		`SELECT COALESCE(ROUND(SUM(ABS(total)) * 100)::bigint, 0) FROM pos_returns
 		 WHERE original_transaction_id = $1 AND refund_method = 'CARD'`, saleID).Scan(&cents)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read the sale's card refunds: %w", err)
@@ -632,11 +638,12 @@ func (r *PostgresRepository) CardRefundedCents(ctx context.Context, saleID uuid.
 
 // LegacyReturnedQtyByProduct sums, per product, the quantity the sale's
 // legacy return lines brought back: the lines migration 105 could not link
-// to a sale line (their sale_line_id is null), counted by product so the
-// cap still bounds a linked return of the same goods.
+// to a sale line (their sale_line_id is null). Each line is read with its
+// own sign: the base commit wrote positive quantities and 105 leaves them,
+// while a free (unlinked) return the contract writes is negative.
 func (r *PostgresRepository) LegacyReturnedQtyByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
-		SELECT rl.product_id, -ROUND(SUM(rl.quantity) * 10000)::bigint
+		SELECT rl.product_id, ROUND(SUM(ABS(rl.quantity)) * 10000)::bigint
 		FROM pos_return_lines rl
 		JOIN pos_returns r ON r.id = rl.return_id
 		WHERE r.original_transaction_id = $1 AND rl.sale_line_id IS NULL AND rl.product_id IS NOT NULL
@@ -653,6 +660,33 @@ func (r *PostgresRepository) LegacyReturnedQtyByProduct(ctx context.Context, sal
 			return nil, err
 		}
 		out[id] = qty
+	}
+	return out, rows.Err()
+}
+
+// LegacyRefundedCentsByProduct sums, per product, the cents the sale's
+// legacy (unlinked) return lines refunded, each line with its own sign: the
+// remainder rule counts them, so the goods bound the money whichever route
+// brought them back.
+func (r *PostgresRepository) LegacyRefundedCentsByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT rl.product_id, ROUND(SUM(ABS(rl.line_total)) * 100)::bigint
+		FROM pos_return_lines rl
+		JOIN pos_returns r ON r.id = rl.return_id
+		WHERE r.original_transaction_id = $1 AND rl.sale_line_id IS NULL AND rl.product_id IS NOT NULL
+		GROUP BY rl.product_id`, saleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the sale's unlinked refund cents: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]int64{}
+	for rows.Next() {
+		var id uuid.UUID
+		var cents int64
+		if err := rows.Scan(&id, &cents); err != nil {
+			return nil, err
+		}
+		out[id] = cents
 	}
 	return out, rows.Err()
 }

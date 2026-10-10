@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -294,39 +295,58 @@ func TestRepeatedPartialReturnsRefundNoMoreThanTheSale(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
-// RULE (fourth review P3-3): a legacy return line the migration could not
-// link to a sale line still counts against the cap, by its product: a sale
-// half returned before the contract cannot be returned in full again through
-// the linked route.
+// RULE (fourth review P3-3, sixth review P1-1): a legacy return line the
+// migration could not link to a sale line still counts against the cap, by
+// its product: a sale half returned before the contract cannot be returned
+// in full again through the linked route. The legacy rows sit in the shape
+// migration 105 leaves them (positive quantities and cents: 105 negates
+// only while copying into credit memos), and the return is a card return so
+// the card tender's cap reads the legacy cents with their own sign too.
 func TestALegacyUnlinkedReturnCountsAgainstTheCap(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
-	saleID, body := f.saleOf("1", tender("cash", 599))
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
-	// a legacy return of half the unit, in the base shape: no sale line link
+	// a legacy return of half the unit, in the base shape 105 leaves: no sale
+	// line link, positive quantity and cents
 	legacy := uuid.New()
 	mustExec(t, f.db, `INSERT INTO pos_returns (id, register_id, cashier_id, original_transaction_id, subtotal, tax_amount, total,
-		refund_method, reason, currency) VALUES ($1, $2, $3, $4, -2.75, -0.24, -2.99, 'CASH', 'legacy half', 'USD')`,
+		refund_method, reason, currency) VALUES ($1, $2, $3, $4, 2.75, 0.24, 2.99, 'CARD', 'legacy half', 'USD')`,
 		legacy, f.register, mustUUID(t), saleID)
 	mustExec(t, f.db, `INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity,
-		uom, unit_price, line_total) VALUES ($1, $2, 0, 'PRODUCT', $3, 'legacy half', -0.5, 'PCS', 5.5, -2.75)`,
+		uom, unit_price, line_total) VALUES ($1, $2, 0, 'PRODUCT', $3, 'legacy half', 0.5, 'PCS', 5.5, 2.75)`,
 		uuid.New(), legacy, f.productID)
 	t.Cleanup(func() {
 		mustExec(t, f.db, `DELETE FROM pos_return_lines WHERE return_id = $1`, legacy)
 		mustExec(t, f.db, `DELETE FROM pos_returns WHERE id = $1`, legacy)
 	})
 	// the whole unit back is refused: half already came home
-	r := f.returnOn(t, saleID, lineID, "1")
+	r := f.cardReturnOn(t, saleID, lineID, "1")
 	if r.status != http.StatusConflict {
-		t.Fatalf("return over a legacy half = %d, want 409: %s", r.status, r.raw)
+		t.Fatalf("card return over a legacy half = %d, want 409: %s", r.status, r.raw)
 	}
 	_, blockers, _ := errorOf(t, r)
 	if len(blockers) == 0 || blockers[0] != "exceeds_sold" {
 		t.Errorf("blockers = %v, want exceeds_sold", blockers)
 	}
-	// the other half still comes back
-	if r := f.returnOn(t, saleID, lineID, "0.5"); r.status != http.StatusCreated {
-		t.Fatalf("return of the other half = %d: %s", r.status, r.raw)
+	if len(gw.refunds) != 0 {
+		t.Fatalf("%d gateway refunds over a legacy half, want 0", len(gw.refunds))
+	}
+	// the other half still comes back, to the card, within the tender less
+	// the legacy card refund: 599 tendered less the 299 the legacy return
+	// took leaves 300 (275 of line and 25 of tax)
+	r = f.cardReturnOn(t, saleID, lineID, "0.5")
+	if r.status != http.StatusCreated {
+		t.Fatalf("card return of the other half = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "total_cents"); got != -300 {
+		t.Errorf("card return of the other half total = %d, want -300 (the tender less the legacy card refund)", got)
+	}
+	if len(gw.refunds) != 1 {
+		t.Fatalf("%d gateway refunds, want 1 (the other half)", len(gw.refunds))
 	}
 	f.assertARInvariants(t)
 }
