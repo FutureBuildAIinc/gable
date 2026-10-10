@@ -121,18 +121,15 @@ wall: the pin does not narrow them, writes included. A
 bound key holding `users:grants` is limited by that scope
 only, and can grant a user any branch. The branch CRUD
 verbs (`GET`, `POST`, `PUT`, `DELETE` on `/api/v1/branches`
-and its by id children except `/tree`) are scoped by the
-role guard only, so a branch bound key's pin does not
+and its by id children except `/tree`) are limited by the key's scope only (the role guard passes a scope checked machine key), so a branch bound key's pin does not
 confine those writes either; a bound key holding
 `branches:write` can write any branch. The
 `PUT /api/v1/locations/{id}` and `DELETE /api/v1/locations/{id}`
-routes are scoped by the role guard only, so a bound key
+routes are limited by the key's scope only (the role guard passes a scope checked machine key), so a bound key
 holding `locations:write` can write any location. An
 operator should not mint a branch bound key with
 `users:grants`, `branches:write` or `locations:write` until
-this gap is fixed (the pin narrows the routes that mount
-the branch middleware; the rest widen by what the scopes
-admit). An unbound key behaves as before.
+this gap is fixed (the pin narrows only the routes that mount the branch middleware; on the rest a key reaches whatever its scopes admit). An unbound key behaves as before.
 
 ## Routes
 
@@ -151,7 +148,7 @@ the route census (`core/api/ROUTES.txt`) lists each one under
 | POST | `/api/v1/drafts/quotes` | Create a quote draft; a create draft (`subject_id` null) carries the quote create request as its payload, an edit draft names the quote it edits and may assert `subject_revision`; `Idempotency-Key` rides the standard header. |
 | GET | `/api/v1/drafts/quotes/feed` | The quote drafts change feed as `text/event-stream`; events `ready` (carries the head cursor), `draft` (carries the write's summary with its by actor), `cursor` (advances a filtered stream past rows its filters exclude), `reset` (the resuming client aged out behind the purge), and `reauth` (the stream is closing at the token's exp, the lifetime bound, or a revoked key); `Last-Event-ID` wins over the `cursor` parameter. |
 | GET | `/api/v1/drafts/quotes/{id}` | One quote draft with its payload and its computed validation; the ETag is the revision; a draft outside the caller's branch wall is a 404. |
-| PUT | `/api/v1/drafts/quotes/{id}` | The whole payload compare and swap; `If-Match` or body `revision` is required (428 without), a moved revision is 409 with the `stale_revision` blocker, any status but `open` is 409 with the `draft_not_open` blocker; `subject_revision` may move forward, never past the subject's current revision; `Idempotency-Key` rides the standard header. |
+| PUT | `/api/v1/drafts/quotes/{id}` | The whole payload compare and swap; `If-Match` or body `revision` is required (428 without), a moved revision is 409 `stale_revision`, any status but `open` is 409 with the `draft_not_open` blocker; `subject_revision` may move forward, never past the subject's current revision; `Idempotency-Key` rides the standard header. |
 | POST | `/api/v1/drafts/quotes/{id}/transitions` | Discard or reopen a quote draft (`to` is `discarded` or `open`) on the revision precondition; `promoted` is terminal (its retry is told `already_promoted`); `Idempotency-Key` rides the standard header. |
 | POST | `/api/v1/drafts/quotes/{id}/promote` | The confirm: the revision the committer read becomes a quote in one transaction, born in status `draft` with its `Q-` number and `quote.created`, beside `draft.promoted`; 428 without a precondition, 409 `stale_revision` on a moved one, 409 with the `already_promoted` blocker on a keyless retry, 409 with the `draft_discarded` blocker on a discarded draft; `Idempotency-Key` rides the standard header. |
 | GET | `/api/v1/drafts/orders` | Cursor list of order drafts, newest first on `created_at` then `id`; same filters as the quote kind. |
@@ -485,7 +482,7 @@ consts, the `auditRefusal` calls inside `handle`):
 
 | Refusal action | When |
 |---|---|
-| `key.scope_refused` | The key is valid but holds none of the scopes `AdmittedScopes` lists for the route's class, or neither `propose` nor `commit` for a draft route, or `propose` but not `commit` for the promotion. The `scope` is empty for a dirty spelling under a real module (a dot segment or doubled slash). The row's `scope` is the first admitted scope (the one the policy table records as refused). |
+| `key.scope_refused` | The key is valid but holds none of the scopes `AdmittedScopes` lists for the route's class, or neither `propose` nor `commit` for a draft route, or `propose` but not `commit` for the promotion. The `scope` is empty for a dirty spelling under a real module (a dot segment or doubled slash). Otherwise the row's `scope` is the first admitted scope (the one the policy table records as refused). |
 | `key.user_required` | The route is in the user only prefix list (the prefixes `underUserOnlyPrefix` tests in `core/pkg/middleware/machinekey.go` `machineKeyUserOnlyRoutes`: `/api/v1/admin/keys` and `/api/v1/me`). A request whose path falls under one is a 403 with the `key.user_required` audit row; a machine key cannot reach any of these routes under any scope, and no scope check would admit them. |
 | `key.path_refused` | The path is not a `/api/v1` module route the key system knows, or not a shape the drafts and links policy table names (a later draft route cannot quietly fall into the draft write class: `ScopeTarget` fails closed). |
 | `key.branch_refused` | A branch bound key named another branch in `X-Branch-Id` (the `principal.BranchID != nil` branch in `handle`; `AuditKeyBranchRefusal` in `core/pkg/audit/audit.go`). The row carries the bound branch id, the request method, and the request path; the refused `X-Branch-Id` value is not stored. A non UUID `X-Branch-Id` value (`uuid.Parse` fails) is refused the same way. An empty `X-Branch-Id` is served under the pin: an empty header names no branch, so the branch check is skipped. |
@@ -536,17 +533,13 @@ the pin does not narrow them, writes included. A bound key
 holding `users:grants` is limited by that scope only, and
 can grant a user any branch. The branch CRUD verbs
 (`GET`, `POST`, `PUT`, `DELETE` on `/api/v1/branches` and
-its by id children except `/tree`) are scoped by the role
-guard only, so a branch bound key's pin does not confine
+its by id children except `/tree`) are limited by the key's scope only (the role guard passes a scope checked machine key), so a branch bound key's pin does not confine
 those writes either; a bound key holding `branches:write`
 can write any branch. The `PUT /api/v1/locations/{id}` and
-`DELETE /api/v1/locations/{id}` routes are scoped by the
-role guard only, so a bound key holding `locations:write`
+`DELETE /api/v1/locations/{id}` routes are limited by the key's scope only (the role guard passes a scope checked machine key), so a bound key holding `locations:write`
 can write any location. An operator should not mint a
 branch bound key with `users:grants`, `branches:write` or
-`locations:write` until this gap is fixed (the pin narrows
-the routes that mount the branch middleware; the rest
-widen by what the scopes admit). An unbound key behaves
+`locations:write` until this gap is fixed (the pin narrows only the routes that mount the branch middleware; on the rest a key reaches whatever its scopes admit). An unbound key behaves
 as before.
 
 The confirm gate sits inside auth and outside idempotency
