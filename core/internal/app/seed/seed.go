@@ -90,6 +90,7 @@ func resetTransactionalData(db *sql.DB) {
 		"projects", "crm_activities", "customer_contacts",
 		"rebate_programs", "rebate_tiers", "rebate_claims",
 		"saved_reports", "edi_trading_partners",
+		"drafts", "draft_events",
 	}
 	// Every name above is created by a migration in core/migrations/. The
 	// existence filter is defensive, not a workaround for a missing table: a

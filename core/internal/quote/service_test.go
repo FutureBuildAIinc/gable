@@ -134,6 +134,14 @@ func (f *fakeRepo) ListQuotesByCustomer(context.Context, uuid.UUID) ([]QuoteSumm
 	return nil, nil
 }
 func (f *fakeRepo) GetQuoteAnalytics(context.Context) (*QuoteAnalytics, error) { return nil, nil }
+func (f *fakeRepo) GetQuoteByNumber(context.Context, string) (*Quote, error) {
+	return nil, ErrNotFound
+}
+
+func (f *fakeRepo) StoreOriginalFile(context.Context, uuid.UUID, []byte, string, string) error {
+	return nil
+}
+
 func (f *fakeRepo) GetOriginalFile(context.Context, uuid.UUID) ([]byte, string, string, error) {
 	return nil, "", "", ErrNotFound
 }

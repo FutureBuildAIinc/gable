@@ -96,6 +96,8 @@ type Repository interface {
 	ListQuotesByCustomer(ctx context.Context, customerID uuid.UUID) ([]QuoteSummary, error)
 	GetQuoteAnalytics(ctx context.Context) (*QuoteAnalytics, error)
 	GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error)
+	GetQuoteByNumber(ctx context.Context, number string) (*Quote, error)
+	StoreOriginalFile(ctx context.Context, id uuid.UUID, data []byte, filename, contentType string) error
 }
 
 type PostgresRepository struct {
@@ -225,6 +227,39 @@ func (r *PostgresRepository) LookupCatalogue(ctx context.Context, codes []string
 		out[u.Code] = u
 	}
 	return out, rows.Err()
+}
+
+// GetQuoteByNumber reads a quote by its document number, behind the same
+// branch wall the id read carries, for the record URLs that name the number
+// (ADR 0007 section 7).
+func (r *PostgresRepository) GetQuoteByNumber(ctx context.Context, number string) (*Quote, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT id FROM quotes WHERE number = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
+		number, middleware.BranchIDForQuery(ctx)).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get quote by number: %w", err)
+	}
+	return r.GetQuote(ctx, id)
+}
+
+// StoreOriginalFile replaces the stored upload and moves the revision, for
+// the quote file route a promotion's committer attaches through (ADR 0007
+// section 10). The row is already locked by the caller's transaction.
+func (r *PostgresRepository) StoreOriginalFile(ctx context.Context, id uuid.UUID, data []byte, filename, contentType string) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE quotes SET original_file = $3, original_filename = $4, original_content_type = $5,
+			revision = revision + 1, updated_at = NOW()
+		 WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
+		id, middleware.BranchIDForQuery(ctx), data,
+		nullIfEmpty(filename), nullIfEmpty(contentType))
+	if err != nil {
+		return fmt.Errorf("failed to store the original file: %w", err)
+	}
+	return nil
 }
 
 // nullIfEmpty renders an empty string as a SQL NULL.

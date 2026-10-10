@@ -244,12 +244,7 @@ func (h *Handler) HandleGet(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	id, err := pathID(r, "invoice")
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	inv, err := h.svc.GetInvoice(r.Context(), id)
+	inv, err := h.svc.GetInvoiceByIDOrNumber(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httpx.WriteError(w, r, notFound(err))
 		return

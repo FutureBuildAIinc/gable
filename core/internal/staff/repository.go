@@ -22,10 +22,10 @@ var ErrNotFound = errors.New("staff not found")
 // ListFilter is the staff list's query: the keyset page, the opt in total,
 // and the active filter.
 type ListFilter struct {
-	Limit     int
-	Active    *bool
-	AfterAt   *time.Time
-	AfterID   uuid.UUID
+	Limit   int
+	Active  *bool
+	AfterAt *time.Time
+	AfterID uuid.UUID
 }
 
 // Repository is the Postgres implementation of the store: it reads and
