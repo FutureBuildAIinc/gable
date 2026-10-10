@@ -596,6 +596,64 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/file:
+    put:
+      operationId: quoteAttachFile
+      tags: [quote]
+      summary: Attach the AI parse's original file after promotion
+      description: >-
+        The raw file bytes with their content type, the same 5 MiB bound
+        the create applies (413 above it): the quote draft never carries
+        the file (every autosave re-sends the payload and every feed
+        subscriber re-reads it), so the parse flow attaches it here, by
+        the committer, right after a promotion. Accepted only while the
+        quote is in status draft (else 409 with the quote_not_draft
+        blocker), on the revision precondition; it replaces any file
+        already stored, moves the quote's revision by one, returns the
+        quote with its new ETag, and writes the quote.file_attached audit
+        row and no outbox event.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: The quote with its new revision and ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     get:
       operationId: quoteDownloadOriginalFile
       tags: [quote]
