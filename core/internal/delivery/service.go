@@ -605,6 +605,18 @@ func (s *Service) TransitionRoute(ctx context.Context, id uuid.UUID, d *RouteTra
 			}
 			event = EventRouteInTransit
 		case RouteStatusCompleted:
+			// The completion only happens from IN_TRANSIT: a DRAFT route
+			// must be dispatched first, a SCHEDULED route must be dispatched
+			// first, an already COMPLETED route is terminal, and a CANCELLED
+			// route is terminal (PR 80 review round 1 P1-3; the base allowed
+			// completion from any non-cancelled status, which accepted a draft
+			// route and re-completed an already completed route, writing a
+			// second route.completed event downstream callers could not
+			// de-duplicate).
+			if cur.Status != RouteStatusInTransit {
+				return httpx.InvalidStateTransition("cannot complete a route in status "+string(cur.Status),
+					httpx.Blocker("invalid_state", "only an in_transit route can be completed"))
+			}
 			// The completion gates on every stop being terminal. The read
 			// is a single count under the route's row lock: a route over
 			// the prior 200 stop page bound (PR 70 review round 4 P2-1)
@@ -626,10 +638,6 @@ func (s *Service) TransitionRoute(ctx context.Context, id uuid.UUID, d *RouteTra
 			if nonTerminal > 0 {
 				return httpx.InvalidStateTransition(fmt.Sprintf("cannot complete a route with %d stop(s) not yet delivered, failed or partial", nonTerminal),
 					httpx.Blocker("stop_not_terminal", "every stop must be delivered, failed or partial before the route completes"))
-			}
-			if cur.Status == RouteStatusCancelled {
-				return httpx.InvalidStateTransition("cannot complete a cancelled route",
-					httpx.Blocker("invalid_state", "a cancelled route is terminal"))
 			}
 			event = EventRouteCompleted
 		default:
