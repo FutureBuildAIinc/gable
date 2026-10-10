@@ -81,14 +81,23 @@ func TestFeedStreamLimits(t *testing.T) {
 	open := func(url string) int {
 		req, _ := http.NewRequest(http.MethodGet, url, nil)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
 		req = req.WithContext(ctx)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
+			cancel()
 			t.Fatalf("open: %v", err)
 		}
-		defer res.Body.Close()
-		go io.Copy(io.Discard, res.Body)
+		// The stream must outlive this helper: the caps count live
+		// streams, and a cancel at return tells the server at once (its
+		// loop checks the context), releasing the slot before the next
+		// open can assert the cap. The drain holds the body open and
+		// the cancel fires only when the body closes, so every opened
+		// stream stays counted for its full two second context.
+		go func() {
+			io.Copy(io.Discard, res.Body)
+			res.Body.Close()
+			cancel()
+		}()
 		return res.StatusCode
 	}
 
