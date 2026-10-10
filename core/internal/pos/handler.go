@@ -278,14 +278,13 @@ func (h *Handler) ListTransactions(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	f := SaleFilter{RegisterID: q.Get("register_id")}
+	f := SaleFilter{RegisterID: q.Get("register_id"), Date: time.Now().Format("2006-01-02")}
 	if d := q.Get("date"); d != "" {
-		parsed, err := time.Parse("2006-01-02", d)
-		if err != nil {
+		if _, err := time.Parse("2006-01-02", d); err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
 		}
-		f.Date = &parsed
+		f.Date = d
 	}
 	if s := q.Get("status"); s != "" {
 		switch s {
@@ -542,14 +541,13 @@ func (h *Handler) ListReturns(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	f := ReturnFilter{RegisterID: q.Get("register_id")}
+	f := ReturnFilter{RegisterID: q.Get("register_id"), Date: time.Now().Format("2006-01-02")}
 	if d := q.Get("date"); d != "" {
-		parsed, err := time.Parse("2006-01-02", d)
-		if err != nil {
+		if _, err := time.Parse("2006-01-02", d); err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
 		}
-		f.Date = &parsed
+		f.Date = d
 	}
 	list, err := h.service.ListReturns(r.Context(), f)
 	if err != nil {

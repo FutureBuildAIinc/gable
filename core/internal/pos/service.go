@@ -518,17 +518,11 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		if err != nil {
 			return err
 		}
-		next := len(existing)
+		// the new lines keep the order Explode built (a kit before its
+		// components), numbered after the cart's own
 		for i := range lines {
-			if lines[i].LineType == salesdoc.LineComponent {
-				continue
-			}
-			lines[i].Position = next
-			next++
+			lines[i].Position = len(existing) + i
 		}
-		// Explode assigns component lines after their kit; the positions
-		// above numbered only the parents, so the components follow theirs
-		// in the stored order Explode built.
 		if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
 			return err
 		}

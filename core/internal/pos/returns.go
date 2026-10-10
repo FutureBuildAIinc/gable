@@ -99,17 +99,19 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	priced := make([]returnLinePriced, 0, len(in.Lines))
 	for i := range in.Lines {
 		rl := in.Lines[i]
-		if src, ok := byID[*rl.SaleLineID]; ok && rl.SaleLineID != nil {
-			if rl.UnitPrice == nil && src.UnitPrice != nil {
-				p := *src.UnitPrice
-				rl.UnitPrice = &p
-			}
-			if rl.Description == "" {
-				rl.Description = src.Description
-			}
-			if rl.ProductID == nil && src.ProductID != nil {
-				p := *src.ProductID
-				rl.ProductID = &p
+		if rl.SaleLineID != nil {
+			if src, ok := byID[*rl.SaleLineID]; ok {
+				if rl.UnitPrice == nil && src.UnitPrice != nil {
+					p := *src.UnitPrice
+					rl.UnitPrice = &p
+				}
+				if rl.Description == "" {
+					rl.Description = src.Description
+				}
+				if rl.ProductID == nil && src.ProductID != nil {
+					p := *src.ProductID
+					rl.ProductID = &p
+				}
 			}
 		}
 		if rl.UnitPrice == nil {
@@ -117,8 +119,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				"is required when the line names no line of the original sale")
 		}
 		taxable := true
-		if ref, ok := refs[rl.ProductID.String()]; ok {
-			taxable = ref.Taxable
+		if rl.ProductID != nil {
+			if ref, ok := refs[rl.ProductID.String()]; ok {
+				taxable = ref.Taxable
+			}
 		}
 		priced = append(priced, returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, *rl.UnitPrice)), taxable: taxable})
 	}
@@ -208,9 +212,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 		}
 		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
-			INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, status, created_at, updated_at, revision)
-			VALUES ($1, $2, $3, $4, 'RETURN', $5, 'DRAFT', NOW(), NOW(), 1)`,
-			memoID, customerID, branchID, facts.Currency, in.Reason); err != nil {
+			INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, status, amount,
+				subtotal, tax_amount, total_amount, amount_open, memo_date, created_at, updated_at, revision)
+			VALUES ($1, $2, $3, $4, 'RETURN', $5, 'DRAFT', 0, 0, 0, 0, 0, $6::date, NOW(), NOW(), 1)`,
+			memoID, customerID, branchID, facts.Currency, in.Reason, date.Format("2006-01-02")); err != nil {
 			return fmt.Errorf("failed to create the credit memo: %w", mapWriteError(err))
 		}
 		for i := range lines {
@@ -219,11 +224,17 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, description, quantity,
 					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock, created_at)
 				VALUES ($1, $2, 'PRODUCT', $3, $4, -($5::numeric / 10000), $6, $6, 1, 1, $7::numeric / 10000, 'MANUAL',
-					-($8::numeric / 100), $9, $10, NOW())`,
+					$8::numeric / 100, $9, $10, NOW())`,
 				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
 				centsArg(l.LineTotal), priced[i].taxable, l.Restock); err != nil {
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
+		}
+		// The gapless CM number, minted late: after every other row lock,
+		// before the posting (ADR 0005 section 4.1).
+		memoNumber, err := httpx.NextGaplessNumber(ctx, s.db.GetExecutor(ctx), "credit_memo", "CM", httpx.DefaultDocNumberWidth)
+		if err != nil {
+			return err
 		}
 		legs := []gl.Leg{{AccountCode: gl.AccountCodeRevenue, Description: "Sales Revenue", Debit: subtotal}}
 		if taxCents > 0 {
@@ -235,7 +246,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				gl.Leg{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Credit: restockCost})
 		}
 		fxPost, err := s.ar.PostCreditMemo(ctx, account.PostCreditMemoIn{
-			MemoID: memoID, CustomerID: *customerID, Currency: facts.Currency, MemoDate: date,
+			MemoID: memoID, CustomerID: *customerID, Number: memoNumber, Currency: facts.Currency, MemoDate: date,
 			SubtotalCents: -subtotal, TaxCents: -taxCents, TotalCents: total, TaxRate: taxRate, Actor: actor, Legs: legs})
 		if err != nil {
 			return err
@@ -276,7 +287,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The events, last: the memo's lifecycle, the AR core's, the
 		// return's own.
 		branch := *branchID
-		number := fxMemoNumber(ctx, s, memoID)
+		number := memoNumber
 		if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.created", EntityType: "credit_memo", EntityID: memoID,
 			BranchID: &branch, Data: eventJSON(map[string]any{
 				"number": nil, "customer_id": customerID, "status": "draft", "currency": facts.Currency,

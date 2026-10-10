@@ -116,10 +116,20 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if err != nil {
 		return nil, err
 	}
-	customerID := pre.WalkInID
-	if pre.CustomerID != nil {
-		customerID = *pre.CustomerID
+	// The walk-in customer backs a sale that names none: the invoice and
+	// its payments need a real customer row.
+	customerID := pre.CustomerID
+	if customerID == nil {
+		id, _, err := s.repo.WalkInCustomer(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pre.WalkInID = id
+		customerID = &id
+	} else {
+		customerID = pre.CustomerID
 	}
+	realCustomerID := *customerID
 	// The tender plan: what the drawer keeps per tender and what walks out
 	// as change (only cash makes change; an ACCOUNT tender needs a named
 	// customer and passes the credit check).
@@ -175,7 +185,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 		charges[i] = &chargeResult{GatewayTxID: res.TransactionID, AuthCode: res.AuthCode, Last4: res.CardLast4, Brand: res.CardBrand}
 	}
-	priced, err := s.prepareSaleTax(ctx, pre, preLines, customerID)
+	priced, err := s.prepareSaleTax(ctx, pre, preLines, realCustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -190,6 +200,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return err
 		}
 		sale.WalkInID = pre.WalkInID
+		customerID := realCustomerID
 		if err := httpx.CheckRevision(sale.Revision, ifMatch, bodyRevision); err != nil {
 			return err
 		}

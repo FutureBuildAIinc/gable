@@ -97,6 +97,7 @@ ALTER TABLE pos_line_items ALTER COLUMN line_type SET NOT NULL;
 
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS parent_line_id UUID NULL REFERENCES pos_line_items (id) ON DELETE CASCADE;
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS charge_code_id UUID NULL REFERENCES charge_codes (id);
+ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS price_uom TEXT;
 UPDATE pos_line_items SET price_uom = uom WHERE price_uom IS NULL;
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS uom_qty NUMERIC(12, 4);

@@ -298,7 +298,8 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 	v := &httpx.Validator{}
 	counted := make(map[string]int64, len(r.CountedByMethod))
 	for m, raw := range r.CountedByMethod {
-		if _, ok := ParseTenderMethod(m); !ok {
+		method, ok := ParseTenderMethod(m)
+		if !ok {
 			v.Check(false, "counted_by_method."+m, "must be cash, check, card or account")
 			continue
 		}
@@ -307,7 +308,7 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 		}
 		if n, ok := v.Int("counted_by_method."+m, raw, true); ok {
 			v.Check(n >= 0, "counted_by_method."+m, "must not be negative")
-			counted[m] = n
+			counted[string(method)] = n
 		}
 	}
 	if err := v.Err(); err != nil {

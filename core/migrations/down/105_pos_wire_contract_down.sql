@@ -78,6 +78,7 @@ ALTER TABLE pos_line_items DROP COLUMN IF EXISTS priced_unit_price;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS price_uom_qty;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS uom_qty;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS price_uom;
+ALTER TABLE pos_line_items DROP COLUMN IF EXISTS sku;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS charge_code_id;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS parent_line_id;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS line_type;

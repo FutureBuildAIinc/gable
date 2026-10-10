@@ -35,14 +35,17 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) {
 	var s TillSession
 	var status string
-	var closedAt *time.Time
-	err := row.Scan(&s.ID, &s.RegisterID, &s.BranchID, &s.CashierID, &status, &s.OpeningFloat, &s.OpenedAt, &closedAt,
+	var openedAt, closedAt *time.Time
+	err := row.Scan(&s.ID, &s.RegisterID, &s.BranchID, &s.CashierID, &status, &s.OpeningFloat, &openedAt, &closedAt,
 		&s.ExpectedByMethod, &s.CountedByMethod, &s.OverShort, &s.GLEntryID, &s.Notes)
 	if err != nil {
 		return nil, err
 	}
-	s.Status = TillSessionStatus(status)
+	if openedAt != nil {
+		s.OpenedAt = httpx.TimestampOf(*openedAt)
+	}
 	s.ClosedAt = httpx.PtrTimestamp(closedAt)
+	s.Status = TillSessionStatus(status)
 	return &s, nil
 }
 
@@ -165,12 +168,14 @@ func (r *PostgresRepository) CreateZReport(ctx context.Context, z *ZReport) erro
 	if z.ID == uuid.Nil {
 		z.ID = uuid.New()
 	}
+	var generated time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO till_z_reports (id, till_session_id, register_id, branch_id, over_short, payload, generated_at)
 		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, NOW())
 		ON CONFLICT (till_session_id) DO NOTHING
 		RETURNING generated_at`,
-		z.ID, z.TillSessionID, z.RegisterID, z.BranchID, int64(z.OverShort), z.Payload).Scan(&z.GeneratedAt)
+		z.ID, z.TillSessionID, z.RegisterID, z.BranchID, int64(z.OverShort), z.Payload).Scan(&generated)
+	z.GeneratedAt = httpx.TimestampOf(generated)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // the frozen snapshot already exists
@@ -182,10 +187,12 @@ func (r *PostgresRepository) CreateZReport(ctx context.Context, z *ZReport) erro
 
 func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {
 	z := &ZReport{}
+	var generatedAt time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, till_session_id, register_id, branch_id, ROUND(over_short * 100)::bigint, payload, generated_at
 		FROM till_z_reports WHERE till_session_id = $1`, sessionID).
-		Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &z.OverShort, &z.Payload, &z.GeneratedAt)
+		Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &z.OverShort, &z.Payload, &generatedAt)
+	z.GeneratedAt = httpx.TimestampOf(generatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("no Z-report for this session")
 	}
@@ -209,9 +216,11 @@ func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string
 	var out []ZReport
 	for rows.Next() {
 		var z ZReport
-		if err := rows.Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &z.OverShort, &z.Payload, &z.GeneratedAt); err != nil {
+		var generatedAt time.Time
+		if err := rows.Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &z.OverShort, &z.Payload, &generatedAt); err != nil {
 			return nil, err
 		}
+		z.GeneratedAt = httpx.TimestampOf(generatedAt)
 		out = append(out, z)
 	}
 	return out, rows.Err()
