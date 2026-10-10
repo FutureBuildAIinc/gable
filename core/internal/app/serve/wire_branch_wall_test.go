@@ -1530,9 +1530,17 @@ func TestBranchWall_ChargeCodeWritesTakeTheFinanceGuard(t *testing.T) {
 			t.Errorf("%s lists charge codes: %d, want 200", role, got)
 		}
 	}
+	// warehouse prices inventory but never writes or reads charge codes, so
+	// the read guard refuses it as surely as the write guard does.
+	if got := f.call(t, "GET", "/api/v1/charge-codes", "", "warehouse", "u-a", ""); got != http.StatusForbidden {
+		t.Errorf("warehouse lists charge codes: %d, want 403", got)
+	}
 	for _, c := range []struct{ method, path string }{{"POST", "/api/v1/charge-codes"}, {"PUT", missing}} {
 		if got := f.call(t, c.method, c.path, `{}`, "sales", "u-a", ""); got != http.StatusForbidden {
 			t.Errorf("sales %s %s: %d, want 403", c.method, c.path, got)
+		}
+		if got := f.call(t, c.method, c.path, `{}`, "warehouse", "u-a", ""); got != http.StatusForbidden {
+			t.Errorf("warehouse %s %s: %d, want 403", c.method, c.path, got)
 		}
 		// Past the guard an empty body is refused by the handler, not the role.
 		if got := f.call(t, c.method, c.path, `{}`, "finance", "u-a", ""); got == http.StatusForbidden {
