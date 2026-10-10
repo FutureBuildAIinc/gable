@@ -1,0 +1,42 @@
+{
+  "comment": "Shared test vectors for the plain segment rule every opener of a record path applies (the Tauri shell's gable:// parser, the front door's ?open= handler, ADR 0007 section 8). A record path is one or more plain segments joined by single slashes: letters, digits, hyphens and underscores, none empty, no dot segments, no doubled slashes, no leading or trailing slash, and no query, fragment, escape or scheme. Every implementation must accept each path in accept and refuse each path in refuse.",
+  "accept": [
+    "Q-000123",
+    "6b1d3f2a-9c4e-4d8a-b1f6-2e7d8a5c9b10",
+    "quotes/Q-000123",
+    "quotes/6b1d3f2a-9c4e-4d8a-b1f6-2e7d8a5c9b10",
+    "orders/SO-000123",
+    "invoices/IN-000123",
+    "accounts/3f9c1a2e-8b7d-4c6a-9e2f-1d5b4a8c7e30",
+    "inventory/7a2b9c4d-1e8f-4a3b-8c7d-6e5f4a3b2c10",
+    "quotes/drafts/6b1d3f2a-9c4e-4d8a-b1f6-2e7d8a5c9b10",
+    "orders/drafts/6b1d3f2a-9c4e-4d8a-b1f6-2e7d8a5c9b10",
+    "products/2X4X8-SPF_PREMIUM"
+  ],
+  "refuse": [
+    "",
+    ".",
+    "..",
+    "/",
+    "quotes",
+    "/quotes/Q-000123",
+    "quotes/Q-000123/",
+    "quotes//Q-000123",
+    "quotes/./Q-000123",
+    "quotes/../orders/SO-000123",
+    "..%2fquotes%2fQ-000123",
+    "quotes/Q-000123?print=1",
+    "quotes/Q-000123#section",
+    "https://example.com/quotes/Q-000123",
+    "gable://quotes/Q-000123",
+    "quotes/Q 000123",
+    "quotes/Q%20000123",
+    "quotes/Q%2E%2E",
+    "quotes/Q-000123\\x",
+    "quotes/C:\\path",
+    "javascript:alert(1)",
+    "quotes/\u0000Q-000123",
+    "quotes/Q-000123%zz",
+    "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/Q-000123"
+  ]
+}

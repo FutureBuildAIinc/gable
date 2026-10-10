@@ -100,7 +100,7 @@ export class TechAdminPage extends LitElement {
         if (!this.newKeyName) return;
         try {
             this.keyError = null;
-            const res = await techAdminService.createKey(this.newKeyName, ['read:inventory', 'write:orders']);
+            const res = await techAdminService.createKey(this.newKeyName, ['inventory:read', 'orders:write']);
             this.generatedKey = res.api_key;
             this.newKeyName = '';
             this._loadKeys();

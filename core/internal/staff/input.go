@@ -14,11 +14,11 @@ import (
 // to true and role to "staff"; a create has no revision to precondition on
 // (a request carrying one is a 400 naming it).
 type CreateStaffInput struct {
-	Email    *string          `json:"email"`
-	FullName *string          `json:"full_name"`
-	StaffNo  *string          `json:"staff_no"`
-	Role     *string          `json:"role"`
-	Active   *bool            `json:"active"`
+	Email    *string         `json:"email"`
+	FullName *string         `json:"full_name"`
+	StaffNo  *string         `json:"staff_no"`
+	Role     *string         `json:"role"`
+	Active   *bool           `json:"active"`
 	Revision json.RawMessage `json:"revision"`
 }
 
@@ -79,11 +79,11 @@ func (r *CreateStaffInput) Parse() (*ParsedCreate, error) {
 // `active` must not blank out the email it did not send. Revision is the
 // body's precondition.
 type UpdateStaffInput struct {
-	Email    *string          `json:"email"`
-	FullName *string          `json:"full_name"`
-	StaffNo  *string          `json:"staff_no"`
-	Role     *string          `json:"role"`
-	Active   *bool            `json:"active"`
+	Email    *string         `json:"email"`
+	FullName *string         `json:"full_name"`
+	StaffNo  *string         `json:"staff_no"`
+	Role     *string         `json:"role"`
+	Active   *bool           `json:"active"`
 	Revision json.RawMessage `json:"revision"`
 }
 
@@ -151,7 +151,7 @@ func (r *UpdateStaffInput) Parse() (*ParsedUpdate, *int64, error) {
 
 // GrantModuleInput is the body of POST /api/v1/admin/staff/{id}/modules.
 type GrantModuleInput struct {
-	ModuleID *string          `json:"module_id"`
+	ModuleID *string         `json:"module_id"`
 	Revision json.RawMessage `json:"revision"`
 }
 
@@ -177,7 +177,7 @@ func (r *GrantModuleInput) Parse() (moduleID string, revision *int64, err error)
 
 // SetModuleEnabledInput is the body of PUT /api/v1/admin/modules/{id}.
 type SetModuleEnabledInput struct {
-	Enabled  *bool            `json:"enabled"`
+	Enabled  *bool           `json:"enabled"`
 	Revision json.RawMessage `json:"revision"`
 }
 

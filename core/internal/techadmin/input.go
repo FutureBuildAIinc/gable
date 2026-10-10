@@ -10,19 +10,22 @@ import (
 
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/google/uuid"
 )
 
 // CreateKeyRequest is the body of POST /api/v1/admin/keys. The scopes are
-// minted verbatim (ADR 0002: a grant reads back as written); grammar
-// validation at the mint is C5-2a's (ADR 0007 section 5.3), so this parse
-// checks only that each scope is a printable, non-empty string.
+// minted verbatim (ADR 0002: a grant reads back as written) after the
+// grammar check ADR 0007 section 5.3 adds at the mint; branch_id, when
+// present, is the branch bound key's pin (ADR 0007 section 5.5), set at
+// mint and never edited.
 type CreateKeyRequest struct {
-	Name   *string  `json:"name"`
-	Scopes []string `json:"scopes"`
+	Name     *string  `json:"name"`
+	Scopes   []string `json:"scopes"`
+	BranchID *string  `json:"branch_id"`
 }
 
 // Parse validates the mint request, collecting every problem into one 400.
-func (r *CreateKeyRequest) Parse() (name string, scopes []string, err error) {
+func (r *CreateKeyRequest) Parse() (name string, scopes []string, branch *uuid.UUID, err error) {
 	v := &httpx.Validator{}
 	name = ""
 	if r.Name != nil {
@@ -32,6 +35,9 @@ func (r *CreateKeyRequest) Parse() (name string, scopes []string, err error) {
 		v.Check(false, "name", "is required")
 	} else if len(name) > 255 {
 		v.Check(false, "name", "must be 255 characters or fewer")
+	}
+	if id, ok := v.UUID("branch_id", r.BranchID, false); ok {
+		branch = &id
 	}
 	scopes = []string{}
 	seen := map[string]bool{}
@@ -54,9 +60,9 @@ func (r *CreateKeyRequest) Parse() (name string, scopes []string, err error) {
 		v.Check(false, "scopes", "must carry at most 64 scopes")
 	}
 	if err := v.Err(); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return name, scopes, nil
+	return name, scopes, branch, nil
 }
 
 // SaveAISettingsRequest is the body of PUT /api/v1/admin/settings/ai. BaseURL
@@ -64,8 +70,8 @@ func (r *CreateKeyRequest) Parse() (name string, scopes []string, err error) {
 // (clear the override, reverting to the environment default) stay distinct.
 // Revision is the body's precondition; If-Match serves the same role.
 type SaveAISettingsRequest struct {
-	APIKey   *string          `json:"api_key"`
-	BaseURL  *string          `json:"base_url"`
+	APIKey   *string         `json:"api_key"`
+	BaseURL  *string         `json:"base_url"`
 	Revision json.RawMessage `json:"revision"`
 }
 
@@ -102,7 +108,7 @@ func (r *SaveAISettingsRequest) Parse() (apiKey string, baseURL *string, revisio
 
 // SaveRoutingSettingsRequest is the body of PUT /api/v1/admin/settings/routing.
 type SaveRoutingSettingsRequest struct {
-	APIKey   *string          `json:"api_key"`
+	APIKey   *string         `json:"api_key"`
 	Revision json.RawMessage `json:"revision"`
 }
 

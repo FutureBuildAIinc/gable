@@ -17,6 +17,7 @@
       "body": {
         "api_key": "<api-key>",
         "key": {
+          "branch_id": null,
           "created_at": "<ts+0d>",
           "id": "<id-1>",
           "last_used_at": null,

@@ -539,6 +539,9 @@ type fakeOrderRepo struct {
 
 var _ order.Repository = (*fakeOrderRepo)(nil)
 
+func (f *fakeOrderRepo) GetOrderByNumber(_ context.Context, _ string) (*order.Order, error) {
+	return nil, order.ErrNotFound
+}
 func (f *fakeOrderRepo) SaveLineQuantities(context.Context, []order.OrderLine) error { return nil }
 func (f *fakeOrderRepo) QueueAllocationRequests(context.Context, uuid.UUID, []uuid.UUID) (int, error) {
 	return 0, nil

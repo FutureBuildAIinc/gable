@@ -179,6 +179,7 @@
       "body": {
         "api_key": "<api-key>",
         "key": {
+          "branch_id": null,
           "created_at": "<ts+0d>",
           "id": "<id-10>",
           "last_used_at": null,

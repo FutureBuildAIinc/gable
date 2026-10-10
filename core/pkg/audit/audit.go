@@ -400,6 +400,36 @@ func (l *Logger) AuditKeyRefusal(ctx context.Context, keyID, action, scope, meth
 	}
 }
 
+// AuditKeyBranchRefusal records a branch bound key's refused X-Branch-Id
+// (ADR 0007 section 5.5): the row's entity is the key, its changes name the
+// key's own branch and the bounded method and path. It implements the
+// middleware package's BranchRefusalAuditor seam. A failure to write is
+// logged and swallowed: the refusal verdict has already been served.
+func (l *Logger) AuditKeyBranchRefusal(ctx context.Context, keyID string, branch uuid.UUID, method, path string) {
+	id, err := uuid.Parse(keyID)
+	if err != nil {
+		slog.Error("audit: branch refusal with non-uuid key id", "key_id", keyID)
+		id = uuid.Nil
+	}
+	storedPath, truncated := cutRunes(path, maxRefusalPathBytes)
+	changes := map[string]interface{}{
+		"branch_id": branch.String(),
+		"method":    method,
+		"path":      storedPath,
+	}
+	if truncated {
+		changes["path_truncated"] = true
+	}
+	if err := l.Log(ctx, Entry{
+		Action:     "key.branch_refused",
+		EntityType: "api_key",
+		EntityID:   id,
+		Changes:    changes,
+	}); err != nil {
+		slog.Error("audit: failed to write branch refusal", "key_id", keyID, "error", err)
+	}
+}
+
 // Drain is retained for graceful-shutdown callers: writes are synchronous
 // now, so there is never anything in flight to wait for.
 func (l *Logger) Drain() {}

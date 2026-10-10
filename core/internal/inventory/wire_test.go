@@ -219,14 +219,14 @@ func TestInventoryLevelsWire(t *testing.T) {
 	}
 
 	for name, path := range map[string]string{
-		"unknown parameter":   "/api/v1/inventory?foo=1",
-		"another unknown":     "/api/v1/inventory?status=low",
-		"bad product_id":      "/api/v1/inventory?product_id=not-a-uuid",
-		"bad location_id":     "/api/v1/inventory?location_id=not-a-uuid",
-		"bad include":         "/api/v1/inventory?include=bogus",
-		"bad limit":           "/api/v1/inventory?limit=0",
-		"limit over the cap":  "/api/v1/inventory?limit=201",
-		"malformed cursor":    "/api/v1/inventory?cursor=garbage",
+		"unknown parameter":    "/api/v1/inventory?foo=1",
+		"another unknown":      "/api/v1/inventory?status=low",
+		"bad product_id":       "/api/v1/inventory?product_id=not-a-uuid",
+		"bad location_id":      "/api/v1/inventory?location_id=not-a-uuid",
+		"bad include":          "/api/v1/inventory?include=bogus",
+		"bad limit":            "/api/v1/inventory?limit=0",
+		"limit over the cap":   "/api/v1/inventory?limit=201",
+		"malformed cursor":     "/api/v1/inventory?cursor=garbage",
 		"cursor from anothers": "/api/v1/inventory?cursor=eyJ2IjoxLCJvIjoicXVvdGVzLmNyZWF0ZWRfYXRfaWQiLCJrIjpbIjIwMjUtMDEtMDFUMDA6MDA6MDBaIiwiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIl19",
 	} {
 		if res := f.get(path); res.status != http.StatusBadRequest {
