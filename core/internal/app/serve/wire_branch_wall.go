@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
@@ -22,29 +23,85 @@ import (
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 )
 
 // branchWall is the branch wall as serve wires it: the branch middleware that
 // settles a request's branch context, the role-plus-branch composition every
-// scoped route uses, and the guard that holds a branch or location a request
-// body names to that context (ADR 0007 section 2.3). The mount methods below
+// scoped route uses, the guard that holds a branch or location a request
+// body names to that context (ADR 0007 section 2.3), and the key branch wall
+// that holds a branch bound machine key to its pin on the routes that mount
+// no branch middleware (ADR 0007 section 5.5). The mount methods below
 // are the only places a route that takes a branch from its body gets its guard,
 // and wire_branch_wall_test.go drives them with the real middleware, so
 // dropping a guard here fails a test.
 type branchWall struct {
-	mw     func(http.Handler) http.Handler
-	guard  *middleware.BranchGuard
-	scoped func(roles ...string) func(http.Handler) http.Handler
+	mw      func(http.Handler) http.Handler
+	guard   *middleware.BranchGuard
+	keyWall *middleware.KeyBranchWall
+	scoped  func(roles ...string) func(http.Handler) http.Handler
 }
 
 func newBranchWall(db *database.DB) *branchWall {
-	w := &branchWall{mw: middleware.NewBranchMiddleware(db).Handler, guard: middleware.NewBranchGuard(db)}
+	w := &branchWall{mw: middleware.NewBranchMiddleware(db).Handler, guard: middleware.NewBranchGuard(db),
+		keyWall: middleware.NewKeyBranchWall(db, audit.NewLogger(db))}
 	w.scoped = func(roles ...string) func(http.Handler) http.Handler {
 		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
 	}
 	return w
+}
+
+// reporting mounts the reporting surface in its three registrations: every
+// report spans every branch's rows (the summaries, the till, the aging, the
+// statements, the builder, the exports, the saved runs and the schedules), so
+// a branch bound key is refused outright and the role guard alone serves
+// everyone else (ADR 0007 section 5.5). Three methods because serve builds
+// the scheduler between the registrations.
+func (w *branchWall) reporting(mux *http.ServeMux, h *reporting.Handler) {
+	h.RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner", "finance"),
+		w.keyWall.RefuseBound("reports span every branch")))
+}
+
+// reportingSchedules is reporting over the builder and schedule routes.
+func (w *branchWall) reportingSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor) {
+	wireReportSchedules(mux, h, executor, w.keyWall.RefuseBound("reports span every branch"))
+}
+
+// reportingBIIntegration is reporting over the BI export routes.
+func (w *branchWall) reportingBIIntegration(mux *http.ServeMux, h *reporting.Handler) {
+	h.RegisterBIIntegrationRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"),
+		w.keyWall.RefuseBound("reports span every branch")))
+}
+
+// eventsFeed mounts the events feed: the outbox carries every branch's events
+// with their payloads, so a branch bound key is refused outright and the role
+// guard alone serves everyone else.
+func (w *branchWall) eventsFeed(mux *http.ServeMux, h *events.Handler) {
+	h.RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"),
+		w.keyWall.RefuseBound("the event feed spans every branch")))
+}
+
+// dealerWideReads is the guard for a module whose books carry no branch
+// dimension (the GL, AP and bank reconciliation) and the sales team roster:
+// the reads span every branch, so a branch bound key is refused them, while
+// the writes, which carry no branch fact, keep the role guard alone for every
+// principal alike.
+func (w *branchWall) dealerWideReads(reason string, roles ...string) func(http.Handler) http.Handler {
+	role := middleware.RequireRole(roles...)
+	reads := middleware.Compose(role, w.keyWall.RefuseBound(reason))
+	return func(next http.Handler) http.Handler {
+		readHandler, writeHandler := reads(next), role(next)
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				readHandler.ServeHTTP(rw, r)
+				return
+			}
+			writeHandler.ServeHTTP(rw, r)
+		})
+	}
 }
 
 // chargeCodes mounts the charge code master: every role that prices a line
@@ -57,9 +114,12 @@ func (w *branchWall) chargeCodes(mux *http.ServeMux, svc *chargecode.Service) {
 // locations mounts the location routes behind the branch middleware: the
 // create writes into a branch's tree, the by-id reads and the list are held
 // to the caller's branches (the branch switcher reads /me/branches, not this
-// list).
+// list). The key branch wall covers the routes that mount no branch
+// middleware: the by-id writes, the branch directory verbs and the grant
+// routes (ADR 0007 section 5.5).
 func (w *branchWall) locations(mux *http.ServeMux, h *location.Handler) {
-	h.WithBranchWall(w.guard, w.mw).RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
+	h.WithBranchWall(w.guard, w.mw).WithKeyBranchWall(w.keyWall).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
 }
 
 // products mounts the product routes behind the branch middleware: the stock

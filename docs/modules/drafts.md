@@ -114,22 +114,33 @@ is read (`pkg/middleware/machinekey.go`, the `principal.BranchID
 != nil` branch in `handle`), and the routes that mount no branch
 middleware (the user-only prefixes `/api/v1/admin/keys` and
 `/api/v1/me`) are JWT user routes, so a machine key cannot
-reach them, bound or not. The branch directory and user
-grant routes (`/api/v1/branches` and its children except
-`/tree`, `/api/v1/users` and its children) carry no branch
-wall: the pin does not narrow them, writes included. A
-bound key holding `users:grants` is limited by that scope
-only, and can grant a user any branch. The branch CRUD
-verbs (`GET`, `POST`, `PUT`, `DELETE` on `/api/v1/branches`
-and its by id children except `/tree`) are limited by the key's scope only (the role guard passes a scope checked machine key), so a branch bound key's pin does not
-confine those writes either; a bound key holding
-`branches:write` can write any branch. The
-`PUT /api/v1/locations/{id}` and `DELETE /api/v1/locations/{id}`
-routes are limited by the key's scope only (the role guard passes a scope checked machine key), so a bound key
-holding `locations:write` can write any location. An
-operator should not mint a branch bound key with
-`users:grants`, `branches:write` or `locations:write` until
-this gap is fixed (the pin narrows only the routes that mount the branch middleware; on the rest a key reaches whatever its scopes admit). An unbound key behaves as before.
+reach them, bound or not. The routes that mount no branch middleware are held to the
+pin by the key branch wall (`core/pkg/middleware/keybranch.go`):
+a bound key naming another branch in a body `branch_id` or a
+path id, or a row of another branch (`PUT` and `DELETE
+/api/v1/locations/{id}`), is a 403 `forbidden` in the wire
+envelope naming the field, audited as `key.branch_refused`
+like the header rule; its own branch passes, and a body is
+read whole, so a body that is not exactly one complete JSON
+value (trailing data after the first value, or unparsable) is
+refused rather than passed for the handler to read only in
+part. The directory
+create (`POST /api/v1/branches`) refuses a bound key outright,
+and `PUT` and `DELETE /api/v1/branches/{id}` refuse it another
+branch. A bound key holding `users:grants` grants, revokes and
+moves home only its own branch. The routes that act across
+every branch refuse a bound key outright: the exposure scan
+and the two exposure lists, the market index refresh, the
+events feed (`GET /api/v1/events`), every reporting route,
+the dealer wide GL, AP and bank reconciliation reads, the
+sales team reads and the known users list (`GET /api/v1/users`).
+The routes that write a named customer's data are confined to
+the pin through that customer's `customer_branches`: the tax
+exemption writes and the customer priced rules, plain and
+category, single and bulk. The branch directory reads
+(`GET /api/v1/branches`, `GET /api/v1/branches/{id}`) stay
+reference data (the PR 39 decision). An unbound key behaves
+as before.
 
 ## Routes
 

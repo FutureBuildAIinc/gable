@@ -64,8 +64,8 @@ import (
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
-	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
@@ -322,7 +322,8 @@ func Run() {
 	// Sales Team Module
 	salesTeamRepo := salesteam.NewRepository(db)
 	salesTeamHandler := salesteam.NewHandler(salesTeamRepo)
-	salesTeamHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	salesTeamHandler.RegisterRoutes(mux,
+		wall.dealerWideReads("the sales team roster spans every branch", "admin", "owner", "sales"))
 
 	// CRM Module: on the wire contract, its writes in one transaction with
 	// their audit row and activity.* event, every route behind the branch
@@ -347,7 +348,7 @@ func Run() {
 	glRepo := gl.NewRepository(db)
 	glSvc := gl.NewService(glRepo, glAdapter, logger)
 	glHandler := gl.NewHandler(glSvc)
-	glHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	glHandler.RegisterRoutes(mux, wall.dealerWideReads("the general ledger spans every branch", "admin", "owner"))
 
 	// Account Module: the AR core, the single writer of the subledger, the
 	// balance, the applications and the AR columns of the documents (ADR 0005
@@ -372,7 +373,7 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, "admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -383,7 +384,7 @@ func Run() {
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
 		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
-		catPricingHandler.RegisterCategoryRoutes(mux, middleware.RequireRole("admin", "owner"))
+		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")
 	} else {
@@ -601,7 +602,7 @@ func Run() {
 	}
 	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
@@ -670,7 +671,7 @@ func Run() {
 	apRepo := ap.NewRepository(db)
 	apSvc := ap.NewService(db, apRepo, glSvc, logger)
 	apHandler := ap.NewHandler(apSvc)
-	apHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	apHandler.RegisterRoutes(mux, wall.dealerWideReads("payables span every branch", "admin", "owner", "finance"))
 
 	// 3-Way PO Matching Module
 	matchingRepo := matching.NewRepository(db)
@@ -681,13 +682,14 @@ func Run() {
 	bankreconRepo := bankrecon.NewRepository(db)
 	bankreconSvc := bankrecon.NewService(db, bankreconRepo, glSvc, logger)
 	bankreconHandler := bankrecon.NewHandler(bankreconSvc)
-	bankreconHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	bankreconHandler.RegisterRoutes(mux,
+		wall.dealerWideReads("bank reconciliation spans every branch", "admin", "owner", "finance"))
 
 	// Reporting Module
 	reportingRepo := reporting.NewRepository(db)
 	reportingSvc := reporting.NewService(reportingRepo)
 	reportingHandler := reporting.NewHandler(reportingSvc)
-	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	wall.reporting(mux, reportingHandler)
 
 	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
 	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
@@ -701,12 +703,12 @@ func Run() {
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		logger.Error("report scheduler failed to start", "error", err)
 	}
-	wireReportSchedules(mux, reportingHandler, reportScheduler)
+	wall.reportingSchedules(mux, reportingHandler, reportScheduler)
 	logger.Info("Scheduled report delivery enabled",
 		"cron_dialect", "six fields, seconds first",
 		"delivery", reportScheduler.DeliveryDescription())
 
-	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.reportingBIIntegration(mux, reportingHandler)
 
 	// The idempotency retention purge no longer runs here: R1-4 moved it to
 	// the worker role (internal/app/worker), so `core worker` owns it.
@@ -835,9 +837,10 @@ func Run() {
 
 	// Events feed: the outbox read API (item R1-12), the one cursor-paginated
 	// feed of every domain event. Role gated admin/owner like the other admin
-	// reads; agents and integrations poll it with their own cursors.
+	// reads; agents and integrations poll it with their own cursors. The feed
+	// carries every branch's events, so a branch bound key is refused it.
 	eventsHandler := events.NewHandler(db)
-	eventsHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.eventsFeed(mux, eventsHandler)
 
 	// Portal Module (Sovereign Dealer Portal)
 	// Resolve JWT secret: required in production, uses dev default in dev mode only.

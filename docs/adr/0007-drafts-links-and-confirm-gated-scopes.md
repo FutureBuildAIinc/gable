@@ -684,6 +684,27 @@ null branch is today's behaviour. A bound key:
   `payload.branch_id`, by the branch rule of section 2.3, on draft routes
   and on the module's own create alike (PR 37's guard).
 
+A route that mounts no branch middleware is held to the pin the same way by
+the key branch wall (`pkg/middleware/keybranch.go`): a branch a request
+names in a path or body, or the branch of a row a path names, is compared to
+the pin and another branch is the same 403 with the same `key.branch_refused`
+row. A body is read whole: a body that is not exactly one complete JSON
+value (trailing data after the first value, or unparsable) is refused, so
+the wall and the handler can never disagree about what a body names. Routes
+that act across every branch refuse a bound key outright, being outside
+every pin: the branch directory's create, the exposure scan and the two
+exposure lists, the market index refresh (it re-checks every branch's
+quotes), the events feed, every reporting route, the dealer wide GL, AP and
+bank reconciliation reads, the sales team reads and the known users list.
+Routes that write a named customer's data are confined to the pin through
+that customer's `customer_branches`: the tax exemption writes and the
+customer priced rules (plain and category, single and bulk) refuse a bound
+key any customer whose branch set does not hold the pin. The branch
+directory reads (`GET /api/v1/branches`, `GET /api/v1/branches/{id}`) stay
+open to a bound key: they are reference data by the PR 39 decision (name,
+code, address and tax rate, no dealer transactions). Users and unbound keys
+keep exactly their reach on every route.
+
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A
 dealer that needs a key for two branches mints two.
