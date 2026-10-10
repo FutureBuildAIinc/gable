@@ -396,7 +396,7 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 			Action: auditLineDiscounted, EntityType: "pos_transaction", EntityID: sale.ID, UserID: actor,
 			Changes: map[string]any{"line_id": line.ID, "product_id": line.ProductID,
 				"discount_percent": pl.DiscountPercent, "discount_cents": pl.DiscountAmount,
-				"reason":           pl.DiscountReason}})
+				"reason": pl.DiscountReason}})
 	}
 	// Kits explode: the kit line priced as a whole, one component per
 	// component at zero (2.6). The caller stores what comes back.

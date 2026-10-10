@@ -107,12 +107,12 @@ type CustomerFacts struct {
 // became: change never subtracts a second time because a cash payment is
 // already the money kept (ADR 0005 section 14.2 C2-5).
 type TillAggregate struct {
-	SaleCount         int
-	SalesTotalCents   int64
-	TaxTotalCents     int64
-	ChangeCents       int64
-	TenderedByMethod  map[string]int64
-	CashRefundsCents  int64
+	SaleCount        int
+	SalesTotalCents  int64
+	TaxTotalCents    int64
+	ChangeCents      int64
+	TenderedByMethod map[string]int64
+	CashRefundsCents int64
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so
@@ -512,12 +512,16 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		if l.ID == uuid.Nil {
 			l.ID = uuid.New()
 		}
+		lineType := l.LineType
+		if lineType == "" {
+			lineType = "PRODUCT"
+		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
 				unit_price, line_total, restock, sale_line_id, created_at)
-			VALUES ($1, $2, $3, 'PRODUCT', $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
+			VALUES ($1, $2, $3, $12, $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock, l.SaleLineID)
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID, lineType)
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}
@@ -561,9 +565,9 @@ func (r *PostgresRepository) SaleHasReturns(ctx context.Context, saleID uuid.UUI
 // InvoiceLineCost is one invoice line's position and the unit cost the sale
 // relieved (ten thousandths).
 type InvoiceLineCost struct {
-	ID        uuid.UUID
-	Position  int
-	UnitCost  int64
+	ID       uuid.UUID
+	Position int
+	UnitCost int64
 }
 
 // InvoiceLineCosts reads an invoice's lines with their unit costs, ordered

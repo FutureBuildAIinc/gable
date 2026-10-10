@@ -334,12 +334,12 @@ type offlineSyncRequest struct {
 }
 
 type offlineSaleRequest struct {
-	ClientID        *string               `json:"client_id"`
-	CashierID       *string               `json:"cashier_id"`
-	CustomerID      *string               `json:"customer_id"`
+	ClientID        *string                `json:"client_id"`
+	CashierID       *string                `json:"cashier_id"`
+	CustomerID      *string                `json:"customer_id"`
 	Items           []salesdoc.LineRequest `json:"items"`
-	Tenders         []tenderRequest       `json:"tenders"`
-	ClientCreatedAt json.RawMessage       `json:"client_created_at"`
+	Tenders         []tenderRequest        `json:"tenders"`
+	ClientCreatedAt json.RawMessage        `json:"client_created_at"`
 }
 
 func (r *offlineSyncRequest) parse() (*OfflineSync, error) {

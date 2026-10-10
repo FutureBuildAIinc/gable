@@ -30,9 +30,17 @@ ALTER TABLE pos_returns DROP CONSTRAINT IF EXISTS pos_returns_credit_memo_id_fke
 DELETE FROM credit_memo_lines WHERE credit_memo_id IN
   (SELECT id FROM credit_memos WHERE reason = 'migrated counter account return');
 DELETE FROM credit_memos WHERE reason = 'migrated counter account return';
+-- The counter the up's memos drew from comes back (the C2-4 down's rule), so
+-- an up after this down mints the same numbers and the gapless series keeps
+-- no gap.
+UPDATE document_counters
+SET next_value = GREATEST(1, COALESCE((SELECT MAX(substring(number FROM 4)::bigint) FROM credit_memos WHERE number ~ '^CM-[0-9]+$'), 0) + 1)
+WHERE series = 'credit_memo';
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS credit_memo_id;
 
 ALTER TABLE pos_return_lines DROP COLUMN IF EXISTS sale_line_id;
+DELETE FROM pos_return_lines WHERE product_id IS NULL;
+ALTER TABLE pos_return_lines ALTER COLUMN product_id SET NOT NULL;
 
 ALTER TABLE pos_return_lines DROP COLUMN IF EXISTS taxable;
 ALTER TABLE pos_return_lines ALTER COLUMN unit_price TYPE NUMERIC(12, 2);

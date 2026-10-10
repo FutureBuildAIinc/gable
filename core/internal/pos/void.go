@@ -6,6 +6,7 @@ package pos
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/payment"
@@ -254,20 +255,18 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 
 const refundApproved = "REFUNDED"
 
-// tendersInIDOrder sorts the tenders by their payment ids (section 11,
-// step 2: payments in id order).
+// tendersInIDOrder answers the tenders that became payments, sorted by
+// their payment ids (section 11, step 2: payments in id order). A tender
+// with no payment (an ACCOUNT tender) locks nothing and is dropped here;
+// the caller skips it anyway.
 func tendersInIDOrder(tenders []Tender) []Tender {
-	out := append([]Tender(nil), tenders...)
-	for i := 1; i < len(out); i++ {
-		for j := i; j > 0; j-- {
-			a, b := out[j], out[j-1]
-			if a.PaymentID != nil && b.PaymentID != nil && a.PaymentID.String() < b.PaymentID.String() {
-				out[j], out[j-1] = out[j-1], out[j]
-			} else {
-				break
-			}
+	out := make([]Tender, 0, len(tenders))
+	for i := range tenders {
+		if tenders[i].PaymentID != nil {
+			out = append(out, tenders[i])
 		}
 	}
+	sort.Slice(out, func(a, b int) bool { return out[a].PaymentID.String() < out[b].PaymentID.String() })
 	return out
 }
 

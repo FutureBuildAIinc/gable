@@ -267,6 +267,8 @@ ALTER TABLE pos_return_lines ALTER COLUMN taxable SET DEFAULT TRUE;
 -- The sale line each return line came from: the return's quantity cap and its
 -- restock cost read it (a linked return is bounded by the line it names).
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS sale_line_id UUID NULL REFERENCES pos_line_items (id);
+-- A returned charge line names a charge code, not a product.
+ALTER TABLE pos_return_lines ALTER COLUMN product_id DROP NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_pos_return_lines_sale_line ON pos_return_lines (sale_line_id)
     WHERE sale_line_id IS NOT NULL;
 
@@ -283,7 +285,16 @@ DO $$
 DECLARE
     r RECORD;
     memo UUID;
+    customerless INT;
 BEGIN
+    -- A legacy ACCOUNT return with no customer cannot become a memo (the
+    -- memo needs its customer): refuse the migration naming the rows, before
+    -- anything is written, rather than dying on the NOT NULL halfway.
+    SELECT count(*) INTO customerless FROM pos_returns
+     WHERE refund_method = 'ACCOUNT' AND credit_memo_id IS NULL AND customer_id IS NULL;
+    IF customerless > 0 THEN
+        RAISE EXCEPTION 'migration 105: % legacy ACCOUNT return(s) have no customer; set their customer before migrating', customerless;
+    END IF;
     FOR r IN SELECT * FROM pos_returns WHERE refund_method = 'ACCOUNT' AND credit_memo_id IS NULL ORDER BY created_at, id LOOP
         memo := gen_random_uuid();
         INSERT INTO credit_memos (id, customer_id, amount, reason, status, created_at, updated_at, number, currency,

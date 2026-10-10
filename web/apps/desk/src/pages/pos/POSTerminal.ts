@@ -264,8 +264,8 @@ export class POSTerminal extends LitElement {
       this._completed = completed;
       const change = completed.change_cents || 0;
       this._success = change > 0
-        ? `Sale ${completed.number} complete \u2014 ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
-        : `Sale ${completed.number} complete \u2014 ${fmt(completed.total_cents)}`;
+        ? `Sale ${completed.number} complete - ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
+        : `Sale ${completed.number} complete - ${fmt(completed.total_cents)}`;
       this._pendingTenders = [];
       this._showTender = false;
 
@@ -292,7 +292,7 @@ export class POSTerminal extends LitElement {
       const voided = await posService.voidSale(sale.id, sale.revision, reason);
       this._sale = voided;
       this._completed = null;
-      this._success = `Sale ${voided.number} voided \u2014 the ledger and the stock are whole again`;
+      this._success = `Sale ${voided.number} voided - the ledger and the stock are whole again`;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to void the sale';
     }
@@ -334,7 +334,7 @@ export class POSTerminal extends LitElement {
         lines,
       });
       this._showReturn = false;
-      this._success = `Return ${ret.number} complete \u2014 ${fmt(ret.total_cents)} refunded ${ret.refund_method}`;
+      this._success = `Return ${ret.number} complete - ${fmt(ret.total_cents)} refunded ${ret.refund_method}`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 4000);
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to take the return';
@@ -382,7 +382,7 @@ export class POSTerminal extends LitElement {
       const osColor = os === 0 ? '#3fb950' : os < 0 ? '#f85149' : '#d29922';
       const osLabel = os === 0 ? 'BALANCED' : os < 0 ? `SHORT ${fmt(Math.abs(os))}` : `OVER ${fmt(os)}`;
       return this._overlay(html`
-        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report \u2014 Till Closed</h2>
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report - Till Closed</h2>
         <div style="text-align:center;padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:10px;margin-bottom:16px">
           <div style="font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px">Over / Short</div>
           <div style="font-size:32px;font-weight:800;color:${osColor}">${osLabel}</div>
@@ -413,9 +413,9 @@ export class POSTerminal extends LitElement {
     const rep = this._tillReport;
     const methods = Object.keys(this._counts);
     return this._overlay(html`
-      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Close Till \u2014 Blind Count</h2>
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Close Till - Blind Count</h2>
       <p style="margin:0 0 16px;font-size:13px;color:#8b949e">
-        Count the drawer and enter actuals by tender. Expected totals stay hidden until you post \u2014 that's the blind count.
+        Count the drawer and enter actuals by tender. Expected totals stay hidden until you post - that's the blind count.
         ${rep ? html`<br>${rep.sale_count} sales rung this session.` : nothing}
       </p>
       ${methods.map((m) => html`
@@ -438,7 +438,7 @@ export class POSTerminal extends LitElement {
     const sale = this._completed;
     const productLines = sale.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
     return this._overlay(html`
-      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Return \u2014 ${sale.number}</h2>
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Return - ${sale.number}</h2>
       <p style="margin:0 0 16px;font-size:13px;color:#8b949e">Name the lines coming back. The return posts a credit memo, restocks what returns, and refunds out of the drawer.</p>
       ${productLines.map((l) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -607,10 +607,10 @@ export class POSTerminal extends LitElement {
                           ${item.quantity} ${item.uom}
                         </td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:right">
-                          ${item.unit_price_ten_thousandths !== null ? fmtPrice(item.unit_price_ten_thousandths) : '\u2014'}
+                          ${item.unit_price_ten_thousandths !== null ? fmtPrice(item.unit_price_ten_thousandths) : '-'}
                         </td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:right;font-weight:600">
-                          ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '\u2014'}
+                          ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}
                         </td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22">
                           <button
@@ -706,7 +706,7 @@ export class POSTerminal extends LitElement {
                   style="padding:16px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px"
                   ?disabled=${this._loading || remaining > 0}
                 >
-                  ${this._loading ? 'Processing...' : remaining > 0 ? `Still owed ${fmt(remaining)}` : `Complete Sale \u2014 $${totalDollars}`}
+                  ${this._loading ? 'Processing...' : remaining > 0 ? `Still owed ${fmt(remaining)}` : `Complete Sale - $${totalDollars}`}
                 </button>
                 <button
                   @click=${() => { this._pendingTenders = []; }}

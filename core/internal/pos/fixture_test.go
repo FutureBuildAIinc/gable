@@ -35,18 +35,18 @@ import (
 )
 
 type fixture struct {
-	t          *testing.T
-	db         *database.DB
-	srv        *httptest.Server
-	service    *pos.Service
-	customerID uuid.UUID
-	productID  uuid.UUID
-	kitID      uuid.UUID
-	sku        string
-	register   string
-	branchID   uuid.UUID
-	yardID     uuid.UUID
-	events     *recordingWriter
+	t            *testing.T
+	db           *database.DB
+	srv          *httptest.Server
+	service      *pos.Service
+	customerID   uuid.UUID
+	productID    uuid.UUID
+	kitID        uuid.UUID
+	sku          string
+	register     string
+	branchID     uuid.UUID
+	yardID       uuid.UUID
+	events       *recordingWriter
 	priorEntries map[string]bool
 }
 

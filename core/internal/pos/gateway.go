@@ -36,9 +36,9 @@ type gatewayRefund struct {
 	gatewayTxID, refundTxID string
 	amountCents             int64
 	// act names the refused act ("void" or "return") for the audit row.
-	act     string
-	entity  uuid.UUID
-	actor   string
+	act    string
+	entity uuid.UUID
+	actor  string
 }
 
 // recordOrphanRefund writes, in its own committed write after the refused

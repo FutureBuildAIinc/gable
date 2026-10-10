@@ -315,8 +315,8 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	mig105Apply(t, conn, target)
 	for sql, want := range map[string]int{
 		`SELECT count(*) FROM credit_memos WHERE reason = 'migrated counter account return'`: 1,
-		`SELECT count(*) FROM customers WHERE account_number = 'WALK-IN'`:                     1,
-		`SELECT count(*) FROM gl_journal_entries`:                                              1,
+		`SELECT count(*) FROM customers WHERE account_number = 'WALK-IN'`:                    1,
+		`SELECT count(*) FROM gl_journal_entries`:                                            1,
 	} {
 		if got := mig105Scalar[int](t, conn, sql); got != want {
 			t.Errorf("after a second apply, %s = %d, want %d", sql, got, want)
@@ -326,6 +326,7 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	// The down: the memo and its lines go, the walk-in customer goes (its
 	// setting first), the new columns go, the line shape returns to the
 	// base commit's, and the text line the up's shape allowed is deleted.
+	memoNumber := mig105Scalar[string](t, conn, `SELECT number FROM credit_memos WHERE reason = 'migrated counter account return'`)
 	mig105Apply(t, conn, downFile)
 	for _, c := range [][2]string{
 		{"pos_transactions", "number"}, {"pos_transactions", "currency"}, {"pos_transactions", "revision"},
@@ -354,12 +355,45 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	}
 
 	// And up again after the down: the memo returns, the numbers return,
-	// and nothing duplicates.
+	// and nothing duplicates. The down returns the credit memo counter, so
+	// the re-up mints the same CM number again and the gapless series keeps
+	// no gap.
 	mig105Apply(t, conn, target)
 	if got := mig105Scalar[int](t, conn, `SELECT count(*) FROM credit_memos WHERE reason = 'migrated counter account return'`); got != 1 {
 		t.Errorf("%d migrated memos after the re-up, want 1", got)
 	}
+	if got := mig105Scalar[string](t, conn, `SELECT number FROM credit_memos WHERE reason = 'migrated counter account return'`); got != memoNumber {
+		t.Errorf("the re-up mints %s after the down minted %s: the down did not return the counter", got, memoNumber)
+	}
 	if got := mig105Scalar[int](t, conn, `SELECT count(DISTINCT number) FROM pos_transactions`); got != mig105Scalar[int](t, conn, `SELECT count(*) FROM pos_transactions WHERE number IS NOT NULL`) {
 		t.Errorf("the re-up duplicated a sale number")
+	}
+}
+
+
+// RULE (second review P3-2): the up refuses to migrate a legacy ACCOUNT
+// return with no customer, naming the rows, instead of dying on the memo's
+// NOT NULL halfway.
+func TestMigration105_RefusesALegacyAccountReturnWithNoCustomer(t *testing.T) {
+	conn, _ := mig105ScratchDB(t)
+	before, target, _ := mig105Files(t)
+	for _, f := range before {
+		mig105Apply(t, conn, f)
+	}
+	mig105Legacy(t, conn)
+	if _, err := conn.Exec(context.Background(), `UPDATE pos_returns SET customer_id = NULL
+		WHERE id = '00000000-0000-0000-0000-0000000000a3'`); err != nil {
+		t.Fatal(err)
+	}
+	sql, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = conn.Exec(context.Background(), string(sql))
+	if err == nil {
+		t.Fatal("the up migrated an ACCOUNT return with no customer")
+	}
+	if !strings.Contains(err.Error(), "no customer") {
+		t.Errorf("the up's refusal = %v, want it to name the customerless rows", err)
 	}
 }

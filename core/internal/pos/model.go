@@ -81,21 +81,21 @@ func (m RefundMethod) MarshalText() ([]byte, error) { return []byte(m.Status()),
 // cart the register builds, then the completed money moment, all money in
 // cents and prices at scale 4, the lines in the shared shape of section 2.2.
 type Sale struct {
-	ID            uuid.UUID     `json:"id"`
-	Number        string        `json:"number"`
-	Revision      int64         `json:"revision"`
-	BranchID      uuid.UUID     `json:"branch_id"`
-	RegisterID    string        `json:"register_id"`
-	CashierID     uuid.UUID     `json:"cashier_id"`
-	CustomerID    *uuid.UUID    `json:"customer_id"`
-	Currency      string        `json:"currency"`
-	SubtotalCents httpx.Cents   `json:"subtotal_cents"`
-	TaxCents      httpx.Cents   `json:"tax_cents"`
-	TotalCents    httpx.Cents   `json:"total_cents"`
-	ChangeCents   httpx.Cents   `json:"change_cents"`
-	TillSessionID *uuid.UUID    `json:"till_session_id"`
-	Status        SaleStatus    `json:"status"`
-	InvoiceID     *uuid.UUID    `json:"invoice_id"`
+	ID            uuid.UUID        `json:"id"`
+	Number        string           `json:"number"`
+	Revision      int64            `json:"revision"`
+	BranchID      uuid.UUID        `json:"branch_id"`
+	RegisterID    string           `json:"register_id"`
+	CashierID     uuid.UUID        `json:"cashier_id"`
+	CustomerID    *uuid.UUID       `json:"customer_id"`
+	Currency      string           `json:"currency"`
+	SubtotalCents httpx.Cents      `json:"subtotal_cents"`
+	TaxCents      httpx.Cents      `json:"tax_cents"`
+	TotalCents    httpx.Cents      `json:"total_cents"`
+	ChangeCents   httpx.Cents      `json:"change_cents"`
+	TillSessionID *uuid.UUID       `json:"till_session_id"`
+	Status        SaleStatus       `json:"status"`
+	InvoiceID     *uuid.UUID       `json:"invoice_id"`
 	CompletedAt   *httpx.Timestamp `json:"completed_at"`
 	CreatedAt     httpx.Timestamp  `json:"created_at"`
 
@@ -110,60 +110,60 @@ type Sale struct {
 // SaleSummary is the list item; the full document embeds it, so the two
 // cannot drift (the recipe's rule).
 type SaleSummary struct {
-	ID            uuid.UUID    `json:"id"`
-	Number        string       `json:"number"`
-	Revision      int64        `json:"revision"`
-	BranchID      uuid.UUID    `json:"branch_id"`
-	RegisterID    string       `json:"register_id"`
-	CashierID     uuid.UUID    `json:"cashier_id"`
-	CustomerID    *uuid.UUID   `json:"customer_id"`
-	Currency      string       `json:"currency"`
-	TotalCents    httpx.Cents  `json:"total_cents"`
-	Status        SaleStatus   `json:"status"`
-	InvoiceID     *uuid.UUID   `json:"invoice_id"`
-	CompletedAt   *httpx.Timestamp `json:"completed_at"`
-	CreatedAt     httpx.Timestamp  `json:"created_at"`
-	ItemCount     int          `json:"item_count"`
+	ID          uuid.UUID        `json:"id"`
+	Number      string           `json:"number"`
+	Revision    int64            `json:"revision"`
+	BranchID    uuid.UUID        `json:"branch_id"`
+	RegisterID  string           `json:"register_id"`
+	CashierID   uuid.UUID        `json:"cashier_id"`
+	CustomerID  *uuid.UUID       `json:"customer_id"`
+	Currency    string           `json:"currency"`
+	TotalCents  httpx.Cents      `json:"total_cents"`
+	Status      SaleStatus       `json:"status"`
+	InvoiceID   *uuid.UUID       `json:"invoice_id"`
+	CompletedAt *httpx.Timestamp `json:"completed_at"`
+	CreatedAt   httpx.Timestamp  `json:"created_at"`
+	ItemCount   int              `json:"item_count"`
 }
 
 // Tender is one payment taken at the counter, stored net: the tendered
 // amount less any change given from it, so the payment it became is the
 // money kept (ADR 0005 section 14.2 C2-5).
 type Tender struct {
-	ID            uuid.UUID     `json:"id"`
-	SaleID        uuid.UUID     `json:"sale_id"`
-	Method        TenderMethod  `json:"method"`
-	AmountCents   httpx.Cents   `json:"amount_cents"`
-	PaymentID     *uuid.UUID    `json:"payment_id"`
-	Reference     *string       `json:"reference"`
-	CardLast4     *string       `json:"card_last4"`
-	CardBrand     *string       `json:"card_brand"`
-	GatewayTxID   *string       `json:"gateway_tx_id"`
-	AuthCode      *string       `json:"auth_code"`
-	CreatedAt     httpx.Timestamp `json:"created_at"`
+	ID          uuid.UUID       `json:"id"`
+	SaleID      uuid.UUID       `json:"sale_id"`
+	Method      TenderMethod    `json:"method"`
+	AmountCents httpx.Cents     `json:"amount_cents"`
+	PaymentID   *uuid.UUID      `json:"payment_id"`
+	Reference   *string         `json:"reference"`
+	CardLast4   *string         `json:"card_last4"`
+	CardBrand   *string         `json:"card_brand"`
+	GatewayTxID *string         `json:"gateway_tx_id"`
+	AuthCode    *string         `json:"auth_code"`
+	CreatedAt   httpx.Timestamp `json:"created_at"`
 }
 
 // Return is one counter return: a credit memo created and posted in one act
 // (ADR 0005 section 14.2 C2-5), refunded in cash or card or left as account
 // credit.
 type Return struct {
-	ID              uuid.UUID       `json:"id"`
-	Number          string          `json:"number"`
-	Revision        int64           `json:"revision"`
-	BranchID        *uuid.UUID      `json:"branch_id"`
-	RegisterID      string          `json:"register_id"`
-	TillSessionID   *uuid.UUID      `json:"till_session_id"`
-	OriginalSaleID  *uuid.UUID      `json:"original_sale_id"`
-	CustomerID      *uuid.UUID      `json:"customer_id"`
-	CashierID       uuid.UUID       `json:"cashier_id"`
-	Currency        string          `json:"currency"`
-	SubtotalCents   httpx.Cents     `json:"subtotal_cents"`
-	TaxCents        httpx.Cents     `json:"tax_cents"`
-	TotalCents      httpx.Cents     `json:"total_cents"`
-	RefundMethod    RefundMethod    `json:"refund_method"`
-	Reason          string          `json:"reason"`
-	CreditMemoID    *uuid.UUID      `json:"credit_memo_id"`
-	CreatedAt       httpx.Timestamp `json:"created_at"`
+	ID             uuid.UUID       `json:"id"`
+	Number         string          `json:"number"`
+	Revision       int64           `json:"revision"`
+	BranchID       *uuid.UUID      `json:"branch_id"`
+	RegisterID     string          `json:"register_id"`
+	TillSessionID  *uuid.UUID      `json:"till_session_id"`
+	OriginalSaleID *uuid.UUID      `json:"original_sale_id"`
+	CustomerID     *uuid.UUID      `json:"customer_id"`
+	CashierID      uuid.UUID       `json:"cashier_id"`
+	Currency       string          `json:"currency"`
+	SubtotalCents  httpx.Cents     `json:"subtotal_cents"`
+	TaxCents       httpx.Cents     `json:"tax_cents"`
+	TotalCents     httpx.Cents     `json:"total_cents"`
+	RefundMethod   RefundMethod    `json:"refund_method"`
+	Reason         string          `json:"reason"`
+	CreditMemoID   *uuid.UUID      `json:"credit_memo_id"`
+	CreatedAt      httpx.Timestamp `json:"created_at"`
 
 	Lines []ReturnLine `json:"lines"`
 }
@@ -171,21 +171,24 @@ type Return struct {
 // ReturnLine is one returned line, negative quantities and extensions (the
 // credit memo line shape).
 type ReturnLine struct {
-	ID          uuid.UUID     `json:"id"`
-	Position    int           `json:"position"`
-	ProductID   *uuid.UUID    `json:"product_id"`
-	Description string        `json:"description"`
+	ID          uuid.UUID       `json:"id"`
+	Position    int             `json:"position"`
+	ProductID   *uuid.UUID      `json:"product_id"`
+	Description string          `json:"description"`
 	Quantity    *httpx.Quantity `json:"quantity"`
-	UOM         *string        `json:"uom"`
-	UnitPrice   *httpx.Price   `json:"unit_price_ten_thousandths"`
-	LineTotal   *httpx.Cents   `json:"line_total_cents"`
-	Restock     bool           `json:"restock"`
+	UOM         *string         `json:"uom"`
+	UnitPrice   *httpx.Price    `json:"unit_price_ten_thousandths"`
+	LineTotal   *httpx.Cents    `json:"line_total_cents"`
+	Restock     bool            `json:"restock"`
 
 	// The pair and price unit the sale line carried, read by the memo line's
 	// insert; internal, never on the wire.
-	PriceUOM    *string          `json:"-"`
-	UOMQty      *httpx.Quantity  `json:"-"`
-	PriceUOMQty *httpx.Quantity  `json:"-"`
+	PriceUOM    *string         `json:"-"`
+	UOMQty      *httpx.Quantity `json:"-"`
+	PriceUOMQty *httpx.Quantity `json:"-"`
+	// LineType and ChargeCodeID carry a returned charge line's own shape.
+	LineType     string     `json:"-"`
+	ChargeCodeID *uuid.UUID `json:"-"`
 
 	// SaleLineID is the sale line a linked return names; InvoiceLineID the
 	// invoice line its restock cost reads. Both internal, never on the wire.
@@ -220,11 +223,11 @@ type TillSession struct {
 	OpenedAt     httpx.Timestamp   `json:"opened_at"`
 	ClosedAt     *httpx.Timestamp  `json:"closed_at"`
 
-	ExpectedByMethod map[string]int64   `json:"expected_by_method"`
-	CountedByMethod  map[string]int64   `json:"counted_by_method"`
-	OverShort        *httpx.Cents       `json:"over_short_cents"`
-	GLEntryID        *uuid.UUID         `json:"gl_entry_id"`
-	Notes            string             `json:"notes"`
+	ExpectedByMethod map[string]int64 `json:"expected_by_method"`
+	CountedByMethod  map[string]int64 `json:"counted_by_method"`
+	OverShort        *httpx.Cents     `json:"over_short_cents"`
+	GLEntryID        *uuid.UUID       `json:"gl_entry_id"`
+	Notes            string           `json:"notes"`
 }
 
 // TillReport is the live (X) or closing (Z) summary for a session.
@@ -254,12 +257,12 @@ type ZReport struct {
 // typeahead (the product module's data; a bare array, like the partner
 // surface the recipe exempts).
 type QuickSearchResult struct {
-	ProductID       uuid.UUID     `json:"product_id"`
-	SKU             string        `json:"sku"`
-	Description     string        `json:"description"`
-	UnitPriceCents  httpx.Cents   `json:"unit_price_cents"`
-	UOM             string        `json:"uom"`
-	InStock         httpx.Quantity `json:"in_stock"`
+	ProductID      uuid.UUID      `json:"product_id"`
+	SKU            string         `json:"sku"`
+	Description    string         `json:"description"`
+	UnitPriceCents httpx.Cents    `json:"unit_price_cents"`
+	UOM            string         `json:"uom"`
+	InStock        httpx.Quantity `json:"in_stock"`
 }
 
 // CatalogProduct is a lightweight product for the offline catalog cache.

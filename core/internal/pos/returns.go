@@ -48,6 +48,9 @@ type returnLinePriced struct {
 	// perUnit is the ten thousandths a linked line refunds at: the sale
 	// line's own extension divided by the quantity it sold.
 	perUnit httpx.Price
+	// chargeCodeID and lineType carry a linked charge line's own shape.
+	chargeCodeID *uuid.UUID
+	lineType     string
 }
 
 // ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
@@ -169,7 +172,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 			perUnit := httpx.Price(divRound(int64(*src.LineTotal)*1_000_000, int64(*src.Quantity)))
 			p := returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, perUnit)),
-				taxable: src.Taxable, saleLine: &src, perUnit: perUnit}
+				taxable: src.Taxable, saleLine: &src, perUnit: perUnit,
+				chargeCodeID: src.ChargeCodeID, lineType: string(src.LineType)}
 			up := perUnit
 			p.in.UnitPrice = &up
 			priced = append(priced, p)
@@ -372,11 +376,16 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if unitPrice == nil {
 				unitPrice = ptrPrice(0)
 			}
+			lineType := p.lineType
+			if lineType == "" {
+				lineType = "PRODUCT"
+			}
 			lines = append(lines, ReturnLine{
 				ID: uuid.New(), Position: i, ProductID: p.in.ProductID, Description: p.in.Description,
 				Quantity: &qty, UOM: &uom, PriceUOM: &priceUOM, UOMQty: &uomQty, PriceUOMQty: &priceUOMQty,
 				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
 				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
+				LineType: lineType, ChargeCodeID: p.chargeCodeID,
 			})
 			if p.in.Restock && p.in.ProductID != nil {
 				// a free line (no sale) restocks at today's average: it has
@@ -401,15 +410,21 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		for i := range lines {
 			l := &lines[i]
+			lineType := l.LineType
+			if lineType == "" || lineType == "KIT" || lineType == "COMPONENT" {
+				// the memo keeps the document's own product shape; a kit
+				// returns as its whole line (its components never priced)
+				lineType = "PRODUCT"
+			}
 			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
-				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, description, quantity,
+				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, charge_code_id, description, quantity,
 					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock,
 					invoice_line_id, created_at)
-				VALUES ($1, $2, 'PRODUCT', $3, $4, -($5::numeric / 10000), $6, $7, $8::numeric / 10000, $9::numeric / 10000,
+				VALUES ($1, $2, $15, $3, $16, $4, -($5::numeric / 10000), $6, $7, $8::numeric / 10000, $9::numeric / 10000,
 					$10::numeric / 10000, 'MANUAL', $11::numeric / 100, $12, $13, $14, NOW())`,
 				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM,
 				qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty), priceArg(l.UnitPrice),
-				centsArg(l.LineTotal), priced[i].taxable, l.Restock, l.InvoiceLineID); err != nil {
+				centsArg(l.LineTotal), priced[i].taxable, l.Restock, l.InvoiceLineID, lineType, l.ChargeCodeID); err != nil {
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
 		}
@@ -419,7 +434,22 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		if err != nil {
 			return err
 		}
-		legs := []gl.Leg{{AccountCode: gl.AccountCodeRevenue, Description: "Sales Revenue", Debit: subtotal}}
+		// Revenue, per the line's own account (8.3): product lines to 4010, a
+		// returned charge to its code's account.
+		var revenueLines []salesdoc.Line
+		for i := range priced {
+			revType := salesdoc.LineProduct
+			if priced[i].lineType == string(salesdoc.LineCharge) {
+				revType = salesdoc.LineCharge
+			}
+			lt := httpx.Cents(priced[i].lineTotal)
+			revenueLines = append(revenueLines, salesdoc.Line{LineType: revType, LineTotal: &lt,
+				RevenueAccountCode: revenueAccountOf(priced[i])})
+		}
+		var legs []gl.Leg
+		for _, g := range salesdoc.RevenueGroups(revenueLines) {
+			legs = append(legs, gl.Leg{AccountCode: g.AccountCode, Description: "Sales Revenue", Debit: int64(g.Cents)})
+		}
 		if taxCents > 0 {
 			legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Debit: taxCents})
 		}
@@ -598,7 +628,9 @@ func fxMemoNumber(ctx context.Context, s *Service, memoID uuid.UUID) string {
 }
 
 // GetReturn reads a return with its lines.
-func (s *Service) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) { return s.repo.GetReturn(ctx, id) }
+func (s *Service) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) {
+	return s.repo.GetReturn(ctx, id)
+}
 
 // ListReturns lists returns for a register on a date.
 func (s *Service) ListReturns(ctx context.Context, f ReturnFilter) ([]Return, error) {
@@ -608,4 +640,14 @@ func (s *Service) ListReturns(ctx context.Context, f ReturnFilter) ([]Return, er
 func ptrPrice(v int64) *httpx.Price {
 	p := httpx.Price(v)
 	return &p
+}
+
+// revenueAccountOf reads the revenue account a returned line credits back:
+// the sale line's own snapshot when linked, nothing for a free line (the
+// group defaults it to product revenue).
+func revenueAccountOf(p returnLinePriced) *string {
+	if p.saleLine != nil {
+		return p.saleLine.RevenueAccountCode
+	}
+	return nil
 }

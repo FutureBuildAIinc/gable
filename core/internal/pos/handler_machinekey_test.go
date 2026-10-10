@@ -17,9 +17,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
