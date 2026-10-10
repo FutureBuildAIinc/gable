@@ -1,0 +1,44 @@
+{
+  "entities": [
+    {
+      "module": "quotes",
+      "entity": "quote",
+      "number_pattern": "^Q-[0-9]{6,}$",
+      "desk": "quotes/{segment}"
+    },
+    {
+      "module": "orders",
+      "entity": "order",
+      "number_pattern": "^SO-[0-9]{6,}$",
+      "desk": "orders/{segment}"
+    },
+    {
+      "module": "invoices",
+      "entity": "invoice",
+      "number_pattern": "^IN-[0-9]{6,}$",
+      "desk": "invoices/{segment}"
+    },
+    {
+      "module": "customers",
+      "entity": "customer",
+      "desk": "accounts/{segment}"
+    },
+    {
+      "module": "products",
+      "entity": "product",
+      "desk": "inventory/{segment}"
+    },
+    {
+      "module": "quotes",
+      "entity": "draft",
+      "desk": "quotes/drafts/{segment}",
+      "draft_kind": true
+    },
+    {
+      "module": "orders",
+      "entity": "draft",
+      "desk": "orders/drafts/{segment}",
+      "draft_kind": true
+    }
+  ]
+}

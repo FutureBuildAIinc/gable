@@ -31,6 +31,7 @@ tags:
   - name: dashboard
   - name: delivery
   - name: documents
+  - name: draft
   - name: edi
   - name: events
   - name: gl
@@ -39,6 +40,7 @@ tags:
   - name: integration
   - name: inventory
   - name: invoice
+  - name: links
   - name: location
   - name: marketIndex
   - name: matching
@@ -4076,6 +4078,671 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/drafts/orders:
+    get:
+      operationId: ordersDraftList
+      tags: [draft]
+      summary: List order drafts
+      description: >-
+        The cursor list envelope, newest first on created_at then id. Filters status, subject_id and created_by_kind; total appears only under include=total. Drafts are shared, not owned.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: created_by_kind
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The list envelope of order draft summaries.
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    post:
+      operationId: ordersDraftCreate
+      tags: [draft]
+      summary: Create an order draft
+      description: >-
+        A create draft (subject_id null) carries the order create request as its payload; an edit draft names the draft order it edits and may assert subject_revision. The payload is the module's own body, never a file and never a revision of its own; the branch is fixed at create.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrdersDraftCreateRequest"
+      responses:
+        "201":
+          description: The open draft; Location names it and the ETag is its revision.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/orders/feed:
+    get:
+      operationId: ordersDraftFeed
+      tags: [draft]
+      summary: The order drafts change feed
+      description: >-
+        A text/event-stream of the order draft change rows, never payloads, with the ready, draft, cursor, reset and reauth events of the quotes feed; the cursor resumes through Last-Event-ID (which wins when both are present) or the cursor parameter.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: draft_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The stream.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "429":
+          description: This principal holds its draft feed stream limit, answered before the stream opens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/drafts/orders/{id}:
+    get:
+      operationId: ordersDraftGet
+      tags: [draft]
+      summary: Read an order draft
+      description: The draft with its payload and computed validation; the ETag is the revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The draft.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersDraftDocument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    put:
+      operationId: ordersDraftReplace
+      tags: [draft]
+      summary: Replace an order draft's payload
+      description: >-
+        The whole-payload compare and swap on the revision precondition; any status but open is 409 with the draft_not_open blocker, and subject_revision moves only forward within the subject's bounds.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrdersDraftCreateRequest"
+      responses:
+        "200":
+          description: The draft at its new revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/orders/{id}/transitions:
+    post:
+      operationId: ordersDraftTransition
+      tags: [draft]
+      summary: Discard or reopen an order draft
+      description: open to discarded and discarded to open, on the revision precondition; promoted is terminal.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, revision]
+              properties:
+                to:
+                  type: string
+                  enum: [discarded, open]
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: The draft in its new status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/orders/{id}/promote:
+    post:
+      operationId: ordersDraftPromote
+      tags: [draft]
+      summary: Promote an order draft, in one transaction
+      description: >-
+        The confirm: the revision the committer read becomes an order born in status draft with its SO- number (order.created, then draft.promoted; the confirm with its credit, PO and contact checks stays an order transition), or an edit draft's payload becomes the draft order's update (order.updated, then draft.promoted). A failure rolls the whole transaction back, the draft stays open at the same revision, and the module's own error is carried out (order_not_draft on a subject that left draft, subject_stale added when the subject moved).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: An edit draft's promotion; the body is the promoted draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersDraftDocument"
+        "201":
+          description: A create draft's promotion; Location is the order's URL.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes:
+    get:
+      operationId: quotesDraftList
+      tags: [draft]
+      summary: List quote drafts
+      description: >-
+        The cursor list envelope, newest first on created_at then id (never updated_at: a keyset on a column that moves would repeat or skip rows). Filters status (open, promoted, discarded), subject_id (the open proposals on one quote) and created_by_kind; total appears only under include=total. Drafts are shared, not owned: any caller the kind admits sees every draft of the branch wall it reads through.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: A lowercase status (open, promoted, discarded).
+          schema:
+            type: string
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: created_by_kind
+          in: query
+          required: false
+          description: One of user, key, agent, anonymous.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The list envelope of quote draft summaries (no payload, validation.ready only).
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    post:
+      operationId: quotesDraftCreate
+      tags: [draft]
+      summary: Create a quote draft
+      description: >-
+        A create draft (subject_id null) carries the quote create request as its payload; an edit draft names the quote it edits and may assert subject_revision (a mismatch is 409 stale_revision with the subject_stale blocker). The payload is the module's own body, never a file and never a revision of its own; the branch is fixed at create. validation is computed from the payload alone on every read, so an unfinished draft saves.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotesDraftCreateRequest"
+      responses:
+        "201":
+          description: The open draft; Location names it and the ETag is its revision.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes/feed:
+    get:
+      operationId: quotesDraftFeed
+      tags: [draft]
+      summary: The quote drafts change feed
+      description: >-
+        A text/event-stream of the draft change rows, never payloads: event ready opens with the head cursor, event draft carries each write's summary with its by actor, event cursor advances a filtered stream past rows its filters exclude, event reset tells a resuming client its cursor aged out behind the purge, and event reauth closes the stream at the token's exp, the lifetime bound or a revoked key. The cursor resumes through Last-Event-ID (which wins when both are present) or the cursor parameter; any other parameter is a 400 before the stream opens.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: The cursor this feed minted (an SSE id); no cursor means from now.
+          schema:
+            type: string
+        - name: draft_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: What an SSE client sends on reconnect; it wins over the cursor parameter.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The stream (Cache-Control no-store, X-Accel-Buffering no).
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "429":
+          description: This principal holds its draft feed stream limit, answered before the stream opens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/drafts/quotes/{id}:
+    get:
+      operationId: quotesDraftGet
+      tags: [draft]
+      summary: Read a quote draft
+      description: >-
+        The draft with its payload and its computed validation; the ETag is the revision. A draft outside the caller's branch wall is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The draft; the ETag is its revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    put:
+      operationId: quotesDraftReplace
+      tags: [draft]
+      summary: Replace a quote draft's payload
+      description: >-
+        The whole-payload compare and swap: If-Match or the body revision is required (428 without), a moved revision is 409 stale_revision, and any status but open is 409 with the draft_not_open blocker (an edit is not a transition). subject_revision may move forward, never past the subject's current revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotesDraftReplaceRequest"
+      responses:
+        "200":
+          description: The draft at its new revision; the ETag moved with it.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes/{id}/transitions:
+    post:
+      operationId: quotesDraftTransition
+      tags: [draft]
+      summary: Discard or reopen a quote draft
+      description: >-
+        open to discarded and discarded to open, on the revision precondition; promoted is terminal (its retry is told already_promoted) and anything else is an invalid state transition. Discard is reversible by reopen; the audit trail keeps who did what.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, revision]
+              properties:
+                to:
+                  type: string
+                  enum: [discarded, open]
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: The draft in its new status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes/{id}/promote:
+    post:
+      operationId: quotesDraftPromote
+      tags: [draft]
+      summary: Promote a quote draft, in one transaction
+      description: >-
+        The confirm: exactly the revision the committer read becomes a quote (428 without a precondition, 409 stale_revision on a moved one, 409 already_promoted on a keyless retry, 409 draft_discarded), born in status draft with its Q- number and quote.created, beside draft.promoted. The body carries nothing but the revision: what is committed is what was reviewed. A failure rolls the whole transaction back and the draft stays open at the same revision, with the module's own error carried out (payload.-prefixed fields on a 400, subject_stale added when the subject moved).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: An edit draft's promotion; the body is the promoted draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "201":
+          description: >-
+            A create draft's promotion; Location is the quote's URL and the body is the promoted draft with promoted filled. An edit draft's promotion answers 200.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
   /api/v1/edi/partners:
     get:
       operationId: ediPartnerList
@@ -6061,6 +6728,224 @@ paths:
         '428':
           $ref: '#/components/responses/WirePreconditionRequired'
         '500': *id004
+  /api/v1/links/quotes/{id}:
+    get:
+      operationId: linksQuoteResolve
+      tags: [links]
+      summary: Resolve a quote to every frontend's record URL
+      description: >-
+        The quote's links: the desk record path (absolute when GABLE_PUBLIC_URL is set, origin relative otherwise), the front door's open form (which signs a person in and then opens the record), gable:// for the shell, a null portal until it has record screens, and the agent slot from GABLE_AGENT_URL_TEMPLATE (null when unset). A record the caller cannot see is the same 404 a missing one gets.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: A UUID or a quote number such as Q-000123.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/orders/{id}:
+    get:
+      operationId: linksOrderResolve
+      tags: [links]
+      summary: Resolve an order to every frontend's record URL
+      description: The order's links; the {id} slot is a UUID or an order number such as SO-000123.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/invoices/{id}:
+    get:
+      operationId: linksInvoiceResolve
+      tags: [links]
+      summary: Resolve an invoice to every frontend's record URL
+      description: The invoice's links; the {id} slot is a UUID or an invoice number such as IN-000123.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/customers/{id}:
+    get:
+      operationId: linksCustomerResolve
+      tags: [links]
+      summary: Resolve a customer to every frontend's record URL
+      description: >-
+        The customer's links (the desk's accounts area); the {id} slot is a UUID (customers carry no document number, so number is null and the segment is the UUID).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/products/{id}:
+    get:
+      operationId: linksProductResolve
+      tags: [links]
+      summary: Resolve a product to every frontend's record URL
+      description: The product's links (the desk's inventory area); the {id} slot is a UUID and number is null.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/drafts/quotes/{id}:
+    get:
+      operationId: linksQuoteDraftResolve
+      tags: [links]
+      summary: Resolve a quote draft to every frontend's record URL
+      description: >-
+        The draft's links (the desk's quote drafts editor); the {id} slot is the draft's UUID (a draft has no number). The draft link needs the confirm verbs, not the module read scope: proposals are unfinished work an existing read key must not start reading.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/drafts/orders/{id}:
+    get:
+      operationId: linksOrderDraftResolve
+      tags: [links]
+      summary: Resolve an order draft to every frontend's record URL
+      description: The draft's links (the desk's order drafts editor); the {id} slot is the draft's UUID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
   /api/v1/locations:
     get:
       operationId: locationList
@@ -6492,7 +7377,7 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The grants, a bare array that is null when none exist.
+          description: The grants, a bare array, [] when none exist (no paging).
           content:
             application/json:
               schema:
@@ -6514,7 +7399,7 @@ paths:
         The caller's grants with the home flag. Without auth claims (dev mode) every active branch is returned with the first marked home.
       responses:
         "200":
-          description: The branch summaries, a bare array that is null when none exist.
+          description: The branch summaries, a bare array, [] when none exist (no paging).
           content:
             application/json:
               schema:
@@ -6533,7 +7418,7 @@ paths:
       description: The union of distinct user subjects from grants and the audit log; feeds the admin user picker.
       responses:
         "200":
-          description: The subject strings, a bare array that is null when none exist.
+          description: The subject strings, a bare array, [] when none exist (no paging).
           content:
             application/json:
               schema:
@@ -12630,6 +13515,55 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/quotes/{id}/file:
+    put:
+      operationId: quoteAttachFile
+      tags: [quote]
+      summary: Attach the AI parse's original file after promotion
+      description: >-
+        The raw file bytes with their content type, the same 5 MiB bound the create applies (413 above it): the quote draft never carries the file (every autosave re-sends the payload and every feed subscriber re-reads it), so the parse flow attaches it here, by the committer, right after a promotion. Accepted only while the quote is in status draft (else 409 with the quote_not_draft blocker), on the revision precondition; it replaces any file already stored, moves the quote's revision by one, returns the quote with its new ETag, and writes the quote.file_attached audit row and no outbox event.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: The quote with its new revision and ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     get:
       operationId: quoteDownloadOriginalFile
       tags: [quote]
@@ -14523,7 +15457,7 @@ components:
           format: int64
     ApiKey:
       type: object
-      required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
+      required: [id, name, prefix, scopes, branch_id, created_at, last_used_at, revoked_at]
       description: >-
         Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key.
       properties:
@@ -14538,6 +15472,11 @@ components:
           type: array
           items:
             type: string
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: >-
+            The branch a branch bound key is pinned to (ADR 0007 section 5.5), set at mint and never edited; null is today's unbound behaviour.
         created_at:
           type: string
           format: date-time
@@ -16833,6 +17772,242 @@ components:
           type: integer
         total_distance_miles:
           type: number
+    OrdersDraftStatus:
+      type: string
+      enum: [open, promoted, discarded]
+      description: The draft lifecycle, lowercase on the wire; promoted is terminal.
+    OrdersDraftActor:
+      type: object
+      description: What pkg/actor resolved for the request (see the quotes kind's actor).
+      properties:
+        kind:
+          type: string
+          enum: [user, key, agent, anonymous]
+        id:
+          type: string
+          nullable: true
+        acting_as:
+          type: string
+          nullable: true
+        tool:
+          type: string
+          nullable: true
+    OrdersDraftDocument:
+      type: object
+      description: >-
+        The order draft resource: one wire type from every draft route. The summary form (the list) is the same object without payload and without validation.problems.
+      required: [id, module, status, revision, branch_id, payload, validation, created_by, updated_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        module:
+          type: string
+          enum: [orders]
+        status:
+          $ref: "#/components/schemas/OrdersDraftStatus"
+        revision:
+          type: integer
+          format: int64
+        branch_id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+          format: uuid
+          nullable: true
+        subject_revision:
+          type: integer
+          format: int64
+          nullable: true
+        payload:
+          type: object
+          description: The order create or update request as JSON.
+        validation:
+          type: object
+          required: [ready]
+          properties:
+            ready:
+              type: boolean
+            problems:
+              type: array
+              items:
+                $ref: "#/components/schemas/WireErrorDetail"
+        created_by:
+          $ref: "#/components/schemas/OrdersDraftActor"
+        updated_by:
+          $ref: "#/components/schemas/OrdersDraftActor"
+        promoted:
+          type: object
+          nullable: true
+          properties:
+            entity_id:
+              type: string
+              format: uuid
+            number:
+              type: string
+              nullable: true
+            at:
+              type: string
+            by:
+              $ref: "#/components/schemas/OrdersDraftActor"
+        discarded:
+          type: object
+          nullable: true
+          properties:
+            at:
+              type: string
+            by:
+              $ref: "#/components/schemas/OrdersDraftActor"
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    OrdersDraftCreateRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+          description: The order create (or, with subject_id, update) request as JSON; at most 256 KiB.
+        subject_id:
+          type: string
+          format: uuid
+        subject_revision:
+          type: integer
+          format: int64
+    QuotesDraftStatus:
+      type: string
+      enum: [open, promoted, discarded]
+      description: The draft lifecycle, lowercase on the wire; promoted is terminal.
+    QuotesDraftActor:
+      type: object
+      description: >-
+        What pkg/actor resolved for the request: the user's subject for an agent acting with a person's session, the key's id for a keyed writer; acting_as and tool carry the agent marker and tool name.
+      properties:
+        kind:
+          type: string
+          enum: [user, key, agent, anonymous]
+        id:
+          type: string
+          nullable: true
+        acting_as:
+          type: string
+          nullable: true
+        tool:
+          type: string
+          nullable: true
+    QuotesDraftValidation:
+      type: object
+      description: >-
+        Computed on every read and write from the payload alone: ready is true when the kind's parser would accept the payload as a create (or update) request, and problems is exactly that 400's details with payload.-prefixed fields. It tells an editor what still blocks a promotion without refusing the save.
+      required: [ready]
+      properties:
+        ready:
+          type: boolean
+        problems:
+          type: array
+          items:
+            $ref: "#/components/schemas/WireErrorDetail"
+    QuotesDraftPromoted:
+      type: object
+      description: Set once, at promotion, with the entity's id and document number.
+      required: [entity_id, at]
+      properties:
+        entity_id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          nullable: true
+        at:
+          type: string
+        by:
+          $ref: "#/components/schemas/QuotesDraftActor"
+    QuotesDraftDocument:
+      type: object
+      description: >-
+        The draft resource: one wire type from every draft route, promotion included. Optional fields are present as null (ADR 0001 section 12). The summary form (the list) is the same object without payload and without validation.problems.
+      required: [id, module, status, revision, branch_id, payload, validation, created_by, updated_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        module:
+          type: string
+          enum: [quotes]
+        status:
+          $ref: "#/components/schemas/QuotesDraftStatus"
+        revision:
+          type: integer
+          format: int64
+        branch_id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+          format: uuid
+          nullable: true
+        subject_revision:
+          type: integer
+          format: int64
+          nullable: true
+        payload:
+          type: object
+          description: The module's own request body as JSON.
+        validation:
+          $ref: "#/components/schemas/QuotesDraftValidation"
+        created_by:
+          $ref: "#/components/schemas/QuotesDraftActor"
+        updated_by:
+          $ref: "#/components/schemas/QuotesDraftActor"
+        promoted:
+          allOf:
+            - $ref: "#/components/schemas/QuotesDraftPromoted"
+          nullable: true
+        discarded:
+          type: object
+          nullable: true
+          properties:
+            at:
+              type: string
+            by:
+              $ref: "#/components/schemas/QuotesDraftActor"
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    QuotesDraftCreateRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+          description: >-
+            The quote create request (or, with subject_id, the update request): never a revision, never a file; at most 256 KiB of JSON.
+        subject_id:
+          type: string
+          format: uuid
+          description: The quote an edit draft edits; null on a create draft.
+        subject_revision:
+          type: integer
+          format: int64
+          description: >-
+            The entity revision the edit was built on; asserted at create (a mismatch is 409 subject_stale), taken from the subject when omitted, moved forward by a bounded rebase on PUT.
+    QuotesDraftReplaceRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+        revision:
+          type: integer
+          format: int64
+          description: The body form of the precondition, beside If-Match.
+        subject_revision:
+          type: integer
+          format: int64
+          description: The bounded rebase, never past the subject's current revision.
     EdiTradingPartner:
       type: object
       required:
@@ -19215,6 +20390,47 @@ components:
             - 'null'
         limit:
           type: integer
+    LinkAnswer:
+      type: object
+      description: >-
+        Who the record is, and every frontend's URL for it. The record segment in the links is the document number when the entity has one, otherwise the UUID; draft links use the draft's UUID. Optional slots are present as null (ADR 0001 section 12).
+      required: [entity, module, id, number, links]
+      properties:
+        entity:
+          type: string
+          description: The entity name (quote, order, invoice, customer, product, draft).
+        module:
+          type: string
+          description: The module, the path segment under /api/v1.
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          nullable: true
+        links:
+          type: object
+          required: [desk, front_door, portal, app, agent]
+          properties:
+            desk:
+              type: string
+              description: >-
+                The desk record route; absolute when GABLE_PUBLIC_URL is configured, otherwise a path relative to the deployment's origin.
+            front_door:
+              type: string
+              description: The front door's /?open=<record path> form, which signs a person in and then opens the record.
+            portal:
+              type: string
+              nullable: true
+              description: Null until the portal has a record screen for the entity.
+            app:
+              type: string
+              description: The gable:// deep link the Tauri shell parses.
+            agent:
+              type: string
+              nullable: true
+              description: >-
+                The agent UI's record URL from GABLE_AGENT_URL_TEMPLATE ({module}, {entity}, {id}, {number} placeholders); null when the template is unset, every deployment today.
     LocationType:
       type: string
       enum: [branch, zone, aisle, rack, shelf, bin, yard]
@@ -19373,7 +20589,7 @@ components:
         timezone:
           type: string
     BranchSummaryList:
-      type: [array, "null"]
+      type: array
       items:
         $ref: "#/components/schemas/BranchSummary"
     UserLocation:
@@ -19393,7 +20609,7 @@ components:
         granted_by:
           type: string
     UserLocationList:
-      type: [array, "null"]
+      type: array
       items:
         $ref: "#/components/schemas/UserLocation"
     UserBranchGrant:
@@ -19413,7 +20629,7 @@ components:
           type: string
           format: uuid
     StringList:
-      type: [array, "null"]
+      type: array
       items:
         type: string
     MatchingStatus:

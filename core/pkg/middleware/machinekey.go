@@ -12,6 +12,9 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/google/uuid"
 )
 
 // Machine keys. A Bearer token whose shape is a machine key (minted by
@@ -35,18 +38,19 @@ func IsMachineKey(token string) bool {
 }
 
 // Scope suffixes. A module's read scope admits GET and HEAD; its write scope
-// admits every other method.
+// admits every other method; propose admits the draft routes of a confirm
+// gated module and commit admits those plus the promotion (ADR 0007 5.1).
 const (
-	scopeReadSuffix  = ":read"
-	scopeWriteSuffix = ":write"
+	scopeReadSuffix    = ":read"
+	scopeWriteSuffix   = ":write"
+	scopeProposeSuffix = ":propose"
+	scopeCommitSuffix  = ":commit"
 )
 
-// ModuleForPath returns the module a request path belongs to for scope
-// purposes: the first path segment under /api/v1/, verbatim. The scope a key
-// needs for a call is therefore derivable from the URL alone, with no lookup
-// table: GET /api/v1/quotes/{id} needs quotes:read, POST /api/v1/quotes needs
-// quotes:write. ok is false for paths that are not /api/v1 module routes
-// (other seams, or a bare /api/v1 prefix), which the machine-key path refuses.
+// ModuleForPath returns the first path segment under /api/v1/, verbatim. It
+// is the vocabulary key the census and the module policy check use; scope
+// resolution is ScopeTarget's (ADR 0007 section 5.2), which refines it for
+// the two delegating segments (drafts, links) and the admin areas.
 func ModuleForPath(path string) (module string, ok bool) {
 	rest, found := strings.CutPrefix(path, "/api/v1/")
 	if !found || rest == "" {
@@ -245,11 +249,250 @@ func FinerAdminScopes() []string {
 	return out
 }
 
+// --- route classes and the delegating segments (ADR 0007 section 5) ---------
+
+// ScopeClass is the class of route a method and path resolve to. The class,
+// not the method alone, decides which scopes admit a keyed request: the
+// seven draft shapes and the two link shapes each have their own row in the
+// policy table (ADR 0007 section 5.1).
+type ScopeClass int
+
+const (
+	// ScopeEntityRead: GET and HEAD under /api/v1/m/..., admitted by m:read.
+	ScopeEntityRead ScopeClass = iota
+	// ScopeEntityWrite: every other method under /api/v1/m/..., admitted by
+	// m:write (or the module's finer write name).
+	ScopeEntityWrite
+	// ScopeDraftRead: the draft list, the draft read and the feed of a
+	// confirm gated module, admitted by m:propose or m:commit.
+	ScopeDraftRead
+	// ScopeDraftWrite: draft create, PUT and transitions, admitted by
+	// m:propose or m:commit.
+	ScopeDraftWrite
+	// ScopePromotion: POST /api/v1/drafts/m/{id}/promote, admitted by
+	// m:commit only.
+	ScopePromotion
+	// ScopeLink: GET /api/v1/links/m/{id}, admitted by m:read.
+	ScopeLink
+	// ScopeDraftLink: GET /api/v1/links/drafts/m/{id}, admitted by
+	// m:propose or m:commit.
+	ScopeDraftLink
+)
+
+// String names the class for tests and refusal messages.
+func (c ScopeClass) String() string {
+	switch c {
+	case ScopeEntityRead:
+		return "entity_read"
+	case ScopeEntityWrite:
+		return "entity_write"
+	case ScopeDraftRead:
+		return "draft_read"
+	case ScopeDraftWrite:
+		return "draft_write"
+	case ScopePromotion:
+		return "promotion"
+	case ScopeLink:
+		return "link"
+	case ScopeDraftLink:
+		return "draft_link"
+	}
+	return "unknown"
+}
+
+// confirmGatedModules lists the modules with a registered draft kind (the
+// kind registry lives in internal/drafts; a test there holds this set
+// against it). propose and commit are grantable only on these modules, and
+// the census test holds every draft route's module against this set.
+// "drafts" and "links" never appear here: they are delegating segments, not
+// modules, and cannot be granted.
+var confirmGatedModules = map[string]struct{}{
+	"quotes": {},
+	"orders": {},
+}
+
+// ConfirmGatedModules returns the confirm gated module set, sorted, for
+// tests, the mint's grammar check and the census test.
+func ConfirmGatedModules() []string {
+	out := make([]string, 0, len(confirmGatedModules))
+	for m := range confirmGatedModules {
+		out = append(out, m)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// IsConfirmGated reports whether the module has a registered draft kind.
+func IsConfirmGated(module string) bool {
+	_, ok := confirmGatedModules[module]
+	return ok
+}
+
+// ScopeTarget resolves a method and path to the scope module and route class
+// a keyed request is judged against (ADR 0007 section 5.2). Two segments are
+// delegating: under /api/v1/drafts/ and /api/v1/links/ the module is the next
+// segment, and the class is decided by matching the whole method and path
+// against the seven draft shapes and the two link shapes, never by the method
+// or the last segment alone. For every other path the module is the first
+// segment (with the admin areas' finer module names, ADR 0009) and the class
+// is the entity read/write split.
+//
+// It fails closed: ok is false for anything that is not /api/v1, and for any
+// method and shape under /api/v1/drafts/m/ or /api/v1/links/ that the policy
+// table does not name, so a later draft route cannot quietly fall into the
+// draft write class. Doubled slashes and dot segments never widen anything:
+// they fail the prefix or name a module outside the vocabulary, and the
+// router's own cleaning redirects them for every caller anyway.
+func ScopeTarget(method, path string) (module string, class ScopeClass, ok bool) {
+	rest, found := strings.CutPrefix(path, "/api/v1/")
+	if !found || rest == "" {
+		return "", 0, false
+	}
+	segments := strings.Split(rest, "/")
+	// Doubled slashes (an empty segment), a trailing slash and dot segments
+	// never resolve: the router redirects their cleaned spelling for every
+	// caller, and admitting one here would judge a request the router never
+	// serves.
+	for _, s := range segments {
+		if s == "" || s == "." || s == ".." {
+			return "", 0, false
+		}
+	}
+	read := method == http.MethodGet || method == http.MethodHead
+
+	switch segments[0] {
+	case "drafts":
+		if len(segments) < 2 {
+			return "", 0, false
+		}
+		m := segments[1]
+		switch {
+		case len(segments) == 2:
+			if read {
+				return m, ScopeDraftRead, true // the list
+			}
+			if method == http.MethodPost {
+				return m, ScopeDraftWrite, true // create
+			}
+			return "", 0, false
+		case len(segments) == 3:
+			if read {
+				return m, ScopeDraftRead, true // the read and the feed
+			}
+			if method == http.MethodPut {
+				return m, ScopeDraftWrite, true // payload replace
+			}
+			return "", 0, false
+		case len(segments) == 4:
+			switch segments[3] {
+			case "transitions":
+				if method == http.MethodPost {
+					return m, ScopeDraftWrite, true
+				}
+			case "promote":
+				if method == http.MethodPost {
+					return m, ScopePromotion, true
+				}
+			}
+			return "", 0, false
+		default:
+			return "", 0, false
+		}
+
+	case "links":
+		switch {
+		case len(segments) == 3 && read && segments[1] != "drafts":
+			return segments[1], ScopeLink, true
+		case len(segments) == 4 && read && segments[1] == "drafts":
+			return segments[2], ScopeDraftLink, true
+		default:
+			return "", 0, false
+		}
+
+	case "admin":
+		if len(segments) < 2 || segments[1] == "" {
+			// /api/v1/admin with nothing after: no area is named, and the
+			// coarse fallback would be wider than the path deserves.
+			return "", 0, false
+		}
+		if _, isArea := adminAreaScopes[segments[1]]; isArea {
+			// The scope module carries the area ("admin/settings") so
+			// AdmittedScopes names the finer scope for every method (ADR
+			// 0009); the vocabulary check the auth core runs stays on the
+			// path's first segment.
+			module = "admin/" + segments[1]
+		} else {
+			module = "admin"
+		}
+		if read {
+			return module, ScopeEntityRead, true
+		}
+		return module, ScopeEntityWrite, true
+
+	default:
+		if read {
+			return segments[0], ScopeEntityRead, true
+		}
+		return segments[0], ScopeEntityWrite, true
+	}
+}
+
+// PolicyModuleForPath names the module whose scope policy judges a path: the
+// first segment, except under the delegating segments (drafts and links),
+// where the module is the one ScopeTarget delegates to, because the segments
+// themselves are not modules and never appear in the vocabulary (ADR 0007
+// section 5.2). The auth core and the census test share it, so a keyed
+// request and the drift gate cannot disagree.
+func PolicyModuleForPath(method, path string) (string, bool) {
+	first, ok := ModuleForPath(path)
+	if !ok {
+		return "", false
+	}
+	if first == "drafts" || first == "links" {
+		module, _, ok := ScopeTarget(method, path)
+		return module, ok
+	}
+	return first, true
+}
+
+// AdmittedScopes returns the scopes that admit a keyed request on a module's
+// route class, the whole policy table of ADR 0007 section 5.1: matching is
+// exact, with no wildcard and no implication between verbs, and a grant
+// reads back as written. The first entry is the refused scope the audit row
+// records when none is held. drafts and links never appear as a module. An
+// admin area module ("admin/settings", from ScopeTarget) resolves to its one
+// area scope for every method (ADR 0009).
+func AdmittedScopes(module string, class ScopeClass) []string {
+	if area, isArea := strings.CutPrefix(module, "admin/"); isArea {
+		if scope, ok := adminAreaScopes[area]; ok {
+			return []string{scope}
+		}
+	}
+	switch class {
+	case ScopeEntityRead:
+		return []string{module + scopeReadSuffix}
+	case ScopeEntityWrite:
+		if finer, ok := writeScopeOverrides[module]; ok {
+			return []string{finer}
+		}
+		return []string{module + scopeWriteSuffix}
+	case ScopeDraftRead, ScopeDraftWrite, ScopeDraftLink:
+		return []string{module + scopeProposeSuffix, module + scopeCommitSuffix}
+	case ScopePromotion:
+		return []string{module + scopeCommitSuffix}
+	case ScopeLink:
+		return []string{module + scopeReadSuffix}
+	}
+	return nil
+}
+
 // ValidScopeGrammar returns every scope a registered /api/v1 route can
 // require: the module read and write scopes, with the finer names (admin
-// areas, users:grants) in place of the coarse ones they replace. C5-2a's mint
-// validation (ADR 0007 section 5.3) checks granted scopes against this set;
-// it is the one source, so the mint and the auth core cannot disagree.
+// areas, users:grants) in place of the coarse ones they replace, and the
+// propose and commit verbs of the confirm gated modules (ADR 0007 section
+// 5.1). The mint's validation (section 5.3) checks granted scopes against
+// this set; it is the one source, so the mint and the auth core cannot
+// disagree.
 func ValidScopeGrammar() []string {
 	var out []string
 	for module := range machineKeyModules {
@@ -259,6 +502,9 @@ func ValidScopeGrammar() []string {
 		} else {
 			out = append(out, module+scopeWriteSuffix)
 		}
+	}
+	for module := range confirmGatedModules {
+		out = append(out, module+scopeProposeSuffix, module+scopeCommitSuffix)
 	}
 	out = append(out, FinerAdminScopes()...)
 	sort.Strings(out)
@@ -309,6 +555,10 @@ type KeyPrincipal struct {
 	ID string
 	// Scopes are the key's stored scopes, verbatim.
 	Scopes []string
+	// BranchID is the branch bound key's pin (ADR 0007 section 5.5): nil is
+	// today's unbound behaviour, a branch pins the request's branch context
+	// to it.
+	BranchID *uuid.UUID
 }
 
 // ErrInvalidMachineKey is the credential verdict: the presented key is
@@ -331,6 +581,14 @@ type KeyRefusalAuditor interface {
 	AuditKeyRefusal(ctx context.Context, keyID, action, scope, method, path string)
 }
 
+// BranchRefusalAuditor records a branch bound key's refused X-Branch-Id
+// (ADR 0007 section 5.5, the key.branch_refused row). Optional: when the
+// wired auditor does not implement it the refusal is still served, with no
+// row.
+type BranchRefusalAuditor interface {
+	AuditKeyBranchRefusal(ctx context.Context, keyID string, branch uuid.UUID, method, path string)
+}
+
 // Refusal actions written to the audit log.
 const (
 	// AuditActionKeyScopeRefused: the key is valid but holds neither the
@@ -340,8 +598,12 @@ const (
 	// no scope would admit a key.
 	AuditActionKeyUserRequired = "key.user_required"
 	// AuditActionKeyPathRefused: the path is not a /api/v1 module route the
-	// key system knows (another seam, or an undeclared module).
+	// key system knows (another seam, or an undeclared module), or not a
+	// shape the drafts and links policy table names.
 	AuditActionKeyPathRefused = "key.path_refused"
+	// AuditActionKeyBranchRefused: a branch bound key named another branch
+	// in X-Branch-Id (ADR 0007 section 5.5).
+	AuditActionKeyBranchRefused = "key.branch_refused"
 )
 
 // keyIDContextKey and keyScopesContextKey carry the authenticated machine
@@ -476,12 +738,29 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 	// audit rows and any downstream writes attribute to it.
 	ctx := WithKeyID(r.Context(), principal.ID)
 
-	module, isModuleRoute := ModuleForPath(r.URL.Path)
-	if !isModuleRoute || ModuleScopePolicyFor(module) != ModuleScopeAllowed {
+	// The route class the whole method and path resolve to (ADR 0007 section
+	// 5.2): drafts and links delegate to their second segment, and any shape
+	// under them the policy table does not name fails closed here, so a
+	// later draft route cannot quietly fall into the draft write class.
+	scopeModule, class, isRoute := ScopeTarget(r.Method, r.URL.Path)
+	policyModule, _ := PolicyModuleForPath(r.Method, r.URL.Path)
+	if !isRoute || ModuleScopePolicyFor(policyModule) != ModuleScopeAllowed {
 		// Fail closed: a machine key is a principal on declared /api/v1
 		// module routes only. Public seams never reach here (the caller's
 		// public path check runs first); anything else is refused.
-		a.auditRefusal(ctx, principal.ID, AuditActionKeyPathRefused, "", r)
+		//
+		// A dirty spelling under a real module (a dot segment, a doubled
+		// slash) keeps the audit contract the module paths had before the
+		// scope table: the module is named and its policy admits keys, so
+		// the refusal is the scope one, with no scope named, because the
+		// request never named a clean route whose scope could be refused.
+		// The delegating segments (drafts, links) and every path outside
+		// the vocabulary stay path refusals.
+		if m, ok := ModuleForPath(r.URL.Path); ok && ModuleScopePolicyFor(m) == ModuleScopeAllowed {
+			a.auditRefusal(ctx, principal.ID, AuditActionKeyScopeRefused, "", r)
+		} else {
+			a.auditRefusal(ctx, principal.ID, AuditActionKeyPathRefused, "", r)
+		}
 		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine keys are accepted on module routes under /api/v1 only")
 		return
 	}
@@ -494,11 +773,37 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 		}
 	}
 
-	scope, ok := RequiredScopeForPath(r.Method, r.URL.Path)
-	if !ok || !scopeHeld(principal.Scopes, scope) {
-		a.auditRefusal(ctx, principal.ID, AuditActionKeyScopeRefused, scope, r)
-		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine key lacks required scope "+scope)
+	admitted := AdmittedScopes(scopeModule, class)
+	if !anyScopeHeld(principal.Scopes, admitted) {
+		// The refusal audit row records the first admitted scope as the
+		// refused one (ADR 0007 section 5.2).
+		refused := ""
+		if len(admitted) > 0 {
+			refused = admitted[0]
+		}
+		a.auditRefusal(ctx, principal.ID, AuditActionKeyScopeRefused, refused, r)
+		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine key lacks required scope "+refused)
 		return
+	}
+
+	// A branch bound key is pinned to its branch (ADR 0007 section 5.5): a
+	// request naming another branch in X-Branch-Id is refused with its audit
+	// row; every other request carries the pin, which the branch middleware
+	// (and, on routes without it, the context set here) turns into the
+	// request's branch context, so lists, reads, drafts, the feed and links
+	// see that branch only and a payload branch_id is held to it.
+	if principal.BranchID != nil {
+		if hdr := strings.TrimSpace(r.Header.Get("X-Branch-Id")); hdr != "" {
+			if named, err := uuid.Parse(hdr); err != nil || named != *principal.BranchID {
+				if ba, ok := a.auditor.(BranchRefusalAuditor); ok && ba != nil {
+					ba.AuditKeyBranchRefusal(ctx, principal.ID, *principal.BranchID, r.Method, r.URL.Path)
+				}
+				respondAuthError(w, r, http.StatusForbidden, "forbidden", "a branch bound key may name only its own branch in X-Branch-Id")
+				return
+			}
+		}
+		ctx = branchctx.WithKeyBranch(ctx, *principal.BranchID)
+		ctx = branchctx.With(ctx, &branchctx.Context{BranchID: principal.BranchID})
 	}
 
 	ctx = WithKeyScopes(ctx, principal.Scopes)
@@ -511,6 +816,17 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 func scopeHeld(scopes []string, want string) bool {
 	for _, s := range scopes {
 		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// anyScopeHeld is the class form of scopeHeld: a key reaches a route when it
+// holds any one of the scopes its class admits (ADR 0007 section 5.1).
+func anyScopeHeld(scopes, admitted []string) bool {
+	for _, want := range admitted {
+		if scopeHeld(scopes, want) {
 			return true
 		}
 	}

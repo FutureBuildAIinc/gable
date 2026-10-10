@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -718,39 +719,58 @@ func (s *Service) Create(ctx context.Context, d *Draft, actor string) (*Order, e
 			return nil, err
 		}
 	}
-	// The order's branch: the body's, the caller's context, then the
-	// deployment default (the same fallback the insert always gave raw
-	// writers). The tax resolver needs it before the write.
-	branchID, err := s.branchFor(ctx, d.BranchID)
-	if err != nil {
-		return nil, err
-	}
-	b, err := s.build(ctx, d, branchID, actor)
-	if err != nil {
-		return nil, err
-	}
 	var out *Order
-	err = s.inTx(ctx, func(ctx context.Context) error {
-		number, err := s.repo.NextNumber(ctx)
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		o, ev, err := s.createCore(ctx, d, actor)
 		if err != nil {
 			return err
 		}
-		b.order.Number = number
-		if err := s.writeLineAudits(ctx, b); err != nil {
-			return err
-		}
-		if err := s.repo.InsertOrder(ctx, &b.order); err != nil {
-			return err
-		}
-		if out, err = s.repo.GetOrder(ctx, b.order.ID); err != nil {
-			return err
-		}
-		return s.record(ctx, out, EventCreated, "")
+		out = o
+		return s.writeEvent(ctx, ev)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// createCore is Create's in-transaction core (ADR 0007 section 4.3): it
+// prices, taxes and stores the draft order and returns the order.created
+// event instead of writing it, so the caller writes it as its transaction's
+// last statement. The entity route writes it itself; a draft promotion
+// writes it beside draft.promoted.
+func (s *Service) createCore(ctx context.Context, d *Draft, actor string) (*Order, *outbox.Event, error) {
+	// The order's branch: the body's, the caller's context, then the
+	// deployment default (the same fallback the insert always gave raw
+	// writers). The tax resolver needs it before the write.
+	branchID, err := s.branchFor(ctx, d.BranchID)
+	if err != nil {
+		return nil, nil, err
+	}
+	b, err := s.build(ctx, d, branchID, actor)
+	if err != nil {
+		return nil, nil, err
+	}
+	number, err := s.repo.NextNumber(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	b.order.Number = number
+	if err := s.writeLineAudits(ctx, b); err != nil {
+		return nil, nil, err
+	}
+	if err := s.repo.InsertOrder(ctx, &b.order); err != nil {
+		return nil, nil, err
+	}
+	out, err := s.repo.GetOrder(ctx, b.order.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	ev, err := s.outboxEventFor(out, EventCreated, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, ev, nil
 }
 
 // branchFor resolves the order's branch: the body's, the caller's context,
@@ -783,54 +803,73 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
 	}
-	// An edit keeps the order's branch: read it first, so the rebuilt tax
-	// estimate resolves against the same branch.
-	cur, err := s.repo.GetOrder(ctx, id)
-	if err != nil {
-		return nil, notFound(err)
-	}
-	b, err := s.build(ctx, d, cur.BranchID, actor)
-	if err != nil {
-		return nil, err
-	}
 	var out *Order
-	err = s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.LockOrder(ctx, id); err != nil {
-			return notFound(err)
-		}
-		cur, err := s.repo.GetOrder(ctx, id)
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		o, ev, err := s.updateCore(ctx, id, d, pre, actor)
 		if err != nil {
-			return notFound(err)
-		}
-		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
-		if cur.Status != StatusDraft {
-			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
-				Message: "only draft orders can be edited",
-				Details: []httpx.FieldError{httpx.Blocker("order_not_draft", "the order is "+cur.Status.Status())}}
-		}
-		b.order.ID = cur.ID
-		b.order.Number = cur.Number
-		b.order.BranchID = cur.BranchID
-		b.order.QuoteID = cur.QuoteID
-		b.order.CreatedAt = cur.CreatedAt
-		b.order.Revision = cur.Revision
-		if err := s.writeLineAudits(ctx, b); err != nil {
-			return err
-		}
-		if err := s.repo.ReplaceDraft(ctx, &b.order); err != nil {
-			return err
-		}
-		if out, err = s.repo.GetOrder(ctx, id); err != nil {
-			return err
-		}
-		return s.record(ctx, out, EventUpdated, "")
+		out = o
+		return s.writeEvent(ctx, ev)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// updateCore is Update's in-transaction core (ADR 0007 section 4.3): it
+// locks the order row, checks the precondition and the draft status,
+// replaces the draft and returns the order.updated event instead of writing
+// it, so the caller writes it as its transaction's last statement. The
+// entity route writes it itself; an edit draft's promotion writes it beside
+// draft.promoted (unlike the quote, the order's update has an event).
+func (s *Service) updateCore(ctx context.Context, id uuid.UUID, d *Draft, pre Precondition, actor string) (*Order, *outbox.Event, error) {
+	// An edit keeps the order's branch: read it first, so the rebuilt tax
+	// estimate resolves against the same branch.
+	cur, err := s.repo.GetOrder(ctx, id)
+	if err != nil {
+		return nil, nil, notFound(err)
+	}
+	b, err := s.build(ctx, d, cur.BranchID, actor)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.repo.LockOrder(ctx, id); err != nil {
+		return nil, nil, notFound(err)
+	}
+	if cur, err = s.repo.GetOrder(ctx, id); err != nil {
+		return nil, nil, notFound(err)
+	}
+	if err := pre.check(cur.Revision); err != nil {
+		return nil, nil, err
+	}
+	if cur.Status != StatusDraft {
+		return nil, nil, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+			Message: "only draft orders can be edited",
+			Details: []httpx.FieldError{httpx.Blocker("order_not_draft", "the order is "+cur.Status.Status())}}
+	}
+	b.order.ID = cur.ID
+	b.order.Number = cur.Number
+	b.order.BranchID = cur.BranchID
+	b.order.QuoteID = cur.QuoteID
+	b.order.CreatedAt = cur.CreatedAt
+	b.order.Revision = cur.Revision
+	if err := s.writeLineAudits(ctx, b); err != nil {
+		return nil, nil, err
+	}
+	if err := s.repo.ReplaceDraft(ctx, &b.order); err != nil {
+		return nil, nil, err
+	}
+	out, err := s.repo.GetOrder(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	ev, err := s.outboxEventFor(out, EventUpdated, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, ev, nil
 }
 
 func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
@@ -839,6 +878,42 @@ func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
 		return nil, notFound(err)
 	}
 	return o, nil
+}
+
+// NumberPattern is the order's document number pattern, from the entity's
+// prefix and pad (ADR 0007 section 7): reads accept it in the {id} slot.
+var NumberPattern = regexp.MustCompile(`^SO-[0-9]{6,}$`)
+
+// ResolveRecordID parses a record URL's {id} slot: a UUID first, then the
+// entity's number pattern. A well formed number of another entity, or
+// anything else, is a 400 naming id; a value that names no visible row is
+// the caller's 404.
+func ResolveRecordID(raw string) (uuid.UUID, string, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		return id, "", nil
+	}
+	if NumberPattern.MatchString(raw) {
+		return uuid.Nil, raw, nil
+	}
+	return uuid.Nil, "", httpx.BadRequest("invalid order id",
+		httpx.FieldError{Field: "id", Message: "must be a UUID or an order number such as SO-000123"})
+}
+
+// GetOrderByIDOrNumber reads an order by its UUID or its document number
+// (section 7): both spellings answer exactly the same body, no redirect.
+func (s *Service) GetOrderByIDOrNumber(ctx context.Context, raw string) (*Order, error) {
+	id, number, err := ResolveRecordID(raw)
+	if err != nil {
+		return nil, err
+	}
+	if number != "" {
+		o, err := s.repo.GetOrderByNumber(ctx, number)
+		if err != nil {
+			return nil, notFound(err)
+		}
+		return o, nil
+	}
+	return s.GetOrder(ctx, id)
 }
 
 // ListOrders returns one page: up to f.Limit rows and whether more follow.
@@ -1408,10 +1483,20 @@ func conflictBlocker(code, message string) *httpx.Error {
 
 // record writes the order's event into the outbox through the transaction's
 // executor. fromStatus is set on a status change.
+// record writes the module's outbox event for a finished order. The cores
+// return the event instead (eventFor), so a caller inside another
+// transaction can order it among its own last statements.
 func (s *Service) record(ctx context.Context, o *Order, eventType, fromStatus string) error {
-	if s.events == nil {
-		return nil
+	ev, err := s.outboxEventFor(o, eventType, fromStatus)
+	if err != nil {
+		return err
 	}
+	return s.writeEvent(ctx, ev)
+}
+
+// outboxEventFor builds the module's outbox event for a finished order
+// without writing it.
+func (s *Service) outboxEventFor(o *Order, eventType, fromStatus string) (*outbox.Event, error) {
 	data := map[string]any{
 		"number":      o.Number,
 		"customer_id": o.CustomerID,
@@ -1425,12 +1510,20 @@ func (s *Service) record(ctx context.Context, o *Order, eventType, fromStatus st
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	branch := o.BranchID
-	return s.events.Write(ctx, outbox.Event{
+	return &outbox.Event{
 		Type: eventType, EntityType: "order", EntityID: o.ID, BranchID: &branch, Data: raw,
-	})
+	}, nil
+}
+
+// writeEvent writes one event when the recorder is wired.
+func (s *Service) writeEvent(ctx context.Context, ev *outbox.Event) error {
+	if s.events == nil || ev == nil {
+		return nil
+	}
+	return s.events.Write(ctx, *ev)
 }
 
 // CheckExposureGate reports whether the order is currently blocked by the
