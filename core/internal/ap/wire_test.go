@@ -1032,3 +1032,63 @@ func TestWire_Aging(t *testing.T) {
 		t.Errorf("the aging report does not list the fixture's vendor: %s", r.raw)
 	}
 }
+
+// RULE (review r3 P2-2): the in-process listing matching reads carries each
+// bill's own lines in position order, with and without the status filter. The
+// lines come from one second query keyed by the page's ids, so a mutant that
+// matches no line, or crosses lines between bills, fails here.
+func TestListVendorInvoices_EachBillCarriesItsOwnLines(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	enterLines := func(number string, descriptions ...string) (string, int64) {
+		t.Helper()
+		body := f.createBody(number, "1", 1000)
+		var lines []map[string]any
+		for _, d := range descriptions {
+			l := f.lineBody("1", 1000)
+			l["description"] = d
+			lines = append(lines, l)
+		}
+		body["lines"] = lines
+		r := f.do("POST", "/api/v1/ap/invoices", body)
+		if r.status != http.StatusCreated {
+			t.Fatalf("enter %s = %d: %s", number, r.status, r.raw)
+		}
+		return str(t, r.body, "id"), rev(t, r)
+	}
+	oneID, oneRev := enterLines("V-LF1", "one-a")
+	threeID, _ := enterLines("V-LF3", "three-a", "three-b", "three-c")
+	if r := f.approve(oneID, oneRev); r.status != http.StatusOK {
+		t.Fatalf("approve = %d: %s", r.status, r.raw)
+	}
+	if !f.balanced() || f.controlBalance() != f.openSum() {
+		t.Fatalf("after the approve: balanced %v, control %d, open %d", f.balanced(), f.controlBalance(), f.openSum())
+	}
+	want := map[string][]string{oneID: {"one-a"}, threeID: {"three-a", "three-b", "three-c"}}
+	check := func(label, status string, wantIDs ...string) {
+		t.Helper()
+		got, err := f.svc.ListVendorInvoices(t.Context(), &f.vendor, status)
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		if len(got) != len(wantIDs) {
+			t.Fatalf("%s: %d bills, want %d", label, len(got), len(wantIDs))
+		}
+		for _, inv := range got {
+			wantLines, ok := want[inv.ID.String()]
+			if !ok {
+				t.Fatalf("%s: unexpected bill %s", label, inv.ID)
+			}
+			var descs []string
+			for _, l := range inv.Lines {
+				descs = append(descs, l.Description)
+			}
+			if fmt.Sprint(descs) != fmt.Sprint(wantLines) {
+				t.Errorf("%s: bill %s carries lines %v, want %v", label, inv.ID, descs, wantLines)
+			}
+		}
+	}
+	check("every status", "", oneID, threeID)
+	check("approved only", "APPROVED", oneID)
+	check("pending only", "PENDING", threeID)
+}
