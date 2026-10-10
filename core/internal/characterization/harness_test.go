@@ -475,6 +475,7 @@ func seedVars(t *testing.T, dbURL string) map[string]string {
 	if vars["glAccount2"] == "" {
 		one("glAccount2", `SELECT id FROM gl_accounts ORDER BY code OFFSET 1 LIMIT 1`)
 	}
+	one("expenseAccount", `SELECT id FROM gl_accounts WHERE code = '5020'`)
 	one("vehicle", `SELECT id FROM vehicles WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("driver", `SELECT id FROM drivers WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("marketIndex", `SELECT id FROM market_indices WHERE index_code = 'RL_SPF_2X4'`)

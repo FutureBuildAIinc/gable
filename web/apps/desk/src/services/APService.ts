@@ -6,6 +6,7 @@ import type {
     APPayment,
     APAgingSummary,
     CreateVendorInvoiceRequest,
+    TransitionVendorInvoiceRequest,
     CreateAPPaymentRequest
 } from '../types/ap';
 import { fetchWithAuth } from './fetchClient';
@@ -19,14 +20,24 @@ export const APService = {
         return res.json();
     },
 
+    // The invoice list is the cursor envelope: walk every page so the page
+    // keeps one flat list, newest first.
     async listVendorInvoices(vendorId?: string, status?: string): Promise<VendorInvoice[]> {
-        const params = new URLSearchParams();
-        if (vendorId) params.set('vendor_id', vendorId);
-        if (status) params.set('status', status);
-        const qs = params.toString() ? `?${params.toString()}` : '';
-        const res = await fetchWithAuth(`${API}/api/v1/ap/invoices${qs}`);
-        if (!res.ok) throw new Error('Failed to fetch vendor invoices');
-        return res.json();
+        const out: VendorInvoice[] = [];
+        let cursor = '';
+        for (;;) {
+            const params = new URLSearchParams();
+            params.set('limit', '100');
+            if (vendorId) params.set('vendor_id', vendorId);
+            if (status) params.set('status', status);
+            if (cursor) params.set('cursor', cursor);
+            const res = await fetchWithAuth(`${API}/api/v1/ap/invoices?${params.toString()}`);
+            if (!res.ok) throw new Error('Failed to fetch vendor invoices');
+            const page = await res.json();
+            out.push(...(page.items ?? []));
+            if (!page.next_cursor) return out;
+            cursor = page.next_cursor;
+        }
     },
 
     async getVendorInvoice(id: string): Promise<VendorInvoice> {
@@ -45,9 +56,11 @@ export const APService = {
         return res.json();
     },
 
-    async approveVendorInvoice(id: string): Promise<VendorInvoice> {
-        const res = await fetchWithAuth(`${API}/api/v1/ap/invoices/${id}/approve`, {
-            method: 'POST'
+    async transitionVendorInvoice(id: string, req: TransitionVendorInvoiceRequest): Promise<VendorInvoice> {
+        const res = await fetchWithAuth(`${API}/api/v1/ap/invoices/${id}/transitions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(req),
         });
         if (!res.ok) throw new Error(await res.text());
         return res.json();

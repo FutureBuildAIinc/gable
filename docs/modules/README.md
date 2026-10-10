@@ -52,6 +52,7 @@ The pages:
 | Payments, deposits and AR | [payments.md](payments.md) | The payment, the application, the AR subledger, the aging, the statement, the reconciliation, the credit memo applications and refunds. | C2-4. |
 | Units | [units.md](units.md) | The unit catalogue, the conversion pair, the product unit set, the inexact refusal, the quote tally, the migration 099 report. | C3-2A-units. |
 | Charge codes | [charge-codes.md](charge-codes.md) | The fee master, the revenue account snapshot on a line, the seeded `FREIGHT`, `FUEL`, `RESTOCK`, `ADJUST`. | C2-2a. |
+| Accounts payable | [ap.md](ap.md) | The vendor bill, the approve and void transitions, the vendor payment, the AP aging by vendor, the GL postings (`2010` Accounts Payable, `1010` Cash) and the stated limits. | C4-1b. |
 | Locations and branches | [locations.md](locations.md) | The location and branch master, the branch tree, the user branch grants, and the branch wall on the by id reads and the location list. | C3-1. |
 | Drafts, links and confirm gated scopes | [drafts.md](drafts.md) | The proposed document, the SSE change feed, the promotion, the link resolver, the machine key scope grammar (read, write, propose, commit), the branch bound key, the confirm gate, and the audit rows. | C5-2a. |
 | Events feed | [events.md](events.md) | The `events_outbox` cursor read API (item R1-12), the `events.position` ordering guarantee, the `next_cursor` exception, the type filter, the event vocabulary by module on `refactor/v1`. | R1-12, R1-12b. |
@@ -79,7 +80,7 @@ The pages:
   pages here: `invoices`, `quotes`, `orders`, `customers`,
   `products`, `inventory`, `activities`, `ship-tos`, `contacts`,
   `payment-terms`, `price_levels`, `credit-memos`, `configurator`,
-  `millwork`, `payments`, `governance`, `apps`). The admin module
+  `millwork`, `payments`, `ap`, `governance`, `apps`). The admin module
   declares finer area scopes in `core/pkg/middleware/machinekey.go`
   (ADR 0009 section 1): `admin:settings` on
   `/api/v1/admin/settings/...`, `admin:staff` on
@@ -126,6 +127,6 @@ the page describes the wire rather than restating the SQL.
   dashboard, deliveries, invites, invoices, orders, quotes, users
   and the rest) sit under the `internal/portal` package in the
   route census.
-- The accounts, GL, AP, bank reconciliation, matching, purchase
+- The accounts, GL, bank reconciliation, matching, purchase
   order, deposit, document print, EDI, governance, accounting
   and AI surfaces, which are not in the brief's list.
