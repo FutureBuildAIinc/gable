@@ -80,12 +80,21 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			customerID = original.CustomerID
 		}
 	}
+	isWalkIn := false
 	if customerID == nil {
 		walkInID, _, err := s.repo.WalkInCustomer(ctx)
 		if err != nil {
 			return nil, err
 		}
 		customerID = &walkInID
+		isWalkIn = true
+	}
+	// The walk-in customer cannot hold account credit: as the sale side
+	// refuses an ACCOUNT tender for it, a return left on its account is
+	// refused the same way.
+	if isWalkIn && in.RefundMethod == RefundAccount {
+		return nil, conflict("walk_in_account",
+			"account credit needs a named customer: the walk-in customer is refunded from the drawer or to the card")
 	}
 	facts, err := s.repo.CustomerFacts(ctx, *customerID)
 	if err != nil {
