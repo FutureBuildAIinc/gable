@@ -268,7 +268,7 @@
     "name": "ar.aging.past_date",
     "request": {
       "method": "GET",
-      "path": "/api/v1/ar/aging?customer_id=<id-1>&as_of=<day-9778>"
+      "path": "/api/v1/ar/aging?customer_id=<id-1>&as_of=<day-3650>"
     },
     "response": {
       "status": 200,
@@ -505,7 +505,7 @@
     "name": "ar.statement.bad_range",
     "request": {
       "method": "GET",
-      "path": "/api/v1/ar/customers/<id-1>/statement?from=<day+1181>&to=<day+1180>"
+      "path": "/api/v1/ar/customers/<id-1>/statement?from=<day+1>&to=<day+0>"
     },
     "response": {
       "status": 400,
