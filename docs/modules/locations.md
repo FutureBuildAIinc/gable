@@ -376,10 +376,19 @@ before the switch is read, `BranchMiddleware` in
 see that branch only, a request naming another branch in
 `X-Branch-Id` is a 403 `forbidden` audited as `key.branch_refused`,
 and a body `parent_id` or path id of another branch is a 403. The
-routes that mount no branch middleware (`GET /api/v1/branches`, `GET
-/api/v1/branches/{id}`, `GET /api/v1/branches/{id}/users`, `GET
-/api/v1/users`) are not narrowed by the pin. An unbound key behaves
-as before.
+routes that mount no branch middleware are held to the pin by the
+key branch wall (`core/pkg/middleware/keybranch.go`, mounted through
+`WithKeyBranchWall`): a bound key writing another branch's location
+(`PUT` and `DELETE /api/v1/locations/{id}`), another branch itself
+(`PUT` and `DELETE /api/v1/branches/{id}`) or another branch in a
+grant body or path is a 403 `forbidden` naming the field, audited as
+`key.branch_refused`; its own branch passes; the directory create
+(`POST /api/v1/branches`) refuses a bound key outright;
+`GET /api/v1/branches/{id}/users` refuses it another branch and
+`GET /api/v1/users/{sub}/branches` answers only its branch for it.
+The branch directory reads (`GET /api/v1/branches`, `GET
+/api/v1/branches/{id}`) stay reference data, unwalled by the PR 39
+decision, a stated limit. An unbound key behaves as before.
 
 ## ADRs that govern this module
 

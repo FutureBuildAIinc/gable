@@ -684,6 +684,13 @@ null branch is today's behaviour. A bound key:
   `payload.branch_id`, by the branch rule of section 2.3, on draft routes
   and on the module's own create alike (PR 37's guard).
 
+A route that mounts no branch middleware is held to the pin the same way by
+the key branch wall (`pkg/middleware/keybranch.go`): a branch a request
+names in a path or body, or the branch of a row a path names, is compared to
+the pin and another branch is the same 403 with the same `key.branch_refused`
+row, while the branch directory's create and the dealer wide routes (the
+exposure scan) refuse a bound key outright, being outside every pin.
+
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A
 dealer that needs a key for two branches mints two.
