@@ -497,14 +497,25 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
 				return err
 			}
+			// The remainders and the totals, restated under the claim's lock
+			// (seventh review P2-1): the terminal is asked for the figure the
+			// lock sees, and the money transaction compares its own restated
+			// total with that claim below.
+			if err := applyRemainders(ctx); err != nil {
+				return err
+			}
+			if err := resolveMoney(ctx); err != nil {
+				return err
+			}
 			if err := s.checkCardClaim(ctx, held.ID, target.ID, -total, cardTenderCap); err != nil {
 				return err
 			}
+			cardIntent.AmountCents = -total
 			return s.repo.InsertRefundIntent(ctx, *cardIntent)
 		}); err != nil {
 			return nil, err
 		}
-		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, -total)
+		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, cardIntent.AmountCents)
 		if err != nil {
 			s.failRefundIntent(ctx, *cardIntent)
 			return nil, fmt.Errorf("card refund failed: %w", err)
@@ -515,7 +526,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		gatewayTxID := *target.GatewayTxID
 		refundTaken = &gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
-			amountCents: -total, tenderID: target.ID, act: "return", entity: *in.OriginalSaleID, actor: actor}
+			amountCents: cardIntent.AmountCents, tenderID: target.ID, act: "return", entity: *in.OriginalSaleID, actor: actor}
 		// the refund row names the tender's own gateway transaction, so the
 		// money is reconcilable against the charge it came from
 		in.GatewayTxID = gatewayTxID
@@ -540,6 +551,19 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if sale.Status != StatusCompleted {
 				return httpx.InvalidStateTransition(
 					fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", sale.Status.Status()))
+			}
+			// A cash return of a sale whose card refund claim still stands is
+			// refused (eighth review P2-1): the claim may already have taken
+			// the terminal's money, and the drawer must not pay the same
+			// goods a second time. Under the sale row lock, before any money
+			// of this return moves.
+			if in.RefundMethod == RefundCash {
+				if pending, err := s.repo.SaleHasPendingRefundIntent(ctx, sale.ID); err != nil {
+					return err
+				} else if pending {
+					return conflict("refund_in_flight",
+						"a card refund of this sale is still in flight: settle it before paying cash back from the drawer")
+				}
 			}
 			// The cap, rechecked under the lock: a return that raced this one
 			// for the same line is counted before this one is allowed.
@@ -605,12 +629,30 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			return conflict("no_open_session",
 				"a cash return pays out of the drawer: open the till session before refunding cash")
 		}
-		// The card cap, rechecked under the sale row lock (sixth review
-		// P2-1): the refund the gateway already took is bounded by what the
-		// tender kept less every card refund the sale's returns committed.
-		// A refusal here leaves the claim standing and the refund recorded,
-		// and the claim completes with the posting below it.
+		// The claim's rules, rechecked under the sale row lock as the refund
+		// posts (seventh review P2-1): the intent table is the authority. The
+		// books take exactly what the terminal took: a restated total that
+		// differs from the claimed amount refuses, the intent stays PENDING
+		// beside the orphan row that records the gateway's figure, and the
+		// books never record a cent less than the terminal moved.
 		if in.RefundMethod == RefundCard && cardIntent != nil && refundTaken != nil {
+			facts, err := s.repo.RefundIntentFacts(ctx, cardIntent.SaleID, cardIntent.TenderID)
+			if err != nil {
+				return err
+			}
+			if facts.DoneVoid {
+				return conflict("tender_refunded",
+					"the card tender was already refunded whole by this sale's void: no second refund of it can be made")
+			}
+			if held := facts.PendingCents - cardIntent.AmountCents; held != 0 {
+				return conflict("refund_in_flight",
+					"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
+			}
+			if -total != refundTaken.amountCents {
+				return conflict("refund_amount_changed",
+					fmt.Sprintf("the terminal refunded %d cents but the return restates to %d under the lock: the intent stands beside the orphan row until it is reconciled",
+						refundTaken.amountCents, -total))
+			}
 			already, err := s.repo.CardRefundedCents(ctx, cardIntent.SaleID)
 			if err != nil {
 				return err
