@@ -724,6 +724,128 @@ func TestRoute_NullVehicleAndDriverServeNull(t *testing.T) {
 	}
 }
 
+// RULE (PR 70 review round 6 P3-3): a route with no vehicle or no
+// driver cannot be dispatched (the legacy row's nullable vehicle_id or
+// driver_id reaches the read through routeFrom's LEFT JOIN, so such a
+// route is visible on the board and its single read returns null in
+// those fields; but the dispatch needs the fleet). The refusal answers
+// 409 invalid_state_transition with a blocker naming the missing field
+// (vehicle_id or driver_id); the assign onto the same route stays
+// allowed so a stop can still be added before the fleet is filled in.
+// The test seeds three routes (no vehicle, no driver, neither), asserts
+// each dispatch answers 409 with the right blocker, then asserts an
+// assign onto each route answers 201.
+func TestRoute_DispatchRefusedWithoutVehicleOrDriver(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	var customer uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1, $2, $3, $4) RETURNING id`,
+		uuid.New(), "Null dispatch co", "NDSP-"+uuid.NewString()[:8], f.branch).Scan(&customer); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customer_branches WHERE customer_id = $1`, customer)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customers WHERE id = $1`, customer)
+	})
+
+	var order uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, number)
+		VALUES ($1, $2, $3, 'CONFIRMED', 10, 'DELIVERY', 'USD', $4) RETURNING id`,
+		uuid.New(), customer, f.branch, "SO-"+strings.ToUpper(uuid.NewString()[:8])).Scan(&order); err != nil {
+		t.Fatal(err)
+	}
+
+	vehicleID := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO vehicles (id, name, vehicle_type, license_plate) VALUES ($1, $2, 'VAN', $3)`,
+		vehicleID, "NDSP truck", "NDSP-V-"+vehicleID.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM vehicles WHERE id = $1`, vehicleID) })
+	driverID := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO drivers (id, name, license_number) VALUES ($1, $2, $3)`,
+		driverID, "NDSP driver", "NDSP-D-"+driverID.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM drivers WHERE id = $1`, driverID) })
+
+	mkRoute := func(label string) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		var err error
+		switch label {
+		case "no_vehicle":
+			err = f.db.Pool.QueryRow(ctx, `
+				INSERT INTO delivery_routes (id, driver_id, scheduled_date, status)
+				VALUES ($1, $2, '2030-09-02', 'DRAFT') RETURNING id`,
+				uuid.New(), driverID).Scan(&id)
+		case "no_driver":
+			err = f.db.Pool.QueryRow(ctx, `
+				INSERT INTO delivery_routes (id, vehicle_id, scheduled_date, status)
+				VALUES ($1, $2, '2030-09-02', 'DRAFT') RETURNING id`,
+				uuid.New(), vehicleID).Scan(&id)
+		default:
+			err = f.db.Pool.QueryRow(ctx, `
+				INSERT INTO delivery_routes (id, scheduled_date, status)
+				VALUES ($1, '2030-09-02', 'DRAFT') RETURNING id`,
+				uuid.New()).Scan(&id)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM delivery_routes WHERE id = $1`, id) })
+		return id
+	}
+
+	cases := []struct {
+		label  string
+		route  uuid.UUID
+		field  string
+		reason string
+	}{
+		{"no_vehicle", mkRoute("no_vehicle"), "vehicle_id", "the route holds no vehicle and a dispatch needs one"},
+		{"no_driver", mkRoute("no_driver"), "driver_id", "the route holds no driver and a dispatch needs one"},
+		{"bare", mkRoute("none"), "vehicle_id", "the route holds no vehicle and a dispatch needs one"},
+	}
+	for _, c := range cases {
+		res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+c.route.String()+"/transitions",
+			`{"to":"in_transit"}`, map[string]string{"If-Match": `"1"`})
+		if res.status != http.StatusConflict {
+			t.Errorf("%s dispatch = %d %s, want 409", c.label, res.status, res.raw)
+			continue
+		}
+		if got := f.errCode(t, res); got != "invalid_state_transition" {
+			t.Errorf("%s dispatch code = %s, want invalid_state_transition", c.label, got)
+		}
+		env := res.body["error"].(map[string]any)
+		details := env["details"].([]any)
+		var found bool
+		for _, d := range details {
+			if m, ok := d.(map[string]any); ok {
+				if m["code"] == c.field {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s dispatch blockers = %v, want a blocker with code %s", c.label, details, c.field)
+		}
+		// The assign onto the same route still answers 201: a stop
+		// can be added before the fleet is filled in.
+		asg := f.assignOrder(t, c.route, order, nil)
+		if asg.status != http.StatusCreated {
+			t.Errorf("%s assign = %d %s, want 201 (the assign stays allowed)", c.label, asg.status, asg.raw)
+		}
+	}
+}
+
 // The route lifecycle through the transitions route (the dispatch and
 // complete action routes are gone): 428 without a revision, the wrong edge
 // a 409 invalid_state_transition with its blocker, and the events in order.

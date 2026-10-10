@@ -587,6 +587,22 @@ func (s *Service) TransitionRoute(ctx context.Context, id uuid.UUID, d *RouteTra
 				return httpx.InvalidStateTransition("cannot dispatch a route in status "+string(cur.Status),
 					httpx.Blocker("invalid_state", "only a draft or scheduled route can be dispatched"))
 			}
+			// RULE (PR 70 review round 6 P3-3): a route with no vehicle or
+			// no driver cannot be dispatched (PR 70 review round 6 P3-3).
+			// The route's nullable vehicle_id and driver_id serve null on
+			// the wire (the LEFT JOIN routeFrom carries), so a legacy row
+			// with neither id null is reachable but has no fleet to
+			// dispatch. The refusal names the missing field; the assign
+			// path stays allowed so a stop can still be added before the
+			// fleet is filled in.
+			if cur.VehicleID == nil {
+				return httpx.InvalidStateTransition("cannot dispatch a route with no vehicle",
+					httpx.Blocker("vehicle_id", "the route holds no vehicle and a dispatch needs one"))
+			}
+			if cur.DriverID == nil {
+				return httpx.InvalidStateTransition("cannot dispatch a route with no driver",
+					httpx.Blocker("driver_id", "the route holds no driver and a dispatch needs one"))
+			}
 			event = EventRouteInTransit
 		case RouteStatusCompleted:
 			// The completion gates on every stop being terminal. The read
