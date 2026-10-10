@@ -566,6 +566,9 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 	})
 	for _, a := range apps {
 		inv := r.invoices[a.InvoiceID]
+		if inv.Status == invVoid {
+			return conflict("invoice_void", "invoice "+inv.Number+" is void: reversing this application would reopen it")
+		}
 		var rev *uuid.UUID
 		var err error
 		switch a.Kind {

@@ -564,6 +564,28 @@ func TestARApplicationReversedAlone(t *testing.T) {
 	w.assertInvariants("after the refused reversal")
 }
 
+// A void invoice that still carries a live application (a state a migration
+// once left) is not reopened by reversing it: the refusal is a 409, not a
+// failed update of the void columns.
+func TestARReversalNeverReopensAVoidInvoice(t *testing.T) {
+	w := newARWorld(t)
+	inv := w.invoice(8000, daysFromNow(-20))
+	w.payment(3000, daysFromNow(-10), "CASH", account.ApplyLine{InvoiceID: inv.ID, AmountCents: 3000})
+	app := w.appID(inv.ID, "PAYMENT")
+	w.exec(`UPDATE invoices SET status = 'VOID', voided_at = NOW(), voided_on = CURRENT_DATE, amount_open = 0 WHERE id = $1`, inv.ID)
+
+	_, err := w.act("reverse onto a void invoice", func(ctx context.Context) (*account.Effects, error) {
+		return w.svc.Reverse(ctx, account.ReverseIn{ApplicationID: app, Reason: "wrong", Actor: "u-finance", On: daysFromNow(0)})
+	})
+	var he *httpx.Error
+	if !errors.As(err, &he) || he.Status != 409 || len(he.Details) == 0 || he.Details[0].Code != "invoice_void" {
+		t.Fatalf("reversal onto a void invoice = %v, want a 409 with the invoice_void blocker", err)
+	}
+	if n := w.queryInt(`SELECT count(*) FROM ar_applications WHERE id = $1 AND reversed_at IS NULL`, app); n != 1 {
+		t.Error("the refused reversal changed the application")
+	}
+}
+
 // EXIT LINE: AR aging splits by job and ship-to, unapplied cash on its job's
 // row, and ties to the 1020 and 2200 balances.
 func TestARAgingByJobAndShipTo(t *testing.T) {
