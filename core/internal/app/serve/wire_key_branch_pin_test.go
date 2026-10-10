@@ -26,24 +26,35 @@ import (
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/bankrecon"
+	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/delivery"
+	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
+	"github.com/gablelbm/gable/internal/governance"
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/matching"
+	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/internal/unit"
+	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -106,6 +117,12 @@ var pinKeyScopes = []string{
 	"gl:read", "gl:write", "ap:read", "ap:write", "bankrecon:read", "bankrecon:write", "sales-team:read",
 	"market-indices:read", "market-indices:write", "tax:read", "tax:write", "pricing:read", "pricing:write",
 	"pos:read", "pos:write", "accounts:read", "ar:read",
+	"products:read", "products:write", "charge-codes:read", "charge-codes:write",
+	"payment-terms:read", "payment-terms:write", "purchase-orders:read", "purchase-orders:write",
+	"edi:read", "edi:write", "vendors:read", "vendors:write", "units:read", "units:write",
+	"millwork:read", "millwork:write", "governance:read", "governance:write",
+	"matching:read", "matching:write", "delivery:read", "delivery:write",
+	"apps:read", "apps:write", "admin:settings", "admin:modules",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -374,7 +391,51 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithAuditLog(audit.NewLogger(db))
 	pos.NewHandler(posSvc).RegisterRoutes(mux, wall.scoped("admin", "owner", "cashier"))
 
+	// The dealer wide catalogue and configuration modules exactly as serve
+	// registers them: products, PIM, the unit catalogue, the payment terms on
+	// the customer handler, vendors, EDI partners, charge codes, rebate
+	// programs, market indices, millwork, governance, the delivery fleet, the
+	// matching config, the techadmin settings and app switches, and the
+	// purchase orders (the reorder refresh among them).
+	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
+	pim.NewHandler(pim.NewService(pim.NewRepository(db), productSvc)).RegisterRoutes(mux, wall.scoped("admin", "owner"))
+	unit.NewHandler(unit.NewService(unit.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
+			middleware.RequireRole("admin", "owner"))
+	wall.customers(mux, customerSvc.WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
+	vendor.NewHandler(vendor.NewService(vendor.NewRepository(db))).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "purchasing"))
+	edi.NewEDIHandler(edi.NewEDIRepository(db), edi.NewBuyingGroupService(slog.Default()), edi.NewService("", slog.Default())).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
+	pricing.NewRebateHandler(pricing.NewRebateService(pricing.NewRebateRepository(db))).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	pricing.NewEscalatorHandler(pricing.NewEscalatorService(pricing.NewEscalatorRepository(db))).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	millwork.NewHandler(millwork.NewService(millwork.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db))).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	governance.NewHandler(governance.NewService(governance.NewRepository(db), governance.NewTemplateAIProvider()).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAuditLog(audit.NewLogger(db))).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.delivery(mux, delivery.NewHandler(delivery.NewService(delivery.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithAudit(audit.NewLogger(db))),
+		"admin", "owner", "warehouse", "driver")
+	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), nil, nil, slog.Default()))
+	apps.NewHandler(apps.NewRegistry(db, slog.Default()).WithAudit(audit.NewLogger(db))).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	poProductSvc := product.NewService(product.NewRepository(db))
+	poRecSvc := purchase_order.NewRecommendationService(purchase_order.NewRepository(db),
+		inventory.NewService(inventory.NewRepository(db)), poProductSvc,
+		vendor.NewService(vendor.NewRepository(db))).
+		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
+	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, poProductSvc, nil).
+		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
+	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
+
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
+	techadmin.NewHandler(keys).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	mint := func(name string, branch *uuid.UUID) string {
 		t.Helper()
 		raw, _, err := keys.GenerateKey(ctx, name, pinKeyScopes, branch)

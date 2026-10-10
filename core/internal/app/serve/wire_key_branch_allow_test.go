@@ -281,19 +281,20 @@ func TestKeyBranchPin_StatedLimits(t *testing.T) {
 	f.parity(t, "GET", "/api/v1/branches", "")
 	f.parity(t, "GET", "/api/v1/branches/"+B, "")
 
-	// The index metadata write and the history read are dealer wide reference
-	// data: the bound key meets the module's own answer, never a refusal.
-	for _, c := range []struct{ method, path string }{
-		{"PUT", "/api/v1/market-indices/" + idx},
-		{"GET", "/api/v1/market-indices/" + idx + "/history"},
+	// The index history read stays dealer wide reference data; the index
+	// metadata write is refused with every other stated limit write (the
+	// stated limit split: it feeds every branch's escalators).
+	f.refuseForeign(t, "PUT", "/api/v1/market-indices/"+idx, `{"name":"pin"}`, nil)
+	for _, path := range []string{
+		"/api/v1/market-indices/" + idx + "/history",
 	} {
-		sb, bb := f.key(t, f.bound, c.method, c.path, "", nil)
-		sk, _ := f.key(t, f.unbound, c.method, c.path, "", nil)
+		sb, bb := f.key(t, f.bound, "GET", path, "", nil)
+		sk, _ := f.key(t, f.unbound, "GET", path, "", nil)
 		if sb == http.StatusForbidden {
-			t.Errorf("bound key %s %s: refused %s, want the module's own answer", c.method, c.path, bb)
+			t.Errorf("bound key GET %s: refused %s, want the module's own answer", path, bb)
 		}
 		if sb != sk {
-			t.Errorf("%s %s: bound %d, unbound %d, want the same answer", c.method, c.path, sb, sk)
+			t.Errorf("GET %s: bound %d, unbound %d, want the same answer", path, sb, sk)
 		}
 	}
 }
@@ -463,4 +464,125 @@ func allowlistWant(refused bool) string {
 		return "403 (the allowlist refuses it)"
 	}
 	return "200 (the stub answers)"
+}
+
+// TestKeyBranchPin_StatedLimitWritesRefused holds the stated limit split (the
+// lead's ruling on item 37, with item 38 and PD-3): a branch bound key reads
+// the dealer wide reference data and is refused every write on it, each
+// family named, with its audit row, while the unbound key keeps the write
+// (never the gate's 403; the module's own answer). The driver routes are
+// refused reads included (PD-3: personal data, no branch column); the vehicle
+// reads stay stated limits.
+func TestKeyBranchPin_StatedLimitWritesRefused(t *testing.T) {
+	f := newKeyPinFixture(t)
+	idx, prod := uuid.NewString(), f.posProd.String()
+	drv, veh, partner, rfc, cat := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	for _, c := range []struct{ method, path, body string }{
+		{"PUT", "/api/v1/admin/settings/ai", `{"provider":"avalara"}`},
+		{"DELETE", "/api/v1/admin/settings/ai", ""},
+		{"PUT", "/api/v1/admin/settings/routing", `{"provider":"avalara"}`},
+		{"DELETE", "/api/v1/admin/settings/routing", ""},
+		{"PUT", "/api/v1/admin/modules/" + uuid.NewString(), `{"is_enabled":false}`},
+		{"POST", "/api/v1/apps/millwork/disable", ""},
+		{"POST", "/api/v1/apps/millwork/enable", ""},
+		{"PUT", "/api/v1/matching/config", `{"price_tolerance_pct":"1"}`},
+		{"POST", "/api/v1/edi/partners", `{"partner_id":"PIN-EDI","name":"pin"}`},
+		{"PUT", "/api/v1/edi/partners/" + partner, `{"name":"pin"}`},
+		{"DELETE", "/api/v1/edi/partners/" + partner, ""},
+		{"POST", "/api/v1/edi/partners/" + partner + "/import-catalog", `{}`},
+		{"POST", "/api/v1/vendors", `{"name":"pin vendor","email":"pin@example.com"}`},
+		{"POST", "/api/v1/units", `{"code":"PIN","name":"pin unit"}`},
+		{"PUT", "/api/v1/units/PIN", `{"name":"pin unit"}`},
+		{"POST", "/api/v1/pricing/categories", `{"name":"pin cat","slug":"pin-cat"}`},
+		{"PUT", "/api/v1/pricing/categories/" + cat, `{"name":"pin cat"}`},
+		{"POST", "/api/v1/pricing/rebates/programs", `{"name":"pin rebate"}`},
+		{"POST", "/api/v1/millwork/options", `{"name":"pin option"}`},
+		{"POST", "/api/v1/governance/rfcs", `{"title":"pin rfc"}`},
+		{"PUT", "/api/v1/governance/rfcs/" + rfc, `{"title":"pin rfc"}`},
+		{"POST", "/api/v1/governance/rfcs/" + rfc + "/transitions", `{"transition":"review"}`},
+		{"PUT", "/api/v1/market-indices/" + idx, `{"name":"pin index"}`},
+		{"POST", "/api/v1/delivery/drivers", `{"name":"pin driver","license_number":"PIN-1"}`},
+		{"GET", "/api/v1/delivery/drivers", ""},
+		{"GET", "/api/v1/delivery/drivers/" + drv, ""},
+		{"PUT", "/api/v1/delivery/drivers/" + drv, `{"name":"pin driver"}`},
+		{"DELETE", "/api/v1/delivery/drivers/" + drv, ""},
+		{"POST", "/api/v1/delivery/drivers/" + drv + "/photo", ``},
+		{"POST", "/api/v1/delivery/vehicles", `{"name":"pin truck","license_plate":"PIN-1"}`},
+		{"PUT", "/api/v1/delivery/vehicles/" + veh, `{"name":"pin truck"}`},
+		{"POST", "/api/v1/delivery/vehicles/" + veh + "/photo", ``},
+		{"DELETE", "/api/v1/delivery/vehicles/" + veh, ""},
+		{"POST", "/api/v1/products", `{"sku":"PIN-PROD-1","description":"pin"}`},
+		{"PATCH", "/api/v1/products/" + prod + "/dimensions", `{}`},
+		{"PATCH", "/api/v1/products/" + prod + "/lead-time", `{"lead_time_days":2,"revision":1}`},
+		{"PUT", "/api/v1/products/" + prod + "/kit-components", `[]`},
+		{"PUT", "/api/v1/products/" + prod + "/units", `[]`},
+		{"PUT", "/api/v1/products/" + prod + "/pim/content", `{"description":"pin"}`},
+		{"DELETE", "/api/v1/products/" + prod + "/pim/collateral/" + uuid.NewString(), ""},
+		{"DELETE", "/api/v1/products/" + prod + "/pim/media/" + uuid.NewString(), ""},
+		{"PATCH", "/api/v1/products/" + prod + "/pim/media/" + uuid.NewString() + "/primary", ``},
+		{"POST", "/api/v1/products/" + prod + "/pim/generate/collateral", `{}`},
+		{"POST", "/api/v1/products/" + prod + "/pim/generate/descriptions", `{}`},
+		{"POST", "/api/v1/products/" + prod + "/pim/generate/image", `{}`},
+		{"POST", "/api/v1/products/" + prod + "/pim/generate/seo", `{}`},
+		{"POST", "/api/v1/charge-codes", `{"code":"PIN-CC","description":"pin"}`},
+		{"PUT", "/api/v1/charge-codes/" + uuid.NewString(), `{"code":"PIN-CC"}`},
+		{"POST", "/api/v1/payment-terms", `{"kind":"net_days","days":30}`},
+		{"PUT", "/api/v1/payment-terms/" + uuid.NewString(), `{"kind":"net_days","days":30}`},
+		{"POST", "/api/v1/purchase-orders/refresh-reorder-targets", `{"dry_run":false}`},
+	} {
+		f.refuseForeign(t, c.method, c.path, c.body, nil)
+		if sk, _ := f.key(t, f.unbound, c.method, c.path, c.body, nil); sk == http.StatusForbidden {
+			t.Errorf("unbound key %s %s: the gate's 403, want the module's own answer", c.method, c.path)
+		}
+	}
+
+	// The written families prove nothing landed from the refused leg: the
+	// bound key's margin attempt leaves the product's target margin where it
+	// was, and the unbound key's same write sets it (the round 5 probe, both
+	// ways, with the revision the write demands).
+	var margin float64
+	var revision int64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(target_margin, 0), revision FROM products WHERE id = $1`, f.posProd).
+		Scan(&margin, &revision); err != nil {
+		t.Fatal(err)
+	}
+	f.refuseForeign(t, "PATCH", "/api/v1/products/"+prod+"/margins",
+		fmt.Sprintf(`{"target_margin":0.5,"revision":%d}`, revision), nil)
+	var after float64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(target_margin, 0) FROM products WHERE id = $1`, f.posProd).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != margin {
+		t.Errorf("refused margins write moved the dealer wide target margin %v to %v", margin, after)
+	}
+	if sk, buf := f.key(t, f.unbound, "PATCH", "/api/v1/products/"+prod+"/margins",
+		fmt.Sprintf(`{"target_margin":0.5,"revision":%d}`, revision), nil); sk != http.StatusOK {
+		t.Errorf("unbound margins write: %d %s, want 200", sk, buf)
+	}
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(target_margin, 0) FROM products WHERE id = $1`, f.posProd).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != 0.5 {
+		t.Errorf("unbound margins write left target margin %v, want 0.5", after)
+	}
+
+	// The reads that stay stated limits answer the bound key as everyone
+	// else: the catalogue, the charge codes, the payment terms and the
+	// vehicle list.
+	for _, path := range []string{
+		"/api/v1/products", "/api/v1/products/" + prod,
+		"/api/v1/charge-codes", "/api/v1/payment-terms", "/api/v1/delivery/vehicles",
+	} {
+		sb, bb := f.key(t, f.bound, "GET", path, "", nil)
+		sk, _ := f.key(t, f.unbound, "GET", path, "", nil)
+		if sb == http.StatusForbidden {
+			t.Errorf("bound key GET %s: refused %s, want the stated limit read", path, bb)
+		}
+		if sb != sk {
+			t.Errorf("GET %s: bound %d, unbound %d, want the same answer", path, sb, sk)
+		}
+	}
 }
