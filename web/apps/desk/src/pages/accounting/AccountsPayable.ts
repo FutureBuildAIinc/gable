@@ -316,8 +316,8 @@ export class AccountsPayable extends LitElement {
         try {
             await APService.transitionVendorInvoice(invoice.id, { to: 'approved', revision: invoice.revision });
             ToastService.show('Vendor invoice approved and posted to General Ledger', 'success');
-            if (this.selectedInvoice && this.selectedInvoice.id === invoiceId) {
-                this.selectedInvoice = await APService.getVendorInvoice(invoiceId);
+            if (this.selectedInvoice && this.selectedInvoice.id === invoice.id) {
+                this.selectedInvoice = await APService.getVendorInvoice(invoice.id);
             }
             await this._loadAllData();
         } catch (err) {
