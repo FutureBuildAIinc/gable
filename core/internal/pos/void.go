@@ -19,10 +19,12 @@ import (
 // VoidSale voids a completed counter sale while its till session is open,
 // in ONE transaction in section 11's order (the sale, its payments, its
 // invoice): each cash or check payment voided; each card payment, whose
-// gateway refund is made before the transaction (as every gateway call is),
-// has its application reversed and the amount recorded as a refund from its
-// unapplied cash; then the invoice void, and the stock returns. After the
-// session closes it is a return (ADR 0005 section 14.2 C2-5).
+// gateway refund is made inside the transaction under the sale row lock
+// (every guard has passed there, and a second void of the same sale blocks
+// on the row and never reaches the gateway), has its application reversed
+// and the amount recorded as a refund from its unapplied cash; then the
+// invoice void, and the stock returns. After the session closes it is a
+// return (ADR 0005 section 14.2 C2-5).
 func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64, reason, actor string) (*Sale, error) {
 	if s.ar == nil || s.inventory == nil {
 		return nil, errNotConfigured
@@ -63,39 +65,12 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	if err := httpx.CheckRevision(pre.Revision, ifMatch, bodyRevision); err != nil {
 		return nil, err
 	}
-	tenders, err := s.repo.GetTenders(ctx, saleID)
-	if err != nil {
-		return nil, err
-	}
-	// Card refunds go through the gateway before the transaction, so a
-	// decline aborts with nothing persisted (as every gateway call is).
-	var refunds []gatewayRefund
-	for i := range tenders {
-		t := &tenders[i]
-		if t.Method != TenderCard || t.PaymentID == nil {
-			continue
-		}
-		var gatewayTxID string
-		if t.GatewayTxID != nil {
-			gatewayTxID = *t.GatewayTxID
-		}
-		if gatewayTxID == "" {
-			continue
-		}
-		if s.gateway == nil {
-			return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card tender")
-		}
-		res, err := s.gateway.Refund(ctx, gatewayTxID, int64(t.AmountCents))
-		if err != nil {
-			return nil, fmt.Errorf("card refund failed: %w", err)
-		}
-		if res.Status != payment.GatewayStatusRefunded && res.Status != payment.GatewayStatusApproved {
-			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
-		}
-		refunds = append(refunds, gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
-			amountCents: int64(t.AmountCents), act: "void", entity: saleID, actor: actor})
-	}
 	var out *Sale
+	// refunds collects each gateway refund the transaction takes: a refusal
+	// after a refund (a failed step, or a failed later refund of a split
+	// card tender) records every refund already made in committed rows of
+	// its own (fourth review P1-4).
+	var refunds []gatewayRefund
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		// Step 1: the sale row.
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
@@ -146,6 +121,41 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		if err != nil {
 			return err
 		}
+		// The card refunds, inside the transaction and UNDER THE SALE ROW
+		// LOCK, after every guard (third review P2-2, fourth review P2-3):
+		// every guard has passed under the lock, and a second void of the
+		// same sale blocks on the same row until this one commits, then sees
+		// the sale voided and refuses without ever reaching the gateway, so
+		// concurrent voids make exactly one refund. A decline still aborts
+		// with nothing persisted (the transaction rolls back); a refund a
+		// later step refuses, or a later refund of a split card tender that
+		// fails, leaves the refunds already made recorded in committed rows
+		// of their own.
+		for i := range tenders {
+			t := &tenders[i]
+			if t.Method != TenderCard || t.PaymentID == nil {
+				continue
+			}
+			var gatewayTxID string
+			if t.GatewayTxID != nil {
+				gatewayTxID = *t.GatewayTxID
+			}
+			if gatewayTxID == "" {
+				continue
+			}
+			if s.gateway == nil {
+				return conflict("card_terminal", "this register has no card terminal gateway to refund the card tender")
+			}
+			res, err := s.gateway.Refund(ctx, gatewayTxID, int64(t.AmountCents))
+			if err != nil {
+				return fmt.Errorf("card refund failed: %w", err)
+			}
+			if res.Status != payment.GatewayStatusRefunded && res.Status != payment.GatewayStatusApproved {
+				return conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
+			}
+			refunds = append(refunds, gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
+				amountCents: int64(t.AmountCents), act: "void", entity: saleID, actor: actor})
+		}
 		date, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
 		if err != nil {
 			return err
@@ -169,8 +179,12 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 				}
 				mergeEffects(&fxAll, fx)
 			case TenderCard:
+				applicationID, err := cardApplicationOf(ctx, s, *t.PaymentID)
+				if err != nil {
+					return err
+				}
 				fx, err := s.ar.Reverse(ctx, account.ReverseIn{
-					ApplicationID: cardApplicationOf(ctx, s, *t.PaymentID), Reason: reason, Actor: actor, On: date})
+					ApplicationID: applicationID, Reason: reason, Actor: actor, On: date})
 				if err != nil {
 					return err
 				}
@@ -270,14 +284,16 @@ func tendersInIDOrder(tenders []Tender) []Tender {
 	return out
 }
 
-// cardApplicationOf finds the payment's live application on the invoice.
-func cardApplicationOf(ctx context.Context, s *Service, paymentID uuid.UUID) uuid.UUID {
+// cardApplicationOf finds the payment's live application on the invoice. A
+// read failure is returned, never swallowed into a nil id that would
+// surface as a confusing Reverse refusal.
+func cardApplicationOf(ctx context.Context, s *Service, paymentID uuid.UUID) (uuid.UUID, error) {
 	var id uuid.UUID
 	err := s.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT id FROM ar_applications WHERE payment_id = $1 AND reversed_at IS NULL ORDER BY created_at, id LIMIT 1`,
 		paymentID).Scan(&id)
 	if err != nil {
-		return uuid.Nil
+		return uuid.Nil, fmt.Errorf("failed to read the card payment's application: %w", err)
 	}
-	return id
+	return id, nil
 }

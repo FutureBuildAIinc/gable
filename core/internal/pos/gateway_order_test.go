@@ -4,14 +4,18 @@
 package pos_test
 
 // The gateway order (ADR 0005 section 14.2 C2-5, first review P1-2, second
-// review P1-5): every guard that needs no lock (the revision, the status,
-// the session, the returns) runs BEFORE any gateway call, so a refusal never
-// moves money at the terminal; and when the transaction then refuses a
-// gateway success, the charge is put back and the refund is recorded in a
-// committed row of its own carrying the gateway id.
+// review P1-5): a refusal never moves money at the terminal (the completion
+// guards and reverses before it answers; the void guards under the sale row
+// lock, inside its transaction, so concurrent voids make exactly one
+// refund), and when a transaction still refuses a gateway success, the
+// charge is put back and the refund is recorded in a committed row of its
+// own carrying the gateway id.
 
 import (
+	"fmt"
 	"net/http"
+	"sort"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/payment"
@@ -244,6 +248,167 @@ func TestACardReturnIsCappedAtTheTenderItRefunds(t *testing.T) {
 	}
 	if len(gw.refunds) != 0 {
 		t.Fatalf("%d gateway refunds past the tender, want 0", len(gw.refunds))
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (third review P2-2, fourth review P2-3): concurrent voids of one card
+// sale make exactly one gateway refund: the void takes the sale row lock
+// before it calls the gateway, so the losing voids see the sale already
+// voided and never move money.
+func TestConcurrentVoidsMakeExactlyOneGatewayRefund(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))
+	revision := rev(t, body)
+	var mu sync.Mutex
+	codes := make([]int, 3)
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+				map[string]any{"reason": "double tap", "revision": revision},
+				"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+			mu.Lock()
+			codes[i] = r.status
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+	sort.Ints(codes)
+	if codes[0] != http.StatusOK || codes[1] != http.StatusConflict || codes[2] != http.StatusConflict {
+		t.Fatalf("void codes = %v, want one 200 and two 409", codes)
+	}
+	if len(gw.refunds) != 1 {
+		t.Fatalf("%d gateway refunds for one voided sale, want exactly 1", len(gw.refunds))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 0 {
+		t.Errorf("%d orphaned refund rows, want 0 (no refund was made without its void)", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "voided" {
+		t.Errorf("sale status = %q, want voided", got)
+	}
+	if got := f.accountBalance("1010"); got != 0 {
+		t.Errorf("card balance = %d, want 0 (the charge refunded whole)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (fourth review P1-4): a void whose second card refund fails leaves no
+// gateway money unrecorded: every refund already taken is recorded in its own
+// committed row, and the sale stands as it was.
+func TestAVoidWhoseSecondCardRefundFailsRecordsTheFirst(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{
+		charges:    []*payment.GatewayResult{approvedCharge(), approvedCharge()},
+		refundErrs: []error{nil, fmt.Errorf("gateway unreachable")},
+	}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	// two card tenders: 2000 + 395 for the 2395 total
+	r := f.completeSale(saleID, withToken(tender("card", 2000)), withToken(tender("card", 395)))
+	if r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	r = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "gateway flaky", "revision": rev(t, r)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status == http.StatusOK {
+		t.Fatalf("the void committed with a failed refund: %s", r.raw)
+	}
+	if len(gw.refunds) != 2 {
+		t.Fatalf("%d gateway refund calls, want 2 (the first taken, the second failed)", len(gw.refunds))
+	}
+	// the refund that was taken is accounted for in its own committed row
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 1 {
+		t.Errorf("%d orphaned refund rows, want 1 (the refund the failed void left standing)", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
+		t.Errorf("sale status = %q, want completed (the void rolled back)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (fourth review P1-3): a completion whose second card charge is
+// declined reverses the charge the first tender already took: no card is
+// left charged behind a sale that never was.
+func TestACompletionWhoseSecondChargeIsDeclinedReversesTheFirst(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), declinedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	r := f.completeSale(saleID, withToken(tender("card", 2000)), withToken(tender("card", 395)))
+	if r.status != http.StatusConflict {
+		t.Fatalf("second charge declined = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "card_declined" {
+		t.Errorf("blockers = %v, want card_declined", blockers)
+	}
+	if gw.chargeCalls != 2 {
+		t.Fatalf("%d gateway charges, want 2", gw.chargeCalls)
+	}
+	if len(gw.voids) != 1 {
+		t.Errorf("%d gateway voids, want 1 (the first charge is put back)", len(gw.voids))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.card_charge_reversal' AND entity_id = $1`, saleID); got != 1 {
+		t.Errorf("%d charge reversal audit rows, want 1", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "open" {
+		t.Errorf("sale status = %q, want open (the completion never was)", got)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`, saleID); got != 0 {
+		t.Errorf("%d tenders after the refused completion, want 0", got)
+	}
+	if got := f.stock(); got != "100.0000/0.0000" {
+		t.Errorf("stock = %s, want the 100 untouched", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (third review P3-G): when neither the void nor the refund of a
+// refused sale's charge works, the completion answers 502
+// charge_not_reversed and the reversal row records the outcome failed.
+func TestAChargeNeitherVoidNorRefundCanReverseAnswers502(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{
+		charges:    []*payment.GatewayResult{approvedCharge()},
+		voidErrs:   []error{fmt.Errorf("void refused")},
+		refundErrs: []error{fmt.Errorf("refund refused")},
+	}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+		f.events.fail = "pos_transaction.completed"
+	})
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	r := f.completeSale(saleID, withToken(tender("card", 2395)))
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("unreversed charge = %d, want 502: %s", r.status, r.raw)
+	}
+	if code, _, _ := errorOf(t, r); code != "charge_not_reversed" {
+		t.Errorf("code = %q, want charge_not_reversed", code)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.card_charge_reversal'
+		AND entity_id = $1 AND changes->>'outcome' = 'failed'`, saleID); got != 1 {
+		t.Errorf("%d failed charge reversal rows, want 1", got)
 	}
 	f.assertARInvariants(t)
 }

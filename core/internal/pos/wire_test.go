@@ -820,11 +820,21 @@ type fakeGateway struct {
 	voids       []string
 	chargeCalls int
 	currency    []string
+	// refundErrs scripts one error per refund call (nil answers success);
+	// voidErrs the same for voids (a reversal that can neither void nor
+	// refund answers 502).
+	refundErrs []error
+	voidErrs   []error
 }
 
 func approvedCharge() *payment.GatewayResult {
 	return &payment.GatewayResult{Status: payment.GatewayStatusApproved, TransactionID: "gw-1", AuthCode: "A1",
 		CardLast4: "4242", CardBrand: "VISA"}
+}
+
+// declinedCharge is a card the gateway refused.
+func declinedCharge() *payment.GatewayResult {
+	return &payment.GatewayResult{Status: payment.GatewayStatusDeclined}
 }
 
 func (g *fakeGateway) Charge(ctx context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
@@ -844,12 +854,26 @@ func (g *fakeGateway) Capture(ctx context.Context, id string, cents int64) (*pay
 
 func (g *fakeGateway) Void(ctx context.Context, id string) (*payment.GatewayResult, error) {
 	g.voids = append(g.voids, id)
+	var err error
+	if len(g.voidErrs) > 0 {
+		err, g.voidErrs = g.voidErrs[0], g.voidErrs[1:]
+	}
+	if err != nil {
+		return nil, err
+	}
 	return &payment.GatewayResult{Status: payment.GatewayStatusVoided}, nil
 }
 
 func (g *fakeGateway) Refund(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {
 	g.refunds = append(g.refunds, id)
-	return &payment.GatewayResult{Status: payment.GatewayStatusRefunded, TransactionID: "ref-1"}, nil
+	var err error
+	if len(g.refundErrs) > 0 {
+		err, g.refundErrs = g.refundErrs[0], g.refundErrs[1:]
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &payment.GatewayResult{Status: payment.GatewayStatusRefunded, TransactionID: fmt.Sprintf("ref-%d", len(g.refunds))}, nil
 }
 
 func withToken(t map[string]any) map[string]any {

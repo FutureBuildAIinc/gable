@@ -203,7 +203,10 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	}
 	// Card charges: outside the transaction, with the sale's own currency
 	// (the hard coded USD of the base commit is the bug this fixes). Every
-	// charge the transaction then refuses is reversed (gateway.go).
+	// charge the transaction then refuses is reversed (gateway.go), and a
+	// tender whose charge is declined or fails reverses every charge the
+	// tenders before it already took (fourth review P1-3): no card is left
+	// charged behind a sale that never was.
 	type chargeMade struct {
 		result      *chargeResult
 		amountCents int64
@@ -220,10 +223,16 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 				"this register has no card terminal gateway: record the card tender without a token (the terminal settles it)")
 		}
 		res, err := s.gateway.Charge(ctx, chargeRequest(saleID, t, pre.Currency))
-		if err != nil {
-			return nil, fmt.Errorf("card charge failed: %w", err)
-		}
-		if res.Status != chargeApproved {
+		if err != nil || res.Status != chargeApproved {
+			// the charges already made go back before the refusal answers
+			for _, c := range chargesMade {
+				if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil {
+					return nil, rerr
+				}
+			}
+			if err != nil {
+				return nil, fmt.Errorf("card charge failed: %w", err)
+			}
 			return nil, conflict("card_declined", fmt.Sprintf("the card was declined (%s)", res.Status))
 		}
 		charges[i] = &chargeResult{GatewayTxID: res.TransactionID, AuthCode: res.AuthCode, Last4: res.CardLast4, Brand: res.CardBrand}
