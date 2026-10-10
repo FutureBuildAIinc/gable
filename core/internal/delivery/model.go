@@ -333,7 +333,9 @@ var ErrStopMovedDuringLock = errStopMovedDuringLock{}
 
 type errStopMovedDuringLock struct{}
 
-func (errStopMovedDuringLock) Error() string { return "delivery changed route under the transition's lock" }
+func (errStopMovedDuringLock) Error() string {
+	return "delivery changed route under the transition's lock"
+}
 
 // IsStopMovedDuringLock reports whether err is the internal sentinel.
 func IsStopMovedDuringLock(err error) bool { return errors.Is(err, ErrStopMovedDuringLock) }
