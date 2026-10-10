@@ -517,19 +517,24 @@ func TestFeedEndsAtLifetimeBound(t *testing.T) {
 	// closes it, which happens when the body EOF arrives (the server has
 	// closed the stream). The drain does not cancel the stream; the
 	// server's lifecycle owns the close.
+	// openStream reports a failed request or a non 200 answer on errs and
+	// never closes events in that case, so the drain watches both: an
+	// error ends the test at once instead of waiting for the package
+	// timeout.
 	var seen []sseEvent
-	for ev := range events {
-		seen = append(seen, ev)
-	}
-	elapsed := time.Since(start)
-
-	select {
-	case e := <-errs:
-		if e != nil {
+drain:
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				break drain
+			}
+			seen = append(seen, ev)
+		case e := <-errs:
 			t.Fatalf("stream error: %v", e)
 		}
-	default:
 	}
+	elapsed := time.Since(start)
 
 	// The test's own clock: the stream must close at the bound (not
 	// before, not "sometime later").
