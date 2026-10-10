@@ -826,8 +826,8 @@ type fakeGateway struct {
 	// refund answers 502). refundStatuses scripts one definite refusal
 	// status per refund call, the terminal's own no (a decline), which no
 	// error carries.
-	refundErrs   []error
-	voidErrs     []error
+	refundErrs     []error
+	voidErrs       []error
 	refundStatuses []payment.GatewayStatus
 	// onRefund runs at the start of every Refund call, outside the fake's
 	// mutex: the tests park a refund in flight or probe the database while
