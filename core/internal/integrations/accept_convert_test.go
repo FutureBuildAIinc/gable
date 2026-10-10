@@ -40,6 +40,12 @@ func TestAcceptAndConvert_ConvertsThePairAndConfirms(t *testing.T) {
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, productID, "SEAM-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
+	// The 2x4x8's MBF row (1, 187.5): the product prices per MBF (ADR 0006
+	// section 3.2's worked set; the stocking row came with the insert).
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price)
+		VALUES ($1, 'MBF', 1, 187.5, TRUE, TRUE, TRUE)`, productID); err != nil {
+		t.Fatalf("seed unit set: %v", err)
+	}
 	// A migrated, unseeded database has no branch tax rate; the convert's
 	// order needs one.
 	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
@@ -123,6 +129,12 @@ func TestAcceptAndConvert_RefusesANonStockUnit(t *testing.T) {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, productID, "SEAM-"+uuid.NewString()[:8]); err != nil {
 		t.Fatalf("seed product: %v", err)
+	}
+	// The 2x4x8's MBF row (1, 187.5): the product prices per MBF (ADR 0006
+	// section 3.2's worked set; the stocking row came with the insert).
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price)
+		VALUES ($1, 'MBF', 1, 187.5, TRUE, TRUE, TRUE)`, productID); err != nil {
+		t.Fatalf("seed unit set: %v", err)
 	}
 	// A migrated, unseeded database has no branch tax rate; the convert's
 	// order needs one.

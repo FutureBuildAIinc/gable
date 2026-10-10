@@ -48,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
@@ -67,6 +68,8 @@ var modelBoundSchemas = []struct {
 	{"Quote", quote.Quote{}},
 	{"QuoteSummary", quote.QuoteSummary{}},
 	{"QuoteLine", quote.QuoteLine{}},
+	{"Tally", quote.Tally{}},
+	{"TallyRow", quote.TallyRow{}},
 	// order
 	{"Order", order.Order{}},
 	{"OrderSummary", order.OrderSummary{}},
@@ -105,6 +108,10 @@ var modelBoundSchemas = []struct {
 	{"PimCollateral", pim.PIMCollateral{}},
 	{"ProductDetail", pim.ProductDetail{}},
 	{"ProductView", product.View{}},
+	{"UnitSetDoc", product.UnitSetDoc{}},
+	{"UnitSetRow", product.UnitSetRowView{}},
+	// units (C3-2A-units, ADR 0006 section 2)
+	{"Unit", unit.Unit{}},
 	// location
 	{"Location", location.Location{}},
 	{"BranchSummary", location.BranchSummary{}},

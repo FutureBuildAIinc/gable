@@ -155,6 +155,28 @@ func (s *Service) CreateProduct(ctx context.Context, p *Product) error {
 		return httpx.BadRequest("one or more fields failed validation",
 			httpx.FieldError{Field: "stock_uom", Message: "must be one of the unit codes the catalogue holds"})
 	}
+	// The stocking unit is a catalogue row from C3-2A-units (ADR 0006
+	// section 2): the closed enum is gone and the catalogue answers, so a
+	// dealer's own unit stocks a product too. A random length product is
+	// stocked in LF (section 3.1's trigger invariant, named here on the
+	// wire).
+	catalogue, err := s.repo.CatalogueUnits(ctx, []string{string(p.UOMPrimary)})
+	if err != nil {
+		return err
+	}
+	unit, known := catalogue[string(p.UOMPrimary)]
+	if !known {
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "stock_uom", Message: string(p.UOMPrimary) + " is not a unit of the catalogue"})
+	}
+	if !unit.IsActive {
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "stock_uom", Message: string(p.UOMPrimary) + " is inactive: an inactive unit cannot stock a new product"})
+	}
+	if p.RandomLength && p.UOMPrimary != UOM("LF") {
+		return httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "stock_uom", Message: "a random length product is stocked in LF: its tallies bill by the linear foot"})
+	}
 	if p.BasePriceScaled < 0 {
 		return httpx.BadRequest("one or more fields failed validation",
 			httpx.FieldError{Field: "base_price_ten_thousandths", Message: "a unit price is never negative"})
@@ -219,6 +241,20 @@ func (s *Service) CountProducts(ctx context.Context) (int64, error) {
 // GetProduct retrieves a product by its ID
 func (s *Service) GetProduct(ctx context.Context, id uuid.UUID) (*Product, error) {
 	return s.repo.GetProduct(ctx, id)
+}
+
+// GetProductDetail is GetProduct with the product's unit set filled: the
+// shape the product read serves (ADR 0006 section 6: the set rides the
+// product read and its own route).
+func (s *Service) GetProductDetail(ctx context.Context, id uuid.UUID) (*Product, error) {
+	p, err := s.repo.GetProduct(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if p.Units, err = s.repo.GetUnitSetRows(ctx, id); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // ListBelowReorder returns products below their reorder point

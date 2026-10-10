@@ -24,7 +24,13 @@ import (
 
 // Run applies every pending migration and returns. Behaviour is unchanged
 // from the old entry point, including the log.Fatalf exits on failure.
+// `migrate -report units` runs the read only units pre flight report of
+// ADR 0006 section 8 instead (see units_report.go).
 func Run() {
+	if len(os.Args) >= 3 && os.Args[1] == "-report" && os.Args[2] == "units" {
+		RunUnitsReport()
+		return
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)

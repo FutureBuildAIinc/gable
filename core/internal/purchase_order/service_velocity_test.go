@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
@@ -28,6 +29,34 @@ func (f *fakeVelocity) ListSalesVelocity(_ context.Context, _ int) ([]SalesVeloc
 type fakeProductRepo struct {
 	products []product.Product
 	updates  map[uuid.UUID][2]float64 // id -> {reorder_point, reorder_qty}
+}
+
+// The unit set store, served empty: the velocity tests create no unit sets.
+func (f *fakeProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]product.UnitSetRowView, error) {
+	return []product.UnitSetRowView{}, nil
+}
+func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*product.UnitSetProduct, error) {
+	return nil, product.ErrNotFound
+}
+func (f *fakeProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []product.UnitSetRowView,
+	_, _, _, _ string, _ *int64, _ int64) (int64, error) {
+	return 0, nil
+}
+func (f *fakeProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
+func (f *fakeProductRepo) ProductStockUnitInUse(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (f *fakeProductRepo) ProductPriceHeld(_ context.Context, _ uuid.UUID) (bool, string, error) {
+	return false, "", nil
+}
+func (f *fakeProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []string) (bool, string, error) {
+	return false, "", nil
 }
 
 func (f *fakeProductRepo) CreateProduct(_ context.Context, _ *product.Product) error { return nil }
