@@ -90,21 +90,42 @@ func accountCustomerPathOf() func(ctx context.Context, r *http.Request) ([]uuid.
 	}
 }
 
-// previewCustomerOf resolves the customer the tax preview's body names. A
-// preview that names no customer is a plain rate calculation and passes; one
-// that names a customer reads that customer's exemptions and is confined.
-func previewCustomerOf() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+// previewCustomerOf resolves the customers the tax preview's body names: its
+// customer_id, and the customer of the ship to its ship_to_id names (round 6
+// P3: a preview quoting the foreign branch's ship to prices that customer's
+// delivery). A preview that names no customer and no ship to is a plain rate
+// calculation and passes; a ship to that does not exist names nothing and the
+// handler ignores the field.
+func previewCustomerOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 		var body struct {
 			CustomerID string `json:"customer_id"`
+			ShipToID   string `json:"ship_to_id"`
 		}
 		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
 			return nil, err
 		}
+		var out []uuid.UUID
 		if id, err := uuid.Parse(body.CustomerID); err == nil {
-			return []uuid.UUID{id}, nil
+			out = append(out, id)
 		}
-		return nil, nil
+		if raw := body.ShipToID; raw != "" {
+			if shipTo, err := uuid.Parse(raw); err == nil {
+				if db == nil {
+					return nil, errors.New("tax preview ship to lookup: no database")
+				}
+				var customer uuid.UUID
+				err := db.GetExecutor(ctx).QueryRow(ctx,
+					`SELECT customer_id FROM customer_ship_tos WHERE id = $1`, shipTo).Scan(&customer)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return nil, err
+				}
+				if err == nil {
+					out = append(out, customer)
+				}
+			}
+		}
+		return out, nil
 	}
 }
 
@@ -332,7 +353,7 @@ func taxCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles .
 	create := middleware.Compose(role, keyWall.CustomerBodyBranch())
 	remove := middleware.Compose(role, keyWall.CustomerRowBranch(exemptionCustomerOf(db)))
 	read := middleware.Compose(role, keyWall.CustomerBranch(exemptionCustomerPathOf()))
-	preview := middleware.Compose(role, keyWall.CustomerBranch(previewCustomerOf()))
+	preview := middleware.Compose(role, keyWall.CustomerBranch(previewCustomerOf(db)))
 	return func(next http.Handler) http.Handler {
 		createHandler, removeHandler, readHandler, previewHandler, roleHandler :=
 			create(next), remove(next), read(next), preview(next), role(next)

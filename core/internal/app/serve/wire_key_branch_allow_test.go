@@ -56,6 +56,27 @@ func TestKeyBranchPin_CustomerConfinedReads(t *testing.T) {
 	}
 	f.parity(t, "POST", "/api/v1/tax/preview", preview(B))
 
+	// A preview that names only a ship to is confined through that ship to's
+	// customer (round 6 P3): the foreign branch's ship to is refused, the
+	// pin's own customer's ship to passes, and a preview naming neither
+	// stays a plain rate calculation.
+	shipTo := func(id uuid.UUID) string {
+		return fmt.Sprintf(`{"ship_to_id":%q,"document_type":"SalesInvoice","lines":[{"amount":100}]}`, id.String())
+	}
+	shipA, shipB := uuid.New(), uuid.New()
+	for _, s := range []struct{ id, customer uuid.UUID }{{shipA, f.custID}, {shipB, f.custB}} {
+		if _, err := f.db.Pool.Exec(context.Background(),
+			`INSERT INTO customer_ship_tos (id, customer_id, code, name, line1) VALUES ($1, $2, 'pin', 'pin ship to', 'pin')`,
+			s.id, s.customer); err != nil {
+			t.Fatalf("seed ship to: %v", err)
+		}
+	}
+	f.refuseForeign(t, "POST", "/api/v1/tax/preview", shipTo(shipB), nil)
+	if status, buf := f.key(t, f.bound, "POST", "/api/v1/tax/preview", shipTo(shipA), nil); status == http.StatusForbidden {
+		t.Errorf("tax preview of the pin's customer's ship to was refused: %s", buf)
+	}
+	f.parity(t, "POST", "/api/v1/tax/preview", shipTo(shipB))
+
 	// The category rule list is confined by its customer_id query; the
 	// unfiltered list is refused (it carries every customer's rules).
 	q := "/api/v1/pricing/category-rules?customer_id="
