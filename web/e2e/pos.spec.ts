@@ -32,8 +32,15 @@ async function stockedProduct(request: APIRequestContext): Promise<{ sku: string
   };
   const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
   for (const p of list) {
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { items: { available: string }[] };
-    if (page.items.reduce((n, r) => n + (Number(r.available) || 0), 0) >= 50) return p;
+    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as {
+      items: { location_name: string; available: string }[];
+    };
+    // The counter issues from the branch REG-01 belongs to (the seeded
+    // Kelowna branch); stock at another branch cannot serve the till.
+    const atBranch = page.items
+      .filter((r) => r.location_name === 'KEL-MAIN')
+      .reduce((n, r) => n + (Number(r.available) || 0), 0);
+    if (atBranch >= 50) return p;
   }
   throw new Error('no stocked product for the counter run');
 }
