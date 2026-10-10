@@ -56,6 +56,57 @@ func TestConvertStockExact(t *testing.T) {
 	}
 }
 
+// TestConvertStockRefusalNamesHoldableQuantities proves the inexact refusal
+// names only quantities the line can hold: never zero, never past the
+// quantity bound. A row whose smallest exact step is huge (the from row
+// (99999999.9989, 1), whose step is the prime 99999999.9989) used to name
+// zero for a small quantity and a past the bound multiple above a large one.
+func TestConvertStockRefusalNamesHoldableQuantities(t *testing.T) {
+	prime := Pair{A: q("99999999.9989"), B: q("1")}
+
+	// 12.3456 of the from unit: the step below is zero, which a line cannot
+	// hold, so the refusal names the step above alone.
+	_, err := ConvertStock(q("12.3456"), "XX", "PCS", prime)
+	inexact, ok := err.(*InexactError)
+	if !ok {
+		t.Fatalf("12.3456 against the prime step row is refused, got %v", err)
+	}
+	if inexact.Below != 0 || inexact.Above != q("99999999.9989") {
+		t.Errorf("the neighbours are %s and %s; want 0 and 99999999.9989",
+			inexact.Below.WireString(), inexact.Above.WireString())
+	}
+	if got := inexact.Error(); got != "does not convert exactly into the stocking unit PCS; the nearest quantity that does is 99999999.9989" {
+		t.Errorf("the refusal names the one holdable neighbour, got %q", got)
+	}
+
+	// 99999999.9999: the step above is 199999999.9978, past the bound, so
+	// the refusal names the step below alone.
+	_, err = ConvertStock(q("99999999.9999"), "XX", "PCS", prime)
+	if inexact, ok = err.(*InexactError); !ok {
+		t.Fatalf("99999999.9999 against the prime step row is refused, got %v", err)
+	}
+	if got := inexact.Error(); got != "does not convert exactly into the stocking unit PCS; the nearest quantity that does is 99999999.9989" {
+		t.Errorf("the refusal names the one holdable neighbour, got %q", got)
+	}
+
+	// The ordinary case still names both: the 2x4x14's worked refusal.
+	bf := Pair{A: q("28"), B: q("3")}
+	_, err = ConvertStock(q("10"), "BF", "PCS", bf)
+	if inexact, ok = err.(*InexactError); !ok ||
+		inexact.Error() != "does not convert exactly into the stocking unit PCS; the nearest quantities that do are 9.9988 and 10.0016" {
+		t.Errorf("the ordinary refusal names both neighbours, got %v", err)
+	}
+	// A negative quantity inside one step of zero names zero above: -0.001
+	// BF of the 2x4x14 names -0.0028 and 0, and zero is not holdable.
+	_, err = ConvertStock(q("-0.001"), "BF", "PCS", bf)
+	if inexact, ok = err.(*InexactError); !ok {
+		t.Fatalf("-0.001 BF of a 2x4x14 is refused, got %v", err)
+	}
+	if got := inexact.Error(); got != "does not convert exactly into the stocking unit PCS; the nearest quantity that does is -0.0028" {
+		t.Errorf("the negative refusal names the holdable neighbour alone, got %q", got)
+	}
+}
+
 // TestConvertBetweenUnits covers the general A to B conversion the round trip
 // property uses: through the stocking unit, exact or refused.
 func TestConvertBetweenUnits(t *testing.T) {

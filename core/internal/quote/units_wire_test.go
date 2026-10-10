@@ -284,6 +284,29 @@ func TestQuoteLineUnitRefusals(t *testing.T) {
 		t.Errorf("28 BF stocks 3 PCS, got %v", stored)
 	}
 
+	// A quantity whose stocking conversion is exact but past the quantity
+	// bound says so: a product stocked in PCS with a BOX row holding
+	// 99999999.9999 PCS per box converts 2 BOX exactly, into
+	// 199999999.9998 PCS, which nothing can hold.
+	bigBox := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(), `INSERT INTO products (id, sku, description, uom_primary)
+		VALUES ($1, $2, 'big box product', 'PCS')`, bigBox, "BOX-"+uuid.NewString()[:8]); err != nil {
+		t.Fatalf("seed big box product: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(context.Background(), `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price) VALUES
+		($1, 'BOX', 1, 99999999.9999, TRUE, FALSE, TRUE)`, bigBox); err != nil {
+		t.Fatalf("seed big box set: %v", err)
+	}
+	big := map[string]any{
+		"product_id": bigBox.String(), "quantity": "2", "uom": "BOX",
+		"price_uom": "BOX", "unit_price_ten_thousandths": 100,
+	}
+	r = f.do("POST", "/api/v1/quotes", f.createBody(big))
+	if r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "lines[0].quantity") ||
+		!strings.Contains(string(r.raw), "past the quantity bound") {
+		t.Errorf("a conversion past the bound says so, got %d: %s", r.status, r.raw)
+	}
+
 	// An inactive unit cannot enter a new line.
 	if _, err := f.db.Pool.Exec(context.Background(), `UPDATE units SET is_active = FALSE WHERE code = 'CY'`); err != nil {
 		t.Fatal(err)

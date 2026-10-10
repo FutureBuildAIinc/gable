@@ -432,9 +432,13 @@ func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteL
 		}
 		if err != nil {
 			var inexact *units.InexactError
-			if errors.As(err, &inexact) {
+			switch {
+			case errors.As(err, &inexact):
 				v.Check(false, path+".quantity", inexact.Error())
-			} else {
+			case errors.Is(err, units.ErrOutOfBound):
+				v.Check(false, path+".quantity",
+					"is past the quantity bound of 99999999.9999 when converted into the stocking unit "+stockUOM)
+			default:
 				v.Check(false, path+".quantity", "does not convert exactly into the stocking unit "+stockUOM)
 			}
 			return false

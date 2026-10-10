@@ -25,10 +25,25 @@ type InexactError struct {
 
 // Error renders the refusal of ADR 0006 section 3.4: "does not convert
 // exactly into the stocking unit PCS; the nearest quantities that do are
-// 9.9988 and 10.0016".
+// 9.9988 and 10.0016". Only quantities the line can hold are named: zero is
+// not a legal quantity and the quantity bound (99999999.9999, either sign)
+// caps each side, so a neighbour that cannot be held is left out and the
+// one that can is named alone.
 func (e *InexactError) Error() string {
-	return fmt.Sprintf("does not convert exactly into the stocking unit %s; the nearest quantities that do are %s and %s",
-		e.To, e.Below.WireString(), e.Above.WireString())
+	belowOK := e.Below != 0 && e.Below >= -httpx.QuantityMax
+	aboveOK := e.Above != 0 && e.Above <= httpx.QuantityMax
+	switch {
+	case belowOK && aboveOK:
+		return fmt.Sprintf("does not convert exactly into the stocking unit %s; the nearest quantities that do are %s and %s",
+			e.To, e.Below.WireString(), e.Above.WireString())
+	case belowOK:
+		return fmt.Sprintf("does not convert exactly into the stocking unit %s; the nearest quantity that does is %s",
+			e.To, e.Below.WireString())
+	case aboveOK:
+		return fmt.Sprintf("does not convert exactly into the stocking unit %s; the nearest quantity that does is %s",
+			e.To, e.Above.WireString())
+	}
+	return fmt.Sprintf("does not convert exactly into the stocking unit %s; no quantity this line can hold converts exactly", e.To)
 }
 
 // Convert converts qty from one unit into another through the two rows of
