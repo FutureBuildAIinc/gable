@@ -332,7 +332,9 @@ func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteL
 			return false
 		}
 		// The pair resolves from the two rows and is stored on the line; a
-		// sent pair must equal it as a ratio (3.3).
+		// sent pair must equal it as a ratio (3.3), and the resolved pair
+		// is what the line stores, canonical whatever equivalent pair the
+		// client sent (R2: one conversion, one byte form).
 		resolved, err := units.ResolveLinePair(uRow.rowPair(), pRow.rowPair())
 		if err != nil {
 			v.Check(false, path+".uom_qty", "the conversion between "+uom+" and "+line.PriceUOM+" does not fit the pair's bound")
@@ -345,10 +347,8 @@ func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteL
 					"does not match the product's unit set; omit the pair or send "+
 						resolved.A.WireString()+" and "+resolved.B.WireString())
 			}
-			line.UOMQty, line.PriceUOMQty = dl.UOMQty, dl.PriceUOMQty
-		} else {
-			line.UOMQty, line.PriceUOMQty = resolved.A, resolved.B
 		}
+		line.UOMQty, line.PriceUOMQty = resolved.A, resolved.B
 	} else {
 		// A line without a product keeps R1-15's rule: the pair is the
 		// client's, except that two units with standard sizes in one
@@ -368,6 +368,9 @@ func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteL
 					"does not match the units' standard sizes; the derived pair is "+
 						derived.A.WireString()+" and "+derived.B.WireString())
 			}
+			// The derived pair is canonical (R2): an agreeing sent pair
+			// stores it, not the form the client chose.
+			line.UOMQty, line.PriceUOMQty = derived.A, derived.B
 		}
 	}
 	if errorCount(v) > before {

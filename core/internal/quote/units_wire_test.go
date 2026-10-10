@@ -178,6 +178,50 @@ func TestLineOnABoardFootStockedProduct(t *testing.T) {
 	}
 }
 
+// TestSentPairStoredCanonically proves a product line's sent pair that
+// equals the resolved pair as a ratio is stored as the canonical resolved
+// pair itself (ADR 0006 section 3.3, R2): sending 375 and 2 on the 2x4x8
+// by the piece per MBF stores 187.5 and 1, on the wire and in the columns,
+// so one conversion holds one byte form.
+func TestSentPairStoredCanonically(t *testing.T) {
+	f := newUnitsFixture(t)
+
+	sent := f.line("10")
+	sent["price_uom"] = "MBF"
+	sent["uom_qty"], sent["price_uom_qty"] = "375", "2"
+	r := f.do("POST", "/api/v1/quotes", f.createBody(sent))
+	if r.status != http.StatusCreated {
+		t.Fatalf("an equivalent sent pair = %d, want 201: %s", r.status, r.raw)
+	}
+	line := r.body["lines"].([]any)[0].(map[string]any)
+	if line["uom_qty"] != "187.5" || line["price_uom_qty"] != "1" {
+		t.Errorf("the answer carries the canonical pair, got %v and %v; want 187.5 and 1",
+			line["uom_qty"], line["price_uom_qty"])
+	}
+	stored := f.storedLine(t, str(t, r.body, "id"))
+	if stored["uom_qty"] != "187.5000" || stored["price_uom_qty"] != "1.0000" {
+		t.Errorf("the columns store the canonical pair, got %s and %s; want 187.5 and 1",
+			stored["uom_qty"], stored["price_uom_qty"])
+	}
+
+	// A non product line's standard size derivation stores the derived pair
+	// too when the sent pair agrees: EA priced per M sends (2000, 2), the
+	// same ratio as (1000, 1), and stores (1000, 1).
+	free := f.nonStockLine("2000", "EA")
+	free["price_uom"] = "M"
+	free["unit_price_ten_thousandths"] = 37500
+	free["uom_qty"], free["price_uom_qty"] = "2000", "2"
+	r = f.do("POST", "/api/v1/quotes", f.createBody(free))
+	if r.status != http.StatusCreated {
+		t.Fatalf("an equivalent standard size pair = %d, want 201: %s", r.status, r.raw)
+	}
+	line = r.body["lines"].([]any)[0].(map[string]any)
+	if line["uom_qty"] != "1000" || line["price_uom_qty"] != "1" {
+		t.Errorf("the non product line stores the derived canonical pair, got %v and %v; want 1000 and 1",
+			line["uom_qty"], line["price_uom_qty"])
+	}
+}
+
 // TestQuoteLineUnitRefusals proves the unit rules of sections 3.3 and 3.4 on
 // the wire: a disagreeing pair refused naming lines[i].uom_qty with the pair
 // to send, a non sale unit refused, a quantity that does not convert exactly
