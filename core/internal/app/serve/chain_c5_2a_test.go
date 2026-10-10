@@ -270,3 +270,56 @@ func idUUID(t *testing.T) string {
 // uuidNew is a small wrapper around uuid.NewString so the chain tests
 // have a stable, inlined source.
 func uuidNew() string { return "11111111-2222-3333-4444-555555555555" }
+
+// TestChainC5_2a_NilSinkKeepsTheGate pins review pr66-r4 P2-3: the chain
+// builder used to return the handler with no gate at all when the audit
+// sink was nil, failing open in the one function that is the single source
+// of the order, while the gate's own constructor refuses exactly the same
+// and writes no row on a nil sink. A chain built with no sink must still
+// refuse an agent marked promotion.
+func TestChainC5_2a_NilSinkKeepsTheGate(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	inner := &markerInner{}
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/v1/drafts/quotes/{id}/promote", inner)
+
+	principal := middleware.KeyPrincipal{ID: "test-key", Scopes: []string{"quotes:read"}}
+	mka := middleware.NewMachineKeyAuth(stubKeyValidator{principal: principal}, nil, []string{"/api/integration/"}, logger)
+
+	chain := buildChain(ChainDeps{
+		Mux:            mux,
+		DB:             nil,
+		Logger:         logger,
+		AuditLog:       nil, // the failing shape: no sink wired
+		MachineKeyAuth: mka,
+		TrustedProxies: nil,
+	})
+
+	// An agent marked session on the promotion route: no Bearer key (the
+	// machine key mount passes a keyless request through), the actor marker
+	// names the agent, and the gate must refuse it with or without a sink.
+	req := httptest.NewRequest("POST", "/api/v1/drafts/quotes/"+idUUID(t)+"/promote", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("X-Request-ID", "req-test-c5-2a")
+	req.Header.Set("X-Agent-Marker", "1")
+	req.Header.Set("X-Agent-Tool", "claude-code")
+	req.Header.Set("X-Agent-Run", "run-1")
+	req.Header.Set("X-Acting-As", "agent")
+	w := httptest.NewRecorder()
+	chain.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("nil sink: agent marked promote = %d, want 403 (the gate refuses and writes no row); body=%s", w.Code, w.Body.String())
+	}
+	if inner.actorKind == "agent" {
+		t.Fatalf("nil sink: the handler was reached; the gate is absent from the chain")
+	}
+
+	// The unmarked person's promotion is untouched: no marker, no refusal.
+	req2 := httptest.NewRequest("POST", "/api/v1/drafts/quotes/"+idUUID(t)+"/promote", bytes.NewReader([]byte(`{}`)))
+	req2.Header.Set("X-Request-ID", "req-test-c5-2a")
+	w2 := httptest.NewRecorder()
+	chain.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("nil sink: unmarked promote = %d, want 200; body=%s", w2.Code, w2.Body.String())
+	}
+}

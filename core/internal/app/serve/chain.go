@@ -146,12 +146,10 @@ func buildChain(d ChainDeps) http.Handler {
 }
 
 // wrapConfirmGate wires the confirm gate's middleware against the
-// audit sink. nil sink means "refuse exactly the same and write no
-// row" (tests that do not exercise the gate); non-nil means the
-// production path.
+// audit sink. The gate is always mounted: a nil sink means "refuse
+// exactly the same and write no row" (confirmgate.Middleware's own nil
+// handling), never "no gate", so a chain built without a sink cannot
+// fail open on the gated writes.
 func wrapConfirmGate(next http.Handler, sink AuditSink) http.Handler {
-	if sink == nil {
-		return next
-	}
 	return confirmgate.Middleware(sink)(next)
 }
