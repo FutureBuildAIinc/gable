@@ -207,6 +207,15 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	insert(paidShort, "PAIDSHORT-1", "PAID", at(-4), nil, "50.00", "44.00")
 	over := uuid.New()
 	insert(over, "OVER-1", "PARTIAL", at(-4), nil, "80.00", "90.00")
+	// A negative total: the base validated no sign, so a vendor credit
+	// entered as a negative bill is a plausible legacy row. It owes nothing
+	// as a bill: it becomes VOIDED with open 0, named by a notice, and a
+	// negative total already VOIDED passes the amount_open range CHECK; one
+	// of either shape must not abort the migration (review r4 P2-2).
+	negative := uuid.New()
+	insert(negative, "NEG-1", "PENDING", at(-3), nil, "-10.00", "0")
+	negVoided := uuid.New()
+	insert(negVoided, "NEG-2", "VOIDED", at(-3), nil, "-5.00", "0")
 	// A NULL created_at: the base column was NOT NULL, so it comes off first
 	// (the migration's own fill-then-set step then has a row to fill).
 	if _, err := conn.Exec(ctx, `ALTER TABLE vendor_invoices ALTER COLUMN created_at DROP NOT NULL`); err != nil {
@@ -261,7 +270,7 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	}
 	joined := strings.Join(*notices, " | ")
 	for _, want := range []string{"duplicate vendor invoice number", "po_id is set null", "unknown status",
-		"cancel-like status", "paid less than their total", "paid past their total"} {
+		"cancel-like status", "paid less than their total", "paid past their total", "negative total"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the notices (%s) do not mention %q", joined, want)
 		}
@@ -298,8 +307,10 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 
 	// amount_open: total less paid, zero on a voided bill and on a paid one
 	// (the insert trigger's rule), clamped at zero for an overpaid partial.
+	// A negative total bill owes nothing: it is VOIDED with open 0 (the
+	// range CHECK admits a voided or paid bill at any total).
 	for id, want := range map[uuid.UUID]string{dup1: "100.00", nailed: "0.00", partial: "50.00", voided: "0.00",
-		cancelled: "0.00", paidShort: "0.00", over: "0.00"} {
+		cancelled: "0.00", paidShort: "0.00", over: "0.00", negative: "0.00", negVoided: "0.00"} {
 		if got := one106(t, conn, `SELECT amount_open::text FROM vendor_invoices WHERE id = $1`, id); got != want {
 			t.Errorf("amount_open of %s = %s, want %s", id, got, want)
 		}
@@ -307,6 +318,10 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	// The cancel-like status becomes VOIDED, not PENDING.
 	if got := one106(t, conn, `SELECT status FROM vendor_invoices WHERE id = $1`, cancelled); got != "VOIDED" {
 		t.Errorf("the cancel-like status = %s, want VOIDED", got)
+	}
+	// The negative total bill becomes VOIDED too.
+	if got := one106(t, conn, `SELECT status FROM vendor_invoices WHERE id = $1`, negative); got != "VOIDED" {
+		t.Errorf("the negative total bill = %s, want VOIDED", got)
 	}
 
 	// The lines: positioned in (created_at, id) order, and the price widened.

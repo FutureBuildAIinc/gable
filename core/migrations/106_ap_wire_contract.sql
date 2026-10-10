@@ -7,8 +7,9 @@
 --   1  vendor_invoices: created_at NOT NULL, revision, the number (AP-), the
 --      branch (from the purchase order's branch when that column exists,
 --      else the default branch), the currency, a status CHECK on today's
---      values (lowercase spellings uppercased, cancel-like values become
---      VOIDED, other unknown values become PENDING, each with a notice),
+--      values (lowercase spellings uppercased, cancel-like values and
+--      negative totals become VOIDED, other unknown values become PENDING,
+--      each with a notice),
 --      po_id as a real foreign key (orphans are set null, with a notice),
 --      UNIQUE (vendor_id, invoice_number) after duplicates are suffixed #2,
 --      #3 in (created_at, id) order (with a notice), amount_open (the insert
@@ -94,9 +95,12 @@ END $$;
 -- The status CHECK on today's values: lowercase spellings are uppercased and
 -- anything unknown becomes PENDING, each with a notice. A hand-written
 -- cancel-like value (CANCELLED, CANCELED) maps to the module's voided state,
--- never to pending: a cancelled bill owes nothing.
+-- never to pending: a cancelled bill owes nothing. So does a negative total
+-- (the base validated no sign, so a vendor credit entered as a negative bill
+-- is a plausible legacy row): it owes nothing as a bill, and the amount_open
+-- range CHECK below would otherwise abort the whole migration on it.
 DO $$
-DECLARE lower BIGINT; unknown BIGINT; cancels BIGINT;
+DECLARE lower BIGINT; unknown BIGINT; cancels BIGINT; negatives BIGINT;
 BEGIN
     SELECT count(*) INTO lower FROM vendor_invoices WHERE status <> UPPER(btrim(status));
     IF lower > 0 THEN
@@ -107,6 +111,11 @@ BEGIN
     IF cancels > 0 THEN
         UPDATE vendor_invoices SET status = 'VOIDED' WHERE status IN ('CANCELLED', 'CANCELED');
         RAISE NOTICE 'migration 106: % vendor invoice(s) held a cancel-like status (CANCELLED, CANCELED) and become VOIDED owing nothing', cancels;
+    END IF;
+    SELECT count(*) INTO negatives FROM vendor_invoices WHERE total < 0 AND status <> 'VOIDED';
+    IF negatives > 0 THEN
+        UPDATE vendor_invoices SET status = 'VOIDED' WHERE total < 0 AND status <> 'VOIDED';
+        RAISE NOTICE 'migration 106: % vendor invoice(s) hold a negative total (a vendor credit entered as a negative bill; re-enter it as a credit) and become VOIDED owing nothing', negatives;
     END IF;
     SELECT count(*) INTO unknown FROM vendor_invoices
     WHERE status NOT IN ('PENDING', 'APPROVED', 'PARTIAL', 'PAID', 'VOIDED');
@@ -258,7 +267,10 @@ END $$;
 -- amount_open: what the vendor is still owed, by the insert trigger's rule:
 -- zero on a voided or paid bill, the total less what was paid (clamped at
 -- zero) otherwise. A short-paid PAID bill and an overpaid PARTIAL one are
--- each named by a notice, so an operator can mend the row.
+-- each named by a notice, so an operator can mend the row. The upper bound
+-- (never more than the total) holds only while the bill owes: a voided or
+-- paid bill owes zero by rule at any total, a negative one included (the
+-- base accepted any sign).
 DO $$
 DECLARE shortPaid BIGINT; overpaid BIGINT;
 BEGIN
@@ -277,7 +289,7 @@ WHERE amount_open IS NULL;
 ALTER TABLE vendor_invoices ALTER COLUMN amount_open SET NOT NULL;
 ALTER TABLE vendor_invoices DROP CONSTRAINT IF EXISTS vendor_invoices_amount_open_range;
 ALTER TABLE vendor_invoices ADD CONSTRAINT vendor_invoices_amount_open_range
-    CHECK (amount_open >= 0 AND amount_open <= total);
+    CHECK (amount_open >= 0 AND (status IN ('VOIDED', 'PAID') OR amount_open <= total));
 
 -- 2. vendor_invoice_lines ---------------------------------------------------
 

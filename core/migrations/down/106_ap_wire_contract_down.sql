@@ -15,7 +15,8 @@
 --      status CHECK. Three of the up's writes are kept, each valid old shape
 --      data: the suffixed duplicate vendor numbers stay suffixed (a dealer
 --      may have had a genuine "X #2" before, so un-suffixing cannot be told
---      apart from it), the normalized statuses stay normalized, and a po_id
+--      apart from it), the normalized statuses stay normalized (a cancel-like
+--      or negative total bill's VOIDED mapping with them), and a po_id
 --      the up orphaned stays null (the purchase order it named is gone).
 
 -- 3 -------------------------------------------------------------------------
