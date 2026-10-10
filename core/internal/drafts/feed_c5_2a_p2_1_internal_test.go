@@ -90,18 +90,25 @@ func TestStreamClosesStalledClientAtFirstDraftEvent(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 
-	// One draft event for the stream to pick up: insert a draft row
-	// directly so the feed's ReadEvents sees it.
+	// One draft event for the stream to pick up: insert a
+	// draft_events row directly so the feed's ReadEvents sees it.
+	// The feed reads from draft_events, not drafts, so inserting a
+	// draft alone does not produce a stream event.
 	module := "quotes"
 	draftID := uuid.New()
+	var branchID uuid.UUID
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO drafts (id, module, payload, revision, status, branch_id, created_by_kind, created_by_id, updated_by_kind, updated_by_id)
-		 VALUES ($1, $2, '{}'::jsonb, 1, 'OPEN', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'user', 'test', 'user', 'test')`,
-		draftID, module); err != nil {
+		`INSERT INTO draft_events (position, draft_id, module, branch_id, op, revision, status, actor_kind, actor_id)
+		 VALUES (1, $1, $2, $3, 'created', 1, 'OPEN', 'user', 'test')`,
+		draftID, module, branchID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE id = $1`, draftID)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE draft_id = $1`, draftID)
 	})
 
 	repo := NewRepository(db)
@@ -112,7 +119,7 @@ func TestStreamClosesStalledClientAtFirstDraftEvent(t *testing.T) {
 	settings.WriteTimeout = 150 * time.Millisecond
 	h := NewFeedHandler(nil, repo, hub, settings, nil)
 
-	w := &stalledAtThirdWriter{header: http.Header{}}
+	w := &stalledAtDraftWriter{header: http.Header{}}
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/drafts/quotes/feed", nil)
 	reqCtx, cancelReq := context.WithCancel(ctx)
 	defer cancelReq()
@@ -120,7 +127,10 @@ func TestStreamClosesStalledClientAtFirstDraftEvent(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.stream(w, req.WithContext(reqCtx), EventFilter{Module: module}, -1)
+		// after = 0 so the loop reads from position 0 and finds the
+		// draft event. after = -1 would set position = head after the
+		// first read, excluding the just-inserted draft.
+		h.stream(w, req.WithContext(reqCtx), EventFilter{Module: module}, 0)
 	}()
 	select {
 	case <-done:
@@ -152,31 +162,32 @@ func (c *captureWriter) Write(p []byte) (int, error) {
 func (c *captureWriter) WriteHeader(int) {}
 func (c *captureWriter) Flush()          {}
 
-// stalledAtThirdWriter is the stalledWriter shape for the first-draft
-// variant: writes 1 and 2 (response head + ready event) go through;
-// write 3 (the first draft event) blocks until the deadline the stream
+// stalledAtDraftWriter is the stalledWriter shape for the first-draft
+// variant: writes that are NOT a draft event go through (the response
+// head, the ready event, the heartbeat comments). The first write
+// that contains "event: draft" blocks until the deadline the stream
 // set through the response controller lapses, then fails as a kernel
-// write timeout does.
-type stalledAtThirdWriter struct {
+// write timeout does. An event path without a SetWriteDeadline lets
+// the write block past the test bound.
+type stalledAtDraftWriter struct {
 	mu       sync.Mutex
 	header   http.Header
-	wrote    int
 	deadline time.Time
 	setDl    bool
 }
 
-func (s *stalledAtThirdWriter) Header() http.Header { return s.header }
-func (s *stalledAtThirdWriter) Write(p []byte) (int, error) {
+func (s *stalledAtDraftWriter) Header() http.Header { return s.header }
+func (s *stalledAtDraftWriter) Write(p []byte) (int, error) {
+	body := string(p)
+	if !strings.Contains(body, "event: draft") {
+		// Head, ready, comment, cursor, reset: all non-draft.
+		return len(p), nil
+	}
+	// First draft event: block until the deadline the stream set.
 	s.mu.Lock()
-	s.wrote++
-	n := len(p)
-	wrote := s.wrote
 	dl := s.deadline
 	set := s.setDl
 	s.mu.Unlock()
-	if wrote <= 2 {
-		return n, nil
-	}
 	if !set || dl.IsZero() {
 		// No deadline: block past the test bound.
 		time.Sleep(5 * time.Second)
@@ -187,12 +198,18 @@ func (s *stalledAtThirdWriter) Write(p []byte) (int, error) {
 	}
 	return 0, http.ErrHandlerTimeout
 }
-func (s *stalledAtThirdWriter) Flush()               {}
-func (s *stalledAtThirdWriter) WriteHeader(int)      {}
-func (s *stalledAtThirdWriter) SetWriteDeadline(t time.Time) error {
+func (s *stalledAtDraftWriter) Flush()          {}
+func (s *stalledAtDraftWriter) WriteHeader(int) {}
+func (s *stalledAtDraftWriter) SetWriteDeadline(t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deadline = t
 	s.setDl = true
 	return nil
 }
+
+// Unwrap exposes the writer to http.NewResponseController so the
+// controller's SetWriteDeadline reaches the stalled writer
+// directly. Without Unwrap, the controller may report
+// http.ErrNotSupported for deadline ops on a custom writer.
+func (s *stalledAtDraftWriter) Unwrap() http.ResponseWriter { return s }
