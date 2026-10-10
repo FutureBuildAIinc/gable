@@ -89,10 +89,13 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 
 	t.Cleanup(func() {
 		f.srv.Close()
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE module='orders'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE module='orders'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft' AND changes::text LIKE '%"orders"%'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type='draft' AND data::text LIKE '%orders%'`)
+		// Scoped to this fixture's own drafts (by the payload's customer),
+		// never by module: the drafts package's tests run in parallel and
+		// hold their own.
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE draft_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE payload->>'customer_id' = $1`, f.customerID.String())
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, f.productID)

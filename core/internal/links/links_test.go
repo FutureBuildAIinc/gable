@@ -176,10 +176,12 @@ func newFixture(t *testing.T, db *database.DB, settings links.Settings) *fixture
 
 	t.Cleanup(func() {
 		f.srv.Close()
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE module='quotes'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE module='quotes'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type IN ('draft','quote')`)
+		// Scoped to this fixture's own drafts, never by module: the drafts
+		// package's tests run in parallel and hold their own.
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE draft_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type IN ('draft','quote') AND (entity_id IN (SELECT id FROM quotes WHERE customer_id = $1) OR entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1))`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE payload->>'customer_id' = $1`, f.customerID.String())
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE customer_id = $1`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, f.customerID)

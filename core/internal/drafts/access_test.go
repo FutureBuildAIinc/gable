@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/links"
@@ -142,10 +143,13 @@ func newAccessFixture(t *testing.T, db *database.DB) *accessFixture {
 	t.Cleanup(func() {
 		f.srv.Close()
 		f.keySrv.Close()
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type IN ('draft','api_key','quote','order') AND created_at > now() - interval '1 hour' AND entity_id::text IN (SELECT id::text FROM drafts)`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type IN ('draft','quote')`)
+		// Scoped to this fixture's own rows (by the payload's customer),
+		// never by module or table wide: other packages' tests run in
+		// parallel and hold their own drafts of the same kinds.
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE draft_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE payload->>'customer_id' = $1`, f.customerID.String())
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE customer_id = $1`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, f.customerID)
@@ -236,6 +240,12 @@ func (f *accessFixture) doKeyStreamHead(rawKey, path string) resp {
 		f.t.Fatal(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+rawKey)
+	// A bound on the whole probe: a refused stream answers at once, an
+	// admitted one its ready event, and a loaded runner must not hang the
+	// table.
+	cctx, cancel := context.WithTimeout(req.Context(), 30*time.Second)
+	defer cancel()
+	req = req.WithContext(cctx)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
