@@ -481,21 +481,82 @@ func (v machineKeyValidatorForTests) ValidateKey(ctx context.Context, rawKey str
 // TestFeedEndsAtLifetimeBound pins section 3.3: the stream ends at its
 // lifetime bound with event: reauth before the close, and the client
 // reconnects from its last cursor.
+//
+// The test sets the lifetime (fastFeedSettings), paces its own clock by
+// it, and reads until the server's end of stream. The stream's context
+// outlives the bound by a margin for the heartbeat (40 ms), the reauth
+// write, and the close; the test cancels only after the server has
+// closed the body, as TestFeedStreamLimits does, so the test's own helper
+// never cuts the server off at its lifetime close.
+//
+// Without the lifetime bound in feed.go the server would never emit
+// reauth: the test's bound timer fires at lifetime + margin, the body
+// closes without a reauth, and the assertion fails.
 func TestFeedEndsAtLifetimeBound(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	events, _ := f.openStream(ctx, "/api/v1/drafts/quotes/feed")
-	defer func() { cancel(); <-events }()
-	ready := await(t, events, "ready")
-	if ready.id == "" {
-		t.Fatal("the ready event carries no cursor id")
+
+	// The bound, set by the fixture's fastFeedSettings. The margin covers
+	// the heartbeat (40 ms), the sseWriter write, the flush, the handler
+	// return and the body close on the wire.
+	const lifetime = 5 * time.Second
+	const margin = 2 * time.Second
+
+	// The stream's context is its own. The bound timer cancels it after
+	// lifetime + margin so a mutant that drops the bound is detected
+	// (the body closes with no reauth). The drain below holds the body
+	// open and the cancel fires when the body closes.
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	t.Cleanup(streamCancel)
+	boundTimer := time.AfterFunc(lifetime+margin, streamCancel)
+	defer boundTimer.Stop()
+
+	start := time.Now()
+	events, errs := f.openStream(streamCtx, "/api/v1/drafts/quotes/feed")
+
+	// The drain reads the events channel until the openStream helper
+	// closes it, which happens when the body EOF arrives (the server has
+	// closed the stream). The drain does not cancel the stream; the
+	// server's lifecycle owns the close.
+	var seen []sseEvent
+	for ev := range events {
+		seen = append(seen, ev)
 	}
-	// The fast settings bound the lifetime to 5 seconds; the next event is
-	// the reauth close (awaitFor paces the wait past the bound itself).
-	ev := awaitFor(t, events, "reauth", 20*time.Second)
-	if ev.event != "reauth" || ev.id == "" {
-		t.Errorf("closing event = %+v, want reauth with the cursor", ev)
+	elapsed := time.Since(start)
+
+	select {
+	case e := <-errs:
+		if e != nil {
+			t.Fatalf("stream error: %v", e)
+		}
+	default:
+	}
+
+	// The test's own clock: the stream must close at the bound (not
+	// before, not "sometime later").
+	if elapsed < lifetime {
+		t.Errorf("stream closed at %v, before its %v bound", elapsed, lifetime)
+	}
+	if elapsed > lifetime+margin {
+		t.Errorf("stream closed at %v, beyond %v bound + %v margin", elapsed, lifetime, margin)
+	}
+
+	// The reauth event with the cursor is what the lifetime bound emits
+	// before the close. Other tests in this package running in parallel
+	// may have delivered draft events onto this stream; the assertion is
+	// the reauth itself, the lifetime close's marker.
+	var reauth sseEvent
+	var found bool
+	for _, ev := range seen {
+		if ev.event == "reauth" {
+			reauth = ev
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no reauth event seen before stream close; saw %d events", len(seen))
+	}
+	if reauth.id == "" {
+		t.Errorf("the reauth event carries no cursor: %+v", reauth)
 	}
 }
 
