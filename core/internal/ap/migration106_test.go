@@ -197,6 +197,16 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	insert(partial, "PART-1", "PARTIAL", at(-5), nil, "80.00", "30.00")
 	voided := uuid.New()
 	insert(voided, "VOID-1", "VOIDED", at(-4), &orphan, "70.00", "0")
+	// A hand-written cancel-like status maps to the module's voided state, not
+	// to pending (a cancelled bill owes nothing); a short-paid PAID bill and an
+	// overpaid PARTIAL one take the insert trigger's amount_open rule (a PAID
+	// bill owes nothing), each named by a notice.
+	cancelled := uuid.New()
+	insert(cancelled, "CANC-1", "CANCELLED", at(-4), nil, "60.00", "0")
+	paidShort := uuid.New()
+	insert(paidShort, "PAIDSHORT-1", "PAID", at(-4), nil, "50.00", "44.00")
+	over := uuid.New()
+	insert(over, "OVER-1", "PARTIAL", at(-4), nil, "80.00", "90.00")
 	// A NULL created_at: the base column was NOT NULL, so it comes off first
 	// (the migration's own fill-then-set step then has a row to fill).
 	if _, err := conn.Exec(ctx, `ALTER TABLE vendor_invoices ALTER COLUMN created_at DROP NOT NULL`); err != nil {
@@ -250,7 +260,8 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 		t.Errorf("the unknown status = %s, want PENDING", got)
 	}
 	joined := strings.Join(*notices, " | ")
-	for _, want := range []string{"duplicate vendor invoice number", "po_id is set null", "unknown status"} {
+	for _, want := range []string{"duplicate vendor invoice number", "po_id is set null", "unknown status",
+		"cancel-like status", "paid less than their total", "paid past their total"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("the notices (%s) do not mention %q", joined, want)
 		}
@@ -285,11 +296,17 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 		t.Errorf("%d rows are not at the default branch (no purchase order branch exists yet)", got)
 	}
 
-	// amount_open: total less paid, and zero on a voided bill.
-	for id, want := range map[uuid.UUID]string{dup1: "100.00", nailed: "0.00", partial: "50.00", voided: "0.00"} {
+	// amount_open: total less paid, zero on a voided bill and on a paid one
+	// (the insert trigger's rule), clamped at zero for an overpaid partial.
+	for id, want := range map[uuid.UUID]string{dup1: "100.00", nailed: "0.00", partial: "50.00", voided: "0.00",
+		cancelled: "0.00", paidShort: "0.00", over: "0.00"} {
 		if got := one106(t, conn, `SELECT amount_open::text FROM vendor_invoices WHERE id = $1`, id); got != want {
 			t.Errorf("amount_open of %s = %s, want %s", id, got, want)
 		}
+	}
+	// The cancel-like status becomes VOIDED, not PENDING.
+	if got := one106(t, conn, `SELECT status FROM vendor_invoices WHERE id = $1`, cancelled); got != "VOIDED" {
+		t.Errorf("the cancel-like status = %s, want VOIDED", got)
 	}
 
 	// The lines: positioned in (created_at, id) order, and the price widened.

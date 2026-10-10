@@ -7,13 +7,16 @@
 --   1  vendor_invoices: created_at NOT NULL, revision, the number (AP-), the
 --      branch (from the purchase order's branch when that column exists,
 --      else the default branch), the currency, a status CHECK on today's
---      values (unknown values become PENDING, with a notice), po_id as a
---      real foreign key (orphans are set null, with a notice), UNIQUE
---      (vendor_id, invoice_number) after duplicates are suffixed #2, #3 in
---      (created_at, id) order (with a notice), amount_open, and gl_entry_id
---      linked to the newest posted, unreversed VENDOR_INVOICE entry of every
---      approved or partial bill (the bills left without one counted by a
---      notice).
+--      values (lowercase spellings uppercased, cancel-like values become
+--      VOIDED, other unknown values become PENDING, each with a notice),
+--      po_id as a real foreign key (orphans are set null, with a notice),
+--      UNIQUE (vendor_id, invoice_number) after duplicates are suffixed #2,
+--      #3 in (created_at, id) order (with a notice), amount_open (the insert
+--      trigger's rule: zero on a voided or paid bill, the total less paid
+--      otherwise, with notices for short-paid PAID and overpaid PARTIAL
+--      rows), and gl_entry_id linked to the newest posted, unreversed
+--      VENDOR_INVOICE entry of every approved or partial bill (the bills
+--      left without one counted by a notice).
 --   2  vendor_invoice_lines: position, purchase_order_line_id, product_id,
 --      unit_price widened to NUMERIC(12,4), po_freight_charge_id (the
 --      carrier freight line link of 7.3, written from package C's freight
@@ -88,14 +91,21 @@ EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
 -- The status CHECK on today's values: lowercase spellings are uppercased and
--- anything unknown becomes PENDING, each with a notice.
+-- anything unknown becomes PENDING, each with a notice. A hand-written
+-- cancel-like value (CANCELLED, CANCELED) maps to the module's voided state,
+-- never to pending: a cancelled bill owes nothing.
 DO $$
-DECLARE lower BIGINT; unknown BIGINT;
+DECLARE lower BIGINT; unknown BIGINT; cancels BIGINT;
 BEGIN
     SELECT count(*) INTO lower FROM vendor_invoices WHERE status <> UPPER(btrim(status));
     IF lower > 0 THEN
         UPDATE vendor_invoices SET status = UPPER(btrim(status)) WHERE status <> UPPER(btrim(status));
         RAISE NOTICE 'migration 106: % vendor invoice status value(s) were not uppercase and are uppercased', lower;
+    END IF;
+    SELECT count(*) INTO cancels FROM vendor_invoices WHERE status IN ('CANCELLED', 'CANCELED');
+    IF cancels > 0 THEN
+        UPDATE vendor_invoices SET status = 'VOIDED' WHERE status IN ('CANCELLED', 'CANCELED');
+        RAISE NOTICE 'migration 106: % vendor invoice(s) held a cancel-like status (CANCELLED, CANCELED) and become VOIDED owing nothing', cancels;
     END IF;
     SELECT count(*) INTO unknown FROM vendor_invoices
     WHERE status NOT IN ('PENDING', 'APPROVED', 'PARTIAL', 'PAID', 'VOIDED');
@@ -220,9 +230,24 @@ BEGIN
     END IF;
 END $$;
 
--- amount_open: what the vendor is still owed, zero on a voided bill.
+-- amount_open: what the vendor is still owed, by the insert trigger's rule:
+-- zero on a voided or paid bill, the total less what was paid (clamped at
+-- zero) otherwise. A short-paid PAID bill and an overpaid PARTIAL one are
+-- each named by a notice, so an operator can mend the row.
+DO $$
+DECLARE shortPaid BIGINT; overpaid BIGINT;
+BEGIN
+    SELECT count(*) INTO shortPaid FROM vendor_invoices WHERE status = 'PAID' AND amount_paid < total;
+    IF shortPaid > 0 THEN
+        RAISE NOTICE 'migration 106: % PAID vendor invoice(s) were paid less than their total and owe nothing', shortPaid;
+    END IF;
+    SELECT count(*) INTO overpaid FROM vendor_invoices WHERE status = 'PARTIAL' AND amount_paid > total;
+    IF overpaid > 0 THEN
+        RAISE NOTICE 'migration 106: % PARTIAL vendor invoice(s) were paid past their total', overpaid;
+    END IF;
+END $$;
 ALTER TABLE vendor_invoices ADD COLUMN IF NOT EXISTS amount_open NUMERIC(12, 2) NULL;
-UPDATE vendor_invoices SET amount_open = CASE WHEN status = 'VOIDED' THEN 0 ELSE GREATEST(0, total - amount_paid) END
+UPDATE vendor_invoices SET amount_open = CASE WHEN status IN ('VOIDED', 'PAID') THEN 0 ELSE GREATEST(0, total - amount_paid) END
 WHERE amount_open IS NULL;
 ALTER TABLE vendor_invoices ALTER COLUMN amount_open SET NOT NULL;
 ALTER TABLE vendor_invoices DROP CONSTRAINT IF EXISTS vendor_invoices_amount_open_range;
