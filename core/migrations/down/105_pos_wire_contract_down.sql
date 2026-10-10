@@ -21,12 +21,15 @@ WHERE c.account_number = 'WALK-IN'
   AND NOT EXISTS (SELECT 1 FROM credit_memos m WHERE m.customer_id = c.id)
   AND NOT EXISTS (SELECT 1 FROM customer_transactions ct WHERE ct.customer_id = c.id);
 
--- 3. the returns.
+-- 3. the returns. The link's foreign key drops first (it blocks the memo
+-- delete), the memos are found by the up's own reason marker, and the link
+-- column goes last.
 DELETE FROM pos_line_items WHERE product_id IS NULL;
 
-DELETE FROM credit_memo_lines WHERE credit_memo_id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL);
-DELETE FROM credit_memos WHERE reason = 'migrated counter account return'
-  AND id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL);
+ALTER TABLE pos_returns DROP CONSTRAINT IF EXISTS pos_returns_credit_memo_id_fkey;
+DELETE FROM credit_memo_lines WHERE credit_memo_id IN
+  (SELECT id FROM credit_memos WHERE reason = 'migrated counter account return');
+DELETE FROM credit_memos WHERE reason = 'migrated counter account return';
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS credit_memo_id;
 
 ALTER TABLE pos_return_lines DROP COLUMN IF EXISTS taxable;

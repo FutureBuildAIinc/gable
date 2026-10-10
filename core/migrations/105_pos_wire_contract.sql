@@ -44,7 +44,7 @@ UPDATE pos_transactions SET currency = 'USD' WHERE currency IS NULL;
 ALTER TABLE pos_transactions ALTER COLUMN currency SET NOT NULL;
 DO $$ BEGIN
     ALTER TABLE pos_transactions ADD CONSTRAINT pos_transactions_currency_check CHECK (currency ~ '^[A-Z]{3}$');
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 ALTER TABLE pos_transactions ADD COLUMN IF NOT EXISTS invoice_id UUID NULL REFERENCES invoices (id);
@@ -70,13 +70,13 @@ ALTER TABLE pos_transactions ALTER COLUMN number SET DEFAULT 'POS-' || lpad(next
 ALTER TABLE pos_transactions ALTER COLUMN number SET NOT NULL;
 DO $$ BEGIN
     ALTER TABLE pos_transactions ADD CONSTRAINT pos_transactions_number_key UNIQUE (number);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 DO $$ BEGIN
     ALTER TABLE pos_transactions ADD CONSTRAINT pos_transactions_status_check
         CHECK (status IN ('OPEN', 'HELD', 'COMPLETED', 'VOIDED', 'RETURNED'));
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 -- 2. pos_line_items: the shared line columns of ADR 0005 section 2.2.
@@ -99,11 +99,11 @@ ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS parent_line_id UUID NULL REF
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS charge_code_id UUID NULL REFERENCES charge_codes (id);
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS price_uom TEXT;
-UPDATE pos_line_items SET price_uom = uom WHERE price_uom IS NULL;
+UPDATE pos_line_items SET price_uom = uom WHERE price_uom IS NULL AND line_type <> 'TEXT';
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS uom_qty NUMERIC(12, 4);
-UPDATE pos_line_items SET uom_qty = 1 WHERE uom_qty IS NULL;
+UPDATE pos_line_items SET uom_qty = 1 WHERE uom_qty IS NULL AND line_type <> 'TEXT';
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS price_uom_qty NUMERIC(12, 4);
-UPDATE pos_line_items SET price_uom_qty = 1 WHERE price_uom_qty IS NULL;
+UPDATE pos_line_items SET price_uom_qty = 1 WHERE price_uom_qty IS NULL AND line_type <> 'TEXT';
 
 ALTER TABLE pos_line_items ALTER COLUMN quantity TYPE NUMERIC(12, 4);
 ALTER TABLE pos_line_items ALTER COLUMN unit_price TYPE NUMERIC(12, 4);
@@ -115,7 +115,7 @@ ALTER TABLE pos_line_items ALTER COLUMN price_source SET NOT NULL;
 DO $$ BEGIN
     ALTER TABLE pos_line_items ADD CONSTRAINT pos_line_items_price_source_check
         CHECK (price_source IN ('PRICE_LIST', 'QUOTE', 'OVERRIDE', 'MANUAL', 'NONE'));
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS override_reason TEXT;
@@ -139,12 +139,12 @@ ALTER TABLE pos_line_items ALTER COLUMN line_total DROP NOT NULL;
 DO $$ BEGIN
     ALTER TABLE pos_line_items ADD CONSTRAINT pos_line_items_line_type_check
         CHECK (line_type IN ('PRODUCT', 'KIT', 'COMPONENT', 'CHARGE', 'TEXT'));
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 DO $$ BEGIN
     ALTER TABLE pos_line_items ADD CONSTRAINT pos_line_items_pair_positive
         CHECK ((uom_qty IS NULL AND price_uom_qty IS NULL) OR (uom_qty > 0 AND price_uom_qty > 0));
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 DO $$ BEGIN
     ALTER TABLE pos_line_items ADD CONSTRAINT pos_line_items_shape
@@ -181,12 +181,12 @@ DO $$ BEGIN
                 AND line_total IS NOT NULL
                 AND charge_code_id IS NOT NULL AND product_id IS NULL)
         );
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 DO $$ BEGIN
     ALTER TABLE pos_line_items ADD CONSTRAINT pos_line_items_discount_check
         CHECK (discount_percent IS NULL OR discount_amount IS NULL);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 -- pos_tenders: the payment each tender became (and, from this item, is).
@@ -208,7 +208,7 @@ UPDATE pos_returns SET currency = 'USD' WHERE currency IS NULL;
 ALTER TABLE pos_returns ALTER COLUMN currency SET NOT NULL;
 DO $$ BEGIN
     ALTER TABLE pos_returns ADD CONSTRAINT pos_returns_currency_check CHECK (currency ~ '^[A-Z]{3}$');
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 ALTER TABLE pos_returns ADD COLUMN IF NOT EXISTS credit_memo_id UUID NULL REFERENCES credit_memos (id);
@@ -234,7 +234,7 @@ ALTER TABLE pos_returns ALTER COLUMN number SET DEFAULT 'RTN-' || lpad(nextval('
 ALTER TABLE pos_returns ALTER COLUMN number SET NOT NULL;
 DO $$ BEGIN
     ALTER TABLE pos_returns ADD CONSTRAINT pos_returns_number_key UNIQUE (number);
-EXCEPTION WHEN duplicate_object THEN NULL;
+EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS position INTEGER;
@@ -251,11 +251,11 @@ UPDATE pos_return_lines SET line_type = 'PRODUCT' WHERE line_type IS NULL;
 ALTER TABLE pos_return_lines ALTER COLUMN line_type SET NOT NULL;
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS sku TEXT;
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS price_uom TEXT;
-UPDATE pos_return_lines SET price_uom = uom WHERE price_uom IS NULL;
+UPDATE pos_return_lines SET price_uom = uom WHERE price_uom IS NULL AND line_type <> 'TEXT';
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS uom_qty NUMERIC(12, 4);
-UPDATE pos_return_lines SET uom_qty = 1 WHERE uom_qty IS NULL;
+UPDATE pos_return_lines SET uom_qty = 1 WHERE uom_qty IS NULL AND line_type <> 'TEXT';
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS price_uom_qty NUMERIC(12, 4);
-UPDATE pos_return_lines SET price_uom_qty = 1 WHERE price_uom_qty IS NULL;
+UPDATE pos_return_lines SET price_uom_qty = 1 WHERE price_uom_qty IS NULL AND line_type <> 'TEXT';
 ALTER TABLE pos_return_lines ALTER COLUMN quantity TYPE NUMERIC(12, 4);
 ALTER TABLE pos_return_lines ALTER COLUMN unit_price TYPE NUMERIC(12, 4);
 ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS taxable BOOLEAN;
