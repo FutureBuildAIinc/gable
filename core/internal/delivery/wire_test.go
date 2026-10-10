@@ -16,9 +16,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -1207,4 +1212,125 @@ func TestRegisterRoutes_GuardsWrapEveryRoute(t *testing.T) {
 			t.Errorf("%s: status %d, want the guard's 418 (the guard did not wrap it)", p, rec.Code)
 		}
 	}
+}
+
+// RULE (PR 70 review round 4 P3-1): a photo upload refused by the wall
+// must leave no file on disk. The test points saveUpload at a temporary
+// directory, sends a real multipart body to the POD photo route for a stop
+// that the wall cannot see (the cross-branch stop seeded here, an unknown
+// id also works), and counts files in the upload directory before and
+// after. The refused request must not have written a file: it is the
+// failure that the wall check happens before saveUpload.
+func TestBranchWall_PODPhotoRefusalLeavesNoFile(t *testing.T) {
+	f := newFixture(t)
+	uploadDir := t.TempDir()
+	t.Chdir(uploadDir)
+	ctx := context.Background()
+	route, _, _ := f.seedStop(t, f.branch)
+	// A stop from a third branch, separately seeded so the wall holds it
+	// out of the caller's branch.
+	wallBranch := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`,
+		wallBranch, "WAL-"+wallBranch.String()[:8]); err != nil {
+		t.Fatalf("seed wall branch: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, wallBranch) })
+	otherBranch := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`,
+		otherBranch, "RFU-"+otherBranch.String()[:8]); err != nil {
+		t.Fatalf("seed other branch: %v", err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, otherBranch) })
+	var customer uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1, $2, $3, $4) RETURNING id`,
+		uuid.New(), "Refused photo customer", "REFU-"+uuid.NewString()[:8], otherBranch).Scan(&customer); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customer_branches WHERE customer_id = $1`, customer)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customers WHERE id = $1`, customer)
+	})
+	var otherOrder uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, number)
+		VALUES ($1, $2, $3, 'CONFIRMED', 10, 'DELIVERY', 'USD', $4) RETURNING id`,
+		uuid.New(), customer, otherBranch, "SO-"+strings.ToUpper(uuid.NewString()[:8])).Scan(&otherOrder); err != nil {
+		t.Fatal(err)
+	}
+	var crossRoute uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx,
+		`INSERT INTO delivery_routes (id, scheduled_date, status) VALUES ($1, '2030-09-01', 'DRAFT') RETURNING id`,
+		uuid.New()).Scan(&crossRoute); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM delivery_routes WHERE id = $1`, crossRoute) })
+	var crossStop uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx,
+		`INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status) VALUES ($1, $2, $3, 99, 'PENDING') RETURNING id`,
+		uuid.New(), crossRoute, otherOrder).Scan(&crossStop); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM deliveries WHERE route_id = $1`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM delivery_routes WHERE id = $1`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM orders WHERE id = $1`, otherOrder)
+	})
+
+	body, ctype := buildMultipartPhoto(t, "refused.jpg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10})
+
+	countFiles := func() int {
+		dir := filepath.Join(uploadDir, "uploads", "pod")
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read uploads/pod: %v", err)
+		}
+		return len(entries)
+	}
+
+	hdr := map[string]string{"X-Test-Branch": wallBranch.String(), "Content-Type": ctype}
+
+	// First: an unknown id. The wall check returns 404, no saveUpload, no file.
+	res := f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+uuid.NewString()+"/pod-photo", body, hdr)
+	if res.status != http.StatusNotFound {
+		t.Errorf("unknown id POD photo = %d, want 404", res.status)
+	}
+	if n := countFiles(); n != 0 {
+		t.Errorf("unknown id upload left %d files in uploads/pod, want 0", n)
+	}
+
+	// Second: a real stop belonging to a route outside the wall. saveUpload
+	// is never called and no file lands on disk.
+	res = f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+crossStop.String()+"/pod-photo", body, hdr)
+	if res.status != http.StatusNotFound {
+		t.Errorf("cross branch POD photo = %d, want 404", res.status)
+	}
+	if n := countFiles(); n != 0 {
+		t.Errorf("cross branch refusal left %d files in uploads/pod, want 0 (the wall check must run before saveUpload)", n)
+	}
+}
+
+// buildMultipartPhoto builds a minimal multipart/form-data body with a single
+// photo part whose bytes are a JPEG header so the extension check passes.
+func buildMultipartPhoto(t *testing.T, filename string, body []byte) (string, string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	hdr := make(textproto.MIMEHeader)
+	hdr.Set("Content-Disposition", fmt.Sprintf(`form-data; name="photo"; filename=%q`, filename))
+	hdr.Set("Content-Type", "image/jpeg")
+	part, err := w.CreatePart(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String(), w.FormDataContentType()
 }

@@ -915,6 +915,15 @@ func (h *Handler) HandleUploadPODPhoto(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	// RULE (PR 70 review round 4 P3-1): a refused photo upload must leave
+	// no file on disk. Validate the stop through the walled read before
+	// the multipart body is saved; a stop the wall hides answers 404 and
+	// saveUpload is never called, so the upload directory never sees a
+	// stray write for a cross-branch or unknown id.
+	if _, gerr := h.service.GetDelivery(r.Context(), id); gerr != nil {
+		httpx.WriteError(w, r, gerr)
+		return
+	}
 	url, err := saveUpload(w, r, "pod")
 	if err != nil {
 		httpx.WriteError(w, r, err)
