@@ -130,6 +130,30 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		customerID = pre.CustomerID
 	}
 	realCustomerID := *customerID
+	if len(preLines) == 0 {
+		return nil, invalid("lines", "the sale has no lines to complete")
+	}
+	// The tax, priced before the transaction with the same resolver the
+	// transaction uses (exemption first, then the provider or the branch
+	// rate), so the tender pre-check refuses the obvious cases before a card
+	// is charged; the transaction's own check against the live total under
+	// the lock is the authority.
+	priced, err := s.prepareSaleTax(ctx, pre, preLines, realCustomerID)
+	if err != nil {
+		return nil, err
+	}
+	estimate := priced
+	if estimate == nil {
+		exempt, err := s.repo.CustomerExempt(ctx, realCustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if exempt {
+			estimate = &providerTax{}
+		} else {
+			estimate = &providerTax{taxCents: httpx.Cents(s.estimateTax(ctx, pre, salesdoc.SumTotals(preLines).TaxableCents))}
+		}
+	}
 	// The tender plan: what the drawer keeps per tender and what walks out
 	// as change (only cash makes change; an ACCOUNT tender needs a named
 	// customer and passes the credit check).
@@ -145,7 +169,7 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 	}
 	totals := salesdoc.SumTotals(preLines)
-	total := int64(totals.SubtotalCents) + int64(s.estimateTax(ctx, pre, totals.TaxableCents))
+	total := int64(totals.SubtotalCents) + int64(estimate.taxCents)
 	change := totalTendered - total
 	if change < 0 {
 		return nil, conflict("insufficient_tender",
@@ -161,8 +185,13 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 				"an ACCOUNT tender needs a named customer: the walk-in customer buys on the barrelhead")
 		}
 	}
-	if len(preLines) == 0 {
-		return nil, invalid("lines", "the sale has no lines to complete")
+	// The credit check an ACCOUNT tender owes, read before the card is
+	// charged (a refusal must never move money at the terminal); the
+	// transaction repeats it under the customer's credit lock.
+	if accountPortion > 0 {
+		if err := s.checkAccountCredit(ctx, realCustomerID, accountPortion); err != nil {
+			return nil, err
+		}
 	}
 	// The credit check an ACCOUNT tender owes, read before the card is
 	// charged (a refusal must never move money at the terminal); the
@@ -200,11 +229,8 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		charges[i] = &chargeResult{GatewayTxID: res.TransactionID, AuthCode: res.AuthCode, Last4: res.CardLast4, Brand: res.CardBrand}
 		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
-	priced, err := s.prepareSaleTax(ctx, pre, preLines, realCustomerID)
 	var out *Sale
-	if err == nil {
-		out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced)
-	}
+	out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced)
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
@@ -331,9 +357,18 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			}
 		}
 		total := int64(totals.SubtotalCents) + taxCents
-		if totalTendered-recomputedChange(tenders, total) < 0 {
+		// The tender check against the LIVE total (the tax is known now, the
+		// lines locked): the change is the tenders less the total, an under
+		// tender is refused and so is a change above the cash taken; a
+		// negative change is never written.
+		change := totalTendered - total
+		if change < 0 {
 			return conflict("insufficient_tender",
 				fmt.Sprintf("the sale needs %d cents and the tenders carry %d", total, totalTendered))
+		}
+		if change > cashTendered {
+			return conflict("change_from_cash",
+				"only a cash tender can give change: the over tender exceeds the cash taken")
 		}
 
 		// The credit check an ACCOUNT tender owes (ADR 0005 14.2 C2-5).
@@ -443,8 +478,8 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 
 		// The tenders become payments applied to the invoice, stored net:
 		// change comes out of the cash tendered, so the payment is the
-		// money kept (ADR 0005 14.2 C2-5).
-		change := totalTendered - total
+		// money kept (ADR 0005 14.2 C2-5). The change is the checked value
+		// from the live total above.
 		cashChangeLeft := change
 		var fxAll *account.Effects
 		for i := range tenders {
@@ -564,18 +599,6 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		return nil, err
 	}
 	return out, nil
-}
-
-// recomputedChange is the change the recomputed total implies.
-func recomputedChange(tenders []TenderIn, total int64) int64 {
-	var tendered int64
-	for i := range tenders {
-		tendered += int64(tenders[i].AmountCents)
-	}
-	if tendered <= total {
-		return 0
-	}
-	return tendered - total
 }
 
 func min64(a, b int64) int64 {
