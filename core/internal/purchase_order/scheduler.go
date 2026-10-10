@@ -9,6 +9,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/robfig/cron/v3"
 )
@@ -112,10 +113,14 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	refreshExpr := s.settingString(ctx, settingRefreshCron, defaultRefreshCron)
 	createExpr := s.settingString(ctx, settingCreateCron, defaultCreateCron)
 
-	if _, err := s.cron.AddFunc(refreshExpr, func() { s.runRefresh(context.Background()) }); err != nil {
+	// Both jobs run as the system caller, the same mark the manual
+	// refresh route puts on its context (PR 44 r3 P3): the cron acts for the
+	// deployment itself, not for a user, and its reads must be recognisable
+	// as a trusted caller's rather than merely a context with no branch.
+	if _, err := s.cron.AddFunc(refreshExpr, func() { s.runRefresh(branchctx.WithSystem(context.Background())) }); err != nil {
 		return fmt.Errorf("register refresh cron %q: %w", refreshExpr, err)
 	}
-	if _, err := s.cron.AddFunc(createExpr, func() { s.runCreateReorders(context.Background()) }); err != nil {
+	if _, err := s.cron.AddFunc(createExpr, func() { s.runCreateReorders(branchctx.WithSystem(context.Background())) }); err != nil {
 		return fmt.Errorf("register create-reorders cron %q: %w", createExpr, err)
 	}
 
