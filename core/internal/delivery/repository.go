@@ -121,6 +121,11 @@ type Repository interface {
 	GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUID) (string, error)
 	SetDeliveryLatLng(ctx context.Context, deliveryID uuid.UUID, lat, lng float64) error
 	SetDeliveryETA(ctx context.Context, deliveryID uuid.UUID, eta time.Time) error
+
+	// GetOrderBranchID resolves the order's branch through the wall so an
+	// assign from a caller held to a branch can refuse a cross-branch
+	// order the same way it refuses a cross-branch route.
+	GetOrderBranchID(ctx context.Context, orderID uuid.UUID) (uuid.UUID, error)
 }
 
 // TouchDelivery moves a stop's revision without changing its content: the
@@ -974,6 +979,37 @@ type BranchOrigin struct {
 	Latitude  *float64
 	Longitude *float64
 	Address   string
+}
+
+// orderVisible is the three-state visibility of an order's branch (the
+// stop table joins o for the predicate; this is the version without a join).
+func orderVisible(branchArg, subArg int) string {
+	return fmt.Sprintf(`(
+		($%d::uuid IS NOT NULL AND branch_id = $%d)
+		OR ($%d::uuid IS NULL AND $%d::text IS NOT NULL AND branch_id IN
+			(SELECT branch_id FROM user_locations WHERE user_sub = $%d))
+		OR ($%d::uuid IS NULL AND $%d::text IS NULL)
+	)`, branchArg, branchArg, branchArg, subArg, subArg, branchArg, subArg)
+}
+
+// GetOrderBranchID resolves an order's branch through the same wall the
+// route and stop reads use. The assign checks the order's branch up front
+// against the wall: a cross-branch caller gets the same 404 as reading the
+// route (PR 70 review round 1 P3-4). Without this wall, OrderDeliveryType
+// uses branchctx.WithSystem and reads any order.
+func (r *PostgresRepository) GetOrderBranchID(ctx context.Context, orderID uuid.UUID) (uuid.UUID, error) {
+	branch, sub := wallArgs(ctx)
+	var branchID uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT branch_id FROM orders WHERE id = $1 AND `+orderVisible(2, 3),
+		orderID, branch, sub).Scan(&branchID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to load order branch: %w", err)
+	}
+	return branchID, nil
 }
 
 // GetRouteBranchID resolves the branch a route belongs to via its orders

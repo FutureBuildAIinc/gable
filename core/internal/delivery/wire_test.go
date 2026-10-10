@@ -251,6 +251,39 @@ func (f *fixture) assignOrder(t *testing.T, route, order uuid.UUID, hdr map[stri
 		`{"route_id":"`+route.String()+`","order_id":"`+order.String()+`"}`, hdr)
 }
 
+// seedOtherBranchOrder creates a fresh delivery order on the given branch
+// for assign tests that need an order independent of the seedStop's seeded
+// stop (whose order is already linked to a delivery row).
+func (f *fixture) seedOtherBranchOrder(t *testing.T, branch uuid.UUID) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	var customer uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1, $2, $3, $4) RETURNING id`,
+		uuid.New(), "Wire assign "+f.prefix, f.prefix+uuid.NewString()[:8], branch).Scan(&customer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, customer, branch); err != nil {
+		t.Fatal(err)
+	}
+	var order uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, number)
+		VALUES ($1, $2, $3, 'CONFIRMED', 10, 'DELIVERY', 'USD', $4) RETURNING id`,
+		uuid.New(), customer, branch, "SO-"+strings.ToUpper(uuid.NewString()[:8])).Scan(&order); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM orders WHERE id = $1`, order)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customer_branches WHERE customer_id = $1`, customer)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customers WHERE id = $1`, customer)
+	})
+	return order
+}
+
 // The create shape: lowercase vocabulary, business dates as YYYY-MM-DD,
 // revision and the ETag, Location, timestamps at microsecond precision,
 // optional fields present as null.
@@ -805,6 +838,8 @@ func TestAdjustQty_RecordsRow(t *testing.T) {
 
 // The branch wall on every read and write of a stop and its route (the live
 // failure: a second branch's request read the first branch's stop as 200).
+// PR 70 review round 1 P3-4 adds assign, photo attaches, route transitions,
+// reorder and optimize to the wall.
 func TestBranchWall(t *testing.T) {
 	f := newFixture(t)
 	route, stop, _ := f.seedStop(t, f.branch)
@@ -839,6 +874,48 @@ func TestBranchWall(t *testing.T) {
 	if res := f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+stop.String()+"/adjust-qty",
 		`{"adjusted_by":"`+uuid.NewString()+`","adjustments":[{"product_id":"`+uuid.NewString()+`","original_qty":"1","adjusted_qty":"1","reason_code":"other"}]}`, hdr); res.status != http.StatusNotFound {
 		t.Errorf("cross branch adjustment = %d, want 404", res.status)
+	}
+	// Cross-branch assign: the order belongs to this branch, the caller's
+	// wall says it is the other branch, the assign refuses. The order here
+	// is a fresh one on this branch so the count tells only what the
+	// assign created.
+	otherOrder := f.seedOtherBranchOrder(t, f.branch)
+	if res := f.assignOrder(t, route, otherOrder, hdr); res.status != http.StatusNotFound {
+		t.Errorf("cross branch assign = %d, want 404", res.status)
+	}
+	var created int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM deliveries WHERE order_id = $1 AND route_id = $2`,
+		otherOrder, route).Scan(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created != 0 {
+		t.Errorf("%d deliveries were created despite a cross-branch assign", created)
+	}
+	// Cross-branch POD photo upload.
+	if res := f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+stop.String()+"/pod-photo",
+		`--boundary\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"a.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n--boundary--`,
+		hdr); res.status != http.StatusNotFound && res.status != http.StatusBadRequest {
+		t.Errorf("cross branch POD photo = %d, want 404 or 400", res.status)
+	}
+	// Cross-branch reorder: the route is not visible, so 404.
+	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/reorder",
+		`{"ordered_delivery_ids":["`+stop.String()+`"]}`,
+		map[string]string{"X-Test-Branch": other.String(), "If-Match": `"1"`}); res.status != http.StatusNotFound {
+		t.Errorf("cross branch reorder = %d, want 404", res.status)
+	}
+	// Cross-branch optimize: the route is not visible, so 404.
+	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/optimize",
+		``, map[string]string{"X-Test-Branch": other.String(), "If-Match": `"1"`}); res.status != http.StatusNotFound {
+		t.Errorf("cross branch optimize = %d, want 404", res.status)
+	}
+	// Cross-branch route transition: the route is not visible, so 404. The
+// request carries the same If-Match a real transition would; the wall fires
+// before the precondition is read.
+	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/transitions",
+		`{"to":"in_transit"}`,
+		map[string]string{"X-Test-Branch": other.String(), "If-Match": `"1"`}); res.status != http.StatusNotFound {
+		t.Errorf("cross branch route transition = %d, want 404", res.status)
 	}
 	// The owning branch still sees everything.
 	if res := f.do(t, http.MethodGet, "/api/v1/delivery/deliveries/"+stop.String(), "", map[string]string{"X-Test-Branch": f.branch.String()}); res.status != http.StatusOK {

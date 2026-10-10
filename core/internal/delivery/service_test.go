@@ -29,6 +29,7 @@ type fakeRepo struct {
 	branchID    uuid.UUID
 	branchOrg   *BranchOrigin
 	orderAddrs  map[uuid.UUID]string
+	orderBranch map[uuid.UUID]uuid.UUID
 	routeStops  map[uuid.UUID][]Stop
 	fetchedStop *Stop
 
@@ -184,6 +185,12 @@ func (m *fakeRepo) SetBranchLatLng(ctx context.Context, branchID uuid.UUID, lat,
 }
 func (m *fakeRepo) GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUID) (string, error) {
 	return m.orderAddrs[orderID], nil
+}
+func (m *fakeRepo) GetOrderBranchID(ctx context.Context, orderID uuid.UUID) (uuid.UUID, error) {
+	if b, ok := m.orderBranch[orderID]; ok {
+		return b, nil
+	}
+	return uuid.Nil, ErrNotFound
 }
 func (m *fakeRepo) SetDeliveryLatLng(ctx context.Context, deliveryID uuid.UUID, lat, lng float64) error {
 	if m.setLatLng == nil {

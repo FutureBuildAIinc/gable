@@ -973,6 +973,12 @@ func (s *Service) GetDelivery(ctx context.Context, id uuid.UUID) (*Stop, error) 
 // cancelled is refused with 409 invalid_state_transition, and the route's
 // revision moves on a successful assign.
 func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, actor string) (*Stop, *CapacityWarning, error) {
+	// The order's branch is checked through the wall up front (PR 70 review
+// round 1 P3-4): a cross-branch caller must see the same 404 as reading a
+// cross-branch route, not a 500 from the post-insert walled read.
+	if _, err := s.repo.GetOrderBranchID(ctx, d.OrderID); err != nil {
+		return nil, nil, notFound(err)
+	}
 	if s.orders != nil {
 		dt, err := s.orders.OrderDeliveryType(ctx, d.OrderID)
 		if err != nil {
