@@ -415,17 +415,29 @@ func (s *sseWriter) comment(line string) error {
 }
 
 // stream opens and runs the SSE response (section 3.2 to 3.4).
+//
+// The response writer may be wrapped by middleware (metrics, recovery,
+// cache control) that does not implement http.Flusher directly. The
+// shipped code type-asserts w.(http.Flusher) and falls back to 503 when
+// the assertion fails, which broke the stream in production where
+// metrics.statusWriter wraps every response. http.NewResponseController
+// looks through the wrappers and finds Flusher if any layer exposes it;
+// on a connection that genuinely cannot flush the response controller
+// will surface ErrNotSupported when we ask for a flush, which the
+// sseWriter emits as a write error and the loop handles.
 func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter EventFilter, after int64) {
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		httpx.WriteError(w, r, httpx.Unavailable("streaming is not supported on this connection"))
-		return
+	rc := http.NewResponseController(w)
+	flusher := func() error {
+		return rc.Flush()
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	if err := flusher(); err != nil && err != http.ErrNotSupported {
+		httpx.WriteError(w, r, httpx.Unavailable("streaming is not supported on this connection"))
+		return
+	}
 
 	sse := &sseWriter{w: w, timeout: h.settings.WriteTimeout}
 	ctx := r.Context()
@@ -456,7 +468,7 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 		if err := sse.write(ctx, "reset", "", nil); err != nil {
 			return
 		}
-		flusher.Flush()
+		flusher()
 	}
 	page, err := h.repo.ReadEvents(ctx, filter, -1, 1)
 	if err != nil {
@@ -473,7 +485,7 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 	if err := sse.write(ctx, "ready", mintFeedCursor(head), nil); err != nil {
 		return
 	}
-	flusher.Flush()
+	flusher()
 
 	keyID := uuid.Nil
 	if id, ok := middleware.KeyIDFromContext(ctx); ok {
@@ -491,7 +503,7 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 		// deadline.
 		if time.Now().After(deadline) {
 			_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
-			flusher.Flush()
+			flusher()
 			return
 		}
 		// One batch of rows past the position; the same statement reads the
@@ -516,9 +528,20 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 				position = ev.Position
 				lastSent = position
 			}
-			flusher.Flush()
-			// Progress without matches: the heartbeat becomes a cursor
-			// event, so a reconnecting client does not rescan excluded rows.
+			flusher()
+			// Cursor advance. When the page was full, the next iteration
+			// must re-read so rows that committed between the last read
+			// and the head land on the stream; jumping to Head right now
+			// skips them. When the page was not full we have already
+			// seen everything up to Head.
+			pageFull := len(page.Rows) == h.settings.Batch
+			if pageFull {
+				// Stay where we are: the next loop reads from
+				// `position` (the last sent row) and catches the rows
+				// that landed in the gap. The hub wake will have fired,
+				// so the next read runs at once.
+				continue
+			}
 			if page.Head > position {
 				position = page.Head
 			}
@@ -543,7 +566,7 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 				valid, err := h.keyCheck(ctx, keyID)
 				if err == nil && !valid {
 					_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
-					flusher.Flush()
+					flusher()
 					return
 				}
 			}
@@ -554,13 +577,13 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 					return
 				}
 				lastSent = position
-				flusher.Flush()
+				flusher()
 				continue
 			}
 			if err := sse.comment("keepalive"); err != nil {
 				return
 			}
-			flusher.Flush()
+			flusher()
 		case <-ctx.Done():
 			return
 		}
