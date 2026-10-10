@@ -64,6 +64,7 @@ import (
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
@@ -244,6 +245,17 @@ func Run() {
 		WithAudit(auditLog)
 	productHandler := product.NewHandler(productSvc)
 	wall.products(mux, productHandler)
+
+	// Unit catalogue (ADR 0006 section 2, item C3-2A-units): the rows the
+	// unit set service and the quote module read. Read for every desk
+	// role, write for admin and owner; the catalogue is dealer wide, so
+	// no branch wall applies.
+	unitSvc := unit.NewService(unit.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
+	unit.NewHandler(unitSvc).RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
+		middleware.RequireRole("admin", "owner"))
 
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and

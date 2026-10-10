@@ -18,6 +18,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -172,10 +173,11 @@ func notFound(err error) error {
 }
 
 // priceDraft turns a Draft into a priced Quote body (no number, no id yet):
-// product defaults filled, each line extended once by the platform rule,
-// totals summed, and freight cleared on a pickup BEFORE it is rolled into the
-// total (a pickup must not be billed for delivery). Every field problem found
-// is collected into one 400.
+// product defaults filled, each line's units resolved against the product's
+// unit set and the catalogue (ADR 0006 sections 3.3, 3.4 and 4), each line
+// extended once by the platform rule, totals summed, and freight cleared on a
+// pickup BEFORE it is rolled into the total (a pickup must not be billed for
+// delivery). Every field problem found is collected into one 400.
 func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	v := &httpx.Validator{}
 
@@ -186,6 +188,39 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 		}
 	}
 	products, err := s.repo.LookupProducts(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	productUnits, err := s.repo.LookupProductUnits(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	// Default the units before the catalogue read so it covers the defaulted
+	// codes too: the line's uom takes the product's sale unit and its
+	// price_uom the product's price unit (ADR 0006 section 3.3).
+	var unitCodes []string
+	for i := range d.Lines {
+		dl := &d.Lines[i]
+		if dl.ProductID != nil {
+			set := productUnits[*dl.ProductID]
+			if dl.UOM == "" {
+				dl.UOM = productUOM(set.SaleUOM)
+			}
+			if dl.PriceUOM == "" {
+				dl.PriceUOM = set.PriceUOM
+			}
+		}
+		if dl.PriceUOM == "" {
+			dl.PriceUOM = string(dl.UOM)
+		}
+		if dl.UOM != "" {
+			unitCodes = append(unitCodes, string(dl.UOM))
+		}
+		if dl.PriceUOM != "" {
+			unitCodes = append(unitCodes, dl.PriceUOM)
+		}
+	}
+	catalogue, err := s.repo.LookupCatalogue(ctx, unitCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -234,36 +269,26 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 		if line.ID == uuid.Nil {
 			line.ID = uuid.New()
 		}
+		var set ProductUnitSet
 		if dl.ProductID != nil {
 			p, ok := products[*dl.ProductID]
 			if !ok {
 				v.Check(false, path+".product_id", "no such product")
-			} else {
-				if line.SKU == "" {
-					line.SKU = p.SKU
-				}
-				if line.Description == "" {
-					line.Description = p.Description
-				}
-				// The unit defaults from the product, then the price unit
-				// from the unit, then the pair from the two.
-				if line.UOM == "" {
-					line.UOM = productUOM(p.UOMPrimary)
-				}
+				continue // an unknown product has no set to resolve against
 			}
+			if line.SKU == "" {
+				line.SKU = p.SKU
+			}
+			if line.Description == "" {
+				line.Description = p.Description
+			}
+			set = productUnits[*dl.ProductID]
 		}
-		if line.PriceUOM == "" {
-			line.PriceUOM = string(line.UOM)
-		}
-		if line.UOM == "" {
+		if line.UOM == "" || line.PriceUOM == "" {
 			continue // the product was unknown (reported above): nothing to price
 		}
-		if line.UOMQty == 0 && line.PriceUOMQty == 0 {
-			if line.PriceUOM != string(line.UOM) {
-				v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
-				continue
-			}
-			line.UOMQty, line.PriceUOMQty = one, one
+		if !s.resolveLineUnits(v, path, &line, dl, set, catalogue) {
+			continue
 		}
 		ext, err := httpx.Extend(line.Quantity, line.UOMQty, line.PriceUOMQty, line.UnitPrice)
 		if err != nil || total > math.MaxInt64-int64(ext) {
@@ -279,6 +304,172 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	}
 	q.TotalCents = httpx.Cents(total)
 	return q, nil
+}
+
+// resolveLineUnits settles one line's units (ADR 0006 sections 3.3, 3.4 and
+// 4): the catalogue check, the pair (resolved from the product's set on a
+// product line, the client's or a standard size derivation on the others),
+// the stocking quantity, exact or refused with the nearest quantities, and
+// the tally of a random length line. It answers false when the line is
+// unusable; every problem is already collected in v.
+func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteLine, dl DraftLine, set ProductUnitSet, catalogue map[string]units.CatalogueUnit) bool {
+	before := errorCount(v)
+	uom := string(line.UOM)
+
+	// The catalogue: a line's units are active catalogue units (2.1).
+	for _, unit := range []struct {
+		field string
+		code  string
+		sent  bool
+	}{
+		{"uom", uom, true},
+		{"price_uom", line.PriceUOM, dl.ProductID == nil || line.PriceUOM != set.PriceUOM},
+	} {
+		if !unit.sent {
+			continue // defaulted from the product: the set check below covers it
+		}
+		u, known := catalogue[unit.code]
+		if !known {
+			v.Check(false, path+"."+unit.field, unit.code+" is not a unit of the catalogue")
+		} else if !u.IsActive {
+			v.Check(false, path+"."+unit.field, unit.code+" is inactive: an inactive unit cannot enter a new line")
+		}
+	}
+
+	if dl.ProductID != nil {
+		// The units must be rows of the product's set, sell on the sale unit
+		// and price on the price unit (3.3).
+		uRow, hasU := set.Row(uom)
+		if !hasU || !uRow.Sell {
+			v.Check(false, path+".uom", uom+" is not a sale unit of the product")
+		}
+		pRow, hasP := set.Row(line.PriceUOM)
+		if !hasP || !pRow.Price {
+			v.Check(false, path+".price_uom", line.PriceUOM+" is not a price unit of the product")
+		}
+		if v.Err() != nil && errorCount(v) > before {
+			return false
+		}
+		// The pair resolves from the two rows and is stored on the line; a
+		// sent pair must equal it as a ratio (3.3), and the resolved pair
+		// is what the line stores, canonical whatever equivalent pair the
+		// client sent (R2: one conversion, one byte form).
+		resolved, err := units.ResolveLinePair(uRow.rowPair(), pRow.rowPair())
+		if err != nil {
+			v.Check(false, path+".uom_qty", "the conversion between "+uom+" and "+line.PriceUOM+" does not fit the pair's bound")
+			return false
+		}
+		if dl.UOMQty != 0 || dl.PriceUOMQty != 0 {
+			sent := units.Pair{A: dl.UOMQty, B: dl.PriceUOMQty}
+			if !sent.SameRatio(resolved) {
+				v.Check(false, path+".uom_qty",
+					"does not match the product's unit set; omit the pair or send "+
+						resolved.A.WireString()+" and "+resolved.B.WireString())
+			}
+		}
+		line.UOMQty, line.PriceUOMQty = resolved.A, resolved.B
+	} else {
+		// A line without a product keeps R1-15's rule: the pair is the
+		// client's, except that two units with standard sizes in one
+		// dimension derive it the same way (rule 2 of 3.2) and a sent pair
+		// must agree.
+		if line.UOMQty == 0 && line.PriceUOMQty == 0 {
+			if line.PriceUOM == uom {
+				line.UOMQty, line.PriceUOMQty = one, one
+			} else if derived, ok := units.StandardPair(uom, line.PriceUOM, catalogue); ok {
+				line.UOMQty, line.PriceUOMQty = derived.A, derived.B
+			} else {
+				v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
+			}
+		} else if derived, ok := units.StandardPair(uom, line.PriceUOM, catalogue); ok {
+			if !(units.Pair{A: line.UOMQty, B: line.PriceUOMQty}).SameRatio(derived) {
+				v.Check(false, path+".uom_qty",
+					"does not match the units' standard sizes; the derived pair is "+
+						derived.A.WireString()+" and "+derived.B.WireString())
+			}
+			// The derived pair is canonical (R2): an agreeing sent pair
+			// stores it, not the form the client chose.
+			line.UOMQty, line.PriceUOMQty = derived.A, derived.B
+		}
+	}
+	if errorCount(v) > before {
+		return false
+	}
+
+	// The tally (section 4): allowed on a random length product line only,
+	// its sale unit LF, its linear feet the line's quantity.
+	if dl.Tally != nil {
+		if dl.ProductID == nil || !set.RandomLength {
+			v.Check(false, path+".tally", "a tally is allowed on a random length product line only")
+			return false
+		}
+		if uom != "LF" {
+			v.Check(false, path+".uom", "a tallied line's unit is LF: the tally carries the lengths")
+			return false
+		}
+		rows := make([]units.TallyRow, 0, len(dl.Tally.Rows))
+		for _, r := range dl.Tally.Rows {
+			rows = append(rows, units.TallyRow{Pieces: int64(r.Pieces), LengthFT: r.LengthFT})
+		}
+		linearFeet, err := units.LinearFeet(rows)
+		if err != nil {
+			v.Check(false, path+".tally",
+				"the tally's linear feet are beyond the quantity bound of 99999999.9999 linear feet")
+			return false
+		}
+		if dl.HasQuantity && dl.Quantity != linearFeet {
+			v.Check(false, path+".quantity", "must equal the tally's linear feet, "+linearFeet.WireString())
+			return false
+		}
+		line.Quantity = linearFeet
+		line.Tally = &Tally{Rows: make([]TallyRow, 0, len(rows))}
+		for _, r := range rows {
+			line.Tally.Rows = append(line.Tally.Rows, TallyRow{Pieces: int(r.Pieces), LengthFT: r.LengthFT})
+		}
+		line.Tally.LinearFeet = linearFeet
+		if set.BoardThick != nil && set.BoardWidth != nil {
+			line.Tally.ThicknessIn, line.Tally.WidthIn = set.BoardThick, set.BoardWidth
+			if bf, err := units.BoardFeet(linearFeet, *set.BoardThick, *set.BoardWidth); err == nil {
+				display := units.DisplayBoardFeet(bf)
+				line.Tally.BoardFeet = &display
+			}
+		}
+	}
+
+	// The stocking unit and quantity (3.4): exact at scale 4 or the line is
+	// refused with the nearest quantities that are exact (R5).
+	if dl.ProductID != nil {
+		stockUOM := set.StockUOM
+		var stockQty httpx.Quantity
+		var err error
+		if uom == stockUOM {
+			stockQty = line.Quantity
+		} else if uRow, ok := set.Row(uom); ok {
+			stockQty, err = units.ConvertStock(line.Quantity, uom, stockUOM, uRow.rowPair())
+		} else {
+			return false // the set check above already refused the unit
+		}
+		if err != nil {
+			var inexact *units.InexactError
+			switch {
+			case errors.As(err, &inexact):
+				v.Check(false, path+".quantity", inexact.Error())
+			case errors.Is(err, units.ErrOutOfBound):
+				v.Check(false, path+".quantity",
+					"is past the quantity bound of 99999999.9999 when converted into the stocking unit "+stockUOM)
+			default:
+				v.Check(false, path+".quantity", "does not convert exactly into the stocking unit "+stockUOM)
+			}
+			return false
+		}
+		line.StockUOM, line.StockQuantity = &stockUOM, &stockQty
+	}
+	return true
+}
+
+// rowPair is the set row as a Pair, its left side the row's unit.
+func (r ProductUnitRow) rowPair() units.Pair {
+	return units.Pair{A: r.UnitQty, B: r.StockQty}
 }
 
 // Create validates the references, prices the document, mints its number from

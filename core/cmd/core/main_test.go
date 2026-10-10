@@ -138,3 +138,19 @@ func TestUnknownFlagIsRefused(t *testing.T) {
 		t.Fatalf("the serve runner ran with %v; an unknown flag must be refused first", *called)
 	}
 }
+
+// TestMigrateTakesTheReportFlag pins that `core migrate -report units`, the
+// form ADR 0006 section 8, migration 099 and CONTRACT-CHANGES name for the
+// read only units pre flight report, reaches the migrate runner with its
+// flag, while every other subcommand still refuses any flag.
+func TestMigrateTakesTheReportFlag(t *testing.T) {
+	called := standIn(t, "migrate")
+	var code int
+	capture(t, func() { code = run([]string{"migrate", "-report", "units"}) })
+	if code != 0 {
+		t.Fatalf("run migrate -report units: exit code %d, want 0", code)
+	}
+	if len(*called) != 2 || (*called)[0] != "-report" || (*called)[1] != "units" {
+		t.Fatalf("the migrate runner saw %v, want [-report units]", *called)
+	}
+}

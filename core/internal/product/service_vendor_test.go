@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/google/uuid"
 )
@@ -60,6 +61,35 @@ func (f *fakeProductRepo) UpdateDimensions(_ context.Context, _ uuid.UUID, _ Geo
 }
 func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int, _ int64) (int64, error) {
 	return 0, nil
+}
+
+// The unit set store, served empty: the vendor tests create products, which
+// stock them in the catalogue's LF by way of these stubs.
+func (f *fakeProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]UnitSetRowView, error) {
+	return []UnitSetRowView{}, nil
+}
+func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*UnitSetProduct, error) {
+	return nil, ErrNotFound
+}
+func (f *fakeProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []UnitSetRowView,
+	_, _, _, _ string, _ *int64, _ int64) (int64, error) {
+	return 0, nil
+}
+func (f *fakeProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
+func (f *fakeProductRepo) ProductStockUnitInUse(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (f *fakeProductRepo) ProductPriceHeld(_ context.Context, _ uuid.UUID) (bool, string, error) {
+	return false, "", nil
+}
+func (f *fakeProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []string) (bool, string, error) {
+	return false, "", nil
 }
 
 // fakeVendorRepo is an in-memory vendor.Repository.

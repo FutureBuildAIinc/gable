@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -40,12 +41,49 @@ type ProductRef struct {
 	UOMPrimary  string
 }
 
+// ProductUnitRow is one row of a product's unit set as a line's resolution
+// reads it (ADR 0006 section 3.1).
+type ProductUnitRow struct {
+	UOM      string
+	UnitQty  httpx.Quantity
+	StockQty httpx.Quantity
+	Sell     bool
+	Purchase bool
+	Price    bool
+}
+
+// ProductUnitSet is the product data a line's resolution reads (ADR 0006
+// sections 3.3 and 3.4): the set's rows and the product facts around them.
+type ProductUnitSet struct {
+	StockUOM     string
+	SaleUOM      string
+	PriceUOM     string
+	RandomLength bool
+	BoardThick   *httpx.Quantity
+	BoardWidth   *httpx.Quantity
+	Rows         []ProductUnitRow
+}
+
+// Row finds the set's row for a unit.
+func (s ProductUnitSet) Row(uom string) (ProductUnitRow, bool) {
+	for _, r := range s.Rows {
+		if r.UOM == uom {
+			return r, true
+		}
+	}
+	return ProductUnitRow{}, false
+}
+
 // Repository is the quote store. Every method reads and writes through the
 // context's executor, so inside a transaction (Service wraps the multi step
 // writes in one) it never reaches for a second pool connection.
 type Repository interface {
 	NextNumber(ctx context.Context) (string, error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductRef, error)
+	// The unit resolution reads of C3-2A-units (ADR 0006 sections 3.3, 3.4
+	// and 4): the products' unit sets and the unit catalogue.
+	LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductUnitSet, error)
+	LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)
 	InsertQuote(ctx context.Context, q *Quote) error
 	GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error)
 	// LockQuote takes the quote's row lock for the rest of the transaction,
@@ -93,6 +131,100 @@ func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID
 			return nil, fmt.Errorf("failed to scan product: %w", err)
 		}
 		out[p.ID] = p
+	}
+	return out, rows.Err()
+}
+
+// LookupProductUnits reads the products' unit sets with the facts a line's
+// resolution reads (ADR 0006 sections 3.3 and 3.4).
+func (r *PostgresRepository) LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductUnitSet, error) {
+	out := make(map[uuid.UUID]ProductUnitSet, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	exec := r.db.GetExecutor(ctx)
+	rows, err := exec.Query(ctx, `
+		SELECT id, uom_primary, sale_uom, price_uom, random_length,
+		       board_thickness_in::text, board_width_in::text
+		FROM products WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up product units: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		var set ProductUnitSet
+		var thick, width *string
+		if err := rows.Scan(&id, &set.StockUOM, &set.SaleUOM, &set.PriceUOM, &set.RandomLength,
+			&thick, &width); err != nil {
+			return nil, fmt.Errorf("failed to scan product units: %w", err)
+		}
+		for _, col := range []struct {
+			text *string
+			dst  **httpx.Quantity
+		}{{thick, &set.BoardThick}, {width, &set.BoardWidth}} {
+			if col.text == nil {
+				continue
+			}
+			q, qerr := httpx.ParseQuantity(*col.text)
+			if qerr != nil {
+				return nil, fmt.Errorf("failed to read a board measure column: %w", qerr)
+			}
+			*col.dst = &q
+		}
+		out[id] = set
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	unitRows, err := exec.Query(ctx, `
+		SELECT product_id, uom, ROUND(unit_qty * 10000)::bigint, ROUND(stock_qty * 10000)::bigint,
+		       sell, purchase, price
+		FROM product_units WHERE product_id = ANY($1) ORDER BY uom`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up unit sets: %w", err)
+	}
+	defer unitRows.Close()
+	for unitRows.Next() {
+		var id uuid.UUID
+		var row ProductUnitRow
+		var unitQty, stockQty int64
+		if err := unitRows.Scan(&id, &row.UOM, &unitQty, &stockQty, &row.Sell, &row.Purchase, &row.Price); err != nil {
+			return nil, fmt.Errorf("failed to scan a unit set row: %w", err)
+		}
+		row.UnitQty, row.StockQty = httpx.Quantity(unitQty), httpx.Quantity(stockQty)
+		set := out[id]
+		set.Rows = append(set.Rows, row)
+		out[id] = set
+	}
+	return out, unitRows.Err()
+}
+
+// LookupCatalogue reads the unit catalogue rows for the given codes: what a
+// line's units are checked against (ADR 0006 sections 2.1 and 7.4).
+func (r *PostgresRepository) LookupCatalogue(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := make(map[string]units.CatalogueUnit, len(codes))
+	if len(codes) == 0 {
+		return out, nil
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT code, dimension,
+		       ROUND(COALESCE(std_unit_qty, 0) * 10000)::bigint,
+		       ROUND(COALESCE(std_ref_qty, 0) * 10000)::bigint,
+		       std_unit_qty IS NOT NULL, is_active
+		FROM units WHERE code = ANY($1)`, codes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up units: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var u units.CatalogueUnit
+		var stdUnit, stdRef int64
+		if err := rows.Scan(&u.Code, &u.Dimension, &stdUnit, &stdRef, &u.HasStdSize, &u.IsActive); err != nil {
+			return nil, fmt.Errorf("failed to scan a unit: %w", err)
+		}
+		u.StdUnitQty, u.StdRefQty = httpx.Quantity(stdUnit), httpx.Quantity(stdRef)
+		out[u.Code] = u
 	}
 	return out, rows.Err()
 }
@@ -227,8 +359,9 @@ func tsArg(t *httpx.Timestamp) any {
 	return t.Time
 }
 
-// insertLines writes q.Lines in order. priorNotes carries the customer notes
-// of lines whose id survives an edit.
+// insertLines writes q.Lines in order, with each line's stocking unit and
+// quantity and its tally rows (ADR 0006 sections 3.4 and 4.2). priorNotes
+// carries the customer notes of lines whose id survives an edit.
 func (r *PostgresRepository) insertLines(ctx context.Context, q *Quote, priorNotes map[uuid.UUID]string) error {
 	exec := r.db.GetExecutor(ctx)
 	for i := range q.Lines {
@@ -243,18 +376,39 @@ func (r *PostgresRepository) insertLines(ctx context.Context, q *Quote, priorNot
 		_, err := exec.Exec(ctx, `
 			INSERT INTO quote_lines (
 				id, quote_id, product_id, sku, description, customer_note,
-				quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, position, created_at
+				quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, position, created_at,
+				stock_uom, stock_quantity, board_thickness_in, board_width_in
 			) VALUES ($1, $2, $3, $4, $5, $6,
-				$7::numeric / 10000, $8, $9, $10::numeric / 10000, $11::numeric / 10000, $12::numeric / 10000, $13::numeric / 100, $14, $15)`,
+				$7::numeric / 10000, $8, $9, $10::numeric / 10000, $11::numeric / 10000, $12::numeric / 10000, $13::numeric / 100, $14, $15,
+				$16, $17::numeric / 10000, $18::numeric / 10000, $19::numeric / 10000)`,
 			line.ID, line.QuoteID, lineProductID(line), line.SKU, line.Description, nullIfEmpty(note),
 			int64(line.Quantity), string(line.UOM), line.PriceUOM, int64(line.UOMQty), int64(line.PriceUOMQty),
 			int64(line.UnitPrice), int64(line.LineTotal), i, line.CreatedAt.Time,
+			line.StockUOM, qtyPtrArg(line.StockQuantity), qtyPtrArg(line.TallyThickness()), qtyPtrArg(line.TallyWidth()),
 		)
 		if err != nil {
 			return mapWriteError(err, "failed to insert quote line")
 		}
+		if line.Tally != nil {
+			for j, row := range line.Tally.Rows {
+				if _, err := exec.Exec(ctx, `
+					INSERT INTO line_tally_rows (quote_line_id, position, pieces, length_ft)
+					VALUES ($1, $2, $3, $4::numeric / 10000)`,
+					line.ID, j, row.Pieces, int64(row.LengthFT)); err != nil {
+					return mapWriteError(err, "failed to insert a tally row")
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// qtyPtrArg renders an optional quantity for a parameterised write.
+func qtyPtrArg(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return int64(*q)
 }
 
 // summaryColumns and summaryFrom are the one header projection: a list item,
@@ -323,13 +477,16 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	q.ExposureCents = httpx.Cents(exposureCents)
 	q.ExposureLastCheckedAt = httpx.PtrTimestamp(exposureAt)
 
-	// Lines, with the product's average cost for the margin basis.
+	// Lines, with the product's average cost for the margin basis, the
+	// stocking fields of C3-2A-units and the tally rows.
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT ql.id, ql.quote_id, ql.product_id, ql.sku, ql.description, NULLIF(ql.customer_note, ''),
 		       ROUND(ql.quantity * 10000)::bigint, ql.uom::text, COALESCE(ql.price_uom, ql.uom::text),
 		       ROUND(ql.uom_qty * 10000)::bigint, ROUND(ql.price_uom_qty * 10000)::bigint,
 		       ROUND(ql.unit_price * 10000)::bigint, ROUND(COALESCE(p.average_unit_cost, 0) * 10000)::bigint,
-		       ROUND(ql.line_total * 100)::bigint, ql.created_at
+		       ROUND(ql.line_total * 100)::bigint, ql.created_at,
+		       ql.stock_uom, ROUND(ql.stock_quantity * 10000)::bigint,
+		       ql.board_thickness_in::text, ql.board_width_in::text
 		FROM quote_lines ql
 		LEFT JOIN products p ON p.id = ql.product_id
 		WHERE ql.quote_id = $1
@@ -340,24 +497,106 @@ func (r *PostgresRepository) GetQuote(ctx context.Context, id uuid.UUID) (*Quote
 	defer rows.Close()
 
 	q.Lines = []QuoteLine{}
+	byID := make(map[uuid.UUID]int)
 	for rows.Next() {
 		var (
 			l                                            QuoteLine
 			uom                                          string
 			qty, uomQty, priceUomQty, price, cost, total int64
 			created                                      time.Time
+			stockQty                                     *int64
+			thick, width                                 *string
 		)
 		if err := rows.Scan(&l.ID, &l.QuoteID, &l.ProductID, &l.SKU, &l.Description, &l.CustomerNote,
-			&qty, &uom, &l.PriceUOM, &uomQty, &priceUomQty, &price, &cost, &total, &created); err != nil {
+			&qty, &uom, &l.PriceUOM, &uomQty, &priceUomQty, &price, &cost, &total, &created,
+			&l.StockUOM, &stockQty, &thick, &width); err != nil {
 			return nil, fmt.Errorf("failed to scan quote line: %w", err)
 		}
 		l.UOM = productUOM(uom)
 		l.Quantity, l.UOMQty, l.PriceUOMQty = httpx.Quantity(qty), httpx.Quantity(uomQty), httpx.Quantity(priceUomQty)
 		l.UnitPrice, l.UnitCost, l.LineTotal = httpx.Price(price), httpx.Price(cost), httpx.Cents(total)
 		l.CreatedAt = httpx.TimestampOf(created)
+		if stockQty != nil {
+			sq := httpx.Quantity(*stockQty)
+			l.StockQuantity = &sq
+		}
+		if thick != nil && width != nil {
+			t, terr := httpx.ParseQuantity(*thick)
+			w, werr := httpx.ParseQuantity(*width)
+			if terr == nil && werr == nil {
+				// The tally object itself is completed below, once the rows
+				// are read; the cross section is pinned here.
+				l.Tally = &Tally{ThicknessIn: &t, WidthIn: &w, Rows: []TallyRow{}}
+			}
+		}
+		byID[l.ID] = len(q.Lines)
 		q.Lines = append(q.Lines, l)
 	}
-	return q, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	tallyRows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT quote_line_id, pieces, ROUND(length_ft * 10000)::bigint
+		FROM line_tally_rows WHERE quote_line_id = ANY($1) ORDER BY quote_line_id, position`, quoteLineIDs(q.Lines))
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tally rows: %w", err)
+	}
+	defer tallyRows.Close()
+	for tallyRows.Next() {
+		var lineID uuid.UUID
+		var row TallyRow
+		var length int64
+		if err := tallyRows.Scan(&lineID, &row.Pieces, &length); err != nil {
+			return nil, fmt.Errorf("failed to scan a tally row: %w", err)
+		}
+		idx, ok := byID[lineID]
+		if !ok || q.Lines[idx].Tally == nil {
+			continue
+		}
+		row.LengthFT = httpx.Quantity(length)
+		q.Lines[idx].Tally.Rows = append(q.Lines[idx].Tally.Rows, row)
+	}
+	if err := tallyRows.Err(); err != nil {
+		return nil, err
+	}
+	// The tally's derived fields: the exact linear feet the line's quantity
+	// carries, and the display board feet of R4.3.
+	for i := range q.Lines {
+		if q.Lines[i].Tally == nil {
+			continue
+		}
+		lf, err := units.LinearFeet(tallyRowsOf(q.Lines[i].Tally))
+		if err != nil {
+			return nil, fmt.Errorf("failed to sum a tally: %w", err)
+		}
+		q.Lines[i].Tally.LinearFeet = lf
+		if q.Lines[i].Tally.ThicknessIn != nil && q.Lines[i].Tally.WidthIn != nil {
+			bf, err := units.BoardFeet(lf, *q.Lines[i].Tally.ThicknessIn, *q.Lines[i].Tally.WidthIn)
+			if err == nil {
+				display := units.DisplayBoardFeet(bf)
+				q.Lines[i].Tally.BoardFeet = &display
+			}
+		}
+	}
+	return q, nil
+}
+
+// tallyRowsOf maps the wire rows onto the arithmetic's input shape.
+func tallyRowsOf(t *Tally) []units.TallyRow {
+	rows := make([]units.TallyRow, 0, len(t.Rows))
+	for _, r := range t.Rows {
+		rows = append(rows, units.TallyRow{Pieces: int64(r.Pieces), LengthFT: r.LengthFT})
+	}
+	return rows
+}
+
+// quoteLineIDs collects the lines' ids for the tally rows read.
+func quoteLineIDs(lines []QuoteLine) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(lines))
+	for i := range lines {
+		ids = append(ids, lines[i].ID)
+	}
+	return ids
 }
 
 func (r *PostgresRepository) LockQuote(ctx context.Context, id uuid.UUID) error {

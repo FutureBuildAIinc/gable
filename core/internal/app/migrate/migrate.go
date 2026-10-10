@@ -11,7 +11,10 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,8 +25,66 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
+// Options are the flags migrate takes.
+type Options struct {
+	// Report names a read only pre flight report to run instead of the
+	// migrations; "units" (ADR 0006 section 8) is the one there is.
+	Report string
+}
+
+// ParseArgs parses migrate's flags: `-report units`, or nothing. Any other
+// flag, a report other than units, or a stray argument is refused.
+func ParseArgs(args []string) (Options, error) {
+	var opts Options
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&opts.Report, "report", "", "run the named read only pre flight report (units) instead of migrating")
+	if err := fs.Parse(args); err != nil {
+		return Options{}, err
+	}
+	// A -report given an empty value (an unset shell variable, say) is
+	// refused rather than read as no report, which would migrate.
+	reportSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "report" {
+			reportSet = true
+		}
+	})
+	if reportSet && opts.Report == "" {
+		return Options{}, fmt.Errorf("migrate -report: a report name is required (the one report is units)")
+	}
+	if fs.NArg() > 0 {
+		return Options{}, fmt.Errorf("migrate takes no arguments, got %q", fs.Args())
+	}
+	if opts.Report != "" && opts.Report != "units" {
+		return Options{}, fmt.Errorf("migrate -report: unknown report %q (the one report is units)", opts.Report)
+	}
+	return opts, nil
+}
+
+// RunArgs parses args with ParseArgs and runs: the units pre flight report
+// when -report units is given, otherwise every pending migration. A refused
+// flag exits 2, like the one binary's other usage errors.
+func RunArgs(args []string) {
+	opts, err := ParseArgs(args)
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Print("usage: migrate [-report units]\n")
+		os.Exit(0)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "migrate: %v\nusage: migrate [-report units]\n", err)
+		os.Exit(2)
+	}
+	if opts.Report == "units" {
+		RunUnitsReport()
+		return
+	}
+	Run()
+}
+
 // Run applies every pending migration and returns. Behaviour is unchanged
 // from the old entry point, including the log.Fatalf exits on failure.
+// RunArgs is the entry that also takes `-report units`.
 func Run() {
 	cfg, err := config.Load()
 	if err != nil {
