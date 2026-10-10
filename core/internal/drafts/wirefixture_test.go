@@ -116,12 +116,14 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 	return f
 }
 
-// fastFeedSettings shortens the heartbeat so feed tests run promptly; every
-// other value is the default.
+// fastFeedSettings shortens the heartbeat so feed tests run promptly; the
+// write deadline is fast so the stalled reader is closed in test time; the
+// lifetime bound runs seconds, paced by the test's own await bound.
 func fastFeedSettings() drafts.FeedSettings {
 	s := drafts.DefaultFeedSettings()
 	s.Heartbeat = 40 * time.Millisecond
 	s.Poll = 20 * time.Millisecond
+	s.WriteTimeout = 750 * time.Millisecond
 	s.MaxLifetime = 5 * time.Second
 	return s
 }
@@ -178,7 +180,7 @@ func (f *fixture) doReq(method, path string, body any, headers ...string) resp {
 // payload is a minimal valid quotes payload.
 func (f *fixture) payload() map[string]any {
 	return map[string]any{
-		"customer_id": f.customerID.String(),
+		"customer_id":   f.customerID.String(),
 		"delivery_type": "pickup",
 		"lines": []map[string]any{{
 			"product_id": f.productID.String(), "sku": f.sku, "description": "2x4x8 SPF",
@@ -311,4 +313,3 @@ func eventsForEntity(t *testing.T, db *database.DB, entityType, entityID string)
 	}
 	return types
 }
-

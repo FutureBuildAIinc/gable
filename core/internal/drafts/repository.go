@@ -358,6 +358,10 @@ func (r *PostgresRepository) ReadEvents(ctx context.Context, f EventFilter, afte
 		pred += ` AND e.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $` + strconv.Itoa(len(args)) + `)`
 	}
 	args = append(args, limit)
+	// head LEFT JOIN rows: the head row always comes back, so an empty
+	// page still carries the head position the connection's own cursor
+	// moves to (the one snapshot rule, section 3.2); a plain cross join
+	// would return nothing at all when no row matches the filter.
 	q := `WITH rows AS (
 	        SELECT e.position, e.draft_id, e.module, e.branch_id, e.subject_id, e.op, e.revision, e.status,
 	               e.actor_kind, e.actor_id, e.acting_as, e.tool,
@@ -367,7 +371,11 @@ func (r *PostgresRepository) ReadEvents(ctx context.Context, f EventFilter, afte
 	        ORDER BY e.position
 	        LIMIT $` + strconv.Itoa(len(args)) + `
 	      ), head AS (SELECT COALESCE(max(position), $2) AS p FROM draft_events)
-	      SELECT rows.*, head.p FROM rows, head ORDER BY rows.position`
+	      SELECT rows.position, rows.draft_id, rows.module, rows.branch_id, rows.subject_id, rows.op,
+	             rows.revision, rows.status, rows.actor_kind, rows.actor_id, rows.acting_as, rows.tool,
+	             rows.promoted_entity_id, rows.promoted_number, rows.at, head.p
+	      FROM head LEFT JOIN rows ON TRUE
+	      ORDER BY rows.position`
 
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, args...)
 	if err != nil {
@@ -376,15 +384,33 @@ func (r *PostgresRepository) ReadEvents(ctx context.Context, f EventFilter, afte
 	defer rows.Close()
 	page := FeedPage{Rows: []DraftEvent{}}
 	for rows.Next() {
-		var e DraftEvent
-		var aID, aAct, aTool *string
-		var at time.Time
-		if err := rows.Scan(&e.Position, &e.DraftID, &e.Module, &e.BranchID, &e.SubjectID, &e.Op, &e.Revision, &e.Status,
-			&e.Actor.Kind, &aID, &aAct, &aTool, &e.PromotedEntity, &e.PromotedNumber, &at, &page.Head); err != nil {
+		// Every row column is nullable: the head-only row (no matching
+		// event) carries NULLs beside the head position.
+		var position *int64
+		var module, op, status, kind *string
+		var draftID, branchID uuid.UUID
+		var subjectID, promotedEntity *uuid.UUID
+		var revision *int64
+		var aID, aAct, aTool, promotedNumber *string
+		var at *time.Time
+		if err := rows.Scan(&position, &draftID, &module, &branchID, &subjectID, &op, &revision, &status,
+			&kind, &aID, &aAct, &aTool, &promotedEntity, &promotedNumber, &at, &page.Head); err != nil {
 			return FeedPage{}, fmt.Errorf("scan draft event: %w", err)
 		}
-		e.Actor.ID, e.Actor.ActingAs, e.Actor.Tool = strOf(aID), strOf(aAct), strOf(aTool)
-		e.At = timestampOf(at)
+		if position == nil {
+			continue
+		}
+		e := DraftEvent{
+			Position: *position, DraftID: draftID, Module: *module, BranchID: branchID,
+			SubjectID: subjectID, Op: *op, Revision: *revision, Status: Status(*status),
+			PromotedEntity: promotedEntity, PromotedNumber: promotedNumber,
+		}
+		if kind != nil {
+			e.Actor = Actor{Kind: *kind, ID: strOf(aID), ActingAs: strOf(aAct), Tool: strOf(aTool)}
+		}
+		if at != nil {
+			e.At = timestampOf(*at)
+		}
 		page.Rows = append(page.Rows, e)
 	}
 	if err := rows.Err(); err != nil {

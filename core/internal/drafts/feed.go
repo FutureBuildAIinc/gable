@@ -19,10 +19,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// feedCursorScope names the feed's cursor: the commit ordered position, so
+// FeedCursorScope names the feed's cursor: the commit ordered position, so
 // a reader resuming from a cursor never skips a row that commits late (the
 // ADR 0003 guarantee, on this feed's own lock).
-const feedCursorScope = "drafts.feed_position"
+const FeedCursorScope = "drafts.feed_position"
 
 // FeedSettings are the feed's tuning knobs with their defaults (ADR 0007
 // section 3.5). Zero values mean the defaults; the config layer refuses
@@ -146,8 +146,21 @@ func (h *Hub) Channel() <-chan struct{} {
 // Head is the last position the hub saw.
 func (h *Hub) Head() int64 { return h.head.Load() }
 
-// Stop ends the poll loop.
-func (h *Hub) Stop() { close(h.stop) }
+// Done is closed when the hub stops: every open stream ends with it (the
+// serve role's graceful shutdown, through RegisterOnShutdown, section 3.4).
+func (h *Hub) Done() <-chan struct{} { return h.stop }
+
+// Stop ends the poll loop. It is idempotent, so a test's stop and the
+// fixture's cleanup can both run.
+func (h *Hub) Stop() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	select {
+	case <-h.stop:
+	default:
+		close(h.stop)
+	}
+}
 
 // streamLimiter holds the feed's two limits (section 3.4): streams per
 // principal and streams per process, both answered before the stream opens.
@@ -329,7 +342,7 @@ func (h *FeedHandler) feed(k Kind) http.HandlerFunc {
 // parseFeedCursor reads a cursor minted for the feed's scope; the id of
 // each SSE event is the same encoding.
 func parseFeedCursor(raw string) (int64, error) {
-	key, err := httpx.DecodeCursor(raw, feedCursorScope)
+	key, err := httpx.DecodeCursor(raw, FeedCursorScope)
 	if err != nil {
 		return 0, err
 	}
@@ -341,7 +354,7 @@ func parseFeedCursor(raw string) (int64, error) {
 
 // mintFeedCursor mints the SSE id of a position.
 func mintFeedCursor(pos int64) string {
-	c, err := httpx.MintCursor(feedCursorScope, strconv.FormatInt(pos, 10))
+	c, err := httpx.MintCursor(FeedCursorScope, strconv.FormatInt(pos, 10))
 	if err != nil {
 		return ""
 	}
@@ -435,7 +448,9 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 		purged = 0
 	}
 	position := after
-	if after >= 0 && after < purged {
+	// A cursor at or below the highest purged position: changes the client
+	// never saw have aged out (ADR 0007 section 3.2).
+	if after >= 0 && after <= purged && purged > 0 {
 		// Changes the client never saw have aged out: it must re-read what
 		// it shows.
 		if err := sse.write(ctx, "reset", "", nil); err != nil {
@@ -509,12 +524,17 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 			}
 		}
 
-		// Wait: the hub's signal ("the head moved"), the heartbeat, or the
-		// client going away. Each read takes the hub's current wake channel
-		// fresh, so no signal is lost between the read and the wait.
+		// Wait: the hub's signal ("the head moved"), the heartbeat, the hub
+		// stopping (the shutdown ends open streams) or the client going
+		// away. Each read takes the hub's current wake channel fresh, so no
+		// signal is lost between the read and the wait.
 		wake := h.hub.Channel()
 		select {
 		case <-wake:
+		case <-h.hub.Done():
+			// The serve role is shutting down: the stream simply ends (the
+			// client reconnects from its last cursor); no event is owed.
+			return
 		case <-heartbeat.C:
 			// A keyed stream rechecks its key at every heartbeat by id; a
 			// revoked key's stream gets reauth and closes, so it reads for

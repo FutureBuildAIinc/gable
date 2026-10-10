@@ -50,9 +50,9 @@ func TestModuleVocabularyCoversEveryV1CensusRoute(t *testing.T) {
 		if !strings.HasPrefix(pattern, "/api/v1/") {
 			continue
 		}
-		module, ok := middleware.ModuleForPath(pattern)
+		module, ok := middleware.PolicyModuleForPath(fields[0], pattern)
 		if !ok {
-			t.Errorf("route %s is under /api/v1 but ModuleForPath finds no module segment", pattern)
+			t.Errorf("route %s is under /api/v1 but no module segment resolves", pattern)
 			continue
 		}
 		censusModules[module] = true
@@ -366,7 +366,7 @@ func TestValidScopeGrammarHoldsTheCensus(t *testing.T) {
 			continue
 		}
 		method, pattern := fields[0], fields[1]
-		module, _ := middleware.ModuleForPath(pattern)
+		module, _ := middleware.PolicyModuleForPath(method, pattern)
 		if middleware.ModuleScopePolicyFor(module) != middleware.ModuleScopeAllowed {
 			continue // excluded segments keep their own seam and no key scope
 		}
