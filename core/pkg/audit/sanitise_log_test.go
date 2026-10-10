@@ -169,3 +169,126 @@ func TestLog_NULInPlainStringColumns(t *testing.T) {
 		})
 	}
 }
+
+// A real NUL byte after one or more backslashes in any changes value (any
+// depth, any key) must still write the row. json.Marshal escapes every
+// backslash in the input as two bytes (`\\`), so a NUL after n backslashes
+// in the source marshals to 2n backslashes before the six byte `\u0000`
+// pattern. The fix counts the run of backslashes before the match and
+// rewrites only when the run is even. This table pins the behaviour for
+// the three shapes the review lists (top level value, nested value, map
+// key) and the four runs (0, 1, 2, 3 input backslashes before a real NUL).
+// It also pins the companion case: genuine `\u0000` text in the source
+// (six characters, no real NUL) with 0 to 3 extra backslashes is stored
+// unaltered, so the sanitiser does not corrupt caller text.
+func TestLog_NULAfterBackslashRunStillWritesRow(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+
+	// Build the source value with n backslashes before a real NUL.
+	backslashesBefore := func(n int) string {
+		return strings.Repeat("\\", n) + "\x00b"
+	}
+	// Genuine `\u0000` text (six characters) plus n extra source
+	// backslashes. No real NUL anywhere.
+	genuineText := func(n int) string {
+		return strings.Repeat("\\", n) + `\u0000` + "b"
+	}
+
+	// Stored-value expectations. The NUL byte is replaced by the visible
+	// marker text `\u0000` (six characters). For n source backslashes,
+	// the stored value therefore has n source `\` plus one marker `\`
+	// (the leading `\` of the marker), totalling n+1 backslashes. The
+	// expectInput strings are raw literals so each `\` is one character.
+	cases := []struct {
+		name        string
+		changes     map[string]interface{}
+		readKey     string
+		expectInput string
+	}{
+		// Real NUL cases: stored value must NOT contain a NUL byte.
+		// The stored value is the source with the NUL replaced by the
+		// visible marker (a total of n+1 backslashes before u0000b).
+		{name: "value, 0 backslashes before NUL",
+			changes:     map[string]interface{}{"v": "a" + backslashesBefore(0)},
+			readKey:     "v",
+			expectInput: `a` + `\` + `u0000b`},
+		{name: "value, 1 backslash before NUL",
+			changes:     map[string]interface{}{"v": "a" + backslashesBefore(1)},
+			readKey:     "v",
+			expectInput: `a` + `\\` + `u0000b`},
+		{name: "value, 2 backslashes before NUL",
+			changes:     map[string]interface{}{"v": "a" + backslashesBefore(2)},
+			readKey:     "v",
+			expectInput: `a` + `\\\` + `u0000b`},
+		{name: "value, 3 backslashes before NUL",
+			changes:     map[string]interface{}{"v": "a" + backslashesBefore(3)},
+			readKey:     "v",
+			expectInput: `a` + `\\\\` + `u0000b`},
+		{name: "nested value, 1 backslash before NUL",
+			changes: map[string]interface{}{
+				"outer": map[string]interface{}{"v": "a" + backslashesBefore(1)},
+			},
+			readKey:     "outer",
+			expectInput: `a` + `\\` + `u0000b`},
+		{name: "nested value, 2 backslashes before NUL",
+			changes: map[string]interface{}{
+				"outer": map[string]interface{}{"v": "a" + backslashesBefore(2)},
+			},
+			readKey:     "outer",
+			expectInput: `a` + `\\\` + `u0000b`},
+		{name: "map key, 1 backslash before NUL",
+			changes:     map[string]interface{}{"k" + backslashesBefore(1): "v"},
+			readKey:     "k" + `\\` + `u0000b`,
+			expectInput: "v"},
+		{name: "map key, 2 backslashes before NUL",
+			changes:     map[string]interface{}{"k" + backslashesBefore(2): "v"},
+			readKey:     "k" + `\\\` + `u0000b`,
+			expectInput: "v"},
+		// Genuine text cases: stored verbatim (no NUL ever, so the
+		// sanitiser must leave the marshalled bytes alone).
+		{name: "genuine \\u0000 text, 0 extra",
+			changes:     map[string]interface{}{"v": genuineText(0)},
+			readKey:     "v",
+			expectInput: `\` + `u0000b`},
+		{name: "genuine \\u0000 text, 1 extra",
+			changes:     map[string]interface{}{"v": genuineText(1)},
+			readKey:     "v",
+			expectInput: `\\` + `u0000b`},
+		{name: "genuine \\u0000 text, 2 extra",
+			changes:     map[string]interface{}{"v": genuineText(2)},
+			readKey:     "v",
+			expectInput: `\\\` + `u0000b`},
+		{name: "genuine \\u0000 text, 3 extra",
+			changes:     map[string]interface{}{"v": genuineText(3)},
+			readKey:     "v",
+			expectInput: `\\\\` + `u0000b`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entityID := uuid.New()
+			err := logger.Log(context.Background(), audit.Entry{
+				Action:     "key.scope_refused",
+				EntityType: "api_key",
+				EntityID:   entityID,
+				Changes:    tc.changes,
+			})
+			if err != nil {
+				t.Fatalf("Log returned %v, want nil: a NUL after backslashes must not lose the row", err)
+			}
+			var got string
+			if err := db.Pool.QueryRow(context.Background(),
+				`SELECT changes->>$1 FROM audit_log WHERE entity_id = $2 AND action = 'key.scope_refused'`,
+				tc.readKey, entityID).Scan(&got); err != nil {
+				t.Fatalf("no audit_log row for entity_id=%s, key=%q: %v", entityID, tc.readKey, err)
+			}
+			if strings.ContainsRune(got, '\x00') {
+				t.Fatalf("stored value for key %q still contains a NUL byte: %q", tc.readKey, got)
+			}
+			if got != tc.expectInput {
+				t.Fatalf("stored value %q, want %q", got, tc.expectInput)
+			}
+		})
+	}
+}
