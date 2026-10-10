@@ -1037,6 +1037,18 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 	if _, n := f.rulesOf(t, f.custB); n != beforeBulkDel {
 		t.Errorf("refused bulk delete changed the foreign customer's rows: %d then %d", beforeBulkDel, n)
 	}
+	// A bulk delete body that is not exactly one complete JSON value never
+	// reaches the handler for a bound key: the wall reads the whole body, and
+	// the handler's own stricter decoder would have answered it 400 with the
+	// delete never attempted.
+	for _, body := range []string{
+		fmt.Sprintf(`{"ids":[%q]} {}`, f.catRuleB.String()),
+		fmt.Sprintf(`{"ids":[%q}] trailing`, f.catRuleB.String()),
+		`[{"ids":[]}]`,
+		``,
+	} {
+		f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/bulk", body, nil)
+	}
 	for _, who := range []string{"unbound", "user"} {
 		id := ruleFor(f.custB)
 		f.allow(t, who, "DELETE", "/api/v1/pricing/category-rules/bulk",
