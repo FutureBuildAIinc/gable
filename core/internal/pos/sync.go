@@ -47,7 +47,7 @@ type OfflineSyncResponse struct {
 // offline is never REJECTED for a tax provider failure: it stays pending in
 // the sync log and the next sync retries it (ADR 0005 section 3).
 func (s *Service) SyncOfflineTransactions(ctx context.Context, batch *OfflineSync, actor string) (*OfflineSyncResponse, error) {
-	resp := &OfflineSyncResponse{BatchID: batch.BatchID}
+	resp := &OfflineSyncResponse{BatchID: batch.BatchID, Errors: []SyncItemResult{}, Pending: []SyncItemResult{}}
 	log := LogBatch{BatchID: batch.BatchID, RegisterID: batch.RegisterID}
 	for i := range batch.Items {
 		item := &batch.Items[i]

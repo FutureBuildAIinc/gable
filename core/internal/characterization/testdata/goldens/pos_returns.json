@@ -404,7 +404,7 @@
           "currency": "USD",
           "customer_id": "<id-5>",
           "id": "<id-6>",
-          "lines": null,
+          "lines": [],
           "number": "RTN-000001",
           "original_sale_id": null,
           "reason": "r1b c wrong size",
@@ -424,7 +424,7 @@
           "currency": "USD",
           "customer_id": "<id-9>",
           "id": "<id-12>",
-          "lines": null,
+          "lines": [],
           "number": "RTN-000002",
           "original_sale_id": null,
           "reason": "r1b c credit the account",
@@ -444,7 +444,7 @@
           "currency": "USD",
           "customer_id": "<id-5>",
           "id": "<id-15>",
-          "lines": null,
+          "lines": [],
           "number": "RTN-000003",
           "original_sale_id": null,
           "reason": "r1b c no account",
@@ -468,7 +468,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": []
     }
   },
   {
@@ -480,7 +480,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": []
     }
   }
 ]

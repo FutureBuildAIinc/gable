@@ -46,6 +46,12 @@ func (r *PostgresRepository) scanTillSession(row pgx.Row) (*TillSession, error) 
 	}
 	s.ClosedAt = httpx.PtrTimestamp(closedAt)
 	s.Status = TillSessionStatus(status)
+	if s.ExpectedByMethod == nil {
+		s.ExpectedByMethod = map[string]int64{}
+	}
+	if s.CountedByMethod == nil {
+		s.CountedByMethod = map[string]int64{}
+	}
 	return &s, nil
 }
 
@@ -213,7 +219,7 @@ func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string
 		return nil, fmt.Errorf("failed to list Z-reports: %w", err)
 	}
 	defer rows.Close()
-	var out []ZReport
+	out := []ZReport{}
 	for rows.Next() {
 		var z ZReport
 		var generatedAt time.Time

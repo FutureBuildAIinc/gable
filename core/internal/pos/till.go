@@ -51,7 +51,8 @@ func (s *Service) OpenTill(ctx context.Context, registerID string, cashierID uui
 			return err
 		}
 		session := &TillSession{RegisterID: registerID, BranchID: branch, CashierID: cashierID,
-			Status: TillOpen, OpeningFloat: openingFloat}
+			Status: TillOpen, OpeningFloat: openingFloat,
+			ExpectedByMethod: map[string]int64{}, CountedByMethod: map[string]int64{}}
 		if err := s.repo.CreateTillSession(ctx, session); err != nil {
 			return err
 		}

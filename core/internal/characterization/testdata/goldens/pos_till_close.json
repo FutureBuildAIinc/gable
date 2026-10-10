@@ -19,8 +19,8 @@
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
           "closed_at": null,
-          "counted_by_method": null,
-          "expected_by_method": null,
+          "counted_by_method": {},
+          "expected_by_method": {},
           "gl_entry_id": null,
           "id": "<id-1>",
           "notes": "",
@@ -316,8 +316,8 @@
         "branch_id": "<id-2>",
         "cashier_id": "<id-3>",
         "closed_at": null,
-        "counted_by_method": null,
-        "expected_by_method": null,
+        "counted_by_method": {},
+        "expected_by_method": {},
         "gl_entry_id": null,
         "id": "<id-15>",
         "notes": "",
@@ -448,7 +448,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": []
     }
   },
   {
@@ -460,7 +460,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": []
     }
   }
 ]

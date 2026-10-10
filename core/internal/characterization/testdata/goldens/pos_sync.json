@@ -41,7 +41,7 @@
             "reason": "complete: this write needs If-Match or a body revision"
           }
         ],
-        "pending": null,
+        "pending": [],
         "pending_count": 0,
         "synced_count": 0
       }
@@ -83,8 +83,8 @@
         "batch_id": "r1c-batch-1",
         "duplicate_count": 1,
         "error_count": 0,
-        "errors": null,
-        "pending": null,
+        "errors": [],
+        "pending": [],
         "pending_count": 0,
         "synced_count": 0
       }
@@ -132,7 +132,7 @@
             "reason": "complete: the sale needs 616 cents and the tenders carry 1"
           }
         ],
-        "pending": null,
+        "pending": [],
         "pending_count": 0,
         "synced_count": 0
       }

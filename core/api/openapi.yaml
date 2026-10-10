@@ -9075,7 +9075,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
     get:
@@ -9146,7 +9146,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/items:
@@ -9187,7 +9187,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "500":
@@ -9227,7 +9227,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "500":
@@ -9270,7 +9270,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "428":
@@ -9317,7 +9317,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "428":
@@ -9449,7 +9449,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "500":
@@ -9481,7 +9481,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/{id}/report:
@@ -9511,7 +9511,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/{id}/close:
@@ -9548,7 +9548,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "500":
@@ -9580,7 +9580,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/zreports:
@@ -9651,7 +9651,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "500":
@@ -9715,7 +9715,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pricing/calculate:

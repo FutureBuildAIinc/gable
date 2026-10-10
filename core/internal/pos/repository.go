@@ -552,9 +552,9 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 		return nil, fmt.Errorf("failed to list returns: %w", err)
 	}
 	defer rows.Close()
-	var out []Return
+	out := []Return{}
 	for rows.Next() {
-		ret := &Return{}
+		ret := &Return{Lines: []ReturnLine{}}
 		var method string
 		var createdAt time.Time
 		if err := rows.Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID,
