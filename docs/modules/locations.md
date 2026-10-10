@@ -382,13 +382,22 @@ key branch wall (`core/pkg/middleware/keybranch.go`, mounted through
 (`PUT` and `DELETE /api/v1/locations/{id}`), another branch itself
 (`PUT` and `DELETE /api/v1/branches/{id}`) or another branch in a
 grant body or path is a 403 `forbidden` naming the field, audited as
-`key.branch_refused`; its own branch passes; the directory create
-(`POST /api/v1/branches`) refuses a bound key outright;
+`key.branch_refused`; its own branch passes; the grant and home bodies are
+read whole, so a body that is not exactly one complete JSON value (trailing
+data after the first value, or unparsable) is refused rather than passed for
+the handler to read only in part; a location row that names no branch (a
+legacy shape the denorm trigger refuses today) is outside every pin and is
+refused like a foreign branch; the directory create
+(`POST /api/v1/branches`) and the known users list (`GET /api/v1/users`,
+every branch's subs) refuse a bound key outright;
 `GET /api/v1/branches/{id}/users` refuses it another branch and
 `GET /api/v1/users/{sub}/branches` answers only its branch for it.
 The branch directory reads (`GET /api/v1/branches`, `GET
 /api/v1/branches/{id}`) stay reference data, unwalled by the PR 39
-decision, a stated limit. An unbound key behaves as before.
+decision, a stated limit. A bound key that sets a user's home to its own
+branch clears `is_home` on that user's other grant rows: a side effect
+inside the user's own grant set, not a cross branch grant. An unbound key
+behaves as before.
 
 ## ADRs that govern this module
 

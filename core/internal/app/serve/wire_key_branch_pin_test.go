@@ -161,16 +161,16 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 	// A legacy row that names no branch: the denorm trigger refuses such rows
-	// today, so the seed lifts it for the insert only.
-	if _, err := db.Pool.Exec(ctx, `ALTER TABLE locations DISABLE TRIGGER trg_locations_set_branch_id`); err != nil {
-		t.Fatalf("lift locations trigger: %v", err)
-	}
-	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name) VALUES ($1, 'YARD', $2, 'pin null row')`,
-		f.yardNull, "pin-null-"+f.yardNull.String()[:8]); err != nil {
+	// on an insert, but it fires only on INSERT and UPDATE OF parent_id and
+	// type, so the seed inserts a normal yard and then nulls its branch with
+	// an update the trigger never sees (no table level trigger lifting, which
+	// would race the packages that run beside this one).
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name, parent_id) VALUES ($1, 'YARD', $2, 'pin null row', $3)`,
+		f.yardNull, "pin-null-"+f.yardNull.String()[:8], f.branchA); err != nil {
 		t.Fatalf("seed null branch row: %v", err)
 	}
-	if _, err := db.Pool.Exec(ctx, `ALTER TABLE locations ENABLE TRIGGER trg_locations_set_branch_id`); err != nil {
-		t.Fatalf("restore locations trigger: %v", err)
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET branch_id = NULL WHERE id = $1`, f.yardNull); err != nil {
+		t.Fatalf("null the branch: %v", err)
 	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote_exposure_event'

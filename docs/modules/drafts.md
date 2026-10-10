@@ -120,15 +120,27 @@ a bound key naming another branch in a body `branch_id` or a
 path id, or a row of another branch (`PUT` and `DELETE
 /api/v1/locations/{id}`), is a 403 `forbidden` in the wire
 envelope naming the field, audited as `key.branch_refused`
-like the header rule; its own branch passes. The directory
+like the header rule; its own branch passes, and a body is
+read whole, so a body that is not exactly one complete JSON
+value (trailing data after the first value, or unparsable) is
+refused rather than passed for the handler to read only in
+part. The directory
 create (`POST /api/v1/branches`) refuses a bound key outright,
 and `PUT` and `DELETE /api/v1/branches/{id}` refuse it another
 branch. A bound key holding `users:grants` grants, revokes and
-moves home only its own branch. The branch directory reads
+moves home only its own branch. The routes that act across
+every branch refuse a bound key outright: the exposure scan
+and the two exposure lists, the market index refresh, the
+events feed (`GET /api/v1/events`), every reporting route,
+the dealer wide GL, AP and bank reconciliation reads, the
+sales team reads and the known users list (`GET /api/v1/users`).
+The routes that write a named customer's data are confined to
+the pin through that customer's `customer_branches`: the tax
+exemption writes and the customer priced rules, plain and
+category, single and bulk. The branch directory reads
 (`GET /api/v1/branches`, `GET /api/v1/branches/{id}`) stay
-reference data (the PR 39 decision), and the exposure lists
-and the events feed stay cross branch, stated limits listed
-for the lead. An unbound key behaves as before.
+reference data (the PR 39 decision). An unbound key behaves
+as before.
 
 ## Routes
 
