@@ -70,19 +70,23 @@ type keyPinFixture struct {
 	category  uuid.UUID // one product category the priced rules hang on
 	catRuleA  uuid.UUID // a category rule scoped to the pin's customer
 	catRuleB  uuid.UUID // a category rule scoped to the foreign customer
+	catRuleT  uuid.UUID // a tier category rule that names no customer
 	taxExempt uuid.UUID // a tax exemption row of the foreign customer
+	jobA      uuid.UUID // a project of the pin's customer
+	jobB      uuid.UUID // a project of the foreign customer
 	bound     string    // the key pinned to branch A
 	unbound   string    // the same scopes, no pin
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
-// directory, the user grants, the exposure surface and the dealer wide reads.
+// directory, the user grants, the exposure surface, the dealer wide routes,
+// the staff roster and the customer scoped pricing and tax surface.
 var pinKeyScopes = []string{
 	"locations:write", "branches:read", "branches:write",
 	"users:read", "users:grants", "quotes:read", "quotes:write", "admin:write",
-	"reports:read", "reporting:read", "reporting:write", "events:read",
-	"gl:read", "gl:write", "ap:read", "bankrecon:read", "sales-team:read",
-	"market-indices:write", "tax:write", "pricing:read", "pricing:write",
+	"admin:staff", "reports:read", "reporting:read", "reporting:write", "events:read",
+	"gl:read", "gl:write", "ap:read", "ap:write", "bankrecon:read", "bankrecon:write", "sales-team:read",
+	"market-indices:read", "market-indices:write", "tax:read", "tax:write", "pricing:read", "pricing:write",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -104,7 +108,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		branchA: uuid.New(), branchB: uuid.New(), branchC: uuid.New(), branchC2: uuid.New(),
 		yardA: uuid.New(), yardB: uuid.New(), quoteA: uuid.New(), quoteB: uuid.New(), custID: uuid.New(),
 		custB: uuid.New(), category: uuid.New(), catRuleA: uuid.New(), catRuleB: uuid.New(), taxExempt: uuid.New(),
-		yardNull: uuid.New(),
+		yardNull: uuid.New(), catRuleT: uuid.New(), jobA: uuid.New(), jobB: uuid.New(),
 	}
 	for _, r := range []struct {
 		id     uuid.UUID
@@ -156,8 +160,24 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 			t.Fatalf("seed category rule: %v", err)
 		}
 	}
+	// A tier rule names no customer: it prices every branch's customers, so it
+	// is a dealer wide write a bound key is refused.
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason) VALUES ($1, $2, 'pin')`, f.taxExempt, f.custB); err != nil {
+		`INSERT INTO category_pricing_rules (id, target_type, tier, category_id, rule_type, rule_value, created_by)
+		VALUES ($1, 'TIER', 'CONTRACTOR', $2, 'MARKUP', 10, 'test')`, f.catRuleT, f.category); err != nil {
+		t.Fatalf("seed tier rule: %v", err)
+	}
+	// A project (a job) belongs to exactly one customer: a pricing rule that
+	// names a job prices that customer, so the job resolves to its customer.
+	for _, j := range []struct{ id, customer uuid.UUID }{{f.jobA, f.custID}, {f.jobB, f.custB}} {
+		if _, err := db.Pool.Exec(ctx,
+			`INSERT INTO projects (id, customer_id, name, status) VALUES ($1, $2, 'pin job', 'Active')`, j.id, j.customer); err != nil {
+			t.Fatalf("seed project: %v", err)
+		}
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, f.taxExempt, f.custB); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 	// A legacy row that names no branch: the denorm trigger refuses such rows
@@ -180,12 +200,14 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id IN ($1, $2)`, f.quoteA, f.quoteB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE customer_id IN ($1, $2) OR id = $3`, f.custID, f.custB, f.taxExempt)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'category_rule'
-			AND entity_id IN (SELECT id::text FROM category_pricing_rules WHERE customer_id IN ($1, $2))`, f.custID, f.custB)
+			AND entity_id IN (SELECT id::text FROM category_pricing_rules WHERE customer_id IN ($1, $2) OR tier = 'PIN-TIER')`, f.custID, f.custB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'pricing_rule'
-			AND entity_id IN (SELECT id::text FROM pricing_rules WHERE customer_id IN ($1, $2))`, f.custID, f.custB)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_audit WHERE rule_id IN (SELECT id FROM category_pricing_rules WHERE customer_id IN ($1, $2))`, f.custID, f.custB)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_rules WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM pricing_rules WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
+			AND entity_id IN (SELECT id::text FROM pricing_rules WHERE customer_id IN ($1, $2) OR job_id IN ($3, $4)
+			OR (customer_id IS NULL AND job_id IS NULL AND name LIKE 'pin %'))`, f.custID, f.custB, f.jobA, f.jobB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_audit WHERE rule_id IN (SELECT id FROM category_pricing_rules WHERE customer_id IN ($1, $2) OR tier = 'PIN-TIER')`, f.custID, f.custB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM category_pricing_rules WHERE customer_id IN ($1, $2) OR id = $3 OR tier = 'PIN-TIER'`, f.custID, f.custB, f.catRuleT)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pricing_rules WHERE customer_id IN ($1, $2) OR job_id IN ($3, $4) OR (customer_id IS NULL AND job_id IS NULL AND name LIKE 'pin %')`, f.custID, f.custB, f.jobA, f.jobB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM projects WHERE id IN ($1, $2)`, f.jobA, f.jobB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM product_categories WHERE id = $1`, f.category)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2)`, f.custID, f.custB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, f.custID, f.custB)
@@ -239,6 +261,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	salesteam.NewHandler(salesteam.NewRepository(db)).
 		RegisterRoutes(mux, wall.dealerWideReads("the sales team roster spans every branch", "admin", "owner", "sales"))
 
+	// The staff roster surface exactly as serve registers it.
+	wireStaffAdmin(mux, db, audit.NewLogger(db), "")
+
 	// The customer confined modules exactly as serve registers them: the tax
 	// exemption writes and the customer priced rules.
 	customerSvc := customer.NewService(customer.NewRepository(db))
@@ -265,7 +290,18 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	f.bound = mint("pin bound to A", &f.branchA)
 	f.unbound = mint("pin unbound", nil)
 	mkAuth := middleware.NewMachineKeyAuth(pinKeyValidator{svc: keys}, audit.NewLogger(db), []string{"/api/integration/"}, nil)
-	f.srv = httptest.NewServer(mkAuth.Handler(pinClaims(mux)))
+	// The production chain, built by the same builder Run uses, so every test
+	// here drives the wiring serve serves: the machine key core, the request
+	// size limit, the idempotency layer and the mux mounts above. Only the
+	// claims a JWT would carry are a stand in, injected outside the chain for
+	// the user requests (a keyed request never carries them).
+	chain := buildChain(ChainDeps{
+		Mux:            mux,
+		DB:             db,
+		AuditLog:       audit.NewLogger(db),
+		MachineKeyAuth: mkAuth,
+	})
+	f.srv = httptest.NewServer(pinClaims(chain))
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -721,16 +757,17 @@ func TestKeyBranchPin_ExposureRoutes(t *testing.T) {
 	}
 }
 
-// TestKeyBranchPin_DealerWideReads holds the pin on the dealer wide surface:
-// every reporting route, the events feed, the two exposure lists, the GL, AP,
-// bank reconciliation and sales team reads, the known users list and the
-// market index refresh refuse a branch bound key outright with their audit
-// row, while the unbound key and the user keep the same answer as each other
-// on every route, and the GL writes (no branch fact, outside the ruling) keep
-// their reach for every principal alike.
+// TestKeyBranchPin_DealerWideReads holds the deny by default refusals on the
+// dealer wide surface: every reporting route, the events feed, the two exposure
+// lists, the GL, AP, bank reconciliation and sales team routes, the known
+// users list, the staff roster, the market index refresh and its preview, and
+// the unfiltered pricing lists refuse a branch bound key outright with their
+// audit row, while the unbound key and the user keep the same answer as each
+// other on every route.
 func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 	f := newKeyPinFixture(t)
 	preview := `{"entity_type":"invoices","definition":{}}`
+	idx := uuid.NewString()
 	for _, c := range []struct{ method, path, body string }{
 		{"GET", "/api/v1/reports/sales-summary", ""},
 		{"GET", "/api/v1/reports/daily-till", ""},
@@ -753,15 +790,28 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 		{"GET", "/api/v1/gl/profit-and-loss", ""},
 		{"GET", "/api/v1/gl/balance-sheet", ""},
 		{"GET", "/api/v1/gl/fiscal-periods", ""},
+		{"POST", "/api/v1/gl/accounts", `{"name":"pin wall probe"}`},
+		{"POST", "/api/v1/gl/journal-entries", `{"lines":[]}`},
+		{"POST", "/api/v1/gl/fiscal-periods/" + uuid.NewString() + "/close", ""},
 		{"GET", "/api/v1/ap/invoices", ""},
 		{"GET", "/api/v1/ap/payments", ""},
 		{"GET", "/api/v1/ap/aging", ""},
+		{"POST", "/api/v1/ap/invoices", `{"vendor_id":"` + uuid.NewString() + `"}`},
+		{"POST", "/api/v1/ap/payments", `{"invoice_id":"` + uuid.NewString() + `"}`},
 		{"GET", "/api/v1/bankrecon/accounts", ""},
 		{"GET", "/api/v1/bankrecon/sessions", ""},
+		{"POST", "/api/v1/bankrecon/import", ""},
+		{"POST", "/api/v1/bankrecon/match", `{"bank_tx_id":"` + uuid.NewString() + `"}`},
+		{"POST", "/api/v1/bankrecon/sessions", `{"bank_account_id":"` + uuid.NewString() + `"}`},
 		{"GET", "/api/v1/sales-team", ""},
 		{"GET", "/api/v1/sales-team/" + uuid.NewString(), ""},
 		{"GET", "/api/v1/users", ""},
-		{"POST", "/api/v1/market-indices/" + uuid.NewString() + "/refresh", ""},
+		{"GET", "/api/v1/admin/staff", ""},
+		{"POST", "/api/v1/admin/staff", `{"name":"pin"}`},
+		{"POST", "/api/v1/market-indices/" + idx + "/refresh", ""},
+		{"POST", "/api/v1/market-indices/" + idx + "/refresh/preview", `{"new_value":120}`},
+		{"GET", "/api/v1/pricing/rules", ""},
+		{"GET", "/api/v1/pricing/matrix", ""},
 	} {
 		f.refuseForeign(t, c.method, c.path, c.body, nil)
 		f.parity(t, c.method, c.path, c.body)
@@ -774,23 +824,20 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 		"/api/v1/reports/customer-statement/" + f.custID.String(),
 		"/api/v1/events", "/api/v1/quotes/exposure", "/api/v1/gl/accounts",
 		"/api/v1/ap/invoices", "/api/v1/sales-team", "/api/v1/users",
+		"/api/v1/admin/staff", "/api/v1/pricing/rules", "/api/v1/pricing/matrix",
 	} {
 		if sk := f.parity(t, "GET", path, ""); sk != http.StatusOK {
 			t.Errorf("unbound key GET %s: %d, want 200", path, sk)
 		}
 	}
 
-	// The GL writes carry no branch fact and are outside the ruling: every
-	// principal meets the same module answer, none a wall refusal.
-	body := `{"name":"pin wall probe"}`
-	sk, _ := f.key(t, f.unbound, "POST", "/api/v1/gl/accounts", body, nil)
-	su, _ := f.user(t, "POST", "/api/v1/gl/accounts", body, nil)
-	sb, bb := f.key(t, f.bound, "POST", "/api/v1/gl/accounts", body, nil)
-	if sk != su || sb != sk {
-		t.Errorf("POST /api/v1/gl/accounts: unbound %d, user %d, bound %d (%s), want one answer", sk, su, sb, bb)
-	}
-	if sb == http.StatusForbidden && strings.Contains(string(bb), "branch bound key") {
-		t.Errorf("POST /api/v1/gl/accounts: the GL writes are outside the ruling and must not hit the wall: %s", bb)
+	// A route the router resolves to no pattern at all is refused the same
+	// way: an unregistered path inside a machine key module fails closed for
+	// a bound key, and answers 404 to everyone else.
+	f.refuseForeign(t, "GET", "/api/v1/tax/exemptions", "", nil)
+	sk := f.parity(t, "GET", "/api/v1/tax/exemptions", "")
+	if sk != http.StatusNotFound {
+		t.Errorf("GET /api/v1/tax/exemptions: unbound and user answer %d, want 404 both", sk)
 	}
 }
 
@@ -835,7 +882,8 @@ func (f *keyPinFixture) seedCatRule(t *testing.T, id, customer, category uuid.UU
 func (f *keyPinFixture) seedTaxExempt(t *testing.T, id, customer uuid.UUID) {
 	t.Helper()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason) VALUES ($1, $2, 'pin')`, id, customer); err != nil {
+		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason, certificate_number, issuing_state)
+		VALUES ($1, $2, 'pin', 'PIN-CERT-1', 'WA')`, id, customer); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
 }
