@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents, formatDay } from '../../lib/utils.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
@@ -125,7 +126,7 @@ export class GableAccountDetail extends LitElement {
             this.openInvoices = open;
         } catch (error) {
             console.error('Failed to load payments:', error);
-            ToastService.show('Failed to load payments', 'error');
+            ToastService.show(error instanceof WalkTruncatedError ? error.message : 'Failed to load payments', 'error');
         } finally {
             this.paymentsLoading = false;
         }

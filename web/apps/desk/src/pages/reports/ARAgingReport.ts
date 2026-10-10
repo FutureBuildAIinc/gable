@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents } from '../../lib/utils.ts';
 import { ArService } from '../../services/ArService.ts';
 import type { ArAgingItem, ArAgingTotal, AgingGroupBy } from '../../types/account.ts';
@@ -45,7 +46,7 @@ export class ARAgingReportPage extends LitElement {
             this.totals = summary.totals;
         } catch (err) {
             console.error(err);
-            ToastService.show('Failed to load AR aging report', 'error');
+            ToastService.show(err instanceof WalkTruncatedError ? err.message : 'Failed to load AR aging report', 'error');
         } finally {
             this.loading = false;
         }
