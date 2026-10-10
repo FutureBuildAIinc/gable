@@ -327,9 +327,11 @@ jobs:
       # Unit tests for the gate's inline-header pass. Runs the gate's own
       # self-check before any reuse invocation, so a regression in the
       # inline-header logic blocks the merge even if the rest of the tree
-      # still passes `reuse lint`.
+      # still passes `reuse lint`. The dotted path form does not work with
+      # python3 -m unittest on the image's Python 3.12 ("Empty module
+      # name"), so the discover form is used.
       - name: REUSE gate unit tests
-        run: python3 -m unittest .github/scripts/test_reuse_gate.py
+        run: python3 -m unittest discover -s .github/scripts -p test_reuse_gate.py
 
       # Full human-readable report for the log. The pass/fail decision is made
       # by the gate step below.
