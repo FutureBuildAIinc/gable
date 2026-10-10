@@ -149,6 +149,84 @@ func TestResolveSetDerivations(t *testing.T) {
 	}
 }
 
+// TestResolveSetRule3ThroughThePieceRow proves rule 3 anchors on a COUNT
+// piece row, never on the stocking row (ADR 0006 section 3.2: 1 PCS =
+// board_length_ft LF): a 2x4x8 stocked in BF, in LF or in MBF derives its
+// other rows through the piece row the set carries, and a sent LF pair
+// equal to the derived one is accepted, not refused.
+func TestResolveSetRule3ThroughThePieceRow(t *testing.T) {
+	cat := seedCatalogue()
+
+	// The same 2x4x8 (2 inches by 4 inches by 8 feet) stocked in each of
+	// the four units: the piece row (PCS) is sent, the other rows derive.
+	// One piece is 16/3 BF, so against BF stock the PCS row is (0.1875, 1)
+	// and the LF row (1.5, 1); against MBF stock the piece row is
+	// (187.5, 1) and LF (1500, 1); against LF stock the piece row is (1, 8)
+	// and BF (1, 1.5) through the cross section.
+	for _, tc := range []struct {
+		stock string
+		want  map[string][2]httpx.Quantity
+	}{
+		{"PCS", map[string][2]httpx.Quantity{
+			"PCS": {q("1"), q("1")}, "LF": {q("8"), q("1")},
+			"BF": {q("1"), q("0.1875")}, "MBF": {q("1"), q("187.5")}}},
+		{"BF", map[string][2]httpx.Quantity{
+			"BF": {q("1"), q("1")}, "PCS": {q("0.1875"), q("1")},
+			"LF": {q("1.5"), q("1")}, "MBF": {q("1"), q("1000")}}},
+		{"LF", map[string][2]httpx.Quantity{
+			"LF": {q("1"), q("1")}, "PCS": {q("1"), q("8")},
+			"BF": {q("1"), q("1.5")}, "MBF": {q("1"), q("1500")}}},
+		{"MBF", map[string][2]httpx.Quantity{
+			"MBF": {q("1"), q("1")}, "PCS": {q("187.5"), q("1")},
+			"LF": {q("1500"), q("1")}, "BF": {q("1000"), q("1")}}},
+	} {
+		inputs := []SetInput{rowIn(tc.stock, true, false, true)}
+		for _, uom := range []string{"PCS", "LF", "BF", "MBF"} {
+			if uom == tc.stock {
+				continue
+			}
+			if uom == "PCS" {
+				inputs = append(inputs, rowPair("PCS", tc.want["PCS"][0].WireString(), tc.want["PCS"][1].WireString(), true, false, false))
+				continue
+			}
+			inputs = append(inputs, rowIn(uom, uom == "LF", uom == "MBF", uom != "LF"))
+		}
+		facts := SetFacts{StockUOM: tc.stock, HasCrossSection: true, ThicknessIn: q("2"), WidthIn: q("4"),
+			HasBoardLength: true, BoardLengthFT: q("8")}
+		rows, _, err := ResolveSet(inputs, facts, cat)
+		if err != nil {
+			t.Fatalf("the 2x4x8 stocked in %s resolves: %v", tc.stock, err)
+		}
+		for uom, w := range tc.want {
+			r, ok := findRow(rows, uom)
+			if !ok {
+				t.Fatalf("%s is missing from the %s stocked set", uom, tc.stock)
+			}
+			if r.UnitQty != w[0] || r.StockQty != w[1] {
+				t.Errorf("stocked in %s: %s row is (%s, %s); want (%s, %s)", tc.stock, uom,
+					r.UnitQty.WireString(), r.StockQty.WireString(), w[0].WireString(), w[1].WireString())
+			}
+		}
+	}
+
+	// The review's exact case: a 2x4 stocked in BF whose LF pair is sent as
+	// the right (1.5, 1) is accepted and stored, never refused for
+	// disagreeing with a stocking row derivation of (8, 1).
+	facts := SetFacts{StockUOM: "BF", HasCrossSection: true, ThicknessIn: q("2"), WidthIn: q("4"),
+		HasBoardLength: true, BoardLengthFT: q("8")}
+	rows, _, err := ResolveSet([]SetInput{
+		rowIn("BF", false, false, true),
+		rowPair("PCS", "0.1875", "1", true, false, false),
+		rowPair("LF", "1.5", "1", true, false, false),
+	}, facts, cat)
+	if err != nil {
+		t.Fatalf("the right LF pair on a BF stocked 2x4 is accepted: %v", err)
+	}
+	if r, _ := findRow(rows, "LF"); r.UnitQty != q("1.5") || r.StockQty != q("1") {
+		t.Errorf("the sent LF pair is stored as (1.5, 1), got (%s, %s)", r.UnitQty.WireString(), r.StockQty.WireString())
+	}
+}
+
 // TestResolveSetAgreementRefusals covers the agreement rule: a sent pair
 // that disagrees with a derivation that applies to it is a 400 naming
 // units[k].unit_qty with the derived pair in the message.

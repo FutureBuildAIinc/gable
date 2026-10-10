@@ -151,6 +151,51 @@ func TestUnitSetDerivations(t *testing.T) {
 		}
 	}
 
+	// The 2x4x8 stocked in each of BF, LF and MBF: the piece row (PCS) is
+	// sent and the other rows derive through it (rule 3 anchors a COUNT
+	// piece row, never the stocking row). One piece is 16/3 BF: against BF
+	// stock the PCS row is (0.1875, 1), LF (1.5, 1) and MBF (1, 1000);
+	// against LF stock the PCS row is (1, 8), BF (1, 1.5) through the cross
+	// section and MBF (1, 1500); against MBF stock the PCS row is
+	// (187.5, 1), LF (1500, 1) and BF (1000, 1).
+	for _, tc := range []struct {
+		stock, pcsUnit, pcsStock string
+		want                     map[string][2]string
+	}{
+		{"BF", "0.1875", "1", map[string][2]string{
+			"BF": {"1", "1"}, "PCS": {"0.1875", "1"}, "LF": {"1.5", "1"}, "MBF": {"1", "1000"}}},
+		{"LF", "1", "8", map[string][2]string{
+			"LF": {"1", "1"}, "PCS": {"1", "8"}, "BF": {"1", "1.5"}, "MBF": {"1", "1500"}}},
+		{"MBF", "187.5", "1", map[string][2]string{
+			"MBF": {"1", "1"}, "PCS": {"187.5", "1"}, "LF": {"1500", "1"}, "BF": {"1000", "1"}}},
+	} {
+		id, rev := f.createBoard(map[string]any{
+			"stock_uom": tc.stock, "board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
+		})
+		units := []any{unitRow(tc.stock, true, true, true)}
+		for _, uom := range []string{"PCS", "LF", "BF", "MBF"} {
+			if uom == tc.stock {
+				continue
+			}
+			if uom == "PCS" {
+				units = append(units, unitRow("PCS", true, false, false, tc.pcsUnit, tc.pcsStock))
+				continue
+			}
+			units = append(units, unitRow(uom, uom == "LF", uom == "MBF", uom != "LF"))
+		}
+		res := f.putUnits(id, unitsBody(rev, tc.stock, tc.stock, tc.stock, tc.stock, units))
+		if res.status != http.StatusOK {
+			t.Fatalf("the 2x4x8 stocked in %s = %d: %s", tc.stock, res.status, res.raw)
+		}
+		for uom, want := range tc.want {
+			row := rowOf(t, res.body, uom)
+			if row["unit_qty"] != want[0] || row["stock_qty"] != want[1] {
+				t.Errorf("stocked in %s: %s stored (%v, %v); want (%s, %s)", tc.stock, uom,
+					row["unit_qty"], row["stock_qty"], want[0], want[1])
+			}
+		}
+	}
+
 	// A client pair is stored canonically: 200 BOX = 2 PCS reads (100, 1),
 	// and a free pair (no rule applies) is accepted as sent, canonically.
 	boxed, brev := f.createBoard(nil)

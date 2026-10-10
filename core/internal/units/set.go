@@ -294,10 +294,21 @@ func deriveAll(uom string, inputs []SetInput, facts SetFacts, catalogue map[stri
 	}
 	// Rule 3: a LENGTH unit through the piece on a product with a fixed
 	// length: 1 PCS = board_length_ft LF, so (pcs_u x blf) of the unit is
-	// (pcs_s x refU) of stock.
+	// (pcs_s x refU) of stock. The anchor is a COUNT piece row (ADR 0006
+	// section 3.2 rule 3: "1 PCS = board_length_ft LF"), a row whose one
+	// unit is one piece (a COUNT unit whose standard size is 1 for 1 EA:
+	// PCS, EA), never the stocking row itself unless the stocking unit is
+	// such a unit. A 2x4x8 stocked in BF anchors its PCS row, so LF derives
+	// as 1.5 LF per BF, not as board_length_ft LF per stocking unit; a
+	// multi piece COUNT row (a DOZ, a pair) or a container (a box, a
+	// bundle) is not the piece and does not anchor the rule.
 	if unit.Dimension == DimLength && facts.HasBoardLength {
-		if stockRow, ok := rowOf(inputs, facts.StockUOM); ok && stockRow.HasPair {
-			if p, err := canonicalOfProducts(stockRow.UnitQty, ratOf(facts.BoardLengthFT), stockRow.StockQty, refPerUnitOrOne(unit)); err == nil {
+		for _, k := range knownRows() {
+			kd, kok := catalogue[k.UOM]
+			if !kok || kd.Dimension != DimCount || !isPieceUnit(kd) {
+				continue
+			}
+			if p, err := canonicalOfProducts(k.UnitQty, ratOf(facts.BoardLengthFT), k.StockQty, refPerUnitOrOne(unit)); err == nil {
 				out = append(out, p)
 			}
 		}
@@ -352,6 +363,14 @@ func refPerUnitOrOne(u CatalogueUnit) *big.Rat {
 		return r
 	}
 	return big.NewRat(1, 1)
+}
+
+// isPieceUnit answers whether one of the unit is one piece: a COUNT unit
+// whose standard size is 1 for 1 EA (PCS, EA). Rule 3's "1 PCS =
+// board_length_ft LF" holds for such a unit alone.
+func isPieceUnit(u CatalogueUnit) bool {
+	r, ok := u.refPerUnit()
+	return ok && r.Cmp(big.NewRat(1, 1)) == 0
 }
 
 // ratOf is a scale 4 quantity as the exact rational it names.

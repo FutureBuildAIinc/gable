@@ -42,6 +42,22 @@ func newUnitsFixture(t *testing.T) *unitsFixture {
 		t.Fatalf("seed 2x4x14 set: %v", err)
 	}
 
+	// A 2x4x8 stocked in BF (the rule 3 piece row case): the piece row is
+	// PCS (0.1875, 1) and LF (1.5, 1), so a line sold by the foot stocks
+	// board feet at 1.5 LF per BF.
+	f.bfProduct = uuid.New()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary,
+			board_thickness_in, board_width_in, board_length_ft)
+		VALUES ($1, $2, '2x4x8 SYP by board foot', 'BF', 2, 4, 8)`, f.bfProduct, "BFB-"+uuid.NewString()[:8]); err != nil {
+		t.Fatalf("seed BF stocked product: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO product_units (product_id, uom, unit_qty, stock_qty, sell, purchase, price) VALUES
+		($1, 'PCS', 0.1875, 1, TRUE, FALSE, FALSE),
+		($1, 'LF', 1.5, 1, TRUE, FALSE, FALSE),
+		($1, 'MBF', 1, 1000, FALSE, TRUE, TRUE)`, f.bfProduct); err != nil {
+		t.Fatalf("seed BF stocked set: %v", err)
+	}
+
 	// A 2x4 random length product stocked in LF (section 4's fixture): BF
 	// through the cross section, MBF through the standard size, the pair
 	// (1500, 1) against LF.
@@ -120,6 +136,45 @@ func TestLinePairResolvedAndStored(t *testing.T) {
 		if after[k] != v {
 			t.Errorf("a unit set change moved the line's %s from %s to %s", k, v, after[k])
 		}
+	}
+}
+
+// TestLineOnABoardFootStockedProduct proves the stocking quantity on a
+// product stocked in BF whose LF row came from the piece row derivation
+// (1.5 LF per BF, never board_length_ft LF per BF): a line of 12 LF stocks
+// exactly 8 BF and prices per MBF through the pair (1500, 1).
+func TestLineOnABoardFootStockedProduct(t *testing.T) {
+	f := newUnitsFixture(t)
+
+	line := map[string]any{
+		"product_id": f.bfProduct.String(), "quantity": "12", "uom": "LF",
+		"price_uom": "MBF", "unit_price_ten_thousandths": 5000000,
+	}
+	r := f.do("POST", "/api/v1/quotes", f.createBody(line))
+	if r.status != http.StatusCreated {
+		t.Fatalf("12 LF of the BF stocked 2x4x8 = %d: %s", r.status, r.raw)
+	}
+	stored := f.storedLine(t, str(t, r.body, "id"))
+	for field, want := range map[string]string{
+		"uom": "LF", "price_uom": "MBF", "uom_qty": "1500.0000", "price_uom_qty": "1.0000",
+		"stock_uom": "BF", "stock_quantity": "8.0000",
+	} {
+		if stored[field] != want {
+			t.Errorf("stored %s = %s, want %s", field, stored[field], want)
+		}
+	}
+	if got := num(t, r.body["lines"].([]any)[0].(map[string]any), "line_total_cents"); got != 400 {
+		t.Errorf("line_total_cents = %d, want 400 (12 LF is 0.008 MBF at 500.00)", got)
+	}
+
+	// A quantity that is not an exact multiple of the smallest exact LF
+	// step is refused with the neighbouring multiples of it: 1.5 LF per BF
+	// makes the step 0.0003 LF, so 10 LF names 9.9999 and 10.0002.
+	line["quantity"] = "10"
+	r = f.do("POST", "/api/v1/quotes", f.createBody(line))
+	if r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "lines[0].quantity") ||
+		!strings.Contains(string(r.raw), "9.9999") || !strings.Contains(string(r.raw), "10.0002") {
+		t.Errorf("10 LF does not convert exactly into BF, got %d: %s", r.status, r.raw)
 	}
 }
 

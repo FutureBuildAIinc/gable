@@ -41,6 +41,7 @@ type fixture struct {
 	customerID    uuid.UUID
 	productID     uuid.UUID
 	product14     uuid.UUID // the 2x4x14 of the units tests, when they built it
+	bfProduct     uuid.UUID // the BF stocked 2x4x8 of the units tests, when they built it
 	randomProduct uuid.UUID // the random length product of the tally tests
 	sku           string
 }
