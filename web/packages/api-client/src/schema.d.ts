@@ -4786,6 +4786,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/refund-intents/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve a stranded card refund claim
+         * @description The guarded operator route for a refund claim that outlived its act (a lost terminal verdict, a crashed process, a transaction that refused after the terminal answered): finance reads the terminal and records its actual outcome. outcome refund carries the gateway's own refund id (the money moved) and books it through the refund's own money transaction with every cap and lock, completing the claim DONE; outcome no_refund carries the reconciliation reference finance filed, marks the claim FAILED and moves nothing. Both write one audit row naming the person, the intent, the outcome and the reason. Only the finance and owner roles; a machine key is refused in the route itself, bound or not. A bare resolve, a refund without its refund id and a no refund without its reference are 400s naming the field; a claim that is not PENDING is 409 intent_not_pending.
+         */
+        post: operations["posRefundIntentResolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pricing/calculate": {
         parameters: {
             query?: never;
@@ -11522,6 +11542,40 @@ export interface components {
              * @description The sale's revision; or send If-Match.
              */
             revision?: number;
+        };
+        PosResolveIntentRequest: {
+            /**
+             * @description The terminal's actual outcome: refund (the gateway's own refund id, the money moved) or no_refund (an explicit no at the terminal).
+             * @enum {string}
+             */
+            outcome: "refund" | "no_refund";
+            /** @description Required when the outcome is refund: the gateway's own refund id for the claim. */
+            refund_tx_id?: string;
+            /** @description Required when the outcome is no_refund: the reference finance filed for the reconciliation. */
+            reconciliation_reference?: string;
+            /** @description Why the record was made */
+            reason: string;
+        };
+        PosRefundIntentResolved: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            sale_id: string;
+            /** Format: uuid */
+            tender_id: string;
+            /** @enum {string} */
+            act: "void" | "return";
+            /**
+             * @description DONE when a recorded refund booked
+             * @enum {string}
+             */
+            state: "DONE" | "FAILED";
+            /** @enum {string} */
+            outcome: "refund" | "no_refund";
+            /** @description The gateway refund id the operator recorded. */
+            refund_tx_id?: string | null;
+            /** @description The reference the operator filed. */
+            reconciliation_reference?: string | null;
         };
         PosReturnRequest: {
             /** @description Defaults REG-01. */
@@ -24209,6 +24263,43 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posRefundIntentResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosResolveIntentRequest"];
+            };
+        };
+        responses: {
+            /** @description The settled claim. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRefundIntentResolved"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             500: components["responses"]["InternalError"];
         };
     };
