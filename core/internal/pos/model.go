@@ -176,10 +176,21 @@ type ReturnLine struct {
 	ProductID   *uuid.UUID    `json:"product_id"`
 	Description string        `json:"description"`
 	Quantity    *httpx.Quantity `json:"quantity"`
-	UOM         *string       `json:"uom"`
-	UnitPrice   *httpx.Price  `json:"unit_price_ten_thousandths"`
-	LineTotal   *httpx.Cents  `json:"line_total_cents"`
-	Restock     bool          `json:"restock"`
+	UOM         *string        `json:"uom"`
+	UnitPrice   *httpx.Price   `json:"unit_price_ten_thousandths"`
+	LineTotal   *httpx.Cents   `json:"line_total_cents"`
+	Restock     bool           `json:"restock"`
+
+	// The pair and price unit the sale line carried, read by the memo line's
+	// insert; internal, never on the wire.
+	PriceUOM    *string          `json:"-"`
+	UOMQty      *httpx.Quantity  `json:"-"`
+	PriceUOMQty *httpx.Quantity  `json:"-"`
+
+	// SaleLineID is the sale line a linked return names; InvoiceLineID the
+	// invoice line its restock cost reads. Both internal, never on the wire.
+	SaleLineID    *uuid.UUID `json:"-"`
+	InvoiceLineID *uuid.UUID `json:"-"`
 }
 
 // TillSessionStatus is the drawer lifecycle.

@@ -13,7 +13,8 @@
 --      unit), product_id NULL-able with the per line type CHECKs.
 --      pos_tenders: payment_id FK payments.
 --   3  pos_returns: the number (RTN-), credit_memo_id FK credit_memos;
---      pos_return_lines widened like the lines. Each historic return with
+--      pos_return_lines widened like the lines, plus the sale_line_id link
+--      that bounds a return by the line it names. Each historic return with
 --      refund_method ACCOUNT lowered AR (its GL entry and subledger row
 --      exist) with no document: it is migrated as an OPEN credit memo
 --      (reason 'migrated counter account return', its gl_entry_id the
@@ -263,6 +264,11 @@ UPDATE pos_return_lines l SET taxable = COALESCE((SELECT p.taxable FROM products
 WHERE taxable IS NULL;
 ALTER TABLE pos_return_lines ALTER COLUMN taxable SET NOT NULL;
 ALTER TABLE pos_return_lines ALTER COLUMN taxable SET DEFAULT TRUE;
+-- The sale line each return line came from: the return's quantity cap and its
+-- restock cost read it (a linked return is bounded by the line it names).
+ALTER TABLE pos_return_lines ADD COLUMN IF NOT EXISTS sale_line_id UUID NULL REFERENCES pos_line_items (id);
+CREATE INDEX IF NOT EXISTS idx_pos_return_lines_sale_line ON pos_return_lines (sale_line_id)
+    WHERE sale_line_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION pg_temp.mig105_local_date(ts TIMESTAMPTZ, branch UUID) RETURNS DATE
 LANGUAGE sql STABLE AS $$

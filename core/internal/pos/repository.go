@@ -49,6 +49,10 @@ type Repository interface {
 	CreateReturn(ctx context.Context, ret *Return, lines []ReturnLine) error
 	GetReturn(ctx context.Context, id uuid.UUID) (*Return, error)
 	ListReturns(ctx context.Context, f ReturnFilter, limit int) ([]Return, error)
+	// ReturnedQtyByLine sums, per sale line, the quantity every earlier
+	// return of the sale brought back (the return's cap).
+	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
+	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
 
 	// Till sessions
 	CreateTillSession(ctx context.Context, s *TillSession) error
@@ -500,15 +504,48 @@ func (r *PostgresRepository) CreateReturn(ctx context.Context, ret *Return, line
 		}
 		_, err := r.ex(ctx).Exec(ctx, `
 			INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity, uom,
-				unit_price, line_total, restock, created_at)
-			VALUES ($1, $2, $3, 'PRODUCT', $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, NOW())`,
+				unit_price, line_total, restock, sale_line_id, created_at)
+			VALUES ($1, $2, $3, 'PRODUCT', $4, $5, -($6::numeric / 10000), $7, $8::numeric / 10000, $9::numeric / 100, $10, $11, NOW())`,
 			l.ID, ret.ID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
-			centsArg(l.LineTotal), l.Restock)
+			centsArg(l.LineTotal), l.Restock, l.SaleLineID)
 		if err != nil {
 			return fmt.Errorf("failed to record the return line: %w", mapWriteError(err))
 		}
 	}
 	return nil
+}
+
+// ReturnedQtyByLine sums what earlier returns brought back per sale line of
+// one sale: the stored quantities are negative, so the sum is negated back.
+func (r *PostgresRepository) ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT rl.sale_line_id, -ROUND(SUM(rl.quantity) * 10000)::bigint
+		FROM pos_return_lines rl
+		JOIN pos_returns r ON r.id = rl.return_id
+		WHERE r.original_transaction_id = $1 AND rl.sale_line_id IS NOT NULL
+		GROUP BY rl.sale_line_id`, saleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the sale's earlier returns: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]httpx.Quantity{}
+	for rows.Next() {
+		var id uuid.UUID
+		var qty httpx.Quantity
+		if err := rows.Scan(&id, &qty); err != nil {
+			return nil, err
+		}
+		out[id] = qty
+	}
+	return out, rows.Err()
+}
+
+// SaleHasReturns answers whether any return names the sale.
+func (r *PostgresRepository) SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM pos_returns WHERE original_transaction_id = $1)`, saleID).Scan(&exists)
+	return exists, err
 }
 
 func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) {

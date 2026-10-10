@@ -41,6 +41,12 @@ type returnLinePriced struct {
 	in        ReturnLineIn
 	lineTotal int64 // positive; the memo line stores it negative
 	taxable   bool
+	// saleLine is the sale line a linked return names: the refund follows it
+	// (its per unit extension, its unit, its tax share).
+	saleLine *salesdoc.Line
+	// perUnit is the ten thousandths a linked line refunds at: the sale
+	// line's own extension divided by the quantity it sold.
+	perUnit httpx.Price
 }
 
 // ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
@@ -58,8 +64,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	}
 	// The customer: named, the original sale's, or the walk-in.
 	customerID := in.CustomerID
-	if customerID == nil && in.OriginalSaleID != nil {
-		if original, err := s.repo.GetSale(ctx, *in.OriginalSaleID); err == nil && original.CustomerID != nil {
+	var original *Sale
+	if in.OriginalSaleID != nil {
+		if original, err = s.repo.GetSale(ctx, *in.OriginalSaleID); err != nil {
+			return nil, err
+		}
+		if customerID == nil {
 			customerID = original.CustomerID
 		}
 	}
@@ -74,8 +84,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	if err != nil {
 		return nil, err
 	}
-	// Price the lines: from the original sale's lines when named, else the
-	// request's own price (which is then required).
+	// Price the lines: a line naming a sale line refunds at that line's own
+	// extension per unit (never the list price, never a client price); a line
+	// that named no sale line stands alone on the product the request named
+	// and the request's own price.
 	var saleLines []salesdoc.Line
 	if in.OriginalSaleID != nil {
 		if saleLines, err = s.repo.GetLines(ctx, *in.OriginalSaleID); err != nil {
@@ -87,8 +99,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		byID[saleLines[i].ID] = saleLines[i]
 	}
 	// First pass: fill each line from the sale line it names, so the product
-	// lookup covers the resolved products too; a line that named no sale line
-	// stands alone on the product the request named.
+	// lookup covers the resolved products too.
 	resolved := make([]ReturnLineIn, len(in.Lines))
 	for i := range in.Lines {
 		rl := in.Lines[i]
@@ -97,9 +108,9 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if !ok {
 				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i), "names no line of the original sale")
 			}
-			if rl.UnitPrice == nil && src.UnitPrice != nil {
-				p := *src.UnitPrice
-				rl.UnitPrice = &p
+			if rl.UnitPrice != nil {
+				return nil, invalid(fmt.Sprintf("lines[%d].unit_price_ten_thousandths", i),
+					"a line that names a sale line refunds at the sale's own price: drop the unit price")
 			}
 			if rl.Description == "" {
 				rl.Description = src.Description
@@ -129,6 +140,24 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				return nil, invalid(fmt.Sprintf("lines[%d].product_id", i), "no such product")
 			}
 		}
+		var src salesdoc.Line
+		if rl.SaleLineID != nil {
+			src = byID[*rl.SaleLineID]
+			// The line's own extension per unit: the extension the sale
+			// charged (discount included) divided by the quantity it sold
+			// (cents at scale 2 over quantity at scale 4, to a price at
+			// scale 4: the divisor carries 10^6).
+			if src.LineTotal == nil || src.Quantity == nil || *src.Quantity <= 0 || *src.LineTotal < 0 {
+				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i), "the sale line carries no priced extension to return against")
+			}
+			perUnit := httpx.Price(divRound(int64(*src.LineTotal)*1_000_000, int64(*src.Quantity)))
+			p := returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, perUnit)),
+				taxable: src.Taxable, saleLine: &src, perUnit: perUnit}
+			up := perUnit
+			p.in.UnitPrice = &up
+			priced = append(priced, p)
+			continue
+		}
 		if rl.UnitPrice == nil {
 			return nil, invalid("lines.unit_price_ten_thousandths",
 				"is required when the line names no line of the original sale")
@@ -141,43 +170,73 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		priced = append(priced, returnLinePriced{in: rl, lineTotal: int64(salesdoc.CostOf(rl.Quantity, *rl.UnitPrice)), taxable: taxable})
 	}
-	// Tax: the sale path's resolver, the branch rate (a return at the
-	// counter is a pickup, 5.5), exemptions first.
-	exempt, err := s.repo.CustomerExempt(ctx, *customerID)
-	if err != nil {
+	// The cap (ADR 0005 14.2 C2-5, second review P1-1): no sale line gives
+	// back more than it sold less every earlier return of it. Checked before
+	// the transaction, and again under the sale row lock inside it.
+	if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
 		return nil, err
 	}
-	var taxableSum int64
-	for i := range priced {
-		if priced[i].taxable {
-			taxableSum += priced[i].lineTotal
+	// Tax: a linked line's share of the tax the sale actually collected (the
+	// sale's own rate, provider priced or exempt, whatever it was); a free
+	// line at today's branch rate, exemptions first.
+	var saleTaxCents, saleTaxable int64
+	if original != nil {
+		saleTaxCents = int64(original.TaxCents)
+		for i := range saleLines {
+			if saleLines[i].Taxable && saleLines[i].LineTotal != nil {
+				saleTaxable += int64(*saleLines[i].LineTotal)
+			}
 		}
 	}
-	subtotal := taxableSum
+	var linkedTaxable int64
 	for i := range priced {
-		if !priced[i].taxable {
+		if priced[i].saleLine != nil && priced[i].taxable {
+			linkedTaxable += priced[i].lineTotal
+		}
+	}
+	subtotal := linkedTaxable
+	var freeTaxable int64
+	var freeNontaxable int64
+	for i := range priced {
+		if priced[i].saleLine == nil {
+			if priced[i].taxable {
+				freeTaxable += priced[i].lineTotal
+			} else {
+				freeNontaxable += priced[i].lineTotal
+			}
+		} else if !priced[i].taxable {
 			subtotal += priced[i].lineTotal
 		}
 	}
+	subtotal += freeTaxable + freeNontaxable
 	var taxCents int64
 	var taxRate *string
-	if exempt {
-		zero := "0"
-		taxRate = &zero
-	} else {
-		rate, ok, err := s.repo.BranchTaxRate(ctx, branchID)
+	if linkedTaxable > 0 && saleTaxable > 0 && saleTaxCents > 0 {
+		taxCents += divRound(linkedTaxable*saleTaxCents, saleTaxable)
+	}
+	if freeTaxable > 0 {
+		exempt, err := s.repo.CustomerExempt(ctx, *customerID)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
-			return nil, conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
+		if exempt {
+			zero := "0"
+			taxRate = &zero
+		} else {
+			rate, ok, err := s.repo.BranchTaxRate(ctx, branchID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
+			}
+			scaled, _, err := salesdoc.ParseTaxRate(rate)
+			if err != nil {
+				return nil, err
+			}
+			taxCents += int64(salesdoc.TaxAt(httpx.Cents(freeTaxable), scaled))
+			taxRate = &rate
 		}
-		scaled, _, err := salesdoc.ParseTaxRate(rate)
-		if err != nil {
-			return nil, err
-		}
-		taxCents = int64(salesdoc.TaxAt(httpx.Cents(taxableSum), scaled))
-		taxRate = &rate
 	}
 	total := -(subtotal + taxCents)
 	// A card refund goes through the gateway before the transaction, so a
@@ -216,6 +275,11 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				return httpx.InvalidStateTransition(
 					fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", sale.Status.Status()))
 			}
+			// The cap, rechecked under the lock: a return that raced this one
+			// for the same line is counted before this one is allowed.
+			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
+				return err
+			}
 			// The return touches the sale: its revision moves, in process, so
 			// a void built on the earlier revision is refused stale.
 			if err := s.repo.BumpSaleRevision(ctx, sale.ID); err != nil {
@@ -237,10 +301,32 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		for i := range priced {
 			p := &priced[i]
 			qty := p.in.Quantity
-			uom := "EA"
+			uom, priceUOM := "EA", "EA"
+			var uomQty, priceUOMQty httpx.Quantity = salesdoc.One, salesdoc.One
+			if p.saleLine != nil {
+				// the memo line mirrors the sale line's own unit and pair
+				if p.saleLine.UOM != nil {
+					uom = *p.saleLine.UOM
+				}
+				if p.saleLine.PriceUOM != nil {
+					priceUOM = *p.saleLine.PriceUOM
+				}
+				if p.saleLine.UOMQty != nil {
+					uomQty = *p.saleLine.UOMQty
+				}
+				if p.saleLine.PriceUOMQty != nil {
+					priceUOMQty = *p.saleLine.PriceUOMQty
+				}
+			}
+			unitPrice := p.in.UnitPrice
+			if unitPrice == nil {
+				unitPrice = ptrPrice(0)
+			}
 			lines = append(lines, ReturnLine{
 				ID: uuid.New(), Position: i, ProductID: p.in.ProductID, Description: p.in.Description,
-				Quantity: &qty, UOM: &uom, UnitPrice: p.in.UnitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
+				Quantity: &qty, UOM: &uom, PriceUOM: &priceUOM, UOMQty: &uomQty, PriceUOMQty: &priceUOMQty,
+				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
+				SaleLineID: p.in.SaleLineID,
 			})
 			if p.in.Restock && p.in.ProductID != nil {
 				if ref, ok := refs[p.in.ProductID.String()]; ok && ref.AverageCost > 0 {
@@ -260,9 +346,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
 				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, description, quantity,
 					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock, created_at)
-				VALUES ($1, $2, 'PRODUCT', $3, $4, -($5::numeric / 10000), $6, $6, 1, 1, $7::numeric / 10000, 'MANUAL',
-					$8::numeric / 100, $9, $10, NOW())`,
-				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, priceArg(l.UnitPrice),
+				VALUES ($1, $2, 'PRODUCT', $3, $4, -($5::numeric / 10000), $6, $7, $8::numeric / 10000, $9::numeric / 10000,
+					$10::numeric / 10000, 'MANUAL', $11::numeric / 100, $12, $13, NOW())`,
+				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM,
+				qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty), priceArg(l.UnitPrice),
 				centsArg(l.LineTotal), priced[i].taxable, l.Restock); err != nil {
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
@@ -376,6 +463,53 @@ func ptrC(v int64) *httpx.Cents {
 	return &c
 }
 
+// divRound divides two integers rounding half away from zero, the money
+// convention of the extensions (a positive denominator only).
+func divRound(num, den int64) int64 {
+	if den <= 0 {
+		return 0
+	}
+	if num >= 0 {
+		return (num + den/2) / den
+	}
+	return -((-num + den/2) / den)
+}
+
+// checkReturnCaps refuses a return whose lines, taken with every earlier
+// return of the same sale lines, bring back more than the lines sold: the
+// sale's own goods bound its refunds (blocker exceeds_sold).
+func (s *Service) checkReturnCaps(ctx context.Context, saleID *uuid.UUID, priced []returnLinePriced, byID map[uuid.UUID]salesdoc.Line) error {
+	if saleID == nil {
+		return nil
+	}
+	requested := map[uuid.UUID]int64{}
+	for i := range priced {
+		if priced[i].in.SaleLineID != nil {
+			requested[*priced[i].in.SaleLineID] += int64(priced[i].in.Quantity)
+		}
+	}
+	if len(requested) == 0 {
+		return nil
+	}
+	returned, err := s.repo.ReturnedQtyByLine(ctx, *saleID)
+	if err != nil {
+		return err
+	}
+	for lineID, want := range requested {
+		src, ok := byID[lineID]
+		if !ok || src.Quantity == nil {
+			continue
+		}
+		already := int64(returned[lineID])
+		if want+already > int64(*src.Quantity) {
+			return conflict("exceeds_sold",
+				fmt.Sprintf("the line sold %s and %s is already returned: %s more is refused",
+					(*src.Quantity).DecimalString(), httpx.Quantity(already).DecimalString(), httpx.Quantity(want).DecimalString()))
+		}
+	}
+	return nil
+}
+
 // fxMemoNumber reads the memo's minted number for its event.
 func fxMemoNumber(ctx context.Context, s *Service, memoID uuid.UUID) string {
 	var number string
@@ -391,4 +525,9 @@ func (s *Service) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) 
 // ListReturns lists returns for a register on a date.
 func (s *Service) ListReturns(ctx context.Context, f ReturnFilter) ([]Return, error) {
 	return s.repo.ListReturns(ctx, f, 200)
+}
+
+func ptrPrice(v int64) *httpx.Price {
+	p := httpx.Price(v)
+	return &p
 }

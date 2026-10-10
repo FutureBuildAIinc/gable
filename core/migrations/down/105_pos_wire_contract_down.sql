@@ -32,6 +32,8 @@ DELETE FROM credit_memo_lines WHERE credit_memo_id IN
 DELETE FROM credit_memos WHERE reason = 'migrated counter account return';
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS credit_memo_id;
 
+ALTER TABLE pos_return_lines DROP COLUMN IF EXISTS sale_line_id;
+
 ALTER TABLE pos_return_lines DROP COLUMN IF EXISTS taxable;
 ALTER TABLE pos_return_lines ALTER COLUMN unit_price TYPE NUMERIC(12, 2);
 ALTER TABLE pos_return_lines ALTER COLUMN quantity TYPE DECIMAL(12, 4);

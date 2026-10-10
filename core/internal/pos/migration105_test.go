@@ -331,6 +331,7 @@ func TestMigration105_POSWireContract(t *testing.T) {
 		{"pos_transactions", "number"}, {"pos_transactions", "currency"}, {"pos_transactions", "revision"},
 		{"pos_returns", "number"}, {"pos_returns", "credit_memo_id"},
 		{"pos_line_items", "line_type"}, {"pos_tenders", "payment_id"},
+		{"pos_return_lines", "sale_line_id"},
 	} {
 		if n := mig105Scalar[int](t, conn, `SELECT count(*) FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`, c[0], c[1]); n != 0 {
 			t.Errorf("after the down, %s.%s remains", c[0], c[1])
