@@ -3,28 +3,31 @@
 
 export type RFCStatus = 'draft' | 'review' | 'approved' | 'rejected';
 
-export interface RFC {
+/**
+ * One RFC as the list serves it: everything but the body, so a list page
+ * never drags the content along.
+ */
+export interface RFCSummary {
     id: string;
+    /** The human readable document number (RFC-000001). */
+    number: string;
     title: string;
     status: RFCStatus;
-    problem_statement: string;
-    proposed_solution: string;
-    content: string;
-    author_id?: string;
+    author_id: string | null;
+    revision: number;
     created_at: string;
     updated_at: string;
+}
+
+export interface RFC extends RFCSummary {
+    problem_statement: string;
+    proposed_solution: string;
+    /** Generated at create; null only on rows the legacy seed wrote without one. */
+    content: string | null;
 }
 
 export interface CreateRFCInput {
     title: string;
     problem_statement: string;
     proposed_solution: string;
-}
-
-export interface UpdateRFCInput {
-    title?: string;
-    status?: RFCStatus;
-    problem_statement?: string;
-    proposed_solution?: string;
-    content?: string;
 }

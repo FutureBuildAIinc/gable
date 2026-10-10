@@ -1,22 +1,17 @@
-# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The /api/v1/admin surface, transcribed from internal/techadmin (machine
-# API keys, the OpenRouter and OpenRouteService settings), internal/staff
-# (the staff roster, module grants and the global module flag) and
-# internal/pricing (the exposure scan trigger) as they behave today. Every
-# route sits behind RequireRole admin or owner, except the exposure scan,
-# whose route guard also admits sales and whose handler then refuses
-# everyone but admin and owner. Secrets handling the transcription preserves:
-# a new machine key is returned in full once, in api_key, and never again
-# (the list carries only the 12 character prefix; the Argon2 hash is never
-# serialized); the AI and routing settings never echo a stored key, only a
-# hint made of its first 10 and last 4 characters (or four asterisks when the
-# key is 12 characters or fewer). Other quirks: the key list is null when
-# there are no keys; revoking a key is a 204 even for an unknown id; granting
-# or revoking a module answers the staff record, or a bare status object when
-# the re-read fails; the module toggle accepts any id and answers an empty
-# name.
+# The /api/v1/admin surface on the wire contract of ADR 0001 (item C5-1a):
+# internal/techadmin (machine API keys, the OpenRouter and OpenRouteService
+# settings), internal/staff (the staff roster, module grants and the global
+# module flag). The exposure scan trigger at the bottom is the pricing
+# module's route and keeps its pending, unconverted shape. Every route sits
+# behind RequireRole admin or owner. Machine keys reach the settings routes
+# with admin:settings, the staff routes with admin:staff and the module flags
+# with admin:modules (ADR 0009); the key routes are user only. The AI and
+# routing settings are documents with a revision anchored in admin_revisions:
+# a write carries If-Match or the body revision, and a saved key never echoes
+# back, only its hint.
 paths:
   /api/v1/admin/keys:
     get:
@@ -24,22 +19,26 @@ paths:
       tags: [admin]
       summary: List machine API keys
       description: >-
-        Admin or owner only. Newest first, revoked keys included. Not
-        paginated. Answers null, not an empty array, when there are no keys.
-        Only the 12 character prefix identifies a key; the secret is never
-        retrievable.
+        Admin or owner only (a machine key is refused here whatever its
+        scopes). The cursor list envelope, newest first, revoked keys
+        included; scopes is never null. Only the 12 character prefix
+        identifies a key; the secret and its hash are never served. total
+        appears only under include=total.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: Every key, or null when none exist.
+          description: The page of keys.
           content:
             application/json:
               schema:
-                type: [array, "null"]
-                items:
-                  $ref: "#/components/schemas/TechAdminKey"
+                $ref: "#/components/schemas/ApiKeyPage"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     post:
       operationId: adminCreateKey
       tags: [admin]
@@ -47,8 +46,11 @@ paths:
       description: >-
         Admin or owner only. The raw key (sk_live_ followed by 43 URL safe
         base64 characters) is returned here and nowhere else; only its salted
-        Argon2 hash is stored. Success is a 200, not a 201. Neither name nor
-        scopes is validated; omitted scopes are stored as null.
+        Argon2 hash is stored. The scopes are stored verbatim (ADR 0002: a
+        grant reads back as written); grammar validation at the mint is
+        C5-2a's (ADR 0007 section 5.3), so this parse checks only that the
+        name is present and each scope is a printable, non-empty string. The
+        mint, its audit row and the key.created event are one transaction.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -56,256 +58,281 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TechAdminCreateKeyRequest"
+              $ref: "#/components/schemas/AdminCreateKeyRequest"
       responses:
-        "200":
-          description: The new key record and the raw key, shown once.
+        "201":
+          description: The new key row and the raw key, shown once.
+          headers:
+            Location:
+              description: The new key's own URL.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TechAdminCreateKeyResponse"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+                $ref: "#/components/schemas/AdminCreateKeyResponse"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/keys/{id}:
     delete:
       operationId: adminRevokeKey
       tags: [admin]
       summary: Revoke a machine API key
       description: >-
-        Admin or owner only. Sets revoked_at; the row is kept. Unknown ids and
-        already revoked keys are a 204 too (an UPDATE that matches nothing is
-        not an error). A malformed id the database refuses is a 500. DELETE is
-        outside the idempotency layer.
+        Admin or owner only. Sets revoked_at; the row is kept. An unknown id
+        is a 404 (a typo no longer looks like success); revoking an already
+        revoked key is an idempotent 204 that writes nothing. A revoke that
+        flips the row writes its audit row and the key.revoked event in one
+        transaction. DELETE is outside the idempotency layer.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         "204":
           description: Revoked; no body.
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/settings/ai:
     get:
       operationId: adminGetAISettings
       tags: [admin]
       summary: Show the OpenRouter key status
       description: >-
-        Admin or owner only. Never returns the key: key_hint is the first 10
-        and last 4 characters joined by three dots (four asterisks for a key
-        of 12 characters or fewer), and is absent when no key is configured.
-        base_url is present only when an admin override is stored, never for
-        the environment or built in default.
+        Admin or owner, or a key holding admin:settings. Never returns the
+        key: key_hint is the first 10 and last 4 characters joined by three
+        dots (four asterisks for a key of 12 characters or fewer), and null
+        when no key is configured. base_url is present only when an admin
+        override is stored, null otherwise. revision is the resource's
+        revision anchor and rides the ETag.
       responses:
         "200":
-          description: The key status.
+          description: The settings document.
+          headers:
+            ETag:
+              description: The revision in quotes, the strong form If-Match reads.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TechAdminSettingsStatus"
+                $ref: "#/components/schemas/AISettings"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     put:
       operationId: adminSaveAISettings
       tags: [admin]
       summary: Save the OpenRouter key and base URL
       description: >-
-        Admin or owner only. The key is stored and never echoed back. base_url
-        absent or null leaves the stored override alone; an empty string
-        clears the override; any other value must be an absolute https URL
-        (plain http only for loopback hosts) or the call is a 400 and nothing,
-        key included, is saved. A key is required. A 500 also answers when the
-        key store is not wired.
+        Admin or owner, or a key holding admin:settings. api_key is
+        required. base_url is absent (leave the override as it is), a URL
+        (set the override; http and non host URLs are refused) or empty
+        (clear the override, reverting to the environment default). The save,
+        its audit row and the admin_settings.saved event are one transaction
+        on the resource's revision: a write without a precondition is 428, a
+        stale one 409, and the answer carries the new revision in body and
+        ETag.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          description: The revision this write preconditions on, quoted ("3"); the weak form W/"3" is accepted.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TechAdminSaveAISettingsRequest"
+              $ref: "#/components/schemas/AdminSaveAISettingsRequest"
       responses:
         "200":
-          description: Saved.
+          description: The settings document after the save.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TechAdminSaveResult"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+                $ref: "#/components/schemas/AISettings"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     delete:
       operationId: adminDeleteAISettings
       tags: [admin]
-      summary: Remove the stored OpenRouter key and base URL override
+      summary: Remove the OpenRouter admin override
       description: >-
-        Admin or owner only. Deletes the admin stored key and the base URL
-        override together, so both revert to the environment or default.
-        DELETE is outside the idempotency layer.
+        Admin or owner, or a key holding admin:settings. Removes the key and
+        the base URL override together, so both revert to their environment
+        defaults. Takes the If-Match precondition; the deletion moves the
+        revision (never backwards) and writes the admin_settings.deleted
+        event.
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The revision this write preconditions on, quoted.
+          schema:
+            type: string
       responses:
         "204":
           description: Removed; no body.
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "409": { $ref: "#/components/responses/WireConflict" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/settings/routing:
     get:
       operationId: adminGetRoutingSettings
       tags: [admin]
       summary: Show the OpenRouteService key status
       description: >-
-        Admin or owner only. Same shape and masking as the AI settings, key
-        only: key_hint is the first 10 and last 4 characters (four asterisks
-        for a key of 12 characters or fewer), and base_url is never present.
+        Admin or owner, or a key holding admin:settings. The AI settings'
+        shape without the base URL; its revision anchor is its own.
       responses:
         "200":
-          description: The key status.
+          description: The settings document.
+          headers:
+            ETag:
+              description: The revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TechAdminSettingsStatus"
+                $ref: "#/components/schemas/RoutingSettings"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     put:
       operationId: adminSaveRoutingSettings
       tags: [admin]
       summary: Save the OpenRouteService key
       description: >-
-        Admin or owner only. The key is stored and never echoed back. A key is
-        required (400). A 500 also answers when the key store is not wired.
+        Admin or owner, or a key holding admin:settings. api_key is
+        required; the write takes the same precondition as the AI settings
+        save and answers the new revision in body and ETag.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          description: The revision this write preconditions on, quoted.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/TechAdminSaveRoutingSettingsRequest"
+              $ref: "#/components/schemas/AdminSaveRoutingSettingsRequest"
       responses:
         "200":
-          description: Saved.
+          description: The settings document after the save.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TechAdminSaveResult"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+                $ref: "#/components/schemas/RoutingSettings"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     delete:
       operationId: adminDeleteRoutingSettings
       tags: [admin]
-      summary: Remove the stored OpenRouteService key
+      summary: Remove the OpenRouteService admin override
       description: >-
-        Admin or owner only. Deletes the admin stored key so the environment
-        value, if any, applies again. DELETE is outside the idempotency layer.
+        Admin or owner, or a key holding admin:settings. Takes the If-Match
+        precondition and answers 204.
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: The revision this write preconditions on, quoted.
+          schema:
+            type: string
       responses:
         "204":
           description: Removed; no body.
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
-  /api/v1/admin/modules:
-    get:
-      operationId: adminListModules
-      tags: [admin]
-      summary: List the integration modules and their global flag
-      description: >-
-        Admin or owner only. A fixed catalog (today only ai_lm); enabled is
-        true only when the modules.<id>.enabled setting is exactly true.
-      responses:
-        "200":
-          description: The modules. Never null.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/StaffModule"
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
-  /api/v1/admin/modules/{id}:
-    put:
-      operationId: adminSetModuleEnabled
-      tags: [admin]
-      summary: Switch an integration module on or off globally
-      description: >-
-        Admin or owner only. Writes the modules.<id>.enabled setting for any
-        id, known or not, and revokes access for every staff member at once
-        when switched off without deleting grants. The id is not checked
-        against the catalog. The response echoes the id and the new flag with
-        an empty name.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/StaffSetModuleEnabledRequest"
-      responses:
-        "200":
-          description: The module with its new flag; name is always the empty string here.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/StaffModule"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
-        "413": { $ref: "#/components/responses/PayloadTooLarge" }
-        "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "409": { $ref: "#/components/responses/WireConflict" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/staff:
     get:
       operationId: adminListStaff
       tags: [admin]
       summary: List the staff roster
       description: >-
-        Admin or owner only. Ordered by full name, with each member's raw
-        module grants. Not paginated. Never null.
+        Admin or owner, or a key holding admin:staff. The cursor list
+        envelope, newest first. active filters on the flag (true or false; a
+        value outside is a 400). Each item carries the member's granted
+        module ids, never null and NOT filtered by the global enable flag.
+        total appears only under include=total.
+      parameters:
+        - name: active
+          in: query
+          required: false
+          description: Filter on the active flag.
+          schema:
+            type: string
+            enum: ["true", "false"]
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
       responses:
         "200":
-          description: The roster.
+          description: The page of staff.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/StaffMember"
+                $ref: "#/components/schemas/StaffPage"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     post:
       operationId: adminCreateStaff
       tags: [admin]
-      summary: Add a staff member
+      summary: Create a staff member
       description: >-
-        Admin or owner only. Email and full_name are required (400 when
-        empty). Role defaults to staff and active to true. A duplicate email
-        the database refuses surfaces as a 500.
+        Admin or owner, or a key holding admin:staff. email and full_name
+        are required; staff_no is optional (null by default); role defaults
+        to staff and active to true. A duplicate email or staff number is a
+        409 naming the field. The create, its audit row and the
+        staff.created event are one transaction.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -313,27 +340,36 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StaffCreateRequest"
+              $ref: "#/components/schemas/AdminCreateStaffRequest"
       responses:
         "201":
-          description: The created member, with an empty modules array.
+          description: The new staff member.
+          headers:
+            Location:
+              description: The new member's own URL.
+              schema:
+                type: string
+            ETag:
+              description: The revision (1) in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/staff/{id}:
     get:
       operationId: adminGetStaff
       tags: [admin]
-      summary: Get a staff member
-      description: Admin or owner only.
+      summary: Read one staff member
+      description: Admin or owner, or a key holding admin:staff.
       parameters:
         - name: id
           in: path
@@ -343,104 +379,134 @@ paths:
             format: uuid
       responses:
         "200":
-          description: The member with its raw module grants.
+          description: The staff member.
+          headers:
+            ETag:
+              description: The revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
     put:
       operationId: adminUpdateStaff
       tags: [admin]
       summary: Update a staff member
       description: >-
-        Admin or owner only. A partial update: absent or null fields are left
-        unchanged (a null staff_no cannot clear the stored value). An empty
-        body returns the current record, or 404 when the id is unknown.
+        Admin or owner, or a key holding admin:staff. Every field is
+        optional: nil leaves it alone, so a PUT that only flips active must
+        not blank out the email it did not send; a staff_no of null clears
+        the number. Takes If-Match or the body revision (428 without, 409
+        stale) and answers the member with its new revision and ETag.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          description: The revision this write preconditions on, quoted.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StaffUpdateRequest"
+              $ref: "#/components/schemas/AdminUpdateStaffRequest"
       responses:
         "200":
-          description: The updated member.
+          description: The member after the update.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/StaffMember"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/staff/{id}/modules:
     post:
-      operationId: adminGrantStaffModule
+      operationId: adminGrantModule
       tags: [admin]
       summary: Grant a module to a staff member
       description: >-
-        Admin or owner only. Idempotent at the database (a repeat grant is a
-        no-op) and audit logged. The module id is not checked against the
-        catalog. An unknown staff id is refused by the database and is a 500.
-        When the re-read of the member fails after the grant, the answer is
-        still 200 with the bare status object granted.
+        Admin or owner, or a key holding admin:staff. The modules list is
+        part of the staff document: a grant that adds one moves the revision
+        and takes the same precondition; an idempotent re-grant changes
+        nothing and writes nothing. module_id must name a module in the
+        catalog (ai_lm). Answers the member with its new revision and ETag.
       parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
           schema:
             type: string
             format: uuid
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: If-Match
+          in: header
+          required: false
+          description: The staff revision this write preconditions on, quoted.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/StaffGrantModuleRequest"
+              $ref: "#/components/schemas/AdminGrantModuleRequest"
       responses:
         "200":
-          description: The member with its grants, or the bare status object.
+          description: The member after the grant.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/StaffMember"
-                  - $ref: "#/components/schemas/StaffModuleStatus"
-        "400": { $ref: "#/components/responses/BadRequestEither" }
+                $ref: "#/components/schemas/StaffMember"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "409": { $ref: "#/components/responses/WireConflict" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/staff/{id}/modules/{module_id}:
     delete:
-      operationId: adminRevokeStaffModule
+      operationId: adminRevokeModule
       tags: [admin]
       summary: Revoke a module from a staff member
       description: >-
-        Admin or owner only. Idempotent and audit logged; an unknown staff id
-        or a grant that does not exist still succeeds, with the bare status
-        object revoked (the re-read finds no member). DELETE is outside the
-        idempotency layer.
+        Admin or owner, or a key holding admin:staff. The grant route's
+        mirror: takes the If-Match precondition, moves the revision only
+        when a grant was actually removed, and answers the member. An
+        unknown module id is a 400 naming module_id.
       parameters:
         - name: id
           in: path
@@ -453,19 +519,110 @@ paths:
           required: true
           schema:
             type: string
+        - name: If-Match
+          in: header
+          required: true
+          description: The staff revision this write preconditions on, quoted.
+          schema:
+            type: string
       responses:
         "200":
-          description: The member with its remaining grants, or the bare status object.
+          description: The member after the revoke.
+          headers:
+            ETag:
+              description: The new revision in quotes.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: "#/components/schemas/StaffMember"
-                  - $ref: "#/components/schemas/StaffModuleStatus"
-        "400": { $ref: "#/components/responses/BadRequest" }
+                $ref: "#/components/schemas/StaffMember"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "409": { $ref: "#/components/responses/WireConflict" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/admin/modules:
+    get:
+      operationId: adminListModules
+      tags: [admin]
+      summary: List the integration modules
+      description: >-
+        Admin or owner, or a key holding admin:modules. The catalog of
+        integration modules with each flag's global state and its revision
+        anchor, in the list envelope (a fixed catalog: next_cursor is null
+        on the single page). The flag is the kill switch; the per staff
+        grants live on the staff document.
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+      responses:
+        "200":
+          description: The module catalog.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffModulePage"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/admin/modules/{id}:
+    put:
+      operationId: adminSetModuleEnabled
+      tags: [admin]
+      summary: Toggle a module's global enable flag
+      description: >-
+        Admin or owner, or a key holding admin:modules. The kill switch:
+        turning a module off revokes it for every staff member at once
+        WITHOUT deleting any grant, so turning it back on restores the
+        roster. Takes If-Match or the body revision against the flag's own
+        anchor; a toggle that changes nothing writes nothing; a flip writes
+        the module.enabled or module.disabled event. An unknown module id is
+        a 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-Match
+          in: header
+          required: false
+          description: The flag's revision this write preconditions on, quoted.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSetModuleEnabledRequest"
+      responses:
+        "200":
+          description: The module after the toggle.
+          headers:
+            ETag:
+              description: The flag's new revision in quotes.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaffModule"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "409": { $ref: "#/components/responses/WireConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "428": { $ref: "#/components/responses/WirePreconditionRequired" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
   /api/v1/admin/exposure-scan:
     post:
       operationId: adminExposureScan
@@ -495,26 +652,25 @@ paths:
         "500": { $ref: "#/components/responses/InternalError" }
 components:
   schemas:
-    TechAdminKey:
+    ApiKey:
       type: object
       required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
       description: >-
         Go type techadmin.APIKey. The hash field is tagged out of the JSON and
-        never serialized. prefix is the first 12 characters of the raw key
-        (sk_live_ plus four).
+        never leaves the package; only the 12 character prefix identifies a
+        key.
       properties:
         id:
           type: string
-          description: A database UUID rendered as text.
+          format: uuid
         name:
           type: string
         prefix:
           type: string
         scopes:
-          type: [array, "null"]
+          type: array
           items:
             type: string
-          description: Null when the key was created without scopes.
         created_at:
           type: string
           format: date-time
@@ -524,9 +680,25 @@ components:
         revoked_at:
           type: [string, "null"]
           format: date-time
-    TechAdminCreateKeyRequest:
+    ApiKeyPage:
       type: object
-      description: Go type techadmin.CreateKeyRequest. Nothing is validated.
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApiKey"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
+    AdminCreateKeyRequest:
+      type: object
+      description: Go type techadmin.CreateKeyRequest. Scopes are minted verbatim; validation of the grammar is C5-2a's.
+      required: [name]
       properties:
         name:
           type: string
@@ -534,74 +706,79 @@ components:
           type: array
           items:
             type: string
-    TechAdminCreateKeyResponse:
+    AdminCreateKeyResponse:
       type: object
       required: [api_key, key]
-      description: Go type techadmin.CreateKeyResponse.
+      description: Go type techadmin.CreatedKey. The raw key appears here and nowhere else.
       properties:
         api_key:
           type: string
-          description: The raw secret key, returned this once and never retrievable again.
         key:
-          oneOf:
-            - $ref: "#/components/schemas/TechAdminKey"
-            - type: "null"
-    TechAdminSettingsStatus:
+          $ref: "#/components/schemas/ApiKey"
+    AISettings:
       type: object
-      required: [configured, source]
+      required: [configured, source, key_hint, base_url, revision]
       description: >-
-        Go type techadmin.AISettingsResponse, used by both the AI and routing
-        settings. The key itself is never present. key_hint and base_url are
-        omitted when empty.
+        Go type techadmin.AISettings. source is admin (a stored override),
+        env (a key from the environment only) or none. key_hint and base_url
+        are null when absent, never omitted.
       properties:
         configured:
           type: boolean
         source:
           type: string
           enum: [admin, env, none]
-          description: admin when a database override holds the key, env when only the environment does, none when unset.
         key_hint:
-          type: string
-          description: First 10 and last 4 characters of the key joined by three dots, or four asterisks for a key of 12 characters or fewer.
-        base_url:
-          type: string
-          description: The admin override of the OpenRouter base URL; AI settings only.
-    TechAdminSaveAISettingsRequest:
-      type: object
-      required: [api_key]
-      description: The anonymous request struct of SaveAISettings.
-      properties:
-        api_key:
-          type: string
-          minLength: 1
-          description: The OpenRouter key. Never returned by any route.
+          type: [string, "null"]
         base_url:
           type: [string, "null"]
-          description: Absent or null leaves the override as is; empty clears it; otherwise an absolute https URL (http only for loopback hosts).
-    TechAdminSaveRoutingSettingsRequest:
+        revision:
+          type: integer
+    RoutingSettings:
       type: object
+      required: [configured, source, key_hint, revision]
+      description: Go type techadmin.RoutingSettings, the AI settings' shape without the base URL.
+      properties:
+        configured:
+          type: boolean
+        source:
+          type: string
+          enum: [admin, env, none]
+        key_hint:
+          type: [string, "null"]
+        revision:
+          type: integer
+    AdminSaveAISettingsRequest:
+      type: object
+      description: >-
+        Go type techadmin.SaveAISettingsRequest. base_url is a pointer:
+        absent leaves the override, empty clears it, a URL sets it. revision
+        is the body form of the If-Match precondition.
       required: [api_key]
-      description: The anonymous request struct of SaveRoutingSettings.
       properties:
         api_key:
           type: string
-          minLength: 1
-          description: The OpenRouteService key. Never returned by any route.
-    TechAdminSaveResult:
+        base_url:
+          type: [string, "null"]
+        revision:
+          type: integer
+    AdminSaveRoutingSettingsRequest:
       type: object
-      required: [status]
-      description: The map literal both save routes answer.
+      required: [api_key]
+      description: Go type techadmin.SaveRoutingSettingsRequest.
       properties:
-        status:
+        api_key:
           type: string
-          enum: [saved]
+        revision:
+          type: integer
     StaffMember:
       type: object
-      required: [id, email, full_name, role, active, created_at, updated_at, modules]
+      required: [id, email, full_name, staff_no, role, active, revision, created_at, updated_at, modules]
       description: >-
-        Go type staff.Staff. staff_no is a pointer with omitempty, absent when
-        unset. modules is the raw set of granted module ids, not filtered by
-        the global enable flag.
+        Go type staff.Staff. A member of the dealer roster, the identity
+        AI_LM authenticates against; role is a free text label, and modules
+        is the raw grant set, never null and not filtered by the global
+        enable flag.
       properties:
         id:
           type: string
@@ -611,12 +788,13 @@ components:
         full_name:
           type: string
         staff_no:
-          type: string
+          type: [string, "null"]
         role:
           type: string
-          description: A free text label, default staff; it does not govern module access.
         active:
           type: boolean
+        revision:
+          type: integer
         created_at:
           type: string
           format: date-time
@@ -627,28 +805,41 @@ components:
           type: array
           items:
             type: string
-    StaffCreateRequest:
+    StaffPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffMember"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
+    AdminCreateStaffRequest:
       type: object
       required: [email, full_name]
-      description: Go type staff.CreateStaffInput. Empty email or full_name is a 400.
+      description: Go type staff.CreateStaffInput. role defaults to staff, active to true, staff_no to null; a revision is refused.
       properties:
         email:
           type: string
-          minLength: 1
         full_name:
           type: string
-          minLength: 1
         staff_no:
           type: [string, "null"]
         role:
           type: string
-          description: Defaults to staff when empty.
         active:
-          type: [boolean, "null"]
-          description: Defaults to true when absent or null.
-    StaffUpdateRequest:
+          type: boolean
+    AdminUpdateStaffRequest:
       type: object
-      description: Go type staff.UpdateStaffInput. Absent or null means leave unchanged.
+      description: >-
+        Go type staff.UpdateStaffInput. Every field is a pointer: nil leaves
+        it alone; a null staff_no clears it.
       properties:
         email:
           type: [string, "null"]
@@ -660,26 +851,21 @@ components:
           type: [string, "null"]
         active:
           type: [boolean, "null"]
-    StaffGrantModuleRequest:
+        revision:
+          type: integer
+    AdminGrantModuleRequest:
       type: object
       required: [module_id]
-      description: The unexported grantModuleRequest struct. An empty module_id is a 400.
+      description: Go type staff.GrantModuleInput. module_id must name a module in the catalog (ai_lm).
       properties:
         module_id:
           type: string
-          minLength: 1
-    StaffModuleStatus:
-      type: object
-      required: [status]
-      description: The bare map literal answered when the member re-read fails after a grant or revoke.
-      properties:
-        status:
-          type: string
-          enum: [granted, revoked]
+        revision:
+          type: integer
     StaffModule:
       type: object
-      required: [id, name, enabled]
-      description: Go type staff.Module.
+      required: [id, name, enabled, revision]
+      description: Go type staff.Module. The global state of an integration module, the kill switch.
       properties:
         id:
           type: string
@@ -687,12 +873,30 @@ components:
           type: string
         enabled:
           type: boolean
-    StaffSetModuleEnabledRequest:
+        revision:
+          type: integer
+    StaffModulePage:
       type: object
-      description: The unexported setModuleEnabledRequest struct. An absent flag means false.
+      required: [items, next_cursor, limit]
+      description: The list envelope over the fixed module catalog.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StaffModule"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+    AdminSetModuleEnabledRequest:
+      type: object
+      required: [enabled]
+      description: Go type staff.SetModuleEnabledInput.
       properties:
         enabled:
           type: boolean
+        revision:
+          type: integer
     AdminExposureScanResult:
       type: object
       required: [ok]

@@ -198,16 +198,18 @@ var modelBoundSchemas = []struct {
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
-	// admin, apps, governance, millwork, configurator (R1-7f)
-	{"TechAdminKey", techadmin.APIKey{}},
-	{"TechAdminCreateKeyResponse", techadmin.CreateKeyResponse{}},
-	{"TechAdminSettingsStatus", techadmin.AISettingsResponse{}},
+	// admin, apps, governance, millwork, configurator (R1-7f, C5-1a)
+	{"ApiKey", techadmin.APIKey{}},
+	{"AdminCreateKeyResponse", techadmin.CreatedKey{}},
+	{"AISettings", techadmin.AISettings{}},
+	{"RoutingSettings", techadmin.RoutingSettings{}},
 	{"StaffMember", staff.Staff{}},
 	{"StaffModule", staff.Module{}},
 	// AppsManifestStatus is apps.Status, which embeds Manifest and adds enabled
 	// and orphaned; the embedded struct is bound, the two extras checked by hand.
 	{"AppsManifestStatus", apps.Manifest{}},
-	{"GovernanceRFC", governance.RFC{}},
+	{"RFC", governance.RFC{}},
+	{"RFCSummary", governance.RFCSummary{}},
 	{"MillworkOption", millwork.Option{}},
 	{"ConfiguratorRule", configurator.Rule{}},
 	{"ConfiguratorPreset", configurator.Preset{}},
