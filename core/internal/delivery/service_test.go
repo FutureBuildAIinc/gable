@@ -98,6 +98,24 @@ func (m *fakeRepo) TouchRoute(ctx context.Context, id uuid.UUID) error {
 func (m *fakeRepo) CountDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error) {
 	return int64(len(m.stops)), nil
 }
+func (m *fakeRepo) CountNonTerminalDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error) {
+	var n int64
+	for _, s := range m.stops {
+		if s.Status != StopStatusDelivered && s.Status != StopStatusFailed && s.Status != StopStatusPartial {
+			n++
+		}
+	}
+	return n, nil
+}
+func (m *fakeRepo) NextStopSequenceForRoute(ctx context.Context, routeID uuid.UUID) (int, error) {
+	max := 0
+	for _, s := range m.stops {
+		if s.StopSequence > max {
+			max = s.StopSequence
+		}
+	}
+	return max + 1, nil
+}
 func (m *fakeRepo) UpdateRouteStatus(ctx context.Context, id uuid.UUID, status RouteStatus) error {
 	for i := range m.routes {
 		if m.routes[i].ID == id {
@@ -131,6 +149,14 @@ func (m *fakeRepo) ListDeliveriesByRoute(ctx context.Context, routeID uuid.UUID,
 		return m.routeStops[routeID], false, nil
 	}
 	return m.stops, false, nil
+}
+func (m *fakeRepo) AllDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) ([]Stop, error) {
+	if m.routeStops != nil {
+		return m.routeStops[routeID], nil
+	}
+	out := make([]Stop, len(m.stops))
+	copy(out, m.stops)
+	return out, nil
 }
 func (m *fakeRepo) UpdateDeliveryStatus(ctx context.Context, id uuid.UUID, status StopStatus, pod *PODUpdate) error {
 	for i := range m.stops {

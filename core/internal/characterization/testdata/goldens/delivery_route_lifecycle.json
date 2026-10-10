@@ -537,7 +537,7 @@
               "message": "every stop must be delivered, failed or partial before the route completes"
             }
           ],
-          "message": "cannot complete a route with a stop still PENDING"
+          "message": "cannot complete a route with 2 stop(s) still pending"
         },
         "meta": {
           "request_id": "<id-17>"
@@ -989,7 +989,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"4\""
+        "If-Match": "\"6\""
       },
       "body": {
         "to": "completed"
@@ -1000,8 +1000,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "stale_revision",
-          "message": "the document was changed after this revision was read; reload and retry"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "stop_not_terminal",
+              "message": "every stop must be delivered, failed or partial before the route completes"
+            }
+          ],
+          "message": "cannot complete a route with 2 stop(s) still pending"
         },
         "meta": {
           "request_id": "<id-31>"
@@ -1076,7 +1082,7 @@
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/transitions",
       "headers": {
-        "If-Match": "\"5\""
+        "If-Match": "\"6\""
       },
       "body": {
         "to": "completed"
@@ -1087,8 +1093,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "stale_revision",
-          "message": "the document was changed after this revision was read; reload and retry"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "stop_not_terminal",
+              "message": "every stop must be delivered, failed or partial before the route completes"
+            }
+          ],
+          "message": "cannot complete a route with 2 stop(s) still pending"
         },
         "meta": {
           "request_id": "<id-33>"

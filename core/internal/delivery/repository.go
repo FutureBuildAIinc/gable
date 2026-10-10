@@ -89,12 +89,15 @@ type Repository interface {
 	UpdateRouteStatus(ctx context.Context, id uuid.UUID, status RouteStatus) error
 	TouchRoute(ctx context.Context, id uuid.UUID) error
 	CountDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error)
+	CountNonTerminalDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error)
+	NextStopSequenceForRoute(ctx context.Context, routeID uuid.UUID) (int, error)
 	LockRoute(ctx context.Context, id uuid.UUID) error
 
 	// Stops
 	CreateDelivery(ctx context.Context, d *Stop) error
 	GetDelivery(ctx context.Context, id uuid.UUID) (*Stop, error)
 	ListDeliveriesByRoute(ctx context.Context, routeID uuid.UUID, f StopListFilter) ([]Stop, bool, error)
+	AllDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) ([]Stop, error)
 	UpdateDeliveryStatus(ctx context.Context, id uuid.UUID, status StopStatus, pod *PODUpdate) error
 	LockDelivery(ctx context.Context, id uuid.UUID) error
 	ReorderRouteDeliveries(ctx context.Context, routeID uuid.UUID, deliveryIDs []uuid.UUID) error
@@ -680,6 +683,74 @@ func (r *PostgresRepository) CountDeliveriesByRoute(ctx context.Context, routeID
 		return 0, fmt.Errorf("failed to count deliveries: %w", err)
 	}
 	return n, nil
+}
+
+// CountNonTerminalDeliveriesByRoute answers the route completion gate: how
+// many stops on this route are not yet delivered, failed or partial. The
+// completion runs the count under the route's row lock so the gate is
+// read against the same write state the transaction is about to commit;
+// without that, a stop that arrives between the gate read and the
+// commit slips into the route after the count cleared (PR 70 review
+// round 4 P2-1).
+func (r *PostgresRepository) CountNonTerminalDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error) {
+	branch, sub := wallArgs(ctx)
+	var n int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT count(*) FROM deliveries s JOIN orders o ON o.id = s.order_id
+		 WHERE s.route_id = $1 AND s.status NOT IN ('DELIVERED','FAILED','PARTIAL')
+		   AND `+stopVisible(2, 3), routeID, branch, sub).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count non-terminal deliveries: %w", err)
+	}
+	return n, nil
+}
+
+// NextStopSequenceForRoute returns the next free stop_sequence for a route,
+// `MAX(stop_sequence) + 1` with the start value of 1 when the route carries
+// no stops. The assign transaction reads the value under the route's row
+// lock so two concurrent assigns onto the same route cannot land on the
+// same sequence (PR 70 review round 2 P2-1 fix held for routes of any size,
+// round 4 P2-1 lifted the 200 stop page that silently truncated the read).
+func (r *PostgresRepository) NextStopSequenceForRoute(ctx context.Context, routeID uuid.UUID) (int, error) {
+	var next *int
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COALESCE(MAX(s.stop_sequence), 0) + 1 FROM deliveries s WHERE s.route_id = $1`, routeID).Scan(&next)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return 1, nil
+		}
+		return 0, fmt.Errorf("failed to read next stop sequence: %w", err)
+	}
+	return *next, nil
+}
+
+// AllDeliveriesByRoute returns every stop of a route, in stop_sequence
+// order, without any paging. The reorder and optimize gates read the
+// whole route: truncating at the list's page bound (200 on the previous
+// read) dropped stops from a route above that bound, so reorder could
+// not validate every stop exactly once and optimize could not return
+// every stop in its answer (PR 70 review round 4 P2-1).
+func (r *PostgresRepository) AllDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) ([]Stop, error) {
+	branch, sub := wallArgs(ctx)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+stopColumns+stopFrom+` WHERE s.route_id = $1 AND `+stopVisible(2, 3)+
+			` ORDER BY s.stop_sequence ASC, s.id ASC`, routeID, branch, sub)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all deliveries: %w", err)
+	}
+	defer rows.Close()
+	items := []Stop{}
+	for rows.Next() {
+		s, err := scanStop(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan delivery: %w", err)
+		}
+		items = append(items, *s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 func (r *PostgresRepository) LockRoute(ctx context.Context, id uuid.UUID) error {

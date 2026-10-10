@@ -589,19 +589,27 @@ func (s *Service) TransitionRoute(ctx context.Context, id uuid.UUID, d *RouteTra
 			}
 			event = EventRouteInTransit
 		case RouteStatusCompleted:
-			stops, _, err := s.repo.ListDeliveriesByRoute(ctx, id, StopListFilter{Limit: 200})
+			// The completion gates on every stop being terminal. The read
+			// is a single count under the route's row lock: a route over
+			// the prior 200 stop page bound (PR 70 review round 4 P2-1)
+			// would have completed with pending stops; the count holds
+			// against the same write state the completion is about to
+			// commit.
+			nonTerminal, err := s.repo.CountNonTerminalDeliveriesByRoute(ctx, id)
 			if err != nil {
 				return err
 			}
-			if len(stops) == 0 {
+			total, err := s.repo.CountDeliveriesByRoute(ctx, id)
+			if err != nil {
+				return err
+			}
+			if total == 0 {
 				return httpx.InvalidStateTransition("a route with no stops cannot be completed",
 					httpx.Blocker("route_empty", "the route holds no stops"))
 			}
-			for _, stop := range stops {
-				if stop.Status != StopStatusDelivered && stop.Status != StopStatusFailed && stop.Status != StopStatusPartial {
-					return httpx.InvalidStateTransition("cannot complete a route with a stop still "+string(stop.Status),
-						httpx.Blocker("stop_not_terminal", "every stop must be delivered, failed or partial before the route completes"))
-				}
+			if nonTerminal > 0 {
+				return httpx.InvalidStateTransition(fmt.Sprintf("cannot complete a route with %d stop(s) still pending", nonTerminal),
+					httpx.Blocker("stop_not_terminal", "every stop must be delivered, failed or partial before the route completes"))
 			}
 			if cur.Status == RouteStatusCancelled {
 				return httpx.InvalidStateTransition("cannot complete a cancelled route",
@@ -651,7 +659,7 @@ func (s *Service) ReorderStops(ctx context.Context, routeID uuid.UUID, d *Reorde
 		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
 			return err
 		}
-		stops, _, err := s.repo.ListDeliveriesByRoute(ctx, routeID, StopListFilter{Limit: 200})
+		stops, err := s.repo.AllDeliveriesByRoute(ctx, routeID)
 		if err != nil {
 			return err
 		}
@@ -709,7 +717,7 @@ func (s *Service) OptimizeRoute(ctx context.Context, routeID uuid.UUID, pre Prec
 	if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
 		return nil, err
 	}
-	deliveries, _, err := s.repo.ListDeliveriesByRoute(ctx, routeID, StopListFilter{Limit: 200})
+	deliveries, err := s.repo.AllDeliveriesByRoute(ctx, routeID)
 	if err != nil {
 		return nil, err
 	}
@@ -1066,15 +1074,16 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, ac
 		if d.StopSequence != nil {
 			stop.StopSequence = *d.StopSequence
 		} else {
-			stops, _, err := s.repo.ListDeliveriesByRoute(ctx, d.RouteID, StopListFilter{Limit: 200})
+			// The next free sequence is read under the route lock so two
+			// assigns onto the same route land on distinct values; the read
+			// is the full route (the page bound that silently truncated the
+			// prior list dropped the value on routes of any size, PR 70
+			// review round 4 P2-1).
+			next, err := s.repo.NextStopSequenceForRoute(ctx, d.RouteID)
 			if err != nil {
 				return err
 			}
-			for _, existing := range stops {
-				if existing.StopSequence >= stop.StopSequence {
-					stop.StopSequence = existing.StopSequence + 1
-				}
-			}
+			stop.StopSequence = next
 		}
 		if err := s.repo.CreateDelivery(ctx, stop); err != nil {
 			return err

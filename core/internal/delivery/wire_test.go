@@ -1054,6 +1054,103 @@ func TestBranchWall(t *testing.T) {
 	}
 }
 
+// RULE (PR 70 review round 4 P2-1): the completion gate, the reorder gate,
+// the optimize read and the assign's next-sequence read each see every stop
+// of the route, not the first page of a 200-row bound (a route of more than
+// 200 stops would complete with a pending stop; an assign onto 201 PENDING
+// stops would take a duplicate sequence; reorder and optimize never name
+// every stop). The test seeds a route with 205 stops (204 DELIVERED and
+// one PENDING): the completion is refused with `stop_not_terminal`, an
+// assign onto the same route takes stop_sequence 206, and the reorder list
+// is told it must name every stop exactly once.
+func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	var customer uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1, $2, $3, $4) RETURNING id`,
+		uuid.New(), "Two hundred stops", "HUND-"+uuid.NewString()[:8], f.branch).Scan(&customer); err != nil {
+		t.Fatal(err)
+	}
+	var route uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx,
+		`INSERT INTO delivery_routes (id, scheduled_date, status) VALUES ($1, $2, $3) RETURNING id`,
+		uuid.New(), "2030-10-01", "DRAFT").Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM delivery_qty_adjustments WHERE delivery_id IN (SELECT id FROM deliveries WHERE route_id = $1)`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM delivery_pod_photos WHERE delivery_id IN (SELECT id FROM deliveries WHERE route_id = $1)`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM deliveries WHERE route_id = $1`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM delivery_routes WHERE id = $1`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM orders WHERE customer_id = $1`, customer)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customer_branches WHERE customer_id = $1`, customer)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM customers WHERE id = $1`, customer)
+	})
+	orders := make([]uuid.UUID, 205)
+	stops := make([]uuid.UUID, 205)
+	for i := 0; i < 205; i++ {
+		if err := f.db.Pool.QueryRow(ctx, `
+			INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, number)
+			VALUES ($1, $2, $3, 'CONFIRMED', 10, 'DELIVERY', 'USD', $4) RETURNING id`,
+			uuid.New(), customer, f.branch, "SO-"+strings.ToUpper(uuid.NewString()[:8])).Scan(&orders[i]); err != nil {
+			t.Fatalf("order %d: %v", i, err)
+		}
+		status := "DELIVERED"
+		if i == 204 {
+			status = "PENDING"
+		}
+		if err := f.db.Pool.QueryRow(ctx, `
+			INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status)
+			VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+			uuid.New(), route, orders[i], i+1, status).Scan(&stops[i]); err != nil {
+			t.Fatalf("stop %d: %v", i, err)
+		}
+	}
+
+	res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/transitions",
+		`{"to":"completed"}`, map[string]string{"If-Match": `"1"`})
+	if res.status != http.StatusConflict {
+		t.Errorf("completion = %d %s, want 409 (stop 205 still PENDING)", res.status, res.raw)
+	}
+
+	var extraOrder uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency, number)
+		VALUES ($1, $2, $3, 'CONFIRMED', 10, 'DELIVERY', 'USD', $4) RETURNING id`,
+		uuid.New(), customer, f.branch, "SO-"+strings.ToUpper(uuid.NewString()[:8])).Scan(&extraOrder); err != nil {
+		t.Fatal(err)
+	}
+	asg := f.assignOrder(t, route, extraOrder, nil)
+	if asg.status != http.StatusCreated {
+		t.Fatalf("assign = %d %s", asg.status, asg.raw)
+	}
+	var gotSeq int
+	if err := f.db.Pool.QueryRow(ctx, `SELECT stop_sequence FROM deliveries WHERE id = $1`, asg.body["delivery"].(map[string]any)["id"].(string)).Scan(&gotSeq); err != nil {
+		t.Fatal(err)
+	}
+	if gotSeq != 206 {
+		t.Errorf("new stop sequence = %d, want 206 (the page bound dropped stops 201 to 205)", gotSeq)
+	}
+
+	newStopID := asg.body["delivery"].(map[string]any)["id"].(string)
+	ordered := append([]string{newStopID}, make([]string, len(stops))...)
+	for i, s := range stops {
+		ordered[i+1] = s.String()
+	}
+	asJSON, _ := json.Marshal(map[string]any{"ordered_delivery_ids": ordered})
+	res = f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+route.String(), "", nil)
+	etag := res.header.Get("ETag")
+	rev := strings.TrimSuffix(strings.TrimPrefix(etag, `"`), `"`)
+	res = f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/reorder",
+		string(asJSON), map[string]string{"If-Match": `"` + rev + `"`})
+	if res.status != http.StatusOK {
+		t.Errorf("reorder with every stop = %d %s, want 200 (read truncated at 200)", res.status, res.raw)
+	}
+}
+
 // Idempotency through the middleware: the same create twice with one key
 // returns the first response (replay header) and makes one row and one
 // event; the same key with another body is 422.
