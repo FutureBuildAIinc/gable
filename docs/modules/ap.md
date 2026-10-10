@@ -11,11 +11,13 @@ header the desk enters (the vendor, the vendor's own number, the date,
 the due date, the tax) and the priced lines (the goods or services, the
 quantity, the unit price, the GL account the line's money lands on). A
 payment names the bills it applies to (in the order the desk pays them)
-and locks that order on the database so two callers can never apply the
-same payment twice. Both acts post one journal entry inside one
-transaction: a payment that posts `DR 2010 / CR 1010`, and an approve
-that builds the entry from the lines and credits the whole total to
-`2010`.
+and locks that order on the database so concurrent payments cannot
+deadlock or both spend the same open amount (repeats are refused as
+`invoice_ids[i] (appears twice)` by `PayRequest.Parse`, and over-payment
+as `exceeds_open` by `PayVendor`). Both acts post one journal entry
+inside one transaction: a payment that posts `DR 2010 / CR 1010`, and an
+approve that builds the entry from the lines and credits the whole
+total to `2010`.
 
 This module is the work of C4-1b (item C4-1b: the AP fixes of ADR 0008
 section 7.4 on the wire contract of ADR 0001, plus migration 106). The
@@ -28,8 +30,7 @@ the ADR planned as 098 in the C4-1b section, renumbered to 106 at merge).
 A yard buys lumber, fasteners and concrete from vendors on terms. The
 bill lands on the desk from the carrier or by email. The clerk enters
 the bill through `POST /ap/invoices`: the line money and the tax are
-integers in cents and the unit price is an integer at scale four (the
-desk still types dollars, the form does the one exact conversion). The
+integers in cents and the unit price is an integer at scale four. The
 bill starts pending, owing its whole total, with Gable's own number
 (prefix `AP-`); the vendor's own number is `vendor_invoice_number`
 (1 to 64 characters, unique per vendor).
@@ -52,9 +53,10 @@ an approved bill's entry is reversed whole through `gl.PostReversal`;
 the bill's `amount_open` drops to zero; a bill that prices to zero
 posted nothing and voids with nothing to reverse. A bill with money
 applied is refused with `has_payments` (the payments have to be undone
-first). An approved or partial bill with a nonzero total and no linked
-entry is refused with `entry_not_linked`, and one whose linked entry
-does not balance with `entry_unbalanced`: both stay approved and
+first); a partial bill is refused there before the void reaches the
+linked-entry checks. An approved bill with a nonzero total and no
+linked entry is refused with `entry_not_linked`, and one whose linked
+entry does not balance with `entry_unbalanced`: both stay approved and
 payable until a later repair item (no route today links an entry to a
 bill). Both refusals write nothing.
 
@@ -96,7 +98,7 @@ package.
 | POST | `/api/v1/ap/payments` | Record a vendor payment; `amount_cents` int64; `method` enum `CHECK`, `ACH` or `WIRE`; `invoice_ids` in the order the desk pays them; `Idempotency-Key`. |
 | GET | `/api/v1/ap/aging` | Aging buckets in int64 cents by vendor (`current`, `past_30`, `past_60`, `past_90`, `total`); held to the caller's branch wall. |
 
-Every write above sits behind `scoped("admin", "owner", "finance")`
+Every route above (reads included) sits behind `scoped("admin", "owner", "finance")`
 (`core/internal/app/serve/serve.go:679`), the branch wall
 (`BranchGuard.CheckPayloadBranch` at `core/internal/ap/service.go:156-167`)
 and the user's branch context. A bound machine key without the right
@@ -119,7 +121,7 @@ scope.
 | `vendor_name` | text | Snapshot of the vendor name. |
 | `branch_id` | UUID | The branch the bill belongs to. |
 | `vendor_invoice_number` | text | The vendor's own number, 1 to 64 characters, unique per vendor. |
-| `currency` | ISO 4217 | The bill's currency; defaults from the `currency.default` setting. |
+| `currency` | ISO 4217 | The bill's currency; an omitted currency is `USD`. |
 | `invoice_date` | date | YYYY-MM-DD. |
 | `due_date` | date | YYYY-MM-DD. |
 | `po_id` | UUID, nullable | The purchase order this bill was matched to (FK since migration 106). |
@@ -133,7 +135,7 @@ scope.
 | `approved_at` | timestamp, nullable | When it was approved. |
 | `notes` | text | At most 2000 characters. |
 | `revision` | integer | Starts at 1; returned as ETag. |
-| `gl_entry_id` | UUID, nullable | The entry the approve posted (set on approve, cleared on the void's reversal). |
+| `gl_entry_id` | UUID, nullable | The entry the approve posted (set on approve; kept after a void). |
 | `created_at` | timestamp | RFC 3339 UTC. |
 | `lines` | array of `ApVendorInvoiceLine` | The priced lines, in position order. |
 
@@ -172,7 +174,7 @@ conversion (ADR 0008 section 11); the field set below is that shape.
 | `vendor_name` | text | Snapshot of the vendor name, filled by the list join. |
 | `batch_id` | UUID, nullable | The batch this payment is in (today's shape). |
 | `amount` | integer | Cents (the response); the request uses `amount_cents`. |
-| `method` | enum | `CHECK`, `ACH`, `WIRE` (UPPERCASE storage, UPPERCASE on the wire today). |
+| `method` | enum | `CHECK`, `ACH`, `WIRE` (UPPERCASE storage; the wire is accepted case insensitively). |
 | `check_number` | text, nullable | For a check. |
 | `reference` | text, nullable | Free text. |
 | `payment_date` | date | YYYY-MM-DD. |
@@ -181,8 +183,10 @@ conversion (ADR 0008 section 11); the field set below is that shape.
 
 `ApPaymentApplication` (the join row, `model.go` `APPaymentApplication`)
 links a payment to the bill it applies to with `id`, `payment_id`,
-`invoice_id`, `amount` (cents) and `created_at`. The same row is the AP
-side of the application.
+`invoice_id`, `amount` (cents) and `created_at`. It is a storage row,
+not on the wire: no AP route returns it; `PayVendor` writes it inside
+the payment's transaction and the response only returns the
+`ApPayment`.
 
 `ApAgingSummary` (the aging row, `fragments/ap.yaml`) carries
 `vendor_id`, `vendor_name`, `current`, `past_30`, `past_60`, `past_90`,
@@ -209,7 +213,7 @@ target is a 403 naming `branch_id`), `vendor_invoice_number` (1 to 64
 characters, unique per vendor; a duplicate is a 409 naming the field),
 `invoice_date`, `due_date` (both YYYY-MM-DD), optional `po_id`
 (an unknown PO is a 400 naming `po_id`), optional `currency`
-(defaults from the `currency.default` setting; a request's currency
+(an omitted currency is `USD`; a request's currency
 must be an ISO 4217 code of three capital letters), `tax_cents`, `notes`
 (at most 2000 characters) and `lines` (at least one line, the same
 set of fields as the line schema minus `id`, `position` and
@@ -233,7 +237,7 @@ module allows:
 
 | From | To | Reason | Event |
 |---|---|---|---|
-| `pending` | `approved` | Loader has reviewed, the GL entry can post. | `vendor_invoice.approved` |
+| `pending` | `approved` | The bill is right; the GL entry can post. | `vendor_invoice.approved` |
 | `pending` | `voided` | The bill was wrong; nothing posted yet. | `vendor_invoice.voided` |
 | `approved` | `voided` | The bill is wrong; the entry is reversed whole. | `vendor_invoice.voided` |
 | `partial` | none | Partial carries payments; the bill cannot be voided while money has left. |  |
@@ -244,7 +248,7 @@ A payment sets a bill's `status` to `partial` (when more is still owed)
 or `paid` (when this payment closes it) at the moment of the apply.
 Transitions `to: "pending"`, `to: "partial"` and `to: "paid"` from
 `POST /ap/invoices/{id}/transitions` are refused with
-`invalid_state_transition`; a payment is the only writer for those two.
+`invalid_state_transition`; a payment is the only writer for those.
 
 ### Approve
 
@@ -269,9 +273,9 @@ transaction:
    `entry_unbalanced` (debits and credits do not balance); each is
    mapped to a 409 by the module and fails the act (ADR 0008 7.4).
 7. Mark the bill approved with the linked `gl_entry_id` and the
-   approver (the caller's UUID when the actor is a parseable UUID, else
-   nil for an in-process caller; `s.ApproveInvoice` passes a fixed
-   approver).
+   approver (the caller's UUID when the actor is a parseable UUID,
+   else nil for an in-process caller; `s.ApproveInvoice` passes the
+   caller-given approver id).
 8. Write the audit row, then the event
    (`vendor_invoice.approved`) in the same transaction (ADR 0003
    section 2).
@@ -414,17 +418,25 @@ layer is `admin`, `owner`, `finance` (registered at
 `ap.NewHandler(apSvc).RegisterRoutes(mux, scoped("admin", "owner", "finance"))`).
 No other module's guard reaches an AP route. A key without the right
 scope is `403 forbidden`; the audit row carries the refused scope (ADR
-0002 section 5).
+0002 section 5). A machine key skips the role guard entirely: ADR 0002
+section 4 holds that a key has no roles and `RequireRole` skips its
+check when the request authenticated with a key, so a key is admitted
+on the scope check and the role guard never runs.
 
 A branch bound machine key (ADR 0007 section 5.5) is pinned to its one
 branch: a `GET` and a `POST` with `X-Branch-Id` set to another branch
 are `403 forbidden`; a payload `branch_id` outside the key's bound is
-`403 forbidden` naming `branch_id`. The payload rule
-(`BranchGuard.CheckPayloadBranch`, `service.go:156-167`) is what
-`POST /ap/invoices` and `POST /ap/payments` apply. The branch resolves
-in three steps (`service.go:263-278`): the payload `branch_id`, the
-caller's context branch, or the `default_branch_id` setting; the
-`currency.default` setting is the same shape for the currency.
+`403 forbidden` naming `branch_id` (the AP code names the field
+`branch_id`). The payload rule (`BranchGuard.CheckPayloadBranch`,
+`service.go:156-167`) is what `POST /ap/invoices` applies; it is the
+only AP route with a payload branch. `POST /ap/payments` carries no
+`branch_id` and is held to the wall through the bills it names (a bill
+outside the caller's wall is a 400 naming `invoice_ids[i]`,
+`LockForPayment` at `repository.go:307-319`). The branch resolves in
+three steps (`service.go:263-278`): the payload `branch_id`, the
+caller's context branch, or the `default_branch_id` setting. The
+`currency` is `Parse`'s `USD` on the route (input.go:117-122); the
+`currency.default` setting is not read on the create path.
 
 ## Stated limits
 
@@ -470,7 +482,7 @@ and NUMERIC(12,4) for unit price, so the ceiling is the column's.
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md):
-  the list envelope, cursors, the error envelope (4), the lowercase
+  the list envelope, cursors, the error envelope (3), the lowercase
   status vocabulary (6), money in `_cents` (7), unit prices in
   `_ten_thousandths` (7a), the `Idempotency-Key` header (9), the
   revision concurrency rule and the 428 / 409 `stale_revision`
@@ -513,11 +525,11 @@ a `po_id` FK, `UNIQUE (vendor_id, invoice_number)`, an `amount_open`,
 and `vendor_invoice_lines.position`, `purchase_order_line_id NULL`,
 `product_id NULL`, `unit_price` widened to NUMERIC(12,4) and
 `po_freight_charge_id NULL`. The demo seed keeps no vendor bill on
-`AP`. Then, with a finance role bearer and the seeded branch:
+`AP`. Then, with the seeded branch (dev mode needs no
+`Authorization` header, ADR 0002 section 3):
 
 ```
 curl -X POST http://localhost:8080/api/v1/ap/invoices \
-  -H 'Authorization: Bearer <token>' \
   -H 'X-Branch-Id: <seeded branch uuid>' \
   -H 'Idempotency-Key: 1' \
   -H 'Content-Type: application/json' \
@@ -532,7 +544,6 @@ least one line (`description`, `quantity` as a decimal string,
 
 ```
 curl -X POST http://localhost:8080/api/v1/ap/invoices/<id>/transitions \
-  -H 'Authorization: Bearer <token>' \
   -H 'X-Branch-Id: <seeded branch uuid>' \
   -H 'Idempotency-Key: 2' \
   -H 'If-Match: "1"' \
