@@ -105,6 +105,13 @@ var draftRouteClassExpectations = map[string]middleware.ScopeClass{
 	"PUT /api/v1/drafts/quotes/{id}":              middleware.ScopeDraftWrite,
 	"POST /api/v1/drafts/quotes/{id}/transitions": middleware.ScopeDraftWrite,
 	"POST /api/v1/drafts/quotes/{id}/promote":     middleware.ScopePromotion,
+	"GET /api/v1/drafts/orders":                   middleware.ScopeDraftRead,
+	"POST /api/v1/drafts/orders":                  middleware.ScopeDraftWrite,
+	"GET /api/v1/drafts/orders/feed":              middleware.ScopeDraftRead,
+	"GET /api/v1/drafts/orders/{id}":              middleware.ScopeDraftRead,
+	"PUT /api/v1/drafts/orders/{id}":              middleware.ScopeDraftWrite,
+	"POST /api/v1/drafts/orders/{id}/transitions": middleware.ScopeDraftWrite,
+	"POST /api/v1/drafts/orders/{id}/promote":     middleware.ScopePromotion,
 	"GET /api/v1/links/quotes/{id}":               middleware.ScopeLink,
 	"GET /api/v1/links/drafts/quotes/{id}":        middleware.ScopeDraftLink,
 }
@@ -357,7 +364,10 @@ func TestValidScopeGrammarHoldsTheCensus(t *testing.T) {
 	if !grammar["quotes:propose"] || !grammar["quotes:commit"] {
 		t.Errorf("grammar lacks the quotes confirm verbs: %v", middleware.ValidScopeGrammar())
 	}
-	if grammar["orders:propose"] || grammar["orders:commit"] || grammar["customers:propose"] {
+	if !grammar["orders:propose"] || !grammar["orders:commit"] {
+		t.Errorf("grammar lacks the orders confirm verbs (the second kind, ADR 0007 section 10): %v", middleware.ValidScopeGrammar())
+	}
+	if grammar["customers:propose"] || grammar["customers:commit"] {
 		t.Error("the grammar grants a confirm verb on a module with no registered draft kind; propose and commit are gated-only (ADR 0007 5.1)")
 	}
 	for _, line := range readCensus(t) {

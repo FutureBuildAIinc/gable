@@ -25,6 +25,7 @@ import (
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/app/orderwire"
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
@@ -337,39 +338,6 @@ func Run() {
 		WithAudit(auditLog)
 	wall.quotes(mux, quoteSvc)
 
-	// The drafts core (ADR 0007): the quotes kind registers its seven routes
-	// behind its own roles; the feed hub is the per process wake signal its
-	// streams wait on, stopped with the server (RegisterOnShutdown below).
-	quoteKind := quote.NewDraftKind(quoteSvc)
-	draftsRepo := drafts.NewRepository(db)
-	draftsRegistry, derr := drafts.NewRegistry(quoteKind)
-	if derr != nil {
-		logger.Error("draft kind registration failed", "error", derr)
-		os.Exit(1)
-	}
-	draftHub := drafts.NewHub(draftsRepo, cfg.DraftFeedPoll, logger)
-	draftsSvc := drafts.NewService(draftsRepo, draftsRegistry).
-		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db).
-		WithAudit(auditLog).
-		WithBranchGuard(wall.guard).
-		WithFeed(draftHub)
-	feedSettings := drafts.FeedSettings{
-		Heartbeat: cfg.DraftFeedHeartbeat, Poll: cfg.DraftFeedPoll,
-		Batch: cfg.DraftFeedBatch, WriteTimeout: cfg.DraftFeedWriteTimeout,
-		MaxLifetime: cfg.DraftFeedMaxLifetime, Retention: cfg.DraftEventsRetention,
-		MaxStreamsPerPrincipal: cfg.DraftFeedMaxStreamsPerPrincipal, MaxStreams: cfg.DraftFeedMaxStreams,
-	}
-	draftsHandler := drafts.NewHandler(draftsSvc).WithFeedHandler(
-		drafts.NewFeedHandler(draftsSvc, draftsRepo, draftHub, feedSettings,
-			func(ctx context.Context, keyID uuid.UUID) (bool, error) {
-				return techAdminSvc.KeyActive(ctx, keyID)
-			}))
-	// The kind registers its seven literal routes behind its own roles
-	// (admin/owner/sales), composed with the branch middleware exactly as
-	// the module's entity routes.
-	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
-
 	// GL Module (Full General Ledger)
 	glAdapter := glint.NewMockGLAdapter()
 	glRepo := gl.NewRepository(db)
@@ -504,6 +472,41 @@ func Run() {
 		RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"), scoped("admin", "owner", "finance"))
 	// Quote conversion creates the order in one act (ADR 0005 section 5.8).
 	quoteSvc.WithOrderCreator(orderSvc)
+
+	// The drafts core (ADR 0007): each kind registers its seven literal
+	// routes behind its own roles; the feed hub is the per process wake
+	// signal its streams wait on, stopped with the server
+	// (RegisterOnShutdown below). It sits after the modules it promotes
+	// for, both kinds' services being built (quotes above, orders just
+	// now).
+	quoteKind := quote.NewDraftKind(quoteSvc)
+	orderKind := order.NewDraftKind(orderSvc)
+	draftsRepo := drafts.NewRepository(db)
+	draftsRegistry, derr := drafts.NewRegistry(quoteKind, orderKind)
+	if derr != nil {
+		logger.Error("draft kind registration failed", "error", derr)
+		os.Exit(1)
+	}
+	draftHub := drafts.NewHub(draftsRepo, cfg.DraftFeedPoll, logger)
+	draftsSvc := drafts.NewService(draftsRepo, draftsRegistry).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog).
+		WithBranchGuard(wall.guard).
+		WithFeed(draftHub)
+	feedSettings := drafts.FeedSettings{
+		Heartbeat: cfg.DraftFeedHeartbeat, Poll: cfg.DraftFeedPoll,
+		Batch: cfg.DraftFeedBatch, WriteTimeout: cfg.DraftFeedWriteTimeout,
+		MaxLifetime: cfg.DraftFeedMaxLifetime, Retention: cfg.DraftEventsRetention,
+		MaxStreamsPerPrincipal: cfg.DraftFeedMaxStreamsPerPrincipal, MaxStreams: cfg.DraftFeedMaxStreams,
+	}
+	draftsHandler := drafts.NewHandler(draftsSvc).WithFeedHandler(
+		drafts.NewFeedHandler(draftsSvc, draftsRepo, draftHub, feedSettings,
+			func(ctx context.Context, keyID uuid.UUID) (bool, error) {
+				return techAdminSvc.KeyActive(ctx, keyID)
+			}))
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
+	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, scoped(orderKind.Roles()...))
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
