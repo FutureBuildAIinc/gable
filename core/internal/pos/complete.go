@@ -505,6 +505,13 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		if err := s.invoices.CreateCounterInvoice(ctx, inv); err != nil {
 			return err
 		}
+		// The stored link each sale line now carries to the invoice line built
+		// from it: a linked return reads its cost and its memo link from this
+		// id, never from a position (a removed cart line leaves the sale's
+		// positions gapped while the invoice numbers its own lines from zero).
+		if err := s.repo.LinkInvoiceLines(ctx, saleID, invoiceLineOf); err != nil {
+			return err
+		}
 
 		// The tenders become payments applied to the invoice, stored net:
 		// change comes out of the cash tendered, so the payment is the

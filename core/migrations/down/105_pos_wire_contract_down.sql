@@ -66,6 +66,9 @@ ALTER TABLE pos_returns DROP COLUMN IF EXISTS updated_at;
 DROP INDEX IF EXISTS idx_pos_tenders_payment;
 ALTER TABLE pos_tenders DROP COLUMN IF EXISTS payment_id;
 
+DROP INDEX IF EXISTS idx_pos_line_items_invoice_line;
+ALTER TABLE pos_line_items DROP COLUMN IF EXISTS invoice_line_id;
+
 ALTER TABLE pos_line_items DROP CONSTRAINT IF EXISTS pos_line_items_discount_check;
 ALTER TABLE pos_line_items DROP CONSTRAINT IF EXISTS pos_line_items_shape;
 ALTER TABLE pos_line_items DROP CONSTRAINT IF EXISTS pos_line_items_pair_positive;

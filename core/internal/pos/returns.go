@@ -299,6 +299,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	}
 	var out *Return
 	var invoiceLines []InvoiceLineCost
+	var invoiceLineIDs map[uuid.UUID]uuid.UUID
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		// The sale row first (section 11, step 1): a void racing this return
 		// serializes here, and the loser sees the sale it priced change under
@@ -326,22 +327,31 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if err := s.repo.BumpSaleRevision(ctx, sale.ID); err != nil {
 				return err
 			}
-			// The sale's own invoice lines, by position: a linked return's
-			// restocking line takes its source invoice line's unit_cost, the
-			// cost the sale relieved (8.4), never today's average.
+			// The sale's own invoice lines, by the stored link on each sale
+			// line: a linked return's restocking line takes its source invoice
+			// line's unit_cost, the cost the sale relieved (8.4), never today's
+			// average and never a position match (a removed cart line leaves
+			// the sale's positions gapped).
 			if sale.InvoiceID != nil {
 				if invoiceLines, err = s.repo.InvoiceLineCosts(ctx, *sale.InvoiceID); err != nil {
 					return err
 				}
+			}
+			if invoiceLineIDs, err = s.repo.InvoiceLineIDsBySaleLine(ctx, sale.ID); err != nil {
+				return err
 			}
 		}
 		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
 		if err != nil {
 			return err
 		}
-		invoiceLineAt := func(pos int) *InvoiceLineCost {
+		invoiceLineAt := func(saleLineID uuid.UUID) *InvoiceLineCost {
+			id, ok := invoiceLineIDs[saleLineID]
+			if !ok {
+				return nil
+			}
 			for i := range invoiceLines {
-				if invoiceLines[i].Position == pos {
+				if invoiceLines[i].ID == id {
 					return &invoiceLines[i]
 				}
 			}
@@ -376,7 +386,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				if p.saleLine.PriceUOMQty != nil {
 					priceUOMQty = *p.saleLine.PriceUOMQty
 				}
-				if src := invoiceLineAt(p.saleLine.Position); src != nil {
+				if src := invoiceLineAt(p.saleLine.ID); src != nil {
 					id := src.ID
 					invoiceLineID = &id
 					restockUnitCost = httpx.Price(src.UnitCost)

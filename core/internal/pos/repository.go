@@ -53,9 +53,13 @@ type Repository interface {
 	// return of the sale brought back (the return's cap).
 	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
-	// InvoiceLineCosts reads an invoice's lines by position with the unit
-	// cost the sale relieved (a linked return's restock cost).
+	// InvoiceLineCosts reads an invoice's lines with the unit cost the sale
+	// relieved (a linked return's restock cost, found by the stored link).
 	InvoiceLineCosts(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceLineCost, error)
+	// LinkInvoiceLines records on each sale line the invoice line completion
+	// built from it; InvoiceLineIDsBySaleLine reads the links back.
+	LinkInvoiceLines(ctx context.Context, saleID uuid.UUID, links map[uuid.UUID]uuid.UUID) error
+	InvoiceLineIDsBySaleLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]uuid.UUID, error)
 
 	// Till sessions
 	// LockTillSession locks a session row (FOR SHARE for the acts that live
@@ -562,20 +566,20 @@ func (r *PostgresRepository) SaleHasReturns(ctx context.Context, saleID uuid.UUI
 	return exists, err
 }
 
-// InvoiceLineCost is one invoice line's position and the unit cost the sale
+// InvoiceLineCost is one invoice line's id and the unit cost the sale
 // relieved (ten thousandths).
 type InvoiceLineCost struct {
 	ID       uuid.UUID
-	Position int
 	UnitCost int64
 }
 
-// InvoiceLineCosts reads an invoice's lines with their unit costs, ordered
-// by position: the completion builds an invoice line per sale line at the
-// same position, so a linked return finds its source line's cost here.
+// InvoiceLineCosts reads an invoice's lines with their unit costs: a linked
+// return finds its source line's cost by the invoice line id completion
+// stored on the sale line (never by a position: a removed cart line leaves
+// the sale's positions gapped while the invoice numbers its own from zero).
 func (r *PostgresRepository) InvoiceLineCosts(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceLineCost, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
-		SELECT id, position, COALESCE(ROUND(unit_cost * 10000)::bigint, 0)
+		SELECT id, COALESCE(ROUND(unit_cost * 10000)::bigint, 0)
 		FROM invoice_lines WHERE invoice_id = $1 ORDER BY position`, invoiceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the invoice's line costs: %w", err)
@@ -584,10 +588,51 @@ func (r *PostgresRepository) InvoiceLineCosts(ctx context.Context, invoiceID uui
 	var out []InvoiceLineCost
 	for rows.Next() {
 		var l InvoiceLineCost
-		if err := rows.Scan(&l.ID, &l.Position, &l.UnitCost); err != nil {
+		if err := rows.Scan(&l.ID, &l.UnitCost); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// LinkInvoiceLines records on each sale line the invoice line completion
+// built from it, inside the completion's transaction.
+func (r *PostgresRepository) LinkInvoiceLines(ctx context.Context, saleID uuid.UUID, links map[uuid.UUID]uuid.UUID) error {
+	if len(links) == 0 {
+		return nil
+	}
+	saleLines := make([]uuid.UUID, 0, len(links))
+	invLines := make([]uuid.UUID, 0, len(links))
+	for saleLine, invLine := range links {
+		saleLines = append(saleLines, saleLine)
+		invLines = append(invLines, invLine)
+	}
+	if _, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_line_items l SET invoice_line_id = v.inv
+		FROM unnest($1::uuid[], $2::uuid[]) AS v(sid, inv)
+		WHERE l.id = v.sid AND l.transaction_id = $3`, saleLines, invLines, saleID); err != nil {
+		return fmt.Errorf("failed to link the sale lines to their invoice lines: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// InvoiceLineIDsBySaleLine reads the invoice line each sale line became.
+func (r *PostgresRepository) InvoiceLineIDsBySaleLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, invoice_line_id FROM pos_line_items
+		WHERE transaction_id = $1 AND invoice_line_id IS NOT NULL`, saleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the sale lines' invoice links: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]uuid.UUID{}
+	for rows.Next() {
+		var saleLine, invLine uuid.UUID
+		if err := rows.Scan(&saleLine, &invLine); err != nil {
+			return nil, err
+		}
+		out[saleLine] = invLine
 	}
 	return out, rows.Err()
 }

@@ -194,6 +194,14 @@ END $$;
 ALTER TABLE pos_tenders ADD COLUMN IF NOT EXISTS payment_id UUID NULL REFERENCES payments (id);
 CREATE INDEX IF NOT EXISTS idx_pos_tenders_payment ON pos_tenders (payment_id);
 
+-- The invoice line completion built from each sale line: a linked return
+-- reads its cost link from the stored id, never from a position (a removed
+-- cart line leaves the sale's positions gapped while the invoice numbers its
+-- own lines from zero).
+ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS invoice_line_id UUID NULL REFERENCES invoice_lines (id);
+CREATE INDEX IF NOT EXISTS idx_pos_line_items_invoice_line ON pos_line_items (invoice_line_id)
+    WHERE invoice_line_id IS NOT NULL;
+
 -- 3. pos_returns and their lines.
 
 ALTER TABLE pos_returns ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
