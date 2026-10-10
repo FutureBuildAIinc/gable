@@ -710,8 +710,8 @@ func inventoryGroups() []groupDef {
 	return []groupDef{{
 		name: "inventory",
 		steps: []stepDef{
-			// New product from this run has no stock rows: the module's
-			// nullable-array shape is part of the contract.
+			// New product from this run has no stock rows: the envelope's
+			// empty page (items [], next_cursor null) is part of the contract.
 			{name: "inventory.list_empty", method: "GET", path: "/api/v1/inventory?product_id={myProduct}"},
 			{
 				name:   "inventory.adjust",
@@ -722,7 +722,9 @@ func inventoryGroups() []groupDef {
 					"reason": "golden characterisation", "is_delta": true,
 				},
 			},
-			{name: "inventory.list_missing_param", method: "GET", path: "/api/v1/inventory"},
+			// No product_id is the whole levels list now, not a 400: one small
+			// page of it, the cursor pinned as a placeholder.
+			{name: "inventory.list_page", method: "GET", path: "/api/v1/inventory?limit=2&include=total"},
 		},
 	}}
 }
