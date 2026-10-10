@@ -292,24 +292,39 @@ var (
 // replace of the six byte pattern `\u0000` would also match the trailing
 // six bytes of `\\u0000` and add a third backslash, turning the marker
 // into `\\\u0000` (which the jsonb parser reads as `\\` (one character)
-// plus `\u0000` (a NUL escape, which jsonb rejects)). The fix is the
-// negative lookbehind in the scan: a `\u0000` only gets rewritten when
-// the byte before it is not itself a backslash, so the seven byte
-// `\\u0000` from a marker is left alone. Raw NUL bytes in the input still
-// produce a six byte `\u0000` in the JSON, and the byte before is the
-// preceding character (slash, letter, etc.), so the rewrite still fires
-// for them.
+// plus `\u0000` (a NUL escape, which jsonb rejects)).
+//
+// The rewrite must skip the trailing six bytes of the marker (and the
+// trailing six bytes of any caller text that already holds `\u0000`)
+// while still firing for a real NUL byte that sits after one or more
+// backslashes in the source. json.Marshal doubles every source backslash
+// to `\\`, so the match's leading `\` and the source backslashes form a
+// run of consecutive `\` bytes immediately before the match. The match
+// itself counts as a run of one. Skipping when the run BEFORE the match
+// is odd (the match's leading `\` is itself escaped, so the `\u` is not
+// a Unicode escape) leaves the marker and any caller `\u0000` text alone,
+// while the run before a real NUL is always even (0, 2, 4, ...) and the
+// rewrite fires.
 func sanitiseNULEscape(in []byte) []byte {
 	if len(in) == 0 {
 		return in
 	}
-	// One scan to find every `\u0000` that is NOT preceded by a backslash.
+	// One scan to find every `\u0000` whose run of preceding backslashes
+	// (not counting the match's own leading `\`) is even.
 	var positions []int
 	for i := 0; i+len(nulJSONEscape) <= len(in); i++ {
 		if !bytes.Equal(in[i:i+len(nulJSONEscape)], nulJSONEscape) {
 			continue
 		}
-		if i > 0 && in[i-1] == '\\' {
+		k := 0
+		for j := i - 1; j >= 0 && in[j] == '\\'; j-- {
+			k++
+		}
+		if k%2 == 1 {
+			// The match backslash is itself escaped, so the `\u` is
+			// not a JSON Unicode escape and the bytes are caller text
+			// (the sanitiser marker or a literal `\u0000` from the
+			// caller). Leave them alone.
 			continue
 		}
 		positions = append(positions, i)
