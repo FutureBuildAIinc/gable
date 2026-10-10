@@ -194,7 +194,7 @@ var modelBoundSchemas = []struct {
 	{"PortalInvite", portal.PortalInvite{}},
 	// project (R1-7c)
 	{"Project", project.Project{}},
-	{"ProjectDashboard", project.ProjectDashboardDTO{}},
+	{"ProjectDashboard", project.ProjectDashboard{}},
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
@@ -208,12 +208,12 @@ var modelBoundSchemas = []struct {
 	// and orphaned; the embedded struct is bound, the two extras checked by hand.
 	{"AppsManifestStatus", apps.Manifest{}},
 	{"GovernanceRFC", governance.RFC{}},
-	{"MillworkOption", millwork.MillworkOption{}},
-	{"ConfiguratorRule", configurator.ConfiguratorRule{}},
-	{"ConfiguratorPreset", configurator.ConfiguratorPreset{}},
+	{"MillworkOption", millwork.Option{}},
+	{"ConfiguratorRule", configurator.Rule{}},
+	{"ConfiguratorPreset", configurator.Preset{}},
 	{"ConfiguratorAvailableOption", configurator.AvailableOption{}},
 	{"ConfiguratorValidationConflict", configurator.ValidationConflict{}},
-	{"ConfiguratorValidateResponse", configurator.ValidateConfigResponse{}},
+	{"ConfiguratorValidateResponse", configurator.ValidateResponse{}},
 	{"ConfiguratorBuildSKUResponse", configurator.BuildSKUResponse{}},
 	// reporting, reports, dashboard (R1-7f)
 	{"ReportingSavedReport", reporting.SavedReport{}},

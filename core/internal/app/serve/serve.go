@@ -320,10 +320,13 @@ func Run() {
 	salesTeamHandler := salesteam.NewHandler(salesTeamRepo)
 	salesTeamHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
-	// CRM Module
-	crmRepo := crm.NewRepository(db)
-	crmHandler := crm.NewHandler(crmRepo)
-	crmHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	// CRM Module: on the wire contract, its writes in one transaction with
+	// their audit row and activity.* event, every route behind the branch
+	// wall through the activity's customer.
+	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog))
 
 	// Account Module
 	accountRepo := account.NewRepository(db)
@@ -674,9 +677,13 @@ func Run() {
 
 	// Millwork App (converted — reference conversion #1)
 	// One app, two backend modules: millwork (option catalogs) + configurator
-	// (rules/validation/build-sku) both gate on the "millwork" app key.
-	millworkRepo := millwork.NewRepository(db)
-	millworkSvc := millwork.NewService(millworkRepo)
+	// (rules/validation/build-sku) both gate on the "millwork" app key. The
+	// millwork catalog is on the wire contract: its create runs in one
+	// transaction with its audit row and millwork_option.created event.
+	millworkSvc := millwork.NewService(millwork.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog)
 	millworkHandler := millwork.NewHandler(millworkSvc)
 	configuratorRepo := configurator.NewRepository(db)
 	configuratorSvc := configurator.NewService(configuratorRepo)
@@ -795,11 +802,15 @@ func Run() {
 	portalChain := func(next http.Handler) http.Handler { return portalMw(portalIdem(next)) }
 	portalHandler.RegisterRoutes(mux, portalChain, middleware.StrictRateLimit(10, cfg.TrustedProxies))
 
-	// Project Module (Sprint 34: Project Management Dashboard)
-	projectRepo := project.NewRepository(db)
-	projectSvc := project.NewService(projectRepo)
-	projectHandler := project.NewHandler(projectSvc)
-	projectHandler.RegisterRoutes(mux, portalChain)
+	// Project Module: the portal's job dashboard on the wire contract, its
+	// writes in one transaction with their audit row and project.* event.
+	// The portal chain scopes every read and write to the customer it
+	// identifies.
+	projectSvc := project.NewService(project.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog)
+	project.NewHandler(projectSvc).RegisterRoutes(mux, portalChain)
 
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff

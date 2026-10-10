@@ -10,7 +10,7 @@
         },
         "category": "Species",
         "name": "Golden Douglas Fir",
-        "price_adjustment": 1.5
+        "price_adjustment_cents": 150
       }
     },
     "response": {
@@ -24,7 +24,31 @@
         "created_at": "<ts+0d>",
         "id": "<id-1>",
         "name": "Golden Douglas Fir",
-        "price_adjustment": 1.5,
+        "price_adjustment_cents": 150,
+        "revision": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "millwork.option.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/millwork/options/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "attributes": {
+          "grade": "Clear"
+        },
+        "category": "Species",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "name": "Golden Douglas Fir",
+        "price_adjustment_cents": 150,
+        "revision": 1,
         "updated_at": "<ts+0d>"
       }
     }
@@ -33,24 +57,88 @@
     "name": "millwork.option.list",
     "request": {
       "method": "GET",
-      "path": "/api/v1/millwork/options?category=Species"
+      "path": "/api/v1/millwork/options?category=Species&limit=2"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "attributes": {
-            "grade": "Clear"
-          },
-          "category": "Species",
-          "created_at": "<ts+0d>",
-          "id": "<id-1>",
-          "name": "Golden Douglas Fir",
-          "price_adjustment": 1.5,
-          "updated_at": "<ts+0d>"
+      "body": {
+        "items": [
+          {
+            "attributes": {
+              "grade": "Clear"
+            },
+            "category": "Species",
+            "created_at": "<ts+0d>",
+            "id": "<id-1>",
+            "name": "Golden Douglas Fir",
+            "price_adjustment_cents": 150,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "millwork.option.list.unknown_param",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/millwork/options?category=Species&zzz=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "zzz",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-2>"
         }
-      ]
+      }
+    }
+  },
+  {
+    "name": "millwork.option.events",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=millwork_option.created&limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "category": "Species",
+              "price_adjustment_cents": 150,
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "millwork_option"
+            },
+            "event_id": "<id-3>",
+            "org": "default",
+            "type": "millwork_option.created"
+          }
+        ],
+        "limit": 1,
+        "next_cursor": "<cursor>"
+      }
     }
   }
 ]

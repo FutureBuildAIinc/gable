@@ -8,7 +8,7 @@ export interface ConfiguratorRule {
     depends_on_type: string;
     depends_on_value: string;
     is_allowed: boolean;
-    error_message?: string;
+    error_message: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -23,7 +23,8 @@ export interface ValidationConflict {
 
 export interface ValidateConfigResponse {
     valid: boolean;
-    conflicts?: ValidationConflict[];
+    /** Always an array, empty when the selections are valid. */
+    conflicts: ValidationConflict[];
 }
 
 export interface BuildSKUResponse {
@@ -34,15 +35,16 @@ export interface BuildSKUResponse {
 export interface AvailableOption {
     value: string;
     allowed: boolean;
-    message?: string;
+    message: string | null;
 }
 
 export interface ConfiguratorPreset {
     id: string;
     name: string;
-    description?: string;
+    description: string | null;
     product_type: string;
-    config: Record<string, string>;
+    /** The JSON the dealer stored, carried as JSON (it used to be base64 text). */
+    config: Record<string, unknown>;
     is_active: boolean;
     created_at: string;
     updated_at: string;

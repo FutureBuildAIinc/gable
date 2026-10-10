@@ -5,22 +5,37 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
-// Repository defines data access for projects. It is declared here, next to
-// the only implementation, so Service can be exercised against a fake store
-// instead of requiring Postgres. *PostgresRepository satisfies it as-is.
+// ListFilter is the list's filters beside the platform's cursor and limit.
+type ListFilter struct {
+	Limit     int
+	AfterTime *time.Time
+	AfterID   uuid.UUID
+	Status    *ProjectStatus
+}
+
+// Repository is the project store. The portal is the only surface: every
+// statement is scoped to one customer, the caller the portal auth chain
+// identifies, so a project of another customer's is not there at all. Every
+// statement goes through the context's executor, so a write inside a
+// caller's transaction joins it.
 type Repository interface {
-	CreateProject(ctx context.Context, p Project) error
-	GetProject(ctx context.Context, id, customerID uuid.UUID) (*Project, error)
-	ListProjects(ctx context.Context, customerID uuid.UUID) ([]Project, error)
-	UpdateProject(ctx context.Context, p Project) error
-	GetProjectEntities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error)
+	List(ctx context.Context, customerID uuid.UUID, f ListFilter, wantTotal bool) ([]Project, bool, *int64, error)
+	Get(ctx context.Context, id, customerID uuid.UUID) (*Project, error)
+	Create(ctx context.Context, p *Project) error
+	Lock(ctx context.Context, id, customerID uuid.UUID) error
+	Update(ctx context.Context, p *Project, status *string) error
+	Entities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error)
 }
 
 // PostgresRepository implements Repository against Postgres.
@@ -28,161 +43,230 @@ type PostgresRepository struct {
 	db *database.DB
 }
 
-// NewRepository creates a new project repository.
 func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-// CreateProject creates a new project in the database.
-func (r *PostgresRepository) CreateProject(ctx context.Context, p Project) error {
-	query := `
+const columns = `id, customer_id, name, status, revision, created_at, updated_at`
+
+func scanOne(row pgx.Row) (*Project, error) {
+	var (
+		p                Project
+		status           string
+		created, updated time.Time
+	)
+	if err := row.Scan(&p.ID, &p.CustomerID, &p.Name, &status, &p.Revision, &created, &updated); err != nil {
+		return nil, err
+	}
+	p.Status, p.CreatedAt, p.UpdatedAt = fromStorage(status), httpx.TimestampOf(created), httpx.TimestampOf(updated)
+	return &p, nil
+}
+
+func (r *PostgresRepository) List(ctx context.Context, customerID uuid.UUID, f ListFilter, wantTotal bool) ([]Project, bool, *int64, error) {
+	conds := []string{"customer_id = $1"}
+	args := []any{customerID}
+	if f.Status != nil {
+		// The column is a free VARCHAR whose rows can be stored Active,
+		// active or COMPLETED while every spelling reads back lowercase:
+		// the filter matches the read, case insensitively.
+		args = append(args, string(*f.Status))
+		conds = append(conds, fmt.Sprintf(`lower(status) = $%d`, len(args)))
+	}
+	if f.AfterTime != nil {
+		args = append(args, *f.AfterTime, f.AfterID)
+		conds = append(conds, fmt.Sprintf(`(created_at, id) < ($%d, $%d)`, len(args)-1, len(args)))
+	}
+	args = append(args, f.Limit+1)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx,
+		`SELECT `+columns+` FROM projects WHERE `+strings.Join(conds, " AND ")+
+			fmt.Sprintf(` ORDER BY created_at DESC, id DESC LIMIT $%d`, len(args)), args...)
+	if err != nil {
+		return nil, false, nil, fmt.Errorf("failed to list projects: %w", err)
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		p, err := scanOne(rows)
+		if err != nil {
+			return nil, false, nil, fmt.Errorf("failed to scan project: %w", err)
+		}
+		items = append(items, *p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, nil, err
+	}
+	hasMore := false
+	if len(items) > f.Limit {
+		items = items[:f.Limit]
+		hasMore = true
+	}
+	var total *int64
+	if wantTotal {
+		// The count shares the filters, not the cursor predicate.
+		countArgs := []any{customerID}
+		cc := []string{"customer_id = $1"}
+		if f.Status != nil {
+			countArgs = append(countArgs, string(*f.Status))
+			cc = append(cc, fmt.Sprintf(`lower(status) = $%d`, len(countArgs)))
+		}
+		var n int64
+		if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM projects WHERE `+strings.Join(cc, " AND "), countArgs...).Scan(&n); err != nil {
+			return nil, false, nil, fmt.Errorf("failed to count projects: %w", err)
+		}
+		total = &n
+	}
+	return items, hasMore, total, nil
+}
+
+func (r *PostgresRepository) Get(ctx context.Context, id, customerID uuid.UUID) (*Project, error) {
+	p, err := scanOne(r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT `+columns+` FROM projects WHERE id = $1 AND customer_id = $2`, id, customerID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get project: %w", err)
+	}
+	return p, nil
+}
+
+func (r *PostgresRepository) Create(ctx context.Context, p *Project) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
 		INSERT INTO projects (id, customer_id, name, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, p.ID, p.CustomerID, p.Name, p.Status, p.CreatedAt, p.UpdatedAt)
+		VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+		p.ID, p.CustomerID, p.Name, storageOf[p.Status])
 	if err != nil {
 		return fmt.Errorf("failed to create project: %w", err)
 	}
 	return nil
 }
 
-// GetProject fetches a single project by ID and CustomerID.
-func (r *PostgresRepository) GetProject(ctx context.Context, id, customerID uuid.UUID) (*Project, error) {
-	query := `
-		SELECT id, customer_id, name, status, created_at, updated_at
-		FROM projects
-		WHERE id = $1 AND customer_id = $2
-	`
-	var p Project
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, customerID).Scan(
-		&p.ID, &p.CustomerID, &p.Name, &p.Status, &p.CreatedAt, &p.UpdatedAt,
-	)
+// Lock takes the row FOR UPDATE; revision checks happen after it, inside the
+// caller's transaction.
+func (r *PostgresRepository) Lock(ctx context.Context, id, customerID uuid.UUID) error {
+	var locked uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT id FROM projects WHERE id = $1 AND customer_id = $2 FOR UPDATE`, id, customerID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, fmt.Errorf("project not found")
-		}
-		return nil, fmt.Errorf("failed to get project: %w", err)
-	}
-	return &p, nil
-}
-
-// ListProjects returns all projects for a customer.
-func (r *PostgresRepository) ListProjects(ctx context.Context, customerID uuid.UUID) ([]Project, error) {
-	query := `
-		SELECT id, customer_id, name, status, created_at, updated_at
-		FROM projects
-		WHERE customer_id = $1
-		ORDER BY created_at DESC
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, customerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list projects: %w", err)
-	}
-	defer rows.Close()
-
-	projects := make([]Project, 0)
-	for rows.Next() {
-		var p Project
-		if err := rows.Scan(&p.ID, &p.CustomerID, &p.Name, &p.Status, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("failed to scan project: %w", err)
-		}
-		projects = append(projects, p)
-	}
-	return projects, nil
-}
-
-// UpdateProject modifies an existing project.
-func (r *PostgresRepository) UpdateProject(ctx context.Context, p Project) error {
-	query := `
-		UPDATE projects
-		SET name = $1, status = $2, updated_at = NOW()
-		WHERE id = $3 AND customer_id = $4
-	`
-	tag, err := r.db.GetExecutor(ctx).Exec(ctx, query, p.Name, p.Status, p.ID, p.CustomerID)
-	if err != nil {
-		return fmt.Errorf("failed to update project: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("project not found")
+		return fmt.Errorf("failed to lock project: %w", err)
 	}
 	return nil
 }
 
-// GetProjectEntities fetches associated orders, deliveries, and invoices.
-func (r *PostgresRepository) GetProjectEntities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error) {
-	orders := make([]ProjectItem, 0)
-	deliveries := make([]ProjectItem, 0)
-	invoices := make([]ProjectItem, 0)
+// Update writes the row with the status the body named, or none: a NULL
+// status keeps the stored spelling (SQL COALESCE), so a name-only update
+// cannot blank or rename a legacy value the storage map does not know (the
+// column is a free VARCHAR; 'On Hold ' and friends stay byte identical).
+func (r *PostgresRepository) Update(ctx context.Context, p *Project, status *string) error {
+	tag, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE projects
+		SET name = $2, status = COALESCE($3, status), revision = revision + 1, updated_at = NOW()
+		WHERE id = $1`,
+		p.ID, p.Name, status)
+	if err != nil {
+		return fmt.Errorf("failed to update project: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
-	// Fetch Orders linked to project
-	orderQuery := `
-		SELECT id, status, total_amount, created_at
+// itemColumns is the shared summary read of a grouped document: the total in
+// integer cents, read and scaled in SQL (ADR 0001 section 7), never through
+// float64.
+func scanItem(row pgx.Row, kind string) (*ProjectItem, error) {
+	var (
+		it      ProjectItem
+		status  string
+		total   *int64
+		created time.Time
+		ref     string
+	)
+	if err := row.Scan(&it.ID, &status, &total, &created, &ref); err != nil {
+		return nil, err
+	}
+	it.Type = kind
+	it.Status = strings.ToLower(status)
+	it.TotalCents = total
+	it.CreatedAt = httpx.TimestampOf(created)
+	it.Reference = ref
+	return &it, nil
+}
+
+// Entities fetches the orders, deliveries and invoices grouped under the
+// project, each a summary with its total in cents.
+func (r *PostgresRepository) Entities(ctx context.Context, projectID, customerID uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error) {
+	orders := []ProjectItem{}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT id, status, ROUND(total_amount * 100)::bigint, created_at,
+			'Order ' || left(id::text, 8)
 		FROM orders
 		WHERE project_id = $1 AND customer_id = $2
-		ORDER BY created_at DESC
-	`
-	oRows, err := r.db.GetExecutor(ctx).Query(ctx, orderQuery, projectID, customerID)
+		ORDER BY created_at DESC, id DESC`, projectID, customerID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch orders: %w", err)
 	}
-	defer oRows.Close()
-
-	for oRows.Next() {
-		item := ProjectItem{Type: "ORDER"}
-		if err := oRows.Scan(&item.ID, &item.Status, &item.TotalAmount, &item.CreatedAt); err != nil {
-			return nil, nil, nil, fmt.Errorf("scan order: %w", err)
+	defer rows.Close()
+	for rows.Next() {
+		it, err := scanItem(rows, "order")
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to scan order: %w", err)
 		}
-		item.Reference = fmt.Sprintf("Order %s", item.ID.String()[:8])
-		orders = append(orders, item)
+		orders = append(orders, *it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
 	}
 
-	// Fetch Deliveries linked via orders
-	deliveryQuery := `
-		SELECT d.id, d.status, d.created_at, o.id
+	deliveries := []ProjectItem{}
+	rows, err = r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT d.id, d.status, NULL::bigint, d.created_at,
+			'Delivery for order ' || left(o.id::text, 8)
 		FROM deliveries d
 		JOIN orders o ON d.order_id = o.id
 		WHERE o.project_id = $1 AND o.customer_id = $2
-		ORDER BY d.created_at DESC
-	`
-	dRows, err := r.db.GetExecutor(ctx).Query(ctx, deliveryQuery, projectID, customerID)
+		ORDER BY d.created_at DESC, d.id DESC`, projectID, customerID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch deliveries: %w", err)
 	}
-	defer dRows.Close()
-
-	for dRows.Next() {
-		item := ProjectItem{Type: "DELIVERY"}
-		var orderID uuid.UUID
-		if err := dRows.Scan(&item.ID, &item.Status, &item.CreatedAt, &orderID); err != nil {
-			return nil, nil, nil, fmt.Errorf("scan delivery: %w", err)
+	defer rows.Close()
+	for rows.Next() {
+		it, err := scanItem(rows, "delivery")
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to scan delivery: %w", err)
 		}
-		item.Reference = fmt.Sprintf("Delivery for Order %s", orderID.String()[:8])
-		deliveries = append(deliveries, item)
+		deliveries = append(deliveries, *it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
 	}
 
-	// Fetch Invoices linked via orders OR maybe invoices don't link via orders in DB yet, but invoices have order_id.
-	invoiceQuery := `
-		SELECT i.id, i.status, i.total_amount, i.created_at, o.id
+	invoices := []ProjectItem{}
+	rows, err = r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT i.id, i.status, ROUND(i.total_amount * 100)::bigint, i.created_at,
+			'Invoice for order ' || left(o.id::text, 8)
 		FROM invoices i
 		JOIN orders o ON i.order_id = o.id
 		WHERE o.project_id = $1 AND i.customer_id = $2
-		ORDER BY i.created_at DESC
-	`
-	iRows, err := r.db.GetExecutor(ctx).Query(ctx, invoiceQuery, projectID, customerID)
+		ORDER BY i.created_at DESC, i.id DESC`, projectID, customerID)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch invoices: %w", err)
 	}
-	defer iRows.Close()
-
-	for iRows.Next() {
-		item := ProjectItem{Type: "INVOICE"}
-		var orderID uuid.UUID
-		if err := iRows.Scan(&item.ID, &item.Status, &item.TotalAmount, &item.CreatedAt, &orderID); err != nil {
-			return nil, nil, nil, fmt.Errorf("scan invoice: %w", err)
+	defer rows.Close()
+	for rows.Next() {
+		it, err := scanItem(rows, "invoice")
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to scan invoice: %w", err)
 		}
-		item.Reference = fmt.Sprintf("Invoice for Order %s", orderID.String()[:8])
-		invoices = append(invoices, item)
+		invoices = append(invoices, *it)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, nil, nil, err
+	}
 	return orders, deliveries, invoices, nil
 }
