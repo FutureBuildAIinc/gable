@@ -32,6 +32,15 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	if pre.Status != StatusCompleted {
 		return nil, httpx.InvalidStateTransition(fmt.Sprintf("cannot void a %s sale: only a completed sale is voided", pre.Status.Status()))
 	}
+	// After any return of the sale the way back is another return: the
+	// return already paid part of the money out and put its goods back, so a
+	// void would pay the whole sale a second time.
+	if has, err := s.repo.SaleHasReturns(ctx, saleID); err != nil {
+		return nil, err
+	} else if has {
+		return nil, conflict("has_returns",
+			"this sale has been returned against: return the rest through POST /pos/returns instead of voiding it")
+	}
 	// A void lives inside its till session; once the drawer closes, the
 	// money has been counted and the way back is a return.
 	if pre.TillSessionID != nil {
@@ -88,6 +97,14 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		}
 		if sale.Status != StatusCompleted {
 			return httpx.InvalidStateTransition("only a completed sale is voided")
+		}
+		// The returns check, again under the lock: a return that raced this
+		// void and won leaves the sale with returns, and this void refuses.
+		if has, err := s.repo.SaleHasReturns(ctx, saleID); err != nil {
+			return err
+		} else if has {
+			return conflict("has_returns",
+				"this sale has been returned against: return the rest through POST /pos/returns instead of voiding it")
 		}
 		if sale.InvoiceID == nil {
 			return conflict("no_invoice", "the sale carries no invoice to void")
