@@ -57,8 +57,11 @@ type returnLinePriced struct {
 // ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
 // credit memo created and posted in ONE act with its restock lines,
 // refunded in cash or card or left as account credit. The card refund goes
-// through the gateway before the transaction; the memo's entry, subledger
-// row, the stock return and the refund commit together.
+// through the gateway before the transaction (section 11, as every gateway
+// call does), claimed first by a committed refund intent unique per sale
+// and tender so a concurrent card return or a void of the same tender never
+// reaches the terminal twice; the memo's entry, subledger row, the stock
+// return and the refund commit together.
 func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *ReturnIn, actor string) (*Return, error) {
 	if s.ar == nil || s.inventory == nil {
 		return nil, errNotConfigured
@@ -264,50 +267,50 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	// what the sale was paid; the tax is capped the same way. Read before the
 	// transaction (the guards) and again under the sale row lock (the
 	// authority the memo is written from).
-		var taxAlreadyBack int64
-		applyRemainders := func(ctx context.Context) error {
-			if in.OriginalSaleID == nil {
-				return nil
-			}
-			returned, err := s.repo.ReturnedQtyByLine(ctx, *in.OriginalSaleID)
-			if err != nil {
-				return err
-			}
-			refunded, err := s.repo.RefundedCentsByLine(ctx, *in.OriginalSaleID)
-			if err != nil {
-				return err
-			}
-			if taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *in.OriginalSaleID); err != nil {
-				return err
-			}
-			legacyCents, err := s.repo.LegacyRefundedCentsByProduct(ctx, *in.OriginalSaleID)
-			if err != nil {
-				return err
-			}
-			for i := range priced {
-				p := &priced[i]
-				if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
-					continue
-				}
-				sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
-				remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
-				// the legacy refund of the product lowers the bearer line's
-				// remaining money, so the rounded shares of later linked
-				// returns cannot pass what the sale took
-				if p.saleLine.ProductID != nil && legacyBearer[*p.saleLine.ProductID] == p.saleLine.ID {
-					remaining -= legacyCents[*p.saleLine.ProductID]
-				}
-				if back+int64(p.in.Quantity) >= sold {
-					p.lineTotal = remaining
-				} else if p.lineTotal > remaining {
-					p.lineTotal = remaining
-				}
-				if p.lineTotal < 0 {
-					p.lineTotal = 0
-				}
-			}
+	var taxAlreadyBack int64
+	applyRemainders := func(ctx context.Context) error {
+		if in.OriginalSaleID == nil {
 			return nil
 		}
+		returned, err := s.repo.ReturnedQtyByLine(ctx, *in.OriginalSaleID)
+		if err != nil {
+			return err
+		}
+		refunded, err := s.repo.RefundedCentsByLine(ctx, *in.OriginalSaleID)
+		if err != nil {
+			return err
+		}
+		if taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *in.OriginalSaleID); err != nil {
+			return err
+		}
+		legacyCents, err := s.repo.LegacyRefundedCentsByProduct(ctx, *in.OriginalSaleID)
+		if err != nil {
+			return err
+		}
+		for i := range priced {
+			p := &priced[i]
+			if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
+				continue
+			}
+			sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
+			remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
+			// the legacy refund of the product lowers the bearer line's
+			// remaining money, so the rounded shares of later linked
+			// returns cannot pass what the sale took
+			if p.saleLine.ProductID != nil && legacyBearer[*p.saleLine.ProductID] == p.saleLine.ID {
+				remaining -= legacyCents[*p.saleLine.ProductID]
+			}
+			if back+int64(p.in.Quantity) >= sold {
+				p.lineTotal = remaining
+			} else if p.lineTotal > remaining {
+				p.lineTotal = remaining
+			}
+			if p.lineTotal < 0 {
+				p.lineTotal = 0
+			}
+		}
+		return nil
+	}
 	if err := applyRemainders(ctx); err != nil {
 		return nil, err
 	}
@@ -389,6 +392,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	// fourth review P2-4): a return with no sale behind it has no card of
 	// the business to refund.
 	var refundTaken *gatewayRefund
+	var cardIntent *RefundIntent
+	var cardTenderCap int64
 	if in.RefundMethod == RefundCard {
 		if in.GatewayTxID != "" {
 			return nil, invalid("gateway_tx_id",
@@ -421,25 +426,50 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		if s.gateway == nil {
 			return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card")
 		}
-		already, err := s.repo.CardRefundedCents(ctx, *in.OriginalSaleID)
-		if err != nil {
+		// The claim, in one short transaction of its own (ADR 0005 section
+		// 11 and 14.2 C2-5: "The card gateway is called before the
+		// transaction and its result written inside it"): the sale row is
+		// locked, the caps are rechecked under it (a contender whose earlier
+		// check read stale must not refund past what the lock now counts),
+		// and the committed refund intent, unique per sale and tender while
+		// pending, refuses a concurrent card return of the same tender, or a
+		// void of the sale, with 409 before it reaches the terminal. No lock
+		// of the money transaction is held across the network call.
+		cardIntent = &RefundIntent{SaleID: *in.OriginalSaleID, TenderID: target.ID, GatewayTxID: *target.GatewayTxID,
+			AmountCents: -total, Act: "return"}
+		cardTenderCap = int64(target.AmountCents)
+		if err := s.inTx(ctx, func(ctx context.Context) error {
+			if err := s.repo.LockSale(ctx, *in.OriginalSaleID); err != nil {
+				return err
+			}
+			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
+				return err
+			}
+			already, err := s.repo.CardRefundedCents(ctx, *in.OriginalSaleID)
+			if err != nil {
+				return err
+			}
+			if -total > cardTenderCap-already {
+				return conflict("exceeds_card_tender",
+					fmt.Sprintf("the card tender kept %d cents less the %d already refunded to the card: refund the rest from the drawer",
+						cardTenderCap, already))
+			}
+			return s.repo.InsertRefundIntent(ctx, *cardIntent)
+		}); err != nil {
 			return nil, err
-		}
-		if -total > int64(target.AmountCents)-already {
-			return nil, conflict("exceeds_card_tender",
-				fmt.Sprintf("the card tender kept %d cents less the %d already refunded to the card: refund the rest from the drawer",
-					int64(target.AmountCents), already))
 		}
 		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, -total)
 		if err != nil {
+			s.failRefundIntent(ctx, *cardIntent)
 			return nil, fmt.Errorf("card refund failed: %w", err)
 		}
 		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
+			s.failRefundIntent(ctx, *cardIntent)
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
 		gatewayTxID := *target.GatewayTxID
 		refundTaken = &gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
-			amountCents: -total, act: "return", entity: *in.OriginalSaleID, actor: actor}
+			amountCents: -total, tenderID: target.ID, act: "return", entity: *in.OriginalSaleID, actor: actor}
 		// the refund row names the tender's own gateway transaction, so the
 		// money is reconcilable against the charge it came from
 		in.GatewayTxID = gatewayTxID
@@ -528,6 +558,25 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		} else if in.RefundMethod == RefundCash {
 			return conflict("no_open_session",
 				"a cash return pays out of the drawer: open the till session before refunding cash")
+		}
+		// The card cap, rechecked under the sale row lock (sixth review
+		// P2-1): the refund the gateway already took is bounded by what the
+		// tender kept less every card refund the sale's returns committed.
+		// A refusal here leaves the claim standing and the refund recorded,
+		// and the claim completes with the posting below it.
+		if in.RefundMethod == RefundCard && cardIntent != nil && refundTaken != nil {
+			already, err := s.repo.CardRefundedCents(ctx, cardIntent.SaleID)
+			if err != nil {
+				return err
+			}
+			if -total > int64(cardTenderCap)-already {
+				return conflict("exceeds_card_tender",
+					fmt.Sprintf("the card tender kept %d cents less the %d already refunded to the card: refund the rest from the drawer",
+						cardTenderCap, already))
+			}
+			if err := s.repo.CompleteRefundIntent(ctx, cardIntent.SaleID, cardIntent.TenderID, refundTaken.refundTxID); err != nil {
+				return err
+			}
 		}
 		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
 		if err != nil {

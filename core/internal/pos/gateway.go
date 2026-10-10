@@ -35,10 +35,25 @@ type gatewayRefund struct {
 	// refund's own id at the gateway.
 	gatewayTxID, refundTxID string
 	amountCents             int64
+	// tenderID is the tender the intent claimed (the money transaction marks
+	// that intent done as it posts).
+	tenderID uuid.UUID
 	// act names the refused act ("void" or "return") for the audit row.
 	act    string
 	entity uuid.UUID
 	actor  string
+}
+
+// failRefundIntent releases a refund intent whose gateway call failed, in
+// its own committed write: no money moved for it, so the tender may be
+// refunded again. A failing write is logged and left alone: the intent
+// stays PENDING, which refuses future refunds of the tender until it is
+// reconciled (the safe side).
+func (s *Service) failRefundIntent(ctx context.Context, intent RefundIntent) {
+	if err := s.repo.FailRefundIntent(ctx, intent.SaleID, intent.TenderID); err != nil {
+		s.logger.Error("CRITICAL: the failed refund intent was not released",
+			"act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID, "error", err)
+	}
 }
 
 // recordOrphanRefund writes, in its own committed write after the refused

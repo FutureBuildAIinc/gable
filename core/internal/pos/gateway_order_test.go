@@ -3,13 +3,15 @@
 
 package pos_test
 
-// The gateway order (ADR 0005 section 14.2 C2-5, first review P1-2, second
-// review P1-5): a refusal never moves money at the terminal (the completion
-// guards and reverses before it answers; the void guards under the sale row
-// lock, inside its transaction, so concurrent voids make exactly one
-// refund), and when a transaction still refuses a gateway success, the
-// charge is put back and the refund is recorded in a committed row of its
-// own carrying the gateway id.
+// The gateway order (ADR 0005 section 11 and section 14.2 C2-5, first
+// review P1-2, second review P1-5): a refusal never moves money at the
+// terminal (the completion guards and reverses before it answers; the void
+// and the card return claim their refunds through a committed intent unique
+// per sale and tender before they call the gateway, so concurrent claims of
+// one tender make exactly one refund), and when a transaction still refuses
+// a gateway success, the charge is put back and the refund is recorded in a
+// committed row of its own carrying the gateway id, beside its standing
+// intent.
 
 import (
 	"context"
@@ -454,8 +456,9 @@ func TestAReturnTheTransactionRefusesRecordsItsGatewayRefund(t *testing.T) {
 
 // RULE (third review P3-B): a card sale that has been returned against is
 // never voided, and the refusal moves no gateway money: the returns guard
-// runs inside the transaction before the refund call, so a double refund
-// (the return's and the void's) can never happen.
+// runs again inside the void's claim transaction, under the sale row lock,
+// before any terminal is reached, so a double refund (the return's and the
+// void's) can never happen.
 func TestAVoidAfterAReturnOfACardSaleMakesNoGatewayRefunds(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()}}
@@ -493,11 +496,12 @@ func TestAVoidAfterAReturnOfACardSaleMakesNoGatewayRefunds(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 
-	// The in-transaction guard is the one that holds under a race: a return
+	// The claim's guard is the one that holds under a race: a return
 	// committing after the void's pre-transaction check still refuses the
-	// void under the sale row lock, before any refund. The sale row is held
-	// so the void parks past its pre-checks, a return lands, then the row
-	// releases.
+	// void under the sale row lock, before the terminal. The sale row is
+	// held so the void parks on its claim's lock, a return lands, then the
+	// row releases; the void's claim then reads the sale returned against
+	// and refuses, having claimed and refunded nothing.
 	saleID2, body2 := f.saleOf("2", withToken(tender("card", 1198)))
 	racing := uuid.New()
 	ctx := context.Background()
@@ -505,6 +509,7 @@ func TestAVoidAfterAReturnOfACardSaleMakesNoGatewayRefunds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = park.Rollback(context.Background()) })
 	if _, err := park.Exec(ctx, `SELECT 1 FROM pos_transactions WHERE id = $1 FOR UPDATE`, saleID2); err != nil {
 		t.Fatal(err)
 	}
@@ -531,10 +536,16 @@ func TestAVoidAfterAReturnOfACardSaleMakesNoGatewayRefunds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if st := <-voidDone; st != http.StatusConflict {
-		t.Fatalf("void racing a committed return = %d, want 409 (the in-transaction guard)", st)
+		t.Fatalf("void racing a committed return = %d, want 409 (the claim's guard under the sale lock)", st)
 	}
 	if len(gw.refunds) != 1 {
 		t.Errorf("%d gateway refunds, want 1 (the first sale's return only; the racing void refunded nothing)", len(gw.refunds))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1`, saleID2); got != 0 {
+		t.Errorf("%d refund intents for the racing void, want 0 (it claimed nothing)", got)
+	}
+	if got := str(t, f.getSale(t, saleID2), "status"); got != "completed" {
+		t.Errorf("sale status = %q, want completed (the void was refused)", got)
 	}
 	f.assertARInvariants(t)
 }

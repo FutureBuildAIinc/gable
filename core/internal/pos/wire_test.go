@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/payment"
@@ -825,6 +826,13 @@ type fakeGateway struct {
 	// refund answers 502).
 	refundErrs []error
 	voidErrs   []error
+	// onRefund runs at the start of every Refund call, outside the fake's
+	// mutex: the tests park a refund in flight or probe the database while
+	// the terminal is on the wire.
+	onRefund func()
+	// mu guards every slice above: with the gateway called outside every
+	// transaction, contenders reach it concurrently.
+	mu sync.Mutex
 }
 
 func approvedCharge() *payment.GatewayResult {
@@ -838,6 +846,8 @@ func declinedCharge() *payment.GatewayResult {
 }
 
 func (g *fakeGateway) Charge(ctx context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.chargeCalls++
 	g.currency = append(g.currency, req.Currency)
 	if len(g.charges) == 0 {
@@ -853,6 +863,8 @@ func (g *fakeGateway) Capture(ctx context.Context, id string, cents int64) (*pay
 }
 
 func (g *fakeGateway) Void(ctx context.Context, id string) (*payment.GatewayResult, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.voids = append(g.voids, id)
 	var err error
 	if len(g.voidErrs) > 0 {
@@ -865,6 +877,11 @@ func (g *fakeGateway) Void(ctx context.Context, id string) (*payment.GatewayResu
 }
 
 func (g *fakeGateway) Refund(ctx context.Context, id string, cents int64) (*payment.GatewayResult, error) {
+	if g.onRefund != nil {
+		g.onRefund()
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.refunds = append(g.refunds, id)
 	var err error
 	if len(g.refundErrs) > 0 {

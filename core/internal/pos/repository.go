@@ -93,6 +93,17 @@ type Repository interface {
 	// credit exposure (section 11, step 1a: the same advisory lock the
 	// confirm and the fulfilment take).
 	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
+
+	// Refund intents (ADR 0005 section 11: the gateway is called before the
+	// transaction, so a committed claim is what serializes the card refunds
+	// of a tender). InsertRefundIntent writes one PENDING claim through the
+	// caller's transaction (a live claim of the same tender answers 409
+	// refund_in_flight before any gateway call); CompleteRefundIntent marks
+	// the claim done inside the money transaction that posts the refund;
+	// FailRefundIntent releases the claim of a gateway call that failed.
+	InsertRefundIntent(ctx context.Context, intent RefundIntent) error
+	CompleteRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error
+	FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error
 	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
@@ -689,6 +700,73 @@ func (r *PostgresRepository) LegacyRefundedCentsByProduct(ctx context.Context, s
 		out[id] = cents
 	}
 	return out, rows.Err()
+}
+
+// RefundIntent is one committed claim to refund a tender at the gateway: the
+// row that serializes the card refunds of a tender (sale id, tender id,
+// amount, state pending) because the gateway is called before the money
+// transaction (ADR 0005 section 11) and no row lock can span the call.
+type RefundIntent struct {
+	ID          uuid.UUID
+	SaleID      uuid.UUID
+	TenderID    uuid.UUID
+	GatewayTxID string
+	AmountCents int64
+	// Act names the act behind the refund ("void" or "return").
+	Act string
+}
+
+// InsertRefundIntent writes one PENDING refund intent through the caller's
+// transaction (the claim's own short transaction: never inside the money
+// transaction). The partial unique index (sale id, tender id) makes the
+// claim exclusive: a second void of the sale, or a card return of the same
+// tender, is refused here with 409 refund_in_flight before it ever reaches
+// the terminal. The insert's foreign keys take only FOR KEY SHARE, so the
+// claim never blocks behind a money transaction's sale row lock.
+func (r *PostgresRepository) InsertRefundIntent(ctx context.Context, intent RefundIntent) error {
+	if intent.ID == uuid.Nil {
+		intent.ID = uuid.New()
+	}
+	_, err := r.ex(ctx).Exec(ctx, `
+		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', NOW(), NOW())`,
+		intent.ID, intent.SaleID, intent.TenderID, intent.GatewayTxID, intent.AmountCents, intent.Act)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return conflict("refund_in_flight",
+				"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
+		}
+		return fmt.Errorf("failed to open the refund intent: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// CompleteRefundIntent marks the tender's live intent done, inside the money
+// transaction that posts the refund, carrying the gateway's own refund id.
+// A refund the transaction then refuses rolls this back with everything
+// else: the intent stays PENDING beside its orphaned refund row, recording
+// the money that moved.
+func (r *PostgresRepository) CompleteRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET state = 'DONE', refund_tx_id = NULLIF($3, ''), updated_at = NOW()
+		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID, refundTxID)
+	if err != nil {
+		return fmt.Errorf("failed to complete the refund intent: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// FailRefundIntent releases the tender's live intent after its gateway call
+// failed: no money moved for it, so the tender may be refunded again.
+func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET state = 'FAILED', updated_at = NOW()
+		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID)
+	if err != nil {
+		return fmt.Errorf("failed to release the refund intent: %w", mapWriteError(err))
+	}
+	return nil
 }
 
 // InvoiceLineCost is one invoice line's id and the unit cost the sale

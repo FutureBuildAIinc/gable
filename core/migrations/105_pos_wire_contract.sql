@@ -21,6 +21,11 @@
 --      return's, no new entry), linked through pos_returns.credit_memo_id.
 --   4  the walk-in customer: a customers row (account_number WALK-IN, name
 --      Walk-in) and system_settings pos.walk_in_customer_id, when absent.
+--   5  pos_refund_intents: the committed claim that serializes every card
+--      refund of a tender (one live intent per sale and tender), because the
+--      gateway is called before the transaction (ADR 0005 section 11) and
+--      the claim is what refuses a second void or card return before it
+--      reaches the terminal.
 --
 -- No migration writes a journal entry or a subledger row: history moves as
 -- data, and GET /api/v1/ar/reconciliation shows where it never agreed.
@@ -193,6 +198,31 @@ END $$;
 -- pos_tenders: the payment each tender became (and, from this item, is).
 ALTER TABLE pos_tenders ADD COLUMN IF NOT EXISTS payment_id UUID NULL REFERENCES payments (id);
 CREATE INDEX IF NOT EXISTS idx_pos_tenders_payment ON pos_tenders (payment_id);
+
+-- 5. The refund intents. ADR 0005 section 11 keeps the card gateway outside
+-- the money transaction ("The card gateway is called before the transaction
+-- and its result written inside it"), so nothing else serializes two refunds
+-- of one tender: the committed intent row does. One live (PENDING) intent
+-- per sale and tender; the money transaction marks it DONE when the refund
+-- posts, a failed gateway call marks it FAILED, and a refund whose
+-- transaction refused stays PENDING beside its orphaned refund row,
+-- refusing the next refund of the tender until it is reconciled.
+CREATE TABLE IF NOT EXISTS pos_refund_intents (
+    id UUID PRIMARY KEY,
+    sale_id UUID NOT NULL REFERENCES pos_transactions (id),
+    tender_id UUID NOT NULL REFERENCES pos_tenders (id),
+    gateway_tx_id TEXT NOT NULL,
+    amount NUMERIC(12, 2) NOT NULL,
+    act TEXT NOT NULL,
+    state TEXT NOT NULL DEFAULT 'PENDING',
+    refund_tx_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pos_refund_intents_state_check CHECK (state IN ('PENDING', 'DONE', 'FAILED')),
+    CONSTRAINT pos_refund_intents_act_check CHECK (act IN ('void', 'return'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_refund_intents_pending
+    ON pos_refund_intents (sale_id, tender_id) WHERE state = 'PENDING';
 
 -- The invoice line completion built from each sale line: a linked return
 -- reads its cost link from the stored id, never from a position (a removed

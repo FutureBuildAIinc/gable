@@ -212,6 +212,7 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM ar_applications WHERE invoice_id IN `+invs+` OR payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms, f.customerID)
 	exec(`DELETE FROM customer_transactions WHERE customer_id IN ($1, `+walkIn+`)`, f.customerID)
+	exec(`DELETE FROM pos_refund_intents`)
 	exec(`DELETE FROM pos_return_lines WHERE return_id IN (SELECT id FROM pos_returns)`)
 	exec(`DELETE FROM pos_returns`)
 	exec(`DELETE FROM pos_tenders WHERE transaction_id IN ` + sales)

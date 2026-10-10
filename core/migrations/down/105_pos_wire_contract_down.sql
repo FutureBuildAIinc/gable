@@ -62,7 +62,9 @@ ALTER TABLE pos_returns DROP COLUMN IF EXISTS currency;
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS revision;
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS updated_at;
 
--- 2. the lines and tenders.
+-- 2. the lines and tenders. The refund intents go first (their foreign keys
+-- block the tender and sale deletes).
+DROP TABLE IF EXISTS pos_refund_intents;
 DROP INDEX IF EXISTS idx_pos_tenders_payment;
 ALTER TABLE pos_tenders DROP COLUMN IF EXISTS payment_id;
 
