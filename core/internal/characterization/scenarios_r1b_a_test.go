@@ -271,7 +271,7 @@ func r1bACRMGroups() []groupDef {
 				path: "/api/v1/customers/{myCustomer}/activities?zzz=1"},
 			// The module's events, read back from the feed (ADR 0003).
 			{name: "crm.activity.events", method: "GET",
-				path: "/api/v1/events?types=activity.created,activity.updated,activity.deleted&limit=3", sortPrimaryArray: true, sortEnvelopeItems: true},
+				path: "/api/v1/events?types=activity.created,activity.updated,activity.deleted&limit=3", sortPrimaryArray: true},
 		},
 	}}
 }
@@ -300,7 +300,7 @@ func r1bALocationGroups() []groupDef {
 				},
 				extract: map[string]string{"a_bin": "/id"},
 			},
-			{name: "branch.tree", method: "GET", path: "/api/v1/branches/{branch}/tree", sortPrimaryArray: true, sortEnvelopeItems: true},
+			{name: "branch.tree", method: "GET", path: "/api/v1/branches/{branch}/tree", sortPrimaryArray: true},
 			{name: "branch.tree.empty_branch", method: "GET", path: "/api/v1/branches/" + r1bAMissingID + "/tree"},
 			{name: "branch.tree.bad_id", method: "GET", path: "/api/v1/branches/not-a-uuid/tree"},
 			{name: "location.update.without_revision", method: "PUT", path: "/api/v1/locations/{a_yard}",
@@ -354,7 +354,7 @@ func r1bAProductGroups() []groupDef {
 				},
 				extract: map[string]string{"a_product": "/id"},
 			},
-			{name: "product.reorder_alerts", method: "GET", path: "/api/v1/products/reorder-alerts", sortPrimaryArray: true, sortEnvelopeItems: true},
+			{name: "product.reorder_alerts", method: "GET", path: "/api/v1/products/reorder-alerts", sortPrimaryArray: true},
 			// Every write names the revision it read: create is 1, and each
 			// write below moves it by one.
 			{name: "product.dimensions.without_revision", method: "PATCH", path: "/api/v1/products/{a_product}/dimensions",
@@ -628,7 +628,7 @@ func r1bAAPGroups() []groupDef {
 				},
 			},
 			{name: "ap.invoice.get.after_settle", method: "GET", path: "/api/v1/ap/invoices/{a_apinvoice}"},
-			{name: "ap.payments.list_vendor", method: "GET", path: "/api/v1/ap/payments?vendor_id={vendor}", sortPrimaryArray: true, sortEnvelopeItems: true},
+			{name: "ap.payments.list_vendor", method: "GET", path: "/api/v1/ap/payments?vendor_id={vendor}", sortPrimaryArray: true},
 			{name: "ap.payment.create.bad_date", method: "POST", path: "/api/v1/ap/payments",
 				body: map[string]any{
 					"vendor_id": "{vendor}", "amount": 1.0, "method": "CHECK", "payment_date": "31/12/2000",
@@ -845,7 +845,7 @@ func r1bAEDIGroups() []groupDef {
 				},
 				extract: map[string]string{"a_partner": "/id"},
 			},
-			{name: "edi.partner.list", method: "GET", path: "/api/v1/edi/partners", sortPrimaryArray: true, sortEnvelopeItems: true},
+			{name: "edi.partner.list", method: "GET", path: "/api/v1/edi/partners", sortPrimaryArray: true},
 			{
 				name:   "edi.partner.update",
 				method: "PUT",
@@ -866,7 +866,7 @@ func r1bAEDIGroups() []groupDef {
 			{name: "edi.catalog.list_empty", method: "GET", path: "/api/v1/edi/partners/{a_partner}/catalog"},
 			{name: "edi.catalog.import_x12", method: "POST", path: "/api/v1/edi/partners/{a_partner}/import-catalog",
 				body: map[string]any{"x": x832}},
-			{name: "edi.catalog.list", method: "GET", path: "/api/v1/edi/partners/{a_partner}/catalog", sortPrimaryArray: true, sortEnvelopeItems: true},
+			{name: "edi.catalog.list", method: "GET", path: "/api/v1/edi/partners/{a_partner}/catalog", sortPrimaryArray: true},
 			{name: "edi.catalog.import_not_x12", method: "POST", path: "/api/v1/edi/partners/{a_partner}/import-catalog",
 				body: map[string]any{}},
 			{name: "edi.catalog.import_csv_unreadable", method: "POST",

@@ -151,7 +151,7 @@ func r1bDReportingGroups() []groupDef {
 			name: "reporting_builder",
 			steps: []stepDef{
 				{name: "reporting.builder.preview", method: "POST", path: "/api/v1/reporting/builder/preview",
-					body: map[string]any{"entity_type": "orders", "definition": ordersDef}, sortPrimaryArray: true, sortEnvelopeItems: true},
+					body: map[string]any{"entity_type": "orders", "definition": ordersDef}, sortPrimaryArray: true},
 				{name: "reporting.builder.preview.invalid_column", method: "POST", path: "/api/v1/reporting/builder/preview",
 					body: map[string]any{"entity_type": "orders", "definition": map[string]any{
 						"columns": []any{map[string]any{"field": "no_such_field", "label": "x"}}}}},
@@ -211,7 +211,7 @@ func r1bDReportingGroups() []groupDef {
 					path: "/api/v1/reporting/saved/{d_saved}", body: "nope"},
 				{name: "reporting.saved.get_after_update", method: "GET", path: "/api/v1/reporting/saved/{d_saved}"},
 				{name: "reporting.saved.run", method: "POST", path: "/api/v1/reporting/saved/{d_saved}/run",
-					sortPrimaryArray: true, sortEnvelopeItems: true},
+					sortPrimaryArray: true},
 				{name: "reporting.saved.run.not_found", method: "POST",
 					path: "/api/v1/reporting/saved/" + zeroUUID + "/run"},
 				{
@@ -596,7 +596,7 @@ func r1bDCategoryGroups() []groupDef {
 					path: "/api/v1/pricing/category-rules",
 					body: map[string]any{"target_type": "tier", "tier": "RETAIL", "category_id": "{d_ruleCat}", "rule_type": "nope"}},
 				{name: "pricing.category_rules.list", method: "GET",
-					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true, sortEnvelopeItems: true},
+					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true},
 				{name: "pricing.category_rules.list_by_tier", method: "GET",
 					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}&target_type=tier&tier=CONTRACTOR"},
 				{name: "pricing.category_rules.list_paginated", method: "GET",
@@ -657,7 +657,7 @@ func r1bDCategoryGroups() []groupDef {
 					path: "/api/v1/pricing/category-rules/bulk",
 					body: []map[string]any{{"target_type": "tier", "category_id": "{d_ruleCat}", "rule_type": "markup"}}},
 				{name: "pricing.category_rules.list_after_bulk", method: "GET",
-					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true, sortEnvelopeItems: true},
+					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true},
 				{name: "pricing.matrix", method: "GET", path: "/api/v1/pricing/matrix"},
 				{name: "pricing.resolve", method: "GET",
 					path: "/api/v1/pricing/resolve?product_id={product}&customer_id={myCustomer}"},
@@ -678,7 +678,7 @@ func r1bDCategoryGroups() []groupDef {
 				{name: "pricing.category_rules.bulk_delete.empty", method: "DELETE",
 					path: "/api/v1/pricing/category-rules/bulk", body: map[string]any{"ids": []any{}}},
 				{name: "pricing.category_rules.list_final", method: "GET",
-					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true, sortEnvelopeItems: true},
+					path: "/api/v1/pricing/category-rules?category_id={d_ruleCat}", sortPrimaryArray: true},
 			},
 		},
 	}

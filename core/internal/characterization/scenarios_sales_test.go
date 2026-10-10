@@ -483,7 +483,7 @@ func orderGroups() []groupDef {
 				headers: map[string]string{"If-Match": `"{myOrderRevision}"`},
 				body:    map[string]any{"to": "fulfilled", "reason": "not yet"}},
 			// The module's events, read back from the feed (ADR 0003).
-			{name: "order.events", method: "GET", path: "/api/v1/events?entity_type=order&limit=25", sortPrimaryArray: true, sortEnvelopeItems: true,
+			{name: "order.events", method: "GET", path: "/api/v1/events?entity_type=order&limit=25", sortPrimaryArray: true,
 				maskBody: true},
 			// Owner override of the pre-ship gate on a clear order: the
 			// write succeeds and records the event even without a block.

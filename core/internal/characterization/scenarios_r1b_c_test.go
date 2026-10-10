@@ -431,7 +431,7 @@ func r1bCMaskedGroups() []groupDef {
 		{
 			name: "purchase_order_list",
 			steps: []stepDef{
-				{name: "purchase_order.list", method: "GET", path: "/api/v1/purchase-orders", sortPrimaryArray: true, sortEnvelopeItems: true, maskFields: vendorMask},
+				{name: "purchase_order.list", method: "GET", path: "/api/v1/purchase-orders", sortPrimaryArray: true, maskFields: vendorMask},
 			},
 		},
 	}

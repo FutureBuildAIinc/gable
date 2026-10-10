@@ -937,6 +937,7 @@
   {
     "name": "pos.transaction.list",
     "sort_primary_array": true,
+    "sort_envelope_items": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/pos/transactions?register_id=REG-01"
@@ -1944,6 +1945,7 @@
   {
     "name": "pos.transaction.list.after",
     "sort_primary_array": true,
+    "sort_envelope_items": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/pos/transactions?register_id=REG-01"
@@ -2026,6 +2028,7 @@
   {
     "name": "pos.events",
     "sort_primary_array": true,
+    "sort_envelope_items": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/events?types=pos_transaction.completed,pos_transaction.voided&limit=50"

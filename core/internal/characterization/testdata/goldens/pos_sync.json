@@ -225,6 +225,7 @@
   {
     "name": "pos.transaction.list.after_sync",
     "sort_primary_array": true,
+    "sort_envelope_items": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/pos/transactions?register_id=REG-01"
