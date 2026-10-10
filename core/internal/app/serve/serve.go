@@ -35,6 +35,7 @@ import (
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
@@ -43,10 +44,12 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/notification"
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/partner"
 	"github.com/gablelbm/gable/internal/payment"
@@ -65,7 +68,6 @@ import (
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
-	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
@@ -110,7 +112,7 @@ func (v machineKeyValidator) ValidateKey(ctx context.Context, rawKey string) (mi
 		}
 		return middleware.KeyPrincipal{}, err
 	}
-	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
+	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes, BranchID: k.BranchID}, nil
 }
 
 // Run starts the HTTP API server and blocks until SIGINT or SIGTERM, then
@@ -336,7 +338,8 @@ func Run() {
 	// last statement.
 	quoteSvc := quote.NewService(quoteRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db)
+		WithTxRunner(db).
+		WithAudit(auditLog)
 	wall.quotes(mux, quoteSvc)
 
 	// GL Module (Full General Ledger)
@@ -471,10 +474,113 @@ func Run() {
 	})
 	wall.orders(mux, orderSvc)
 	// The charge code master (ADR 0005 section 2.5), contract born.
-	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).
-		RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"), scoped("admin", "owner", "finance"))
+	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
 	// Quote conversion creates the order in one act (ADR 0005 section 5.8).
 	quoteSvc.WithOrderCreator(orderSvc)
+
+	// The drafts core (ADR 0007): each kind registers its seven literal
+	// routes behind its own roles; the feed hub is the per process wake
+	// signal its streams wait on, stopped with the server
+	// (RegisterOnShutdown below). It sits after the modules it promotes
+	// for, both kinds' services being built (quotes above, orders just
+	// now).
+	quoteKind := quote.NewDraftKind(quoteSvc)
+	orderKind := order.NewDraftKind(orderSvc)
+	draftsRepo := drafts.NewRepository(db)
+	draftsRegistry, derr := drafts.NewRegistry(quoteKind, orderKind)
+	if derr != nil {
+		logger.Error("draft kind registration failed", "error", derr)
+		os.Exit(1)
+	}
+	draftHub := drafts.NewHub(draftsRepo, cfg.DraftFeedPoll, logger)
+	draftsSvc := drafts.NewService(draftsRepo, draftsRegistry).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog).
+		WithBranchGuard(wall.guard).
+		WithFeed(draftHub)
+	feedSettings := drafts.FeedSettings{
+		Heartbeat: cfg.DraftFeedHeartbeat, Poll: cfg.DraftFeedPoll,
+		Batch: cfg.DraftFeedBatch, WriteTimeout: cfg.DraftFeedWriteTimeout,
+		MaxLifetime: cfg.DraftFeedMaxLifetime, Retention: cfg.DraftEventsRetention,
+		MaxStreamsPerPrincipal: cfg.DraftFeedMaxStreamsPerPrincipal, MaxStreams: cfg.DraftFeedMaxStreams,
+	}
+	draftsHandler := drafts.NewHandler(draftsSvc).WithFeedHandler(
+		drafts.NewFeedHandler(draftsSvc, draftsRepo, draftHub, feedSettings,
+			func(ctx context.Context, keyID uuid.UUID) (bool, error) {
+				return techAdminSvc.KeyActive(ctx, keyID)
+			}))
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
+	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, scoped(orderKind.Roles()...))
+
+	// The link resolver (ADR 0007 section 8): one literal route per entity
+	// and per draft kind, each behind the module's own read roles composed
+	// with the branch middleware, resolving through the module's own read
+	// so a record the caller cannot see is a 404. The declarative table is
+	// links.Table, the only copy; cmd/links writes api/links.json from it.
+	linksHandler := links.NewHandler(links.Settings{
+		PublicURL:        cfg.PublicURL,
+		AgentURLTemplate: cfg.AgentURLTemplate,
+	},
+		links.Entity{Row: rowOrNone(links.RowFor("quotes", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			q, err := quoteSvc.GetQuoteByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return q.ID, q.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("orders", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			o, err := orderSvc.GetOrderByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return o.ID, o.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("invoices", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			inv, err := invoiceSvc.GetInvoiceByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return inv.ID, inv.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("customers", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			c, err := customerSvc.Get(ctx, uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return c.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("products", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			p, err := productSvc.GetProduct(ctx, uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return p.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("quotes", true)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			d, err := draftsSvc.Get(ctx, "quotes", uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return d.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("orders", true)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			d, err := draftsSvc.Get(ctx, "orders", uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return d.ID, "", nil
+		}},
+	)
+	links.RegisterAll(mux, linksHandler, links.Guards{
+		Quotes:      scoped("admin", "owner", "sales"),
+		Orders:      scoped("admin", "owner", "sales", "finance"),
+		Invoices:    scoped("admin", "owner", "sales", "finance"),
+		Customers:   scoped("admin", "owner", "sales"),
+		Products:    scoped("admin", "owner", "sales", "warehouse"),
+		DraftQuotes: scoped(quoteKind.Roles()...),
+		DraftOrders: scoped(orderKind.Roles()...),
+	})
 
 	// Notification Module
 	emailSvc := notification.NewLogEmailService(logger)
@@ -951,58 +1057,19 @@ func Run() {
 	// Prometheus metrics endpoint (public — scrape target)
 	mux.Handle("GET /metrics", promhttp.Handler())
 
-	// 6. Wrap Middleware (outermost first)
-	var finalHandler http.Handler = mux
-
-	// Cache-Control headers (innermost — runs after auth, before response)
-	finalHandler = middleware.CacheControl(finalHandler)
-
-	// Idempotency keys (POST/PUT with Idempotency-Key), one layer per surface
-	// where the principal that scopes a claim is established. The global
-	// layer here covers the ERP API only: it runs inside auth (the JWT
-	// subject is the principal) and inside the request size limit (the
-	// fingerprint read honours it), and it skips /api/portal/v1/ and
-	// /api/integration/ because those surfaces carry their own layer inside
-	// their auth chains (see the portal and integration wiring below), so
-	// nothing runs twice. Claims live in Postgres (migration 087), so a
-	// replay survives a restart.
-	finalHandler = middleware.Idempotency(db)(finalHandler)
-
-	// Request size limit (10MB default)
-	finalHandler = middleware.MaxRequestSize(10 << 20)(finalHandler)
-
-	// Auth (JWT verification; a Bearer machine key dispatches to the
-	// machine-key core inside it). In AUTH_MODE=dev the JWT layer is off but
-	// machine keys still authenticate and scope check exactly as behind it.
-	if authMw != nil {
-		finalHandler = authMw.Handler(finalHandler)
-	} else {
-		finalHandler = machineKeyAuth.Handler(finalHandler)
-	}
-
-	// Actor identity (agent headers → context for audit attribution).
-	// Outside auth on purpose: this middleware wraps auth, so it runs before
-	// it and the context it builds flows through auth to the handler; it
-	// records who acted, it never grants anything.
-	finalHandler = actor.Middleware(finalHandler)
-
-	// CORS — must be outside auth so OPTIONS preflight is handled before auth
-	finalHandler = middleware.CORSMiddleware(finalHandler)
-
-	// Rate limiting (RATE_LIMIT_PER_MINUTE requests per IP, default 120)
-	finalHandler = middleware.RateLimit(cfg.RateLimitPerMinute, cfg.TrustedProxies)(finalHandler)
-
-	// Panic recovery
-	finalHandler = middleware.Recovery(logger)(finalHandler)
-
-	// Request ID generation
-	finalHandler = middleware.RequestID(finalHandler)
-
-	// Prometheus HTTP metrics
-	finalHandler = metrics.HTTPMetrics(finalHandler)
-
-	// Access logging (outermost — captures full request lifecycle)
-	finalHandler = RequestLogger(logger, cfg.TrustedProxies, finalHandler)
+	// 6. Wrap Middleware (outermost first). The chain order is a single
+	// function (ChainDeps) so tests for any layer can build the real order
+	// without starting the server.
+	finalHandler := buildChain(ChainDeps{
+		Mux:            mux,
+		DB:             db,
+		Logger:         logger,
+		AuditLog:       auditLog,
+		AuthMw:         authMw,
+		MachineKeyAuth: machineKeyAuth,
+		RateLimitRPM:   cfg.RateLimitPerMinute,
+		TrustedProxies: cfg.TrustedProxies,
+	})
 
 	// 7. Start Server with Graceful Shutdown
 	srv := &http.Server{
@@ -1014,6 +1081,13 @@ func Run() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+
+	// The feed hub ends with the server: Shutdown is not held by
+	// connections that are never idle (ADR 0007 section 3.4).
+	srv.RegisterOnShutdown(func() {
+		draftHub.Stop()
+		draftHub.Nudge()
+	})
 
 	// Run server in goroutine
 	go func() {
@@ -1235,4 +1309,13 @@ func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid
 		return basePrice, nil
 	}
 	return float64(pricing.CentsOf(sp.Price)) / 100, nil
+}
+
+// rowOrNone unwraps RowFor's lookup; the table and the registrations sit
+// in the same change, so a miss is a wiring bug that fails loudly at boot.
+func rowOrNone(r links.Row, ok bool) links.Row {
+	if !ok {
+		panic("links: the declarative table names no such row")
+	}
+	return r
 }

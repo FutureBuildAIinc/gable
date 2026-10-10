@@ -1695,6 +1695,222 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/drafts/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List order drafts
+         * @description The cursor list envelope, newest first on created_at then id. Filters status, subject_id and created_by_kind; total appears only under include=total. Drafts are shared, not owned.
+         */
+        get: operations["ordersDraftList"];
+        put?: never;
+        /**
+         * Create an order draft
+         * @description A create draft (subject_id null) carries the order create request as its payload; an edit draft names the draft order it edits and may assert subject_revision. The payload is the module's own body, never a file and never a revision of its own; the branch is fixed at create.
+         */
+        post: operations["ordersDraftCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The order drafts change feed
+         * @description A text/event-stream of the order draft change rows, never payloads, with the ready, draft, cursor, reset and reauth events of the quotes feed; the cursor resumes through Last-Event-ID (which wins when both are present) or the cursor parameter.
+         */
+        get: operations["ordersDraftFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an order draft
+         * @description The draft with its payload and computed validation; the ETag is the revision.
+         */
+        get: operations["ordersDraftGet"];
+        /**
+         * Replace an order draft's payload
+         * @description The whole-payload compare and swap on the revision precondition; any status but open is 409 with the draft_not_open blocker, and subject_revision moves only forward within the subject's bounds.
+         */
+        put: operations["ordersDraftReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard or reopen an order draft
+         * @description open to discarded and discarded to open, on the revision precondition; promoted is terminal.
+         */
+        post: operations["ordersDraftTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/{id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote an order draft, in one transaction
+         * @description The confirm: the revision the committer read becomes an order born in status draft with its SO- number (order.created, then draft.promoted; the confirm with its credit, PO and contact checks stays an order transition), or an edit draft's payload becomes the draft order's update (order.updated, then draft.promoted). A failure rolls the whole transaction back, the draft stays open at the same revision, and the module's own error is carried out (order_not_draft on a subject that left draft, subject_stale added when the subject moved).
+         */
+        post: operations["ordersDraftPromote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List quote drafts
+         * @description The cursor list envelope, newest first on created_at then id (never updated_at: a keyset on a column that moves would repeat or skip rows). Filters status (open, promoted, discarded), subject_id (the open proposals on one quote) and created_by_kind; total appears only under include=total. Drafts are shared, not owned: any caller the kind admits sees every draft of the branch wall it reads through.
+         */
+        get: operations["quotesDraftList"];
+        put?: never;
+        /**
+         * Create a quote draft
+         * @description A create draft (subject_id null) carries the quote create request as its payload; an edit draft names the quote it edits and may assert subject_revision (a mismatch is 409 stale_revision with the subject_stale blocker). The payload is the module's own body, never a file and never a revision of its own; the branch is fixed at create. validation is computed from the payload alone on every read, so an unfinished draft saves.
+         */
+        post: operations["quotesDraftCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The quote drafts change feed
+         * @description A text/event-stream of the draft change rows, never payloads: event ready opens with the head cursor, event draft carries each write's summary with its by actor, event cursor advances a filtered stream past rows its filters exclude, event reset tells a resuming client its cursor aged out behind the purge, and event reauth closes the stream at the token's exp, the lifetime bound or a revoked key. The cursor resumes through Last-Event-ID (which wins when both are present) or the cursor parameter; any other parameter is a 400 before the stream opens.
+         */
+        get: operations["quotesDraftFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a quote draft
+         * @description The draft with its payload and its computed validation; the ETag is the revision. A draft outside the caller's branch wall is a 404.
+         */
+        get: operations["quotesDraftGet"];
+        /**
+         * Replace a quote draft's payload
+         * @description The whole-payload compare and swap: If-Match or the body revision is required (428 without), a moved revision is 409 stale_revision, and any status but open is 409 with the draft_not_open blocker (an edit is not a transition). subject_revision may move forward, never past the subject's current revision.
+         */
+        put: operations["quotesDraftReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard or reopen a quote draft
+         * @description open to discarded and discarded to open, on the revision precondition; promoted is terminal (its retry is told already_promoted) and anything else is an invalid state transition. Discard is reversible by reopen; the audit trail keeps who did what.
+         */
+        post: operations["quotesDraftTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/{id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote a quote draft, in one transaction
+         * @description The confirm: exactly the revision the committer read becomes a quote (428 without a precondition, 409 stale_revision on a moved one, 409 already_promoted on a keyless retry, 409 draft_discarded), born in status draft with its Q- number and quote.created, beside draft.promoted. The body carries nothing but the revision: what is committed is what was reviewed. A failure rolls the whole transaction back and the draft stays open at the same revision, with the module's own error carried out (payload.-prefixed fields on a 400, subject_stale added when the subject moved).
+         */
+        post: operations["quotesDraftPromote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/edi/partners": {
         parameters: {
             query?: never;
@@ -2679,6 +2895,146 @@ export interface paths {
          * @description Uses the open credit of an open or partial credit memo on invoices of the same customer and currency. No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application. The precondition is the credit memo's revision. Refused with 409 exceeds_open_credit, exceeds_open_amount, invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and invoice.partial or invoice.paid per invoice.
          */
         post: operations["creditMemoApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a quote to every frontend's record URL
+         * @description The quote's links: the desk record path (absolute when GABLE_PUBLIC_URL is set, origin relative otherwise), the front door's open form (which signs a person in and then opens the record), gable:// for the shell, a null portal until it has record screens, and the agent slot from GABLE_AGENT_URL_TEMPLATE (null when unset). A record the caller cannot see is the same 404 a missing one gets.
+         */
+        get: operations["linksQuoteResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve an order to every frontend's record URL
+         * @description The order's links; the {id} slot is a UUID or an order number such as SO-000123.
+         */
+        get: operations["linksOrderResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/invoices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve an invoice to every frontend's record URL
+         * @description The invoice's links; the {id} slot is a UUID or an invoice number such as IN-000123.
+         */
+        get: operations["linksInvoiceResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/customers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a customer to every frontend's record URL
+         * @description The customer's links (the desk's accounts area); the {id} slot is a UUID (customers carry no document number, so number is null and the segment is the UUID).
+         */
+        get: operations["linksCustomerResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/products/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a product to every frontend's record URL
+         * @description The product's links (the desk's inventory area); the {id} slot is a UUID and number is null.
+         */
+        get: operations["linksProductResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/drafts/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a quote draft to every frontend's record URL
+         * @description The draft's links (the desk's quote drafts editor); the {id} slot is the draft's UUID (a draft has no number). The draft link needs the confirm verbs, not the module read scope: proposals are unfinished work an existing read key must not start reading.
+         */
+        get: operations["linksQuoteDraftResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/drafts/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve an order draft to every frontend's record URL
+         * @description The draft's links (the desk's order drafts editor); the {id} slot is the draft's UUID.
+         */
+        get: operations["linksOrderDraftResolve"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5688,7 +6044,11 @@ export interface paths {
          * @description Streams the stored original upload of an AI sourced quote. The stored content type is echoed; the filename in Content-Disposition is sanitized. A quote with no stored file, or no such quote, is a 404.
          */
         get: operations["quoteDownloadOriginalFile"];
-        put?: never;
+        /**
+         * Attach the AI parse's original file after promotion
+         * @description The raw file bytes with their content type, the same 5 MiB bound the create applies (413 above it): the quote draft never carries the file (every autosave re-sends the payload and every feed subscriber re-reads it), so the parse flow attaches it here, by the committer, right after a promotion. Accepted only while the quote is in status draft (else 409 with the quote_not_draft blocker), on the revision precondition; it replaces any file already stored, moves the quote's revision by one, returns the quote with its new ETag, and writes the quote.file_attached audit row and no outbox event.
+         */
+        put: operations["quoteAttachFile"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6638,6 +6998,11 @@ export interface components {
             name: string;
             prefix: string;
             scopes: string[];
+            /**
+             * Format: uuid
+             * @description The branch a branch bound key is pinned to (ADR 0007 section 5.5), set at mint and never edited; null is today's unbound behaviour.
+             */
+            branch_id: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -7999,6 +8364,145 @@ export interface components {
              */
             photo_type: "signature" | "site" | "damage";
         };
+        /**
+         * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
+         * @enum {string}
+         */
+        OrdersDraftStatus: "open" | "promoted" | "discarded";
+        /** @description What pkg/actor resolved for the request (see the quotes kind's actor). */
+        OrdersDraftActor: {
+            /** @enum {string} */
+            kind?: "user" | "key" | "agent" | "anonymous";
+            id?: string | null;
+            acting_as?: string | null;
+            tool?: string | null;
+        };
+        /** @description The order draft resource: one wire type from every draft route. The summary form (the list) is the same object without payload and without validation.problems. */
+        OrdersDraftDocument: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            module: "orders";
+            status: components["schemas"]["OrdersDraftStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            subject_id?: string | null;
+            /** Format: int64 */
+            subject_revision?: number | null;
+            /** @description The order create or update request as JSON. */
+            payload: Record<string, never>;
+            validation: {
+                ready: boolean;
+                problems?: components["schemas"]["WireErrorDetail"][];
+            };
+            created_by: components["schemas"]["OrdersDraftActor"];
+            updated_by: components["schemas"]["OrdersDraftActor"];
+            promoted?: {
+                /** Format: uuid */
+                entity_id?: string;
+                number?: string | null;
+                at?: string;
+                by?: components["schemas"]["OrdersDraftActor"];
+            } | null;
+            discarded?: {
+                at?: string;
+                by?: components["schemas"]["OrdersDraftActor"];
+            } | null;
+            created_at: string;
+            updated_at: string;
+        };
+        OrdersDraftCreateRequest: {
+            /** @description The order create (or, with subject_id, update) request as JSON; at most 256 KiB. */
+            payload: Record<string, never>;
+            /** Format: uuid */
+            subject_id?: string;
+            /** Format: int64 */
+            subject_revision?: number;
+        };
+        /**
+         * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
+         * @enum {string}
+         */
+        QuotesDraftStatus: "open" | "promoted" | "discarded";
+        /** @description What pkg/actor resolved for the request: the user's subject for an agent acting with a person's session, the key's id for a keyed writer; acting_as and tool carry the agent marker and tool name. */
+        QuotesDraftActor: {
+            /** @enum {string} */
+            kind?: "user" | "key" | "agent" | "anonymous";
+            id?: string | null;
+            acting_as?: string | null;
+            tool?: string | null;
+        };
+        /** @description Computed on every read and write from the payload alone: ready is true when the kind's parser would accept the payload as a create (or update) request, and problems is exactly that 400's details with payload.-prefixed fields. It tells an editor what still blocks a promotion without refusing the save. */
+        QuotesDraftValidation: {
+            ready: boolean;
+            problems?: components["schemas"]["WireErrorDetail"][];
+        };
+        /** @description Set once, at promotion, with the entity's id and document number. */
+        QuotesDraftPromoted: {
+            /** Format: uuid */
+            entity_id: string;
+            number?: string | null;
+            at: string;
+            by?: components["schemas"]["QuotesDraftActor"];
+        };
+        /** @description The draft resource: one wire type from every draft route, promotion included. Optional fields are present as null (ADR 0001 section 12). The summary form (the list) is the same object without payload and without validation.problems. */
+        QuotesDraftDocument: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            module: "quotes";
+            status: components["schemas"]["QuotesDraftStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            subject_id?: string | null;
+            /** Format: int64 */
+            subject_revision?: number | null;
+            /** @description The module's own request body as JSON. */
+            payload: Record<string, never>;
+            validation: components["schemas"]["QuotesDraftValidation"];
+            created_by: components["schemas"]["QuotesDraftActor"];
+            updated_by: components["schemas"]["QuotesDraftActor"];
+            promoted?: components["schemas"]["QuotesDraftPromoted"] | null;
+            discarded?: {
+                at?: string;
+                by?: components["schemas"]["QuotesDraftActor"];
+            } | null;
+            created_at: string;
+            updated_at: string;
+        };
+        QuotesDraftCreateRequest: {
+            /** @description The quote create request (or, with subject_id, the update request): never a revision, never a file; at most 256 KiB of JSON. */
+            payload: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The quote an edit draft edits; null on a create draft.
+             */
+            subject_id?: string;
+            /**
+             * Format: int64
+             * @description The entity revision the edit was built on; asserted at create (a mismatch is 409 subject_stale), taken from the subject when omitted, moved forward by a bounded rebase on PUT.
+             */
+            subject_revision?: number;
+        };
+        QuotesDraftReplaceRequest: {
+            payload: Record<string, never>;
+            /**
+             * Format: int64
+             * @description The body form of the precondition, beside If-Match.
+             */
+            revision?: number;
+            /**
+             * Format: int64
+             * @description The bounded rebase, never past the subject's current revision.
+             */
+            subject_revision?: number;
+        };
         /** @description A trading partner. Used as the create and update request body and as the response body; on a request the id and timestamps are ignored or overwritten by the server. */
         EdiTradingPartner: {
             /** Format: uuid */
@@ -9307,6 +9811,28 @@ export interface components {
             next_cursor: string | null;
             limit: number;
         };
+        /** @description Who the record is, and every frontend's URL for it. The record segment in the links is the document number when the entity has one, otherwise the UUID; draft links use the draft's UUID. Optional slots are present as null (ADR 0001 section 12). */
+        LinkAnswer: {
+            /** @description The entity name (quote, order, invoice, customer, product, draft). */
+            entity: string;
+            /** @description The module, the path segment under /api/v1. */
+            module: string;
+            /** Format: uuid */
+            id: string;
+            number: string | null;
+            links: {
+                /** @description The desk record route; absolute when GABLE_PUBLIC_URL is configured, otherwise a path relative to the deployment's origin. */
+                desk: string;
+                /** @description The front door's /?open=<record path> form, which signs a person in and then opens the record. */
+                front_door: string;
+                /** @description Null until the portal has a record screen for the entity. */
+                portal: string | null;
+                /** @description The gable:// deep link the Tauri shell parses. */
+                app: string;
+                /** @description The agent UI's record URL from GABLE_AGENT_URL_TEMPLATE ({module}, {entity}, {id}, {number} placeholders); null when the template is unset, every deployment today. */
+                agent: string | null;
+            };
+        };
         /** @enum {string} */
         LocationType: "branch" | "zone" | "aisle" | "rack" | "shelf" | "bin" | "yard";
         /** @description A node of the hierarchy; the type is lowercase on the wire and the optional metadata is present with null (ADR 0001 sections 6 and 12). */
@@ -9392,7 +9918,7 @@ export interface components {
             is_home?: boolean;
             timezone?: string;
         };
-        BranchSummaryList: components["schemas"]["BranchSummary"][] | null;
+        BranchSummaryList: components["schemas"]["BranchSummary"][];
         UserLocation: {
             user_sub: string;
             /** Format: uuid */
@@ -9402,7 +9928,7 @@ export interface components {
             granted_at: string;
             granted_by?: string;
         };
-        UserLocationList: components["schemas"]["UserLocation"][] | null;
+        UserLocationList: components["schemas"]["UserLocation"][];
         UserBranchGrant: {
             /** Format: uuid */
             branch_id: string;
@@ -9412,7 +9938,7 @@ export interface components {
             /** Format: uuid */
             branch_id: string;
         };
-        StringList: string[] | null;
+        StringList: string[];
         /** @enum {string} */
         MatchingStatus: "PENDING" | "MATCHED" | "PARTIAL" | "EXCEPTION";
         MatchingResult: {
@@ -17401,6 +17927,578 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    ordersDraftList: {
+        parameters: {
+            query?: {
+                status?: string;
+                subject_id?: string;
+                created_by_kind?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list envelope of order draft summaries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrdersDraftCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The open draft; Location names it and the ETag is its revision. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftFeed: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                draft_id?: string;
+                subject_id?: string;
+            };
+            header?: {
+                "Last-Event-ID"?: string;
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description This principal holds its draft feed stream limit, answered before the stream opens. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    ordersDraftGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftReplace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrdersDraftCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft at its new revision. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "discarded" | "open";
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The draft in its new status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftPromote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description An edit draft's promotion; the body is the promoted draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            /** @description A create draft's promotion; Location is the order's URL. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftList: {
+        parameters: {
+            query?: {
+                /** @description A lowercase status (open, promoted, discarded). */
+                status?: string;
+                subject_id?: string;
+                /** @description One of user, key, agent, anonymous. */
+                created_by_kind?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list envelope of quote draft summaries (no payload, validation.ready only). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotesDraftCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The open draft; Location names it and the ETag is its revision. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftFeed: {
+        parameters: {
+            query?: {
+                /** @description The cursor this feed minted (an SSE id); no cursor means from now. */
+                cursor?: string;
+                draft_id?: string;
+                subject_id?: string;
+            };
+            header?: {
+                /** @description What an SSE client sends on reconnect; it wins over the cursor parameter. */
+                "Last-Event-ID"?: string;
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stream (Cache-Control no-store, X-Accel-Buffering no). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description This principal holds its draft feed stream limit, answered before the stream opens. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    quotesDraftGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft; the ETag is its revision. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftReplace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotesDraftReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft at its new revision; the ETag moved with it. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "discarded" | "open";
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The draft in its new status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftPromote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description An edit draft's promotion; the body is the promoted draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            /** @description A create draft's promotion; Location is the quote's URL and the body is the promoted draft with promoted filled. An edit draft's promotion answers 200. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     ediPartnerList: {
         parameters: {
             query?: never;
@@ -19254,6 +20352,217 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    linksQuoteResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description A UUID or a quote number such as Q-000123. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksOrderResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksInvoiceResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksCustomerResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksProductResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksQuoteDraftResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksOrderDraftResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     locationList: {
         parameters: {
             query?: {
@@ -19630,7 +20939,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The grants, a bare array that is null when none exist. */
+            /** @description The grants, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19654,7 +20963,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The branch summaries, a bare array that is null when none exist. */
+            /** @description The branch summaries, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -19677,7 +20986,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The subject strings, a bare array that is null when none exist. */
+            /** @description The subject strings, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -25332,6 +26641,46 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    quoteAttachFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description The quote with its new revision and ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

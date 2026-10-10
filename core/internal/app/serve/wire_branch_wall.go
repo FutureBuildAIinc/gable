@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
@@ -44,6 +45,13 @@ func newBranchWall(db *database.DB) *branchWall {
 		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
 	}
 	return w
+}
+
+// chargeCodes mounts the charge code master: every role that prices a line
+// reads it, and only admin, owner and finance write it (a code carries its
+// revenue account).
+func (w *branchWall) chargeCodes(mux *http.ServeMux, svc *chargecode.Service) {
+	chargecode.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"), w.scoped("admin", "owner", "finance"))
 }
 
 // locations mounts the location routes behind the branch middleware: the

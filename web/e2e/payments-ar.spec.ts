@@ -54,6 +54,7 @@ async function billedInvoice(
   customer: { id: string; name: string },
   extras: { job_id?: string; ship_to_id?: string } = {},
 ): Promise<{ id: string; number: string; total_cents: number }> {
+  const tried: string[] = [];
   for (const product of await stockedProducts(request)) {
     const created = await request.post('/api/v1/orders', {
       data: {
@@ -68,6 +69,7 @@ async function billedInvoice(
     expect(confirmed.status(), await confirmed.text()).toBe(200);
     const confirmedOrder = await confirmed.json();
     if (confirmedOrder.status !== 'confirmed' || confirmedOrder.lines[0].quantity_allocated !== '10') {
+      tried.push(`${product.sku}: ${confirmedOrder.status}, ${confirmedOrder.lines[0].quantity_allocated} allocated`);
       await request.post(`/api/v1/orders/${order.id}/transitions`, { data: { to: 'cancelled', revision: confirmedOrder.revision, reason: 'e2e: not enough stock here' } });
       continue;
     }
@@ -79,7 +81,7 @@ async function billedInvoice(
     const id = fulfilled.headers()['location'].replace('/api/v1/invoices/', '');
     return await (await request.get(`/api/v1/invoices/${id}`)).json();
   }
-  throw new Error('no product could be fully allocated for ten units');
+  throw new Error(`no product could be confirmed and fully allocated for ten units (${tried.join('; ') || 'no stocked product'})`);
 }
 
 test.describe('Payments, unapplied cash and AR', () => {
@@ -154,7 +156,14 @@ test.describe('Payments, unapplied cash and AR', () => {
     await signIn(page, 'Playwright Aging');
 
     // A customer with at least two quoted jobs (the seed draws fresh ids every
-    // run, so the customer is discovered through its quotes, never hardcoded).
+    // run, so the customer is discovered through its quotes, never hardcoded),
+    // with room under its credit limit: the seed parks one customer over its
+    // limit for the credit hold demo, and an order for it goes on hold rather
+    // than confirm. Quote dates are random, so without this check that
+    // customer is sometimes the first one found. The room is counted as the
+    // order's credit check counts it (ADR 0005 5.3): the receivable plus the
+    // customer's live orders, here their whole totals, which is never less
+    // than their unbilled remainder.
     const quotes = ((await (await request.get('/api/v1/quotes?limit=200')).json()) as { items: { customer_id: string; customer_name?: string; job_id: string | null }[] }).items;
     const jobsByCustomer = new Map<string, Set<string>>();
     for (const q of quotes) {
@@ -164,10 +173,18 @@ test.describe('Payments, unapplied cash and AR', () => {
     }
     let kelbrook = '';
     for (const [customer, jobs] of jobsByCustomer) {
-        if (jobs.size >= 2) { kelbrook = customer; break; }
+        if (jobs.size < 2) continue;
+        const c = (await (await request.get(`/api/v1/customers/${customer}`)).json()) as { credit_limit_cents: number | null; balance_cents: number };
+        if (c.credit_limit_cents === null) { kelbrook = customer; break; }
+        let live = 0;
+        for (const status of ['confirmed', 'backordered', 'on_hold']) {
+          const page = (await (await request.get(`/api/v1/orders?customer_id=${customer}&status=${status}&limit=200`)).json()) as { items: { total_cents: number }[] };
+          live += page.items.reduce((n, o) => n + o.total_cents, 0);
+        }
+        if (c.credit_limit_cents - c.balance_cents - live >= 2_000_000) { kelbrook = customer; break; }
     }
     if (!kelbrook) {
-        test.skip(true, 'the seed holds no customer with two jobs to age by');
+        test.skip(true, 'the seed holds no customer with two jobs and credit room to age by');
         return;
     }
     const jobIds = [...jobsByCustomer.get(kelbrook)!];

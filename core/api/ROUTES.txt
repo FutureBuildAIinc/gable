@@ -124,10 +124,10 @@ GET	/api/v1/branches/{id}	internal/location	h.GetBranch
 PUT	/api/v1/branches/{id}	internal/location	h.UpdateBranch
 GET	/api/v1/branches/{id}/tree	internal/location	tree
 GET	/api/v1/branches/{id}/users	internal/location	h.ListBranchUsers
-GET	/api/v1/charge-codes	internal/chargecode	h.HandleList
-POST	/api/v1/charge-codes	internal/chargecode	h.HandleCreate
-GET	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleGet
-PUT	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleUpdate
+GET	/api/v1/charge-codes	internal/chargecode	wrap(read, h.HandleList)
+POST	/api/v1/charge-codes	internal/chargecode	wrap(write, h.HandleCreate)
+GET	/api/v1/charge-codes/{id}	internal/chargecode	wrap(read, h.HandleGet)
+PUT	/api/v1/charge-codes/{id}	internal/chargecode	wrap(write, h.HandleUpdate)
 POST	/api/v1/configurator/build-sku	internal/configurator	h.handleBuildSKU
 GET	/api/v1/configurator/options	internal/configurator	h.handleGetOptions
 GET	/api/v1/configurator/presets	internal/configurator	h.handleGetPresets
@@ -188,6 +188,20 @@ PUT	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleUpdateVehicle
 POST	/api/v1/delivery/vehicles/{id}/photo	internal/delivery	h.HandleUploadVehiclePhoto
 GET	/api/v1/documents/print/invoice/{id}	internal/document	h.HandlePrintInvoice
 GET	/api/v1/documents/print/pickticket/{id}	internal/document	h.HandlePrintPickTicket
+GET	/api/v1/drafts/orders	internal/order	k
+POST	/api/v1/drafts/orders	internal/order	k
+GET	/api/v1/drafts/orders/feed	internal/order	k
+GET	/api/v1/drafts/orders/{id}	internal/order	k
+PUT	/api/v1/drafts/orders/{id}	internal/order	k
+POST	/api/v1/drafts/orders/{id}/promote	internal/order	k
+POST	/api/v1/drafts/orders/{id}/transitions	internal/order	k
+GET	/api/v1/drafts/quotes	internal/quote	k
+POST	/api/v1/drafts/quotes	internal/quote	k
+GET	/api/v1/drafts/quotes/feed	internal/quote	k
+GET	/api/v1/drafts/quotes/{id}	internal/quote	k
+PUT	/api/v1/drafts/quotes/{id}	internal/quote	k
+POST	/api/v1/drafts/quotes/{id}/promote	internal/quote	k
+POST	/api/v1/drafts/quotes/{id}/transitions	internal/quote	k
 GET	/api/v1/edi/partners	internal/edi	h.ListPartners
 POST	/api/v1/edi/partners	internal/edi	h.CreatePartner
 DELETE	/api/v1/edi/partners/{id}	internal/edi	h.DeletePartner
@@ -225,6 +239,13 @@ POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
 GET	/api/v1/invoices/{id}/payments	internal/invoice	h.HandleApplications
 POST	/api/v1/invoices/{id}/transitions	internal/invoice	h.HandleTransition
 POST	/api/v1/invoices/{id}/write-offs	internal/invoice	h.HandleWriteOff
+GET	/api/v1/links/customers/{id}	internal/links	Guarded(guard, h.resolveFor("customers", false))
+GET	/api/v1/links/drafts/orders/{id}	internal/links	Guarded(guard, h.resolveFor("orders", true))
+GET	/api/v1/links/drafts/quotes/{id}	internal/links	Guarded(guard, h.resolveFor("quotes", true))
+GET	/api/v1/links/invoices/{id}	internal/links	Guarded(guard, h.resolveFor("invoices", false))
+GET	/api/v1/links/orders/{id}	internal/links	Guarded(guard, h.resolveFor("orders", false))
+GET	/api/v1/links/products/{id}	internal/links	Guarded(guard, h.resolveFor("products", false))
+GET	/api/v1/links/quotes/{id}	internal/links	Guarded(guard, h.resolveFor("quotes", false))
 GET	/api/v1/locations	internal/location	list
 POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation
@@ -358,6 +379,7 @@ POST	/api/v1/quotes/{id}/exposure/escalate-now	internal/pricing	h.HandleEscalate
 POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
+PUT	/api/v1/quotes/{id}/file	internal/quote	h.HandleAttachFile
 POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport
 POST	/api/v1/reporting/builder/preview	internal/reporting	h.HandleBuilderPreview

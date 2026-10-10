@@ -546,7 +546,7 @@ func TestWire_FinerAdminScopesOnStaff(t *testing.T) {
 
 	mint := func(t *testing.T, scopes ...string) string {
 		t.Helper()
-		raw, key, err := keySvc.GenerateKey(context.Background(), "staff scope key", scopes)
+		raw, key, err := keySvc.GenerateKey(context.Background(), "staff scope key", scopes, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -635,7 +635,7 @@ func TestWire_GrantByAKeyAttributesToTheKey(t *testing.T) {
 	id, _ := created.body["id"].(string)
 	t.Cleanup(func() { dropStaff(t, db, uuid.MustParse(id)) })
 
-	raw, key, err := keySvc.GenerateKey(context.Background(), "granting key", []string{"admin:staff"})
+	raw, key, err := keySvc.GenerateKey(context.Background(), "granting key", []string{"admin:staff"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +803,7 @@ func TestWire_MachineKeyRefusalWritesAuditRow(t *testing.T) {
 	srv := httptest.NewServer(auth.Handler(mux))
 	defer srv.Close()
 
-	raw, key, err := keySvc.GenerateKey(context.Background(), "staff refusal key", []string{"admin:settings"})
+	raw, key, err := keySvc.GenerateKey(context.Background(), "staff refusal key", []string{"admin:settings"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

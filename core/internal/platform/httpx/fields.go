@@ -165,6 +165,30 @@ func DecodeJSON(r *http.Request, dst any) error {
 	return nil
 }
 
+// DecodeStrictJSON is DecodeJSON over raw bytes: one JSON value, decoded
+// into dst with unknown fields and wrong types refused as a 400 naming the
+// field. The drafts core uses it for a payload it holds as JSON (ADR 0007
+// section 2.3), where the structural check must answer before anything is
+// written.
+func DecodeStrictJSON(data []byte, dst any) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return BadRequest("payload is required")
+	}
+	dec := json.NewDecoder(strings.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return decodeFailure(err)
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return BadRequest("the JSON must be a single object")
+		}
+		return decodeFailure(err)
+	}
+	return nil
+}
+
 func decodeFailure(err error) error {
 	var tooLarge *http.MaxBytesError
 	var syntax *json.SyntaxError

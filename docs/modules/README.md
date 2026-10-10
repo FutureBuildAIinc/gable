@@ -51,6 +51,9 @@ The pages:
 | Millwork | [millwork.md](millwork.md) | The millwork option catalog. | C5-1b. |
 | Payments, deposits and AR | [payments.md](payments.md) | The payment, the application, the AR subledger, the aging, the statement, the reconciliation, the credit memo applications and refunds. | C2-4. |
 | Units | [units.md](units.md) | The unit catalogue, the conversion pair, the product unit set, the inexact refusal, the quote tally, the migration 099 report. | C3-2A-units. |
+| Charge codes | [charge-codes.md](charge-codes.md) | The fee master, the revenue account snapshot on a line, the seeded `FREIGHT`, `FUEL`, `RESTOCK`, `ADJUST`. | C2-2a. |
+| Locations and branches | [locations.md](locations.md) | The location and branch master, the branch tree, the user branch grants, and the branch wall on the by id reads and the location list. | C3-1. |
+| Events feed | [events.md](events.md) | The `events_outbox` cursor read API (item R1-12), the `events.position` ordering guarantee, the `next_cursor` exception, the type filter, the event vocabulary by module on `refactor/v1`. | R1-12, R1-12b. |
 | Tech admin | [tech-admin.md](tech-admin.md) | Machine API keys, the AI and routing settings, the apps catalog and toggles, and the finer admin scopes of ADR 0009. | C5-1a. |
 | Staff roster and module grants | [staff.md](staff.md) | The dealer roster the integrations surface authenticates against, the per staff module grants, and the global module kill switches. | C5-1a. |
 | Governance (RFCs) | [governance.md](governance.md) | The RFC drafting, review and status surface; the operator-installed governance app. | C5-1a. |

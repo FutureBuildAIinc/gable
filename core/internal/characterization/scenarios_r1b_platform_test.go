@@ -117,7 +117,7 @@ func r1bPlatformGroups() []groupDef {
 				path:   "/api/v1/admin/keys",
 				body:   map[string]any{"name": "golden-coarse-key", "scopes": []any{"admin:read"}},
 				extract: map[string]string{
-					"coarseKey": "/api_key",
+					"coarseKey":   "/api_key",
 					"coarseKeyID": "/key/id",
 				},
 			},

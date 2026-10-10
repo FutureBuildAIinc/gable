@@ -147,7 +147,7 @@
           "details": [
             {
               "field": "id",
-              "message": "must be a UUID"
+              "message": "must be a UUID or a quote number such as Q-000123"
             }
           ],
           "message": "invalid quote id"

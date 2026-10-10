@@ -183,7 +183,7 @@ func governanceGroups() []groupDef {
 			{name: "governance.rfc.transition", method: "POST", path: "/api/v1/governance/rfcs/{myRFC}/transitions",
 				body: map[string]any{"to": "review", "revision": 2}},
 			{
-				name: "governance.rfc.events",
+				name:   "governance.rfc.events",
 				method: "GET",
 				path:   "/api/v1/events?types=rfc.created,rfc.updated,rfc.review&limit=50",
 			},
@@ -267,10 +267,10 @@ func techadminGroups() []groupDef {
 		steps: []stepDef{
 			{name: "techadmin.keys.list", method: "GET", path: "/api/v1/admin/keys"},
 			{
-				name:   "techadmin.key.create",
-				method: "POST",
-				path:   "/api/v1/admin/keys",
-				body:   map[string]any{"name": "golden-key", "scopes": []any{"quotes:read"}},
+				name:    "techadmin.key.create",
+				method:  "POST",
+				path:    "/api/v1/admin/keys",
+				body:    map[string]any{"name": "golden-key", "scopes": []any{"quotes:read"}},
 				extract: map[string]string{"myKeyID": "/key/id"},
 			},
 			{name: "techadmin.keys.list.after_create", method: "GET", path: "/api/v1/admin/keys?limit=2"},
