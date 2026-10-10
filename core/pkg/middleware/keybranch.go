@@ -96,8 +96,21 @@ func (w *KeyBranchWall) BodyBranch() func(http.Handler) http.Handler {
 }
 
 // errRefused tells wrap the request is refused for a bound key rather than
-// failed: a body the wall cannot read as one complete JSON value.
+// failed: a body the wall cannot read as one complete JSON value. It is
+// exported as ErrBodyRefused for resolvers built outside this package.
 var errRefused = errors.New("key branch wall: refused")
+
+// ErrBodyRefused is the error DecodeOneJSONBody answers for a body that is
+// not exactly one complete JSON value.
+var ErrBodyRefused = errRefused
+
+// DecodeOneJSONBody reads the whole body, restores it for the handler, and
+// decodes it into v only when it is exactly one complete JSON value. It
+// answers ErrBodyRefused for anything else, so a resolver that hands it back
+// refuses a bound key the body the handler would have read only in part.
+func DecodeOneJSONBody(r *http.Request, v any) error {
+	return decodeOneJSON(r, v)
+}
 
 // decodeOneJSON reads the whole body, restores it for the handler, and decodes
 // it into v only when it is exactly one complete JSON value. Anything else
@@ -173,6 +186,138 @@ func (w *KeyBranchWall) RefuseBound(reason string) func(http.Handler) http.Handl
 		// refused whatever the request carries.
 		return uuid.Nil, true, nil
 	})
+}
+
+// CustomerBranch wraps a handler whose request writes one or more customers'
+// data: the tax exemption writes and the customer priced rules. A branch
+// bound key may reach it only while every customer the request names holds
+// the pin among that customer's branches (customer_branches), the same
+// visibility the customer module holds a caller's branch context to;
+// anything else is the 403 refusal with its key.branch_refused row, the
+// details naming customer_id. A request that names no customer passes
+// through: what it writes is not scoped to one. A resolver failure answers
+// 500 rather than failing open, and a resolver may hand back
+// DecodeOneJSONBody's ErrBodyRefused to refuse a body the handler would have
+// read only in part.
+func (w *KeyBranchWall) CustomerBranch(customersOf func(ctx context.Context, r *http.Request) ([]uuid.UUID, error)) func(http.Handler) http.Handler {
+	return w.wrap("customer_id", "", func(ctx context.Context, r *http.Request) (uuid.UUID, bool, error) {
+		customers, err := customersOf(ctx, r)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		if len(customers) == 0 {
+			return uuid.Nil, false, nil
+		}
+		ok, err := w.customersHoldPin(ctx, customers)
+		if err != nil {
+			return uuid.Nil, false, err
+		}
+		if !ok {
+			// A customer outside the pin: the nil branch the wrap refuses.
+			return uuid.Nil, true, nil
+		}
+		return uuid.Nil, false, nil
+	})
+}
+
+// CustomerBodyBranch is CustomerBranch over a JSON body that names the
+// customer in customer_id: one object or an array of them (a bulk body),
+// decoded whole exactly as the handler's own decoder would have to.
+func (w *KeyBranchWall) CustomerBodyBranch() func(http.Handler) http.Handler {
+	return w.CustomerBranch(func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		return bodyCustomers(r)
+	})
+}
+
+// CustomerRowBranch is CustomerBranch over the customer the row the path
+// names belongs to. customerOf resolves that customer; a row that does not
+// exist or that belongs to no customer names nothing and passes to the
+// handler's own answer.
+func (w *KeyBranchWall) CustomerRowBranch(customerOf func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)) func(http.Handler) http.Handler {
+	return w.CustomerBranch(func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		raw := r.PathValue("id")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		customer, err := customerOf(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if customer == nil {
+			return nil, nil
+		}
+		return []uuid.UUID{*customer}, nil
+	})
+}
+
+// bodyCustomers reads the customer_ids a body names, one object or an array
+// of them. An id that does not parse names nothing the wall can hold, and
+// the handler's own validation answers it.
+func bodyCustomers(r *http.Request) ([]uuid.UUID, error) {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("key branch wall: read body: %w", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	collect := func(id string, out []uuid.UUID) []uuid.UUID {
+		if parsed, err := uuid.Parse(id); err == nil {
+			out = append(out, parsed)
+		}
+		return out
+	}
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
+		var many []struct {
+			CustomerID string `json:"customer_id"`
+		}
+		if err := json.Unmarshal(raw, &many); err != nil {
+			return nil, errRefused
+		}
+		out := make([]uuid.UUID, 0, len(many))
+		for _, m := range many {
+			out = collect(m.CustomerID, out)
+		}
+		return out, nil
+	}
+	var one struct {
+		CustomerID string `json:"customer_id"`
+	}
+	if err := json.Unmarshal(raw, &one); err != nil {
+		return nil, errRefused
+	}
+	if one.CustomerID == "" {
+		return nil, nil
+	}
+	return collect(one.CustomerID, nil), nil
+}
+
+// customersHoldPin answers whether every customer's branch set
+// (customer_branches) holds the pin. A customer with no row there holds no
+// branch at all, so a bound key is refused it.
+func (w *KeyBranchWall) customersHoldPin(ctx context.Context, customers []uuid.UUID) (bool, error) {
+	if w.db == nil {
+		return false, errors.New("key branch wall: no database for the customer branch lookup")
+	}
+	pin, _ := KeyBranchPin(ctx)
+	distinct := make(map[uuid.UUID]struct{}, len(customers))
+	for _, c := range customers {
+		distinct[c] = struct{}{}
+	}
+	ids := make([]uuid.UUID, 0, len(distinct))
+	for c := range distinct {
+		ids = append(ids, c)
+	}
+	var holding int
+	err := w.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COUNT(DISTINCT customer_id) FROM customer_branches WHERE branch_id = $1 AND customer_id = ANY($2)`,
+		pin, ids).Scan(&holding)
+	if err != nil {
+		return false, fmt.Errorf("key branch wall: customer branch lookup: %w", err)
+	}
+	return holding == len(ids), nil
 }
 
 // wrap builds the wrapper: no pin passes (a user, an unbound key), the pin's

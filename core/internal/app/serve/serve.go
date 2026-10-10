@@ -373,7 +373,7 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, "admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -384,7 +384,7 @@ func Run() {
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
 		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
-		catPricingHandler.RegisterCategoryRoutes(mux, middleware.RequireRole("admin", "owner"))
+		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")
 	} else {
@@ -602,7 +602,7 @@ func Run() {
 	}
 	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)

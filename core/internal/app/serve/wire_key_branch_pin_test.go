@@ -221,14 +221,14 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 	customerSvc := customer.NewService(customer.NewRepository(db))
 	productSvc := product.NewService(product.NewRepository(db))
 	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+		RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
 	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db), customerSvc, productSvc).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, "admin", "owner"))
 	pricing.NewCategoryHandler(
 		pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db).
 			WithOutbox(outbox.NewWriter(db, "")).
 			WithAudit(pricingAuditAdapter{l: audit.NewLogger(db)}),
-		customerSvc).RegisterCategoryRoutes(mux, middleware.RequireRole("admin", "owner"))
+		customerSvc).RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	mint := func(name string, branch *uuid.UUID) string {
@@ -927,9 +927,10 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 		f.allow(t, who, "PUT", "/api/v1/pricing/category-rules/"+id.String(), putBody, putHdr(id), http.StatusOK)
 	}
 
+	_, beforeCat := f.rulesOf(t, f.custB)
 	f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/"+f.catRuleB.String(), "", putHdr(f.catRuleB))
-	if _, n := f.rulesOf(t, f.custB); n != 1 {
-		t.Errorf("refused category rule delete changed the foreign customer's rows: %d", n)
+	if _, n := f.rulesOf(t, f.custB); n != beforeCat {
+		t.Errorf("refused category rule delete changed the foreign customer's rows: %d then %d", beforeCat, n)
 	}
 	deadA := ruleFor(f.custID)
 	f.allow(t, "bound", "DELETE", "/api/v1/pricing/category-rules/"+deadA.String(), "", putHdr(deadA), http.StatusNoContent)
@@ -940,10 +941,11 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 
 	// Bulk: every element's customer must hold the pin, and a bulk delete's
 	// rows belong to their customers.
+	_, beforeBulk := f.rulesOf(t, f.custB)
 	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules/bulk",
 		"["+categoryRuleBody(f.custID, f.freshCategory(t))+","+categoryRuleBody(f.custB, f.freshCategory(t))+"]", nil)
-	if _, n := f.rulesOf(t, f.custB); n != 1 {
-		t.Errorf("refused bulk upsert wrote the foreign customer's rows: %d", n)
+	if _, n := f.rulesOf(t, f.custB); n != beforeBulk {
+		t.Errorf("refused bulk upsert wrote the foreign customer's rows: %d then %d", beforeBulk, n)
 	}
 	f.allow(t, "bound", "POST", "/api/v1/pricing/category-rules/bulk",
 		"["+categoryRuleBody(f.custID, f.freshCategory(t))+"]", nil, http.StatusOK)
@@ -951,10 +953,11 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 		f.allow(t, who, "POST", "/api/v1/pricing/category-rules/bulk",
 			"["+categoryRuleBody(f.custB, f.freshCategory(t))+"]", nil, http.StatusOK)
 	}
+	_, beforeBulkDel := f.rulesOf(t, f.custB)
 	f.refuseForeign(t, "DELETE", "/api/v1/pricing/category-rules/bulk",
 		fmt.Sprintf(`{"ids":[%q]}`, f.catRuleB.String()), nil)
-	if _, n := f.rulesOf(t, f.custB); n != 1 {
-		t.Errorf("refused bulk delete changed the foreign customer's rows: %d", n)
+	if _, n := f.rulesOf(t, f.custB); n != beforeBulkDel {
+		t.Errorf("refused bulk delete changed the foreign customer's rows: %d then %d", beforeBulkDel, n)
 	}
 	for _, who := range []string{"unbound", "user"} {
 		id := ruleFor(f.custB)
