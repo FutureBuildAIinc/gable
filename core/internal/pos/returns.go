@@ -151,11 +151,21 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 	}
 	// First pass: fill each line from the sale line it names, so the product
-	// lookup covers the resolved products too.
+	// lookup covers the resolved products too. One request names one sale
+	// line at most once (sixth review P2-2, fifth review P2-2): each
+	// duplicate would price its own rounded share against the same earlier
+	// total, refunding a cent more per duplicate than the sale took; the
+	// quantity belongs in one line.
+	seenLine := map[uuid.UUID]bool{}
 	resolved := make([]ReturnLineIn, len(in.Lines))
 	for i := range in.Lines {
 		rl := in.Lines[i]
 		if rl.SaleLineID != nil {
+			if seenLine[*rl.SaleLineID] {
+				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i),
+					"names the sale line twice: return it once, with the whole quantity in one line")
+			}
+			seenLine[*rl.SaleLineID] = true
 			src, ok := byID[*rl.SaleLineID]
 			if !ok {
 				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i), "names no line of the original sale")

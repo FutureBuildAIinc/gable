@@ -80,6 +80,104 @@ func TestALegacyReturnBearsOnTheFirstLineOfItsProduct(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE (sixth review P2-2, fifth review P2-2): one request naming the same
+// sale line several times cannot escape the remainder rule: each duplicate
+// would take its own rounded share against the same earlier total, refunding
+// a cent more per duplicate than the sale took. The second naming is a 400
+// naming the field.
+func TestARequestNamingOneSaleLineTwiceIsRefused(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	// 3 at 5.50 less one cent: line 1649, tax 146, total 1795
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, map[string]any{"product_id": f.productID.String(), "quantity": "3",
+		"discount_cents": 1, "discount_reason": "penny off"}); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, tender("cash", 1795)); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"refund_method": "cash", "reason": "split across lines", "lines": []map[string]any{
+			{"line_id": lineID, "quantity": "1", "restock": true},
+			{"line_id": lineID, "quantity": "1", "restock": false},
+			{"line_id": lineID, "quantity": "1", "restock": false},
+		},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("a request naming one sale line three times = %d, want 400: %s", r.status, r.raw)
+	}
+	_, _, fields := errorOf(t, r)
+	if len(fields) == 0 || fields[0] != "lines[1].line_id" {
+		t.Errorf("fields = %v, want lines[1].line_id (the second naming)", fields)
+	}
+	// nothing moved: the drawer keeps the sale, the stock keeps its 97
+	if got := f.accountBalance("1010"); got != 1795 {
+		t.Errorf("cash balance = %d, want 1795 (the refused request paid nothing)", got)
+	}
+	if got := f.stock(); got != "97.0000/0.0000" {
+		t.Errorf("stock = %s, want 97", got)
+	}
+	f.assertARInvariants(t)
+	// the same quantity in one line is the return that was meant
+	if r := f.returnOn(t, saleID, lineID, "3"); r.status != http.StatusCreated {
+		t.Fatalf("the whole line in one naming = %d: %s", r.status, r.raw)
+	}
+	if got := f.accountBalance("1010"); got != 0 {
+		t.Errorf("cash balance = %d, want 0 (the sale in, the whole line out)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (fifth review P3-1, sixth review P2-2): the remainder rule's
+// completing branch is provable alone: on a line whose rounded per unit
+// shares sum below it (3 units totalling 1648 round to 549 each), the return
+// that completes the line takes the remainder (550, not its own 549), so
+// repeated partial returns refund exactly what the sale took. With the
+// completing branch removed this test goes red on the under refund.
+func TestTheReturnThatCompletesALineTakesTheRemainderExactly(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	// 3 at 5.50 less two cents: line 1648, tax 146, total 1794
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, map[string]any{"product_id": f.productID.String(), "quantity": "3",
+		"discount_cents": 2, "discount_reason": "two off"}); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, tender("cash", 1794)); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// two returns of one unit: the rounded shares 549 and 549
+	for i, want := range []int64{598, 598} {
+		r := f.returnOn(t, saleID, lineID, "1")
+		if r.status != http.StatusCreated {
+			t.Fatalf("partial return %d = %d: %s", i+1, r.status, r.raw)
+		}
+		if got := num(t, r.body, "total_cents"); got != -want {
+			t.Errorf("partial return %d total = %d, want %d", i+1, got, -want)
+		}
+		f.assertARInvariants(t)
+	}
+	// the completing return takes the remainder: 1648 less the 1098 the
+	// earlier returns took is 550, a cent above its own rounded share
+	r := f.returnOn(t, saleID, lineID, "1")
+	if r.status != http.StatusCreated {
+		t.Fatalf("the completing return = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "subtotal_cents"); got != -550 {
+		t.Errorf("the completing return subtotal = %d, want -550 (the line's remainder, not the rounded share)", got)
+	}
+	if got := f.accountBalance("1010"); got != 0 {
+		t.Errorf("cash balance = %d, want 0 (1794 in, exactly 1794 out)", got)
+	}
+	f.assertARInvariants(t)
+}
+
 // RULE (sixth review P1-1): the legacy cents lower the bearer line's
 // remaining money, so the return that would round a share past the line
 // (0.9 of a 3 unit line whose earlier returns rounded up) is clamped, and
