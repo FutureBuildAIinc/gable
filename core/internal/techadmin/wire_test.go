@@ -264,6 +264,78 @@ func TestWire_CreateKeyValidation(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0007 sections 5.3 and 5.5): the mint refuses a scope outside
+// the grant grammar (a typo, a delegating segment, a confirm verb on a
+// module with no draft kind), naming scopes[i]; and a mint carrying
+// branch_id pins the key to that branch, which reads back.
+func TestWire_MintScopeGrammarAndBranchBinding(t *testing.T) {
+	f := newFixture(t)
+	r := f.do("POST", "/api/v1/admin/keys", map[string]any{"name": "grammar", "scopes": []string{
+		"quotes:typo", "drafts:read", "customers:propose", "orders:commit"}})
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("status = %d: %s", r.status, r.raw)
+	}
+	code, _, details := errorOf(t, r)
+	if code != "validation_failed" {
+		t.Errorf("code = %q", code)
+	}
+	fields := map[string]bool{}
+	for _, d := range details {
+		if fld, ok := d["field"].(string); ok {
+			fields[fld] = true
+		}
+	}
+	for _, want := range []string{"scopes[0]", "scopes[1]", "scopes[2]"} {
+		if !fields[want] {
+			t.Errorf("details = %v, want %s named", details, want)
+		}
+	}
+	// orders:commit is grantable now (the orders kind registered); only the
+	// first three are named.
+	if fields["scopes[3]"] {
+		t.Errorf("details = %v, orders:commit is grantable (the kind registered) and must not be named", details)
+	}
+
+	// A mint carrying branch_id: the key reads it back and none other.
+	branch := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, branch, "MW-"+branch.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, branch)
+	})
+	r = f.do("POST", "/api/v1/admin/keys", map[string]any{
+		"name": "bound", "scopes": []string{"quotes:propose"}, "branch_id": branch.String()})
+	if r.status != http.StatusCreated {
+		t.Fatalf("bound mint = %d: %s", r.status, r.raw)
+	}
+	k, _ := r.body["key"].(map[string]any)
+	if k["branch_id"] != branch.String() {
+		t.Errorf("the minted key's branch_id = %v, want the named branch", k["branch_id"])
+	}
+
+	// A branch that does not exist is a 400 naming branch_id.
+	r = f.do("POST", "/api/v1/admin/keys", map[string]any{
+		"name": "nowhere", "scopes": []string{"quotes:propose"}, "branch_id": uuid.NewString()})
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("mint to no branch = %d: %s", r.status, r.raw)
+	}
+	code, _, details = errorOf(t, r)
+	if code != "validation_failed" {
+		t.Errorf("code = %q", code)
+	}
+	named := false
+	for _, d := range details {
+		if fld, _ := d["field"].(string); fld == "branch_id" {
+			named = true
+		}
+	}
+	if !named {
+		t.Errorf("details = %v, want branch_id named", details)
+	}
+}
+
 // RULE (ADR 0001 section 9): the same create twice with one idempotency key
 // replays the stored response and makes one row and one event; the same key
 // with another body is 422 idempotency_key_reused.
