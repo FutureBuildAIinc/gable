@@ -43,9 +43,17 @@ type fixture struct {
 	sku        string
 	hub        *drafts.Hub
 	draftsRepo *drafts.PostgresRepository
+	svc        *drafts.Service
 }
 
 func newFixture(t *testing.T, db *database.DB) *fixture {
+	return newFixtureWithAudit(t, db, nil)
+}
+
+// newFixtureWithAudit is newFixture with the drafts service's audit sink
+// replaced (the rollback tests fault it before the handler is built, which
+// is the only time the swap reaches the wire).
+func newFixtureWithAudit(t *testing.T, db *database.DB, sink drafts.AuditSink) *fixture {
 	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
@@ -76,16 +84,21 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		t.Fatal(err)
 	}
 	hub := drafts.NewHub(draftsRepo, 50*time.Millisecond, nil)
+	var auditor drafts.AuditSink = audit.NewLogger(db)
+	if sink != nil {
+		auditor = sink
+	}
 	svc := drafts.NewService(draftsRepo, registry).
 		WithOutbox(outbox.NewWriter(db, "")).
 		WithTxRunner(db).
-		WithAudit(audit.NewLogger(db)).
+		WithAudit(auditor).
 		WithBranchGuard(middleware.NewBranchGuard(db)).
 		WithFeed(hub)
 	handler := drafts.NewHandler(svc).WithFeedHandler(drafts.NewFeedHandler(svc, draftsRepo, hub,
 		fastFeedSettings(), nil))
 	f.hub = hub
 	f.draftsRepo = draftsRepo
+	f.svc = svc
 
 	// The guard is the branch middleware, as serve mounts it (the kill
 	// switch off in the seeded database makes every caller an
@@ -278,6 +291,12 @@ func (f *fixture) auditRows(entityID string) []map[string]any {
 		}
 		if actorID != nil {
 			row["actor_id"] = *actorID
+		}
+		if actingAs != nil {
+			row["acting_as"] = *actingAs
+		}
+		if tool != nil {
+			row["tool"] = *tool
 		}
 		var ch map[string]any
 		_ = json.Unmarshal(changes, &ch)
