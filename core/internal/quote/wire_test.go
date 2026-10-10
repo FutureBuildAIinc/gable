@@ -174,6 +174,37 @@ func (f *fixture) create(lines ...map[string]any) resp {
 	return r
 }
 
+// ownBranch creates a branch with the given default tax rate, names it after
+// the short id, and registers a cleanup that removes the rows the quotes and
+// converted orders it owns reference it in dependency order, reporting any
+// failure with t.Errorf rather than swallowing it (the FKs are not cascading,
+// so deleting in the wrong order hides the failure).
+func (f *fixture) ownBranch(rate string) uuid.UUID {
+	f.t.Helper()
+	branchID := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO locations (id, type, code, default_tax_rate) VALUES ($1, 'BRANCH', $2, $3::numeric)`,
+		branchID, "WIRE-OW-"+branchID.String()[:8], rate); err != nil {
+		f.t.Fatalf("seed branch: %v", err)
+	}
+	f.t.Cleanup(func() {
+		ctx := context.Background()
+		for _, q := range []string{
+			`DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
+			`DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
+			`DELETE FROM orders WHERE branch_id = $1`,
+			`DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE branch_id = $1)`,
+			`DELETE FROM quotes WHERE branch_id = $1`,
+			`DELETE FROM locations WHERE id = $1`,
+		} {
+			if _, err := f.db.Pool.Exec(ctx, q, branchID); err != nil {
+				f.t.Errorf("cleanup %q: %v", q, err)
+			}
+		}
+	})
+	return branchID
+}
+
 func str(t *testing.T, m map[string]any, key string) string {
 	t.Helper()
 	s, ok := m[key].(string)
@@ -992,6 +1023,15 @@ func TestWire_TransitionsAndEvents(t *testing.T) {
 func TestWire_Convert(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	// Owns its branch and its tax rate: the convert lands on the quote's
+	// branch and reads that branch's default_tax_rate (ADR 0005 section 5.8's
+	// table), and another package's tests run in parallel against the same
+	// database, leaving the deployment default branch's row shared. The
+	// fixture's helper creates the branch, names it in the create body, and
+	// registers the cleanup that removes references in dependency order.
+	branchID := f.ownBranch("0.088750")
+	body := f.createBody(f.line("10"))
+	body["branch_id"] = branchID.String()
 	// 1 PCS at 500.00 per MBF, 187.5 PCS to 1 MBF: the line an order could
 	// not carry before cycle 2.
 	mbf := f.line("187.5")
@@ -999,7 +1039,11 @@ func TestWire_Convert(t *testing.T) {
 	mbf["uom_qty"] = "187.5"
 	mbf["price_uom_qty"] = "1"
 	mbf["unit_price_ten_thousandths"] = 5000000
-	created := f.create(f.line("10"), mbf)
+	body["lines"] = []map[string]any{f.line("10"), mbf}
+	created := f.do("POST", "/api/v1/quotes", body)
+	if created.status != http.StatusCreated {
+		f.t.Fatalf("create = %d: %s", created.status, created.raw)
+	}
 	id := str(t, created.body, "id")
 
 	if r := f.do("POST", "/api/v1/quotes/"+id+"/convert", nil); r.status != 428 {
@@ -1060,11 +1104,17 @@ func TestWire_Convert(t *testing.T) {
 func TestWire_ConvertRefusesANonStockUnit(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	// The fixture's product stocks in PCS; the line is sold by the foot, a
-	// sale unit of the set that is not the stocking unit.
-	stocked := f.line("8")
-	stocked["uom"] = "LF"
-	created := f.create(stocked)
+	// Owns its branch: the convert reads the quote's branch's tax rate, so
+	// a NULL rate on the default branch cannot break this test even on a
+	// fresh database.
+	branchID := f.ownBranch("0.088750")
+	body := f.createBody(f.line("8"))
+	body["branch_id"] = branchID.String()
+	body["lines"].([]map[string]any)[0]["uom"] = "LF"
+	created := f.do("POST", "/api/v1/quotes", body)
+	if created.status != http.StatusCreated {
+		f.t.Fatalf("create = %d: %s", created.status, created.raw)
+	}
 	id := str(t, created.body, "id")
 
 	c := f.do("POST", "/api/v1/quotes/"+id+"/convert", nil, "If-Match", `"1"`)
@@ -1104,35 +1154,12 @@ func TestWire_ConvertExactCentsOnOneToOneLines(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
 
 	// Owns its branch and its tax rate: the convert lands on the quote's
-	// branch and reads its default_tax_rate (ADR 0005 section 5.8's table),
-	// and another package's tests run in parallel against the same database,
-	// leaving the deployment default branch's row shared. The fix here is the
-	// one the other fixed flakes in this repository use: seed a branch with
-	// its own rate, name it as the quote's branch, and remove it in cleanup.
-	branchID := uuid.New()
-	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO locations (id, type, code, default_tax_rate) VALUES ($1, 'BRANCH', $2, 0.05)`,
-		branchID, "WIRE-TX-"+branchID.String()[:8]); err != nil {
-		t.Fatalf("seed branch: %v", err)
-	}
-	// The quote and the converted order reference the branch (no cascade),
-	// so they go first, in the order convertWorld uses, and a failure is
-	// reported rather than swallowed.
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, q := range []string{
-			`DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
-			`DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
-			`DELETE FROM orders WHERE branch_id = $1`,
-			`DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE branch_id = $1)`,
-			`DELETE FROM quotes WHERE branch_id = $1`,
-			`DELETE FROM locations WHERE id = $1`,
-		} {
-			if _, err := f.db.Pool.Exec(ctx, q, branchID); err != nil {
-				t.Errorf("cleanup %q: %v", q, err)
-			}
-		}
-	})
+	// branch and reads that branch's default_tax_rate (ADR 0005 section 5.8's
+	// table), and another package's tests run in parallel against the same
+	// database, leaving the deployment default branch's row shared. The
+	// fixture's helper creates the branch, names it in the create body, and
+	// registers the cleanup that removes references in dependency order.
+	branchID := f.ownBranch("0.05")
 
 	odd := f.line("3")
 	odd["unit_price_ten_thousandths"] = 13725 // 1.3725 rounds to 137 cents
