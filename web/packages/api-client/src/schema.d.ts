@@ -11467,7 +11467,7 @@ export interface components {
             product_id?: string | null;
             /**
              * Format: uuid
-             * @description The sale line returned; its price and cost follow. Required on every line when original_sale_id is named.
+             * @description The sale line returned; its price and cost follow. Required on every line when original_sale_id is named, and named at most once: a request naming one sale line twice is refused naming the second.
              */
             line_id?: string | null;
             description?: string | null;
