@@ -175,3 +175,80 @@ func hasBlockerCode(t *testing.T, r resp, code string) bool {
 	}
 	return false
 }
+
+// completedRouteStop plants a route on the test branch with one PENDING
+// stop, then forces the route's status to COMPLETED. The path does not
+// run the completion gate (the route's stop is still PENDING); the
+// SQL UPDATE is the deliberate bypass. A stop without a route id is
+// covered by TestTransitionStop_RefusedWhenRouteIsCancelled's sister
+// test for a no-route stop elsewhere.
+func (f *txFixture) completedRouteStop(t *testing.T) (route, stop uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	route, stop = f.seedStop(t)
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE delivery_routes SET status = 'COMPLETED' WHERE id = $1`, route); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(),
+			`UPDATE delivery_routes SET status = 'DRAFT' WHERE id = $1`, route)
+	})
+	return route, stop
+}
+
+// TestTransitionStop_RefusedWhenRouteIsCompleted is the COMPLETED half
+// of the guard, mirrored from TestTransitionStop_RefusedWhenRouteIsCancelled
+// (PR 70 review round 7 N3, sharpened in PR 79 review round 1). The
+// route is forced to COMPLETED around a PENDING stop and a delivery on
+// that stop is refused with 409 invalid_state_transition and a
+// route_id blocker. The test is the only thing that catches a mutant
+// that removes the COMPLETED arm of the guard: deleting
+// `routeStatus == RouteStatusCompleted` from TransitionStop turns this
+// test red while the CANCELLED arm of the guard (the previous test)
+// stays green.
+func TestTransitionStop_RefusedWhenRouteIsCompleted(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	f := newTxFixture(t, db)
+	svc := f.service(outbox.NewWriter(db, ""), db)
+	route, stop := f.completedRouteStop(t)
+	ctx := context.Background()
+
+	q := &recordingFulfilment{}
+	svc.WithFulfilment(q, fakeOrders{})
+
+	_, err := svc.TransitionStop(ctx, stop, deliveredTransition(), rev(1), "")
+	var he *httpx.Error
+	if !errors.As(err, &he) {
+		t.Fatalf("delivered on a completed route: err = %v, want httpx.Error", err)
+	}
+	if he.Status != http.StatusConflict {
+		t.Errorf("status = %d, want 409 (the stop on a completed route must be refused)", he.Status)
+	}
+	if he.Code != httpx.CodeInvalidStateTransition {
+		t.Errorf("code = %s, want %s", he.Code, httpx.CodeInvalidStateTransition)
+	}
+	found := false
+	for _, d := range he.Details {
+		if d.Code == "route_id" && d.Message != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the 409 must carry a route_id blocker, got %v", he.Details)
+	}
+	if q.calls != 0 {
+		t.Errorf("fulfilment was queued %d times for a refused delivery, want 0 (no bill)", q.calls)
+	}
+	if n := f.count(`SELECT count(*) FROM deliveries WHERE id = $1 AND status = 'DELIVERED'`, stop); n != 0 {
+		t.Errorf("the stop status moved to DELIVERED though the transition was refused")
+	}
+	var routeStatus string
+	if err := f.db.Pool.QueryRow(ctx, `SELECT status FROM delivery_routes WHERE id = $1`, route).Scan(&routeStatus); err != nil {
+		t.Fatal(err)
+	}
+	if routeStatus != "COMPLETED" {
+		t.Errorf("the route status moved to %s though the transition was refused", routeStatus)
+	}
+}

@@ -13,10 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// NoticeWriter is the destination each migration's NOTICE is written to.
-// It is a variable so tests can substitute a bytes.Buffer (the migrate
-// runner would otherwise write to os.Stdout, which a test cannot capture).
-var NoticeWriter io.Writer
+// noticeWriter is the destination each migration's NOTICE is written to.
+// It is a variable so tests in this package can substitute a
+// bytes.Buffer (the migrate runner would otherwise write to os.Stdout,
+// which a test cannot capture). It is unexported: no caller outside
+// the migrate package should reach for the variable, the public way is
+// the setter below.
+var noticeWriter io.Writer
 
 var (
 	noticeMu       sync.Mutex
@@ -24,7 +27,7 @@ var (
 )
 
 // openPool builds a pgxpool whose connection config routes every
-// NOTICE through the notice handler that prints each one to NoticeWriter
+// NOTICE through the notice handler that prints each one to noticeWriter
 // (or to stdout if nil) prefixed with the migration file name. PR 70
 // review round 7 N1.
 func openPool(url string) (*pgxpool.Pool, error) {
@@ -60,10 +63,12 @@ func resetNoticeHandler() {
 
 // setNoticeWriter swaps the destination writer the notice handler reads.
 // The package mutex guards it so a concurrent handler does not race a
-// test that swaps the buffer between calls.
+// test that swaps the buffer between calls. The writer is set to nil
+// between tests so the runner's own os.Stdout stays in effect when no
+// test is in scope.
 func setNoticeWriter(w io.Writer) {
 	noticeMu.Lock()
-	NoticeWriter = w
+	noticeWriter = w
 	noticeMu.Unlock()
 }
 
@@ -77,7 +82,7 @@ func noticeHandler() func(*pgconn.PgConn, *pgconn.Notice) {
 		}
 		noticeMu.Lock()
 		base := noticeFileBase
-		w := NoticeWriter
+		w := noticeWriter
 		noticeMu.Unlock()
 		if w == nil {
 			return

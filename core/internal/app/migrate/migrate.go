@@ -107,16 +107,31 @@ func Run() {
 		log.Fatalf("Failed to ping DB: %v", err)
 	}
 
-	// 1. Ensure migration tracking table exists
+	// 1. Ensure migration tracking table exists. The CREATE TABLE IF NOT
+	// EXISTS Postgres ships raises a NOTICE every time the table already
+	// exists, and a fresh run on a fully migrated database prints one
+	// spurious notice per call (PR 79 review round 1 P3). The runner
+	// checks for the table first; the CREATE runs once, on the first
+	// run, and from then on the runner skips the statement and prints no
+	// notice. Old migrations' notices still print on a fresh run, which
+	// is the migration body's purpose and is left alone.
 	resetNoticeHandler()
-	_, err = pool.Exec(context.Background(), `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
-			version TEXT PRIMARY KEY,
-			applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-		);
-	`)
-	if err != nil {
-		log.Fatalf("Failed to create schema_migrations table: %v", err)
+	var hasTable bool
+	if err := pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_tables WHERE schemaname = 'public' AND tablename = 'schema_migrations')`,
+	).Scan(&hasTable); err != nil {
+		log.Fatalf("Failed to check schema_migrations table: %v", err)
+	}
+	if !hasTable {
+		_, err = pool.Exec(context.Background(), `
+			CREATE TABLE schema_migrations (
+				version TEXT PRIMARY KEY,
+				applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+			);
+		`)
+		if err != nil {
+			log.Fatalf("Failed to create schema_migrations table: %v", err)
+		}
 	}
 
 	// 2. Read migration files
