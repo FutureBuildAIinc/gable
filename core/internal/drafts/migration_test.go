@@ -157,9 +157,14 @@ func TestMigration103_AppliesOnEmptyDatabaseAndIsIdempotent(t *testing.T) {
 }
 
 // TestMigration103_AppliesOnASeededDatabaseAndReportsOffGrammarKeys applies
-// 103 to a database with an unrevoked key whose scopes fall outside the
-// grammar and one inside it: the off-grammar key is named in a NOTICE by id
-// and prefix, the other is not, and neither row is changed.
+// 103 to a database with three unrevoked keys: one whose scopes fall
+// outside the grant grammar (an off-grammar key is named in a NOTICE
+// naming the typo and the prefix), one whose scopes are inside the
+// grammar with a propose or commit verb (a gaining-reach key is named in
+// its own NOTICE because the verbs are new and the operator should
+// review such a key explicitly), and one whose scopes are inside the
+// grammar with only plain verbs (no NOTICE named it). Nothing is
+// changed; each row keeps its stored scopes.
 func TestMigration103_AppliesOnASeededDatabaseAndReportsOffGrammarKeys(t *testing.T) {
 	conn, notices := scratchDB103(t)
 	before, target, _ := migrationFiles103(t)
@@ -168,30 +173,37 @@ func TestMigration103_AppliesOnASeededDatabaseAndReportsOffGrammarKeys(t *testin
 	}
 	branch, err := conn.Exec(context.Background(),
 		`INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes)
-		 VALUES ('11111111-1111-1111-1111-111111111111', 'typo key', 'x$y', 'sk_live_aa', '{"quotes:writ"}'),
-		        ('22222222-2222-2222-2222-222222222222', 'good key', 'x$y', 'sk_live_bb', '{"quotes:read","quotes:propose"}')`)
+		 VALUES ('11111111-1111-1111-1111-111111111111', 'typo key', 'x$y', 'off_grammar_prefix', '{"quotes:writ"}'),
+		        ('22222222-2222-2222-2222-222222222222', 'gaining key', 'x$y', 'gaining_reach_prefix', '{"quotes:read","quotes:propose"}'),
+		        ('33333333-3333-3333-3333-333333333333', 'plain key', 'x$y', 'plain_in_grammar_prefix', '{"quotes:read"}')`)
 	if err != nil {
 		t.Fatalf("seed keys: %v", err)
 	}
-	if branch.RowsAffected() != 2 {
+	if branch.RowsAffected() != 3 {
 		t.Fatalf("seed keys wrote %d rows", branch.RowsAffected())
 	}
 	applySQL103(t, conn, target)
 
-	var reported bool
+	var reportedOff, reportedGaining bool
 	for _, n := range *notices {
-		if strings.Contains(n, "11111111-1111-1111-1111-111111111111") &&
-			strings.Contains(n, "sk_live_aa") && strings.Contains(n, "quotes:writ") {
-			reported = true
-		}
-		if strings.Contains(n, "22222222") {
-			t.Errorf("the in-grammar key was reported: %s", n)
+		switch {
+		case strings.Contains(n, "11111111-1111-1111-1111-111111111111") &&
+			strings.Contains(n, "off_grammar_prefix") && strings.Contains(n, "outside the grant grammar"):
+			reportedOff = true
+		case strings.Contains(n, "22222222-2222-2222-2222-222222222222") &&
+			strings.Contains(n, "gaining_reach_prefix") && strings.Contains(n, "gains reach"):
+			reportedGaining = true
+		case strings.Contains(n, "33333333"):
+			t.Errorf("the plain in-grammar key was reported: %s", n)
 		}
 	}
-	if !reported {
+	if !reportedOff {
 		t.Errorf("the off-grammar key was not named in a NOTICE; notices: %v", *notices)
 	}
-	// The report changed nothing: both keys keep their stored scopes.
+	if !reportedGaining {
+		t.Errorf("the gaining-reach key was not named in a NOTICE; notices: %v", *notices)
+	}
+	// The report changed nothing: each key keeps its stored scopes.
 	if got := scalar103(t, conn,
 		`SELECT scopes::text FROM api_keys WHERE id = '11111111-1111-1111-1111-111111111111'`); got != "{quotes:writ}" {
 		t.Fatalf("the reported key's scopes were changed: %v", got)

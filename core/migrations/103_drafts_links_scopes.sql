@@ -164,46 +164,69 @@ ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS branch_id UUID REFERENCES location
 -- 5. The read only report --------------------------------------------------
 -- Names every unrevoked key whose scopes fall outside the grammar (ADR 0007
 -- section 5.3): <module>:<verb> with verb read, write, propose or commit,
--- propose and commit only on a confirm gated module (quotes at this
--- migration), and the finer names ADR 0009 put in place of the coarse ones
--- they narrow (users:grants, admin:settings, admin:staff, admin:modules).
--- The module list mirrors the scope vocabulary at this migration; it is a
--- one shot report, not a constraint, so a later module joining the
--- vocabulary does not need this file to change. The `migrate` command logs
--- the NOTICE. Nothing is changed; such a key keeps exactly the reach it
+-- the finer names ADR 0009 put in place of the coarse ones they narrow
+-- (users:grants, admin:settings, admin:staff, admin:modules), and the
+-- dash and underscore module vocabulary the migrate brings into grammar
+-- (price_levels, sales-team, charge-codes, market-indices, payment-terms,
+-- purchase-orders, ship-tos, credit-memos). The confirm gated set is the
+-- draft kind modules: quotes and orders, both register a Kind, so both
+-- grant propose and commit. The module list mirrors the section 5.1
+-- vocabulary as held by pkg/middleware/machinekey.go's ValidScopeGrammar;
+-- a later module joining the vocabulary can change here too. The
+-- `migrate` command logs the NOTICE; a key with any propose or commit
+-- scope is named with "gaining reach" because the verbs are new (ADR
+-- 0007 5.4) and the operator should review such a key explicitly, not
+-- silently. Nothing is changed; such a key keeps exactly the reach it
 -- had, since the scope check matches exact strings.
 
 DO $$
 DECLARE
     k RECORD;
+    s TEXT;
+    bad_reach BOOLEAN;
+    gaining_reach BOOLEAN;
 BEGIN
     FOR k IN
         SELECT id, key_prefix, scopes
         FROM api_keys
         WHERE revoked_at IS NULL
     LOOP
-        IF EXISTS (
-            SELECT 1
-            FROM unnest(k.scopes) AS s(scope)
-            WHERE NOT (
-                s.scope ~ '^[a-z0-9-]+:(read|write|propose|commit)$'
-                AND split_part(s.scope, ':', 1) IN (
-                    'accounts','activities','admin','ap','apps','bankrecon','branches',
-                    'configurator','contacts','credit-memos','customers','dashboard',
-                    'delivery','deposits','documents','edi','events','gl','governance',
-                    'inventory','invoices','locations','market-indices','matching','me',
-                    'millwork','orders','parsing','payment-terms','payments','pos',
-                    'price_levels','pricing','products','purchase-orders','quotes',
-                    'reports','reporting','sales-team','charge-codes','ship-tos','tax',
-                    'users','vendors','vision')
-                AND (
-                    split_part(s.scope, ':', 2) NOT IN ('propose', 'commit')
-                    OR split_part(s.scope, ':', 1) = 'quotes'
-                )
-                AND s.scope NOT IN ('users:write')
-            )
-        ) THEN
+        bad_reach := FALSE;
+        gaining_reach := FALSE;
+        FOR s IN SELECT unnest(k.scopes) LOOP
+            -- The grammar: the section 5.1 vocabulary, the confirm gated
+            -- modules' two extra verbs, the finer names, and nothing else.
+            IF s IN ('users:grants',
+                     'admin:settings', 'admin:staff', 'admin:modules') THEN
+                -- in-grammar finer name
+            ELSIF s ~ '^(quotes|orders):(propose|commit)$' THEN
+                -- confirm gated module's new verb: gained reach.
+                gaining_reach := TRUE;
+            ELSIF s ~ '^[a-z0-9_-]+:(read|write)$'
+                  AND split_part(s, ':', 1) IN (
+                    'accounts','activities','admin','ap','apps','ar',
+                    'bankrecon','branches','configurator','contacts',
+                    'credit-memos','customers','dashboard','delivery',
+                    'deposits','documents','edi','events','gl',
+                    'governance','inventory','invoices','locations',
+                    'market-indices','matching','me','millwork','orders',
+                    'parsing','payment-terms','payments','pos',
+                    'price_levels','pricing','products','purchase-orders',
+                    'quotes','reports','reporting','sales-team',
+                    'charge-codes','ship-tos','tax','users','vendors',
+                    'vision') THEN
+                -- in-grammar coarse module scope
+            ELSIF s ~ '^(quotes|orders):(propose|commit)$' THEN
+                gaining_reach := TRUE;
+            ELSE
+                bad_reach := TRUE;
+            END IF;
+        END LOOP;
+        IF bad_reach THEN
             RAISE NOTICE 'api key % (prefix %) carries a scope outside the grant grammar: %; it keeps its stored reach; revoke and re-mint it',
+                k.id, k.key_prefix, array_to_string(k.scopes, ', ');
+        ELSIF gaining_reach THEN
+            RAISE NOTICE 'api key % (prefix %) gains reach through a propose or commit scope: %; review whether a propose key (cannot commit) fits the operator role',
                 k.id, k.key_prefix, array_to_string(k.scopes, ', ');
         END IF;
     END LOOP;
