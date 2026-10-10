@@ -370,7 +370,10 @@ func (r *Repository) CreatePaymentApplication(ctx context.Context, app *APPaymen
 	return nil
 }
 
-// ListPayments lists a vendor's payments, newest first.
+// ListPayments lists a vendor's payments, newest first. The branch wall rides
+// it through the bills a payment applies to: a payment only the caller's wall
+// cannot see (every bill it touched is another branch's) is not the caller's
+// to read.
 func (r *Repository) ListPayments(ctx context.Context, vendorID *uuid.UUID) ([]APPayment, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT p.id, p.vendor_id, COALESCE(v.name, '') as vendor_name,
@@ -379,7 +382,11 @@ func (r *Repository) ListPayments(ctx context.Context, vendorID *uuid.UUID) ([]A
 		FROM ap_payments p
 		LEFT JOIN vendors v ON v.id = p.vendor_id
 		WHERE ($1::uuid IS NULL OR p.vendor_id = $1)
-		ORDER BY p.created_at DESC, p.id DESC`, vendorID)
+		  AND EXISTS (SELECT 1 FROM ap_payment_applications a
+		              JOIN vendor_invoices vi ON vi.id = a.invoice_id
+		              WHERE a.payment_id = p.id AND `+wall("vi", 2, 3)+`)
+		ORDER BY p.created_at DESC, p.id DESC`,
+		vendorID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list AP payments: %w", err)
 	}
@@ -398,7 +405,8 @@ func (r *Repository) ListPayments(ctx context.Context, vendorID *uuid.UUID) ([]A
 	return payments, rows.Err()
 }
 
-// GetAgingSummary returns the AP aging report by vendor, in cents.
+// GetAgingSummary returns the AP aging report by vendor, in cents, held to
+// the caller's branch wall.
 func (r *Repository) GetAgingSummary(ctx context.Context) ([]APAgingSummary, error) {
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT vi.vendor_id, COALESCE(v.name, 'Unknown') as vendor_name,
@@ -409,9 +417,10 @@ func (r *Repository) GetAgingSummary(ctx context.Context) ([]APAgingSummary, err
 			ROUND(COALESCE(SUM(vi.amount_open), 0) * 100)::bigint
 		FROM vendor_invoices vi
 		LEFT JOIN vendors v ON v.id = vi.vendor_id
-		WHERE vi.status NOT IN ('PAID', 'VOIDED')
+		WHERE `+wall("vi", 1, 2)+` AND vi.status NOT IN ('PAID', 'VOIDED')
 		GROUP BY vi.vendor_id, v.name
-		ORDER BY 6 DESC`)
+		ORDER BY 6 DESC`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get AP aging: %w", err)
 	}

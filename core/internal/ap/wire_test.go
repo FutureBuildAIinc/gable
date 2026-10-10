@@ -647,7 +647,7 @@ func TestWire_BranchWall(t *testing.T) {
 		mustExec(t, f.db, `UPDATE vendor_invoices SET branch_id = `+defaultBranch+` WHERE branch_id = $1`, other)
 		mustExec(t, f.db, `DELETE FROM locations WHERE id = $1`, other)
 	})
-	id, _ := f.enter("V-WALL", "1", 1000)
+	id, _ := f.enter("V-WALL", "1", 100000)
 	mustExec(t, f.db, `UPDATE vendor_invoices SET branch_id = $2 WHERE id = $1`, id, other)
 
 	wall := []string{"X-Test-Branch", f.branch.String()}
@@ -687,6 +687,73 @@ func TestWire_BranchWall(t *testing.T) {
 		"invoice_date": "2026-01-10", "due_date": "2026-02-10",
 		"lines": []map[string]any{f.lineBody("1", 1000)}}, wall...); r.status != http.StatusCreated {
 		t.Errorf("create at the caller's branch = %d, want 201: %s", r.status, r.raw)
+	}
+
+	// RULE (ADR 0008 section 11): the wall holds on the aging report, the
+	// payments list and the payment act itself, for a caller bound by
+	// user_locations and for a key bound to one branch. The foreign bill stays
+	// approved and owing (moved above); a payment lands on it through the
+	// unwalled administrator so the two reads have something to leak.
+	home, rh := f.enter("V-WALL-HOME", "1", 100000)
+	if ha := f.approve(home, rh); ha.status != http.StatusOK {
+		t.Fatal(ha.raw)
+	}
+	if fa := f.approve(id, 1); fa.status != http.StatusOK {
+		t.Fatalf("the administrator approves the foreign bill = %d: %s", fa.status, fa.raw)
+	}
+	if pa := f.pay(400, id); pa.status != http.StatusCreated {
+		t.Fatalf("the administrator's payment on the foreign bill = %d: %s", pa.status, pa.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Fatalf("after the payment on the foreign bill: control %d, open %d", got, want)
+	}
+	if !f.balanced() {
+		t.Error("the payment entry on the foreign bill does not balance")
+	}
+	// A user bound to the home branch through user_locations.
+	bound := "c41b-bound-" + uuid.NewString()[:8]
+	mustExec(t, f.db, `INSERT INTO user_locations (user_sub, branch_id) VALUES ($1, $2)`, bound, f.branch)
+	agingTotal := func(headers ...string) int64 {
+		t.Helper()
+		r := f.do("GET", "/api/v1/ap/aging", nil, headers...)
+		if r.status != 200 {
+			t.Fatalf("aging = %d: %s", r.status, r.raw)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(r.raw, &rows); err != nil {
+			t.Fatalf("aging body: %v", err)
+		}
+		for _, row := range rows {
+			if row["vendor_id"] == f.vendor.String() {
+				return int64(row["total"].(float64))
+			}
+		}
+		return -1
+	}
+	for name, headers := range map[string][]string{
+		"a user bound by user_locations": {"X-Test-Sub", bound, "X-Test-User-Bound", "1"},
+		"a key bound to one branch":      wall,
+	} {
+		if got := agingTotal(headers...); got != 1010 {
+			t.Errorf("the aging total behind the wall for %s = %d, want the caller's branch bills only (1010 cents)", name, got)
+		}
+		pl := f.do("GET", "/api/v1/ap/payments?vendor_id="+f.vendor.String(), nil, headers...)
+		if pl.status != 200 {
+			t.Fatalf("payments list = %d: %s", pl.status, pl.raw)
+		}
+		if n := strings.Count(string(pl.raw), `"id"`); n != 0 {
+			t.Errorf("the payments list behind the wall for %s shows %d payment(s) applied to another branch's bill", name, n)
+		}
+		if pr := f.payHeaders(headers, 400, id); pr.status != http.StatusBadRequest {
+			t.Errorf("a payment on another branch's bill for %s = %d, want 400", name, pr.status)
+		}
+	}
+	// Unwalled, both reads carry the other branch's bill and its payment.
+	if got := agingTotal(); got != 1610 {
+		t.Errorf("the unwalled aging total = %d, want every branch's 1610 cents", got)
+	}
+	if pl := f.do("GET", "/api/v1/ap/payments?vendor_id="+f.vendor.String(), nil); strings.Count(string(pl.raw), `"id"`) != 1 {
+		t.Errorf("the unwalled payments list = %s, want the one payment", pl.raw)
 	}
 }
 

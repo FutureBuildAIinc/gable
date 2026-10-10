@@ -95,11 +95,14 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		ctx := context.WithValue(r.Context(), middleware.UserContextKey, claims)
 		// What the branch middleware settles for a real request: without a
 		// branch header an administrator reads every branch; X-Test-Branch
-		// holds the request to one branch.
+		// holds the request to one branch (a branch-bound key); X-Test-User-Bound
+		// holds it to the branches the user's user_locations rows name.
 		bc := &branchctx.Context{UserSub: claims.Subject, IsAdmin: true}
 		if b := r.Header.Get("X-Test-Branch"); b != "" {
 			id := uuid.MustParse(b)
 			bc = &branchctx.Context{UserSub: claims.Subject, IsAdmin: r.Header.Get("X-Test-Admin") == "1", BranchID: &id}
+		} else if r.Header.Get("X-Test-User-Bound") == "1" {
+			bc = &branchctx.Context{UserSub: claims.Subject, IsAdmin: false}
 		}
 		mux.ServeHTTP(w, r.WithContext(branchctx.With(ctx, bc)))
 	})
@@ -278,10 +281,16 @@ func (f *fixture) void(id string, revision int64, reason string) resp {
 // pay pays cents against the invoices.
 func (f *fixture) pay(cents float64, invoiceIDs ...string) resp {
 	f.t.Helper()
+	return f.payHeaders(nil, cents, invoiceIDs...)
+}
+
+// payHeaders pays cents against the invoices behind extra request headers.
+func (f *fixture) payHeaders(headers []string, cents float64, invoiceIDs ...string) resp {
+	f.t.Helper()
 	return f.do("POST", "/api/v1/ap/payments", map[string]any{
 		"vendor_id": f.vendor.String(), "amount": cents / 100.0, "method": "CHECK",
 		"payment_date": "2026-01-15", "invoice_ids": invoiceIDs,
-	})
+	}, headers...)
 }
 
 // ---------------------------------------------------------------------------

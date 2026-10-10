@@ -230,10 +230,12 @@ paths:
       tags: [ap]
       summary: List vendor payments
       description: >-
-        Role guard admin, owner or finance. A bare array until the payment
-        routes' own conversion (ADR 0008 section 11). Optional vendor_id
-        filter (an unparseable value is a 400 naming it); a parameter the
-        route does not declare is refused.
+        Role guard admin, owner or finance, held to the caller's branch wall
+        through the bills a payment applies to (a payment whose every bill is
+        another branch's is not the caller's to read). A bare array until the
+        payment routes' own conversion (ADR 0008 section 11). Optional
+        vendor_id filter (an unparseable value is a 400 naming it); a
+        parameter the route does not declare is refused.
       parameters:
         - name: vendor_id
           in: query
@@ -308,10 +310,11 @@ paths:
       tags: [ap]
       summary: AP aging by vendor
       description: >-
-        Role guard admin, owner or finance. One row per vendor with open
-        balances in int64 cents buckets, from amount_open; a paid or voided
-        bill owes nothing anywhere. A bare array until the aging route's own
-        conversion. No query parameters; one is refused.
+        Role guard admin, owner or finance, held to the caller's branch wall
+        (a bound caller's buckets sum its branch's bills only). One row per
+        vendor with open balances in int64 cents buckets, from amount_open; a
+        paid or voided bill owes nothing anywhere. A bare array until the
+        aging route's own conversion. No query parameters; one is refused.
       responses:
         '200':
           description: The aging rows.
