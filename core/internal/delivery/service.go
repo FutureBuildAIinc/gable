@@ -624,7 +624,7 @@ func (s *Service) TransitionRoute(ctx context.Context, id uuid.UUID, d *RouteTra
 					httpx.Blocker("route_empty", "the route holds no stops"))
 			}
 			if nonTerminal > 0 {
-				return httpx.InvalidStateTransition(fmt.Sprintf("cannot complete a route with %d stop(s) still pending", nonTerminal),
+				return httpx.InvalidStateTransition(fmt.Sprintf("cannot complete a route with %d stop(s) not yet delivered, failed or partial", nonTerminal),
 					httpx.Blocker("stop_not_terminal", "every stop must be delivered, failed or partial before the route completes"))
 			}
 			if cur.Status == RouteStatusCancelled {
@@ -1012,12 +1012,12 @@ func (s *Service) GetDelivery(ctx context.Context, id uuid.UUID) (*Stop, error) 
 func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, actor string) (*Stop, *CapacityWarning, error) {
 	// The order's branch is checked through the wall up front (PR 70 review
 	// round 1 P3-4): a cross-branch caller must see the same 404 as reading a
-	// cross-branch route, not a 500 from the post-insert walled read.
-	// The existence check runs first with no wall so a truly missing order is
-	// a 400 naming `order_id`, not a 404 (PR 70 review round 3 P2-N1: the up
-	// front check turned a missing order from 400 to 404; restoring the
-	// existence check keeps the 400 path, while the branch wall still answers
-	// 404 for a cross-branch order).
+	// cross-branch route, not the legacy 500 the post-insert walled read used
+	// to produce. The existence check runs first with no wall so a truly
+	// missing order is a 400 naming `order_id`, not a 404 (PR 70 review round
+	// 3 P2-N1: the up front check turned a missing order from 400 to 404;
+	// restoring the existence check keeps the 400 path, while the branch wall
+	// still answers 404 for a cross-branch order).
 	exists, err := s.repo.OrderExists(ctx, d.OrderID)
 	if err != nil {
 		return nil, nil, err

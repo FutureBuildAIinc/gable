@@ -537,7 +537,7 @@
               "message": "every stop must be delivered, failed or partial before the route completes"
             }
           ],
-          "message": "cannot complete a route with 2 stop(s) still pending"
+          "message": "cannot complete a route with 2 stop(s) not yet delivered, failed or partial"
         },
         "meta": {
           "request_id": "<id-17>"
@@ -1007,7 +1007,7 @@
               "message": "every stop must be delivered, failed or partial before the route completes"
             }
           ],
-          "message": "cannot complete a route with 2 stop(s) still pending"
+          "message": "cannot complete a route with 2 stop(s) not yet delivered, failed or partial"
         },
         "meta": {
           "request_id": "<id-31>"
@@ -1100,7 +1100,7 @@
               "message": "every stop must be delivered, failed or partial before the route completes"
             }
           ],
-          "message": "cannot complete a route with 2 stop(s) still pending"
+          "message": "cannot complete a route with 2 stop(s) not yet delivered, failed or partial"
         },
         "meta": {
           "request_id": "<id-33>"

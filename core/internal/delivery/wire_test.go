@@ -1277,6 +1277,25 @@ func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
 	if res.status != http.StatusOK {
 		t.Errorf("reorder with every stop = %d %s, want 200 (read truncated at 200)", res.status, res.raw)
 	}
+
+	// RULE (PR 70 review round 5 P3-2): the optimize gate must read every
+	// stop of the route (the r4 fix used AllDeliveriesByRoute; a mutation
+	// back to ListDeliveriesByRoute with Limit 200 was the surviving
+	// mutant M7). After the reorder the route has 206 stops; the optimize
+	// request returns 200 and the route document it answers with embeds
+	// every one of them.
+	res = f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+route.String(), "", nil)
+	etag = res.header.Get("ETag")
+	rev = strings.TrimSuffix(strings.TrimPrefix(etag, `"`), `"`)
+	res = f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/optimize",
+		``, map[string]string{"If-Match": `"` + rev + `"`})
+	if res.status != http.StatusOK {
+		t.Fatalf("optimize = %d %s, want 200", res.status, res.raw)
+	}
+	stopsBody, _ := res.body["stops"].([]any)
+	if len(stopsBody) != 206 {
+		t.Errorf("optimize stops = %d, want 206 (the optimize read must see every stop, not the first 200)", len(stopsBody))
+	}
 }
 
 // Idempotency through the middleware: the same create twice with one key
