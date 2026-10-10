@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/google/uuid"
 )
@@ -143,19 +144,19 @@ type approval struct {
 }
 
 type fakeAP struct {
-	headers    []ap.VendorInvoice             // what ListVendorInvoices returns
-	full       map[uuid.UUID]ap.VendorInvoice // what GetVendorInvoice returns (with lines)
+	headers    []ap.Invoice             // what ListVendorInvoices returns
+	full       map[uuid.UUID]ap.Invoice // what GetVendorInvoice returns (with lines)
 	listErr    error
 	getErr     error
 	approveErr error
 	approvals  []approval
 }
 
-func (f *fakeAP) ListVendorInvoices(context.Context, *uuid.UUID, string) ([]ap.VendorInvoice, error) {
+func (f *fakeAP) ListVendorInvoices(context.Context, *uuid.UUID, string) ([]ap.Invoice, error) {
 	return f.headers, f.listErr
 }
 
-func (f *fakeAP) GetVendorInvoice(_ context.Context, id uuid.UUID) (*ap.VendorInvoice, error) {
+func (f *fakeAP) GetVendorInvoice(_ context.Context, id uuid.UUID) (*ap.Invoice, error) {
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
@@ -166,7 +167,7 @@ func (f *fakeAP) GetVendorInvoice(_ context.Context, id uuid.UUID) (*ap.VendorIn
 	return &inv, nil
 }
 
-func (f *fakeAP) ApproveInvoice(_ context.Context, invoiceID, approverID uuid.UUID) (*ap.VendorInvoice, error) {
+func (f *fakeAP) ApproveInvoice(_ context.Context, invoiceID, approverID uuid.UUID) (*ap.Invoice, error) {
 	f.approvals = append(f.approvals, approval{invoiceID: invoiceID, approverID: approverID})
 	if f.approveErr != nil {
 		return nil, f.approveErr
@@ -208,28 +209,29 @@ func poWithLines(specs ...poLineSpec) *purchase_order.PurchaseOrder {
 }
 
 // invoiceFor builds a vendor invoice linked to poID, with (qty, unit price in
-// cents) line pairs.
+// cents) line pairs. The quantities and prices are the wire's scale 4 types
+// since C4-1b.
 type invLineSpec struct {
 	qty       float64
-	unitPrice int64 // cents, as ap stores them
+	unitPrice int64 // cents, as the matcher's arithmetic uses them
 }
 
 func invoiceFor(poID uuid.UUID, specs ...invLineSpec) *fakeAP {
-	inv := ap.VendorInvoice{ID: uuid.New(), POID: &poID, InvoiceNumber: "V-1001"}
+	inv := ap.Invoice{Summary: ap.Summary{ID: uuid.New(), POID: &poID, VendorInvoiceNumber: "V-1001"}}
 	for _, s := range specs {
-		inv.Lines = append(inv.Lines, ap.VendorInvoiceLine{
-			ID:        uuid.New(),
-			InvoiceID: inv.ID,
-			Quantity:  s.qty,
-			UnitPrice: s.unitPrice,
-			LineTotal: int64(s.qty * float64(s.unitPrice)),
+		inv.Lines = append(inv.Lines, ap.InvoiceLine{
+			ID:                      uuid.New(),
+			Position:                len(inv.Lines),
+			Quantity:                httpx.Quantity(int64(math.Round(s.qty * 10000))),
+			UnitPriceTenThousandths: httpx.Price(s.unitPrice * 100),
+			LineTotalCents:          httpx.Cents(int64(s.qty * float64(s.unitPrice))),
 		})
 	}
 	header := inv
 	header.Lines = nil // ListVendorInvoices returns headers without lines
 	return &fakeAP{
-		headers: []ap.VendorInvoice{header},
-		full:    map[uuid.UUID]ap.VendorInvoice{inv.ID: inv},
+		headers: []ap.Invoice{header},
+		full:    map[uuid.UUID]ap.Invoice{inv.ID: inv},
 	}
 }
 
@@ -669,7 +671,7 @@ func TestRunMatch_AutoApproveCanBeDisabled(t *testing.T) {
 // no third document — and nothing may be approved.
 func TestRunMatch_NoVendorInvoiceIsAnException(t *testing.T) {
 	po := poWithLines(poLineSpec{ordered: 10, received: 10, cost: 10.00})
-	apSvc := &fakeAP{full: map[uuid.UUID]ap.VendorInvoice{}}
+	apSvc := &fakeAP{full: map[uuid.UUID]ap.Invoice{}}
 	repo := &fakeRepo{cfg: &MatchConfig{PriceTolerancePct: 2.0, AutoApproveOnMatch: true}}
 
 	result, err := newMatchService(repo, &fakePO{po: po}, apSvc).RunMatch(context.Background(), po.ID)
