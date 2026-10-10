@@ -121,14 +121,20 @@ func TestAssign_RouteCompletionRaceNeverLeavesPendingOnCompletedRoute(t *testing
 	const racers = 3
 	results := make(chan outcome, racers)
 
-	// First the route prep completes the only seeded stop and then dispatches +
-	// completes the route. The route revision moves to 1 after the stop
-	// transition (TouchDelivery only bumps the stop's revision, not the
-	// route's), so the route transition reads 1.
+	// First the route prep completes the only seeded stop, dispatches the
+	// route to IN_TRANSIT, then completes it. The route state machine
+	// (PR 80 review round 1 P1-3) only accepts `completed` from IN_TRANSIT,
+	// so the prep must move through dispatch before complete. The route
+	// revision moves to 1 after the stop transition (TouchDelivery only
+	// bumps the stop's revision, not the route's), so the first route
+	// transition reads 1; the dispatch moves it to 2; the complete reads 2.
 	if _, err := svc.TransitionStop(ctx, stop, deliveredTransition(), rev(1), ""); err != nil {
 		t.Fatalf("prep stop delivered: %v", err)
 	}
-	if _, err := svc.TransitionRoute(ctx, route, &delivery.RouteTransitionDraft{To: delivery.RouteStatusCompleted}, rev(1), ""); err != nil {
+	if _, err := svc.TransitionRoute(ctx, route, &delivery.RouteTransitionDraft{To: delivery.RouteStatusInTransit}, rev(1), ""); err != nil {
+		t.Fatalf("prep route in_transit: %v", err)
+	}
+	if _, err := svc.TransitionRoute(ctx, route, &delivery.RouteTransitionDraft{To: delivery.RouteStatusCompleted}, rev(2), ""); err != nil {
 		t.Fatalf("prep route completed: %v", err)
 	}
 

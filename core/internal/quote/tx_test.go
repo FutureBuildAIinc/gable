@@ -57,6 +57,37 @@ func seedCustomerAndProduct(t *testing.T, db *database.DB) (customerID, productI
 	return customerID, productID
 }
 
+// seedBranch creates a branch with the given default tax rate and registers a
+// cleanup that removes the rows the seeded quotes and converted orders
+// reference it, in dependency order. The convert path reads the quote's
+// branch_id and that branch's rate (ADR 0005 section 5.8's table), so a NULL
+// rate on the default branch would block the convert on a fresh database.
+func seedBranch(t *testing.T, db *database.DB) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	branchID := uuid.New()
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO locations (id, type, code, default_tax_rate) VALUES ($1, 'BRANCH', $2, $3::numeric)`,
+		branchID, "TX-B-"+branchID.String()[:8], "0.088750"); err != nil {
+		t.Fatalf("seed branch: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, q := range []string{
+			`DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
+			`DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
+			`DELETE FROM orders WHERE branch_id = $1`,
+			`DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE branch_id = $1)`,
+			`DELETE FROM quotes WHERE branch_id = $1`,
+			`DELETE FROM locations WHERE id = $1`,
+		} {
+			if _, err := db.Pool.Exec(ctx, q, branchID); err != nil {
+				t.Errorf("cleanup %q: %v", q, err)
+			}
+		}
+	})
+	return branchID
+}
+
 func draftFor(customerID, productID uuid.UUID) *quote.Draft {
 	return &quote.Draft{
 		CustomerID: customerID, DeliveryType: quote.DeliveryPickup, Source: "manual",
@@ -65,6 +96,15 @@ func draftFor(customerID, productID uuid.UUID) *quote.Draft {
 			PriceUOM: "EA", UOMQty: 10000, PriceUOMQty: 10000, UnitPrice: 50000,
 		}},
 	}
+}
+
+// draftForBranch is draftFor with a BranchID set, so the convert path reads
+// that branch's tax rate (ADR 0005 section 5.8's table) on a fresh database
+// where the default branch's rate is NULL.
+func draftForBranch(customerID, productID, branchID uuid.UUID) *quote.Draft {
+	d := draftFor(customerID, productID)
+	d.BranchID = &branchID
+	return d
 }
 
 func countRows(t *testing.T, db *database.DB, sql string, args ...any) int {
@@ -323,6 +363,11 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDBMaxConns(t, 4)
 	customerID, productID := seedCustomerAndProduct(t, db)
+	// Owns its branch and its rate: the convert reads the quote's branch's
+	// default_tax_rate (ADR 0005 section 5.8's table); on a fresh database
+	// the default branch has no rate and the convert would refuse with
+	// tax_rate_not_configured before reaching its gated transaction proof.
+	branchID := seedBranch(t, db)
 	events := outbox.NewWriter(db, "")
 	// The convert needs the order service; the real one over the same
 	// database joins the gated transactions.
@@ -336,7 +381,7 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	const contenders = 4
 	var seed []*quote.Quote
 	for i := 0; i < 3*contenders; i++ {
-		q, err := plain.Create(ctx, draftFor(customerID, productID))
+		q, err := plain.Create(ctx, draftForBranch(customerID, productID, branchID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -368,12 +413,12 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	}
 
 	phase("create", func(svc *quote.Service, i int) error {
-		_, err := svc.Create(ctx, draftFor(customerID, productID))
+		_, err := svc.Create(ctx, draftForBranch(customerID, productID, branchID))
 		return err
 	})
 	phase("update", func(svc *quote.Service, i int) error {
 		rev := int64(1)
-		_, err := svc.Update(ctx, seed[i].ID, draftFor(customerID, productID), quote.Precondition{Revision: &rev})
+		_, err := svc.Update(ctx, seed[i].ID, draftForBranch(customerID, productID, branchID), quote.Precondition{Revision: &rev})
 		return err
 	})
 	phase("transition", func(svc *quote.Service, i int) error {

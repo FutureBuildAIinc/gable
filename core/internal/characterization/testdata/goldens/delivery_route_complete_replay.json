@@ -1,0 +1,272 @@
+[
+  {
+    "name": "delivery.route.create.completed",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes",
+      "body": {
+        "driver_id": "<id-1>",
+        "notes": "r1b c replay route",
+        "scheduled_date": "<day+2>",
+        "vehicle_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-1>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-3>",
+        "notes": "r1b c replay route",
+        "revision": 1,
+        "scheduled_date": "<day+2>",
+        "status": "draft",
+        "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-2>",
+        "vehicle_name": "R1C Truck Renamed"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.assign.replay",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": {
+        "delivery_instructions": "r1b c replay stop",
+        "order_id": "<id-4>",
+        "route_id": "<id-3>",
+        "stop_sequence": 1
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "capacity_warning": null,
+        "delivery": {
+          "address": "1 Golden Way, Kelowna BC",
+          "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
+          "delivery_instructions": "r1b c replay stop",
+          "estimated_arrival": null,
+          "id": "<id-5>",
+          "latitude": 49.888,
+          "longitude": -119.496,
+          "order_id": "<id-4>",
+          "order_number": "SO-000088",
+          "pod_proof_url": null,
+          "pod_signed_by": null,
+          "pod_timestamp": null,
+          "revision": 1,
+          "route_id": "<id-3>",
+          "scheduled_end": null,
+          "scheduled_start": null,
+          "signature_data_url": null,
+          "status": "pending",
+          "stop_sequence": 1,
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.dispatch.replay",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-3>/transitions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "to": "in_transit"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-1>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-3>",
+        "notes": "r1b c replay route",
+        "revision": 3,
+        "scheduled_date": "<day+2>",
+        "status": "in_transit",
+        "stop_count": 1,
+        "stops": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c replay stop",
+            "estimated_arrival": null,
+            "id": "<id-5>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-4>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 1,
+            "route_id": "<id-3>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-2>",
+        "vehicle_name": "R1C Truck Renamed"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.delivered.replay",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-5>/transitions",
+      "body": {
+        "pod_proof_url": "/uploads/pod/golden.png",
+        "pod_signed_by": "R1C Receiver",
+        "revision": 1,
+        "signature_data_url": "data:image/png;base64,AAAA",
+        "to": "delivered"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "address": "1 Golden Way, Kelowna BC",
+        "created_at": "<ts+0d>",
+        "customer_name": "Golden Harness Co",
+        "delivery_instructions": "r1b c replay stop",
+        "estimated_arrival": null,
+        "id": "<id-5>",
+        "latitude": 49.888,
+        "longitude": -119.496,
+        "order_id": "<id-4>",
+        "order_number": "SO-000088",
+        "pod_proof_url": "/uploads/pod/golden.png",
+        "pod_signed_by": "R1C Receiver",
+        "pod_timestamp": "<ts+0d>",
+        "revision": 2,
+        "route_id": "<id-3>",
+        "scheduled_end": null,
+        "scheduled_start": null,
+        "signature_data_url": "data:image/png;base64,AAAA",
+        "status": "delivered",
+        "stop_sequence": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.complete.replay",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-3>/transitions",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "to": "completed"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-1>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-3>",
+        "notes": "r1b c replay route",
+        "revision": 4,
+        "scheduled_date": "<day+2>",
+        "status": "completed",
+        "stop_count": 1,
+        "stops": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c replay stop",
+            "estimated_arrival": null,
+            "id": "<id-5>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-4>",
+            "order_number": "SO-000088",
+            "pod_proof_url": "/uploads/pod/golden.png",
+            "pod_signed_by": "R1C Receiver",
+            "pod_timestamp": "<ts+0d>",
+            "revision": 2,
+            "route_id": "<id-3>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": "data:image/png;base64,AAAA",
+            "status": "delivered",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-2>",
+        "vehicle_name": "R1C Truck Renamed"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.complete.completed",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-3>/transitions",
+      "headers": {
+        "If-Match": "\"4\""
+      },
+      "body": {
+        "to": "completed"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "only an in_transit route can be completed"
+            }
+          ],
+          "message": "cannot complete a route in status COMPLETED"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  }
+]

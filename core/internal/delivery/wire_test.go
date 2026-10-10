@@ -857,16 +857,18 @@ func TestRouteTransitions(t *testing.T) {
 		`{"to":"in_transit"}`, nil); res.status != http.StatusPreconditionRequired {
 		t.Errorf("no precondition = %d, want 428", res.status)
 	}
-	// A route with a pending stop cannot complete: the blocker names it.
+	// A draft route cannot complete: the state machine check (PR 80 review
+	// round 1 P1-3) refuses with the module's invalid_state blocker; the
+	// count checks would be reached only after the route is in_transit.
 	res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/transitions",
 		`{"to":"completed","revision":1}`, nil)
 	if res.status != http.StatusConflict || f.errCode(t, res) != "invalid_state_transition" {
-		t.Fatalf("complete with a pending stop = %d %s, want 409 invalid_state_transition", res.status, res.raw)
+		t.Fatalf("complete from DRAFT = %d %s, want 409 invalid_state_transition", res.status, res.raw)
 	}
 	env := res.body["error"].(map[string]any)
 	details := env["details"].([]any)
-	if len(details) == 0 || details[0].(map[string]any)["code"] != "stop_not_terminal" {
-		t.Errorf("blockers = %v, want stop_not_terminal", details)
+	if len(details) == 0 || details[0].(map[string]any)["code"] != "invalid_state" {
+		t.Errorf("blockers = %v, want invalid_state", details)
 	}
 
 	// Dispatch, then complete the stop, then complete the route.
