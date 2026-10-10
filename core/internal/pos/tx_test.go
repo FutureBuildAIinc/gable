@@ -29,21 +29,30 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	})
 	saleID := f.startSale(nil)
 	f.addLine(saleID, f.productLine("3"))
+	// the table wide counts before the attempt: the seeded database shares
+	// these tables, so the proof is that the failed act moves none of them.
+	invoicesBefore := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`)
+	paymentsBefore := countOf(t, f.db, `SELECT count(*) FROM payments`)
+	entriesBefore := countOf(t, f.db, `SELECT count(*) FROM gl_journal_entries`)
 	r := f.completeSale(saleID, tender("cash", 3266))
 	if r.status == httpOK {
 		t.Fatal("the sale completed with a failing event write")
 	}
 	// nothing stayed: no invoice, no payment, no tender, the stock unmoved,
 	// the sale still open.
-	for sql, want := range map[string]int64{
-		`SELECT count(*) FROM invoices WHERE order_id IS NULL`:                     0,
-		`SELECT count(*) FROM payments`:                                            0,
-		`SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`:               0,
-		`SELECT count(*) FROM gl_journal_entries`:                                  0,
-		`SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction'`: 0,
+	for _, c := range []struct {
+		sql  string
+		want int64
+		args []any
+	}{
+		{`SELECT count(*) FROM invoices WHERE order_id IS NULL`, invoicesBefore, nil},
+		{`SELECT count(*) FROM payments`, paymentsBefore, nil},
+		{`SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`, 0, []any{saleID}},
+		{`SELECT count(*) FROM gl_journal_entries`, entriesBefore, nil},
+		{`SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction'`, 0, nil},
 	} {
-		if got := countOf(t, f.db, sql, saleID); got != want {
-			t.Errorf("%s = %d, want %d", sql, got, want)
+		if got := countOf(t, f.db, c.sql, c.args...); got != c.want {
+			t.Errorf("%s = %d, want %d", c.sql, got, c.want)
 		}
 	}
 	if got := f.stock(); got != "100.0000/0.0000" {
@@ -56,8 +65,8 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	// number the rolled back sale would have taken.
 	f.events.fail = ""
 	saleID2, _ := f.saleOf("1", tender("cash", 599))
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 1 {
-		t.Errorf("%d invoices after the retry, want 1", got)
+	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != invoicesBefore+1 {
+		t.Errorf("%d invoices after the retry, want %d", got, invoicesBefore+1)
 	}
 	_ = saleID2
 
@@ -141,7 +150,7 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 		go func(i int, reg string) {
 			defer wg.Done()
 			saleID := f.startSaleOn(reg)
-			if _, err := f.addLineOn(saleID, f.productLine("1")); err != nil {
+			if err := f.addLineOn(saleID, f.productLine("1")); err != nil {
 				errs[i] = err
 				return
 			}
@@ -154,10 +163,15 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		walkIn := f.scalar(`SELECT id FROM customers WHERE account_number = 'WALK-IN'`).(uuid.UUID)
+		var walkIn string
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT id::text FROM customers WHERE account_number = 'WALK-IN'`).Scan(&walkIn); err != nil {
+			f.t.Errorf("walk-in customer: %v", err)
+			return
+		}
 		for i := 0; i < 3; i++ {
 			_ = f.do("POST", "/api/v1/payments", map[string]any{
-				"customer_id": walkIn.String(), "method": "cash", "amount_cents": 100,
+				"customer_id": walkIn, "method": "cash", "amount_cents": 100,
 				"received_on": "2030-01-01",
 			}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 		}
@@ -243,13 +257,13 @@ func (f *fixture) startSaleOn(register string) string {
 	return str(f.t, r.body, "id")
 }
 
-func (f *fixture) addLineOn(saleID string, line map[string]any) (string, error) {
+func (f *fixture) addLineOn(saleID string, line map[string]any) error {
 	f.t.Helper()
 	r := f.addLine(saleID, line)
 	if r.status != httpOK {
-		return "", fmt.Errorf("add line = %d: %s", r.status, r.raw)
+		return fmt.Errorf("add line = %d: %s", r.status, r.raw)
 	}
-	return str(f.t, r.body, "revision"), nil
+	return nil
 }
 
 func (f *fixture) completeSaleOn(register, saleID string, tenders ...map[string]any) resp {
