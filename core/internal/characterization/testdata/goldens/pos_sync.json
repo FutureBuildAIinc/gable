@@ -34,16 +34,11 @@
       "body": {
         "batch_id": "r1c-batch-1",
         "duplicate_count": 0,
-        "error_count": 1,
-        "errors": [
-          {
-            "client_id": "<id-2>",
-            "reason": "complete: this write needs If-Match or a body revision"
-          }
-        ],
+        "error_count": 0,
+        "errors": [],
         "pending": [],
         "pending_count": 0,
-        "synced_count": 0
+        "synced_count": 1
       }
     }
   },
@@ -273,12 +268,28 @@
           },
           {
             "branch_id": "<id-9>",
+            "cashier_id": "<id-1>",
+            "completed_at": "<ts+0d>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-2>",
+            "invoice_id": "<id-16>",
+            "item_count": 1,
+            "number": "POS-000005",
+            "register_id": "REG-01",
+            "revision": 3,
+            "status": "completed",
+            "total_cents": 616
+          },
+          {
+            "branch_id": "<id-9>",
             "cashier_id": "<id-10>",
             "completed_at": null,
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-11>",
-            "id": "<id-16>",
+            "id": "<id-17>",
             "invoice_id": null,
             "item_count": 0,
             "number": "POS-000001",
@@ -294,7 +305,7 @@
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": null,
-            "id": "<id-17>",
+            "id": "<id-18>",
             "invoice_id": null,
             "item_count": 1,
             "number": "POS-000003",
@@ -302,22 +313,6 @@
             "revision": 2,
             "status": "open",
             "total_cents": 4256
-          },
-          {
-            "branch_id": "<id-9>",
-            "cashier_id": "<id-1>",
-            "completed_at": null,
-            "created_at": "<ts+0d>",
-            "currency": "USD",
-            "customer_id": null,
-            "id": "<id-2>",
-            "invoice_id": null,
-            "item_count": 1,
-            "number": "POS-000005",
-            "register_id": "REG-01",
-            "revision": 2,
-            "status": "open",
-            "total_cents": 616
           },
           {
             "branch_id": "<id-9>",

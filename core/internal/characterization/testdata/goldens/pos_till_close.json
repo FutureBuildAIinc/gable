@@ -9,12 +9,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "change_cents": 48597,
+        "change_cents": 67981,
         "expected_by_method": {
-          "CASH": 8603
+          "CASH": 9219
         },
-        "sale_count": 1,
-        "sales_total_cents": 1403,
+        "sale_count": 2,
+        "sales_total_cents": 2019,
         "session": {
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
@@ -30,9 +30,9 @@
           "register_id": "REG-01",
           "status": "open"
         },
-        "tax_total_cents": 0,
+        "tax_total_cents": 66,
         "tendered_by_method": {
-          "CASH": 1403
+          "CASH": 2019
         }
       }
     }
@@ -222,12 +222,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "change_cents": 48597,
+        "change_cents": 67981,
         "expected_by_method": {
-          "CASH": 8603
+          "CASH": 9219
         },
-        "sale_count": 1,
-        "sales_total_cents": 1403,
+        "sale_count": 2,
+        "sales_total_cents": 2019,
         "session": {
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
@@ -236,20 +236,20 @@
             "CASH": 20000
           },
           "expected_by_method": {
-            "CASH": 8603
+            "CASH": 9219
           },
           "gl_entry_id": "<id-12>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
           "opening_float_cents": 10000,
-          "over_short_cents": 11397,
+          "over_short_cents": 10781,
           "register_id": "REG-01",
           "status": "closed"
         },
-        "tax_total_cents": 0,
+        "tax_total_cents": 66,
         "tendered_by_method": {
-          "CASH": 1403
+          "CASH": 2019
         }
       }
     }
@@ -339,12 +339,12 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "change_cents": 48597,
+        "change_cents": 67981,
         "expected_by_method": {
-          "CASH": 8603
+          "CASH": 9219
         },
-        "sale_count": 1,
-        "sales_total_cents": 1403,
+        "sale_count": 2,
+        "sales_total_cents": 2019,
         "session": {
           "branch_id": "<id-2>",
           "cashier_id": "<id-3>",
@@ -353,20 +353,20 @@
             "CASH": 20000
           },
           "expected_by_method": {
-            "CASH": 8603
+            "CASH": 9219
           },
           "gl_entry_id": "<id-12>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
           "opening_float_cents": 10000,
-          "over_short_cents": 11397,
+          "over_short_cents": 10781,
           "register_id": "REG-01",
           "status": "closed"
         },
-        "tax_total_cents": 0,
+        "tax_total_cents": 66,
         "tendered_by_method": {
-          "CASH": 1403
+          "CASH": 2019
         }
       }
     }
@@ -387,7 +387,7 @@
         "branch_id": "<id-2>",
         "generated_at": "<ts+0d>",
         "id": "<id-16>",
-        "over_short_cents": 11397,
+        "over_short_cents": 10781,
         "payload": "<zreport-payload>",
         "register_id": "REG-01",
         "till_session_id": "<id-1>"
@@ -431,7 +431,7 @@
           "branch_id": "<id-2>",
           "generated_at": "<ts+0d>",
           "id": "<id-16>",
-          "over_short_cents": 11397,
+          "over_short_cents": 10781,
           "payload": "<zreport-payload>",
           "register_id": "REG-01",
           "till_session_id": "<id-1>"

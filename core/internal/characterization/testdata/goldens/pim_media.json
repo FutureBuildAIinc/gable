@@ -30,7 +30,7 @@
         "media": [],
         "product": {
           "allocated": "14",
-          "available": "415",
+          "available": "414",
           "average_unit_cost_ten_thousandths": 35000,
           "base_price_ten_thousandths": 55000,
           "board_length_ft": null,
@@ -44,7 +44,7 @@
           "id": "<id-1>",
           "lead_time_days": null,
           "length_in": 96,
-          "on_hand": "429",
+          "on_hand": "428",
           "price_uom": "PCS",
           "purchase_uom": "PCS",
           "random_length": false,

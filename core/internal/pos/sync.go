@@ -60,6 +60,49 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, batch *OfflineSyn
 			continue
 		}
 		if exists {
+			// A prior sync may have left this sale OPEN: the cart was built
+			// and the tax provider did not answer, so the item went pending.
+			// The retry completes that sale through the same path; a
+			// completed or voided one is a plain duplicate.
+			pending, err := s.repo.GetSale(ctx, item.ClientID)
+			if err == nil && pending.Status == StatusOpen {
+				if lines, lerr := s.repo.GetLines(ctx, pending.ID); lerr == nil && len(lines) == 0 {
+					if _, aerr := s.AddLine(ctx, pending.ID, item.Lines, actor); aerr != nil {
+						resp.ErrorCount++
+						e := SyncItemResult{ClientID: item.ClientID.String(), Reason: "lines: " + aerr.Error()}
+						resp.Errors = append(resp.Errors, e)
+						log.Errors = append(log.Errors, e)
+						continue
+					}
+				}
+				// The sync is an in process caller: it carries the sale's own
+				// current revision, the recipe's in process rule.
+				current, gerr := s.repo.GetSale(ctx, pending.ID)
+				if gerr != nil {
+					resp.ErrorCount++
+					e := SyncItemResult{ClientID: item.ClientID.String(), Reason: "complete: " + gerr.Error()}
+					resp.Errors = append(resp.Errors, e)
+					log.Errors = append(log.Errors, e)
+					continue
+				}
+				rev := current.Revision
+				if _, cerr := s.CompleteSale(ctx, pending.ID, "", &rev, item.Tenders, "", actor); cerr == nil {
+					resp.SyncedCount++
+					continue
+				} else if !errors.Is(cerr, ErrTaxProviderUnavailable) {
+					resp.ErrorCount++
+					e := SyncItemResult{ClientID: item.ClientID.String(), Reason: "complete: " + cerr.Error()}
+					resp.Errors = append(resp.Errors, e)
+					log.Errors = append(log.Errors, e)
+					continue
+				}
+				// still pending: the provider did not answer again
+				p := SyncItemResult{ClientID: item.ClientID.String(), Reason: "pending: the tax provider did not answer"}
+				resp.PendingCount++
+				resp.Pending = append(resp.Pending, p)
+				log.Details = append(log.Details, p)
+				continue
+			}
 			resp.DuplicateCount++
 			continue
 		}
@@ -81,7 +124,18 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, batch *OfflineSyn
 			log.Errors = append(log.Errors, e)
 			continue
 		}
-		if _, err := s.CompleteSale(ctx, sale.ID, "", nil, item.Tenders, "", actor); err != nil {
+		// In process caller: carry the sale's own current revision (the adds
+		// moved it past what StartSaleAt returned).
+		current, err := s.repo.GetSale(ctx, sale.ID)
+		if err != nil {
+			resp.ErrorCount++
+			e := SyncItemResult{ClientID: item.ClientID.String(), Reason: "complete: " + err.Error()}
+			resp.Errors = append(resp.Errors, e)
+			log.Errors = append(log.Errors, e)
+			continue
+		}
+		rev := current.Revision
+		if _, err := s.CompleteSale(ctx, sale.ID, "", &rev, item.Tenders, "", actor); err != nil {
 			if errors.Is(err, ErrTaxProviderUnavailable) {
 				// never a rejection: the sale was made offline, and the
 				// provider will be asked again on the next sync

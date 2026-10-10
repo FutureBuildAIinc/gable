@@ -10,12 +10,12 @@
       "content_type": "application/json",
       "body": {
         "by_method": {
-          "CASH": 18.19,
+          "CASH": 24.35,
           "CHECK": 313596.85
         },
         "date": "<day+0>",
-        "total_collected": 313615.04,
-        "transaction_count": 45
+        "total_collected": 313621.19999999995,
+        "transaction_count": 46
       }
     }
   },
