@@ -11,15 +11,19 @@ package pos_test
 // at its discounted amount.
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
-// returnOn is a linked cash return of qty of the sale's first line.
+// returnOn is a linked cash return of qty of the sale's first line. A cash
+// return pays out of the drawer, so the register needs an open till session;
+// the fixture opens one when the test has not.
 func (f *fixture) returnOn(t *testing.T, saleID, lineID, qty string, extra ...map[string]any) resp {
 	t.Helper()
+	f.ensureOpenTill(t)
 	line := map[string]any{"line_id": lineID, "quantity": qty, "restock": true}
 	for _, e := range extra {
 		for k, v := range e {
@@ -30,6 +34,82 @@ func (f *fixture) returnOn(t *testing.T, saleID, lineID, qty string, extra ...ma
 		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
 		"refund_method": "cash", "reason": "bounds", "lines": []map[string]any{line},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+}
+
+// ensureOpenTill opens a till session when the register has none.
+func (f *fixture) ensureOpenTill(t *testing.T) {
+	t.Helper()
+	var n int64
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM till_sessions WHERE register_id = $1 AND status = 'OPEN'`, f.register).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n == 0 {
+		f.openTill(0)
+	}
+}
+
+// RULE (fourth review P2-2): a cash return pays out of a drawer that is open
+// and counted live: it locks the register's open session FOR SHARE inside
+// its transaction (against the close's FOR UPDATE) and is refused when no
+// session is open, so it never lands in a drawer that was already counted,
+// or in no drawer at all.
+func TestACashReturnNeedsAnOpenTillSession(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	saleID, body := f.saleOf("1", tender("cash", 599))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	cashReturn := func() resp {
+		return f.do("POST", "/api/v1/pos/returns", map[string]any{
+			"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+			"refund_method": "cash", "reason": "no drawer", "lines": []map[string]any{
+				{"line_id": lineID, "quantity": "1", "restock": true}},
+		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	}
+	// no session open: the drawer cannot pay
+	r := cashReturn()
+	if r.status != http.StatusConflict {
+		t.Fatalf("cash return with no open session = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "no_open_session" {
+		t.Errorf("blockers = %v, want no_open_session", blockers)
+	}
+	if got := f.accountBalance("1010"); got != 599 {
+		t.Errorf("cash balance = %d, want 599 (nothing paid)", got)
+	}
+	f.assertARInvariants(t)
+	// an open session pays, and the return lands in it
+	sessionID := f.openTill(0)
+	r = cashReturn()
+	if r.status != http.StatusCreated {
+		t.Fatalf("cash return in an open session = %d: %s", r.status, r.raw)
+	}
+	if got := str(t, r.body, "till_session_id"); got != sessionID {
+		t.Errorf("till_session_id = %s, want the open session %s", got, sessionID)
+	}
+	f.assertARInvariants(t)
+	// after the close the drawer was counted: the rest comes back another
+	// way, never out of the counted drawer
+	saleID2, body2 := f.saleOf("1", tender("cash", 599))
+	lineID2 := body2.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	if r := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{
+		"counted_by_method": map[string]any{"cash": 599}}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK {
+		t.Fatalf("close = %d: %s", r.status, r.raw)
+	}
+	r = f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID2,
+		"refund_method": "cash", "reason": "counted drawer", "lines": []map[string]any{
+			{"line_id": lineID2, "quantity": "1", "restock": true}},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("cash return after the close = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ = errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "no_open_session" {
+		t.Errorf("blockers = %v, want no_open_session (the counted drawer pays nothing)", blockers)
+	}
+	f.assertARInvariants(t)
 }
 
 // RULE: a return line that names a sale line refunds at that line's own

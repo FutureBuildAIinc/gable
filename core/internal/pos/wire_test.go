@@ -434,6 +434,7 @@ func TestVoidAfterSessionCloseIsRefused(t *testing.T) {
 func TestReturnRestocksAndReversesCOGS(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
+	f.ensureOpenTill(t)
 	saleID, body := f.saleOf("10", tender("cash", 5988))
 	saleLines := body.body["lines"].([]any)
 	firstLine := saleLines[0].(map[string]any)["id"].(string)

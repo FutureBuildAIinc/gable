@@ -403,9 +403,6 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		in.GatewayTxID = gatewayTxID
 	}
 	var tillSessionID *uuid.UUID
-	if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
-		tillSessionID = &session.ID
-	}
 	var out *Return
 	var invoiceLines []InvoiceLineCost
 	var invoiceLineIDs map[uuid.UUID]uuid.UUID
@@ -460,6 +457,35 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if invoiceLineIDs, err = s.repo.InvoiceLineIDsBySaleLine(ctx, sale.ID); err != nil {
 				return err
 			}
+		}
+		// The drawer the refund pays out of (fourth review P2-2), whatever
+		// the return is linked to: a cash return locks the register's open
+		// session FOR SHARE (against the close's FOR UPDATE) inside the
+		// transaction and is refused when none is open, so it never lands in
+		// a drawer already counted (the close waits on the same lock and
+		// aggregates the payout) or in no drawer at all. A card or account
+		// return may live sessionless.
+		session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID)
+		if err != nil {
+			return err
+		}
+		if session != nil {
+			if err := s.repo.LockTillSession(ctx, session.ID, false); err != nil {
+				return err
+			}
+			held, err := s.repo.GetTillSession(ctx, session.ID)
+			if err != nil {
+				return err
+			}
+			if held.Status == TillOpen {
+				tillSessionID = &session.ID
+			} else if in.RefundMethod == RefundCash {
+				return conflict("session_closed",
+					"the till session closed while the return was made: open the drawer and take it again")
+			}
+		} else if in.RefundMethod == RefundCash {
+			return conflict("no_open_session",
+				"a cash return pays out of the drawer: open the till session before refunding cash")
 		}
 		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
 		if err != nil {
