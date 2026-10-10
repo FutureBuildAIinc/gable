@@ -380,10 +380,11 @@ func TestPromotionPayloadPathsOnA400(t *testing.T) {
 // its promoted block.
 func TestPromotionEventsInOrderAndProvenance(t *testing.T) {
 	f := newFixture(t, testutil.RequireDB(t))
-	id := f.create()
+	// The proposer is the agent who creates the draft (the brief:
+	// "use two distinct actors and assert both").
+	id := f.create("X-Acting-As", "agent", "X-Agent-Tool", "quote-builder")
 	// A second writer: an agent with the person's session.
-	f.do("PUT", "/api/v1/drafts/quotes/"+id, map[string]any{"payload": f.payload(), "revision": 1},
-		"X-Acting-As", "agent", "X-Agent-Tool", "quote-builder")
+	f.do("PUT", "/api/v1/drafts/quotes/"+id, map[string]any{"payload": f.payload(), "revision": 1})
 
 	r := f.do("POST", "/api/v1/drafts/quotes/"+id+"/promote", map[string]any{"revision": 2})
 	if r.status != http.StatusCreated {
@@ -423,8 +424,24 @@ func TestPromotionEventsInOrderAndProvenance(t *testing.T) {
 	if proposedBy == nil {
 		t.Errorf("proposed_by = %v, want the proposing actor object", data["proposed_by"])
 	}
-	if data["committed_by"] == nil {
+	committedBy, _ := data["committed_by"].(map[string]any)
+	if committedBy == nil {
 		t.Errorf("committed_by missing: %v", data)
+	}
+	// Review pr66-r1 P2-1.9: the prior test only asserted committed_by
+	// was non-nil; setting it to the creator's id kept the test green.
+	// The two actors are distinct — the agent's PUT (proposer, set on
+	// the create with X-Acting-As) and the anonymous promote
+	// (committer) — and the outbox must name both by value. A refactor
+	// that sets committed_by = proposed_by fails this check.
+	if proposedBy["kind"] != "agent" || proposedBy["tool"] != "quote-builder" {
+		t.Errorf("proposed_by = %v, want kind=agent tool=quote-builder", proposedBy)
+	}
+	if committedBy["kind"] != "anonymous" {
+		t.Errorf("committed_by kind = %v, want anonymous (no X-Acting-As on promote)", committedBy["kind"])
+	}
+	if committedBy["kind"] == proposedBy["kind"] {
+		t.Errorf("committed_by must distinguish proposer from committer; both are kind %v", committedBy["kind"])
 	}
 
 	// The audit row names the proposers and carries the payload hash.
@@ -518,5 +535,34 @@ func TestPromotionRaces(t *testing.T) {
 	got := f.do("GET", "/api/v1/drafts/quotes/"+id2, nil)
 	if num(t, got.body, "revision") != 2 {
 		t.Errorf("revision = %v, want 2 (exactly one winner moved it once)", got.body["revision"])
+	}
+}
+
+// TestPromotedIsTerminal pins the section 4.x rule: a promoted
+// draft cannot transition back to OPEN or DISCARDED; it is terminal.
+// Review pr66-r1 P2-1.8: the shipped code had the rule in
+// service.Transition's allowed map (StatusPromoted's entry is empty)
+// but no test caught the case. With the rule removed (allowed
+// StatusPromoted: {StatusOpen}) the prior state stayed green because
+// no test exercised the path; this test fails the moment the rule is
+// rewritten. The test pins the wire shape: a 409
+// invalid_state_transition naming both states.
+func TestPromotedIsTerminal(t *testing.T) {
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// Build a draft, promote it.
+	id := f.create()
+	r := f.do("POST", "/api/v1/drafts/quotes/"+id+"/promote", map[string]any{"revision": 1})
+	if r.status != http.StatusCreated {
+		t.Fatalf("promote = %d: %s", r.status, r.raw)
+	}
+
+	// Transitions from PROMOTED are refused.
+	for _, to := range []string{"open", "discarded"} {
+		r = f.do("POST", "/api/v1/drafts/quotes/"+id+"/transitions",
+			map[string]any{"to": to, "revision": 2}, "If-Match", `"2"`)
+		if r.status != http.StatusConflict {
+			t.Errorf("promoted draft transition to %q = %d, want 409 invalid_state_transition; body %s", to, r.status, r.raw)
+		}
 	}
 }
