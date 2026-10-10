@@ -948,6 +948,10 @@ type invLevelPage struct {
 	} `json:"items"`
 	NextCursor *string `json:"next_cursor"`
 	Limit      int     `json:"limit"`
+	// Total answers include=total (the page and the count carry the same
+	// three arm predicate as the row page itself; the wall test asserts it
+	// agrees with what the page's rows would give).
+	Total *int `json:"total,omitempty"`
 }
 
 // The inventory levels list is the contract's envelope (ADR 0006 7.2) and is
@@ -1003,6 +1007,26 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 		return page
 	}
+	// listTotal is the same call with include=total; the count must hold the
+	// same three arm predicate as the row page, so the answer agrees with the
+	// page's row count for every caller.
+	listTotal := func(role, sub, header string) (invLevelPage, int) {
+		t.Helper()
+		status, body := f.callBody(t, "GET",
+			"/api/v1/inventory?product_id="+f.productID.String()+"&include=total",
+			"", role, sub, header)
+		if status != http.StatusOK {
+			t.Fatalf("inventory list+total as %s/%s: %d %s", role, sub, status, body)
+		}
+		var page invLevelPage
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("inventory list+total body is not the envelope: %v\n%s", err, body)
+		}
+		if page.Total == nil {
+			t.Fatalf("inventory list+total as %s/%s: total missing: %s", role, sub, body)
+		}
+		return page, *page.Total
+	}
 	rowAt := func(page invLevelPage, yard string) bool {
 		for _, it := range page.Items {
 			if it.LocationID != nil && *it.LocationID == yard {
@@ -1047,6 +1071,14 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 		if got := legacyIn(page); got != c.wantLegacy {
 			t.Errorf("inventory list, %s: legacy row present = %v, want %v", c.name, got, c.wantLegacy)
+		}
+		// include=total must hold the same three arm predicate as the row
+		// page: the count agrees with the page's row count for every caller.
+		// A drift in either side (the page starts matching the wrong rows,
+		// the count stops filtering) shows up as a mismatch.
+		_, total := listTotal(c.role, c.sub, c.header)
+		if total != c.wantRows {
+			t.Errorf("inventory count, %s: total = %d, want %d (the page's row count, the count and the page share the wall)", c.name, total, c.wantRows)
 		}
 	}
 }
