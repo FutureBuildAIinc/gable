@@ -57,6 +57,7 @@ The pages:
 | Tech admin | [tech-admin.md](tech-admin.md) | Machine API keys, the AI and routing settings, the apps catalog and toggles, and the finer admin scopes of ADR 0009. | C5-1a. |
 | Staff roster and module grants | [staff.md](staff.md) | The dealer roster the integrations surface authenticates against, the per staff module grants, and the global module kill switches. | C5-1a. |
 | Governance (RFCs) | [governance.md](governance.md) | The RFC drafting, review and status surface; the operator-installed governance app. | C5-1a. |
+| Delivery | [delivery.md](delivery.md) | The fleet, the day's routes, the stops and proof of delivery, the dispatch board, the deliver to fulfilment link. | C5-1d. |
 
 ## Conventions every page uses
 
