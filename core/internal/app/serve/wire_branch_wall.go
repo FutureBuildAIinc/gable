@@ -22,25 +22,30 @@ import (
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 )
 
 // branchWall is the branch wall as serve wires it: the branch middleware that
 // settles a request's branch context, the role-plus-branch composition every
-// scoped route uses, and the guard that holds a branch or location a request
-// body names to that context (ADR 0007 section 2.3). The mount methods below
+// scoped route uses, the guard that holds a branch or location a request
+// body names to that context (ADR 0007 section 2.3), and the key branch wall
+// that holds a branch bound machine key to its pin on the routes that mount
+// no branch middleware (ADR 0007 section 5.5). The mount methods below
 // are the only places a route that takes a branch from its body gets its guard,
 // and wire_branch_wall_test.go drives them with the real middleware, so
 // dropping a guard here fails a test.
 type branchWall struct {
-	mw     func(http.Handler) http.Handler
-	guard  *middleware.BranchGuard
-	scoped func(roles ...string) func(http.Handler) http.Handler
+	mw      func(http.Handler) http.Handler
+	guard   *middleware.BranchGuard
+	keyWall *middleware.KeyBranchWall
+	scoped  func(roles ...string) func(http.Handler) http.Handler
 }
 
 func newBranchWall(db *database.DB) *branchWall {
-	w := &branchWall{mw: middleware.NewBranchMiddleware(db).Handler, guard: middleware.NewBranchGuard(db)}
+	w := &branchWall{mw: middleware.NewBranchMiddleware(db).Handler, guard: middleware.NewBranchGuard(db),
+		keyWall: middleware.NewKeyBranchWall(db, audit.NewLogger(db))}
 	w.scoped = func(roles ...string) func(http.Handler) http.Handler {
 		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
 	}
@@ -57,9 +62,12 @@ func (w *branchWall) chargeCodes(mux *http.ServeMux, svc *chargecode.Service) {
 // locations mounts the location routes behind the branch middleware: the
 // create writes into a branch's tree, the by-id reads and the list are held
 // to the caller's branches (the branch switcher reads /me/branches, not this
-// list).
+// list). The key branch wall covers the routes that mount no branch
+// middleware: the by-id writes, the branch directory verbs and the grant
+// routes (ADR 0007 section 5.5).
 func (w *branchWall) locations(mux *http.ServeMux, h *location.Handler) {
-	h.WithBranchWall(w.guard, w.mw).RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
+	h.WithBranchWall(w.guard, w.mw).WithKeyBranchWall(w.keyWall).
+		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "sales"))
 }
 
 // products mounts the product routes behind the branch middleware: the stock

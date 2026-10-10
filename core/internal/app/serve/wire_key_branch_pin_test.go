@@ -130,13 +130,14 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 	registerExposureRoutes(mux, exposureRoutes{
 		Scanner: pricing.NewExposureScanner(exposureRepo, escRepo, quoteRepo, exposureAudit, db, slog.Default()).
 			WithOutbox(outbox.NewWriter(db, "")),
-		Checker:    pricing.NewExposureChecker(db),
-		Exposure:   exposureRepo,
-		Service:    pricing.NewExposureService(exposureRepo, escRepo, quoteRepo, exposureAudit, pricing.NewExposureChecker(db), slog.Default()).
+		Checker:  pricing.NewExposureChecker(db),
+		Exposure: exposureRepo,
+		Service: pricing.NewExposureService(exposureRepo, escRepo, quoteRepo, exposureAudit, pricing.NewExposureChecker(db), slog.Default()).
 			WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db),
 		Escalators: escRepo,
 		DB:         db,
 		Logger:     slog.Default(),
+		AuditLog:   audit.NewLogger(db),
 	})
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)

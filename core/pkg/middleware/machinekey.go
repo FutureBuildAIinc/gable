@@ -5,7 +5,6 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -861,24 +860,5 @@ type authErrorBody struct {
 // verbatim (4xx only; this layer writes no 500 with detail), and the request
 // id so a client can quote one identifier for any response.
 func respondAuthError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
-	reqID := w.Header().Get("X-Request-ID")
-	if reqID == "" {
-		reqID = r.Header.Get("X-Request-ID")
-	}
-
-	var body authErrorBody
-	body.Error.Code = code
-	body.Error.Message = message
-	body.Meta.RequestID = reqID
-
-	slog.Warn("auth refusal",
-		"code", code,
-		"status", status,
-		"method", r.Method,
-		"path", r.URL.Path,
-		"request_id", reqID,
-	)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	writeAuthError(w, r, status, code, message, nil)
 }
