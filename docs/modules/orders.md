@@ -96,6 +96,7 @@ consults before it bills.
 | `currency` | ISO 4217 | The customer's effective currency. |
 | `lines` | array of `OrderLine` | The priced lines, in position order. |
 | `invoice_ids` | array of UUID | The invoices that have been issued from this order. |
+| `deposit_unapplied_cents` | integer | The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed; `sum(pm.amount_unapplied)` over posted payments of this order, read at read time (`core/internal/order/repository.go` `summaryColumns`). |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 `OrderLine` carries the shared sales line shape of ADR 0005 section 2
