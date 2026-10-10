@@ -9,15 +9,19 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "session": {
-          "cashier_id": "<id-1>",
-          "id": "<id-2>",
-          "notes": "",
-          "opened_at": "<ts+0d>",
-          "opening_float": 10000,
-          "register_id": "REG-01",
-          "status": "OPEN"
-        }
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "closed_at": null,
+        "counted_by_method": null,
+        "expected_by_method": null,
+        "gl_entry_id": null,
+        "id": "<id-3>",
+        "notes": "",
+        "opened_at": "<ts+0d>",
+        "opening_float_cents": 10000,
+        "over_short_cents": null,
+        "register_id": "REG-01",
+        "status": "open"
       }
     }
   },
@@ -28,7 +32,7 @@
       "path": "/api/v1/inventory/adjust",
       "body": {
         "is_delta": true,
-        "product_id": "<id-3>",
+        "product_id": "<id-4>",
         "quantity": 50,
         "reason": "r1b c pos setup"
       }
@@ -48,7 +52,7 @@
       "path": "/api/v1/inventory/adjust",
       "body": {
         "is_delta": true,
-        "product_id": "<id-4>",
+        "product_id": "<id-5>",
         "quantity": 10,
         "reason": "r1b c pos setup"
       }
@@ -67,7 +71,7 @@
       "method": "POST",
       "path": "/api/v1/pos/till/open",
       "body": {
-        "opening_float": 50,
+        "opening_float_cents": 5000,
         "register_id": "REG-01"
       }
     },
@@ -76,11 +80,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "CONFLICT",
-          "message": "Conflict"
+          "code": "conflict",
+          "details": [
+            {
+              "code": "till_open",
+              "message": "register REG-01 already has an open till session"
+            }
+          ],
+          "message": "register REG-01 already has an open till session"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-6>"
         }
       }
     }
@@ -97,11 +107,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -112,7 +122,7 @@
       "method": "POST",
       "path": "/api/v1/pos/transactions",
       "body": {
-        "customer_id": "<id-7>",
+        "customer_id": "<id-8>",
         "register_id": "REG-01"
       }
     },
@@ -120,18 +130,25 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": null,
+        "lines": [],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 0,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 0
+        "revision": 1,
+        "status": "open",
+        "subtotal_cents": 0,
+        "tax_cents": 0,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 0
       }
     }
   },
@@ -148,17 +165,25 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-11>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "id": "<id-12>",
+        "currency": "USD",
+        "customer_id": null,
+        "id": "<id-10>",
+        "invoice_id": null,
+        "lines": [],
+        "number": "POS-000003",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 0,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 0
+        "revision": 1,
+        "status": "open",
+        "subtotal_cents": 0,
+        "tax_cents": 0,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 0
       }
     }
   },
@@ -175,17 +200,25 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-13>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "id": "<id-14>",
+        "currency": "USD",
+        "customer_id": null,
+        "id": "<id-11>",
+        "invoice_id": null,
+        "lines": [],
+        "number": "POS-000004",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 0,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 0
+        "revision": 1,
+        "status": "open",
+        "subtotal_cents": 0,
+        "tax_cents": 0,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 0
       }
     }
   },
@@ -201,11 +234,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -222,154 +255,154 @@
       "body": [
         {
           "description": "1x6x6 Cedar Fence Board",
-          "in_stock": 739,
-          "product_id": "<id-16>",
+          "in_stock": "739",
+          "product_id": "<id-13>",
           "sku": "LUM-166-WRC",
-          "unit_price": 5.1,
+          "unit_price_cents": 510,
           "uom": "PCS"
         },
         {
           "description": "2x10x12 Hem-Fir No.2",
-          "in_stock": 543,
-          "product_id": "<id-17>",
+          "in_stock": "543",
+          "product_id": "<id-14>",
           "sku": "LUM-21012-NO2",
-          "unit_price": 24.5,
+          "unit_price_cents": 2450,
           "uom": "PCS"
         },
         {
           "description": "2x12x16 Hem-Fir No.2",
-          "in_stock": 586,
-          "product_id": "<id-18>",
+          "in_stock": "586",
+          "product_id": "<id-15>",
           "sku": "LUM-21216-NO2",
-          "unit_price": 45,
+          "unit_price_cents": 4500,
           "uom": "PCS"
         },
         {
           "description": "2x4x10 SPF Premium",
-          "in_stock": 488,
-          "product_id": "<id-19>",
+          "in_stock": "488",
+          "product_id": "<id-16>",
           "sku": "LUM-2410-PREM",
-          "unit_price": 7.25,
+          "unit_price_cents": 725,
           "uom": "PCS"
         },
         {
           "description": "2x4x12 SPF Premium",
-          "in_stock": 631,
-          "product_id": "<id-20>",
+          "in_stock": "631",
+          "product_id": "<id-17>",
           "sku": "LUM-2412-PREM",
-          "unit_price": 8.75,
+          "unit_price_cents": 875,
           "uom": "PCS"
         },
         {
           "description": "2x4x8 SPF Premium",
-          "in_stock": 429,
-          "product_id": "<id-3>",
+          "in_stock": "415",
+          "product_id": "<id-4>",
           "sku": "LUM-248-PREM",
-          "unit_price": 5.5,
+          "unit_price_cents": 550,
           "uom": "PCS"
         },
         {
           "description": "2x4x92-5/8 SPF Stud",
-          "in_stock": 635,
-          "product_id": "<id-21>",
+          "in_stock": "635",
+          "product_id": "<id-18>",
           "sku": "LUM-2492-STUD",
-          "unit_price": 5.1,
+          "unit_price_cents": 510,
           "uom": "PCS"
         },
         {
           "description": "2x6x10 SPF Premium",
-          "in_stock": 869,
-          "product_id": "<id-22>",
+          "in_stock": "869",
+          "product_id": "<id-19>",
           "sku": "LUM-2610-PREM",
-          "unit_price": 9.8,
+          "unit_price_cents": 980,
           "uom": "PCS"
         },
         {
           "description": "2x6x12 SPF Premium",
-          "in_stock": 200,
-          "product_id": "<id-23>",
+          "in_stock": "200",
+          "product_id": "<id-20>",
           "sku": "LUM-2612-PREM",
-          "unit_price": 11.75,
+          "unit_price_cents": 1175,
           "uom": "PCS"
         },
         {
           "description": "2x6x16 SPF Premium",
-          "in_stock": 868,
-          "product_id": "<id-24>",
+          "in_stock": "868",
+          "product_id": "<id-21>",
           "sku": "LUM-2616-PREM",
-          "unit_price": 15.6,
+          "unit_price_cents": 1560,
           "uom": "PCS"
         },
         {
           "description": "2x8x10 Hem-Fir No.2",
-          "in_stock": 622,
-          "product_id": "<id-25>",
+          "in_stock": "622",
+          "product_id": "<id-22>",
           "sku": "LUM-2810-NO2",
-          "unit_price": 13.9,
+          "unit_price_cents": 1390,
           "uom": "PCS"
         },
         {
           "description": "2x8x16 Hem-Fir No.2",
-          "in_stock": 851,
-          "product_id": "<id-26>",
+          "in_stock": "851",
+          "product_id": "<id-23>",
           "sku": "LUM-2816-NO2",
-          "unit_price": 22.25,
+          "unit_price_cents": 2225,
           "uom": "PCS"
         },
         {
           "description": "4x4x10 Pressure Treated",
-          "in_stock": 823,
-          "product_id": "<id-27>",
+          "in_stock": "823",
+          "product_id": "<id-24>",
           "sku": "LUM-4410-PT",
-          "unit_price": 15.75,
+          "unit_price_cents": 1575,
           "uom": "PCS"
         },
         {
           "description": "4x4x8 Pressure Treated",
-          "in_stock": 646,
-          "product_id": "<id-28>",
+          "in_stock": "646",
+          "product_id": "<id-25>",
           "sku": "LUM-448-PT",
-          "unit_price": 12.5,
+          "unit_price_cents": 1250,
           "uom": "PCS"
         },
         {
           "description": "4x4x8 Western Red Cedar",
-          "in_stock": 900,
-          "product_id": "<id-29>",
+          "in_stock": "900",
+          "product_id": "<id-26>",
           "sku": "LUM-448-WRC",
-          "unit_price": 34,
+          "unit_price_cents": 3400,
           "uom": "PCS"
         },
         {
           "description": "6x6x12 Pressure Treated",
-          "in_stock": 499,
-          "product_id": "<id-30>",
+          "in_stock": "499",
+          "product_id": "<id-27>",
           "sku": "LUM-6612-PT",
-          "unit_price": 55,
+          "unit_price_cents": 5500,
           "uom": "PCS"
         },
         {
           "description": "1 X 4 RL #3 SPF",
-          "in_stock": 787,
-          "product_id": "<id-31>",
+          "in_stock": "787",
+          "product_id": "<id-28>",
           "sku": "LUMB14RLN3+",
-          "unit_price": 0.52,
+          "unit_price_cents": 52,
           "uom": "LF"
         },
         {
           "description": "2 X 4 RL #3 SPF",
-          "in_stock": 535,
-          "product_id": "<id-32>",
+          "in_stock": "535",
+          "product_id": "<id-29>",
           "sku": "LUMB24RLN3",
-          "unit_price": 0.46,
+          "unit_price_cents": 46,
           "uom": "LF"
         },
         {
           "description": "2 X 4 RL Utility",
-          "in_stock": 590,
-          "product_id": "<id-33>",
+          "in_stock": "590",
+          "product_id": "<id-30>",
           "sku": "LUMBUT24RL",
-          "unit_price": 0.44,
+          "unit_price_cents": 44,
           "uom": "LF"
         }
       ]
@@ -403,41 +436,69 @@
     "name": "pos.item.add",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/items",
+      "path": "/api/v1/pos/transactions/<id-9>/items",
       "body": {
-        "product_id": "<id-3>",
-        "quantity": 3
+        "line": {
+          "product_id": "<id-4>",
+          "quantity": "3"
+        }
       }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": null,
+        "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-31>",
+            "is_special_order": false,
+            "line_total_cents": 1403,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-4>",
+            "quantity": "3",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 1404,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 1404
+        "revision": 2,
+        "status": "open",
+        "subtotal_cents": 1403,
+        "tax_cents": 168,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 1571
       }
     }
   },
@@ -445,53 +506,100 @@
     "name": "pos.item.add.second",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/items",
+      "path": "/api/v1/pos/transactions/<id-9>/items",
       "body": {
-        "product_id": "<id-4>",
-        "quantity": 2,
-        "uom": "EA"
+        "line": {
+          "product_id": "<id-5>",
+          "quantity": "2"
+        }
       }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": null,
+        "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-31>",
+            "is_special_order": false,
+            "line_total_cents": 1403,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-4>",
+            "quantity": "3",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           },
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "3/4 Plywood G1S 4x8 (Fir)",
-            "id": "<id-35>",
-            "line_total": 6460,
-            "product_id": "<id-4>",
-            "quantity": 2,
-            "transaction_id": "<id-10>",
-            "unit_price": 3230,
-            "uom": "EA"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-32>",
+            "is_special_order": false,
+            "line_total_cents": 6460,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 1,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 323000,
+            "product_id": "<id-5>",
+            "quantity": "2",
+            "revenue_account_code": null,
+            "sku": "PLY-34-CDX",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 323000,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 7864,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 7864
+        "revision": 3,
+        "status": "open",
+        "subtotal_cents": 7863,
+        "tax_cents": 944,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 8807
       }
     }
   },
@@ -501,8 +609,10 @@
       "method": "POST",
       "path": "/api/v1/pos/transactions/not-a-uuid/items",
       "body": {
-        "product_id": "<id-3>",
-        "quantity": 1
+        "line": {
+          "product_id": "<id-4>",
+          "quantity": "1"
+        }
       }
     },
     "response": {
@@ -510,11 +620,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-36>"
+          "request_id": "<id-33>"
         }
       }
     }
@@ -523,7 +639,7 @@
     "name": "pos.item.add.bad_body",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/items",
+      "path": "/api/v1/pos/transactions/<id-9>/items",
       "body": "not an object"
     },
     "response": {
@@ -531,11 +647,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-37>"
+          "request_id": "<id-34>"
         }
       }
     }
@@ -544,22 +660,30 @@
     "name": "pos.item.add.unknown_product",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/items",
+      "path": "/api/v1/pos/transactions/<id-9>/items",
       "body": {
-        "product_id": "<id-38>",
-        "quantity": 1
+        "line": {
+          "product_id": "<id-35>",
+          "quantity": "1"
+        }
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "line.product_id",
+              "message": "no such product"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-39>"
+          "request_id": "<id-36>"
         }
       }
     }
@@ -568,37 +692,63 @@
     "name": "pos.item.remove",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/pos/transactions/<id-10>/items/<id-35>"
+      "path": "/api/v1/pos/transactions/<id-9>/items/<id-32>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": null,
+        "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-31>",
+            "is_special_order": false,
+            "line_total_cents": 1403,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-4>",
+            "quantity": "3",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 1404,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 1404
+        "revision": 4,
+        "status": "open",
+        "subtotal_cents": 1403,
+        "tax_cents": 168,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 1571
       }
     }
   },
@@ -606,18 +756,24 @@
     "name": "pos.item.remove.bad_tx_id",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/pos/transactions/not-a-uuid/items/<id-34>"
+      "path": "/api/v1/pos/transactions/not-a-uuid/items/<id-31>"
     },
     "response": {
       "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-40>"
+          "request_id": "<id-37>"
         }
       }
     }
@@ -626,18 +782,24 @@
     "name": "pos.item.remove.bad_item_id",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/pos/transactions/<id-10>/items/not-a-uuid"
+      "path": "/api/v1/pos/transactions/<id-9>/items/not-a-uuid"
     },
     "response": {
       "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "itemId",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-41>"
+          "request_id": "<id-38>"
         }
       }
     }
@@ -646,37 +808,19 @@
     "name": "pos.item.remove.unknown_item",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/pos/transactions/<id-10>/items/<id-38>"
+      "path": "/api/v1/pos/transactions/<id-9>/items/<id-35>"
     },
     "response": {
-      "status": 200,
+      "status": 404,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 0,
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
-          {
-            "created_at": "<ts+0d>",
-            "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
-          }
-        ],
-        "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 1404,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 1404
+        "error": {
+          "code": "not_found",
+          "message": "line not found on this sale"
+        },
+        "meta": {
+          "request_id": "<id-39>"
+        }
       }
     }
   },
@@ -684,37 +828,63 @@
     "name": "pos.transaction.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/transactions/<id-10>"
+      "path": "/api/v1/pos/transactions/<id-9>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": null,
+        "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-31>",
+            "is_special_order": false,
+            "line_total_cents": 1403,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-4>",
+            "quantity": "3",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 1404,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 1404
+        "revision": 4,
+        "status": "open",
+        "subtotal_cents": 1403,
+        "tax_cents": 168,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 1571
       }
     }
   },
@@ -722,18 +892,18 @@
     "name": "pos.transaction.get.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/transactions/<id-38>"
+      "path": "/api/v1/pos/transactions/<id-35>"
     },
     "response": {
       "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "sale not found"
         },
         "meta": {
-          "request_id": "<id-42>"
+          "request_id": "<id-40>"
         }
       }
     }
@@ -749,11 +919,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-43>"
+          "request_id": "<id-41>"
         }
       }
     }
@@ -768,40 +944,76 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-14>",
-          "item_count": 0,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 0
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-12>",
-          "item_count": 0,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 0
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-44>",
-          "item_count": 0,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 0
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-10>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 1404
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "id": "<id-42>",
+            "invoice_id": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "id": "<id-9>",
+            "invoice_id": null,
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "open",
+            "total_cents": 1571
+          },
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-10>",
+            "invoice_id": null,
+            "item_count": 0,
+            "number": "POS-000003",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-11>",
+            "invoice_id": null,
+            "item_count": 0,
+            "number": "POS-000004",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -813,14 +1025,70 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": []
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.bad_status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?status=OPEN"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be one of: open, held, completed, voided"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-43>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.list.unknown_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/pos/transactions?bogus=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "bogus",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-44>"
+        }
+      }
     }
   },
   {
     "name": "pos.transaction.complete.no_tenders",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/complete",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
       "body": {
         "tenders": []
       }
@@ -830,8 +1098,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "tenders",
+              "message": "name at least one tender"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-45>"
@@ -847,8 +1121,8 @@
       "body": {
         "tenders": [
           {
-            "amount": 1,
-            "method": "CASH"
+            "amount_cents": 100,
+            "method": "cash"
           }
         ]
       }
@@ -858,8 +1132,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-46>"
@@ -871,7 +1151,7 @@
     "name": "pos.transaction.complete.bad_body",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/complete",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
       "body": "not an object"
     },
     "response": {
@@ -879,8 +1159,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-47>"
@@ -889,26 +1169,26 @@
     }
   },
   {
-    "name": "pos.transaction.complete.insufficient",
+    "name": "pos.transaction.complete.no_precondition",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/complete",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
       "body": {
         "tenders": [
           {
-            "amount": 0.01,
-            "method": "CASH"
+            "amount_cents": 50000,
+            "method": "cash"
           }
         ]
       }
     },
     "response": {
-      "status": 422,
+      "status": 428,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "UNPROCESSABLE_ENTITY",
-          "message": "Unprocessable Entity"
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
         },
         "meta": {
           "request_id": "<id-48>"
@@ -917,26 +1197,29 @@
     }
   },
   {
-    "name": "pos.transaction.complete.not_found",
+    "name": "pos.transaction.complete.stale_revision",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-38>/complete",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "tenders": [
           {
-            "amount": 1,
-            "method": "CASH"
+            "amount_cents": 50000,
+            "method": "cash"
           }
         ]
       }
     },
     "response": {
-      "status": 422,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "UNPROCESSABLE_ENTITY",
-          "message": "Unprocessable Entity"
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
         },
         "meta": {
           "request_id": "<id-49>"
@@ -945,82 +1228,66 @@
     }
   },
   {
-    "name": "pos.transaction.complete",
+    "name": "pos.transaction.complete.insufficient",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/complete",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
+      "headers": {
+        "If-Match": "\"4\""
+      },
       "body": {
         "tenders": [
           {
-            "amount": 500,
-            "method": "CASH"
+            "amount_cents": 1,
+            "method": "cash"
           }
         ]
       }
     },
     "response": {
-      "status": 200,
+      "status": 409,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 48596,
-        "completed_at": "<ts+0d>",
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
-          {
-            "created_at": "<ts+0d>",
-            "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
-          }
-        ],
-        "register_id": "REG-01",
-        "status": "COMPLETED",
-        "subtotal": 1404,
-        "tax_amount": 0,
-        "tenders": [
-          {
-            "amount": 50000,
-            "created_at": "<ts+0d>",
-            "id": "<id-50>",
-            "method": "CASH",
-            "transaction_id": "<id-10>"
-          }
-        ],
-        "till_session_id": "<id-2>",
-        "total": 1404
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "insufficient_tender",
+              "message": "the sale needs 1571 cents and the tenders carry 1"
+            }
+          ],
+          "message": "the sale needs 1571 cents and the tenders carry 1"
+        },
+        "meta": {
+          "request_id": "<id-50>"
+        }
       }
     }
   },
   {
-    "name": "pos.transaction.complete.again",
+    "name": "pos.transaction.complete.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/complete",
+      "path": "/api/v1/pos/transactions/<id-35>/complete",
+      "headers": {
+        "If-Match": "\"4\""
+      },
       "body": {
         "tenders": [
           {
-            "amount": 500,
-            "method": "CASH"
+            "amount_cents": 50000,
+            "method": "cash"
           }
         ]
       }
     },
     "response": {
-      "status": 422,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "UNPROCESSABLE_ENTITY",
-          "message": "Unprocessable Entity"
+          "code": "not_found",
+          "message": "sale not found"
         },
         "meta": {
           "request_id": "<id-51>"
@@ -1029,239 +1296,18 @@
     }
   },
   {
-    "name": "pos.item.add.after_complete",
+    "name": "pos.transaction.complete",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-10>/items",
-      "body": {
-        "product_id": "<id-3>",
-        "quantity": 1
-      }
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 48596,
-        "completed_at": "<ts+0d>",
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
-          {
-            "created_at": "<ts+0d>",
-            "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
-          },
-          {
-            "created_at": "<ts+0d>",
-            "description": "2x4x8 SPF Premium",
-            "id": "<id-52>",
-            "line_total": 468,
-            "product_id": "<id-3>",
-            "quantity": 1,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
-          }
-        ],
-        "register_id": "REG-01",
-        "status": "COMPLETED",
-        "subtotal": 1872,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 1872
-      }
-    }
-  },
-  {
-    "name": "pos.item.add.void_tx",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-12>/items",
-      "body": {
-        "product_id": "<id-4>",
-        "quantity": 1
-      }
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-11>",
-        "change_due": 0,
-        "created_at": "<ts+0d>",
-        "id": "<id-12>",
-        "line_items": [
-          {
-            "created_at": "<ts+0d>",
-            "description": "3/4 Plywood G1S 4x8 (Fir)",
-            "id": "<id-53>",
-            "line_total": 3800,
-            "product_id": "<id-4>",
-            "quantity": 1,
-            "transaction_id": "<id-12>",
-            "unit_price": 3800,
-            "uom": "PCS"
-          }
-        ],
-        "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 3800,
-        "tax_amount": 456,
-        "till_session_id": "<id-2>",
-        "total": 4256
-      }
-    }
-  },
-  {
-    "name": "pos.transaction.void",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-12>/void"
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-11>",
-        "change_due": 0,
-        "created_at": "<ts+0d>",
-        "id": "<id-12>",
-        "register_id": "REG-01",
-        "status": "VOIDED",
-        "subtotal": 3800,
-        "tax_amount": 456,
-        "till_session_id": "<id-2>",
-        "total": 4256
-      }
-    }
-  },
-  {
-    "name": "pos.transaction.void.again",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-12>/void"
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-11>",
-        "change_due": 0,
-        "created_at": "<ts+0d>",
-        "id": "<id-12>",
-        "register_id": "REG-01",
-        "status": "VOIDED",
-        "subtotal": 3800,
-        "tax_amount": 456,
-        "till_session_id": "<id-2>",
-        "total": 4256
-      }
-    }
-  },
-  {
-    "name": "pos.transaction.void.bad_id",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/not-a-uuid/void"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-54>"
-        }
-      }
-    }
-  },
-  {
-    "name": "pos.transaction.void.not_found",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-38>/void"
-    },
-    "response": {
-      "status": 500,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-55>"
-        }
-      }
-    }
-  },
-  {
-    "name": "pos.item.add.voidpaid_tx",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-14>/items",
-      "body": {
-        "product_id": "<id-3>",
-        "quantity": 1
-      }
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-13>",
-        "change_due": 0,
-        "created_at": "<ts+0d>",
-        "id": "<id-14>",
-        "line_items": [
-          {
-            "created_at": "<ts+0d>",
-            "description": "2x4x8 SPF Premium",
-            "id": "<id-56>",
-            "line_total": 550,
-            "product_id": "<id-3>",
-            "quantity": 1,
-            "transaction_id": "<id-14>",
-            "unit_price": 550,
-            "uom": "PCS"
-          }
-        ],
-        "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 550,
-        "tax_amount": 66,
-        "till_session_id": "<id-2>",
-        "total": 616
-      }
-    }
-  },
-  {
-    "name": "pos.transaction.complete.voidpaid",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-14>/complete",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
+      "headers": {
+        "If-Match": "\"4\""
+      },
       "body": {
         "tenders": [
           {
-            "amount": 100,
-            "method": "CASH"
+            "amount_cents": 50000,
+            "method": "cash"
           }
         ]
       }
@@ -1270,40 +1316,453 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-13>",
-        "change_due": 9384,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 48597,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
-        "id": "<id-14>",
-        "line_items": [
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": "<id-52>",
+        "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
-            "id": "<id-56>",
-            "line_total": 550,
-            "product_id": "<id-3>",
-            "quantity": 1,
-            "transaction_id": "<id-14>",
-            "unit_price": 550,
-            "uom": "PCS"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-31>",
+            "is_special_order": false,
+            "line_total_cents": 1403,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-4>",
+            "quantity": "3",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "COMPLETED",
-        "subtotal": 550,
-        "tax_amount": 66,
+        "revision": 5,
+        "status": "completed",
+        "subtotal_cents": 1403,
+        "tax_cents": 0,
         "tenders": [
           {
-            "amount": 10000,
+            "amount_cents": 1403,
+            "auth_code": null,
+            "card_brand": null,
+            "card_last4": null,
             "created_at": "<ts+0d>",
-            "id": "<id-57>",
-            "method": "CASH",
-            "transaction_id": "<id-14>"
+            "gateway_tx_id": null,
+            "id": "<id-53>",
+            "method": "cash",
+            "payment_id": "<id-54>",
+            "reference": null,
+            "sale_id": "<id-9>"
           }
         ],
-        "till_session_id": "<id-2>",
-        "total": 616
+        "till_session_id": "<id-3>",
+        "total_cents": 1403
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.complete.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-9>/complete",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "tenders": [
+          {
+            "amount_cents": 50000,
+            "method": "cash"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "cannot complete a completed sale"
+        },
+        "meta": {
+          "request_id": "<id-55>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.item.add.after_complete",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-9>/items",
+      "body": {
+        "line": {
+          "product_id": "<id-4>",
+          "quantity": "1"
+        }
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "cannot add a line to a completed sale"
+        },
+        "meta": {
+          "request_id": "<id-56>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.item.add.void_tx",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-10>/items",
+      "body": {
+        "line": {
+          "product_id": "<id-5>",
+          "quantity": "1"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": null,
+        "id": "<id-10>",
+        "invoice_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "3/4 Plywood G1S 4x8 (Fir)",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-57>",
+            "is_special_order": false,
+            "line_total_cents": 3800,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 380000,
+            "product_id": "<id-5>",
+            "quantity": "1",
+            "revenue_account_code": null,
+            "sku": "PLY-34-CDX",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 380000,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "number": "POS-000003",
+        "register_id": "REG-01",
+        "revision": 2,
+        "status": "open",
+        "subtotal_cents": 3800,
+        "tax_cents": 456,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 4256
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.void.open",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-10>/void",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "reason": "r1b c abandon"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "cannot void a open sale: only a completed sale is voided"
+        },
+        "meta": {
+          "request_id": "<id-58>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.void.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/not-a-uuid/void",
+      "body": {
+        "reason": "r1b c"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-59>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.void.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-35>/void",
+      "body": {
+        "reason": "r1b c"
+      }
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "sale not found"
+        },
+        "meta": {
+          "request_id": "<id-60>"
+        }
+      }
+    }
+  },
+  {
+    "name": "pos.item.add.voidpaid_tx",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-11>/items",
+      "body": {
+        "line": {
+          "product_id": "<id-4>",
+          "quantity": "1"
+        }
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": null,
+        "id": "<id-11>",
+        "invoice_id": null,
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-61>",
+            "is_special_order": false,
+            "line_total_cents": 550,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 55000,
+            "product_id": "<id-4>",
+            "quantity": "1",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 55000,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "number": "POS-000004",
+        "register_id": "REG-01",
+        "revision": 2,
+        "status": "open",
+        "subtotal_cents": 550,
+        "tax_cents": 66,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 616
+      }
+    }
+  },
+  {
+    "name": "pos.transaction.complete.voidpaid_split_tender",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/pos/transactions/<id-11>/complete",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "tenders": [
+          {
+            "amount_cents": 416,
+            "method": "cash"
+          },
+          {
+            "amount_cents": 200,
+            "method": "check",
+            "reference": "ch-1042"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": "<ts+0d>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": null,
+        "id": "<id-11>",
+        "invoice_id": "<id-62>",
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-61>",
+            "is_special_order": false,
+            "line_total_cents": 550,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 55000,
+            "product_id": "<id-4>",
+            "quantity": "1",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 55000,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "number": "POS-000004",
+        "register_id": "REG-01",
+        "revision": 3,
+        "status": "completed",
+        "subtotal_cents": 550,
+        "tax_cents": 66,
+        "tenders": [
+          {
+            "amount_cents": 416,
+            "auth_code": null,
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "gateway_tx_id": null,
+            "id": "<id-63>",
+            "method": "cash",
+            "payment_id": "<id-64>",
+            "reference": null,
+            "sale_id": "<id-11>"
+          },
+          {
+            "amount_cents": 200,
+            "auth_code": null,
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "gateway_tx_id": null,
+            "id": "<id-65>",
+            "method": "check",
+            "payment_id": "<id-66>",
+            "reference": "ch-1042",
+            "sale_id": "<id-11>"
+          }
+        ],
+        "till_session_id": "<id-3>",
+        "total_cents": 616
       }
     }
   },
@@ -1311,24 +1770,96 @@
     "name": "pos.transaction.void.completed",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/transactions/<id-14>/void"
+      "path": "/api/v1/pos/transactions/<id-11>/void",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "reason": "r1b c wrong customer"
+      }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-13>",
-        "change_due": 9384,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
-        "id": "<id-14>",
+        "currency": "USD",
+        "customer_id": null,
+        "id": "<id-11>",
+        "invoice_id": "<id-62>",
+        "lines": [
+          {
+            "charge_code": null,
+            "charge_code_id": null,
+            "created_at": "<ts+0d>",
+            "description": "2x4x8 SPF Premium",
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-61>",
+            "is_special_order": false,
+            "line_total_cents": 550,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 55000,
+            "product_id": "<id-4>",
+            "quantity": "1",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 55000,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
+          }
+        ],
+        "number": "POS-000004",
         "register_id": "REG-01",
-        "status": "VOIDED",
-        "subtotal": 550,
-        "tax_amount": 66,
-        "till_session_id": "<id-2>",
-        "total": 616
+        "revision": 4,
+        "status": "voided",
+        "subtotal_cents": 550,
+        "tax_cents": 66,
+        "tenders": [
+          {
+            "amount_cents": 416,
+            "auth_code": null,
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "gateway_tx_id": null,
+            "id": "<id-63>",
+            "method": "cash",
+            "payment_id": "<id-64>",
+            "reference": null,
+            "sale_id": "<id-11>"
+          },
+          {
+            "amount_cents": 200,
+            "auth_code": null,
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "gateway_tx_id": null,
+            "id": "<id-65>",
+            "method": "check",
+            "payment_id": "<id-66>",
+            "reference": "ch-1042",
+            "sale_id": "<id-11>"
+          }
+        ],
+        "till_session_id": "<id-3>",
+        "total_cents": 616
       }
     }
   },
@@ -1336,58 +1867,77 @@
     "name": "pos.transaction.get.after",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/transactions/<id-10>"
+      "path": "/api/v1/pos/transactions/<id-9>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-8>",
-        "cashier_id": "<id-9>",
-        "change_due": 48596,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 48597,
         "completed_at": "<ts+0d>",
         "created_at": "<ts+0d>",
-        "customer_id": "<id-7>",
-        "id": "<id-10>",
-        "line_items": [
+        "currency": "USD",
+        "customer_id": "<id-8>",
+        "id": "<id-9>",
+        "invoice_id": "<id-52>",
+        "lines": [
           {
+            "charge_code": null,
+            "charge_code_id": null,
             "created_at": "<ts+0d>",
             "description": "2x4x8 SPF Premium",
-            "id": "<id-34>",
-            "line_total": 1404,
-            "product_id": "<id-3>",
-            "quantity": 3,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
-          },
-          {
-            "created_at": "<ts+0d>",
-            "description": "2x4x8 SPF Premium",
-            "id": "<id-52>",
-            "line_total": 468,
-            "product_id": "<id-3>",
-            "quantity": 1,
-            "transaction_id": "<id-10>",
-            "unit_price": 468,
-            "uom": "PCS"
+            "discount_cents": null,
+            "discount_percent": null,
+            "discount_reason": null,
+            "id": "<id-31>",
+            "is_special_order": false,
+            "line_total_cents": 1403,
+            "line_type": "product",
+            "override_reason": null,
+            "parent_line_id": null,
+            "position": 0,
+            "price_adjusted_by": null,
+            "price_source": "price_list",
+            "price_uom": "PCS",
+            "price_uom_qty": "1",
+            "priced_unit_price_ten_thousandths": 46750,
+            "product_id": "<id-4>",
+            "quantity": "3",
+            "revenue_account_code": null,
+            "sku": "LUM-248-PREM",
+            "special_order_unit_cost_ten_thousandths": null,
+            "taxable": true,
+            "unit_price_ten_thousandths": 46750,
+            "uom": "PCS",
+            "uom_qty": "1",
+            "vendor_id": null
           }
         ],
+        "number": "POS-000002",
         "register_id": "REG-01",
-        "status": "COMPLETED",
-        "subtotal": 1872,
-        "tax_amount": 0,
+        "revision": 5,
+        "status": "completed",
+        "subtotal_cents": 1403,
+        "tax_cents": 0,
         "tenders": [
           {
-            "amount": 50000,
+            "amount_cents": 1403,
+            "auth_code": null,
+            "card_brand": null,
+            "card_last4": null,
             "created_at": "<ts+0d>",
-            "id": "<id-50>",
-            "method": "CASH",
-            "transaction_id": "<id-10>"
+            "gateway_tx_id": null,
+            "id": "<id-53>",
+            "method": "cash",
+            "payment_id": "<id-54>",
+            "reference": null,
+            "sale_id": "<id-9>"
           }
         ],
-        "till_session_id": "<id-2>",
-        "total": 1872
+        "till_session_id": "<id-3>",
+        "total_cents": 1403
       }
     }
   },
@@ -1401,42 +1951,159 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "completed_at": "<ts+0d>",
-          "created_at": "<ts+0d>",
-          "id": "<id-14>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "VOIDED",
-          "total": 616
-        },
-        {
-          "completed_at": "<ts+0d>",
-          "created_at": "<ts+0d>",
-          "id": "<id-10>",
-          "item_count": 2,
-          "register_id": "REG-01",
-          "status": "COMPLETED",
-          "total": 1872
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-44>",
-          "item_count": 0,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 0
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-12>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "VOIDED",
-          "total": 4256
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": "<ts+0d>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "id": "<id-9>",
+            "invoice_id": "<id-52>",
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 5,
+            "status": "completed",
+            "total_cents": 1403
+          },
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": "<ts+0d>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-11>",
+            "invoice_id": "<id-62>",
+            "item_count": 1,
+            "number": "POS-000004",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "voided",
+            "total_cents": 616
+          },
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-8>",
+            "id": "<id-42>",
+            "invoice_id": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-1>",
+            "cashier_id": "<id-2>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-10>",
+            "invoice_id": null,
+            "item_count": 1,
+            "number": "POS-000003",
+            "register_id": "REG-01",
+            "revision": 2,
+            "status": "open",
+            "total_cents": 4256
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "pos.events",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=pos_transaction.completed,pos_transaction.voided&limit=50"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-1>",
+            "data": {
+              "change_cents": 0,
+              "currency": "USD",
+              "customer_id": null,
+              "from_status": "open",
+              "invoice_id": "<id-62>",
+              "number": "POS-000004",
+              "revision": 3,
+              "status": "completed",
+              "total_cents": 616
+            },
+            "entity": {
+              "id": "<id-11>",
+              "kind": "pos_transaction"
+            },
+            "event_id": "<id-67>",
+            "org": "default",
+            "type": "pos_transaction.completed"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-1>",
+            "data": {
+              "change_cents": 48597,
+              "currency": "USD",
+              "customer_id": "<id-8>",
+              "from_status": "open",
+              "invoice_id": "<id-52>",
+              "number": "POS-000002",
+              "revision": 5,
+              "status": "completed",
+              "total_cents": 1403
+            },
+            "entity": {
+              "id": "<id-9>",
+              "kind": "pos_transaction"
+            },
+            "event_id": "<id-68>",
+            "org": "default",
+            "type": "pos_transaction.completed"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-1>",
+            "data": {
+              "currency": "USD",
+              "customer_id": null,
+              "from_status": "completed",
+              "number": "POS-000004",
+              "reason": "r1b c wrong customer",
+              "revision": 4,
+              "status": "voided",
+              "total_cents": 616
+            },
+            "entity": {
+              "id": "<id-11>",
+              "kind": "pos_transaction"
+            },
+            "event_id": "<id-69>",
+            "org": "default",
+            "type": "pos_transaction.voided"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": "<cursor>"
+      }
     }
   }
 ]

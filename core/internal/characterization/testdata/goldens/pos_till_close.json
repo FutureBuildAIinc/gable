@@ -9,24 +9,30 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "change_given": 48596,
+        "change_cents": 48597,
         "expected_by_method": {
-          "CASH": 11404
+          "CASH": 8603
         },
         "sale_count": 1,
-        "sales_total": 1872,
+        "sales_total_cents": 1403,
         "session": {
-          "cashier_id": "<id-2>",
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
+          "closed_at": null,
+          "counted_by_method": null,
+          "expected_by_method": null,
+          "gl_entry_id": null,
           "id": "<id-1>",
           "notes": "",
           "opened_at": "<ts+0d>",
-          "opening_float": 10000,
+          "opening_float_cents": 10000,
+          "over_short_cents": null,
           "register_id": "REG-01",
-          "status": "OPEN"
+          "status": "open"
         },
-        "tax_total": 0,
+        "tax_total_cents": 0,
         "tendered_by_method": {
-          "CASH": 50000
+          "CASH": 1403
         }
       }
     }
@@ -42,11 +48,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-4>"
         }
       }
     }
@@ -55,18 +67,18 @@
     "name": "pos.till.report.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/till/<id-4>/report"
+      "path": "/api/v1/pos/till/<id-5>/report"
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "not_found",
+          "message": "till session not found"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-6>"
         }
       }
     }
@@ -82,11 +94,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "no Z-report for this session"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -102,11 +114,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -118,7 +136,7 @@
       "path": "/api/v1/pos/till/not-a-uuid/close",
       "body": {
         "counted_by_method": {
-          "CASH": 1
+          "cash": 100
         }
       }
     },
@@ -127,11 +145,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -148,11 +172,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -161,23 +185,23 @@
     "name": "pos.till.close.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/till/<id-4>/close",
+      "path": "/api/v1/pos/till/<id-5>/close",
       "body": {
         "counted_by_method": {
-          "CASH": 1
+          "cash": 100
         }
       }
     },
     "response": {
-      "status": 409,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "CONFLICT",
-          "message": "Conflict"
+          "code": "not_found",
+          "message": "till session not found"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -189,7 +213,7 @@
       "path": "/api/v1/pos/till/<id-1>/close",
       "body": {
         "counted_by_method": {
-          "CASH": 200
+          "cash": 20000
         },
         "notes": "r1b c close count"
       }
@@ -198,33 +222,34 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "change_given": 48596,
+        "change_cents": 48597,
         "expected_by_method": {
-          "CASH": 11404
+          "CASH": 8603
         },
         "sale_count": 1,
-        "sales_total": 1872,
+        "sales_total_cents": 1403,
         "session": {
-          "cashier_id": "<id-2>",
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
           "closed_at": "<ts+0d>",
           "counted_by_method": {
             "CASH": 20000
           },
           "expected_by_method": {
-            "CASH": 11404
+            "CASH": 8603
           },
-          "gl_entry_id": "<id-11>",
+          "gl_entry_id": "<id-12>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
-          "opening_float": 10000,
-          "over_short": 8596,
+          "opening_float_cents": 10000,
+          "over_short_cents": 11397,
           "register_id": "REG-01",
-          "status": "CLOSED"
+          "status": "closed"
         },
-        "tax_total": 0,
+        "tax_total_cents": 0,
         "tendered_by_method": {
-          "CASH": 50000
+          "CASH": 1403
         }
       }
     }
@@ -236,7 +261,7 @@
       "path": "/api/v1/pos/till/<id-1>/close",
       "body": {
         "counted_by_method": {
-          "CASH": 200
+          "cash": 20000
         }
       }
     },
@@ -245,11 +270,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "CONFLICT",
-          "message": "Conflict"
+          "code": "invalid_state_transition",
+          "message": "the till session is not open"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -261,10 +286,16 @@
       "path": "/api/v1/pos/till/current?register_id=REG-01"
     },
     "response": {
-      "status": 200,
+      "status": 404,
       "content_type": "application/json",
       "body": {
-        "session": null
+        "error": {
+          "code": "not_found",
+          "message": "no open till session for this register"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
       }
     }
   },
@@ -274,7 +305,7 @@
       "method": "POST",
       "path": "/api/v1/pos/till/open",
       "body": {
-        "opening_float": 100,
+        "opening_float_cents": 10000,
         "register_id": "REG-01"
       }
     },
@@ -282,13 +313,19 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "cashier_id": "<id-13>",
-        "id": "<id-14>",
+        "branch_id": "<id-2>",
+        "cashier_id": "<id-3>",
+        "closed_at": null,
+        "counted_by_method": null,
+        "expected_by_method": null,
+        "gl_entry_id": null,
+        "id": "<id-15>",
         "notes": "",
         "opened_at": "<ts+0d>",
-        "opening_float": 10000,
+        "opening_float_cents": 10000,
+        "over_short_cents": null,
         "register_id": "REG-01",
-        "status": "OPEN"
+        "status": "open"
       }
     }
   },
@@ -302,39 +339,43 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "change_given": 48596,
+        "change_cents": 48597,
         "expected_by_method": {
-          "CASH": 11404
+          "CASH": 8603
         },
         "sale_count": 1,
-        "sales_total": 1872,
+        "sales_total_cents": 1403,
         "session": {
-          "cashier_id": "<id-2>",
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
           "closed_at": "<ts+0d>",
           "counted_by_method": {
             "CASH": 20000
           },
           "expected_by_method": {
-            "CASH": 11404
+            "CASH": 8603
           },
-          "gl_entry_id": "<id-11>",
+          "gl_entry_id": "<id-12>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
-          "opening_float": 10000,
-          "over_short": 8596,
+          "opening_float_cents": 10000,
+          "over_short_cents": 11397,
           "register_id": "REG-01",
-          "status": "CLOSED"
+          "status": "closed"
         },
-        "tax_total": 0,
+        "tax_total_cents": 0,
         "tendered_by_method": {
-          "CASH": 50000
+          "CASH": 1403
         }
       }
     }
   },
   {
     "name": "pos.till.zreport",
+    "mask_fields": {
+      "payload": "<zreport-payload>"
+    },
     "request": {
       "method": "GET",
       "path": "/api/v1/pos/till/<id-1>/zreport"
@@ -343,39 +384,11 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "branch_id": "<id-2>",
         "generated_at": "<ts+0d>",
-        "id": "<id-15>",
-        "over_short": 8596,
-        "payload": {
-          "change_given": 48596,
-          "expected_by_method": {
-            "CASH": 11404
-          },
-          "sale_count": 1,
-          "sales_total": 1872,
-          "session": {
-            "cashier_id": "<id-2>",
-            "closed_at": "<ts+0d>",
-            "counted_by_method": {
-              "CASH": 20000
-            },
-            "expected_by_method": {
-              "CASH": 11404
-            },
-            "gl_entry_id": "<id-11>",
-            "id": "<id-1>",
-            "notes": "r1b c close count",
-            "opened_at": "<ts+0d>",
-            "opening_float": 10000,
-            "over_short": 8596,
-            "register_id": "REG-01",
-            "status": "CLOSED"
-          },
-          "tax_total": 0,
-          "tendered_by_method": {
-            "CASH": 50000
-          }
-        },
+        "id": "<id-16>",
+        "over_short_cents": 11397,
+        "payload": "<zreport-payload>",
         "register_id": "REG-01",
         "till_session_id": "<id-1>"
       }
@@ -385,24 +398,27 @@
     "name": "pos.till.zreport.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/till/<id-4>/zreport"
+      "path": "/api/v1/pos/till/<id-5>/zreport"
     },
     "response": {
       "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "no Z-report for this session"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-17>"
         }
       }
     }
   },
   {
     "name": "pos.zreports.list",
+    "mask_fields": {
+      "payload": "<zreport-payload>"
+    },
     "request": {
       "method": "GET",
       "path": "/api/v1/pos/zreports?register_id=REG-01"
@@ -410,47 +426,17 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": {
-        "z_reports": [
-          {
-            "generated_at": "<ts+0d>",
-            "id": "<id-15>",
-            "over_short": 8596,
-            "payload": {
-              "change_given": 48596,
-              "expected_by_method": {
-                "CASH": 11404
-              },
-              "sale_count": 1,
-              "sales_total": 1872,
-              "session": {
-                "cashier_id": "<id-2>",
-                "closed_at": "<ts+0d>",
-                "counted_by_method": {
-                  "CASH": 20000
-                },
-                "expected_by_method": {
-                  "CASH": 11404
-                },
-                "gl_entry_id": "<id-11>",
-                "id": "<id-1>",
-                "notes": "r1b c close count",
-                "opened_at": "<ts+0d>",
-                "opening_float": 10000,
-                "over_short": 8596,
-                "register_id": "REG-01",
-                "status": "CLOSED"
-              },
-              "tax_total": 0,
-              "tendered_by_method": {
-                "CASH": 50000
-              }
-            },
-            "register_id": "REG-01",
-            "till_session_id": "<id-1>"
-          }
-        ]
-      }
+      "body": [
+        {
+          "branch_id": "<id-2>",
+          "generated_at": "<ts+0d>",
+          "id": "<id-16>",
+          "over_short_cents": 11397,
+          "payload": "<zreport-payload>",
+          "register_id": "REG-01",
+          "till_session_id": "<id-1>"
+        }
+      ]
     }
   },
   {
@@ -462,9 +448,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": {
-        "z_reports": null
-      }
+      "body": null
     }
   },
   {
@@ -476,9 +460,7 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": {
-        "z_reports": null
-      }
+      "body": null
     }
   }
 ]

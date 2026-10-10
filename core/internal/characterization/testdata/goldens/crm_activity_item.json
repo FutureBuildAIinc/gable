@@ -494,22 +494,6 @@
             "at": "<ts+0d>",
             "branch_id": null,
             "data": {
-              "activity_type": "note",
-              "customer_id": "<id-1>",
-              "revision": 1
-            },
-            "entity": {
-              "id": "<id-15>",
-              "kind": "activity"
-            },
-            "event_id": "<id-17>",
-            "org": "default",
-            "type": "activity.created"
-          },
-          {
-            "at": "<ts+0d>",
-            "branch_id": null,
-            "data": {
               "activity_type": "call",
               "customer_id": "<id-1>",
               "revision": 1
@@ -518,7 +502,7 @@
               "id": "<id-2>",
               "kind": "activity"
             },
-            "event_id": "<id-18>",
+            "event_id": "<id-17>",
             "org": "default",
             "type": "activity.created"
           },
@@ -534,9 +518,25 @@
               "id": "<id-2>",
               "kind": "activity"
             },
-            "event_id": "<id-19>",
+            "event_id": "<id-18>",
             "org": "default",
             "type": "activity.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "activity_type": "note",
+              "customer_id": "<id-1>",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-15>",
+              "kind": "activity"
+            },
+            "event_id": "<id-19>",
+            "org": "default",
+            "type": "activity.created"
           }
         ],
         "limit": 3,

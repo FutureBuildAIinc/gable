@@ -211,7 +211,8 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 	var out *Sale
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		sale := &Sale{RegisterID: in.RegisterID, CashierID: in.CashierID, CustomerID: in.CustomerID,
-			Status: StatusOpen, Currency: currency, WalkInID: walkInID}
+			Status: StatusOpen, Currency: currency, WalkInID: walkInID,
+			Lines: []salesdoc.Line{}, Tenders: []Tender{}}
 		if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
 			sale.TillSessionID = &session.ID
 		}
@@ -247,6 +248,10 @@ func (s *Service) priceLine(ctx context.Context, sale *Sale, pl salesdoc.ParsedL
 	customerID := uuid.Nil
 	if sale.CustomerID != nil {
 		customerID = *sale.CustomerID
+	} else if sale.WalkInID != uuid.Nil {
+		// The walk-in customer is the sale's customer of record: the engine
+		// prices for it (its retail tier), never for an empty id.
+		customerID = sale.WalkInID
 	}
 	refs, codes, _, err := s.lookups(ctx, []salesdoc.ParsedLine{pl})
 	if err != nil {
@@ -498,6 +503,15 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		}
 		if sale.Status != StatusOpen && sale.Status != StatusHeld {
 			return httpx.InvalidStateTransition(fmt.Sprintf("cannot add a line to a %s sale", sale.Status.Status()))
+		}
+		if sale.CustomerID == nil {
+			// The engine prices a walk-in sale for the walk-in customer of
+			// record, never for an empty id (the read does not carry it).
+			walkInID, _, err := s.repo.WalkInCustomer(ctx)
+			if err != nil {
+				return err
+			}
+			sale.WalkInID = walkInID
 		}
 		var priced []salesdoc.Line
 		var audits []audit.Entry

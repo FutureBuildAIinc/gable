@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/v1/pos/till/open",
       "body": {
-        "opening_float": 100,
+        "opening_float_cents": 10000,
         "register_id": "REG-01"
       }
     },
@@ -13,13 +13,19 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "cashier_id": "<id-1>",
-        "id": "<id-2>",
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "closed_at": null,
+        "counted_by_method": null,
+        "expected_by_method": null,
+        "gl_entry_id": null,
+        "id": "<id-3>",
         "notes": "",
         "opened_at": "<ts+0d>",
-        "opening_float": 10000,
+        "opening_float_cents": 10000,
+        "over_short_cents": null,
         "register_id": "REG-01",
-        "status": "OPEN"
+        "status": "open"
       }
     }
   },
@@ -33,15 +39,19 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "session": {
-          "cashier_id": "<id-1>",
-          "id": "<id-2>",
-          "notes": "",
-          "opened_at": "<ts+0d>",
-          "opening_float": 10000,
-          "register_id": "REG-01",
-          "status": "OPEN"
-        }
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "closed_at": null,
+        "counted_by_method": null,
+        "expected_by_method": null,
+        "gl_entry_id": null,
+        "id": "<id-3>",
+        "notes": "",
+        "opened_at": "<ts+0d>",
+        "opening_float_cents": 10000,
+        "over_short_cents": null,
+        "register_id": "REG-01",
+        "status": "open"
       }
     }
   },
@@ -51,7 +61,7 @@
       "method": "POST",
       "path": "/api/v1/pos/transactions",
       "body": {
-        "customer_id": "<id-3>",
+        "customer_id": "<id-4>",
         "register_id": "REG-01"
       }
     },
@@ -59,18 +69,25 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-4>",
-        "cashier_id": "<id-5>",
-        "change_due": 0,
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "change_cents": 0,
+        "completed_at": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-3>",
-        "id": "<id-6>",
+        "currency": "USD",
+        "customer_id": "<id-4>",
+        "id": "<id-5>",
+        "invoice_id": null,
+        "lines": [],
+        "number": "POS-000001",
         "register_id": "REG-01",
-        "status": "OPEN",
-        "subtotal": 0,
-        "tax_amount": 0,
-        "till_session_id": "<id-2>",
-        "total": 0
+        "revision": 1,
+        "status": "open",
+        "subtotal_cents": 0,
+        "tax_cents": 0,
+        "tenders": [],
+        "till_session_id": "<id-3>",
+        "total_cents": 0
       }
     }
   },
@@ -81,17 +98,562 @@
       "path": "/api/v1/pos/catalog"
     },
     "response": {
-      "status": 500,
+      "status": 200,
       "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+      "body": [
+        {
+          "description": "Flashing J 6 X 6 X 10",
+          "in_stock": "303",
+          "product_id": "<id-6>",
+          "sku": "CORN2006",
+          "unit_price_cents": 2325,
+          "uom": "EA"
         },
-        "meta": {
-          "request_id": "<id-7>"
+        {
+          "description": "Flashing Z Bar 3/4 X 10'",
+          "in_stock": "966",
+          "product_id": "<id-7>",
+          "sku": "CORN2009",
+          "unit_price_cents": 525,
+          "uom": "EA"
+        },
+        {
+          "description": "Silicone Clear Caulk",
+          "in_stock": "404",
+          "product_id": "<id-8>",
+          "sku": "CORNCLEAR",
+          "unit_price_cents": 865,
+          "uom": "EA"
+        },
+        {
+          "description": "Cemtrim Textured 7/16 X 4 X 12",
+          "in_stock": "523",
+          "product_id": "<id-9>",
+          "sku": "CORNCTRM412+",
+          "unit_price_cents": 1131,
+          "uom": "EA"
+        },
+        {
+          "description": "Cemtrim Textured 7/16 X 6 X 12",
+          "in_stock": "667",
+          "product_id": "<id-10>",
+          "sku": "CORNCTRMG12+",
+          "unit_price_cents": 1791,
+          "uom": "EA"
+        },
+        {
+          "description": "Vinyl H Mold 1/4 X 12'",
+          "in_stock": "295",
+          "product_id": "<id-11>",
+          "sku": "CORNHMOLD14",
+          "unit_price_cents": 600,
+          "uom": "EA"
+        },
+        {
+          "description": "Poly Black 18 X 300",
+          "in_stock": "693",
+          "product_id": "<id-12>",
+          "sku": "CORNPOLY18",
+          "unit_price_cents": 3468,
+          "uom": "RL"
+        },
+        {
+          "description": "Solid Soffit Hardie Textured 1/4 X 12 X 12",
+          "in_stock": "375",
+          "product_id": "<id-13>",
+          "sku": "CORNSFT1212",
+          "unit_price_cents": 2288,
+          "uom": "EA"
+        },
+        {
+          "description": "Solid Soffit Hardie Textured 1/4 X 16 X 12",
+          "in_stock": "773",
+          "product_id": "<id-14>",
+          "sku": "CORNSFT1612",
+          "unit_price_cents": 3068,
+          "uom": "EA"
+        },
+        {
+          "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
+          "in_stock": "552",
+          "product_id": "<id-15>",
+          "sku": "CORNSFT1612V",
+          "unit_price_cents": 3923,
+          "uom": "EA"
+        },
+        {
+          "description": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
+          "in_stock": "471",
+          "product_id": "<id-16>",
+          "sku": "CORNSFT2408V",
+          "unit_price_cents": 2625,
+          "uom": "EA"
+        },
+        {
+          "description": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
+          "in_stock": "487",
+          "product_id": "<id-17>",
+          "sku": "CORNSHTGR49",
+          "unit_price_cents": 1404,
+          "uom": "EA"
+        },
+        {
+          "description": "Window Tape 6\" (100')",
+          "in_stock": "407",
+          "product_id": "<id-18>",
+          "sku": "CORNTAPE",
+          "unit_price_cents": 3300,
+          "uom": "RL"
+        },
+        {
+          "description": "Ext Door 36x80 Steel 6-Panel",
+          "in_stock": "923",
+          "product_id": "<id-19>",
+          "sku": "DR-EXT-3680-STL",
+          "unit_price_cents": 28000,
+          "uom": "PCS"
+        },
+        {
+          "description": "Int Door 30x80 6-Panel Hollow",
+          "in_stock": "821",
+          "product_id": "<id-20>",
+          "sku": "DR-INT-3080-6P",
+          "unit_price_cents": 9500,
+          "uom": "PCS"
+        },
+        {
+          "description": "Int Door 32x80 6-Panel Hollow",
+          "in_stock": "281",
+          "product_id": "<id-21>",
+          "sku": "DR-INT-3280-6P",
+          "unit_price_cents": 9500,
+          "uom": "PCS"
+        },
+        {
+          "description": "Int Door 36x80 6-Panel Hollow",
+          "in_stock": "825",
+          "product_id": "<id-22>",
+          "sku": "DR-INT-3680-6P",
+          "unit_price_cents": 9900,
+          "uom": "PCS"
+        },
+        {
+          "description": "1/2 Drywall Regular 4x8",
+          "in_stock": "816",
+          "product_id": "<id-23>",
+          "sku": "DW-12-REG",
+          "unit_price_cents": 1600,
+          "uom": "PCS"
+        },
+        {
+          "description": "5/8 Drywall Firecode 4x8",
+          "in_stock": "800",
+          "product_id": "<id-24>",
+          "sku": "DW-58-FC",
+          "unit_price_cents": 2100,
+          "uom": "PCS"
+        },
+        {
+          "description": "Golden harness stud",
+          "in_stock": "0",
+          "product_id": "<id-25>",
+          "sku": "GOLD-HARNESS-2X4",
+          "unit_price_cents": 425,
+          "uom": "PCS"
+        },
+        {
+          "description": "Joist Hanger 2x10",
+          "in_stock": "513",
+          "product_id": "<id-26>",
+          "sku": "HANGER-210",
+          "unit_price_cents": 185,
+          "uom": "PCS"
+        },
+        {
+          "description": "Joist Hanger 2x6",
+          "in_stock": "804",
+          "product_id": "<id-27>",
+          "sku": "HANGER-26",
+          "unit_price_cents": 145,
+          "uom": "PCS"
+        },
+        {
+          "description": "Joist Hanger 2x8",
+          "in_stock": "689",
+          "product_id": "<id-28>",
+          "sku": "HANGER-28",
+          "unit_price_cents": 165,
+          "uom": "PCS"
+        },
+        {
+          "description": "R-14 Fiberglass Batts 15x93",
+          "in_stock": "298",
+          "product_id": "<id-29>",
+          "sku": "INS-R13-15",
+          "unit_price_cents": 6800,
+          "uom": "BAG"
+        },
+        {
+          "description": "R-20 Fiberglass Batts 15x93",
+          "in_stock": "932",
+          "product_id": "<id-30>",
+          "sku": "INS-R19-15",
+          "unit_price_cents": 8200,
+          "uom": "BAG"
+        },
+        {
+          "description": "R-28 Fiberglass Batts 24x48",
+          "in_stock": "605",
+          "product_id": "<id-31>",
+          "sku": "INS-R30-24",
+          "unit_price_cents": 9800,
+          "uom": "BAG"
+        },
+        {
+          "description": "1x6x6 Cedar Fence Board",
+          "in_stock": "739",
+          "product_id": "<id-32>",
+          "sku": "LUM-166-WRC",
+          "unit_price_cents": 510,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x10x12 Hem-Fir No.2",
+          "in_stock": "543",
+          "product_id": "<id-33>",
+          "sku": "LUM-21012-NO2",
+          "unit_price_cents": 2450,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x12x16 Hem-Fir No.2",
+          "in_stock": "586",
+          "product_id": "<id-34>",
+          "sku": "LUM-21216-NO2",
+          "unit_price_cents": 4500,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x4x10 SPF Premium",
+          "in_stock": "488",
+          "product_id": "<id-35>",
+          "sku": "LUM-2410-PREM",
+          "unit_price_cents": 725,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x4x12 SPF Premium",
+          "in_stock": "631",
+          "product_id": "<id-36>",
+          "sku": "LUM-2412-PREM",
+          "unit_price_cents": 875,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x4x8 SPF Premium",
+          "in_stock": "379",
+          "product_id": "<id-37>",
+          "sku": "LUM-248-PREM",
+          "unit_price_cents": 550,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x4x92-5/8 SPF Stud",
+          "in_stock": "635",
+          "product_id": "<id-38>",
+          "sku": "LUM-2492-STUD",
+          "unit_price_cents": 510,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x6x10 SPF Premium",
+          "in_stock": "869",
+          "product_id": "<id-39>",
+          "sku": "LUM-2610-PREM",
+          "unit_price_cents": 980,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x6x12 SPF Premium",
+          "in_stock": "200",
+          "product_id": "<id-40>",
+          "sku": "LUM-2612-PREM",
+          "unit_price_cents": 1175,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x6x16 SPF Premium",
+          "in_stock": "868",
+          "product_id": "<id-41>",
+          "sku": "LUM-2616-PREM",
+          "unit_price_cents": 1560,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x8x10 Hem-Fir No.2",
+          "in_stock": "622",
+          "product_id": "<id-42>",
+          "sku": "LUM-2810-NO2",
+          "unit_price_cents": 1390,
+          "uom": "PCS"
+        },
+        {
+          "description": "2x8x16 Hem-Fir No.2",
+          "in_stock": "851",
+          "product_id": "<id-43>",
+          "sku": "LUM-2816-NO2",
+          "unit_price_cents": 2225,
+          "uom": "PCS"
+        },
+        {
+          "description": "4x4x10 Pressure Treated",
+          "in_stock": "823",
+          "product_id": "<id-44>",
+          "sku": "LUM-4410-PT",
+          "unit_price_cents": 1575,
+          "uom": "PCS"
+        },
+        {
+          "description": "4x4x8 Pressure Treated",
+          "in_stock": "646",
+          "product_id": "<id-45>",
+          "sku": "LUM-448-PT",
+          "unit_price_cents": 1250,
+          "uom": "PCS"
+        },
+        {
+          "description": "4x4x8 Western Red Cedar",
+          "in_stock": "900",
+          "product_id": "<id-46>",
+          "sku": "LUM-448-WRC",
+          "unit_price_cents": 3400,
+          "uom": "PCS"
+        },
+        {
+          "description": "6x6x12 Pressure Treated",
+          "in_stock": "499",
+          "product_id": "<id-47>",
+          "sku": "LUM-6612-PT",
+          "unit_price_cents": 5500,
+          "uom": "PCS"
+        },
+        {
+          "description": "1 X 4 RL #3 SPF",
+          "in_stock": "787",
+          "product_id": "<id-48>",
+          "sku": "LUMB14RLN3+",
+          "unit_price_cents": 52,
+          "uom": "LF"
+        },
+        {
+          "description": "2 X 4 RL #3 SPF",
+          "in_stock": "535",
+          "product_id": "<id-49>",
+          "sku": "LUMB24RLN3",
+          "unit_price_cents": 46,
+          "uom": "LF"
+        },
+        {
+          "description": "2 X 4 RL Utility",
+          "in_stock": "590",
+          "product_id": "<id-50>",
+          "sku": "LUMBUT24RL",
+          "unit_price_cents": 44,
+          "uom": "LF"
+        },
+        {
+          "description": "Baseboard 3-1/4 MDF 16'",
+          "in_stock": "645",
+          "product_id": "<id-51>",
+          "sku": "MLD-BASE-MDF",
+          "unit_price_cents": 1950,
+          "uom": "PCS"
+        },
+        {
+          "description": "Casing 2-1/4 MDF 14'",
+          "in_stock": "542",
+          "product_id": "<id-52>",
+          "sku": "MLD-CASE-MDF",
+          "unit_price_cents": 1350,
+          "uom": "PCS"
+        },
+        {
+          "description": "3\" Common Nails (25kg)",
+          "in_stock": "975",
+          "product_id": "<id-53>",
+          "sku": "NAIL-10D-50",
+          "unit_price_cents": 6500,
+          "uom": "BOX"
+        },
+        {
+          "description": "3-1/4\" Common Nails (25kg)",
+          "in_stock": "336",
+          "product_id": "<id-54>",
+          "sku": "NAIL-16D-50",
+          "unit_price_cents": 6500,
+          "uom": "BOX"
+        },
+        {
+          "description": "7/16 OSB 4x8",
+          "in_stock": "326",
+          "product_id": "<id-55>",
+          "sku": "OSB-12",
+          "unit_price_cents": 1950,
+          "uom": "PCS"
+        },
+        {
+          "description": "3/4 OSB T&G 4x8",
+          "in_stock": "623",
+          "product_id": "<id-56>",
+          "sku": "OSB-34-TG",
+          "unit_price_cents": 3400,
+          "uom": "PCS"
+        },
+        {
+          "description": "1/2 Plywood G1S 4x8 (Fir)",
+          "in_stock": "359",
+          "product_id": "<id-57>",
+          "sku": "PLY-12-CDX",
+          "unit_price_cents": 2850,
+          "uom": "PCS"
+        },
+        {
+          "description": "3/4 Plywood G1S 4x8 (Fir)",
+          "in_stock": "859",
+          "product_id": "<id-58>",
+          "sku": "PLY-34-CDX",
+          "unit_price_cents": 3800,
+          "uom": "PCS"
+        },
+        {
+          "description": "Architectural Shingles 30yr",
+          "in_stock": "990",
+          "product_id": "<id-59>",
+          "sku": "RF-ARCH-30",
+          "unit_price_cents": 4200,
+          "uom": "BUNDLE"
+        },
+        {
+          "description": "Roof Edge Drip 10'",
+          "in_stock": "135",
+          "product_id": "<id-60>",
+          "sku": "RF-DRIP-10",
+          "unit_price_cents": 750,
+          "uom": "PCS"
+        },
+        {
+          "description": "Roof Edge Drip 10'",
+          "in_stock": "548",
+          "product_id": "<id-61>",
+          "sku": "RF-EDGE-WHT",
+          "unit_price_cents": 750,
+          "uom": "PCS"
+        },
+        {
+          "description": "Roofing Felt #15",
+          "in_stock": "404",
+          "product_id": "<id-62>",
+          "sku": "RF-FELT-15",
+          "unit_price_cents": 2250,
+          "uom": "RL"
+        },
+        {
+          "description": "Pipe Boot Flashing",
+          "in_stock": "399",
+          "product_id": "<id-63>",
+          "sku": "RF-FLASH-PIPE",
+          "unit_price_cents": 1400,
+          "uom": "PCS"
+        },
+        {
+          "description": "Step Flashing",
+          "in_stock": "272",
+          "product_id": "<id-64>",
+          "sku": "RF-FLASH-STEP",
+          "unit_price_cents": 450,
+          "uom": "PCS"
+        },
+        {
+          "description": "Ice & Water Shield 65'",
+          "in_stock": "489",
+          "product_id": "<id-65>",
+          "sku": "RF-ICE-65",
+          "unit_price_cents": 9800,
+          "uom": "RL"
+        },
+        {
+          "description": "Ice & Water Shield",
+          "in_stock": "525",
+          "product_id": "<id-66>",
+          "sku": "RF-ICE-WTR",
+          "unit_price_cents": 9800,
+          "uom": "RL"
+        },
+        {
+          "description": "1.25\" Roofing Nails 2.5kg",
+          "in_stock": "958",
+          "product_id": "<id-67>",
+          "sku": "RF-NAIL-125",
+          "unit_price_cents": 1900,
+          "uom": "BOX"
+        },
+        {
+          "description": "Ridge Vent 4'",
+          "in_stock": "690",
+          "product_id": "<id-68>",
+          "sku": "RF-RIDGE-4",
+          "unit_price_cents": 1350,
+          "uom": "PCS"
+        },
+        {
+          "description": "Architectural Shingles (Black)",
+          "in_stock": "880",
+          "product_id": "<id-69>",
+          "sku": "RF-SH-BLK",
+          "unit_price_cents": 4200,
+          "uom": "BUNDLE"
+        },
+        {
+          "description": "Architectural Shingles (Weathered Wood)",
+          "in_stock": "750",
+          "product_id": "<id-70>",
+          "sku": "RF-SH-WW",
+          "unit_price_cents": 4200,
+          "uom": "BUNDLE"
+        },
+        {
+          "description": "Starter Strip",
+          "in_stock": "876",
+          "product_id": "<id-71>",
+          "sku": "RF-START",
+          "unit_price_cents": 1000,
+          "uom": "PCS"
+        },
+        {
+          "description": "3\" Deck Screws (2.5kg)",
+          "in_stock": "537",
+          "product_id": "<id-72>",
+          "sku": "SCR-DECK-3-5",
+          "unit_price_cents": 2999,
+          "uom": "BOX"
+        },
+        {
+          "description": "Simpson Strong-Tie LUS28",
+          "in_stock": "846",
+          "product_id": "<id-73>",
+          "sku": "SIMP-LUS28",
+          "unit_price_cents": 150,
+          "uom": "PCS"
+        },
+        {
+          "description": "Hurricane Tie H1",
+          "in_stock": "583",
+          "product_id": "<id-74>",
+          "sku": "TIE-H1",
+          "unit_price_cents": 115,
+          "uom": "PCS"
         }
-      }
+      ]
     }
   }
 ]

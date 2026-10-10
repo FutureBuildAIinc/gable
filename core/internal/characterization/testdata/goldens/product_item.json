@@ -77,6 +77,17 @@
         "items": [
           {
             "current_stock": "0",
+            "deficit": "10",
+            "description": "Golden harness stud",
+            "product_id": "<id-2>",
+            "reorder_point": "10",
+            "reorder_qty": "50",
+            "sku": "GOLD-HARNESS-2X4",
+            "vendor": null,
+            "vendor_id": null
+          },
+          {
+            "current_stock": "0",
             "deficit": "5000",
             "description": "Golden item stud",
             "product_id": "<id-1>",
@@ -90,22 +101,11 @@
             "current_stock": "535",
             "deficit": "465",
             "description": "2 X 4 RL #3 SPF",
-            "product_id": "<id-2>",
+            "product_id": "<id-3>",
             "reorder_point": "1000",
             "reorder_qty": "5000",
             "sku": "LUMB24RLN3",
             "vendor": "Gable Lumber & Supply",
-            "vendor_id": null
-          },
-          {
-            "current_stock": "0",
-            "deficit": "10",
-            "description": "Golden harness stud",
-            "product_id": "<id-3>",
-            "reorder_point": "10",
-            "reorder_qty": "50",
-            "sku": "GOLD-HARNESS-2X4",
-            "vendor": null,
             "vendor_id": null
           }
         ],

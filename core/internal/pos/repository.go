@@ -399,7 +399,7 @@ func (r *PostgresRepository) GetLines(ctx context.Context, saleID uuid.UUID) ([]
 		return nil, fmt.Errorf("failed to read the sale's lines: %w", err)
 	}
 	defer rows.Close()
-	var out []salesdoc.Line
+	out := []salesdoc.Line{}
 	for rows.Next() {
 		var l salesdoc.Line
 		var sc salesdoc.LineScan
@@ -435,12 +435,12 @@ func (r *PostgresRepository) GetTenders(ctx context.Context, saleID uuid.UUID) (
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, method, ROUND(amount * 100)::bigint, payment_id, reference, card_last4, card_brand, gateway_tx_id,
 			auth_code, created_at
-		FROM pos_tenders WHERE transaction_id = $1 ORDER BY created_at, id`, saleID)
+		FROM pos_tenders WHERE transaction_id = $1 ORDER BY created_at, method, id`, saleID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the tenders: %w", err)
 	}
 	defer rows.Close()
-	var out []Tender
+	out := []Tender{}
 	for rows.Next() {
 		var t Tender
 		var method string
@@ -657,7 +657,7 @@ func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, l
 		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
 		FROM products p LEFT JOIN inventory i ON i.product_id = p.id
-		WHERE (p.sku ILIKE $1 OR p.description ILIKE $1) AND COALESCE(p.is_active, TRUE)
+		WHERE (p.sku ILIKE $1 OR p.description ILIKE $1)
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
 		ORDER BY p.sku LIMIT $2`, "%"+query+"%", limit)
 	if err != nil {
@@ -680,7 +680,6 @@ func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogPr
 		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
 		FROM products p LEFT JOIN inventory i ON i.product_id = p.id
-		WHERE COALESCE(p.is_active, TRUE)
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
 		ORDER BY p.sku`)
 	if err != nil {

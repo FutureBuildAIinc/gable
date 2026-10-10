@@ -408,6 +408,10 @@ func (h *Handler) CurrentTill(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
+	if session == nil {
+		httpx.WriteError(w, r, httpx.NotFound("no open till session for this register"))
+		return
+	}
 	writeJSON(w, http.StatusOK, session)
 }
 
