@@ -245,7 +245,9 @@ CREATE INDEX IF NOT EXISTS idx_pos_refund_intents_state_created
 -- cart line leaves the sale's positions gapped while the invoice numbers its
 -- own lines from zero). The links of the sales completed before this item
 -- are backfilled from their invoices, by product and order within it (the
--- invoices were built from those lines in order); the same backfill runs on
+-- invoices were built from those lines in order), product lines to product
+-- invoice lines only: a kit, component, charge or text line is never paired
+-- by position with a line of another type. The same backfill runs on
 -- every apply, so a down then up cycle restores them, because the down
 -- drops the column with the rest of this step.
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS invoice_line_id UUID NULL REFERENCES invoice_lines (id);
@@ -256,12 +258,14 @@ WITH sale_lines AS (
     FROM pos_line_items l
     JOIN pos_transactions t ON t.id = l.transaction_id
     WHERE t.invoice_id IS NOT NULL AND l.product_id IS NOT NULL AND l.invoice_line_id IS NULL
+      AND l.line_type = 'PRODUCT'
 ),
 inv_lines AS (
     SELECT il.id, i.id AS invoice_id, il.product_id,
            row_number() OVER (PARTITION BY i.id, il.product_id
                               ORDER BY il.position, il.created_at, il.id) AS n
     FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id
+    WHERE il.line_type = 'PRODUCT'
 )
 UPDATE pos_line_items l
 SET invoice_line_id = v.id
