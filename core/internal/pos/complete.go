@@ -424,6 +424,11 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 		if err != nil {
 			return err
 		}
+		// The sale line id to invoice line id map: a component's parent, a
+		// pos sale line id on the sale, becomes the kit's own INVOICE line id
+		// here (the parent is built before its components, as position
+		// orders them).
+		invoiceLineOf := map[uuid.UUID]uuid.UUID{}
 		for n := range lines {
 			b := &lines[n]
 			fl := invoice.FulfilmentLine{
@@ -432,12 +437,14 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				PriceSource: string(b.PriceSource), Taxable: b.Taxable, RevenueAccountCode: b.RevenueAccountCode,
 				OverrideReason: b.OverrideReason, PriceAdjustedBy: b.PriceAdjustedBy,
 			}
+			invoiceLineOf[b.ID] = fl.ID
 			if b.PricedUnitPrice != nil {
 				p := int64(*b.PricedUnitPrice)
 				fl.PricedUnitPrice = &p
 			}
 			if b.ParentLineID != nil {
-				fl.ParentLineID = b.ParentLineID
+				parent := invoiceLineOf[*b.ParentLineID]
+				fl.ParentLineID = &parent
 			}
 			if b.LineType != salesdoc.LineText {
 				q := int64(*b.Quantity)
