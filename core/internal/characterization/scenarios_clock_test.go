@@ -51,7 +51,7 @@ func clockGroups() []groupDef {
 	return []groupDef{{
 		name: "clockwindow",
 		steps: []stepDef{
-			{name: "ap.aging", method: "GET", path: "/api/v1/ap/aging", sortPrimaryArray: true},
+			{name: "ap.aging", method: "GET", path: "/api/v1/ap/aging", sortPrimaryArray: true, sortEnvelopeItems: true},
 			{name: "reports.ar_aging", method: "GET", path: "/api/v1/reports/ar-aging", maskCustomerIdentity: true},
 			{name: "reports.sales_summary", method: "GET", path: "/api/v1/reports/sales-summary"},
 			{name: "dashboard.summary", method: "GET", path: "/api/v1/dashboard/summary"},

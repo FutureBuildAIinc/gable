@@ -43,8 +43,8 @@ export class DriverRouteList extends LitElement {
 
     private _statusConfig(status: string) {
         switch (status) {
-            case 'IN_TRANSIT': return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
-            case 'COMPLETED': return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+            case 'in_transit': return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+            case 'completed': return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
             default: return 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
         }
     }

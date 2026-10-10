@@ -17,13 +17,19 @@
       "body": {
         "created_at": "<ts+0d>",
         "driver_id": "<id-1>",
+        "driver_name": "R1C Driver Renamed",
         "id": "<id-3>",
         "notes": "r1b c main route",
-        "scheduled_date": "<ts+2d>",
-        "status": "DRAFT",
+        "revision": 1,
+        "scheduled_date": "<day+2>",
+        "status": "draft",
         "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
         "updated_at": "<ts+0d>",
-        "vehicle_id": "<id-2>"
+        "vehicle_id": "<id-2>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
@@ -44,13 +50,19 @@
       "body": {
         "created_at": "<ts+0d>",
         "driver_id": "<id-1>",
+        "driver_name": "R1C Driver Renamed",
         "id": "<id-4>",
         "notes": null,
-        "scheduled_date": "<ts+3d>",
-        "status": "DRAFT",
+        "revision": 1,
+        "scheduled_date": "<day+3>",
+        "status": "draft",
         "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
         "updated_at": "<ts+0d>",
-        "vehicle_id": "<id-2>"
+        "vehicle_id": "<id-2>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
@@ -66,8 +78,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-5>"
@@ -87,12 +99,18 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "scheduled_date",
+              "message": "must be a date as YYYY-MM-DD"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-6>"
@@ -112,12 +130,18 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "vehicle_id",
+              "message": "no such record"
+            }
+          ],
+          "message": "a referenced record does not exist"
         },
         "meta": {
           "request_id": "<id-8>"
@@ -134,61 +158,115 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "driver_id": "<id-1>",
-          "driver_name": "R1C Driver Renamed",
-          "id": "<id-3>",
-          "notes": "r1b c main route",
-          "scheduled_date": "<ts+2d>",
-          "status": "DRAFT",
-          "stop_count": 0,
-          "updated_at": "<ts+0d>",
-          "vehicle_id": "<id-2>",
-          "vehicle_name": "R1C Truck Renamed"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-1>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-3>",
+            "notes": "r1b c main route",
+            "revision": 1,
+            "scheduled_date": "<day+2>",
+            "status": "draft",
+            "stop_count": 0,
+            "stops": null,
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-2>",
+            "vehicle_name": "R1C Truck Renamed"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
-    "name": "delivery.route.list_by_driver",
-    "sort_primary_array": true,
+    "name": "delivery.route.list_board_empty",
     "request": {
       "method": "GET",
-      "path": "/api/v1/delivery/routes?driver_id=<id-1>"
+      "path": "/api/v1/delivery/routes?date=<day+2>&include=stops"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "driver_id": "<id-1>",
-          "driver_name": "R1C Driver Renamed",
-          "id": "<id-3>",
-          "notes": "r1b c main route",
-          "scheduled_date": "<ts+2d>",
-          "status": "DRAFT",
-          "stop_count": 0,
-          "updated_at": "<ts+0d>",
-          "vehicle_id": "<id-2>",
-          "vehicle_name": "R1C Truck Renamed"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "driver_id": "<id-1>",
-          "driver_name": "R1C Driver Renamed",
-          "id": "<id-4>",
-          "notes": null,
-          "scheduled_date": "<ts+3d>",
-          "status": "DRAFT",
-          "stop_count": 0,
-          "updated_at": "<ts+0d>",
-          "vehicle_id": "<id-2>",
-          "vehicle_name": "R1C Truck Renamed"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-1>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-3>",
+            "notes": "r1b c main route",
+            "revision": 1,
+            "scheduled_date": "<day+2>",
+            "status": "draft",
+            "stop_count": 0,
+            "stops": [],
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-2>",
+            "vehicle_name": "R1C Truck Renamed"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_by_driver",
+    "sort_envelope_items": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?driver_id=<id-1>&limit=200"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-1>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-4>",
+            "notes": null,
+            "revision": 1,
+            "scheduled_date": "<day+3>",
+            "status": "draft",
+            "stop_count": 0,
+            "stops": null,
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-2>",
+            "vehicle_name": "R1C Truck Renamed"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-1>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-3>",
+            "notes": "r1b c main route",
+            "revision": 1,
+            "scheduled_date": "<day+2>",
+            "status": "draft",
+            "stop_count": 0,
+            "stops": null,
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-2>",
+            "vehicle_name": "R1C Truck Renamed"
+          }
+        ],
+        "limit": 200,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -202,8 +280,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "driver_id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-9>"
@@ -218,15 +302,181 @@
       "path": "/api/v1/delivery/routes?date=next-tuesday"
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "date",
+              "message": "must be a date as YYYY-MM-DD"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_unknown_param",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?flavour=vanilla"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "flavour",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_bad_status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?status=DRAFT"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be one of: draft, scheduled, in_transit, completed, cancelled"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_status_filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?status=draft&date=<day+2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-1>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-3>",
+            "notes": "r1b c main route",
+            "revision": 1,
+            "scheduled_date": "<day+2>",
+            "status": "draft",
+            "stop_count": 0,
+            "stops": null,
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-2>",
+            "vehicle_name": "R1C Truck Renamed"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "delivery.route.get.c",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/<id-3>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-1>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-3>",
+        "notes": "r1b c main route",
+        "revision": 1,
+        "scheduled_date": "<day+2>",
+        "status": "draft",
+        "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-2>",
+        "vehicle_name": "R1C Truck Renamed"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/<id-7>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "record not found"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.get.bad_id",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/not-a-uuid"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid route id"
+        },
+        "meta": {
+          "request_id": "<id-14>"
         }
       }
     }
@@ -240,7 +490,31 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": null
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "delivery.route.deliveries.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes/<id-7>/deliveries"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "record not found"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
     }
   },
   {
@@ -254,11 +528,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid route id"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-16>"
         }
       }
     }

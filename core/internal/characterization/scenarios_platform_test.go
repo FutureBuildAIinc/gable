@@ -256,7 +256,7 @@ func portalGroups() []groupDef {
 			{name: "project.list.unknown_param", method: "GET", path: "/api/portal/v1/projects?zzz=1"},
 			// The module's events, read back from the feed (ADR 0003).
 			{name: "project.events", method: "GET",
-				path: "/api/v1/events?types=project.created,project.updated&limit=2", sortPrimaryArray: true},
+				path: "/api/v1/events?types=project.created,project.updated&limit=2", sortPrimaryArray: true, sortEnvelopeItems: true},
 		},
 	}}
 }
@@ -359,7 +359,7 @@ func integrationGroups() []groupDef {
 			// of every order while each order's own line arrays keep their
 			// wire order (the flag is recorded in the golden).
 			{name: "integration.orders", method: "GET", path: "/api/integration/orders?date={today}",
-				headers: withKey, sortPrimaryArray: true},
+				headers: withKey, sortPrimaryArray: true, sortEnvelopeItems: true},
 			{
 				name:    "integration.quote.create",
 				method:  "POST",

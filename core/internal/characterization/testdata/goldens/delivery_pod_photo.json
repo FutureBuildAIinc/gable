@@ -28,7 +28,7 @@
   },
   {
     "name": "delivery.delivery.pod_photos",
-    "sort_primary_array": true,
+    "sort_envelope_items": true,
     "mask_fields": {
       "photo_url": "<pod-photo-url>"
     },
@@ -39,15 +39,19 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "delivery_id": "<id-1>",
-          "id": "<id-2>",
-          "photo_type": "site",
-          "photo_url": "<pod-photo-url>",
-          "uploaded_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "delivery_id": "<id-1>",
+            "id": "<id-2>",
+            "photo_type": "site",
+            "photo_url": "<pod-photo-url>",
+            "uploaded_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   }
 ]

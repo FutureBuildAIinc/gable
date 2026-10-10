@@ -44,7 +44,7 @@ export class StopList extends LitElement {
             `;
         }
 
-        const completedCount = this.deliveries.filter(d => d.status === 'DELIVERED').length;
+        const completedCount = this.deliveries.filter(d => d.status === 'delivered').length;
         const progress = this.deliveries.length > 0 ? (completedCount / this.deliveries.length) * 100 : 0;
 
         return html`
@@ -84,9 +84,9 @@ export class StopList extends LitElement {
                     ` : nothing}
 
                     ${this.deliveries.map((d, index) => {
-                        const isNext = d.status === 'PENDING' && (index === 0 || this.deliveries[index - 1].status !== 'PENDING');
-                        const isCompleted = d.status === 'DELIVERED';
-                        const isFailed = d.status === 'FAILED';
+                        const isNext = d.status === 'pending' && (index === 0 || this.deliveries[index - 1].status !== 'pending');
+                        const isCompleted = d.status === 'delivered';
+                        const isFailed = d.status === 'failed';
 
                         return html`
                             <div class="relative pl-10">

@@ -166,7 +166,7 @@ GET	/api/v1/delivery/deliveries/{id}	internal/delivery	h.HandleGetDelivery
 POST	/api/v1/delivery/deliveries/{id}/adjust-qty	internal/delivery	h.HandleAdjustQuantity
 POST	/api/v1/delivery/deliveries/{id}/pod-photo	internal/delivery	h.HandleUploadPODPhoto
 GET	/api/v1/delivery/deliveries/{id}/pod-photos	internal/delivery	h.HandleListPODPhotos
-PUT	/api/v1/delivery/deliveries/{id}/status	internal/delivery	h.HandleUpdateDeliveryStatus
+POST	/api/v1/delivery/deliveries/{id}/transitions	internal/delivery	h.HandleStopTransition
 GET	/api/v1/delivery/drivers	internal/delivery	h.HandleListDrivers
 POST	/api/v1/delivery/drivers	internal/delivery	h.HandleCreateDriver
 DELETE	/api/v1/delivery/drivers/{id}	internal/delivery	h.HandleDeleteDriver
@@ -175,11 +175,11 @@ PUT	/api/v1/delivery/drivers/{id}	internal/delivery	h.HandleUpdateDriver
 POST	/api/v1/delivery/drivers/{id}/photo	internal/delivery	h.HandleUploadDriverPhoto
 GET	/api/v1/delivery/routes	internal/delivery	h.HandleListRoutes
 POST	/api/v1/delivery/routes	internal/delivery	h.HandleCreateRoute
-POST	/api/v1/delivery/routes/{id}/complete	internal/delivery	h.HandleCompleteRoute
+GET	/api/v1/delivery/routes/{id}	internal/delivery	h.HandleGetRoute
 GET	/api/v1/delivery/routes/{id}/deliveries	internal/delivery	h.HandleListDeliveries
-POST	/api/v1/delivery/routes/{id}/dispatch	internal/delivery	h.HandleDispatchRoute
 POST	/api/v1/delivery/routes/{id}/optimize	internal/delivery	h.HandleOptimizeRoute
 POST	/api/v1/delivery/routes/{id}/reorder	internal/delivery	h.HandleReorderStops
+POST	/api/v1/delivery/routes/{id}/transitions	internal/delivery	h.HandleRouteTransition
 GET	/api/v1/delivery/vehicles	internal/delivery	h.HandleListVehicles
 POST	/api/v1/delivery/vehicles	internal/delivery	h.HandleCreateVehicle
 DELETE	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleDeleteVehicle

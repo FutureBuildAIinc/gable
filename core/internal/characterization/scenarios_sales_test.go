@@ -483,7 +483,7 @@ func orderGroups() []groupDef {
 				headers: map[string]string{"If-Match": `"{myOrderRevision}"`},
 				body:    map[string]any{"to": "fulfilled", "reason": "not yet"}},
 			// The module's events, read back from the feed (ADR 0003).
-			{name: "order.events", method: "GET", path: "/api/v1/events?entity_type=order&limit=25", sortPrimaryArray: true,
+			{name: "order.events", method: "GET", path: "/api/v1/events?entity_type=order&limit=25", sortPrimaryArray: true, sortEnvelopeItems: true,
 				maskBody: true},
 			// Owner override of the pre-ship gate on a clear order: the
 			// write succeeds and records the event even without a block.
@@ -827,12 +827,12 @@ func deliveryGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/delivery/vehicles",
 				body: map[string]any{
-					"name": "Golden Truck 01", "vehicle_type": "BOX_TRUCK", "license_plate": "GLD0001",
+					"name": "Golden Truck 01", "vehicle_type": "box_truck", "license_plate": "GLD0001",
 					"capacity_weight_lbs": 5000,
 				},
 				extract: map[string]string{"myVehicle": "/id"},
 			},
-			{name: "delivery.vehicle.list", method: "GET", path: "/api/v1/delivery/vehicles"},
+			{name: "delivery.vehicle.list", method: "GET", path: "/api/v1/delivery/vehicles?limit=200", sortEnvelopeItems: true},
 			{
 				name:   "delivery.driver.create",
 				method: "POST",
