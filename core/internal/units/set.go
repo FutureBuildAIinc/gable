@@ -488,3 +488,28 @@ func SortedUnits(rows []SetRow) []string {
 	sort.Strings(out)
 	return out
 }
+
+// StandardPair derives the conversion between two units that both carry a
+// standard size in one dimension (rule 2 of section 3.2, quoted by section
+// 3.3 for a line without a product): one of uom is refU of the dimension's
+// reference unit and one of other is refP of it, so x of uom is y of other
+// exactly when x / y = refP / refU. Fasteners by EA per M give (1000, 1);
+// SQ against SF give (1, 100). It answers false when the two units carry no
+// such pair (another dimension, or a unit whose size is per product).
+func StandardPair(uom, other string, catalogue map[string]CatalogueUnit) (Pair, bool) {
+	u, okU := catalogue[uom]
+	p, okP := catalogue[other]
+	if !okU || !okP || u.Dimension != p.Dimension {
+		return Pair{}, false
+	}
+	refU, hasU := u.refPerUnit()
+	refP, hasP := p.refPerUnit()
+	if !hasU || !hasP {
+		return Pair{}, false
+	}
+	pair, err := canonicalOfRats(refP, refU)
+	if err != nil {
+		return Pair{}, false
+	}
+	return pair, true
+}
