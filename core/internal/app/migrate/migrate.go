@@ -10,7 +10,6 @@ package migrate
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -22,7 +21,6 @@ import (
 	"strings"
 
 	"github.com/gablelbm/gable/internal/config"
-	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // Options are the flags migrate takes.
@@ -91,19 +89,27 @@ func Run() {
 		log.Fatalf("Configuration error: %v", err)
 	}
 
-	// Use standard database/sql with pgx driver for simplicity in migrations
-	db, err := sql.Open("pgx", cfg.DatabaseURL)
+	// Use pgxpool directly (not database/sql with the pgx stdlib driver):
+	// the stdlib driver has no way to surface NOTICE responses, and the
+	// 103 and 104 migrations raise per row notices that an operator
+	// needs to see. The notice handler writes each notice to stdout
+	// prefixed with the file name, so the operator can grep the audit
+	// trail from the migrate run (PR 70 review round 7 N1).
+	setNoticeWriter(os.Stdout)
+	defer setNoticeWriter(nil)
+	pool, err := openPool(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Failed to open DB: %v", err)
 	}
-	defer db.Close()
+	defer pool.Close()
 
-	if err := db.Ping(); err != nil {
+	if err := pool.Ping(context.Background()); err != nil {
 		log.Fatalf("Failed to ping DB: %v", err)
 	}
 
 	// 1. Ensure migration tracking table exists
-	_, err = db.Exec(`
+	resetNoticeHandler()
+	_, err = pool.Exec(context.Background(), `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version TEXT PRIMARY KEY,
 			applied_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -142,7 +148,8 @@ func Run() {
 		// Assuming format "001_name.sql"
 
 		var exists bool
-		err = db.QueryRow("SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", base).Scan(&exists)
+		err = pool.QueryRow(context.Background(),
+			"SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)", base).Scan(&exists)
 		if err != nil {
 			log.Fatalf("Failed to check migration status for %s: %v", base, err)
 		}
@@ -158,24 +165,30 @@ func Run() {
 			log.Fatalf("Failed to read file %s: %v", file, err)
 		}
 
-		tx, err := db.BeginTx(context.Background(), nil)
+		tx, err := pool.Begin(context.Background())
 		if err != nil {
 			log.Fatalf("Failed to begin transaction: %v", err)
 		}
 
-		if _, err := tx.Exec(string(content)); err != nil {
-			tx.Rollback()
+		// Set a notice handler on the transaction that prefixes each
+		// notice with the migration's base name, so the operator can
+		// tell which migration raised which notice.
+		setTxNoticeHandler(base)
+
+		if _, err := tx.Exec(context.Background(), string(content)); err != nil {
+			_ = tx.Rollback(context.Background())
 			log.Fatalf("Failed to execute migration %s: %v", base, err)
 		}
 
-		if _, err := tx.Exec("INSERT INTO schema_migrations (version) VALUES ($1)", base); err != nil {
-			tx.Rollback()
+		if _, err := tx.Exec(context.Background(), "INSERT INTO schema_migrations (version) VALUES ($1)", base); err != nil {
+			_ = tx.Rollback(context.Background())
 			log.Fatalf("Failed to record migration %s: %v", base, err)
 		}
 
-		if err := tx.Commit(); err != nil {
+		if err := tx.Commit(context.Background()); err != nil {
 			log.Fatalf("Failed to commit transaction for %s: %v", base, err)
 		}
+		resetNoticeHandler()
 		fmt.Printf("Applied %s successfully.\n", base)
 	}
 }
