@@ -19,14 +19,21 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/database"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -265,9 +272,9 @@ INSERT INTO gl_journal_entries (id, entry_date, memo, source, status) VALUES
 INSERT INTO gl_journal_lines (journal_entry_id, account_id, debit, credit)
 SELECT v.entry, a.id, v.dr, v.cr
 FROM (VALUES
-	('{E1r}'::uuid,'1010',6000,0), ('{E1r}','2200',0,6000), ('{E1a}','2200',6000,0), ('{E1a}','1020',0,6000),
-	('{E5ar}','1010',10000,0), ('{E5ar}','2200',0,10000), ('{E5b}','2200',3000,0), ('{E5b}','1020',0,3000),
-	('{E5c}','2200',5000,0), ('{E5c}','1020',0,5000), ('{E5d}','2200',8000,0), ('{E5d}','1020',0,8000)
+	('{E1r}'::uuid,'1010',60,0), ('{E1r}','2200',0,60), ('{E1a}','2200',60,0), ('{E1a}','1020',0,60),
+	('{E5ar}','1010',100,0), ('{E5ar}','2200',0,100), ('{E5b}','2200',30,0), ('{E5b}','1020',0,30),
+	('{E5c}','2200',50,0), ('{E5c}','1020',0,50), ('{E5d}','2200',80,0), ('{E5d}','1020',0,80)
 ) v(entry, code, dr, cr) JOIN gl_accounts a ON a.code = v.code;
 
 INSERT INTO credit_memos (id, invoice_id, customer_id, amount, reason, status, created_at, applied_at, number, currency, branch_id, reason_code, subtotal, tax_amount, total_amount, memo_date, voided_at, voided_on) VALUES
@@ -965,4 +972,116 @@ func diff101(a, b []string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// serviceOn101 wires the AR core on the scratch database the migration ran in.
+func serviceOn101(t *testing.T, m *mig101) (*account.Service, *database.DB) {
+	t.Helper()
+	db, err := database.Connect(m.conn.Config().ConnString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(db.Close)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return account.NewService(db, gl.NewService(gl.NewRepository(db), nil, logger), logger), db
+}
+
+// 14.2, migration line: an application the migration wrote with no entry is
+// reversed by a new 1020 / 2200 entry for its amount, and one that kept its
+// deposit application's own entry is reversed by reversing that exact entry.
+func TestMigration101_MigratedApplicationsReverse(t *testing.T) {
+	m := migrated101(t)
+	svc, db := serviceOn101(t, m)
+	conn := m.conn
+	ctx := context.Background()
+	reverse := func(app string) {
+		t.Helper()
+		err := db.RunInTx(ctx, func(ctx context.Context) error {
+			id, err := uuid.Parse(app)
+			if err != nil {
+				return err
+			}
+			_, err = svc.Reverse(ctx, account.ReverseIn{ApplicationID: id, Reason: "migrated, undone", Actor: "u-finance", On: time.Now()})
+			return err
+		})
+		if err != nil {
+			t.Fatalf("reversing %s: %v", app, err)
+		}
+	}
+	net := func(entry string) string { // 1020 and 2200 of an entry, debit less credit, in cents
+		return one101[string](t, conn, `SELECT COALESCE(string_agg(a.code || '=' || x.net::text, ',' ORDER BY a.code), '') FROM (
+			SELECT l.account_id, SUM(l.debit - l.credit) AS net FROM gl_journal_lines l WHERE l.journal_entry_id = $1::uuid GROUP BY l.account_id) x
+			JOIN gl_accounts a ON a.id = x.account_id`, entry)
+	}
+
+	// no entry: payment P2a (100.00) applied to invoice I2 by the migration
+	noEntry := one101[string](t, conn, `SELECT id::text FROM ar_applications WHERE payment_id = $1 AND gl_entry_id IS NULL`, m101ID["P2a"])
+	if n := one101[int](t, conn, `SELECT count(*) FROM gl_journal_entries WHERE source_ref_id = $1::uuid`, noEntry); n != 0 {
+		t.Fatalf("setup: %d entries name the migrated application", n)
+	}
+	reverse(noEntry)
+	var undo string
+	if err := conn.QueryRow(ctx, `SELECT reversal_gl_entry_id::text FROM ar_applications WHERE id = $1::uuid AND reversed_at IS NOT NULL`, noEntry).Scan(&undo); err != nil {
+		t.Fatalf("the application is not reversed with an entry: %v", err)
+	}
+	if got := net(undo); got != "1020=100.00,2200=-100.00" {
+		t.Errorf("the new entry for an application with none nets %s, want 1020 debit 100.00 / 2200 credit 100.00", got)
+	}
+	if got := one101[string](t, conn, `SELECT status || '|' || amount_open::text FROM invoices WHERE id = $1`, m101ID["I2"]); got != "UNPAID|100.00" {
+		t.Errorf("invoice I2 after the reversal = %s, want UNPAID|100.00", got)
+	}
+	if got := one101[string](t, conn, `SELECT amount_unapplied::text FROM payments WHERE id = $1`, m101ID["P2a"]); got != "100.00" {
+		t.Errorf("payment P2a unapplied after the reversal = %s, want 100.00", got)
+	}
+	if got := one101[string](t, conn, `SELECT type || '|' || amount::text FROM customer_transactions WHERE reference_id = $1::uuid`, noEntry); got != "REVERSAL|10000" {
+		t.Errorf("subledger row of the reversal = %s, want REVERSAL|10000", got)
+	}
+
+	// its exact entry: deposit D1 (60.00) applied to invoice I1b with entry E1a
+	withEntry := one101[string](t, conn, `SELECT id::text FROM ar_applications WHERE payment_id = $1 AND gl_entry_id = $2`, m101ID["D1"], m101ID["E1a"])
+	reverse(withEntry)
+	if got := one101[string](t, conn, `SELECT reversal_gl_entry_id::text FROM ar_applications WHERE id = $1::uuid`, withEntry); got == "" || got == m101ID["E1a"] {
+		t.Fatalf("reversal entry of the exact-entry application = %q", got)
+	} else if rev := one101[string](t, conn, `SELECT reverses_entry_id::text FROM gl_journal_entries WHERE id = $1::uuid`, got); rev != m101ID["E1a"] {
+		t.Errorf("the reversal entry reverses %s, want the application's own entry %s", rev, m101ID["E1a"])
+	} else if got := net(got); got != "1020=60.00,2200=-60.00" {
+		t.Errorf("the reversal of the exact entry nets %s, want 1020 debit 60.00 / 2200 credit 60.00", got)
+	}
+	if n := one101[int](t, conn, `SELECT count(*) FROM gl_journal_entries WHERE source_ref_id = $1::uuid`, withEntry); n != 0 {
+		t.Errorf("%d new entries named the application whose own entry was reversed, want none", n)
+	}
+	if got := one101[string](t, conn, `SELECT status || '|' || amount_open::text FROM invoices WHERE id = $1`, m101ID["I1b"]); got != "UNPAID|60.00" {
+		t.Errorf("invoice I1b after the reversal = %s, want UNPAID|60.00", got)
+	}
+}
+
+// 14.2, migration line: after the migration the reconciliation read lists
+// exactly the customers whose subledger, balance and documents disagree.
+// Customer C9 was seeded to drift (balance and subledger 40.00 against an
+// invoice of 50.00); the others hold documents the base never wrote a
+// subledger row for, so the read says so; C1 agrees and is absent.
+func TestMigration101_ReconciliationListsTheSeededDrift(t *testing.T) {
+	m := migrated101(t)
+	svc, _ := serviceOn101(t, m)
+	rec, err := svc.Reconcile(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range rec.Customers {
+		got = append(got, fmt.Sprintf("%s %s balance=%d subledger=%d documents=%d", c.CustomerName, c.Currency, c.BalanceCents, c.SubledgerCents, c.DocumentsCents))
+	}
+	want := []string{
+		"Mig Five USD balance=0 subledger=0 documents=14000",
+		"Mig Five E USD balance=0 subledger=0 documents=6000",
+		"Mig Five F USD balance=0 subledger=0 documents=-2000",
+		"Mig Four USD balance=0 subledger=0 documents=-6500",
+		"Mig Nine USD balance=4000 subledger=4000 documents=5000",
+		"Mig Seven CAD balance=0 subledger=0 documents=10000",
+		"Mig Three USD balance=0 subledger=0 documents=3000",
+		"Mig Two USD balance=0 subledger=0 documents=-2500",
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("reconciliation lists\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
 }
