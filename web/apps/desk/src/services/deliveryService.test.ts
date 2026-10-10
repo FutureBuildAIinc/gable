@@ -12,7 +12,7 @@ import type {
   CreateVehicleRequest,
   CreateDriverRequest,
   TransitionDeliveryRequest,
-} from '../../types/delivery'
+} from '../types/delivery'
 
 const fetchMock = vi.fn()
 vi.mock('./fetchClient', () => ({
