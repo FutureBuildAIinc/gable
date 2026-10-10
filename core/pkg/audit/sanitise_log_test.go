@@ -203,7 +203,11 @@ func TestLog_NULAfterBackslashRunStillWritesRow(t *testing.T) {
 	cases := []struct {
 		name        string
 		changes     map[string]interface{}
-		readKey     string
+		// readParts is the jsonb path (split into segments) used in
+		// the `changes #>> $1` query, where pgx maps a Go []string to
+		// the text[] the operator expects. Each segment is a single
+		// key name in the jsonb map.
+		readParts    []string
 		expectInput string
 	}{
 		// Real NUL cases: stored value must NOT contain a NUL byte.
@@ -211,57 +215,57 @@ func TestLog_NULAfterBackslashRunStillWritesRow(t *testing.T) {
 		// visible marker (a total of n+1 backslashes before u0000b).
 		{name: "value, 0 backslashes before NUL",
 			changes:     map[string]interface{}{"v": "a" + backslashesBefore(0)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `a` + `\` + `u0000b`},
 		{name: "value, 1 backslash before NUL",
 			changes:     map[string]interface{}{"v": "a" + backslashesBefore(1)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `a` + `\\` + `u0000b`},
 		{name: "value, 2 backslashes before NUL",
 			changes:     map[string]interface{}{"v": "a" + backslashesBefore(2)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `a` + `\\\` + `u0000b`},
 		{name: "value, 3 backslashes before NUL",
 			changes:     map[string]interface{}{"v": "a" + backslashesBefore(3)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `a` + `\\\\` + `u0000b`},
 		{name: "nested value, 1 backslash before NUL",
 			changes: map[string]interface{}{
 				"outer": map[string]interface{}{"v": "a" + backslashesBefore(1)},
 			},
-			readKey:     "outer",
+			readParts:   []string{"outer", "v"},
 			expectInput: `a` + `\\` + `u0000b`},
 		{name: "nested value, 2 backslashes before NUL",
 			changes: map[string]interface{}{
 				"outer": map[string]interface{}{"v": "a" + backslashesBefore(2)},
 			},
-			readKey:     "outer",
+			readParts:   []string{"outer", "v"},
 			expectInput: `a` + `\\\` + `u0000b`},
 		{name: "map key, 1 backslash before NUL",
 			changes:     map[string]interface{}{"k" + backslashesBefore(1): "v"},
-			readKey:     "k" + `\\` + `u0000b`,
+			readParts:   []string{"k" + `\\` + `u0000b`},
 			expectInput: "v"},
 		{name: "map key, 2 backslashes before NUL",
 			changes:     map[string]interface{}{"k" + backslashesBefore(2): "v"},
-			readKey:     "k" + `\\\` + `u0000b`,
+			readParts:   []string{"k" + `\\\` + `u0000b`},
 			expectInput: "v"},
 		// Genuine text cases: stored verbatim (no NUL ever, so the
 		// sanitiser must leave the marshalled bytes alone).
 		{name: "genuine \\u0000 text, 0 extra",
 			changes:     map[string]interface{}{"v": genuineText(0)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `\` + `u0000b`},
 		{name: "genuine \\u0000 text, 1 extra",
 			changes:     map[string]interface{}{"v": genuineText(1)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `\\` + `u0000b`},
 		{name: "genuine \\u0000 text, 2 extra",
 			changes:     map[string]interface{}{"v": genuineText(2)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `\\\` + `u0000b`},
 		{name: "genuine \\u0000 text, 3 extra",
 			changes:     map[string]interface{}{"v": genuineText(3)},
-			readKey:     "v",
+			readParts:   []string{"v"},
 			expectInput: `\\\\` + `u0000b`},
 	}
 
@@ -277,14 +281,19 @@ func TestLog_NULAfterBackslashRunStillWritesRow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Log returned %v, want nil: a NUL after backslashes must not lose the row", err)
 			}
+			// The #>> jsonb path operator takes a text[] (each
+			// element a single key); pgx maps a Go []string directly
+			// to text[], so the path elements reach the server
+			// unchanged. The query returns the unescaped text at
+			// any depth.
 			var got string
 			if err := db.Pool.QueryRow(context.Background(),
-				`SELECT changes->>$1 FROM audit_log WHERE entity_id = $2 AND action = 'key.scope_refused'`,
-				tc.readKey, entityID).Scan(&got); err != nil {
-				t.Fatalf("no audit_log row for entity_id=%s, key=%q: %v", entityID, tc.readKey, err)
+				`SELECT changes#>>$1 FROM audit_log WHERE entity_id = $2 AND action = 'key.scope_refused'`,
+				tc.readParts, entityID).Scan(&got); err != nil {
+				t.Fatalf("no audit_log row for entity_id=%s, path=%v: %v", entityID, tc.readParts, err)
 			}
 			if strings.ContainsRune(got, '\x00') {
-				t.Fatalf("stored value for key %q still contains a NUL byte: %q", tc.readKey, got)
+				t.Fatalf("stored value for path %v still contains a NUL byte: %q", tc.readParts, got)
 			}
 			if got != tc.expectInput {
 				t.Fatalf("stored value %q, want %q", got, tc.expectInput)
