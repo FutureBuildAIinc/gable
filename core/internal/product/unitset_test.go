@@ -11,6 +11,7 @@ package product_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -515,6 +516,80 @@ func TestUnitSetStockingUnitComesFromStockUOM(t *testing.T) {
 	}))
 	if res.status != http.StatusBadRequest || !strings.Contains(string(res.raw), `"stock_uom"`) {
 		t.Errorf("a stock_uom row sent as another pair is a 400 naming stock_uom, got %d: %s", res.status, res.raw)
+	}
+}
+
+// TestUnitSetStockHoldLocksTheRowsItReads proves the stock unit hold's
+// check takes the row locks it reads, inside the caller's transaction: a
+// receive on the product's bin, run while the unit set write's transaction
+// sits between the check and its commit, waits for that transaction; once
+// it commits, the same receive is served. A row that first appears after
+// the check (a new bin, a new order line) is cycle 4's stock identity work
+// and is not what this test pins.
+func TestUnitSetStockHoldLocksTheRowsItReads(t *testing.T) {
+	f := newSetFixture(t)
+	ctx := context.Background()
+	held, _ := f.createBoard(map[string]any{"description": "hold locks", "stock_uom": "PCS"})
+	uid := uuid.MustParse(held)
+	var locID string
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1`).Scan(&locID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO inventory (product_id, location, location_id, quantity) VALUES ($1, 'YARD', $2, 10)`,
+		held, locID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE product_id = $1`, held)
+	}()
+
+	repo := product.NewRepository(f.db)
+	checked := make(chan error, 1)
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- f.db.RunInTx(ctx, func(txCtx context.Context) error {
+			inUse, err := repo.ProductStockUnitInUse(txCtx, uid)
+			if err != nil {
+				checked <- err
+				return err
+			}
+			if !inUse {
+				checked <- errors.New("the hold check did not see the product's stock")
+				return nil
+			}
+			checked <- nil
+			<-release
+			return nil
+		})
+	}()
+	if err := <-checked; err != nil {
+		t.Fatal(err)
+	}
+	// Release the gated transaction on every path, so a failure below never
+	// leaves it holding a pool connection through the fixture's cleanup.
+	var releaseOnce sync.Once
+	releaseNow := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseNow()
+
+	// The receive waits: the row lock is held to the transaction's end.
+	updCtx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+	defer cancel()
+	if _, err := f.db.Pool.Exec(updCtx,
+		`UPDATE inventory SET quantity = 12 WHERE product_id = $1`, held); err == nil {
+		t.Fatal("a receive on the product's bin waits for the unit set write's transaction")
+	}
+	releaseNow()
+	if err := <-done; err != nil {
+		t.Fatalf("the gated transaction: %v", err)
+	}
+
+	// The same receive is served once the transaction has committed.
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE inventory SET quantity = 12 WHERE product_id = $1`, held); err != nil {
+		t.Fatalf("the receive is served after the commit: %v", err)
 	}
 }
 

@@ -732,10 +732,28 @@ func (r *PostgresRepository) CatalogueUnits(ctx context.Context, codes []string)
 // ProductStockUnitInUse answers whether any inventory row of the product
 // holds a nonzero quantity or allocation, or any open order line names it
 // (3.2's stock_unit_in_use: changing what stock is counted in is a stock
-// conversion, a cycle 4 adjustment act).
+// conversion, a cycle 4 adjustment act). The read takes the row locks it
+// runs on, every inventory row of the product and its open order lines,
+// inside the caller's transaction and under the product row lock the unit
+// set write already holds: a concurrent receive on an existing bin or an
+// edit of an open line waits for the write to commit instead of landing
+// between this check and the replace. A row that first appears after the
+// check (a new bin, a new order line; the writers do not lock the product
+// row) is the stock identity work of cycle 4 and is not closed here.
 func (r *PostgresRepository) ProductStockUnitInUse(ctx context.Context, id uuid.UUID) (bool, error) {
+	exec := r.db.GetExecutor(ctx)
+	for _, lock := range []string{
+		`SELECT count(*) FROM (SELECT 1 FROM inventory WHERE product_id = $1 FOR UPDATE) l`,
+		`SELECT count(*) FROM (SELECT 1 FROM order_lines ol JOIN orders o ON o.id = ol.order_id
+		   WHERE ol.product_id = $1 AND o.status NOT IN ('FULFILLED', 'CANCELLED') FOR UPDATE OF ol) l`,
+	} {
+		var n int
+		if err := exec.QueryRow(ctx, lock, id).Scan(&n); err != nil {
+			return false, fmt.Errorf("failed to lock the product's stock rows: %w", err)
+		}
+	}
 	var inUse bool
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+	err := exec.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM inventory WHERE product_id = $1 AND (quantity <> 0 OR allocated <> 0)
 			UNION ALL
