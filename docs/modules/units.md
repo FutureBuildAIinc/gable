@@ -23,16 +23,25 @@ The unit set wire lives under the product module (`/products/{id}/units`).
 ## What it does in a yard
 
 A builder asks for "12 LF of 2x4x8". `LF` is the catalogue code for
-linear feet, dimension `length`, standard size omitted because a foot
-is the dimension's reference unit. `EA` is the catalogue code for
+linear feet, dimension `length`; the reference unit of `length` is
+the foot, so `LF` carries `(std_unit_qty = 1, std_ref_qty = 1)`
+(migration 099, the rest of the dimension: `EA`, `PCS`, `SF`, `CF`,
+`LBS`, `BF` are also `(1, 1)`). `EA` is the catalogue code for
 "each", dimension `count`. `BF` is the board foot, dimension
-`board_measure`, standard size `12 BF = 1 CF`. A 2x4x8 stocked in
-`BF` carries its board measure dimensions (`board_thickness_in`,
-`board_width_in`, `board_length_ft`) and the stock rule says
-`LF = 8 / BF` so a `LF` sale unit can be derived from the existing
-`BF` row. A paver stocked in `EA` sold by `SF` needs `stock_qty =
-0.5556` (or whatever the dealer names), which the unit set PUT
-records once and the conversion uses every time.
+`board_measure`, `(1, 1)`; `MBF` is `1, 1000` board feet. The seed
+of ADR 0006 section 2.2 places the 23 standard units in 099
+(`099_units_catalogue_and_sets.sql:71-93`), the per product units
+(`SET`, `BOX`, `CTN`, `BAG`, `BUNDLE`, `RL`) carry `(NULL, NULL)`
+because their size is per product.
+
+The worked examples of ADR 0006 section 3.2: a 2x4x8 stocked in
+`PCS` stores `LF (8, 1)`, `BF (1, 0.1875)` and `MBF (1, 187.5)`,
+all in canonical form (R2, GCD reduced, scale 4). A 2x4 random
+length product stocked in `LF` stores `LF (1, 1)`, `BF (1, 1.5)`
+and `MBF (1, 1500)`. A 6x9 paver stocked in `PCS` and sold by `SF`
+has `1 SF = 8/3 PCS`, which is not exact at scale 4, so the unit
+set PUT answers a warning naming `SF` as the finer stocking unit
+that would make every sell row exact (`1 PCS = 0.375 SF`).
 
 A quantity on a line is a plain decimal string at scale 4
 (`"12.5"`, `"0.1875"`). A unit conversion is a pair of positive
@@ -93,39 +102,48 @@ unit set row or any line names the unit).
 
 ### Standard sizes and the dimension reference
 
-Each dimension has a reference unit whose standard pair is omitted:
-`EA` for `count`, `LF` for `length`, `SF` for `area`, `CF` for
-`volume`, `LBS` for `weight`, `BF` for `board_measure`. The
-seeding of 099 writes the twenty three standard units of ADR 0006
-section 2.2: `EA`, `PCS`, `PAIR`, `DOZ`, `C`, `M`, `SET`, `BOX`,
-`CTN`, `BAG`, `BUNDLE`, `RL`, `LF`, `SF`, `SQ`, `CF`, `CY`, `GAL`,
-`LBS`, `CWT`, `TON`, `BF`, `MBF`. Other units with a standard size
-(where the dimension is not the reference) are seeded with the pair
-as the canonical of ADR 0006 section 1 (`GAL` is `576 = 77 CF`).
+The reference unit of each dimension is the canonical 1 of the
+dimension. The migration seeds the 23 standard units
+(`099_units_catalogue_and_sets.sql:71-93`) of ADR 0006 section 2.2:
+`EA`, `PCS`, `PAIR`, `DOZ`, `C`, `M`, `SET`, `BOX`, `CTN`, `BAG`,
+`BUNDLE`, `RL`, `LF`, `SF`, `SQ`, `CF`, `CY`, `GAL`, `LBS`, `CWT`,
+`TON`, `BF`, `MBF`. The reference units (`EA`, `LF`, `SF`, `CF`,
+`LBS`, `BF`) and `PCS` are `(1, 1)`; `MBF` is `(1, 1000)` board
+feet. The per product units (`SET`, `BOX`, `CTN`, `BAG`, `BUNDLE`,
+`RL`) carry `(NULL, NULL)` because their size is per product. The
+rest of the count units (`PAIR`, `DOZ`, `C`, `M`) and the weight
+units (`CWT`, `TON`) have their canonical pair (`1 = 2`, `1 = 12`,
+`1 = 100`, `1 = 1000`, `1 = 100`, `1 = 2000`); the area `SQ` is
+`(1, 100)`; volume `CY` is `(1, 27)`; `GAL` is `(576, 77)` of
+`CF` (ADR 0006 section 1, R2).
 
-### The deposit on a unit
+### Unit values already in use
 
 The catalogue table is the place a dealer adds a new unit, not a
 guess the migration makes. Migration 099's step A1 collects every
 distinct unit value stored in `products.uom_primary`,
-`quote_lines.uom`, `quote_lines.price_uom` (and B0's counter and
-document line columns), normalises with `upper(trim())`, inserts as
-a dealer unit (dimension `COUNT`, no standard size), and reports it
-when it is a new valid code. A value that does not match
-`^[A-Z]{1,6}$` aborts the migration naming the table and the
-value; the migration never guesses a mapping. An operator runs the
-read-only report first:
+`quote_lines.uom` and `quote_lines.price_uom`
+(`099_units_catalogue_and_sets.sql:111-118`), normalises with
+`upper(trim())`, inserts as a dealer unit (dimension `COUNT`, no
+standard size), and reports it when it is a new valid code. A
+value that does not match `^[A-Z]{1,6}$` aborts the migration
+naming the table and the value; the migration never guesses a
+mapping. An operator runs the read-only report first:
 
 ```
-core migrate -report units
+cd core && go run ./cmd/migrate -report units
 ```
 
-The report prints, per table and column, the values that would be
-inserted as new dealer units with their row counts, and the values
-that would abort the migration (the latter exit code `1`). The
-report is the same shape B0 (C3-2B) extends to the counter and
-document lines; before B0 the report prints `not present on this
-database` for the columns B0 has not converted yet.
+(`migrate.Run` reads `os.Args[1]`; the `core migrate` form does
+not accept the flag and answers `flag provided but not defined:
+-report`.) The report prints, per table and column, the values
+that would be inserted as new dealer units with their row counts,
+and the values that would abort the migration (the latter exit
+code `1`). The report is the same shape B0 (C3-2B) extends to the
+counter and document line columns, listed ahead of B0's own output
+in `units_report.go`; before B0 the report prints `not present on
+this database` for the columns B0 has not converted yet
+(`units_report.go:123`).
 
 ## The product unit set
 
@@ -156,27 +174,36 @@ is `stock_qty` of the product's stocking unit, in canonical form.
 | `stock_qty` | quantity | The right side of the pair, scale 4. |
 | `sell` | boolean | The row can be a sale unit. |
 | `purchase` | boolean | The row can be a purchase unit. |
-| `price` | boolean | The row can be a price unit (fixed while the base price is nonzero or any contract or fixed-price rule names the product). |
+| `price` | boolean | The row can be a price unit. A change of the stocking unit (the `price_unit_held` hold of ADR 0006 9.1) is refused while the product has a nonzero `base_price` or any contract or fixed price rule names it. |
 
 `UnitSetPut` replaces the whole set and the four default columns at
 the product's revision. A row may omit its pair (the derivations of
 ADR 0006 section 3.2 fill it); a sent pair is stored canonically
-and must agree with every derivation that applies. `base_price`
-simply sets the base price while the price unit cannot leave the
-stocking unit. A field the PUT cannot apply (the board measure
-columns) is a `400` naming it.
+and must agree with every derivation that applies. From C3-2B a
+`base_price_ten_thousandths` body field is required whenever the
+PUT changes `price_uom` (the stored base is a price per the old
+unit); sent with an unchanged `price_uom` it simply sets the base
+price (`ADR 0006` 3.2 step 6). A field the PUT cannot apply (the
+board measure columns) is a `400` naming it.
 
 ### Pair arithmetic and exactness
 
 `Pair` is a conversion between two units as a pair of positive
 scale 4 quantities (`core/internal/units/pair.go`): `A` of one unit
-is the same goods as `B` of the other. The canonical form rejects
-gcd-reductions larger than one of the scale 4 integers; a pair that
-fits the `NUMERIC(12,4)` bound in no canonical form is refused
-where it is written, never at a line (`ErrOutOfBound`, ADR 0006
-section 1 R2). The arithmetic over both sides is exact rational
-over `int64` (`math/big.Rat`, never `float64`, never parsing
-through text).
+is the same goods as `B` of the other. The canonical form of R2
+(ADR 0006 section 1, `units/pair.go:108-169`): if both `r = a/b`
+and `1/r` are exact decimals at scale 4, the `1` goes on the side
+that leaves the other side at least `1`; else if `r` is exact the
+pair is `(r, 1)` and if `1/r` is exact the pair is `(1, 1/r)`; else
+the lowest integer terms `(p, q)`, or `(p x k, q x k)` for the
+largest `k` of `0.1, 0.01, 0.001, 0.0001` that fits the bound; a
+ratio that fits the `NUMERIC(12,4)` bound in no form above is
+refused where it is written, never at a line (`ErrOutOfBound`).
+Worked: 187.5 PCS to 1 MBF is `(187.5, 1)`; 8 LF to 1 PCS is
+`(8, 1)`; 1 BF of 2x4 is 1.5 LF so `(1, 1.5)`; 28 BF = 3 PCS of
+2x4x14 is `(28, 3)`; GAL to CF is `(576, 77)`. The arithmetic over
+both sides is exact rational over `int64` (`math/big.Rat`, never
+`float64`, never parsing through text).
 
 A quantity in a sale unit does not convert exactly into the
 stocking unit at scale 4 is refused on the line by
@@ -268,14 +295,17 @@ examples below show the production header shape).
 The pre flight report runs before migration 099:
 
 ```
-core migrate -report units
+cd core && go run ./cmd/migrate -report units
 ```
 
-It prints the new dealer units it would insert (with row counts
-across the columns) and the values that would abort the migration
-(exit code `1`). After `make migrate`, the seed populates the
-twenty three standard units, so the report lists no new dealer
-units.
+(`core migrate -report units` does not take the flag and is
+refused with `flag provided but not defined: -report`.) It prints
+the new dealer units it would insert (with row counts across the
+columns) and the values that would abort the migration (exit code
+`1`). Migration 099 inserts the 23 standard units
+(`099_units_catalogue_and_sets.sql:70-93`); the seed does not
+touch the catalogue, so after `make migrate` the report lists no
+new dealer units for them.
 
 Then, with an admin role bearer:
 
