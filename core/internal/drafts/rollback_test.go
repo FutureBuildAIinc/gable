@@ -43,10 +43,12 @@ func TestFailedAuditWriteRollsBackCreate(t *testing.T) {
 	if r.status != http.StatusInternalServerError {
 		t.Fatalf("create with a failing audit write = %d: %s", r.status, r.raw)
 	}
-	if n := countRows(t, f.db, `SELECT count(*) FROM drafts WHERE module='quotes'`); n != 0 {
+	// Scoped to this fixture's own customer (other packages' tests run in
+	// parallel and hold their own drafts).
+	if n := countRows(t, f.db, `SELECT count(*) FROM drafts WHERE payload->>'customer_id' = $1`, f.customerID.String()); n != 0 {
 		t.Errorf("drafts after the failed create = %d, want none committed", n)
 	}
-	if n := countRows(t, f.db, `SELECT count(*) FROM draft_events`); n != 0 {
+	if n := countRows(t, f.db, `SELECT count(*) FROM draft_events WHERE draft_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String()); n != 0 {
 		t.Errorf("draft_events after the failed create = %d, want none committed", n)
 	}
 }

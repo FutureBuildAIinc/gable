@@ -118,10 +118,13 @@ func newFixtureWithAudit(t *testing.T, db *database.DB, sink drafts.AuditSink) *
 		// Only this package's tests write drafts and their change rows, so
 		// the cleanup is the whole module's rows; the shared database's other
 		// tables are cleaned by customer like the quote fixture's.
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE module='quotes'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE module='quotes'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft'`)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type='draft'`)
+		// Scoped to this fixture's own drafts (by the payload's customer),
+		// never by module: other packages' tests run in parallel and hold
+		// their own drafts of the same kinds.
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM draft_events WHERE draft_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type='draft' AND entity_id IN (SELECT id FROM drafts WHERE payload->>'customer_id' = $1)`, f.customerID.String())
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM drafts WHERE payload->>'customer_id' = $1`, f.customerID.String())
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE customer_id = $1`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, f.productID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, f.customerID)
