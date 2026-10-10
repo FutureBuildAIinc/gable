@@ -65,6 +65,7 @@ type keyPinFixture struct {
 	quoteA    uuid.UUID
 	quoteB    uuid.UUID
 	custID    uuid.UUID
+	yardNull  uuid.UUID // a legacy row that names no branch
 	custB     uuid.UUID // a customer whose branches hold branch B only
 	category  uuid.UUID // one product category the priced rules hang on
 	catRuleA  uuid.UUID // a category rule scoped to the pin's customer
@@ -86,6 +87,15 @@ var pinKeyScopes = []string{
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
 	t.Helper()
+	return newKeyPinFixtureSwitched(t, "true")
+}
+
+// newKeyPinFixtureSwitched builds the fixture with the multi_branch_enabled
+// switch in the state given: the branch middleware reads it once at
+// construction, so the state has to be in the table before the wall is
+// built.
+func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
+	t.Helper()
 	testutil.LockOutboxTables(t) // the exposure writes record outbox events
 	db := testutil.RequireDB(t)
 	t.Setenv("AUTH_MODE", "dev")
@@ -94,6 +104,7 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 		branchA: uuid.New(), branchB: uuid.New(), branchC: uuid.New(), branchC2: uuid.New(),
 		yardA: uuid.New(), yardB: uuid.New(), quoteA: uuid.New(), quoteB: uuid.New(), custID: uuid.New(),
 		custB: uuid.New(), category: uuid.New(), catRuleA: uuid.New(), catRuleB: uuid.New(), taxExempt: uuid.New(),
+		yardNull: uuid.New(),
 	}
 	for _, r := range []struct {
 		id     uuid.UUID
@@ -149,6 +160,18 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 		`INSERT INTO tax_exemptions (id, customer_id, exempt_reason) VALUES ($1, $2, 'pin')`, f.taxExempt, f.custB); err != nil {
 		t.Fatalf("seed tax exemption: %v", err)
 	}
+	// A legacy row that names no branch: the denorm trigger refuses such rows
+	// today, so the seed lifts it for the insert only.
+	if _, err := db.Pool.Exec(ctx, `ALTER TABLE locations DISABLE TRIGGER trg_locations_set_branch_id`); err != nil {
+		t.Fatalf("lift locations trigger: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name) VALUES ($1, 'YARD', $2, 'pin null row')`,
+		f.yardNull, "pin-null-"+f.yardNull.String()[:8]); err != nil {
+		t.Fatalf("seed null branch row: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `ALTER TABLE locations ENABLE TRIGGER trg_locations_set_branch_id`); err != nil {
+		t.Fatalf("restore locations trigger: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote_exposure_event'
 			AND entity_id IN (SELECT id::text FROM quote_exposure_events WHERE quote_id IN ($1, $2))`, f.quoteA, f.quoteB)
@@ -169,11 +192,11 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub LIKE 'pin-%' OR user_sub = 'pin-both'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE code LIKE 'pin-new-%'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE parent_id IN ($1, $2, $3, $4)`, f.branchA, f.branchB, f.branchC, f.branchC2)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2, $3, $4, $5, $6)`,
-			f.branchA, f.branchB, f.branchC, f.branchC2, f.yardA, f.yardB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2, $3, $4, $5, $6, $7)`,
+			f.branchA, f.branchB, f.branchC, f.branchC2, f.yardA, f.yardB, f.yardNull)
 	})
 
-	setSetting(t, db, "multi_branch_enabled", "true")
+	setSetting(t, db, "multi_branch_enabled", switchState)
 	setSetting(t, db, "default_branch_required", "false")
 	wall := newBranchWall(db)
 	mux := http.NewServeMux()
@@ -964,4 +987,39 @@ func TestKeyBranchPin_CustomerConfinedWrites(t *testing.T) {
 		f.allow(t, who, "DELETE", "/api/v1/pricing/category-rules/bulk",
 			fmt.Sprintf(`{"ids":[%q]}`, id.String()), nil, http.StatusNoContent)
 	}
+}
+
+// TestKeyBranchPin_SwitchOff pins the wall's independence from the
+// multi_branch_enabled switch: with the switch off the pin still refuses the
+// foreign branch and still passes the pin's own, and the unbound key and the
+// user keep their reach. The wall never reads the switch; this is the case
+// that says so.
+func TestKeyBranchPin_SwitchOff(t *testing.T) {
+	f := newKeyPinFixtureSwitched(t, "false")
+	A, B := f.branchA.String(), f.branchB.String()
+
+	f.refuseForeign(t, "POST", "/api/v1/users/pin-off-grant/branches", fmt.Sprintf(`{"branch_id":%q}`, B), nil)
+	if f.hasGrant(t, "pin-off-grant", f.branchB) {
+		t.Errorf("switch off refused grant wrote the foreign grant row")
+	}
+	f.allow(t, "bound", "POST", "/api/v1/users/pin-off-grant/branches", fmt.Sprintf(`{"branch_id":%q}`, A), nil, http.StatusNoContent)
+	f.allow(t, "unbound", "POST", "/api/v1/users/pin-off-grant/branches", fmt.Sprintf(`{"branch_id":%q}`, B), nil, http.StatusNoContent)
+	f.allow(t, "user", "POST", "/api/v1/users/pin-off-grant/branches", fmt.Sprintf(`{"branch_id":%q}`, B), nil, http.StatusNoContent)
+	f.refuseForeign(t, "GET", "/api/v1/branches/"+B+"/users", "", nil)
+}
+
+// TestKeyBranchPin_RowWithoutBranch refuses a bound key a location row that
+// names no branch (a legacy shape the denorm trigger refuses today): such a
+// row is outside every pin, so it is refused like a foreign branch, while the
+// unbound key and the user keep their reach on it.
+func TestKeyBranchPin_RowWithoutBranch(t *testing.T) {
+	f := newKeyPinFixture(t)
+	f.refuseForeign(t, "PUT", "/api/v1/locations/"+f.yardNull.String(),
+		fmt.Sprintf(`{"code":"pin-null-%s","path":"pin","name":"no"}`, f.yardNull.String()[:8]),
+		map[string]string{"If-Match": `"1"`})
+	if rev, _, active := f.locState(t, f.yardNull); rev != 1 || !active {
+		t.Errorf("refused PUT changed the null branch row: revision %d active %v", rev, active)
+	}
+	f.putLocation(t, "unbound", f.yardNull, "pin free null edit", http.StatusOK)
+	f.putLocation(t, "user", f.yardNull, "pin user null edit", http.StatusOK)
 }

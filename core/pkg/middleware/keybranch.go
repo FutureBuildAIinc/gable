@@ -128,10 +128,16 @@ func decodeOneJSON(r *http.Request, v any) error {
 	return nil
 }
 
+// ErrRowNamesNoBranch tells RowBranch the row the path names exists but
+// belongs to no branch (a legacy shape the denorm trigger refuses today):
+// such a row is outside every pin, so a bound key is refused it.
+var ErrRowNamesNoBranch = errors.New("key branch wall: the row names no branch")
+
 // RowBranch wraps a handler whose path names a row ("id") whose branch
-// branchOf resolves: a location, a quote. A row that does not exist, or that
-// belongs to no branch, names no branch and passes to the handler's own
-// answer. A lookup failure answers 500 rather than failing open.
+// branchOf resolves: a location, a quote. A row that does not exist names no
+// branch and passes to the handler's own answer; a row that exists but
+// belongs to no branch (ErrRowNamesNoBranch) is outside every pin and is
+// refused. A lookup failure answers 500 rather than failing open.
 func (w *KeyBranchWall) RowBranch(branchOf func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)) func(http.Handler) http.Handler {
 	return w.wrap("id", "", func(ctx context.Context, r *http.Request) (uuid.UUID, bool, error) {
 		raw := r.PathValue("id")
@@ -143,6 +149,9 @@ func (w *KeyBranchWall) RowBranch(branchOf func(ctx context.Context, id uuid.UUI
 			return uuid.Nil, false, nil // the handler answers the malformed id
 		}
 		branch, err := branchOf(ctx, id)
+		if errors.Is(err, ErrRowNamesNoBranch) {
+			return uuid.Nil, true, nil
+		}
 		if err != nil {
 			return uuid.Nil, false, err
 		}
@@ -173,6 +182,9 @@ func (w *KeyBranchWall) branchOfLocation(ctx context.Context, id uuid.UUID) (*uu
 	}
 	if err != nil {
 		return nil, fmt.Errorf("key branch wall: location branch lookup: %w", err)
+	}
+	if branch == nil {
+		return nil, ErrRowNamesNoBranch
 	}
 	return branch, nil
 }
