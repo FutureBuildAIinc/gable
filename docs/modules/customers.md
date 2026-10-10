@@ -33,9 +33,9 @@ forces the sales rep to enter a purchase order number at confirm.
 
 Every route is in `core/api/fragments/customer.yaml` and the registered
 handles are in `core/internal/customer/handler.go`. The route census
-(`core/api/ROUTES.txt`) lists each one under the `internal/customer`
-package (the route census has a `package` column, not a module
-column).
+(`core/api/ROUTES.txt`) lists each one under the module named in the
+`module` column (the column carries the registering package
+directory).
 
 | Method | Path | One line |
 |---|---|---|
@@ -60,6 +60,24 @@ column).
 | PUT | `/api/v1/contacts/{id}` | Replace a contact. |
 | DELETE | `/api/v1/contacts/{id}` | Delete a contact. |
 | GET | `/api/v1/price_levels` | List the price level master. |
+
+A `PriceLevel` (see `core/api/fragments/customer.yaml`
+`components.schemas.PriceLevel`) carries `id`, `name`, `multiplier`
+(a price multiplier, a rate and not money), `created_at`,
+`updated_at`. The level the customer holds is embedded on the
+`Customer` document as `price_level` (and named by `price_level_id`
+when set).
+
+The customer's lumber index escalation policy (`EscalationPolicy`,
+see `core/api/fragments/customer.yaml`
+`components.schemas.EscalationPolicy`) carries `customer_id`,
+`policy` (`auto_escalate`, `flag_for_requote`, `require_ack`),
+`threshold_percent` (a decimal string with at most four fraction
+digits, above 0 and at most 50), `agreement_signed_at` (a
+timestamp; required for `auto_escalate`), `agreement_ref`, and the
+customer's `revision`. `EscalationPolicyRequest` (the body of
+`PUT /escalation-policy`) takes the same fields except
+`customer_id` and requires `policy` and `threshold_percent`.
 
 `ship-tos`, `contacts`, `payment-terms` and `price_levels` each carry
 their own scope segment.
@@ -123,8 +141,10 @@ A customer has no lifecycle of its own. It is enabled or disabled by
 documents. The currency override is refused with `409 conflict` and
 blocker `open_documents` when the customer has an order in `draft`,
 `confirmed` or `on_hold`, an invoice that is `unpaid` or `partial`,
-a credit memo in `draft`, `open` or `partial`, or a deposit with an
-unapplied amount.
+a credit memo in `draft`, `open` or `partial`, or a posted payment
+with an unapplied amount (a deposit or not;
+`customer/repository.go` `OpenDocuments` reads
+`payments.status = 'POSTED' AND amount_unapplied > 0`).
 
 A `ShipTo` and a `Contact` are versioned through `revision` but have no
 lifecycle. A `Contact` may be deleted; a `ShipTo` may not be deleted
@@ -143,7 +163,7 @@ A machine key reaching the customer routes needs `customers:read` for
 `GET` and `customers:write` for every other method (ADR 0002; the
 segment is the first path segment under `/api/v1/`). Ship-tos need
 `ship-tos:read` or `ship-tos:write`; contacts need
-`contacts:read` or `contacts:write`; payment terms writes need
+`contacts:read` or `contacts:write`; payment terms need
 `payment-terms:read` or `payment-terms:write`; price levels need
 `price_levels:read`. The user guard at the serve layer is
 `admin`, `owner`, `sales` for customer reads and writes, with
@@ -160,7 +180,7 @@ refused scope.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
 - [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 4.2: currency, the `open_documents` rule; section 7: the customer contract on the wire.
 - [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) section 6: price levels on the customer.
-- The customer's unapplied cash and the open-documents rule (order, invoice, credit memo, deposit unapplied) live in [payments.md](payments.md) (C2-4).
+- The customer's unapplied cash and the open-documents rule (order, invoice, credit memo, posted payment with unapplied cash) live in [payments.md](payments.md) (C2-4).
 
 ## How to try it locally
 
