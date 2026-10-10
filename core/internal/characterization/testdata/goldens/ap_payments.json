@@ -7,73 +7,283 @@
       "body": {
         "due_date": "<day+30>",
         "invoice_date": "<day+0>",
-        "invoice_number": "GOLD-AP-A01",
         "lines": [
           {
             "description": "golden ap payable line",
-            "quantity": 2,
-            "unit_price": 50
+            "gl_account_id": "<id-1>",
+            "quantity": "2",
+            "unit_price_ten_thousandths": 500000
           }
         ],
-        "tax_amount": 0,
-        "vendor_id": "<id-1>"
+        "tax_cents": 0,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-A01"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "amount_paid": 0,
+        "amount_open_cents": 10000,
+        "amount_paid_cents": 0,
+        "approved_at": null,
+        "approved_by": null,
+        "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
-        "due_date": "<ts+30d>",
-        "id": "<id-2>",
-        "invoice_date": "<ts+0d>",
-        "invoice_number": "GOLD-AP-A01",
-        "status": "PENDING",
-        "subtotal": 10000,
-        "tax_amount": 0,
-        "total": 10000,
-        "vendor_id": "<id-1>"
+        "currency": "USD",
+        "due_date": "<day+30>",
+        "gl_entry_id": null,
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap payable line",
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "2",
+            "unit_price_ten_thousandths": 500000
+          }
+        ],
+        "notes": "",
+        "number": "AP-000006",
+        "po_id": null,
+        "revision": 1,
+        "status": "pending",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-A01",
+        "vendor_name": "BC Roofing Wholesale"
       }
     }
   },
   {
-    "name": "ap.invoice.approve.no_claims",
+    "name": "ap.invoice.approve.no_precondition",
     "request": {
       "method": "POST",
-      "path": "/api/v1/ap/invoices/<id-2>/approve"
+      "path": "/api/v1/ap/invoices/<id-4>/transitions",
+      "body": {
+        "to": "approved"
+      }
     },
     "response": {
-      "status": 401,
+      "status": 428,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "UNAUTHORIZED",
-          "message": "Unauthorized"
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-6>"
         }
       }
     }
   },
   {
-    "name": "ap.invoice.approve.bad_id",
+    "name": "ap.invoice.approve",
     "request": {
       "method": "POST",
-      "path": "/api/v1/ap/invoices/not-a-uuid/approve"
+      "path": "/api/v1/ap/invoices/<id-4>/transitions",
+      "body": {
+        "revision": 1,
+        "to": "approved"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_open_cents": 10000,
+        "amount_paid_cents": 0,
+        "approved_at": "<ts+0d>",
+        "approved_by": null,
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "due_date": "<day+30>",
+        "gl_entry_id": "<id-7>",
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap payable line",
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "2",
+            "unit_price_ten_thousandths": 500000
+          }
+        ],
+        "notes": "",
+        "number": "AP-000006",
+        "po_id": null,
+        "revision": 2,
+        "status": "approved",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-A01",
+        "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.approve.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices/<id-4>/transitions",
+      "body": {
+        "revision": 2,
+        "to": "approved"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invoice_not_pending",
+              "message": "the bill is approved"
+            }
+          ],
+          "message": "only a pending bill can be approved"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.transition.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices/not-a-uuid/transitions",
+      "body": {
+        "revision": 1,
+        "to": "approved"
+      }
     },
     "response": {
       "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid vendor invoice id"
         },
         "meta": {
-          "request_id": "<id-4>"
+          "request_id": "<id-9>"
         }
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.events",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=vendor_invoice.created,vendor_invoice.approved&limit=10"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-3>",
+            "data": {
+              "amount_open_cents": 10000,
+              "branch_id": "<id-3>",
+              "currency": "USD",
+              "from_status": "",
+              "number": "AP-000005",
+              "revision": 1,
+              "status": "pending",
+              "total_cents": 10000,
+              "vendor_id": "<id-2>",
+              "vendor_invoice_number": "GOLD-AP-001"
+            },
+            "entity": {
+              "id": "<id-10>",
+              "kind": "vendor_invoice"
+            },
+            "event_id": "<id-11>",
+            "org": "default",
+            "type": "vendor_invoice.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-3>",
+            "data": {
+              "amount_open_cents": 10000,
+              "branch_id": "<id-3>",
+              "currency": "USD",
+              "from_status": "",
+              "number": "AP-000006",
+              "revision": 1,
+              "status": "pending",
+              "total_cents": 10000,
+              "vendor_id": "<id-2>",
+              "vendor_invoice_number": "GOLD-AP-A01"
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "vendor_invoice"
+            },
+            "event_id": "<id-12>",
+            "org": "default",
+            "type": "vendor_invoice.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-3>",
+            "data": {
+              "amount_open_cents": 10000,
+              "branch_id": "<id-3>",
+              "currency": "USD",
+              "from_status": "pending",
+              "number": "AP-000006",
+              "revision": 2,
+              "status": "approved",
+              "total_cents": 10000,
+              "vendor_id": "<id-2>",
+              "vendor_invoice_number": "GOLD-AP-A01"
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "vendor_invoice"
+            },
+            "event_id": "<id-13>",
+            "org": "default",
+            "type": "vendor_invoice.approved"
+          }
+        ],
+        "limit": 10,
+        "next_cursor": "<cursor>"
       }
     }
   },
@@ -81,7 +291,7 @@
     "name": "ap.payments.list_empty_for_vendor",
     "request": {
       "method": "GET",
-      "path": "/api/v1/ap/payments?vendor_id=<id-1>"
+      "path": "/api/v1/ap/payments?vendor_id=<id-2>"
     },
     "response": {
       "status": 200,
@@ -98,12 +308,12 @@
         "amount": 40,
         "check_number": "GOLD-CHK-1",
         "invoice_ids": [
-          "<id-2>"
+          "<id-4>"
         ],
         "method": "CHECK",
         "payment_date": "<day+0>",
         "reference": "golden partial",
-        "vendor_id": "<id-1>"
+        "vendor_id": "<id-2>"
       }
     },
     "response": {
@@ -113,12 +323,12 @@
         "amount": 4000,
         "check_number": "GOLD-CHK-1",
         "created_at": "<ts+0d>",
-        "id": "<id-5>",
+        "id": "<id-14>",
         "method": "CHECK",
-        "payment_date": "<ts+0d>",
+        "payment_date": "<day+0>",
         "reference": "golden partial",
         "status": "COMPLETE",
-        "vendor_id": "<id-1>"
+        "vendor_id": "<id-2>"
       }
     }
   },
@@ -126,34 +336,48 @@
     "name": "ap.invoice.get.after_partial",
     "request": {
       "method": "GET",
-      "path": "/api/v1/ap/invoices/<id-2>"
+      "path": "/api/v1/ap/invoices/<id-4>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "amount_paid": 4000,
+        "amount_open_cents": 6000,
+        "amount_paid_cents": 4000,
+        "approved_at": "<ts+0d>",
+        "approved_by": null,
+        "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
-        "due_date": "<ts+30d>",
-        "id": "<id-2>",
-        "invoice_date": "<ts+0d>",
-        "invoice_number": "GOLD-AP-A01",
+        "currency": "USD",
+        "due_date": "<day+30>",
+        "gl_entry_id": "<id-7>",
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
         "lines": [
           {
             "created_at": "<ts+0d>",
             "description": "golden ap payable line",
-            "id": "<id-6>",
-            "invoice_id": "<id-2>",
-            "line_total": 10000,
-            "quantity": 2,
-            "unit_price": 5000
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "2",
+            "unit_price_ten_thousandths": 500000
           }
         ],
-        "status": "PARTIAL",
-        "subtotal": 10000,
-        "tax_amount": 0,
-        "total": 10000,
-        "vendor_id": "<id-1>",
+        "notes": "",
+        "number": "AP-000006",
+        "po_id": null,
+        "revision": 3,
+        "status": "partial",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-A01",
         "vendor_name": "BC Roofing Wholesale"
       }
     }
@@ -166,12 +390,12 @@
       "body": {
         "amount": 60,
         "invoice_ids": [
-          "<id-2>"
+          "<id-4>"
         ],
         "method": "ACH",
         "payment_date": "<day+0>",
         "reference": "golden settle",
-        "vendor_id": "<id-1>"
+        "vendor_id": "<id-2>"
       }
     },
     "response": {
@@ -180,12 +404,12 @@
       "body": {
         "amount": 6000,
         "created_at": "<ts+0d>",
-        "id": "<id-7>",
+        "id": "<id-15>",
         "method": "ACH",
-        "payment_date": "<ts+0d>",
+        "payment_date": "<day+0>",
         "reference": "golden settle",
         "status": "COMPLETE",
-        "vendor_id": "<id-1>"
+        "vendor_id": "<id-2>"
       }
     }
   },
@@ -193,35 +417,115 @@
     "name": "ap.invoice.get.after_settle",
     "request": {
       "method": "GET",
-      "path": "/api/v1/ap/invoices/<id-2>"
+      "path": "/api/v1/ap/invoices/<id-4>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "amount_paid": 10000,
+        "amount_open_cents": 0,
+        "amount_paid_cents": 10000,
+        "approved_at": "<ts+0d>",
+        "approved_by": null,
+        "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
-        "due_date": "<ts+30d>",
-        "id": "<id-2>",
-        "invoice_date": "<ts+0d>",
-        "invoice_number": "GOLD-AP-A01",
+        "currency": "USD",
+        "due_date": "<day+30>",
+        "gl_entry_id": "<id-7>",
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
         "lines": [
           {
             "created_at": "<ts+0d>",
             "description": "golden ap payable line",
-            "id": "<id-6>",
-            "invoice_id": "<id-2>",
-            "line_total": 10000,
-            "quantity": 2,
-            "unit_price": 5000
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "2",
+            "unit_price_ten_thousandths": 500000
           }
         ],
-        "status": "PAID",
-        "subtotal": 10000,
-        "tax_amount": 0,
-        "total": 10000,
-        "vendor_id": "<id-1>",
+        "notes": "",
+        "number": "AP-000006",
+        "po_id": null,
+        "revision": 4,
+        "status": "paid",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-A01",
         "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.payment.create.paid_invoice",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/payments",
+      "body": {
+        "amount": 1,
+        "invoice_ids": [
+          "<id-4>"
+        ],
+        "method": "CHECK",
+        "payment_date": "<day+0>",
+        "vendor_id": "<id-2>"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invoice_not_approved",
+              "message": "AP-000006 is paid"
+            }
+          ],
+          "message": "only an approved or partial bill takes a payment"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.void.with_payments",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices/<id-4>/transitions",
+      "body": {
+        "reason": "golden void refused",
+        "revision": 4,
+        "to": "voided"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "has_payments",
+              "message": "10000 cents have been applied to this bill"
+            }
+          ],
+          "message": "the bill carries payments: they must be undone before it is voided"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
       }
     }
   },
@@ -230,7 +534,7 @@
     "sort_primary_array": true,
     "request": {
       "method": "GET",
-      "path": "/api/v1/ap/payments?vendor_id=<id-1>"
+      "path": "/api/v1/ap/payments?vendor_id=<id-2>"
     },
     "response": {
       "status": 200,
@@ -240,23 +544,23 @@
           "amount": 4000,
           "check_number": "GOLD-CHK-1",
           "created_at": "<ts+0d>",
-          "id": "<id-5>",
+          "id": "<id-14>",
           "method": "CHECK",
-          "payment_date": "<ts+0d>",
+          "payment_date": "<day+0>",
           "reference": "golden partial",
           "status": "COMPLETE",
-          "vendor_id": "<id-1>",
+          "vendor_id": "<id-2>",
           "vendor_name": "BC Roofing Wholesale"
         },
         {
           "amount": 6000,
           "created_at": "<ts+0d>",
-          "id": "<id-7>",
+          "id": "<id-15>",
           "method": "ACH",
-          "payment_date": "<ts+0d>",
+          "payment_date": "<day+0>",
           "reference": "golden settle",
           "status": "COMPLETE",
-          "vendor_id": "<id-1>",
+          "vendor_id": "<id-2>",
           "vendor_name": "BC Roofing Wholesale"
         }
       ]
@@ -271,19 +575,25 @@
         "amount": 1,
         "method": "CHECK",
         "payment_date": "31/12/2000",
-        "vendor_id": "<id-1>"
+        "vendor_id": "<id-2>"
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "payment_date",
+              "message": "must be YYYY-MM-DD"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -296,23 +606,29 @@
       "body": {
         "amount": 1,
         "invoice_ids": [
-          "<id-9>"
+          "<id-19>"
         ],
         "method": "CHECK",
         "payment_date": "<day+0>",
-        "vendor_id": "<id-1>"
+        "vendor_id": "<id-2>"
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "invoice_ids[0]",
+              "message": "no such invoice for this vendor"
+            }
+          ],
+          "message": "a referenced record does not exist"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -329,11 +645,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-21>"
         }
       }
     }
