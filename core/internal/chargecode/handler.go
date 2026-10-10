@@ -17,22 +17,29 @@ type Handler struct {
 
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
+// RegisterRoutes takes a read guard and an optional write guard; with one
+// guard it holds every route, with two the writes take the second.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
-	guard := func(handler http.HandlerFunc) http.HandlerFunc {
-		if len(roleGuard) > 0 && roleGuard[0] != nil {
-			return func(w http.ResponseWriter, r *http.Request) {
-				roleGuard[0](handler).ServeHTTP(w, r)
-			}
+	var read, write func(http.Handler) http.Handler
+	if len(roleGuard) > 0 {
+		read, write = roleGuard[0], roleGuard[0]
+	}
+	if len(roleGuard) > 1 && roleGuard[1] != nil {
+		write = roleGuard[1]
+	}
+	wrap := func(g func(http.Handler) http.Handler, handler http.HandlerFunc) http.HandlerFunc {
+		if g == nil {
+			return handler
 		}
-		return handler
+		return func(w http.ResponseWriter, r *http.Request) { g(handler).ServeHTTP(w, r) }
 	}
 	// The charge codes master is a plain collection, not a growing document
 	// list: no cursor, no keyset, the whole (small) table in one array. The
 	// strict query guard and the error envelope are the contract's.
-	mux.HandleFunc("GET /api/v1/charge-codes", guard(h.HandleList))
-	mux.HandleFunc("POST /api/v1/charge-codes", guard(h.HandleCreate))
-	mux.HandleFunc("GET /api/v1/charge-codes/{id}", guard(h.HandleGet))
-	mux.HandleFunc("PUT /api/v1/charge-codes/{id}", guard(h.HandleUpdate))
+	mux.HandleFunc("GET /api/v1/charge-codes", wrap(read, h.HandleList))
+	mux.HandleFunc("POST /api/v1/charge-codes", wrap(write, h.HandleCreate))
+	mux.HandleFunc("GET /api/v1/charge-codes/{id}", wrap(read, h.HandleGet))
+	mux.HandleFunc("PUT /api/v1/charge-codes/{id}", wrap(write, h.HandleUpdate))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
