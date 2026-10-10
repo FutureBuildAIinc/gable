@@ -188,9 +188,12 @@ posts `DR 2200 / CR 1010` for the amount still unapplied (the
 create leg is `DR 1010 / CR 2200`), and the payment stays in
 `voided`. A card payment is refused with `409 card_payment` on the
 void; it is refunded through the gateway
-(`POST /payments/{id}/refunds`). A non card refund that already
-reached the gateway carries the gateway refund id and is recorded
-as a separate `Refund` row.
+(`POST /payments/{id}/refunds`). A card refund goes through the
+gateway first and carries the gateway refund id on its `Refund` row;
+a refund of any other method posts with no gateway id
+(`payment/service.go` `RefundPayment`, the gateway is called only for
+`card`). Either way the refund is a separate `Refund` row and posts
+`DR 2200 / CR 1010` (`account/core_payments.go` `RefundPayment`).
 
 `Refund.status` is the gateway's state machine, kept in UPPERCASE
 by the database CHECK:
@@ -289,7 +292,7 @@ list:
 
 | Event | Constant (Source) | Written at |
 |---|---|---|
-| `payment.recorded` | `EventRecorded` (`core/internal/payment/service.go:273`) | `core/internal/payment/service.go:267` |
+| `payment.recorded` | `EventRecorded` (`core/internal/payment/service.go:273`) | `core/internal/payment/service.go:345` (built by `recordedEvent` at `:267`) |
 | `payment.applied` | `EventPaymentApplied` (`core/internal/account/model.go:52`) | `core/internal/account/effects.go:115` |
 | `payment.unapplied` | `EventPaymentUnapplied` (`core/internal/account/model.go:53`) | `core/internal/account/effects.go:117` |
 | `payment.refunded` | `EventRefunded` (`core/internal/payment/service.go:274`) | `core/internal/payment/service.go:534` |
@@ -302,8 +305,8 @@ list:
 | `credit_memo.applied` | `EventCreditApplied` (`core/internal/account/model.go:59`) | `core/internal/account/effects.go:136`; also an audit row at `core/internal/invoice/service_ar.go:70` |
 | `credit_memo.partial` | `EventCreditPartial` (`core/internal/account/model.go:58`) | `core/internal/account/effects.go:131` |
 | `credit_memo.reopened` | `EventCreditReopened` (`core/internal/account/model.go:60`) | `core/internal/account/effects.go:134` (the credit memo's reverse) |
-| `credit_memo.posted` | `EventCreditPosted` (`core/internal/invoice/model.go:256`) | `core/internal/invoice/model.go` |
-| `credit_memo.voided` | `EventCreditVoided` (`core/internal/invoice/model.go:257`) | `core/internal/invoice/model.go` |
+| `credit_memo.posted` | `EventCreditPosted` (`core/internal/invoice/model.go:256`) | `core/internal/invoice/service_cm.go:459` |
+| `credit_memo.voided` | `EventCreditVoided` (`core/internal/invoice/model.go:257`) | `core/internal/invoice/service_cm.go:591` |
 | `credit_memo.refunded` | (event string) | `core/internal/payment/service_card.go:263` |
 
 A `POST /payments` with `applications` writes `payment.recorded`,
@@ -330,8 +333,7 @@ take the read scope, every other method the write scope.
 
 The user guard at the serve layer is composed of one or two
 `scoped(...)` calls per handler (see
-`core/internal/app/serve/wire_branch_wall.go`, ADR 0002 section
-6): the payment handler takes `admin`, `owner`, `sales`, `finance`,
+`core/internal/app/serve/wire_branch_wall.go`): the payment handler takes `admin`, `owner`, `sales`, `finance`,
 `cashier` (`wall.payments`); the account and AR handler takes a
 read guard `admin`, `owner`, `sales`, `finance` and a write guard
 `admin`, `owner`, `finance` (`wall.accounts`); the invoice handler
@@ -352,15 +354,14 @@ guard); the credit memo refund at
 (`payment/service.go:182-187`).
 
 The branch wall applies: a payment is read and written under the
-branch the request carries through `X-Branch-Id` (ADR 0002 section
-6, ADR 0007).
+branch the request carries through `X-Branch-Id` (ADR 0007).
 
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 7, 7a, 9, 11, 12.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
-- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 4.1, 4.2, 8 (the GL postings; leg pairs for the create, the void, the apply, the refund, the discount, the credit memo posting), 9 (subledger and applications, write-offs, payment acts and the state machine), 10 (aging and statements), and 9.1 (the card gateway).
+- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 4.1, 4.2, 8 (the GL postings; leg pairs for the create, the void, the apply, the refund, the discount, the credit memo posting), 9 (subledger and applications, write-offs, payment acts and the state machine), 10 (aging and statements), and 11 (the card gateway rule; 9.1 holds the card columns).
 
 ## How to try it locally
 

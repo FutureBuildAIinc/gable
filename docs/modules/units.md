@@ -25,8 +25,9 @@ The unit set wire lives under the product module (`/products/{id}/units`).
 A builder asks for "12 LF of 2x4x8". `LF` is the catalogue code for
 linear feet, dimension `length`; the reference unit of `length` is
 the foot, so `LF` carries `(std_unit_qty = 1, std_ref_qty = 1)`
-(migration 099, the rest of the dimension: `EA`, `PCS`, `SF`, `CF`,
-`LBS`, `BF` are also `(1, 1)`). `EA` is the catalogue code for
+(migration 099; each other dimension's reference unit is likewise
+`(1, 1)`: `EA` and `PCS` for `count`, `SF` for `area`, `CF` for
+`volume`, `LBS` for `weight`, `BF` for `board_measure`). `EA` is the catalogue code for
 "each", dimension `count`. `BF` is the board foot, dimension
 `board_measure`, `(1, 1)`; `MBF` is `1, 1000` board feet. The seed
 of ADR 0006 section 2.2 places the 23 standard units in 099
@@ -143,7 +144,7 @@ code `1`). The report is the same shape B0 (C3-2B) extends to the
 counter and document line columns, listed ahead of B0's own output
 in `units_report.go`; before B0 the report prints `not present on
 this database` for the columns B0 has not converted yet
-(`units_report.go:123`).
+(`units_report.go`, `unitsReport`).
 
 ## The product unit set
 
@@ -174,7 +175,7 @@ is `stock_qty` of the product's stocking unit, in canonical form.
 | `stock_qty` | quantity | The right side of the pair, scale 4. |
 | `sell` | boolean | The row can be a sale unit. |
 | `purchase` | boolean | The row can be a purchase unit. |
-| `price` | boolean | The row can be a price unit. A change of the stocking unit (the `price_unit_held` hold of ADR 0006 9.1) is refused while the product has a nonzero `base_price_ten_thousandths` or any contract or fixed price rule names it. |
+| `price` | boolean | The row can be a price unit. A change of the stocking unit (the `price_unit_held` hold of ADR 0006 9.1) is refused while the product has a nonzero `base_price_ten_thousandths`, a customer contract, a pricing rule with a fixed price, or a product price row (`product/unitset.go` `ProductPriceHeld`). |
 
 `UnitSetPut` replaces the whole set and the four default columns at
 the product's revision. A row may omit its pair (the derivations of
@@ -183,7 +184,7 @@ and must agree with every derivation that applies. From C3-2B a
 `base_price_ten_thousandths` body field is required whenever the
 PUT changes `price_uom` (the stored base is a price per the old
 unit); sent with an unchanged `price_uom` it simply sets the base
-price (`ADR 0006` 3.2 step 6). A field the PUT cannot apply (the
+price (`ADR 0006` section 3.2). A field the PUT cannot apply (the
 board measure columns) is a `400` naming it.
 
 ### Pair arithmetic and exactness
