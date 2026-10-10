@@ -11,8 +11,8 @@ export interface APIKey {
     prefix: string;
     scopes: string[];
     created_at: string;
-    last_used_at?: string;
-    revoked_at?: string;
+    last_used_at: string | null;
+    revoked_at: string | null;
 }
 
 export interface CreateKeyResponse {
@@ -20,17 +20,26 @@ export interface CreateKeyResponse {
     key: APIKey;
 }
 
+interface ListPage<T> {
+    items: T[];
+    next_cursor: string | null;
+    limit: number;
+    total?: number;
+}
+
 export interface AISettings {
     configured: boolean;
     source: 'admin' | 'env' | 'none';
-    key_hint?: string;
-    base_url?: string;
+    key_hint: string | null;
+    base_url: string | null;
+    revision: number;
 }
 
 export interface RoutingSettings {
     configured: boolean;
     source: 'admin' | 'env' | 'none';
-    key_hint?: string;
+    key_hint: string | null;
+    revision: number;
 }
 
 /**
@@ -46,9 +55,10 @@ export interface StaffMember {
     id: string;
     email: string;
     full_name: string;
-    staff_no?: string;
+    staff_no: string | null;
     role: string;
     active: boolean;
+    revision: number;
     created_at: string;
     updated_at: string;
     modules: string[];
@@ -59,6 +69,7 @@ export interface ModuleInfo {
     id: string;
     name: string;
     enabled: boolean;
+    revision: number;
 }
 
 /**
@@ -81,14 +92,44 @@ export interface Readiness {
     checks: Record<string, ReadinessCheck>;
 }
 
+/** The error envelope of ADR 0001: code, message, field details. */
+interface WireErrorBody {
+    error?: { code?: string; message?: string; details?: { field?: string; message?: string }[] };
+}
+
+async function readError(response: Response): Promise<string> {
+    try {
+        const body = (await response.json()) as WireErrorBody;
+        const parts = (body.error?.details ?? []).map((d) => (d.field ? `${d.field}: ${d.message}` : d.message));
+        return [body.error?.message ?? `Request failed (${response.status})`, ...parts].join('; ');
+    } catch {
+        return `Request failed (${response.status})`;
+    }
+}
+
+async function failOn(response: Response): Promise<void> {
+    if (!response.ok) throw new Error(await readError(response));
+}
+
+/** Walks a cursor list to exhaustion; the admin surfaces are small. */
+async function walkList<T>(path: string): Promise<T[]> {
+    const out: T[] = [];
+    let cursor = '';
+    for (let page = 0; page < 50; page++) {
+        const url = `${API_URL}${path}${path.includes('?') ? '&' : '?'}limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+        const response = await fetchWithAuth(url);
+        if (!response.ok) throw new Error(await readError(response));
+        const data = (await response.json()) as ListPage<T>;
+        out.push(...data.items);
+        if (!data.next_cursor) break;
+        cursor = data.next_cursor;
+    }
+    return out;
+}
+
 export const techAdminService = {
     async listKeys(): Promise<APIKey[]> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/keys`);
-        if (!response.ok) {
-            throw new Error('Failed to fetch API keys');
-        }
-        const data = await response.json();
-        return data || [];
+        return walkList<APIKey>('/api/v1/admin/keys');
     },
 
     async createKey(name: string, scopes: string[]): Promise<CreateKeyResponse> {
@@ -99,9 +140,7 @@ export const techAdminService = {
             },
             body: JSON.stringify({ name, scopes }),
         });
-        if (!response.ok) {
-            throw new Error('Failed to create API key');
-        }
+        await failOn(response);
         return response.json();
     },
 
@@ -109,110 +148,153 @@ export const techAdminService = {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/keys/${id}`, {
             method: 'DELETE',
         });
-        if (!response.ok) {
-            throw new Error('Failed to revoke API key');
-        }
+        await failOn(response);
     },
 
     // --- AI Settings ---
+    //
+    // The settings are documents on a revision (ADR 0001 section 11): every
+    // save and delete sends the revision it read as its If-Match, and one
+    // stale retry re-reads and tries again (a second editor saved first).
 
     async getAISettings(): Promise<AISettings> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`);
-        if (!response.ok) throw new Error('Failed to fetch AI settings');
+        await failOn(response);
         return response.json();
     },
 
     async saveAIKey(apiKey: string, baseUrl?: string): Promise<void> {
         const body: { api_key: string; base_url?: string } = { api_key: apiKey };
         if (baseUrl !== undefined) body.base_url = baseUrl;
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || 'Failed to save API key');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await this.getAISettings();
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'If-Match': `"${current.revision}"` },
+                body: JSON.stringify(body),
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            await failOn(response);
+            return;
         }
     },
 
     async deleteAIKey(): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`, {
-            method: 'DELETE',
-        });
-        if (!response.ok) throw new Error('Failed to delete API key');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await this.getAISettings();
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`, {
+                method: 'DELETE',
+                headers: { 'If-Match': `"${current.revision}"` },
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            await failOn(response);
+            return;
+        }
     },
 
     // --- Routing (OpenRouteService) Settings ---
 
     async getRoutingSettings(): Promise<RoutingSettings> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`);
-        if (!response.ok) throw new Error('Failed to fetch routing settings');
+        await failOn(response);
         return response.json();
     },
 
     async saveORSKey(apiKey: string): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: apiKey }),
-        });
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(text || 'Failed to save routing API key');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await this.getRoutingSettings();
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'If-Match': `"${current.revision}"` },
+                body: JSON.stringify({ api_key: apiKey }),
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            await failOn(response);
+            return;
         }
     },
 
     async deleteORSKey(): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`, {
-            method: 'DELETE',
-        });
-        if (!response.ok) throw new Error('Failed to delete routing API key');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await this.getRoutingSettings();
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/routing`, {
+                method: 'DELETE',
+                headers: { 'If-Match': `"${current.revision}"` },
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            await failOn(response);
+            return;
+        }
     },
 
     // --- Staff Management & Module Access ---
     //
-    // These five calls are the write side of AI_LM's login path: the roster and
+    // These calls are the write side of AI_LM's login path: the roster and
     // grants they edit are exactly what POST /api/integration/validate-staff
     // reads. Entitlement there is active AND granted AND globally enabled.
 
     async listStaff(): Promise<StaffMember[]> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff`);
-        if (!response.ok) throw new Error('Failed to fetch staff');
-        const data = await response.json();
-        return data || [];
+        return walkList<StaffMember>('/api/v1/admin/staff');
     },
 
     async listModules(): Promise<ModuleInfo[]> {
         const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules`);
         if (!response.ok) throw new Error('Failed to fetch modules');
-        const data = await response.json();
-        return data || [];
+        const data = (await response.json()) as ListPage<ModuleInfo>;
+        return data.items;
     },
 
     async setModuleEnabled(moduleId: string, enabled: boolean): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules/${moduleId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled }),
-        });
-        if (!response.ok) throw new Error('Failed to update module');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                const modules = await this.listModules();
+                const target = modules.find((m) => m.id === moduleId);
+                if (!target) throw new Error('Failed to update module');
+                const response = await fetchWithAuth(`${API_URL}/api/v1/admin/modules/${moduleId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'If-Match': `"${target.revision}"` },
+                    body: JSON.stringify({ enabled }),
+                });
+                if (response.status === 409 && attempt === 0) continue;
+                await failOn(response);
+                return;
+            } catch (err) {
+                throw new Error(`Failed to update module${err instanceof Error && err.message ? `: ${err.message}` : ''}`);
+            }
+        }
     },
 
     async grantModule(staffId: string, moduleId: string): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ module_id: moduleId }),
-        });
-        if (!response.ok) throw new Error('Failed to grant module access');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const member = await this.getStaff(staffId);
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'If-Match': `"${member.revision}"` },
+                body: JSON.stringify({ module_id: moduleId }),
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            if (!response.ok) throw new Error(`Failed to grant module access: ${await readError(response)}`);
+            return;
+        }
     },
 
     async revokeModule(staffId: string, moduleId: string): Promise<void> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules/${moduleId}`, {
-            method: 'DELETE',
-        });
-        if (!response.ok) throw new Error('Failed to revoke module access');
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const member = await this.getStaff(staffId);
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${staffId}/modules/${moduleId}`, {
+                method: 'DELETE',
+                headers: { 'If-Match': `"${member.revision}"` },
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            if (!response.ok) throw new Error(`Failed to revoke module access: ${await readError(response)}`);
+            return;
+        }
+    },
+
+    async getStaff(id: string): Promise<StaffMember> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/staff/${id}`);
+        await failOn(response);
+        return response.json();
     },
 
     /**
@@ -245,7 +327,6 @@ export const techAdminService = {
         return { checks: {}, uptime: '', ...readiness } as Readiness;
     },
 };
-
 // --- EDI Trading Partner Types & Service ---
 
 export interface EDITradingPartner {

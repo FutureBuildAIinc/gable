@@ -109,7 +109,7 @@ func (v machineKeyValidator) ValidateKey(ctx context.Context, rawKey string) (mi
 		}
 		return middleware.KeyPrincipal{}, err
 	}
-	return middleware.KeyPrincipal{ID: k.ID, Scopes: k.Scopes}, nil
+	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
 }
 
 // Run starts the HTTP API server and blocks until SIGINT or SIGTERM, then
@@ -183,7 +183,10 @@ func Run() {
 	// so a key grants the same reach in dev as in production and a keyed
 	// integration is developed against the dev stack without a JWKS. The
 	// service is shared with the tech admin handler wired further down.
-	techAdminSvc := techadmin.NewService(techadmin.NewRepository(db))
+	techAdminSvc := techadmin.NewService(techadmin.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).WithTxRunner(db).
+		WithAuditLog(auditLog).
+		WithSettingsDefaults(cfg.OpenRouterAPIKey, cfg.OpenRouterBaseURL, cfg.ORSAPIKey)
 	machineKeyAuth := middleware.NewMachineKeyAuth(
 		machineKeyValidator{svc: techAdminSvc},
 		auditLog,
@@ -683,7 +686,8 @@ func Run() {
 	// Governance App (converted — reference conversion #2)
 	governanceRepo := governance.NewRepository(db)
 	aiProvider := governance.NewTemplateAIProvider()
-	governanceSvc := governance.NewService(governanceRepo, aiProvider)
+	governanceSvc := governance.NewService(governanceRepo, aiProvider).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).WithTxRunner(db).WithAuditLog(auditLog)
 	governanceHandler := governance.NewHandler(governanceSvc)
 	appRegistry.Add(apps.App{Manifest: governance.App, Register: func(r apps.Router) {
 		governanceHandler.RegisterRoutes(r, middleware.RequireRole("admin", "owner"))
@@ -703,10 +707,11 @@ func Run() {
 
 	// Tech Admin Module (the service was built at startup, shared with the
 	// machine-key validator)
+	// The AI stack keeps its own key stores (aiKeyStore and friends above):
+	// they read the same system_settings rows this module writes and carry
+	// the environment fallbacks; a saved setting reaches them within their
+	// 30 second cache TTL.
 	techAdminHandler := techadmin.NewHandler(techAdminSvc)
-	techAdminHandler.WithAIKeyStore(aiKeyStore)
-	techAdminHandler.WithAIBaseURLStore(aiBaseURLStore)
-	techAdminHandler.WithORSKeyStore(orsKeyStore)
 	techAdminHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Events feed: the outbox read API (item R1-12), the one cursor-paginated
@@ -797,7 +802,7 @@ func Run() {
 	// Staff roster and per-module access grants. This is the write side of
 	// AI_LM's login path: it edits the rows POST /api/integration/validate-staff
 	// reads back. Route list and the admin/owner guard: wire_staff.go.
-	wireStaffAdmin(mux, db, auditLog)
+	wireStaffAdmin(mux, db, auditLog, cfg.EventsOrg)
 
 	// Integration API. One X-Integration-Key-gated surface shared by the
 	// FB-Brain cross-system endpoints and by AI_LM (github.com/gablelbm/
