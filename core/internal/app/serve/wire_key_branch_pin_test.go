@@ -621,6 +621,26 @@ func TestKeyBranchPin_LocationWrites(t *testing.T) {
 	f.putLocation(t, "unbound", f.yardB, "pin free edit", http.StatusOK)
 	f.putLocation(t, "user", f.yardB, "pin user edit", http.StatusOK)
 
+	// PUT /locations/{id} writes `path`, a materialized breadcrumb with no
+	// enforcement (round 5 P3-4 probed whether it can move a row under
+	// another branch's tree). It cannot: the row's branch comes from its
+	// parent at insert (the denorm trigger fires on parent_id and type,
+	// neither writable here) and no branch scoped read resolves a branch from
+	// path, so a path naming the foreign branch's breadcrumb leaves the row
+	// exactly where it was. This leg pins that.
+	revA, codeA, _ := f.locState(t, f.yardA)
+	f.allow(t, "bound", "PUT", "/api/v1/locations/"+f.yardA.String(),
+		fmt.Sprintf(`{"code":%q,"path":%q,"name":"pin path probe"}`, codeA, B+"/yards/under-B"),
+		map[string]string{"If-Match": fmt.Sprintf(`"%d"`, revA)}, http.StatusOK)
+	var pathBranch uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT branch_id FROM locations WHERE id = $1`, f.yardA).Scan(&pathBranch); err != nil {
+		t.Fatal(err)
+	}
+	if pathBranch != f.branchA {
+		t.Errorf("a path write moved the own yard to branch %s, want it to stay its own", pathBranch)
+	}
+
 	// DELETE /locations/{id}: the foreign yard is refused and stays active.
 	f.refuseForeign(t, "DELETE", "/api/v1/locations/"+f.yardB.String(), "", map[string]string{"If-Match": `"2"`})
 	if _, _, active := f.locState(t, f.yardB); !active {
@@ -889,25 +909,45 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 		{"POST", "/api/v1/gl/accounts", `{"name":"pin wall probe"}`},
 		{"POST", "/api/v1/gl/journal-entries", `{"lines":[]}`},
 		{"POST", "/api/v1/gl/fiscal-periods/" + uuid.NewString() + "/close", ""},
+		{"POST", "/api/v1/gl/fiscal-periods/" + uuid.NewString() + "/reopen", ""},
+		{"POST", "/api/v1/gl/journal-entries/" + uuid.NewString() + "/post", ""},
+		{"POST", "/api/v1/gl/journal-entries/" + uuid.NewString() + "/reverse", ""},
+		{"POST", "/api/v1/gl/journal-entries/" + uuid.NewString() + "/void", ""},
+		{"PUT", "/api/v1/gl/accounts/" + uuid.NewString(), `{"name":"pin wall probe"}`},
 		{"GET", "/api/v1/ap/invoices", ""},
+		{"GET", "/api/v1/ap/invoices/" + uuid.NewString(), ""},
 		{"GET", "/api/v1/ap/payments", ""},
 		{"GET", "/api/v1/ap/aging", ""},
 		{"POST", "/api/v1/ap/invoices", `{"vendor_id":"` + uuid.NewString() + `"}`},
 		{"POST", "/api/v1/ap/payments", `{"invoice_id":"` + uuid.NewString() + `"}`},
+		{"POST", "/api/v1/ap/invoices/" + uuid.NewString() + "/approve", ""},
 		{"GET", "/api/v1/bankrecon/accounts", ""},
 		{"GET", "/api/v1/bankrecon/sessions", ""},
 		{"POST", "/api/v1/bankrecon/import", ""},
 		{"POST", "/api/v1/bankrecon/match", `{"bank_tx_id":"` + uuid.NewString() + `"}`},
 		{"POST", "/api/v1/bankrecon/sessions", `{"bank_account_id":"` + uuid.NewString() + `"}`},
+		{"GET", "/api/v1/bankrecon/sessions/" + uuid.NewString(), ""},
+		{"POST", "/api/v1/bankrecon/accounts", `{"name":"pin"}`},
+		{"POST", "/api/v1/bankrecon/sessions/" + uuid.NewString() + "/complete", ""},
+		{"POST", "/api/v1/bankrecon/unmatch", `{"match_id":"` + uuid.NewString() + `"}`},
 		{"GET", "/api/v1/sales-team", ""},
 		{"GET", "/api/v1/sales-team/" + uuid.NewString(), ""},
 		{"GET", "/api/v1/users", ""},
 		{"GET", "/api/v1/admin/staff", ""},
+		{"GET", "/api/v1/admin/staff/" + uuid.NewString(), ""},
 		{"POST", "/api/v1/admin/staff", `{"name":"pin"}`},
+		{"POST", "/api/v1/admin/staff/" + uuid.NewString() + "/modules", `{"modules":["pos"]}`},
+		{"PUT", "/api/v1/admin/staff/" + uuid.NewString(), `{"name":"pin"}`},
+		{"DELETE", "/api/v1/admin/staff/" + uuid.NewString() + "/modules/m", ""},
 		{"POST", "/api/v1/market-indices/" + idx + "/refresh", ""},
 		{"POST", "/api/v1/market-indices/" + idx + "/refresh/preview", `{"new_value":120}`},
 		{"GET", "/api/v1/pricing/rules", ""},
 		{"GET", "/api/v1/pricing/matrix", ""},
+		{"GET", "/api/v1/reporting/saved/" + uuid.NewString(), ""},
+		{"POST", "/api/v1/reporting/save", `{"name":"pin"}`},
+		{"PUT", "/api/v1/reporting/saved/" + uuid.NewString(), `{"name":"pin"}`},
+		{"DELETE", "/api/v1/reporting/saved/" + uuid.NewString(), ""},
+		{"DELETE", "/api/v1/reporting/schedules/" + uuid.NewString(), ""},
 	} {
 		f.refuseForeign(t, c.method, c.path, c.body, nil)
 		f.parity(t, c.method, c.path, c.body)

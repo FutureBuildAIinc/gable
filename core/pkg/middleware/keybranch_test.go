@@ -305,3 +305,48 @@ func TestKeyBranchWall_CustomerBranch(t *testing.T) {
 		t.Errorf("missing row: %d ran %v, want 200 and run", code, ran)
 	}
 }
+
+// TestKeyBranchRouteGateFailsClosedWithoutResolver pins the gate's nil
+// resolver arm (round 5 P3-2, mutant G5): a mux the gate cannot resolve a
+// registered pattern through (any http.Handler that is not the pattern
+// resolver) is a surface the allowlist cannot speak about, so a branch bound
+// key is refused everything on it, the audit row is written and the handler
+// never runs, while a request with no pin (a user, an unbound key) keeps the
+// handler's own answer.
+func TestKeyBranchRouteGateFailsClosedWithoutResolver(t *testing.T) {
+	ran := false
+	inner := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		ran = true
+		rw.WriteHeader(http.StatusOK)
+	})
+	mux := http.NewServeMux()
+	mux.Handle("GET /api/v1/branches", inner)
+	// The opaque wrapper hides the mux's patternResolver surface: the gate
+	// cannot resolve, which must refuse, never pass.
+	opaque := http.Handler(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		mux.ServeHTTP(rw, r)
+	}))
+	auditor := &pinAuditor{}
+	pin := uuid.New()
+	send := func(pin *uuid.UUID) int {
+		t.Helper()
+		ran = false
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/branches", nil)
+		ctx := WithKeyID(req.Context(), "key-test")
+		if pin != nil {
+			ctx = branchctx.WithKeyBranch(ctx, *pin)
+		}
+		rec := httptest.NewRecorder()
+		KeyBranchRouteGate(opaque, auditor)(inner).ServeHTTP(rec, req.WithContext(ctx))
+		return rec.Code
+	}
+	if code := send(&pin); code != http.StatusForbidden || ran {
+		t.Errorf("bound key through an unresolvable mux: %d ran %v, want 403 and not run", code, ran)
+	}
+	if len(auditor.rows) != 1 {
+		t.Errorf("refusal audit rows: %v, want one", auditor.rows)
+	}
+	if code := send(nil); code != http.StatusOK || !ran {
+		t.Errorf("no pin through an unresolvable mux: %d ran %v, want 200 and run", code, ran)
+	}
+}
