@@ -101,8 +101,8 @@ func (r *chainRig) Times(path string) int { return r.reached[path] }
 // markerInner captures whether the marker was on, the authenticated
 // principal (if any), and the actor kind the chain resolved.
 type markerInner struct {
-	gotKey         bool
-	actorKind      string
+	gotKey    bool
+	actorKind string
 }
 
 func (m *markerInner) ServeHTTP(w http.ResponseWriter, r *http.Request) {
