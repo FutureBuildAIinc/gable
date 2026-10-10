@@ -161,7 +161,7 @@ async function _happy() {
   const locationType: string = moved.body.type;
 
 
-  return [invoiceNumber, billed, open, voidedAt, memoNumber, memoTotal, quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, limit, terms, shipToRevision, customerRevision, stockUom, basePrice, available, unitPrice, basis, total, locationType];
+  return [invoiceNumber, billed, open, voidedAt, memoNumber, memoTotal, quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, boardStops, boardTotal, routeStatus, podTime, adjustedRevision, limit, terms, shipToRevision, customerRevision, stockUom, basePrice, available, unitPrice, basis, total, locationType];
 }
 
 // Wrong paths: each line must be a compile error --------------------------

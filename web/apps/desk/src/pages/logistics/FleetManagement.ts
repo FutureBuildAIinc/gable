@@ -11,11 +11,11 @@ import type { Vehicle, Driver, CreateVehicleRequest, UpdateVehicleRequest, Creat
 
 type Tab = 'vehicles' | 'drivers';
 
-const VEHICLE_TYPES: VehicleType[] = ['BOX_TRUCK', 'FLATBED', 'PICKUP', 'VAN', 'CRANE'];
-const DRIVER_STATUSES: DriverStatus[] = ['ACTIVE', 'INACTIVE', 'ON_LEAVE'];
+const VEHICLE_TYPES: VehicleType[] = ['box_truck', 'flatbed', 'pickup', 'van', 'crane'];
+const DRIVER_STATUSES: DriverStatus[] = ['active', 'inactive', 'on_leave'];
 const CDL_CLASSES = ['', 'A', 'B', 'C'];
 
-function isDateWarning(dateStr?: string, daysThreshold = 30): 'expired' | 'warning' | null {
+function isDateWarning(dateStr?: string | null, daysThreshold = 30): 'expired' | 'warning' | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   const now = new Date();
@@ -31,7 +31,7 @@ function dateBadgeClass(level: 'expired' | 'warning' | null): string {
   return 'text-zinc-300';
 }
 
-function formatDate(d?: string): string {
+function formatDate(d?: string | null): string {
   if (!d) return '\u2014';
   return new Date(d).toLocaleDateString();
 }
@@ -107,16 +107,16 @@ export class FleetManagement extends LitElement {
   private _defaultVehicleForm(vehicle?: Vehicle): CreateVehicleRequest & { id?: string } {
     return {
       name: vehicle?.name || '',
-      vehicle_type: vehicle?.vehicle_type || 'BOX_TRUCK',
+      vehicle_type: vehicle?.vehicle_type || 'box_truck',
       license_plate: vehicle?.license_plate || '',
-      capacity_weight_lbs: vehicle?.capacity_weight_lbs,
+      capacity_weight_lbs: vehicle?.capacity_weight_lbs ?? undefined,
       vin: vehicle?.vin || undefined,
       year: vehicle?.year || undefined,
       make: vehicle?.make || undefined,
       model: vehicle?.model || undefined,
       insurance_expiry: vehicle?.insurance_expiry?.split('T')[0] || undefined,
       next_service_date: vehicle?.next_service_date?.split('T')[0] || undefined,
-      odometer_miles: vehicle?.odometer_miles || undefined,
+      odometer_miles: vehicle?.odometer_miles ?? undefined,
       notes: vehicle?.notes || undefined,
     };
   }
@@ -125,7 +125,7 @@ export class FleetManagement extends LitElement {
     this._vForm = this._defaultVehicleForm(this._vehicleModalVehicle);
     this._vSaving = false;
     this._vDeleting = false;
-    this._vPhotoUrl = this._vehicleModalVehicle?.photo_url;
+    this._vPhotoUrl = this._vehicleModalVehicle?.photo_url ?? undefined;
     this._vUploading = false;
   }
 
@@ -183,7 +183,7 @@ export class FleetManagement extends LitElement {
       name: driver?.name || '',
       license_number: driver?.license_number || undefined,
       phone_number: driver?.phone_number || undefined,
-      status: (driver?.status || 'ACTIVE') as DriverStatus,
+      status: (driver?.status || 'active') as DriverStatus,
       cdl_class: driver?.cdl_class || undefined,
       cdl_expiry: driver?.cdl_expiry?.split('T')[0] || undefined,
       hire_date: driver?.hire_date?.split('T')[0] || undefined,
@@ -195,7 +195,7 @@ export class FleetManagement extends LitElement {
     this._dForm = this._defaultDriverForm(this._driverModalDriver);
     this._dSaving = false;
     this._dDeleting = false;
-    this._dPhotoUrl = this._driverModalDriver?.photo_url;
+    this._dPhotoUrl = this._driverModalDriver?.photo_url ?? undefined;
     this._dUploading = false;
   }
 

@@ -135,7 +135,7 @@ export class GableDeliveryList extends LitElement {
 
   private get _allTerminal(): boolean {
     if (this._deliveries.length === 0) return false;
-    return this._deliveries.every(d => d.status === 'DELIVERED' || d.status === 'FAILED' || d.status === 'PARTIAL');
+    return this._deliveries.every(d => d.status === 'delivered' || d.status === 'failed' || d.status === 'partial');
   }
 
   render() {
@@ -161,9 +161,9 @@ export class GableDeliveryList extends LitElement {
 
     const routeStatusBadge = this.routeStatus ? html`
       <span class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${
-        this.routeStatus === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-        this.routeStatus === 'IN_TRANSIT' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-        this.routeStatus === 'CANCELLED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+        this.routeStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+        this.routeStatus === 'in_transit' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+        this.routeStatus === 'cancelled' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
         'bg-white/5 text-zinc-400 border-white/10'
       }">
         ${this.routeStatus.replace(/_/g, ' ')}
@@ -178,7 +178,7 @@ export class GableDeliveryList extends LitElement {
             Delivery Manifest
           </h2>
           <div class="flex items-center gap-2">
-            ${this._deliveries.length >= 2 && this.routeStatus !== 'COMPLETED' && this.routeStatus !== 'CANCELLED' ? html`
+            ${this._deliveries.length >= 2 && this.routeStatus !== 'completed' && this.routeStatus !== 'cancelled' ? html`
               <button
                 @click=${this._optimizeRoute}
                 ?disabled=${this._optimizing || this._reordering}
@@ -200,8 +200,8 @@ export class GableDeliveryList extends LitElement {
                 ${icon(RotateCcw, 14)}
               </button>
             ` : nothing}
-            ${this._deliveries.length > 0 && this.routeStatus !== 'COMPLETED' && this.routeStatus !== 'CANCELLED' ? html`
-              ${this.routeStatus === 'IN_TRANSIT' && this._allTerminal ? html`
+            ${this._deliveries.length > 0 && this.routeStatus !== 'completed' && this.routeStatus !== 'cancelled' ? html`
+              ${this.routeStatus === 'in_transit' && this._allTerminal ? html`
                 <button class="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center justify-center rounded-lg font-medium transition-all" @click=${this._completeRoute} ?disabled=${this._completing}>
                   ${icon(CheckCircle2, 12, 'mr-1')} ${this._completing ? 'Completing...' : 'Complete Route'}
                 </button>

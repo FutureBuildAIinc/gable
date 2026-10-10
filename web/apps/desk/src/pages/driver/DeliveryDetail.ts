@@ -25,7 +25,7 @@ export class DeliveryDetail extends LitElement {
     @state() private delivery: Delivery | null = null;
     @state() private isSubmitting = false;
     @state() private showPODModal = false;
-    @state() private status: DeliveryStatus = 'DELIVERED';
+    @state() private status: DeliveryStatus = 'delivered';
     @state() private signedBy = '';
     @state() private podPhotos: PODPhotoPreview[] = [];
     @state() private isDrawing = false;
@@ -150,13 +150,13 @@ export class DeliveryDetail extends LitElement {
             let signatureDataUrl: string | undefined;
             let proofUrl: string | undefined;
             const canvas = this._getCanvas();
-            if (this.status === 'DELIVERED' && canvas) {
+            if (this.status === 'delivered' && canvas) {
                 signatureDataUrl = canvas.toDataURL('image/png');
                 proofUrl = signatureDataUrl;
             }
 
             await deliveryService.updateStatus(this.delivery.id, {
-                status: this.status,
+                to: this.status,
                 pod_proof_url: proofUrl,
                 pod_signed_by: this.signedBy || 'Unknown',
                 signature_data_url: signatureDataUrl,
@@ -180,8 +180,8 @@ export class DeliveryDetail extends LitElement {
         if (!this.delivery) return html`<div class="p-8 text-center text-zinc-500">Delivery not found.</div>`;
 
         const d = this.delivery;
-        const statusColor = d.status === 'DELIVERED' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
-            d.status === 'FAILED' ? 'text-rose-400 bg-rose-500/10 border-rose-500/20' :
+        const statusColor = d.status === 'delivered' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+            d.status === 'failed' ? 'text-rose-400 bg-rose-500/10 border-rose-500/20' :
             'text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
 
         return html`
@@ -236,7 +236,7 @@ export class DeliveryDetail extends LitElement {
                 </div>
 
                 <!-- Action Button -->
-                ${d.status !== 'DELIVERED' ? html`
+                ${d.status !== 'delivered' ? html`
                     <div class="fixed bottom-6 left-4 right-4 max-w-md mx-auto">
                         <button
                             @click=${() => { this.showPODModal = true; this._canvasRef = null; }}
@@ -266,15 +266,15 @@ export class DeliveryDetail extends LitElement {
                                     <label class="block text-xs font-mono uppercase text-zinc-500 mb-2">Delivery Status</label>
                                     <div class="grid grid-cols-2 gap-3">
                                         <button
-                                            @click=${() => { this.status = 'DELIVERED'; }}
-                                            class="p-3 rounded-lg border text-sm font-bold transition-all ${this.status === 'DELIVERED' ? 'bg-gable-green/20 border-gable-green text-gable-green' : 'bg-white/5 border-white/10 text-zinc-400'}"
+                                            @click=${() => { this.status = 'delivered'; }}
+                                            class="p-3 rounded-lg border text-sm font-bold transition-all ${this.status === 'delivered' ? 'bg-gable-green/20 border-gable-green text-gable-green' : 'bg-white/5 border-white/10 text-zinc-400'}"
                                         >
                                             ${icon(CheckCircle, 20, 'mx-auto mb-1')}
                                             Delivered
                                         </button>
                                         <button
-                                            @click=${() => { this.status = 'FAILED'; }}
-                                            class="p-3 rounded-lg border text-sm font-bold transition-all ${this.status === 'FAILED' ? 'bg-rose-500/20 border-rose-500 text-rose-500' : 'bg-white/5 border-white/10 text-zinc-400'}"
+                                            @click=${() => { this.status = 'failed'; }}
+                                            class="p-3 rounded-lg border text-sm font-bold transition-all ${this.status === 'failed' ? 'bg-rose-500/20 border-rose-500 text-rose-500' : 'bg-white/5 border-white/10 text-zinc-400'}"
                                         >
                                             ${icon(AlertTriangle, 20, 'mx-auto mb-1')}
                                             Failed
@@ -282,7 +282,7 @@ export class DeliveryDetail extends LitElement {
                                     </div>
                                 </div>
 
-                                ${this.status === 'DELIVERED' ? html`
+                                ${this.status === 'delivered' ? html`
                                     <!-- Photo Capture Section -->
                                     <div>
                                         <label class="block text-xs font-mono uppercase text-zinc-500 mb-2">Site Photos</label>
@@ -381,7 +381,7 @@ export class DeliveryDetail extends LitElement {
 
                                 <button
                                     @click=${() => this._handleSubmit()}
-                                    ?disabled=${this.isSubmitting || (this.status === 'DELIVERED' && !this.signedBy)}
+                                    ?disabled=${this.isSubmitting || (this.status === 'delivered' && !this.signedBy)}
                                     class="w-full h-12 shadow-glow font-bold text-lg bg-gable-green text-black rounded-xl hover:bg-gable-green/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     ${this.isSubmitting
