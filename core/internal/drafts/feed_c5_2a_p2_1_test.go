@@ -206,6 +206,10 @@ func TestFeedSubjectFilterExcludesNoiseCreatedAfterReady(t *testing.T) {
 // instead of the draft's branch to k.Promote lands the quote in the
 // header's branch and the assertion fails.
 func TestPromotionRunsAtDraftsBranchWithKillSwitchOn(t *testing.T) {
+	// The kill switch flip is global database state every package's fixtures
+	// read (a non admin caller elsewhere suddenly needs X-Branch-Id), so it
+	// rides the outbox lock the other settings flippers take.
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 
