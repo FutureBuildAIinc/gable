@@ -249,16 +249,19 @@ func categoryRuleRowCustomerOf(db *database.DB) func(ctx context.Context, r *htt
 		if err != nil {
 			return nil, nil // the handler answers the malformed id
 		}
-		var customer *uuid.UUID
+		var (
+			customer   *uuid.UUID
+			targetType string
+		)
 		err = db.GetExecutor(r.Context()).QueryRow(r.Context(),
-			`SELECT customer_id FROM category_pricing_rules WHERE id = $1`, id).Scan(&customer)
+			`SELECT customer_id, target_type FROM category_pricing_rules WHERE id = $1`, id).Scan(&customer, &targetType)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		if err != nil {
 			return nil, err
 		}
-		if customer == nil {
+		if customer == nil || targetType != "ACCOUNT" {
 			return nil, middleware.ErrBodyRefused
 		}
 		return []uuid.UUID{*customer}, nil
@@ -267,8 +270,8 @@ func categoryRuleRowCustomerOf(db *database.DB) func(ctx context.Context, r *htt
 
 // bulkRuleCustomersOf resolves the customers a bulk delete's rule ids belong
 // to. An id that does not parse is left to the handler's own 400; an id that
-// names a tier or account row (no customer) is a dealer wide delete and
-// refuses the whole request.
+// names a row that is not an account rule, or that names no customer, is a
+// dealer wide delete and refuses the whole request.
 func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 		if db == nil {
@@ -291,7 +294,7 @@ func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Requ
 		}
 		var dealerWide int
 		if err := db.GetExecutor(r.Context()).QueryRow(r.Context(),
-			`SELECT COUNT(*) FROM category_pricing_rules WHERE id = ANY($1) AND customer_id IS NULL`, ids).
+			`SELECT COUNT(*) FROM category_pricing_rules WHERE id = ANY($1) AND (customer_id IS NULL OR target_type <> 'ACCOUNT')`, ids).
 			Scan(&dealerWide); err != nil {
 			return nil, err
 		}
@@ -515,19 +518,22 @@ func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB
 // list is refused by the gate, so the parameter is required here), the create
 // and the bulk upsert name one per element (a tier target names none and is
 // refused), the update, the delete and the audit act on a row that belongs
-// to one, the bulk delete's ids belong to theirs, and the resolve preview
+// to one (the audit read is a read, so a customer shared with another branch
+// still passes it, as the list and resolve reads do), the bulk delete's ids
+// belong to theirs, and the resolve preview
 // names a customer when its query carries one. The matrix is REFUSED by the
 // route allowlist gate; the categories routes are stated limits.
 func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
 	body := middleware.Compose(role, keyWall.CustomerBranchExclusive(categoryRuleBodyCustomers))
 	byRow := middleware.Compose(role, keyWall.CustomerBranchExclusive(categoryRuleRowCustomerOf(db)))
+	auditRead := middleware.Compose(role, keyWall.CustomerBranch(categoryRuleRowCustomerOf(db)))
 	byBulkIDs := middleware.Compose(role, keyWall.CustomerBranchExclusive(bulkRuleCustomersOf(db)))
 	list := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", true)))
 	resolve := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", false)))
 	return func(next http.Handler) http.Handler {
-		bodyHandler, rowHandler, bulkHandler, listHandler, resolveHandler, roleHandler :=
-			body(next), byRow(next), byBulkIDs(next), list(next), resolve(next), role(next)
+		bodyHandler, rowHandler, bulkHandler, listHandler, resolveHandler, auditHandler, roleHandler :=
+			body(next), byRow(next), byBulkIDs(next), list(next), resolve(next), auditRead(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.Pattern {
 			case "GET /api/v1/pricing/category-rules":
@@ -536,9 +542,10 @@ func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.D
 				bodyHandler.ServeHTTP(w, r)
 			case "DELETE /api/v1/pricing/category-rules/bulk":
 				bulkHandler.ServeHTTP(w, r)
-			case "PUT /api/v1/pricing/category-rules/{id}", "DELETE /api/v1/pricing/category-rules/{id}",
-				"GET /api/v1/pricing/category-rules/{id}/audit":
+			case "PUT /api/v1/pricing/category-rules/{id}", "DELETE /api/v1/pricing/category-rules/{id}":
 				rowHandler.ServeHTTP(w, r)
+			case "GET /api/v1/pricing/category-rules/{id}/audit":
+				auditHandler.ServeHTTP(w, r)
 			case "GET /api/v1/pricing/resolve":
 				resolveHandler.ServeHTTP(w, r)
 			default:
