@@ -7913,16 +7913,15 @@ export interface components {
             stop_sequence?: number;
             delivery_instructions?: string | null;
         };
-        /** @description Soft warning only; the assignment still happens. */
-        DeliveryCapacityWarning: {
-            vehicle_capacity_lbs: number;
-            current_load_lbs: number;
-            order_weight_lbs: number;
-            total_after_lbs: number;
-        };
         DeliveryAssignResult: {
             delivery: components["schemas"]["Delivery"];
-            capacity_warning: (components["schemas"]["DeliveryCapacityWarning"] | null) & components["schemas"]["DeliveryCapacityWarning"];
+            /** @description Soft warning only; the assignment still happens. Null when the vehicle holds no capacity or the load fits. */
+            capacity_warning: {
+                vehicle_capacity_lbs: number;
+                current_load_lbs: number;
+                order_weight_lbs: number;
+                total_after_lbs: number;
+            } | null;
         };
         DeliveryStopTransition: {
             /** @enum {string} */
@@ -16487,10 +16486,10 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryVehicle"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -16530,7 +16529,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -16561,10 +16560,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
@@ -16604,7 +16603,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -16709,10 +16708,10 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryDriver"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -16752,7 +16751,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -16783,10 +16782,10 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalErrorEither"];
@@ -16826,7 +16825,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -16937,10 +16936,10 @@ export interface operations {
                     "application/json": components["schemas"]["DeliveryRoute"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -16980,7 +16979,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17024,7 +17023,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17064,7 +17063,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17105,7 +17104,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -17142,7 +17141,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17174,10 +17173,10 @@ export interface operations {
                     "application/json": components["schemas"]["Delivery"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };
@@ -17217,7 +17216,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17259,7 +17258,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17298,7 +17297,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -17338,7 +17337,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
             500: components["responses"]["InternalErrorEither"];
         };
     };

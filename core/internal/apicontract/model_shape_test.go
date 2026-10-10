@@ -132,8 +132,9 @@ var modelBoundSchemas = []struct {
 	{"Delivery", delivery.Stop{}},
 	{"DeliveryPodPhoto", delivery.PODPhoto{}},
 	{"DeliveryQtyAdjustment", delivery.QtyAdjustment{}},
-	{"DeliveryCapacityWarning", delivery.CapacityWarning{}},
-	{"DeliveryQtyAdjustment", delivery.QtyAdjustment{}},
+	// CapacityWarning has no binding of its own: the assign result carries
+	// it as an inlined nullable property, the way the order wire carries
+	// its ship_to address.
 	// inventory
 	{"InventoryLevel", inventory.Level{}},
 	{"InventoryProductSummary", inventory.ProductSummary{}},

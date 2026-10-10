@@ -3234,13 +3234,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeliveryVehicle"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
     put:
@@ -3284,7 +3284,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -3314,13 +3314,13 @@ paths:
         "204":
           description: Vehicle deleted.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "428":
@@ -3368,7 +3368,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -3473,13 +3473,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeliveryDriver"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
     put:
@@ -3523,7 +3523,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -3552,13 +3552,13 @@ paths:
         "204":
           description: Driver deleted.
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "428":
@@ -3606,7 +3606,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -3733,13 +3733,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeliveryRoute"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/routes/{id}/transitions:
@@ -3784,7 +3784,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "413":
@@ -3837,7 +3837,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "413":
@@ -3884,7 +3884,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "413":
@@ -3927,7 +3927,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries:
@@ -3968,7 +3968,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "413":
@@ -4004,13 +4004,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/Delivery"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          $ref: "#/components/responses/BadRequestEither"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries/{id}/transitions:
@@ -4055,7 +4055,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/ConflictEither"
         "413":
@@ -4107,7 +4107,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -4152,7 +4152,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "409":
           $ref: "#/components/responses/IdempotencyConflict"
         "413":
@@ -4193,7 +4193,7 @@ paths:
         "403":
           $ref: "#/components/responses/ForbiddenEither"
         "404":
-          $ref: "#/components/responses/NotFound"
+          $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/documents/print/invoice/{id}:
@@ -16891,23 +16891,6 @@ components:
           type:
             - string
             - "null"
-    DeliveryCapacityWarning:
-      type: object
-      description: Soft warning only; the assignment still happens.
-      required:
-        - vehicle_capacity_lbs
-        - current_load_lbs
-        - order_weight_lbs
-        - total_after_lbs
-      properties:
-        vehicle_capacity_lbs:
-          type: number
-        current_load_lbs:
-          type: number
-        order_weight_lbs:
-          type: number
-        total_after_lbs:
-          type: number
     DeliveryAssignResult:
       type: object
       required: [delivery, capacity_warning]
@@ -16918,8 +16901,22 @@ components:
           type:
             - object
             - "null"
-          allOf:
-            - $ref: "#/components/schemas/DeliveryCapacityWarning"
+          description: >-
+            Soft warning only; the assignment still happens. Null when the vehicle holds no capacity or the load fits.
+          required:
+            - vehicle_capacity_lbs
+            - current_load_lbs
+            - order_weight_lbs
+            - total_after_lbs
+          properties:
+            vehicle_capacity_lbs:
+              type: number
+            current_load_lbs:
+              type: number
+            order_weight_lbs:
+              type: number
+            total_after_lbs:
+              type: number
     DeliveryStopTransition:
       type: object
       required: [to]
