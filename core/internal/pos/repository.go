@@ -674,7 +674,8 @@ func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID 
 func (r *PostgresRepository) GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error) {
 	var branch *uuid.UUID
 	err := r.ex(ctx).QueryRow(ctx, `SELECT l.branch_id FROM pos_registers pr
-		LEFT JOIN locations l ON l.id = pr.location_id WHERE pr.id = $1`, registerID).Scan(&branch)
+		LEFT JOIN locations l ON l.id = pr.location_id
+		WHERE pr.id = $1 AND ($2::uuid IS NULL OR l.branch_id = $2)`, registerID, branchctx.IDForQuery(ctx)).Scan(&branch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("no such register")
 	}

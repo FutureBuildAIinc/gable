@@ -83,7 +83,7 @@ func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (
 			expected_by_method, counted_by_method,
 			CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
 			gl_entry_id, notes
-		FROM till_sessions) t WHERE t.id = $1`, id))
+		FROM till_sessions) t WHERE t.id = $1 AND ($2::uuid IS NULL OR t.branch_id = $2)`, id, branchctx.IDForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("till session not found")
 	}
@@ -99,7 +99,8 @@ func (r *PostgresRepository) GetOpenTillSession(ctx context.Context, registerID 
 			expected_by_method, counted_by_method,
 			CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
 			gl_entry_id, notes
-		FROM till_sessions) t WHERE t.register_id = $1 AND t.status = 'OPEN'`, registerID))
+		FROM till_sessions) t WHERE t.register_id = $1 AND t.status = 'OPEN'
+			AND ($2::uuid IS NULL OR t.branch_id = $2)`, registerID, branchctx.IDForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -233,7 +234,8 @@ func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string
 		FROM till_z_reports
 		WHERE ($1 = '' OR register_id = $1)
 			AND (generated_at >= $2::date AND generated_at < ($2::date + 1))
-		ORDER BY generated_at DESC`, registerID, date)
+			AND ($3::uuid IS NULL OR branch_id = $3)
+		ORDER BY generated_at DESC`, registerID, date, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Z-reports: %w", err)
 	}
