@@ -34,7 +34,7 @@ func (f *fixture) withMoney() func(*order.Service) *order.Service {
 		glSvc := gl.NewService(gl.NewRepository(f.db), nil, slog.Default())
 		acct := account.NewService(f.db, glSvc, slog.Default())
 		inv := invoice.NewService(invoice.NewRepository(f.db), glSvc, acct, f.db).WithAuditLog(audit.NewLogger(f.db))
-		return s.WithInvoices(inv)
+		return s.WithInvoices(inv).WithDeposits(acct)
 	}
 }
 
