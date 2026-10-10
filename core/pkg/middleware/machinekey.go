@@ -748,7 +748,19 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 		// Fail closed: a machine key is a principal on declared /api/v1
 		// module routes only. Public seams never reach here (the caller's
 		// public path check runs first); anything else is refused.
-		a.auditRefusal(ctx, principal.ID, AuditActionKeyPathRefused, "", r)
+		//
+		// A dirty spelling under a real module (a dot segment, a doubled
+		// slash) keeps the audit contract the module paths had before the
+		// scope table: the module is named and its policy admits keys, so
+		// the refusal is the scope one, with no scope named, because the
+		// request never named a clean route whose scope could be refused.
+		// The delegating segments (drafts, links) and every path outside
+		// the vocabulary stay path refusals.
+		if m, ok := ModuleForPath(r.URL.Path); ok && ModuleScopePolicyFor(m) == ModuleScopeAllowed {
+			a.auditRefusal(ctx, principal.ID, AuditActionKeyScopeRefused, "", r)
+		} else {
+			a.auditRefusal(ctx, principal.ID, AuditActionKeyPathRefused, "", r)
+		}
 		respondAuthError(w, r, http.StatusForbidden, "forbidden", "machine keys are accepted on module routes under /api/v1 only")
 		return
 	}

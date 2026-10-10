@@ -432,6 +432,42 @@ func TestMachineKeyAdminPathsDotSegmentRefused(t *testing.T) {
 	}
 }
 
+// The audit action of a refused keyed path keeps two contracts apart. A
+// dirty spelling under a real module (a dot segment, a doubled slash) keeps
+// the scope refusal the module paths wrote before the scope table: the
+// module is named and its policy admits keys, and no scope is named because
+// the request never named a clean route. Every shape under the delegating
+// segments (drafts, links) the policy table does not name, dirty or not,
+// stays the path refusal the C5-2a scopes row promises.
+func TestMachineKeyDirtyPathAuditAction(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		want   string
+	}{
+		{"a dot segment under quotes", "GET", "/api/v1/quotes/../admin/settings/ai", middleware.AuditActionKeyScopeRefused},
+		{"a doubled slash under units", "GET", "/api/v1/units//EA", middleware.AuditActionKeyScopeRefused},
+		{"a trailing slash under products", "GET", "/api/v1/products/", middleware.AuditActionKeyScopeRefused},
+		{"an unnamed draft shape", "DELETE", "/api/v1/drafts/quotes/00000000-0000-0000-0000-000000000001", middleware.AuditActionKeyPathRefused},
+		{"a draft subroute nobody named", "POST", "/api/v1/drafts/quotes/00000000-0000-0000-0000-000000000001/publish", middleware.AuditActionKeyPathRefused},
+		{"a dirty drafts path", "GET", "/api/v1/drafts/../quotes", middleware.AuditActionKeyPathRefused},
+		{"an unnamed link shape", "POST", "/api/v1/links/quotes/00000000-0000-0000-0000-000000000001", middleware.AuditActionKeyPathRefused},
+		{"a link with no id named", "GET", "/api/v1/links/quotes", middleware.AuditActionKeyPathRefused},
+	} {
+		aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: []string{"quotes:read", "units:read", "products:read", "quotes:propose"}}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want 403; body: %s", tc.name, tc.method, tc.path, rec.Code, rec.Body.String())
+			continue
+		}
+		if len(aud.calls) != 1 || aud.calls[0].action != tc.want {
+			t.Errorf("%s: audit calls = %+v, want one %s", tc.name, aud.calls, tc.want)
+		}
+	}
+}
+
 // The users module's write scope is named for what it grants (ADR 0009):
 // users:grants, not users:write.
 func TestMachineKeyUsersGrantsScope(t *testing.T) {
