@@ -66,15 +66,23 @@ LABELS = {
 }
 
 # File extensions whose tracked files must carry the inline SPDX header.
+# The list mirrors the source kinds LICENSE-MAP.md places in scope:
+# Go under core/, SQL under core/, TypeScript and JSX/TSX under web/,
+# Python under .github/ and core/, shell at the repo root, Rust under
+# tauri/, and CSS under web/apps/.
 INLINE_CHECK_EXTENSIONS: tuple[str, ...] = (
     ".go",
     ".ts",
     ".tsx",
     ".js",
+    ".jsx",
     ".mjs",
+    ".cjs",
     ".sql",
     ".py",
     ".sh",
+    ".rs",
+    ".css",
 )
 
 # The literal header tags, composed at runtime so they do not appear as a
@@ -85,7 +93,7 @@ _LICENSE_TAG = "SPDX-" + "License-Identifier:"
 _COPYRIGHT_TAG = "SPDX-" + "FileCopyrightText:"
 
 # Tracked files that look like source but are generated and therefore cannot
-# carry an inline header -- the generator owns the whole file and would
+# carry an inline header: the generator owns the whole file and would
 # overwrite any header on every regeneration. The REUSE.toml tree annotation
 # for the file's directory supplies the licence instead. Each entry pairs a
 # repo-relative path with a short reason that explains *why* it is exempt.
@@ -121,8 +129,8 @@ def invalid_expressions(report: dict) -> list[str]:
 def missing_inline_headers(git_root: str) -> list[str]:
     """Tracked source files missing the inline SPDX header.
 
-    The header is the same pair `reuse lint` looks for -- an identifier
-    line and a copyright line -- appearing somewhere in the first ten lines
+    The header is the same pair `reuse lint` looks for, an identifier
+    line and a copyright line, appearing somewhere in the first ten lines
     of the file. Files in `INLINE_EXEMPT` are excluded, and files outside
     `INLINE_CHECK_EXTENSIONS` are ignored (the inline header is a house rule
     for source code, not a requirement for every file in the tree).
@@ -151,11 +159,12 @@ def missing_inline_headers(git_root: str) -> list[str]:
         has_id = _LICENSE_TAG in head
         has_cr = _COPYRIGHT_TAG in head
         if not (has_id and has_cr):
-            missing.append(
-                f"{path}: missing "
-                + ("identifier line " if not has_id else "")
-                + ("copyright line" if not has_cr else "")
-            )
+            pieces = []
+            if not has_id:
+                pieces.append("identifier line")
+            if not has_cr:
+                pieces.append("copyright line")
+            missing.append(f"{path}: missing { ' and '.join(pieces) }")
     return missing
 
 
@@ -198,12 +207,16 @@ def main() -> int:
     # Not reported under non_compliant by reuse 6.2 -- see invalid_expressions().
     non_compliant["invalid_spdx_expressions"] = invalid_expressions(report)
 
-    # Inline-header pass (see the module docstring for the why). Operates on
-    # the working directory's tree; reuse lint itself only cares about the
-    # REUSE.toml annotations, so it cannot see a missing inline header.
-    non_compliant["missing_inline_header"] = missing_inline_headers(
-        os.getcwd()
-    )
+    # Inline-header pass (see the module docstring for the why). Scans
+    # the git repository root rather than the current directory so the gate
+    # behaves the same wherever it is invoked from; reuse lint itself only
+    # cares about the REUSE.toml annotations, so it cannot see a missing
+    # inline header.
+    git_root = subprocess.check_output(
+        ["git", "rev-parse", "--show-toplevel"],
+        text=True,
+    ).strip()
+    non_compliant["missing_inline_header"] = missing_inline_headers(git_root)
 
     failures = {
         key: value
