@@ -109,7 +109,7 @@ func customerGroups() []groupDef {
 				extract: map[string]string{"myCustomer": "/id", "myTerms": "/payment_terms_id"},
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
-			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3", maskFields: map[string]any{"balance_cents": "<balance>", "credit_limit_cents": "<limit>"}},
+			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3", maskFields: map[string]any{"balance_cents": 999999, "credit_limit_cents": 999999}},
 			// The filters filter; an unsupported parameter, a tier outside the
 			// lowercase vocabulary and a broken cursor are 400s naming the field.
 			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"},

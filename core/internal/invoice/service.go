@@ -275,12 +275,6 @@ func (s *Service) ListInvoices(ctx context.Context, f ListFilter, wantTotal bool
 	return items, hasMore, total, nil
 }
 
-// GetCustomerOpenBalanceCents returns the customer's live outstanding AR balance
-// (sum of open invoices), in cents.
-func (s *Service) GetCustomerOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
-	return s.repo.SumOpenBalanceCents(ctx, customerID)
-}
-
 // ExistsInvoiceForOrder reports whether the order has an invoice not void.
 func (s *Service) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
 	return s.repo.ExistsInvoiceForOrder(ctx, orderID)

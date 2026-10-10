@@ -20,18 +20,17 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Repository is the slice of the store the older callers use: the payment
-// module reads and updates an invoice's status around a payment, the counter
-// creates an account charge, and the order credit check sums the open
-// balance. The invoice acts of C2-3 (void, the credit memo lifecycle, the
-// fulfilment invoice) use Store, which the Postgres repository also
-// implements; unit tests that fake only this slice never reach them.
+// Repository is the slice of the store the older callers use: the counter
+// creates an account charge and reads a branch rate. The invoice acts of C2-3
+// (void, the credit memo lifecycle, the fulfilment invoice) use Store, which
+// the Postgres repository also implements; unit tests that fake only this
+// slice never reach them. The payment module's status write and the order
+// credit check's balance sum were the interim AR path; the AR core owns both
+// since C2-4 and this slice no longer carries them.
 type Repository interface {
 	CreateInvoice(ctx context.Context, inv *LegacyInvoice) error
 	GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error)
-	UpdateInvoice(ctx context.Context, inv *Invoice) error
 	ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error)
-	SumOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	GetBranchTaxRate(ctx context.Context, branchID *uuid.UUID) (float64, bool)
 }
 
@@ -335,18 +334,6 @@ func (r *PostgresRepository) invoiceLines(ctx context.Context, id uuid.UUID) ([]
 // The older callers' slice.
 // ---------------------------------------------------------------------------
 
-// UpdateInvoice writes the status and paid_at the payment module derives and
-// moves the revision (an in process write: no client precondition).
-func (r *PostgresRepository) UpdateInvoice(ctx context.Context, inv *Invoice) error {
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		UPDATE invoices SET status = $1, paid_at = $2, updated_at = NOW(), revision = revision + 1
-		WHERE id = $3`, string(inv.Status), inv.PaidAt, inv.ID)
-	if err != nil {
-		return fmt.Errorf("failed to update invoice: %w", err)
-	}
-	return nil
-}
-
 // ExistsInvoiceForOrder reports whether an invoice (not void) exists for the order.
 func (r *PostgresRepository) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
 	var exists bool
@@ -356,19 +343,6 @@ func (r *PostgresRepository) ExistsInvoiceForOrder(ctx context.Context, orderID 
 		return false, fmt.Errorf("failed to check existing invoice for order: %w", err)
 	}
 	return exists, nil
-}
-
-// SumOpenBalanceCents returns the customer's outstanding AR balance, computed
-// live from open invoices (total less the payments recorded against each).
-func (r *PostgresRepository) SumOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
-	var cents int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT COALESCE(SUM(`+openExpr+`), 0)::bigint FROM invoices i
-		WHERE i.customer_id = $1 AND i.status IN (`+OpenInvoiceStatuses+`)`, customerID).Scan(&cents)
-	if err != nil {
-		return 0, fmt.Errorf("failed to sum open balance: %w", err)
-	}
-	return cents, nil
 }
 
 // GetBranchTaxRate returns the default sales tax rate configured on a branch

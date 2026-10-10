@@ -92,8 +92,8 @@
   {
     "name": "customer.list",
     "mask_fields": {
-      "balance_cents": "<balance>",
-      "credit_limit_cents": "<limit>"
+      "balance_cents": 999999,
+      "credit_limit_cents": 999999
     },
     "request": {
       "method": "GET",
@@ -107,9 +107,9 @@
           {
             "account_number": "GOLD-001",
             "address": "1 Golden Way, Kelowna BC",
-            "balance_cents": "<balance>",
+            "balance_cents": 999999,
             "created_at": "<ts+0d>",
-            "credit_limit_cents": "<limit>",
+            "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
             "email": "goldens@example.com",
@@ -136,9 +136,9 @@
           {
             "account_number": "DIY-OKN",
             "address": "45 Sawhorse Ln, Lake Country BC",
-            "balance_cents": "<balance>",
+            "balance_cents": 999999,
             "created_at": "<ts+0d>",
-            "credit_limit_cents": "<limit>",
+            "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
             "email": "okanagan.diy@example.com",
@@ -171,9 +171,9 @@
           {
             "account_number": "SRR-001",
             "address": "200 Ridgecap Rd, Summerland BC",
-            "balance_cents": "<balance>",
+            "balance_cents": 999999,
             "created_at": "<ts+0d>",
-            "credit_limit_cents": "<limit>",
+            "credit_limit_cents": 999999,
             "currency": null,
             "effective_currency": "USD",
             "email": "admin@summerlandroofers.ca",
