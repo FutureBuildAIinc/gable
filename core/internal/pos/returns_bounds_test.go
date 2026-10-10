@@ -166,3 +166,49 @@ func TestAProductLineOnANamedSaleIsRefused(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (fourth review P2-1): repeated partial returns of one line never
+// refund more than the sale took: the return that completes the line takes
+// the remainder (the whole line total and the whole tax less what earlier
+// returns already refunded), so the rounded shares of the earlier returns
+// cannot drift the total past what was paid.
+func TestRepeatedPartialReturnsRefundNoMoreThanTheSale(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	// 3 at 5.50 less one cent: line 1649, tax 146, total 1795 in cash
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, map[string]any{"product_id": f.productID.String(), "quantity": "3",
+		"discount_cents": 1, "discount_reason": "penny off"}); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, tender("cash", 1795)); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+
+	// three returns of one unit each: 599, 599, then the remainder 597
+	var refunded int64
+	for i, want := range []int64{599, 599, 597} {
+		r := f.returnOn(t, saleID, lineID, "1")
+		if r.status != http.StatusCreated {
+			t.Fatalf("partial return %d = %d: %s", i+1, r.status, r.raw)
+		}
+		if got := num(t, r.body, "total_cents"); got != -want {
+			t.Errorf("partial return %d total = %d, want %d", i+1, got, -want)
+		}
+		refunded += want
+		f.assertARInvariants(t)
+	}
+	if refunded != 1795 {
+		t.Errorf("%d refunded over the three returns, want exactly the 1795 taken", refunded)
+	}
+	if got := f.accountBalance("1010"); got != 0 {
+		t.Errorf("cash balance = %d, want 0 (1795 in, 1795 out, never a cent more)", got)
+	}
+	// the line is fully returned: nothing more comes back
+	if r := f.returnOn(t, saleID, lineID, "1"); r.status != http.StatusConflict {
+		t.Fatalf("return past the sold quantity = %d, want 409: %s", r.status, r.raw)
+	}
+	f.assertARInvariants(t)
+}

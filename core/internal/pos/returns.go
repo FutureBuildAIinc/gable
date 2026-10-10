@@ -225,57 +225,118 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 		}
 	}
-	var linkedTaxable int64
-	for i := range priced {
-		if priced[i].saleLine != nil && priced[i].taxable {
-			linkedTaxable += priced[i].lineTotal
+	// applyRemainders restates each linked line's refund against what earlier
+	// returns already took (fourth review P2-1): the return that completes a
+	// line takes the line's whole total less every cent already refunded, so
+	// the rounded per unit shares of repeated partial returns never sum past
+	// what the sale was paid; the tax is capped the same way. Read before the
+	// transaction (the guards) and again under the sale row lock (the
+	// authority the memo is written from).
+	var taxAlreadyBack int64
+	applyRemainders := func(ctx context.Context) error {
+		if in.OriginalSaleID == nil {
+			return nil
 		}
-	}
-	subtotal := linkedTaxable
-	var freeTaxable int64
-	var freeNontaxable int64
-	for i := range priced {
-		if priced[i].saleLine == nil {
-			if priced[i].taxable {
-				freeTaxable += priced[i].lineTotal
-			} else {
-				freeNontaxable += priced[i].lineTotal
-			}
-		} else if !priced[i].taxable {
-			subtotal += priced[i].lineTotal
-		}
-	}
-	subtotal += freeTaxable + freeNontaxable
-	var taxCents int64
-	var taxRate *string
-	if linkedTaxable > 0 && saleTaxable > 0 && saleTaxCents > 0 {
-		taxCents += divRound(linkedTaxable*saleTaxCents, saleTaxable)
-	}
-	if freeTaxable > 0 {
-		exempt, err := s.repo.CustomerExempt(ctx, *customerID)
+		returned, err := s.repo.ReturnedQtyByLine(ctx, *in.OriginalSaleID)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if exempt {
-			zero := "0"
-			taxRate = &zero
-		} else {
-			rate, ok, err := s.repo.BranchTaxRate(ctx, branchID)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				return nil, conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
-			}
-			scaled, _, err := salesdoc.ParseTaxRate(rate)
-			if err != nil {
-				return nil, err
-			}
-			taxCents += int64(salesdoc.TaxAt(httpx.Cents(freeTaxable), scaled))
-			taxRate = &rate
+		refunded, err := s.repo.RefundedCentsByLine(ctx, *in.OriginalSaleID)
+		if err != nil {
+			return err
 		}
+		if taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *in.OriginalSaleID); err != nil {
+			return err
+		}
+		for i := range priced {
+			p := &priced[i]
+			if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
+				continue
+			}
+			sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
+			remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
+			if back+int64(p.in.Quantity) >= sold {
+				p.lineTotal = remaining
+			} else if p.lineTotal > remaining {
+				p.lineTotal = remaining
+			}
+			if p.lineTotal < 0 {
+				p.lineTotal = 0
+			}
+		}
+		return nil
 	}
-	total := -(subtotal + taxCents)
+	if err := applyRemainders(ctx); err != nil {
+		return nil, err
+	}
+	// resolveMoney restates the memo's totals from the lines' money; the
+	// transaction runs it again under the sale row lock after the caps
+	// recheck, and the memo, the legs, the refund and the return row are all
+	// written from its latest answer.
+	var subtotal, taxCents, total int64
+	var taxRate *string
+	resolveMoney := func(ctx context.Context) error {
+		var linkedTaxable int64
+		for i := range priced {
+			if priced[i].saleLine != nil && priced[i].taxable {
+				linkedTaxable += priced[i].lineTotal
+			}
+		}
+		subtotal = linkedTaxable
+		var freeTaxable int64
+		var freeNontaxable int64
+		for i := range priced {
+			if priced[i].saleLine == nil {
+				if priced[i].taxable {
+					freeTaxable += priced[i].lineTotal
+				} else {
+					freeNontaxable += priced[i].lineTotal
+				}
+			} else if !priced[i].taxable {
+				subtotal += priced[i].lineTotal
+			}
+		}
+		subtotal += freeTaxable + freeNontaxable
+		taxCents = 0
+		taxRate = nil
+		if linkedTaxable > 0 && saleTaxable > 0 && saleTaxCents > 0 {
+			taxCents += divRound(linkedTaxable*saleTaxCents, saleTaxable)
+			// never more tax back than the sale collected less what earlier
+			// returns took (the same remainder rule)
+			if remaining := saleTaxCents - taxAlreadyBack; taxCents > remaining {
+				taxCents = remaining
+			}
+		}
+		if freeTaxable > 0 {
+			exempt, err := s.repo.CustomerExempt(ctx, *customerID)
+			if err != nil {
+				return err
+			}
+			if exempt {
+				zero := "0"
+				taxRate = &zero
+			} else {
+				rate, ok, err := s.repo.BranchTaxRate(ctx, branchID)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
+				}
+				scaled, _, err := salesdoc.ParseTaxRate(rate)
+				if err != nil {
+					return err
+				}
+				taxCents += int64(salesdoc.TaxAt(httpx.Cents(freeTaxable), scaled))
+				taxRate = &rate
+			}
+		}
+		total = -(subtotal + taxCents)
+		return nil
+	}
+	if err := resolveMoney(ctx); err != nil {
+		return nil, err
+	}
 	// A card refund goes through the gateway before the transaction, so a
 	// decline aborts with nothing persisted. Every guard that needs no lock
 	// (the sale's status, the caps) has run by now; a refund the transaction
@@ -326,6 +387,17 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			// The cap, rechecked under the lock: a return that raced this one
 			// for the same line is counted before this one is allowed.
 			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
+				return err
+			}
+			// The remainder rule and the totals, restated under the lock: the
+			// money is written from these answers, never from the pre
+			// transaction read (a card refund already taken keeps the amount
+			// it took; the race window is the cents a concurrent return's
+			// rounding moves).
+			if err := applyRemainders(ctx); err != nil {
+				return err
+			}
+			if err := resolveMoney(ctx); err != nil {
 				return err
 			}
 			// The return touches the sale: its revision moves, in process, so

@@ -52,6 +52,11 @@ type Repository interface {
 	// ReturnedQtyByLine sums, per sale line, the quantity every earlier
 	// return of the sale brought back (the return's cap).
 	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
+	// RefundedCentsByLine sums the cents every earlier return refunded per
+	// sale line, and RefundedTaxCents the tax they took back: the remainder
+	// rule of repeated partial returns reads them.
+	RefundedCentsByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
+	RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
 	// InvoiceLineCosts reads an invoice's lines with the unit cost the sale
 	// relieved (a linked return's restock cost, found by the stored link).
@@ -564,6 +569,46 @@ func (r *PostgresRepository) SaleHasReturns(ctx context.Context, saleID uuid.UUI
 	err := r.ex(ctx).QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM pos_returns WHERE original_transaction_id = $1)`, saleID).Scan(&exists)
 	return exists, err
+}
+
+// RefundedCentsByLine sums, per sale line, the cents every earlier return of
+// the sale refunded against it (the stored line totals are negative, so the
+// sum is negated back): the remainder rule reads it, so repeated partial
+// returns never refund more than the line was paid.
+func (r *PostgresRepository) RefundedCentsByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT rl.sale_line_id, -ROUND(SUM(rl.line_total) * 100)::bigint
+		FROM pos_return_lines rl
+		JOIN pos_returns r ON r.id = rl.return_id
+		WHERE r.original_transaction_id = $1 AND rl.sale_line_id IS NOT NULL
+		GROUP BY rl.sale_line_id`, saleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the sale's refunded cents: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]int64{}
+	for rows.Next() {
+		var id uuid.UUID
+		var cents int64
+		if err := rows.Scan(&id, &cents); err != nil {
+			return nil, err
+		}
+		out[id] = cents
+	}
+	return out, rows.Err()
+}
+
+// RefundedTaxCents sums the tax every earlier return of the sale took back
+// (the stored amounts are negative, so the sum is negated back).
+func (r *PostgresRepository) RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error) {
+	var cents int64
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT COALESCE(-ROUND(SUM(tax_amount) * 100)::bigint, 0) FROM pos_returns WHERE original_transaction_id = $1`,
+		saleID).Scan(&cents)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read the sale's refunded tax: %w", err)
+	}
+	return cents, nil
 }
 
 // InvoiceLineCost is one invoice line's id and the unit cost the sale
