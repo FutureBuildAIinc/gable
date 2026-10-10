@@ -1158,8 +1158,10 @@ func (s *Service) TransitionStop(ctx context.Context, id uuid.UUID, d *StopTrans
 		// the second FOR UPDATE in the same transaction, so a cancel
 		// racing this transition cannot slip a delivered stop onto a
 		// cancelled route through a status read between the stop read
-		// and the route check.
-		routeStatus, err := s.repo.LockRouteForStopTransition(ctx, id)
+		// and the route check. A stop without a route (a PENDING stop the
+		// worker insert path writes before any route is assigned) has
+		// nothing to check, so the transition continues.
+		routeStatus, hasRoute, err := s.repo.LockRouteForStopTransition(ctx, id)
 		if err != nil {
 			return notFound(err)
 		}
@@ -1170,7 +1172,7 @@ func (s *Service) TransitionStop(ctx context.Context, id uuid.UUID, d *StopTrans
 		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
 			return err
 		}
-		if routeStatus == RouteStatusCancelled || routeStatus == RouteStatusCompleted {
+		if hasRoute && (routeStatus == RouteStatusCancelled || routeStatus == RouteStatusCompleted) {
 			return httpx.InvalidStateTransition(
 				"cannot complete a stop on a route already "+string(routeStatus),
 				httpx.Blocker("route_id",

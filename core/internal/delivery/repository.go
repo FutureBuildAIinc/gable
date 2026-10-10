@@ -93,10 +93,12 @@ type Repository interface {
 	NextStopSequenceForRoute(ctx context.Context, routeID uuid.UUID) (int, error)
 	LockRoute(ctx context.Context, id uuid.UUID) error
 	// LockRouteForStopTransition locks the route the named stop belongs
-	// to and returns its current status, so a stop transition can refuse
-	// a delivery on a terminal route under the route lock. See PR 70
-	// review round 7 N3.
-	LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (RouteStatus, error)
+	// to and returns its current status (and whether the stop has a
+	// route), so a stop transition can refuse a delivery on a terminal
+	// route under the route lock. A stop without a route returns
+	// hasRoute=false; the caller continues without a route check. See
+	// PR 70 review round 7 N3.
+	LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (status RouteStatus, hasRoute bool, err error)
 
 	// Stops
 	CreateDelivery(ctx context.Context, d *Stop) error
@@ -780,30 +782,43 @@ func (r *PostgresRepository) LockRoute(ctx context.Context, id uuid.UUID) error 
 }
 
 // LockRouteForStopTransition locks the route the named stop belongs to
-// (FOR UPDATE OF the route row) and returns its current status, so the
-// stop transition can refuse a delivery on a route that is already in a
-// terminal state (CANCELLED or COMPLETED) under the route lock the stop
-// transition takes. The stop lock that runs first keeps the join honest
-// when a concurrent cancel rewrites the route: a route read without the
-// lock would race a cancellation that lands between the stop read and
-// the status read. PR 70 review round 7 N3.
-func (r *PostgresRepository) LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (RouteStatus, error) {
+// (FOR UPDATE OF the route row) and returns whether the stop has a route
+// and, if so, its current status. The stop lock that runs first keeps
+// the join honest when a concurrent cancel rewrites the route: a route
+// read without the lock would race a cancellation that lands between
+// the stop read and the status read. PR 70 review round 7 N3.
+//
+// A stop with no route (the worker fulfilments and the will-call pickup
+// path insert PENDING stops without a route_id) returns hasRoute=false;
+// the caller continues without a route check. The CTE first looks up
+// the route id through the walled delivery read, then locks only the
+// route row (a LEFT JOIN's nullable side refuses FOR UPDATE in Postgres,
+// so the lock has to run against the routes table alone).
+func (r *PostgresRepository) LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (status RouteStatus, hasRoute bool, err error) {
 	branch, sub := wallArgs(ctx)
-	var status RouteStatus
-	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT r.status FROM deliveries s
-			JOIN delivery_routes r ON r.id = s.route_id
+	var routeID *uuid.UUID
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT s.route_id FROM deliveries s
 			JOIN orders o ON o.id = s.order_id
-		   WHERE s.id = $1 AND `+stopVisible(2, 3)+`
-		   FOR UPDATE OF r`,
-		deliveryID, branch, sub).Scan(&status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrNotFound
+		   WHERE s.id = $1 AND `+stopVisible(2, 3),
+		deliveryID, branch, sub).Scan(&routeID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, ErrNotFound
+		}
+		return "", false, fmt.Errorf("failed to look up stop route: %w", err)
 	}
-	if err != nil {
-		return "", fmt.Errorf("failed to lock route for stop transition: %w", err)
+	if routeID == nil {
+		return "", false, nil
 	}
-	return status, nil
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT status FROM delivery_routes WHERE id = $1 FOR UPDATE`,
+		*routeID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, ErrNotFound
+		}
+		return "", false, fmt.Errorf("failed to lock route for stop transition: %w", err)
+	}
+	return status, true, nil
 }
 
 // Stops
