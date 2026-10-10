@@ -94,6 +94,11 @@ mint.
   record exposes `ValidScopeGrammar()` beside the auth core so the mint and
   the auth core cannot disagree: every scope a registered route can require,
   finer names included, from one function.
+- An admin path whose second segment is "." or "..", or any admin path
+  not equal to path.Clean of itself, is refused before the scope check
+  (alongside the empty second segment already refused), so the
+  "coarse scopes reach only routes no area declares" guarantee above
+  no longer leans on the router's 307 redirect to clean the path.
 - The confirm gated verbs (`propose`, `commit`) do not apply: no admin act is
   a draft (ADR 0002's known limit says so, ADR 0007 section 5.5 repeats it).
 - Branch bound keys are C5-2a's (ADR 0007 section 5.5).
