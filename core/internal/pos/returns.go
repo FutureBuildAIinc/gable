@@ -173,6 +173,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		var src salesdoc.Line
 		if rl.SaleLineID != nil {
 			src = byID[*rl.SaleLineID]
+			// A kit's components never restock on their own line: the
+			// component carries no price, the kit line carries the return.
+			if src.LineType == salesdoc.LineComponent && rl.Restock {
+				return nil, invalid(fmt.Sprintf("lines[%d].restock", i),
+					"a kit component returns with its kit line: name the kit line, its components follow")
+			}
 			// The line's own extension per unit: the extension the sale
 			// charged (discount included) divided by the quantity it sold
 			// (cents at scale 2 over quantity at scale 4, to a price at
@@ -365,6 +371,13 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		memoID := uuid.New()
 		var lines []ReturnLine
 		var restockCost int64
+		// restockAct is one physical restock the return makes: a product
+		// line's own units, or a returned kit's components.
+		type restockAct struct {
+			productID uuid.UUID
+			qty       httpx.Quantity
+		}
+		var restocks []restockAct
 		for i := range priced {
 			p := &priced[i]
 			qty := p.in.Quantity
@@ -407,7 +420,42 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
 				LineType: lineType, ChargeCodeID: p.chargeCodeID,
 			})
-			if p.in.Restock && p.in.ProductID != nil {
+			if !p.in.Restock {
+				continue
+			}
+			// A returned kit line restocks its components and never itself:
+			// the kit product has no inventory row, and the goods that left
+			// were the components. Each component comes back at the returned
+			// fraction of its quantity, at its own invoice line's cost (the
+			// cost the sale relieved, 8.4).
+			if p.saleLine != nil && p.saleLine.LineType == salesdoc.LineKit && p.saleLine.Quantity != nil {
+				for j := range saleLines {
+					comp := &saleLines[j]
+					if comp.ParentLineID == nil || *comp.ParentLineID != p.saleLine.ID ||
+						comp.Quantity == nil || comp.ProductID == nil {
+						continue
+					}
+					qtyBack := httpx.Quantity(divRound(int64(*comp.Quantity)*int64(p.in.Quantity), int64(*p.saleLine.Quantity)))
+					if qtyBack <= 0 {
+						continue
+					}
+					cost := httpx.Price(0)
+					if src := invoiceLineAt(comp.ID); src != nil {
+						cost = httpx.Price(src.UnitCost)
+					}
+					if cost <= 0 {
+						if ref, ok := refs[comp.ProductID.String()]; ok {
+							cost = ref.AverageCost
+						}
+					}
+					if cost > 0 {
+						restockCost += int64(salesdoc.CostOf(qtyBack, cost))
+					}
+					restocks = append(restocks, restockAct{productID: *comp.ProductID, qty: qtyBack})
+				}
+				continue
+			}
+			if p.in.ProductID != nil {
 				// a free line (no sale) restocks at today's average: it has
 				// no source invoice line to read
 				cost := restockUnitCost
@@ -419,6 +467,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				if cost > 0 {
 					restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
 				}
+				restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: p.in.Quantity})
 			}
 		}
 		if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
@@ -486,13 +535,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		var fxAll *account.Effects
 		mergeEffects(&fxAll, fxPost)
-		// The stock returns: restock lines back on hand.
-		for i := range lines {
-			l := &lines[i]
-			if !l.Restock || l.ProductID == nil {
-				continue
-			}
-			if err := s.inventory.RestockQty(ctx, *l.ProductID, *branchID, *l.Quantity); err != nil {
+		// The stock returns: each restock act back on hand (a product line's
+		// own units, a kit's components; the kit product itself never stocks).
+		for i := range restocks {
+			if err := s.inventory.RestockQty(ctx, restocks[i].productID, *branchID, restocks[i].qty); err != nil {
 				return err
 			}
 		}

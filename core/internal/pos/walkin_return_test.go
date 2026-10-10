@@ -20,12 +20,12 @@ import (
 func TestAWalkInReturnRefusesAccount(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	saleID, _ := f.saleOf("1", tender("cash", 599)) // a walk-in sale
+	saleID, body := f.saleOf("1", tender("cash", 599)) // a walk-in sale
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "original_sale_id": saleID, "refund_method": "account",
 		"reason": "store credit for a stranger",
-		"lines": []map[string]any{{"product_id": f.productID.String(), "quantity": "1",
-			"unit_price_ten_thousandths": 55000, "restock": true}},
+		"lines": []map[string]any{{"line_id": lineID, "quantity": "1", "restock": true}},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	if r.status != http.StatusConflict {
 		t.Fatalf("walk-in account return = %d, want 409: %s", r.status, r.raw)
