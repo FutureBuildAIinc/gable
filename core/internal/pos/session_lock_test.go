@@ -104,6 +104,67 @@ func TestAVoidRacingTheCloseEndsCoherent(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE (fourth review P2-2, fifth review P2-1): a cash return locks the
+// register's open session FOR SHARE inside its transaction and refuses when
+// the session closed under that lock, so it never lands in a counted drawer.
+// The proof is the discriminating one: a plain timing probe cannot tell the
+// FOR SHARE from its absence (the return's till_session_id foreign key
+// insert blocks on the holder too), but a return parked on the session row
+// while the holder closes the drawer and commits must answer 409
+// session_closed; without the lock it would commit into the closed session,
+// and without the refusal branch it would commit sessionless.
+func TestACashReturnParkedOnTheSessionRefusesWhenItCloses(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	sessionID := f.openTill(0)
+	saleID, body := f.saleOf("1", tender("cash", 599))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	ctx := context.Background()
+	holder, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a failure after this point must never leave the holder open: the
+	// package would hang on the session row
+	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan resp, 1)
+	go func() {
+		done <- f.returnOn(t, saleID, lineID, "1")
+	}()
+	select {
+	case r := <-done:
+		t.Fatalf("the cash return finished beside the lock holder (status %d): its FOR SHARE of the session row is missing", r.status)
+	case <-time.After(400 * time.Millisecond):
+	}
+	// the holder closes the drawer and commits: the parked return wakes
+	// under its FOR SHARE, re-reads the session, and refuses
+	if _, err := holder.Exec(ctx, `UPDATE till_sessions SET status = 'CLOSED', closed_at = NOW() WHERE id = $1`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r := <-done
+	if r.status != http.StatusConflict {
+		t.Fatalf("the cash return parked on a closing session = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "session_closed" {
+		t.Errorf("blockers = %v, want session_closed (the session closed under the return's lock)", blockers)
+	}
+	// nothing left the counted drawer and no return row exists
+	if got := f.accountBalance("1010"); got != 599 {
+		t.Errorf("cash balance = %d, want 599 (the refused return paid nothing)", got)
+	}
+	if got := f.counterReturns(t); got != 0 {
+		t.Errorf("%d returns after the refusal, want 0", got)
+	}
+	f.assertARInvariants(t)
+}
+
 // tillExpected reads a session's stored expected_by_method map.
 func (f *fixture) tillExpected(t *testing.T, sessionID string) map[string]int64 {
 	t.Helper()
