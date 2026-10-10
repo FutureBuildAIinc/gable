@@ -92,6 +92,11 @@ type Repository interface {
 	CountNonTerminalDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error)
 	NextStopSequenceForRoute(ctx context.Context, routeID uuid.UUID) (int, error)
 	LockRoute(ctx context.Context, id uuid.UUID) error
+	// LockRouteForStopTransition locks the route the named stop belongs
+	// to and returns its current status, so a stop transition can refuse
+	// a delivery on a terminal route under the route lock. See PR 70
+	// review round 7 N3.
+	LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (RouteStatus, error)
 
 	// Stops
 	CreateDelivery(ctx context.Context, d *Stop) error
@@ -772,6 +777,33 @@ func (r *PostgresRepository) LockRoute(ctx context.Context, id uuid.UUID) error 
 		return fmt.Errorf("failed to lock route: %w", err)
 	}
 	return nil
+}
+
+// LockRouteForStopTransition locks the route the named stop belongs to
+// (FOR UPDATE OF the route row) and returns its current status, so the
+// stop transition can refuse a delivery on a route that is already in a
+// terminal state (CANCELLED or COMPLETED) under the route lock the stop
+// transition takes. The stop lock that runs first keeps the join honest
+// when a concurrent cancel rewrites the route: a route read without the
+// lock would race a cancellation that lands between the stop read and
+// the status read. PR 70 review round 7 N3.
+func (r *PostgresRepository) LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (RouteStatus, error) {
+	branch, sub := wallArgs(ctx)
+	var status RouteStatus
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT r.status FROM deliveries s
+			JOIN delivery_routes r ON r.id = s.route_id
+			JOIN orders o ON o.id = s.order_id
+		   WHERE s.id = $1 AND `+stopVisible(2, 3)+`
+		   FOR UPDATE OF r`,
+		deliveryID, branch, sub).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("failed to lock route for stop transition: %w", err)
+	}
+	return status, nil
 }
 
 // Stops

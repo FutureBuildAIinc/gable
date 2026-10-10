@@ -126,6 +126,9 @@ func (m *fakeRepo) UpdateRouteStatus(ctx context.Context, id uuid.UUID, status R
 	return nil
 }
 func (m *fakeRepo) LockRoute(ctx context.Context, id uuid.UUID) error { return nil }
+func (m *fakeRepo) LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (RouteStatus, error) {
+	return RouteStatusDraft, nil
+}
 
 func (m *fakeRepo) CreateDelivery(ctx context.Context, d *Stop) error {
 	m.createdStop = d

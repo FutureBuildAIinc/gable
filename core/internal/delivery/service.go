@@ -1153,12 +1153,29 @@ func (s *Service) TransitionStop(ctx context.Context, id uuid.UUID, d *StopTrans
 		if err := s.repo.LockDelivery(ctx, id); err != nil {
 			return notFound(err)
 		}
+		// PR 70 review round 7 N3: lock the route and refuse any
+		// transition whose route is already terminal. The route lock is
+		// the second FOR UPDATE in the same transaction, so a cancel
+		// racing this transition cannot slip a delivered stop onto a
+		// cancelled route through a status read between the stop read
+		// and the route check.
+		routeStatus, err := s.repo.LockRouteForStopTransition(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
 		cur, err := s.repo.GetDelivery(ctx, id)
 		if err != nil {
 			return notFound(err)
 		}
 		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
 			return err
+		}
+		if routeStatus == RouteStatusCancelled || routeStatus == RouteStatusCompleted {
+			return httpx.InvalidStateTransition(
+				"cannot complete a stop on a route already "+string(routeStatus),
+				httpx.Blocker("route_id",
+					"the route "+cur.RouteID.String()+" is "+string(routeStatus)+
+						" and takes no more stop transitions"))
 		}
 		if d.To != StopStatusDelivered && d.To != StopStatusFailed && d.To != StopStatusPartial {
 			return httpx.InvalidStateTransition("a stop cannot move to "+string(d.To),
