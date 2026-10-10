@@ -71,32 +71,48 @@ func (w *KeyBranchWall) NamedBranch(pathValue string) func(http.Handler) http.Ha
 	})
 }
 
-// BodyBranch wraps a handler whose JSON body names a branch in branch_id. A
-// body that names no branch (absent, empty, malformed) passes through: the
-// handler's own validation answers it, and the wall never turns a 400 into a
-// 403. The body is restored for the handler.
+// BodyBranch wraps a handler whose JSON body names a branch in branch_id. The
+// wall decodes the body into the same branch_id field and the same uuid.UUID
+// the handler decodes, and only a body that is exactly one complete JSON value
+// reaches that comparison: a body the handler's own json.Decoder would read
+// only in part (a second value or trailing bytes after the first) or not at
+// all is refused for a bound key, so the wall and the handler can never
+// disagree about what a body names. A body that parses and names no branch
+// (absent, null) passes through to the handler's own validation. The body is
+// restored for the handler.
 func (w *KeyBranchWall) BodyBranch() func(http.Handler) http.Handler {
 	return w.wrap("branch_id", "", func(ctx context.Context, r *http.Request) (uuid.UUID, bool, error) {
-		raw, err := io.ReadAll(r.Body)
-		if err != nil {
-			return uuid.Nil, false, fmt.Errorf("key branch wall: read body: %w", err)
-		}
-		r.Body = io.NopCloser(bytes.NewReader(raw))
 		var body struct {
-			BranchID string `json:"branch_id"`
+			BranchID uuid.UUID `json:"branch_id"`
 		}
-		if err := json.Unmarshal(raw, &body); err != nil {
+		if err := decodeOneJSON(r, &body); err != nil {
+			return uuid.Nil, false, err
+		}
+		if body.BranchID == uuid.Nil {
 			return uuid.Nil, false, nil
 		}
-		if body.BranchID == "" {
-			return uuid.Nil, false, nil
-		}
-		id, err := uuid.Parse(body.BranchID)
-		if err != nil {
-			return uuid.Nil, false, nil // the handler answers the malformed id
-		}
-		return id, true, nil
+		return body.BranchID, true, nil
 	})
+}
+
+// errRefused tells wrap the request is refused for a bound key rather than
+// failed: a body the wall cannot read as one complete JSON value.
+var errRefused = errors.New("key branch wall: refused")
+
+// decodeOneJSON reads the whole body, restores it for the handler, and decodes
+// it into v only when it is exactly one complete JSON value. Anything else
+// (unparsable, truncated, trailing data after the first value) answers
+// errRefused.
+func decodeOneJSON(r *http.Request, v any) error {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return fmt.Errorf("key branch wall: read body: %w", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	if err := json.Unmarshal(raw, v); err != nil {
+		return errRefused
+	}
+	return nil
 }
 
 // RowBranch wraps a handler whose path names a row ("id") whose branch
@@ -173,6 +189,10 @@ func (w *KeyBranchWall) wrap(field, reason string, named func(ctx context.Contex
 			}
 			id, has, err := named(r.Context(), r)
 			if err != nil {
+				if errors.Is(err, errRefused) {
+					w.refuse(r.Context(), rw, r, pin, field, reason)
+					return
+				}
 				slog.Error("key branch wall: branch lookup failed", "error", err, "method", r.Method, "path", r.URL.Path)
 				respondAuthError(rw, r, http.StatusInternalServerError, "internal_error", "branch lookup failed")
 				return
