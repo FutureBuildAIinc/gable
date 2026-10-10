@@ -301,15 +301,15 @@ func (s fixturePOSource) GetPOBranch(_ context.Context, id uuid.UUID) (*uuid.UUI
 // answer before any invoice is needed.
 type fixtureAPSource struct{}
 
-func (fixtureAPSource) ListVendorInvoices(_ context.Context, _ *uuid.UUID, _ string) ([]ap.VendorInvoice, error) {
+func (fixtureAPSource) ListVendorInvoices(_ context.Context, _ *uuid.UUID, _ string) ([]ap.Invoice, error) {
 	return nil, nil
 }
 
-func (fixtureAPSource) GetVendorInvoice(_ context.Context, _ uuid.UUID) (*ap.VendorInvoice, error) {
+func (fixtureAPSource) GetVendorInvoice(_ context.Context, _ uuid.UUID) (*ap.Invoice, error) {
 	return nil, nil
 }
 
-func (fixtureAPSource) ApproveInvoice(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*ap.VendorInvoice, error) {
+func (fixtureAPSource) ApproveInvoice(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*ap.Invoice, error) {
 	return nil, nil
 }
 

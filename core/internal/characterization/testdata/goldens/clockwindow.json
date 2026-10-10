@@ -11,11 +11,11 @@
       "content_type": "application/json",
       "body": [
         {
-          "current": 10000,
+          "current": 0,
           "past_30": 29029,
           "past_60": 31031,
           "past_90": 152152,
-          "total": 222212,
+          "total": 212212,
           "vendor_id": "<id-1>",
           "vendor_name": "BC Roofing Wholesale"
         }

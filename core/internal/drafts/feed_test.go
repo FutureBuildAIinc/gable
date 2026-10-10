@@ -271,7 +271,7 @@ func TestFeedCommitOrderServesBoth(t *testing.T) {
 	t.Cleanup(func() { _ = txA.Rollback(context.Background()) })
 	if _, err := txA.Exec(ctx,
 		"INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind) "+
-		"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
+			"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
 		uuid.New()); err != nil {
 		t.Fatalf("A insert: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestFeedCommitOrderServesBoth(t *testing.T) {
 	go func() {
 		_, err := txB.Exec(ctx,
 			"INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind) "+
-			"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
+				"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
 			uuid.New())
 		insertBErr <- err
 	}()
