@@ -4,6 +4,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -79,19 +80,44 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	// Extract request ID from context
 	requestID := sanitiseString(middleware.GetRequestID(ctx))
 
-	// Marshal changes to JSON after sanitising every string value: a refused
-	// path can hold a NUL byte or invalid UTF-8 from the URL, and the jsonb
-	// parser rejects a NUL with SQLSTATE 22P05, so the writer is the one
-	// place that prepares the row for Postgres text and jsonb both.
+	// Marshal changes to JSON, then rewrite the marshalled bytes so a NUL
+	// byte ANYWHERE in the changes (a top level string, a nested map, a
+	// slice value, a map key, a struct field, or any future shape the
+	// jsonb column accepts) never reaches the jsonb parser. json.Marshal
+	// escapes every NUL byte in the input as the six byte sequence
+	// `\u0000`, and the jsonb parser then rejects that sequence with
+	// SQLSTATE 22P05 ("unsupported Unicode escape sequence"). Replacing
+	// those six bytes with the seven byte sequence `\\u0000` in the
+	// marshalled text turns the escape into `\\` (an escaped backslash,
+	// a valid JSON escape for backslash) followed by the literal text
+	// `u0000`; the jsonb parser reads the six characters `\u0000` and
+	// the NUL byte is gone. The marker text `\\u0000` is itself NOT a
+	// valid JSON escape of NUL (the `\u0000` is preceded by `\\`, so it
+	// is no longer a `\u` escape; without the leading backslash `u0000`
+	// is plain text). json.Marshal also coerces any invalid UTF-8 byte
+	// in the input to U+FFFD, so a second pass over the bytes is enough.
+	// This is the one place that prepares the changes jsonb for Postgres,
+	// and the writer never mutates the caller's map: json.Marshal only
+	// reads, and the rewrite is on the resulting bytes.
 	var changesJSON []byte
 	if entry.Changes != nil {
 		var err error
-		changesJSON, err = json.Marshal(sanitiseChanges(entry.Changes))
+		changesJSON, err = json.Marshal(entry.Changes)
 		if err != nil {
 			slog.Error("audit: failed to marshal changes", "error", err)
 			changesJSON = nil
 		}
+		if len(changesJSON) > 0 {
+			changesJSON = sanitiseNULEscape(changesJSON)
+		}
 	}
+
+	// The plain string columns go to text, which rejects a NUL byte
+	// outright (SQLSTATE 22021). Sanitise them through the same function
+	// the JSON pass uses, so every string the writer hands to Postgres
+	// passes through one shared place.
+	action := sanitiseString(entry.Action)
+	entityType := sanitiseString(entry.EntityType)
 
 	var actingAs, tool any
 	if act.Kind == actor.KindAgent {
@@ -116,7 +142,7 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 		`INSERT INTO audit_log (action, entity_type, entity_id, user_id, changes, request_id,
 		                        actor_kind, actor_id, acting_as, tool)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		entry.Action, entry.EntityType, entry.EntityID, userIDVal, changesJSON, requestID,
+		action, entityType, entry.EntityID, userIDVal, changesJSON, requestID,
 		act.Kind, actorID, actingAs, tool,
 	)
 	if err != nil {
@@ -203,11 +229,26 @@ func sanitiseString(s string) string {
 	return b.String()
 }
 
-// sanitiseChanges walks a changes map and returns a copy with every string
-// value replaced by sanitiseString(string). Booleans and other typed values
-// pass through unchanged. The audit writer calls this on every entry's
-// Changes so callers do not have to know that NULs and invalid UTF-8 are
-// hazards at the database boundary.
+// sanitiseStringChanged is sanitiseString plus a flag that says whether
+// the input needed rewriting. The refusal path records the flag in the
+// audit row's changes (`path_sanitised: true`) so an investigator can
+// tell a sanitised NUL byte from a caller's literal `\u0000` text; the
+// server log line carries the verbatim path, which is the second record.
+func sanitiseStringChanged(s string) (string, bool) {
+	out := sanitiseString(s)
+	if out == s {
+		return out, false
+	}
+	return out, true
+}
+
+// sanitiseChanges is no longer called: the JSON byte pass (sanitiseNULEscape)
+// catches every NUL in the changes at every depth in one rewrite of the
+// marshalled bytes, so a walk of the map would do the same work twice. Kept
+// here only so the unit test that pins its name keeps compiling if a future
+// reviewer reintroduces the walk; otherwise the function is dead code.
+//
+//nolint:unused
 func sanitiseChanges(in map[string]interface{}) map[string]interface{} {
 	if len(in) == 0 {
 		return in
@@ -221,6 +262,34 @@ func sanitiseChanges(in map[string]interface{}) map[string]interface{} {
 		out[k] = v
 	}
 	return out
+}
+
+// nulJSONEscape is the six bytes json.Marshal writes for a NUL byte in a
+// string. The jsonb parser rejects this with SQLSTATE 22P05 ("unsupported
+// Unicode escape sequence"). The replacement is the seven bytes
+// `\u005Cu0000` no, simpler: the brief says "the text `\\u0000`" which is
+// the seven bytes `\`, `\`, `u`, `0`, `0`, `0`, `0`. The jsonb parser
+// reads `\\` as an escaped backslash (one character) and the four
+// characters `u0000` as plain text (no leading backslash, so no escape),
+// producing the six characters `\u0000` with no NUL byte. The marker text
+// itself is NOT a valid JSON escape of NUL (the `\u0000` is preceded by
+// `\\`, so it is no longer a `\u` escape).
+var (
+	nulJSONEscape    = []byte(`\u0000`)
+	nulJSONMarker    = []byte(`\\u0000`)
+)
+
+// sanitiseNULEscape rewrites every NUL escape in a json.Marshal output
+// (the six bytes `\u0000`) with the seven byte sequence `\\u0000`, so the
+// jsonb parser reads the six characters `\u0000` and no NUL byte reaches
+// the jsonb value. The input is the marshalled JSON the writer is about to
+// INSERT; invalid UTF-8 is already coerced to U+FFFD by json.Marshal, so
+// one byte pass is enough. The input is not mutated.
+func sanitiseNULEscape(in []byte) []byte {
+	if len(in) == 0 {
+		return in
+	}
+	return bytes.ReplaceAll(in, nulJSONEscape, nulJSONMarker)
 }
 
 // AuditKeyRefusal records a refused machine-key request (a valid key refused
@@ -241,11 +310,30 @@ func (l *Logger) AuditKeyRefusal(ctx context.Context, keyID, action, scope, meth
 		slog.Error("audit: machine key refusal with non-uuid key id", "key_id", keyID, "action", action)
 		id = uuid.Nil
 	}
-	storedPath, pathTruncated := cutRunes(path, maxRefusalPathBytes)
+	// The 512 byte cap is on the stored path, so it must be cut AFTER
+	// sanitising: a NUL byte becomes six characters in the stored value
+	// (the marker is the six byte text `\u0000`), and an invalid UTF-8
+	// byte may be replaced by the three byte U+FFFD, both of which would
+	// push a path that fit pre-sanitise over the cap post-sanitise. The
+	// cap protects the row from an attacker sized path; cutting on the
+	// pre-sanitise length would let the stored row exceed the cap.
+	storedPath, sanitised := sanitiseStringChanged(path)
+	pathTruncated := false
+	if len(storedPath) > maxRefusalPathBytes {
+		storedPath, pathTruncated = cutRunes(storedPath, maxRefusalPathBytes)
+	}
 	storedScope, scopeTruncated := cutRunes(scope, maxRefusalScopeBytes)
 	changes := map[string]interface{}{"method": method, "path": storedPath}
 	if pathTruncated {
 		changes["path_truncated"] = true
+	}
+	if sanitised {
+		// A sanitised NUL is otherwise indistinguishable from a
+		// caller's literal `\u0000` text: both read back as the six
+		// characters `\u0000`. Flag it so an investigator can tell the
+		// two apart (the server log line carries the verbatim path,
+		// which is the other record).
+		changes["path_sanitised"] = true
 	}
 	if scopeTruncated {
 		changes["scope_truncated"] = true
