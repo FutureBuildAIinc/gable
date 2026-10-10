@@ -313,6 +313,17 @@ func (f *keyPinFixture) hasGrant(t *testing.T, sub string, branch uuid.UUID) boo
 	return ok
 }
 
+// homeBranch reads the branch a user's is_home grant row names.
+func (f *keyPinFixture) homeBranch(t *testing.T, sub string) uuid.UUID {
+	t.Helper()
+	var id uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT branch_id FROM user_locations WHERE user_sub = $1 AND is_home`, sub).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func (f *keyPinFixture) exposureEvents(t *testing.T, quote uuid.UUID) int {
 	t.Helper()
 	var n int
@@ -440,6 +451,36 @@ func TestKeyBranchPin_UserGrants(t *testing.T) {
 	f.allow(t, "bound", "PUT", "/api/v1/users/pin-bound-grant/home-branch", fmt.Sprintf(`{"branch_id":%q}`, A), nil, http.StatusNoContent)
 	f.allow(t, "unbound", "PUT", "/api/v1/users/pin-free-grant/home-branch", fmt.Sprintf(`{"branch_id":%q}`, B), nil, http.StatusNoContent)
 	f.allow(t, "user", "PUT", "/api/v1/users/pin-user-grant/home-branch", fmt.Sprintf(`{"branch_id":%q}`, B), nil, http.StatusNoContent)
+
+	// A body the handler would read only in part never reaches it: the wall
+	// parses the whole body exactly as the handler's own decoder would have to,
+	// and a valid object followed by anything at all is refused for the bound
+	// key with its audit row and no write. Each body below names the foreign
+	// branch in its first value, which is all the handler's json.Decoder reads.
+	for _, body := range []string{
+		fmt.Sprintf(`{"branch_id":%q} {}`, B),
+		fmt.Sprintf(`{"branch_id":%q}xyz`, B),
+		fmt.Sprintf(`{"branch_id":%q} 1`, B),
+	} {
+		f.refuseForeign(t, "POST", "/api/v1/users/pin-trail-grant/branches", body, nil)
+		if f.hasGrant(t, "pin-trail-grant", f.branchB) {
+			t.Errorf("grant body with trailing data %q wrote the foreign grant row", body)
+		}
+	}
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by)
+		VALUES ('pin-trail-home', $1, TRUE, 'test'), ('pin-trail-home', $2, FALSE, 'test')`, f.branchA, f.branchB); err != nil {
+		t.Fatalf("seed trail home grants: %v", err)
+	}
+	for _, body := range []string{
+		fmt.Sprintf(`{"branch_id":%q} {}`, B),
+		fmt.Sprintf(`{"branch_id":%q}]`, B),
+	} {
+		f.refuseForeign(t, "PUT", "/api/v1/users/pin-trail-home/home-branch", body, nil)
+		if home := f.homeBranch(t, "pin-trail-home"); home != f.branchA {
+			t.Errorf("home branch body with trailing data %q moved the home to %s", body, home)
+		}
+	}
 
 	// Revoke: path branch_id.
 	f.refuseForeign(t, "DELETE", "/api/v1/users/pin-both/branches/"+B, "", nil)
