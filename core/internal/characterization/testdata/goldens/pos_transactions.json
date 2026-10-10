@@ -1253,10 +1253,10 @@
           "details": [
             {
               "code": "insufficient_tender",
-              "message": "the sale needs 1571 cents and the tenders carry 1"
+              "message": "the sale needs 1403 cents and the tenders carry 1"
             }
           ],
-          "message": "the sale needs 1571 cents and the tenders carry 1"
+          "message": "the sale needs 1403 cents and the tenders carry 1"
         },
         "meta": {
           "request_id": "<id-50>"
