@@ -39,35 +39,135 @@ ALTER TABLE delivery_routes ALTER COLUMN status SET NOT NULL;
 UPDATE deliveries SET status = 'PENDING' WHERE status IS NULL;
 ALTER TABLE deliveries ALTER COLUMN status SET NOT NULL;
 
--- 1b. Normalise a legacy lowercase or mixed-case status to the storage
---     spelling the model and the scans carry. Without this rewrite a stored
---     lowercase or foreign value (a `delivered` stop, an `in_progress`
---     route) walks through ModelText's map lookup, hits no key, and the
---     reader emits the start-state name instead of the row's own status:
---     the read and the write then disagree about the same row and a
---     dispatch against `in_progress` answers 409 while the read still
---     prints `draft`. The legacy vocabulary comes from the start-state
---     fill (a NULL was filled with `'DRAFT'` for routes and `'PENDING'`
---     for stops) and the storage spelling; the model's map keys are all
---     UPPERCASE, so uppercasing the known lowercase values brings them
---     into the same vocabulary. Any value outside the known list is a
---     legacy artefact: route rows map to `'DRAFT'`, stop rows to
---     `'PENDING'` (a tracked started value, the row visible but stalled
---     until an operator rewrites it). CONTRACT-CHANGES rows for this
---     behaviour cover the up migration.
-UPDATE delivery_routes
-   SET status = UPPER(status)
- WHERE LOWER(status) IN ('draft', 'scheduled', 'in_transit', 'completed', 'cancelled');
-UPDATE delivery_routes
-   SET status = 'DRAFT'
- WHERE status NOT IN ('DRAFT', 'SCHEDULED', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED');
+-- 1b. Normalise a legacy lowercase or foreign status to the storage
+--     spelling the model and the scans carry, and never revive an
+--     unknown stored status to a live state (PR 70 review round 5
+--     P2-1, lead decision on method). Each row is rewritten in two
+--     passes; first the spelling is normalised (UPPER(BTRIM(status)))
+--     and the known synonyms are mapped explicitly, so a legacy
+--     `delivered` stop, an `IN_PROGRESS` route, a stored `COMPLETE`
+--     route (no trailing D), a stored `CANCELED` route (one L) and a
+--     stored value with stray whitespace each land on the canonical
+--     value the model and the scans carry. Any stored value still
+--     outside the vocabulary after that pass is mapped to a TERMINAL
+--     non billing state of its table: a route becomes `'CANCELLED'`
+--     and a stop becomes `'FAILED'`. TransitionRoute (dispatch from
+--     DRAFT or SCHEDULED only) cannot move a CANCELLED route to
+--     in_transit; TransitionStop accepts only PENDING or
+--     OUT_FOR_DELIVERY as the source for delivery, so a FAILED stop
+--     cannot be delivered again, cannot re queue fulfilment and
+--     cannot be re billed. The mapping never sends a rewritten row
+--     to `'DRAFT'` or `'PENDING'`; both are live states and a legacy
+--     row of unknown spelling could have been a finished route or a
+--     delivered stop. Each row the rewrite touches is named in a
+--     RAISE NOTICE (the table, the id, the old value, the new value)
+--     so an operator has the audit trail and a refusal to fail the
+--     migration keeps an unattended up applyable on a polluted
+--     legacy database. CONTRACT-CHANGES rows for this behaviour
+--     cover the up migration.
+DO $$
+DECLARE
+  r record;
+  new_status text;
+BEGIN
+  -- Normalise spelling: trim then upper. BTRIM trims leading and
+  -- trailing whitespace, UPPER brings the casing to the storage
+  -- vocabulary. The set below is the closed route vocabulary, the
+  -- same spelling model.go uses for the storage values and that
+  -- every scan reads into a non-null string. The legacy values the
+  -- route vocabulary used (IN_PROGRESS, COMPLETE, CANCELED) are
+  -- mapped explicitly to their canonical forms. The rewrite covers
+  -- a case or whitespace change (status != UPPER(BTRIM(status)))
+  -- and a foreign synonym (UPPER(BTRIM(status)) in the synonym
+  -- set, mapping to a different canonical value).
+  FOR r IN
+    SELECT id, status AS old_status
+      FROM delivery_routes
+     WHERE UPPER(BTRIM(status)) IN (
+       'DRAFT', 'SCHEDULED', 'IN_TRANSIT', 'IN_PROGRESS',
+       'COMPLETED', 'COMPLETE', 'CANCELLED', 'CANCELED'
+     )
+       AND (
+         status IS DISTINCT FROM UPPER(BTRIM(status))
+         OR UPPER(BTRIM(status)) IN ('IN_PROGRESS', 'COMPLETE', 'CANCELED')
+       )
+  LOOP
+    new_status := CASE UPPER(BTRIM(r.old_status))
+      WHEN 'IN_PROGRESS' THEN 'IN_TRANSIT'
+      WHEN 'COMPLETE'    THEN 'COMPLETED'
+      WHEN 'CANCELED'    THEN 'CANCELLED'
+      ELSE UPPER(BTRIM(r.old_status))
+    END;
+    UPDATE delivery_routes
+       SET status = new_status
+     WHERE id = r.id;
+    RAISE NOTICE 'migration 104: delivery_routes id=% old=% new=%',
+      r.id, r.old_status, new_status;
+  END LOOP;
+  -- Any stored value still outside the vocabulary is a legacy
+  -- artefact; the migration sends it to the terminal non billing
+  -- value CANCELLED so a finished or in flight route of unknown
+  -- spelling cannot reopen as dispatchable (DRAFT) and a route that
+  -- already had its stops cancelled stays cancelled.
+  FOR r IN
+    SELECT id, status AS old_status
+      FROM delivery_routes
+     WHERE status NOT IN (
+       'DRAFT', 'SCHEDULED', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED'
+     )
+  LOOP
+    RAISE NOTICE 'migration 104: delivery_routes id=% old=% new=CANCELLED',
+      r.id, r.old_status;
+    UPDATE delivery_routes
+       SET status = 'CANCELLED'
+     WHERE id = r.id;
+  END LOOP;
+END $$;
 
-UPDATE deliveries
-   SET status = UPPER(status)
- WHERE LOWER(status) IN ('pending', 'out_for_delivery', 'delivered', 'failed', 'partial');
-UPDATE deliveries
-   SET status = 'PENDING'
- WHERE status NOT IN ('PENDING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED', 'PARTIAL');
+DO $$
+DECLARE
+  r record;
+  new_status text;
+BEGIN
+  -- Same normalisation for stops. The legacy vocabulary had no
+  -- foreign spellings of the known values; a `CANCELLED` stop is
+  -- the one foreign spelling a legacy database carried, and it has
+  -- no home in the stop vocabulary, so it lands on the terminal
+  -- non billing value FAILED. A value with stray whitespace and a
+  -- lowercase known value are handled here too.
+  FOR r IN
+    SELECT id, status AS old_status
+      FROM deliveries
+     WHERE UPPER(BTRIM(status)) IN (
+       'PENDING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED', 'PARTIAL'
+     )
+       AND UPPER(BTRIM(status)) IS DISTINCT FROM status
+  LOOP
+    new_status := UPPER(BTRIM(r.old_status));
+    UPDATE deliveries
+       SET status = new_status
+     WHERE id = r.id;
+    RAISE NOTICE 'migration 104: deliveries id=% old=% new=%',
+      r.id, r.old_status, new_status;
+  END LOOP;
+  -- Any stored value still outside the vocabulary lands on the
+  -- terminal non billing value FAILED so a delivered stop of
+  -- unknown spelling cannot reopen as deliverable (PENDING) and
+  -- cannot re queue fulfilment or re bill.
+  FOR r IN
+    SELECT id, status AS old_status
+      FROM deliveries
+     WHERE status NOT IN (
+       'PENDING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED', 'PARTIAL'
+     )
+  LOOP
+    RAISE NOTICE 'migration 104: deliveries id=% old=% new=FAILED',
+      r.id, r.old_status;
+    UPDATE deliveries
+       SET status = 'FAILED'
+     WHERE id = r.id;
+  END LOOP;
+END $$;
 
 -- 2. The revision every mutable document carries (ADR 0001 section 11).
 --    Existing rows start at 1; the DEFAULT serves raw writers (the seed, the

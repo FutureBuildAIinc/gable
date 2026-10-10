@@ -204,16 +204,29 @@ func TestMigration104_BackfillsNullStatusAndSetsNotNull(t *testing.T) {
 	}
 }
 
-// RULE (PR 70 review round 4 P3-2 and round 3's left P3): the up migration
-// also normalises a legacy lowercase or stored value to the UPPERCASE
-// vocabulary the model and scans carry, and routes a stored value outside
-// the known vocabulary to a stated blocking value (a route becomes DRAFT,
-// a stop becomes PENDING). The test inserts one of each shape the legacy
-// schema allows before applying migration 104 and reads back: the
-// lowercase values come through uppercase; the foreign values land on
-// the stated blocking value.
+// RULE (PR 70 review round 5 P2-1, lead decision on method): the up
+// migration normalises a legacy stored status to the UPPERCASE vocabulary
+// the model and scans carry (UPPER(BTRIM(status))) and maps a stored value
+// outside the vocabulary to a TERMINAL non billing state of each table:
+// a route becomes CANCELLED and a stop becomes FAILED (the values
+// TransitionRoute and TransitionStop can never dispatch, deliver, fulfil
+// or bill from). The known synonyms are mapped explicitly so a value the
+// legacy spellings used (a lowercase or spaced form of a known value, a
+// stored COMPLETE route, a stored IN_PROGRESS route, a stored CANCELED
+// route, a stored DELIVERED with stray whitespace, a stored CANCELLED
+// stop) lands on the right value. Each row the migration rewrites is
+// named in a RAISE NOTICE (the table, the id, the old value, the new
+// value). The mapping never sends a row to DRAFT or PENDING; DRAFT and
+// PENDING are live states and a legacy row of unknown spelling could
+// have been a finished route or a delivered stop, so the migration
+// refuses to revive them. The test inserts one of each shape the legacy
+// schema allows, applies migration 104, reads back, and asserts the
+// known synonyms land on their canonical values, the unknown values
+// land on the terminal non billing values of their tables, the notices
+// name every rewritten row, and no rewritten row ended on DRAFT or
+// PENDING (the unsafe mapping the prior round shipped).
 func TestMigration104_NormalisesLowercaseAndUnknownStatuses(t *testing.T) {
-	conn, _ := scratchDB104(t)
+	conn, notices := scratchDB104(t)
 	before, target := migration104Files(t)
 	for _, f := range before {
 		apply104(t, conn, f)
@@ -238,17 +251,27 @@ func TestMigration104_NormalisesLowercaseAndUnknownStatuses(t *testing.T) {
 		t.Fatalf("seed rows: %v", err)
 	}
 
-	// A lowercase known route vocabulary value (route 'in_transit') and a
-	// stored unknown route value ('weird_legacy'); a lowercase known stop
-	// value ('delivered') and a stored unknown stop value ('finished?'). The
-	// migration rewrites every one of these.
+	// Lowercase known forms, foreign spellings the legacy vocabulary used,
+	// whitespace-padded values and nonsense values the migration must
+	// classify safely. Routes: lowercase 'in_transit', foreign 'IN_PROGRESS',
+	// stored 'COMPLETE' (no D), foreign 'CANCELED' (one L), whitespace
+	// ' DRAFT ', nonsense 'weird_legacy'. Stops: lowercase 'delivered',
+	// whitespace 'DELIVERED ' (trailing space), nonsense 'finished?',
+	// foreign 'CANCELLED' (has no home in the stop vocabulary). Every
+	// row is rewritten by the migration.
 	legacyRows := `
 		INSERT INTO delivery_routes (id, vehicle_id, driver_id, scheduled_date, status) VALUES
 			('00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'in_transit'),
-			('00000000-0000-4000-8000-0000000104de', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'weird_legacy');
+			('00000000-0000-4000-8000-0000000104de', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'IN_PROGRESS'),
+			('00000000-0000-4000-8000-0000000104d1', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'COMPLETE'),
+			('00000000-0000-4000-8000-0000000104d2', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'CANCELED'),
+			('00000000-0000-4000-8000-0000000104d3', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, ' DRAFT '),
+			('00000000-0000-4000-8000-0000000104d4', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'weird_legacy');
 		INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status) VALUES
 			('00000000-0000-4000-8000-0000000104df', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 1, 'delivered'),
-			('00000000-0000-4000-8000-0000000104e0', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 2, 'finished?');
+			('00000000-0000-4000-8000-0000000104e1', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 2, 'DELIVERED '),
+			('00000000-0000-4000-8000-0000000104e2', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 3, 'finished?'),
+			('00000000-0000-4000-8000-0000000104e3', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 4, 'CANCELLED');
 	`
 	if _, err := conn.Exec(context.Background(), legacyRows); err != nil {
 		t.Fatalf("legacy rows: %v", err)
@@ -256,20 +279,88 @@ func TestMigration104_NormalisesLowercaseAndUnknownStatuses(t *testing.T) {
 
 	apply104(t, conn, target)
 
-	// The lowercase IN_TRANSIT is normalised to UPPER; a stored unknown
-	// route value moves to the stated blocking value (DRAFT).
+	// Route: known synonyms land on their canonical values.
 	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104dd"); got != "IN_TRANSIT" {
 		t.Errorf("lowercase route status after migration = %s, want IN_TRANSIT", got)
 	}
-	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104de"); got != "DRAFT" {
-		t.Errorf("unknown route status after migration = %s, want DRAFT", got)
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104de"); got != "IN_TRANSIT" {
+		t.Errorf("IN_PROGRESS route status after migration = %s, want IN_TRANSIT", got)
 	}
-	// The lowercase DELIVERED is normalised to UPPER; an unknown stop value
-	// moves to the stated blocking value (PENDING).
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104d1"); got != "COMPLETED" {
+		t.Errorf("COMPLETE route status after migration = %s, want COMPLETED (not DRAFT)", got)
+	}
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104d2"); got != "CANCELLED" {
+		t.Errorf("CANCELED route status after migration = %s, want CANCELLED (not DRAFT)", got)
+	}
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104d3"); got != "DRAFT" {
+		t.Errorf("whitespace-padded route status after migration = %s, want DRAFT (trim then known)", got)
+	}
+	// Route: nonsense value lands on the terminal non billing value
+	// CANCELLED, never DRAFT (a DRAFT route is dispatchable).
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104d4"); got != "CANCELLED" {
+		t.Errorf("nonsense route status after migration = %s, want CANCELLED (not DRAFT)", got)
+	}
+	// Stop: known synonyms land on their canonical values.
 	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104df"); got != "DELIVERED" {
 		t.Errorf("lowercase stop status after migration = %s, want DELIVERED", got)
 	}
-	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104e0"); got != "PENDING" {
-		t.Errorf("unknown stop status after migration = %s, want PENDING", got)
+	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104e1"); got != "DELIVERED" {
+		t.Errorf("whitespace-padded stop status after migration = %s, want DELIVERED", got)
+	}
+	// Stop: nonsense and foreign values land on the terminal non billing
+	// value FAILED, never PENDING (a PENDING stop can be delivered again
+	// and re queue fulfilment and re bill).
+	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104e2"); got != "FAILED" {
+		t.Errorf("nonsense stop status after migration = %s, want FAILED (not PENDING)", got)
+	}
+	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104e3"); got != "FAILED" {
+		t.Errorf("CANCELLED stop status after migration = %s, want FAILED (not PENDING)", got)
+	}
+
+	// No rewritten row ended on DRAFT or PENDING (the unsafe mapping the
+	// prior round shipped; the brief: a route or a stop of unknown
+	// spelling could have been a finished route or a delivered stop, so
+	// the migration refuses to revive them onto the two most live
+	// states). The unknown-status rows above are exactly the rows the
+	// unsafe mapping would have revived.
+	var draft, pending int
+	if err := conn.QueryRow(context.Background(),
+		`SELECT count(*) FROM delivery_routes WHERE id IN ('00000000-0000-4000-8000-0000000104d1','00000000-0000-4000-8000-0000000104d2','00000000-0000-4000-8000-0000000104d4') AND status = 'DRAFT'`).Scan(&draft); err != nil {
+		t.Fatal(err)
+	}
+	if draft != 0 {
+		t.Errorf("%d rewritten route rows landed on DRAFT, want 0 (the unsafe mapping)", draft)
+	}
+	if err := conn.QueryRow(context.Background(),
+		`SELECT count(*) FROM deliveries WHERE id IN ('00000000-0000-4000-8000-0000000104e2','00000000-0000-4000-8000-0000000104e3') AND status = 'PENDING'`).Scan(&pending); err != nil {
+		t.Fatal(err)
+	}
+	if pending != 0 {
+		t.Errorf("%d rewritten stop rows landed on PENDING, want 0 (the unsafe mapping)", pending)
+	}
+
+	// Every rewritten row is named in a RAISE NOTICE: the table, the id,
+	// the old value and the new value. The notice text the migration
+	// emits is the operator's audit trail for the rewrite.
+	wantNotices := []struct{ table, id, old, neu string }{
+		{"delivery_routes", "00000000-0000-4000-8000-0000000104de", "IN_PROGRESS", "IN_TRANSIT"},
+		{"delivery_routes", "00000000-0000-4000-8000-0000000104d1", "COMPLETE", "COMPLETED"},
+		{"delivery_routes", "00000000-0000-4000-8000-0000000104d2", "CANCELED", "CANCELLED"},
+		{"delivery_routes", "00000000-0000-4000-8000-0000000104d4", "weird_legacy", "CANCELLED"},
+		{"deliveries", "00000000-0000-4000-8000-0000000104e2", "finished?", "FAILED"},
+		{"deliveries", "00000000-0000-4000-8000-0000000104e3", "CANCELLED", "FAILED"},
+	}
+	for _, w := range wantNotices {
+		var found bool
+		for _, line := range *notices {
+			if strings.Contains(line, w.table) && strings.Contains(line, w.id) &&
+				strings.Contains(line, w.old) && strings.Contains(line, w.neu) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("no NOTICE named %s id=%s old=%s new=%s; got %d notices", w.table, w.id, w.old, w.neu, len(*notices))
+		}
 	}
 }
