@@ -11,8 +11,8 @@ expiration, and it is the first priced document. The customer accepts
 or rejects the offer through the portal or the integration seam; an
 accepted quote becomes an order through
 `POST /api/v1/quotes/{id}/convert`. The lifecycle spans draft, sent,
-accepted, rejected, expired and reopened, every transition writing one
-outbox event.
+accepted, rejected and expired; rejected and expired reopen to draft, every
+transition writing one outbox event.
 
 This module is the wire template. The recipe in
 [`docs/refactor/MODULE-RECIPE.md`](../refactor/MODULE-RECIPE.md) was
@@ -47,11 +47,18 @@ package.
 | POST | `/api/v1/quotes/{id}/transitions` | Move a quote along its lifecycle, on the client's revision. |
 | POST | `/api/v1/quotes/{id}/convert` | Accept and create the order in one transaction. |
 | GET | `/api/v1/quotes/{id}/file` | Download the original parsed file. |
+| PUT | `/api/v1/quotes/{id}/file` | Attach the AI parse's original file after promotion, on the client's revision; `application/octet-stream` body, 5 MiB bound; only while the quote is a draft, else 409 with the `quote_not_draft` blocker. |
 
 The exposure routes at `/api/v1/quotes/exposure` and
 `/api/v1/quotes/{id}/exposure/...` belong to the pricing module and
 register under `internal/pricing` in the route census, even though
-their paths sit under `quotes`.
+their paths sit under `quotes`. The draft routes at
+`/api/v1/drafts/quotes` and `/api/v1/drafts/quotes/{id}[/...]` belong
+to the drafts module and register under `internal/quote` (the
+promotion route turns a quote draft into a quote in one transaction);
+the draft routes are documented in
+[`docs/modules/drafts.md`](drafts.md) and are listed here only so the
+route census and this page agree on the package that owns the paths.
 
 ## The main resource
 
@@ -98,13 +105,16 @@ A `QuoteLine` carries:
 | `description` | text | Snapshot of the description. |
 | `customer_note` | text, nullable | The customer's free text note on the line. |
 | `quantity` | decimal string | Scale 4. |
-| `uom` | uppercase enum | The sale unit (`PCS`, `EA`, `LF`, `SF`, `BF`, `MBF`, `SQ`, `BOX`, `CTN`, `RL`, `GAL`, `LBS`, `BAG`, `BUNDLE`, `PAIR`, `SET`). |
+| `uom` | uppercase pattern | The sale unit, regex `^[A-Z]{1,6}$`, a code from the units catalogue (ADR 0006 section 2.1: the seed inserts 23 codes including `EA`, `PCS`, `PAIR`, `DOZ`, `C`, `M`, `SET`, `BOX`, `CTN`, `BAG`, `BUNDLE`, `RL`, `LF`, `SF`, `SQ`, `CF`, `CY`, `GAL`, `LBS`, `CWT`, `TON`, `BF`, `MBF`; dealers add their own). On a product line the value must be one of the product's own sale units (ADR 0006 section 3.4). |
 | `price_uom` | text | The price unit. |
 | `uom_qty` | decimal string | Scale 4. |
 | `price_uom_qty` | decimal string | Scale 4. |
 | `unit_price_ten_thousandths` | integer | The price per `price_uom`. |
 | `line_total_cents` | integer | The extension, rounded once. |
 | `unit_cost_ten_thousandths` | integer | The cost per stocking unit. |
+| `stock_uom` | text, nullable | The product's stocking unit at the line's create (ADR 0006 section 3.4); null on a line without a product. |
+| `stock_quantity` | decimal string, nullable | The line's quantity converted into the stocking unit, exact at scale 4 (R5); null on a line without a product. |
+| `tally` | object, nullable | The pieces by length a random length line carries (ADR 0006 section 4): `thickness_in`, `width_in`, `rows` (pieces and length_ft), `linear_feet`, `board_feet`. Null on every other line. |
 | `created_at` | timestamp | RFC 3339 UTC. |
 
 The conversion pair (`uom_qty`, `price_uom_qty`) is mandatory; when
