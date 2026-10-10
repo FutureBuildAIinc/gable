@@ -474,8 +474,7 @@ func Run() {
 	})
 	wall.orders(mux, orderSvc)
 	// The charge code master (ADR 0005 section 2.5), contract born.
-	chargecode.NewHandler(chargecode.NewService(chargecode.NewRepository(db))).
-		RegisterRoutes(mux, scoped("admin", "owner", "sales", "finance"), scoped("admin", "owner", "finance"))
+	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
 	// Quote conversion creates the order in one act (ADR 0005 section 5.8).
 	quoteSvc.WithOrderCreator(orderSvc)
 

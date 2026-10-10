@@ -23,6 +23,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/document"
@@ -232,6 +233,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
 	wall.inventory(mux, invSvc)
 	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
+	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	// The crm mount, driven here as serve wires it: the activity routes
@@ -1512,6 +1514,38 @@ func TestBranchWall_CatalogReads(t *testing.T) {
 	// A branch route refuses a path id that is not a branch.
 	if got := f.call(t, "PUT", "/api/v1/branches/"+f.yardA.String(), `{"code":"x","revision":1}`, "admin", "boss", ""); got != http.StatusNotFound {
 		t.Errorf("branch update of a yard: %d, want 404", got)
+	}
+}
+
+// The charge code master through serve's wiring: every pricing role reads it,
+// and a write takes the narrower guard, so a sales user cannot create or edit
+// a code (and with it the revenue account a charge line posts to).
+func TestBranchWall_ChargeCodeWritesTakeTheFinanceGuard(t *testing.T) {
+	testutil.LockOutboxTables(t) // the fixture's route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	const missing = "/api/v1/charge-codes/00000000-0000-0000-0000-000000000001"
+	for _, role := range []string{"admin", "owner", "sales", "finance"} {
+		if got := f.call(t, "GET", "/api/v1/charge-codes", "", role, "u-a", ""); got != http.StatusOK {
+			t.Errorf("%s lists charge codes: %d, want 200", role, got)
+		}
+	}
+	// warehouse prices inventory but never writes or reads charge codes, so
+	// the read guard refuses it as surely as the write guard does.
+	if got := f.call(t, "GET", "/api/v1/charge-codes", "", "warehouse", "u-a", ""); got != http.StatusForbidden {
+		t.Errorf("warehouse lists charge codes: %d, want 403", got)
+	}
+	for _, c := range []struct{ method, path string }{{"POST", "/api/v1/charge-codes"}, {"PUT", missing}} {
+		if got := f.call(t, c.method, c.path, `{}`, "sales", "u-a", ""); got != http.StatusForbidden {
+			t.Errorf("sales %s %s: %d, want 403", c.method, c.path, got)
+		}
+		if got := f.call(t, c.method, c.path, `{}`, "warehouse", "u-a", ""); got != http.StatusForbidden {
+			t.Errorf("warehouse %s %s: %d, want 403", c.method, c.path, got)
+		}
+		// Past the guard an empty body is refused by the handler, not the role.
+		if got := f.call(t, c.method, c.path, `{}`, "finance", "u-a", ""); got == http.StatusForbidden {
+			t.Errorf("finance %s %s: 403, want the guard to admit finance", c.method, c.path)
+		}
 	}
 }
 
