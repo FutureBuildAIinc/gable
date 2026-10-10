@@ -11455,7 +11455,7 @@ export interface components {
             customer_id?: string | null;
             refund_method?: components["schemas"]["PosRefundMethod"];
             reason: string;
-            /** @description Names the gateway refund for a card return. */
+            /** @description Refused on a card return: the refund goes to the sale's own card tender, never a transaction the client names. */
             gateway_tx_id?: string | null;
             lines: components["schemas"]["PosReturnLineRequest"][];
         };
@@ -11467,7 +11467,7 @@ export interface components {
             product_id?: string | null;
             /**
              * Format: uuid
-             * @description The sale line returned; its price and cost follow.
+             * @description The sale line returned; its price and cost follow. Required on every line when original_sale_id is named.
              */
             line_id?: string | null;
             description?: string | null;

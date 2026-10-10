@@ -843,7 +843,7 @@ components:
         customer_id: {type: [string, "null"], format: uuid}
         refund_method: {$ref: "#/components/schemas/PosRefundMethod"}
         reason: {type: string}
-        gateway_tx_id: {type: [string, "null"], description: "Names the gateway refund for a card return."}
+        gateway_tx_id: {type: [string, "null"], description: "Refused on a card return: the refund goes to the sale's own card tender, never a transaction the client names."}
         lines:
           type: array
           items:
@@ -853,7 +853,7 @@ components:
       required: [quantity]
       properties:
         product_id: {type: [string, "null"], format: uuid, description: "Required when the line names no sale line."}
-        line_id: {type: [string, "null"], format: uuid, description: "The sale line returned; its price and cost follow."}
+        line_id: {type: [string, "null"], format: uuid, description: "The sale line returned; its price and cost follow. Required on every line when original_sale_id is named."}
         description: {type: [string, "null"]}
         quantity: {type: string, description: "A positive decimal string with at most 4 fraction digits."}
         unit_price_ten_thousandths: {type: integer, format: int64, minimum: 0, description: "Required when the line names no sale line."}
