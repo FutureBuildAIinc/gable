@@ -25,6 +25,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
@@ -125,6 +126,10 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	mux := http.NewServeMux()
 	pos.NewHandler(f.service).RegisterRoutes(mux)
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
+	// the payment route, as serve mounts it: the contention tests race real
+	// walk-in payments against the sales
+	payments := payment.NewService(db, payment.NewRepository(db), acct)
+	payment.NewHandler(payments).RegisterRoutes(mux)
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(roleClaims(middleware.NewBranchMiddleware(db).Handler(mux))))
 	t.Cleanup(func() {
 		f.srv.Close()
@@ -172,14 +177,22 @@ func (f *fixture) cleanup() {
 	// the entry delete never misses one that named a payment or an
 	// application deleted below
 	var entryIDs []string
+	// Every entry the fixture's documents own, and every reversal of one of
+	// those entries (a void reverses receipt and application entries too, and
+	// a reversal whose original goes would trip the reverses foreign key and
+	// strand the whole family).
 	if rows, err := f.db.Pool.Query(ctx, `SELECT e.id::text FROM gl_journal_entries e WHERE e.source_ref_id::text IN
 		(SELECT id::text FROM invoices WHERE id IN `+invs+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM payments WHERE id IN `+pays+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
 		OR e.source_ref_id::text IN (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)
-		OR e.reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id::text IN
-			(SELECT id::text FROM invoices WHERE id IN `+invs+`))`, f.customerID); err == nil {
+		OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN
+			((SELECT id::text FROM invoices WHERE id IN `+invs+`)
+			UNION (SELECT id::text FROM credit_memos WHERE id IN `+cms+`)
+			UNION (SELECT id::text FROM payments WHERE id IN `+pays+`)
+			UNION (SELECT id::text FROM ar_applications WHERE invoice_id IN `+invs+`)
+			UNION (SELECT id::text FROM payment_refunds WHERE payment_id IN `+pays+` OR credit_memo_id IN `+cms+`)))`, f.customerID); err == nil {
 		for rows.Next() {
 			var id string
 			if rows.Scan(&id) == nil {

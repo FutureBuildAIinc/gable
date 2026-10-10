@@ -11,6 +11,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -465,6 +466,19 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		if err := s.repo.CreateReturn(ctx, ret, lines); err != nil {
 			return err
+		}
+		// The audit row, inside the transaction (R1-14): a rolled back return
+		// leaves no row.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: "pos.return.completed", EntityType: "pos_return", EntityID: ret.ID, UserID: actor,
+				Changes: map[string]any{
+					"number": ret.Number, "total_cents": total, "refund_method": in.RefundMethod.Status(),
+					"register_id": in.RegisterID, "customer_id": customerID, "credit_memo_id": memoID,
+					"original_sale_id": in.OriginalSaleID,
+				}}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
 		}
 		// The events, last: the memo's lifecycle, the AR core's, the
 		// return's own.

@@ -24,7 +24,7 @@ import (
 // the completion and the void).
 func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
 		f.events.fail = "pos_transaction.completed"
 	})
 	saleID := f.startSale(nil)
@@ -72,7 +72,7 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 
 	// The same proof for the void.
 	f.events.fail = "pos_transaction.voided"
-	f2 := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+	f2 := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
 		f.events.fail = "pos_transaction.voided"
 	})
 	saleID3, body := f2.saleOf("2", tender("cash", 1198))
@@ -97,7 +97,7 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 // the other is refused with insufficient_stock and moves nothing.
 func TestTwoSalesOfTheLastUnit(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	mustExec(t, f.db, `UPDATE inventory SET quantity = 2 WHERE product_id = $1`, f.productID)
 	var wg sync.WaitGroup
 	results := make([]int, 2)
@@ -137,7 +137,7 @@ func TestTwoSalesOfTheLastUnit(t *testing.T) {
 // walk-in customer row, ADR 0005 4.1).
 func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	registers := []string{f.register, "REG-" + uuid.NewString()[:8], "REG-" + uuid.NewString()[:8]}
 	for _, reg := range registers[1:] {
 		mustExec(t, f.db, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'r', $3)`,
@@ -159,7 +159,10 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 			}
 		}(i, reg)
 	}
-	// a payment for the walk-in customer racing the sales
+	// three payments for the walk-in customer racing the sales, through the
+	// real payment route the fixture mounts: their outcomes are asserted,
+	// not discarded
+	paymentStatuses := make([]int, 3)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -170,13 +173,25 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 			return
 		}
 		for i := 0; i < 3; i++ {
-			_ = f.do("POST", "/api/v1/payments", map[string]any{
+			r := f.do("POST", "/api/v1/payments", map[string]any{
 				"customer_id": walkIn, "method": "cash", "amount_cents": 100,
 				"received_on": "2030-01-01",
 			}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+			paymentStatuses[i] = r.status
 		}
 	}()
 	wg.Wait()
+	for i, st := range paymentStatuses {
+		if st != 201 {
+			t.Errorf("racing payment %d = %d, want 201", i, st)
+		}
+	}
+	// the three walk-in payments landed as unapplied cash
+	if got := countOf(t, f.db, `SELECT count(*) FROM payments p
+		JOIN customers c ON c.id = p.customer_id WHERE c.account_number = 'WALK-IN' AND p.amount_unapplied = 1.00`); got != 3 {
+		t.Errorf("%d unapplied walk-in payments of 1.00, want 3", got)
+	}
+	f.assertARInvariants(t)
 	for i, err := range errs {
 		if err != nil {
 			t.Errorf("register %d: %v", i, err)
@@ -210,38 +225,53 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 
 // RULE: a void racing a return of the same sale: one wins, the other is
 // refused, and the books stay consistent.
-func TestVoidRacingAReturn(t *testing.T) {
+func TestVoidRacingTwoReturns(t *testing.T) {
 	testutil.LockOutboxTables(t)
-	f := newFixture(t, testutil.RequireDB(t))
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	saleID, body := f.saleOf("6", tender("cash", 3593))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// three contenders on one sale at pool size 4: a void and two returns
+	// of different quantities of the same line
 	var wg sync.WaitGroup
-	var voidStatus, returnStatus int
-	wg.Add(2)
+	var voidStatus int
+	returnStatuses := make([]int, 2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		voidStatus = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
 			map[string]any{"reason": "racing", "revision": rev(t, body)},
 			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
 	}()
-	go func() {
-		defer wg.Done()
-		returnStatus = f.do("POST", "/api/v1/pos/returns", map[string]any{
-			"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
-			"refund_method": "cash", "reason": "racing",
-			"lines": []map[string]any{{"line_id": lineID, "quantity": "1", "restock": true}},
-		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
-	}()
+	for i, qty := range []string{"1", "2"} {
+		go func(i int, qty string) {
+			defer wg.Done()
+			returnStatuses[i] = f.do("POST", "/api/v1/pos/returns", map[string]any{
+				"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+				"refund_method": "cash", "reason": "racing",
+				"lines": []map[string]any{{"line_id": lineID, "quantity": qty, "restock": true}},
+			}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
+		}(i, qty)
+	}
 	wg.Wait()
-	t.Logf("void status %d, return status %d, stock %s", voidStatus, returnStatus, f.stock())
 	won := func(status int) bool { return status >= 200 && status < 300 }
-	if won(voidStatus) && won(returnStatus) {
-		t.Fatalf("both the void and the return won (%d, %d)", voidStatus, returnStatus)
+	t.Logf("void %d, returns %v, stock %s", voidStatus, returnStatuses, f.stock())
+	var returnsWon int
+	for _, st := range returnStatuses {
+		if won(st) {
+			returnsWon++
+		}
+	}
+	if won(voidStatus) && returnsWon > 0 {
+		t.Fatalf("the void and a return both won (%d, %v)", voidStatus, returnStatuses)
 	}
 	f.assertARInvariants(t)
-	// the stock is whole either way: voided returns all 6, a return returns
-	// what it named; both winning is the only corruption
-	if got := f.stock(); got != "94.0000/0.0000" && got != "100.0000/0.0000" && got != "95.0000/0.0000" {
+	// the stock is whole either way: the sale left 94; a void returns all
+	// 6 (100); the returns are capped at what the line sold less each other,
+	// so 97 (both won), 95 or 96 (one won) or 100 (the void won) are the
+	// coherent outcomes
+	switch got := f.stock(); got {
+	case "97.0000/0.0000", "95.0000/0.0000", "96.0000/0.0000", "100.0000/0.0000":
+	default:
 		t.Errorf("stock = %s after the race", got)
 	}
 }

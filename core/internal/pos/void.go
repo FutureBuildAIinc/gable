@@ -10,6 +10,7 @@ import (
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -206,6 +207,18 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		}
 		if err := s.repo.VoidSale(ctx, saleID); err != nil {
 			return err
+		}
+		// The audit row, inside the transaction (R1-14): a rolled back void
+		// leaves no row, and only a void that changed state reaches here.
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: "pos.transaction.voided", EntityType: "pos_transaction", EntityID: saleID, UserID: actor,
+				Changes: map[string]any{
+					"number": sale.Number, "total_cents": int64(sale.TotalCents), "reason": reason,
+					"register_id": sale.RegisterID, "customer_id": sale.CustomerID,
+				}}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
 		}
 		// The events, last: the AR core's, then the sale's own.
 		branch := sale.BranchID

@@ -680,30 +680,65 @@ func (f *fixture) paymentsOf(saleID string) []paymentOf {
 	return out
 }
 
-// assertARInvariants proves the subledger rule of ADR 0005 9.3 for the
-// fixture's customer after every act: the subledger sum equals balance_due
-// equals the 1020 balance, and the unapplied cash equals the 2200 balance.
+// assertARInvariants proves the subledger rule of ADR 0005 9.3 for every
+// customer the fixture touched (its own and the walk-in that carries most
+// of the sales) with all three legs: balance_due = the sum of its
+// customer_transactions = the sum of amount_open over its live invoices and
+// posted credit memos. The control accounts tie globally, each in one
+// statement so the snapshot is consistent: GL 1020 = the sum of every
+// customer's balance_due, GL 2200 = the sum of unapplied cash.
 func (f *fixture) assertARInvariants(t *testing.T) {
 	t.Helper()
-	var subledger int64
-	if err := f.db.Pool.QueryRow(context.Background(), `
-		SELECT COALESCE(SUM(ROUND(amount)::bigint), 0) FROM customer_transactions WHERE customer_id = $1`, f.customerID).Scan(&subledger); err != nil {
+	walkIn := f.scalar(`SELECT id::text FROM customers WHERE account_number = 'WALK-IN'`).(string)
+	rows, err := f.db.Pool.Query(context.Background(), `
+		SELECT c.id, COALESCE(ROUND(c.balance_due * 100)::bigint, 0),
+			COALESCE((SELECT SUM(ROUND(ct.amount)::bigint) FROM customer_transactions ct WHERE ct.customer_id = c.id), 0),
+			COALESCE((SELECT SUM(ROUND(i.amount_open * 100)::bigint) FROM invoices i
+				WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')), 0)
+			+ COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
+				WHERE m.customer_id = c.id AND m.status IN ('OPEN', 'PARTIAL')), 0)
+		FROM customers c WHERE c.id = ANY($1::uuid[])`, []string{f.customerID.String(), walkIn})
+	if err != nil {
 		t.Fatal(err)
 	}
-	bal := f.balance()
-	if subledger != bal {
-		t.Errorf("the subledger sums %d but balance_due is %d", subledger, bal)
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var balance, subledger, documents int64
+		if err := rows.Scan(&id, &balance, &subledger, &documents); err != nil {
+			t.Fatal(err)
+		}
+		if balance != subledger {
+			t.Errorf("customer %s: balance_due is %d but the subledger sums %d", id, balance, subledger)
+		}
+		if balance != documents {
+			t.Errorf("customer %s: balance_due is %d but the open documents sum %d", id, balance, documents)
+		}
 	}
-	if gl1020 := f.accountBalance("1020"); gl1020 != bal {
-		t.Errorf("the 1020 balance is %d but balance_due is %d", gl1020, bal)
-	}
-	var unapplied int64
-	if err := f.db.Pool.QueryRow(context.Background(), `
-		SELECT COALESCE(SUM(ROUND(amount_unapplied * 100)::bigint), 0) FROM payments WHERE customer_id = $1 AND status = 'POSTED'`, f.customerID).Scan(&unapplied); err != nil {
+	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if gl2200 := f.accountBalance("2200"); gl2200 != unapplied {
-		t.Errorf("the 2200 balance is %d but the unapplied cash is %d", gl2200, unapplied)
+	// GL 1020 ties to the sum of every customer's balance, GL 2200 to the
+	// unapplied cash; each in one statement, so the two sides of a tie are
+	// read from one consistent snapshot even while other tests run.
+	var ties bool
+	if err := f.db.Pool.QueryRow(context.Background(), `
+		SELECT (SELECT COALESCE(ROUND(SUM(c.balance_due) * 100)::bigint, 0) FROM customers c)
+			= (SELECT COALESCE(ROUND((SUM(l.debit) - SUM(l.credit)) * 100)::bigint, 0)
+				FROM gl_journal_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE a.code = '1020')`).Scan(&ties); err != nil {
+		t.Fatal(err)
+	}
+	if !ties {
+		t.Error("GL 1020 does not tie to the sum of the customers' balances")
+	}
+	if err := f.db.Pool.QueryRow(context.Background(), `
+		SELECT (SELECT COALESCE(SUM(ROUND(p.amount_unapplied * 100)::bigint), 0) FROM payments p WHERE p.status = 'POSTED')
+			= (SELECT COALESCE(ROUND((SUM(l.credit) - SUM(l.debit)) * 100)::bigint, 0)
+				FROM gl_journal_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE a.code = '2200')`).Scan(&ties); err != nil {
+		t.Fatal(err)
+	}
+	if !ties {
+		t.Error("GL 2200 does not tie to the sum of the unapplied cash (2200 carries it as a credit)")
 	}
 }
 
