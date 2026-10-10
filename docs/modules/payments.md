@@ -15,11 +15,14 @@ the same document.
 This module is the work of C2-4 (the sales and money core's payment
 conversion). The Go code is in `core/internal/payment/`. The AR
 subledger, the aging, the reconciliation, the statements and the
-write-offs live in `core/internal/account/` and are reached through
-the payment routes that namespace as `/api/v1/payments` and
-`/api/v1/ar/*`. The deposit flow uses no separate deposit routes; a
-deposit is a payment with `order_id` set, applied by the order's
-fulfillment when it bills.
+write-offs live in `core/internal/account/` (write-offs are reached
+through the invoice module at `POST /invoices/{id}/write-offs`,
+`invoice/handler.go`); the module routes live under
+`/api/v1/payments`, `/api/v1/ar/*`, `/api/v1/accounts/*`,
+`/api/v1/credit-memos/*` and `/api/v1/invoices/{id}/payments`. The
+deposit flow uses no separate deposit routes; a deposit is a
+payment with `order_id` set, applied by the order's fulfillment
+when it bills.
 
 ## What it does in a yard
 
@@ -178,12 +181,16 @@ CHECK.
 | `VOIDED` | `voided` | Terminal. |
 
 The transition is `POST /payments/{id}/transitions` with `to:
-voided` and `reason`. A posted payment carries its applications and
-refunds; a void unposts the GL and rolls the unapplied cash back
-through the same leg pair as the create, then it stays in `voided`.
-A card payment can be voided while the gateway still allows a void;
-a refund that already reached the gateway carries the gateway
-refund id and is recorded as a separate `Refund` row.
+voided` and `reason` (fragment roles `admin`, `owner`, `finance`).
+A posted payment carries its applications and refunds; a void
+first reverses every live application with its discounts, then
+posts `DR 2200 / CR 1010` for the amount still unapplied (the
+create leg is `DR 1010 / CR 2200`), and the payment stays in
+`voided`. A card payment is refused with `409 card_payment` on the
+void; it is refunded through the gateway
+(`POST /payments/{id}/refunds`). A non card refund that already
+reached the gateway carries the gateway refund id and is recorded
+as a separate `Refund` row.
 
 `Refund.status` is the gateway's state machine, kept in UPPERCASE
 by the database CHECK:
@@ -235,15 +242,19 @@ of "this much of that document settled that much of this invoice".
 | `created_at` | timestamp | RFC 3339 UTC. |
 
 A reversed application is never deleted: the row stays with its
-reversal fields filled and the next read is the reversal as well.
+reversal fields filled and the reverse itself appears as a
+`REVERSAL` row in the transaction list.
 The reverse route is `POST /ar/applications/{id}/reverse` with a
 `reason` body and returns the application envelope.
 
 The AR transaction list (`GET /accounts/{id}/transactions`,
 `AccountTransaction`) is the date-ordered view of those settlements.
-`AccountTransaction.type` is UPPERCASE in storage and lowercase on
-the wire: `INVOICE`, `PAYMENT`, `ADJUSTMENT`, `REFUND`,
-`CREDIT_MEMO`, `DISCOUNT`, `WRITE_OFF`, `REVERSAL`.
+`AccountTransaction.type` is UPPERCASE on the wire: `INVOICE`,
+`PAYMENT`, `ADJUSTMENT`, `REFUND`, `CREDIT_MEMO`, `DISCOUNT`,
+`WRITE_OFF`, `REVERSAL`
+(`accounts.yaml` `AccountTransactionType`, the golden
+`characterization/testdata/goldens/account.json` carries `INVOICE`,
+`PAYMENT`, `CREDIT_MEMO`, `REVERSAL` on the wire).
 
 ## Aging, statements and reconciliation
 
@@ -258,11 +269,14 @@ the totals by currency (`ArAgingSummary`, `ArAgingTotal`).
 The statement (`ArStatement`) names the customer, the date range
 (`from`, `to`), an optional `job_id` filter and the currencies. Each
 currency carries the opening balance, the dated lines, the closing
-balance, and the open documents as of the range end. The same range
-end is what the reconciliation cites when it compares the AR
-subledger to the customer deposit ledger. The reconciliation report
-is a `ArReconciliation` with a `customers` array (per customer
-drift: `balance_cents`, `subledger_cents`, `documents_cents`) and a
+balance, and the open documents as of the range end. The
+reconciliation (`GET /ar/reconciliation`) takes no date; it lists
+every customer whose `balance_due`, subledger sum and document open
+amounts disagree, and per currency whether the sum of balances
+equals account `1020` and unapplied cash equals `2200` (the
+fragment `accounts.yaml`). The reconciliation report is a
+`ArReconciliation` with a `customers` array (per customer drift:
+`balance_cents`, `subledger_cents`, `documents_cents`) and a
 `currencies` array (per currency: `receivable_ledger_cents`,
 `balance_sum_cents`, `deposits_ledger_cents`, `unapplied_sum_cents`,
 the two `*_in_sync` flags). The shape is read only.
@@ -273,61 +287,80 @@ Every mutation writes the event as the last statement of its
 transaction ([ADR 0003](../adr/0003-events-outbox.md)). The full
 list:
 
-| Event | Source | Constant |
+| Event | Constant (Source) | Written at |
 |---|---|---|
-| `payment.recorded` | `core/internal/payment/service.go:273` | `EventRecorded` |
-| `payment.applied` | `core/internal/account/model.go:52` | `EventPaymentApplied` |
-| `payment.unapplied` | `core/internal/account/model.go:53` | `EventPaymentUnapplied` |
-| `payment.refunded` | `core/internal/payment/service.go:534` | `EventRefunded` |
-| `payment.voided` | `core/internal/payment/service.go:456` | `EventVoided` |
-| `invoice.partial` | `core/internal/account/effects.go` | `EventInvoicePartial` |
-| `invoice.paid` | `core/internal/account/effects.go` | `EventInvoicePaid` |
-| `invoice.written_off` | `core/internal/account/model.go:56` | `EventInvoiceWrittenOff` |
-| `invoice.reopened` | `core/internal/account/model.go:57` | `EventInvoiceReopened` |
-| `customer.updated` | `core/internal/account/effects.go` | `EventCustomerUpdated` |
-| `credit_memo.applied` | `core/internal/invoice/service_ar.go` | `audit.Action` |
-| `credit_memo.posted` | `core/internal/invoice/model.go:256` | `EventCreditPosted` |
-| `credit_memo.voided` | `core/internal/invoice/model.go:257` | `EventCreditVoided` |
+| `payment.recorded` | `EventRecorded` (`core/internal/payment/service.go:273`) | `core/internal/payment/service.go:267` |
+| `payment.applied` | `EventPaymentApplied` (`core/internal/account/model.go:52`) | `core/internal/account/effects.go:115` |
+| `payment.unapplied` | `EventPaymentUnapplied` (`core/internal/account/model.go:53`) | `core/internal/account/effects.go:117` |
+| `payment.refunded` | `EventRefunded` (`core/internal/payment/service.go:274`) | `core/internal/payment/service.go:534` |
+| `payment.voided` | `EventVoided` (`core/internal/payment/service.go:275`) | `core/internal/payment/service.go:456` |
+| `invoice.partial` | `EventInvoicePartial` (`core/internal/account/model.go:54`) | `core/internal/account/effects.go:145` |
+| `invoice.paid` | `EventInvoicePaid` (`core/internal/account/model.go:55`) | `core/internal/account/effects.go:150` |
+| `invoice.written_off` | `EventInvoiceWrittenOff` (`core/internal/account/model.go:56`) | `core/internal/account/effects.go:152` |
+| `invoice.reopened` | `EventInvoiceReopened` (`core/internal/account/model.go:57`) | `core/internal/account/effects.go:148` |
+| `customer.updated` | `EventCustomerUpdated` (`core/internal/account/model.go:61`) | `core/internal/account/effects.go:161` |
+| `credit_memo.applied` | `EventCreditApplied` (`core/internal/account/model.go:59`) | `core/internal/account/effects.go:136`; also an audit row at `core/internal/invoice/service_ar.go:70` |
+| `credit_memo.partial` | `EventCreditPartial` (`core/internal/account/model.go:58`) | `core/internal/account/effects.go:131` |
+| `credit_memo.reopened` | `EventCreditReopened` (`core/internal/account/model.go:60`) | `core/internal/account/effects.go:134` (the credit memo's reverse) |
+| `credit_memo.posted` | `EventCreditPosted` (`core/internal/invoice/model.go:256`) | `core/internal/invoice/model.go` |
+| `credit_memo.voided` | `EventCreditVoided` (`core/internal/invoice/model.go:257`) | `core/internal/invoice/model.go` |
+| `credit_memo.refunded` | (event string) | `core/internal/payment/service_card.go:263` |
 
 A `POST /payments` with `applications` writes `payment.recorded`,
 then `payment.applied` and `invoice.partial` (or `invoice.paid`),
-then `customer.updated` for every customer whose balance moved.
-The order is the order of legs, not the order the body named.
-A card charge writes `payment.recorded` first; the gateway reverses
-into `payment.voided` or into a `Refund` row, never both.
+then `customer.updated` for every customer whose balance moved, in
+that order (the payment fragment). A card charge the system then
+refuses writes no payment and no event: the charge is voided or
+refunded at the gateway and only the audit row
+`payment.charge_reversal` is kept; when both fail the route
+answers `502 charge_not_reversed`
+(`payment/service_card.go` `reverseCharge`).
 
 ## Scopes, roles and keys
 
-A machine key reaching the payment routes needs `payments:read` for
-`GET` and `payments:write` for every other method (ADR 0002; the
-segment is the first path segment under `/api/v1/`). The account /
-AR keys are `ar:read` and `ar:write`; the AR reverse
-(`/ar/applications/{id}/reverse`), the reconciliation
-(`/ar/reconciliation`) and the credit memo writes
-(`/credit-memos/.../applications`,
-`/credit-memos/.../transitions`) are `finance` only at the user
-guard.
+A machine key needs the scope of the first path segment under
+`/api/v1/` (`pkg/middleware/machinekey.go`, `RequiredScope`):
+`payments:read` or `payments:write` for every `/payments...` route;
+`ar:read` or `ar:write` for every `/ar/...` route; `accounts:read`
+or `accounts:write` for every `/accounts/...` route;
+`credit-memos:read` or `credit-memos:write` for every
+`/credit-memos...` route, the refund route included;
+`invoices:read` for `/invoices/{id}/payments`. `GET` and `HEAD`
+take the read scope, every other method the write scope.
 
 The user guard at the serve layer is composed of one or two
 `scoped(...)` calls per handler (see
-`core/internal/app/serve/wire_branch_wall.go`): the payment handler
-takes the wider guard `admin`, `owner`, `sales`, `finance`,
-`cashier` (`wall.payments`); the account / AR handler takes a read
-guard `admin`, `owner`, `sales`, `finance` and a write guard
-`admin`, `owner`, `finance` (`wall.accounts`). A key without the
-scope is `403 forbidden`; the audit row carries the refused scope.
+`core/internal/app/serve/wire_branch_wall.go`, ADR 0002 section
+6): the payment handler takes `admin`, `owner`, `sales`, `finance`,
+`cashier` (`wall.payments`); the account and AR handler takes a
+read guard `admin`, `owner`, `sales`, `finance` and a write guard
+`admin`, `owner`, `finance` (`wall.accounts`); the invoice handler
+(covering the credit memo routes) takes `admin`, `owner`, `sales`,
+`finance` (`wall.invoices`). "Finance only" at the role check is
+the roles `admin`, `owner` or `finance`
+(`account/service.go` `FinanceRole`). A key without the scope is
+`403 forbidden`; the audit row carries the refused scope.
+
+The credit memo routes carry per write role checks on top of the
+invoice handler guard: `POST /credit-memos/{id}/applications`
+applies the memo's open credit and needs only the invoice guard;
+`POST /credit-memos/{id}/transitions` posting a draft to `OPEN`
+needs `admin`, `owner` or `finance`, and so does voiding a posted
+memo (`invoice/service_cm.go`, draft to `VOID` is the invoice
+guard); the credit memo refund at
+`/credit-memos/{id}/refunds` needs `admin`, `owner` or `finance`
+(`payment/service.go:182-187`).
 
 The branch wall applies: a payment is read and written under the
-branch the request carries through `X-Branch-Id` (the header of ADR
-0001 section 12). The unit catalogue (ADR 0006 section 2) is dealer
-wide; no branch wall applies there.
+branch the request carries through `X-Branch-Id` (ADR 0002 section
+6, ADR 0007).
 
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 7, 7a, 9, 11, 12.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
-- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 4.1, 4.2, 9, 10, 11: the payment number, currency, the AR subledger and applications, the customer's unapplied cash, the card gateway.
+- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 4.1, 4.2, 8 (the GL postings; leg pairs for the create, the void, the apply, the refund, the discount, the credit memo posting), 9 (subledger and applications, write-offs, payment acts and the state machine), 10 (aging and statements), and 9.1 (the card gateway).
 
 ## How to try it locally
 
