@@ -156,22 +156,32 @@ EXCEPTION WHEN duplicate_object OR duplicate_table THEN NULL;
 END $$;
 
 -- The vendor's own number is unique per vendor once duplicates are suffixed
--- #2, #3 in (created_at, id) order, the oldest keeping the bare number.
+-- #2, #3 in (created_at, id) order, the oldest keeping the bare number. A
+-- vendor may already hold a genuine "X #2" beside its duplicate "X" rows, so
+-- each suffixed row takes the next suffix no row of that vendor holds.
 DO $$
-DECLARE dups BIGINT;
+DECLARE dups BIGINT; r RECORD; n BIGINT; candidate TEXT;
 BEGIN
     SELECT count(*) - count(DISTINCT (vendor_id, invoice_number)) INTO dups FROM vendor_invoices;
     IF dups > 0 THEN
-        WITH ranked AS (
-            SELECT id, row_number() OVER (PARTITION BY vendor_id, invoice_number ORDER BY created_at, id) AS rn
+        FOR r IN (
+            SELECT id, vendor_id, invoice_number,
+                   row_number() OVER (PARTITION BY vendor_id, invoice_number ORDER BY created_at, id) AS rn
             FROM vendor_invoices
-        )
-        UPDATE vendor_invoices vi
-        SET invoice_number = left(vi.invoice_number, 64 - length(' #' || r.rn)) || ' #' || r.rn
-        FROM ranked r
-        WHERE r.id = vi.id AND r.rn > 1
-          AND vi.invoice_number <> left(vi.invoice_number, 64 - length(' #' || r.rn)) || ' #' || r.rn;
-        RAISE NOTICE 'migration 106: % duplicate vendor invoice number(s) suffixed #2, #3 in (created_at, id) order', dups;
+        ) LOOP
+            IF r.rn = 1 THEN
+                CONTINUE;
+            END IF;
+            n := r.rn;
+            LOOP
+                candidate := left(r.invoice_number, 64 - length(' #' || n)) || ' #' || n;
+                EXIT WHEN NOT EXISTS (SELECT 1 FROM vendor_invoices vi
+                                      WHERE vi.vendor_id = r.vendor_id AND vi.invoice_number = candidate AND vi.id <> r.id);
+                n := n + 1;
+            END LOOP;
+            UPDATE vendor_invoices SET invoice_number = candidate WHERE id = r.id;
+        END LOOP;
+        RAISE NOTICE 'migration 106: % duplicate vendor invoice number(s) suffixed #2, #3 in (created_at, id) order, the next free suffix where a genuine one is taken', dups;
     END IF;
 END $$;
 DO $$ BEGIN

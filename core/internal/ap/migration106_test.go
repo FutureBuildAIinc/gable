@@ -187,6 +187,10 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	insert(dup1, "DUP-1", "PENDING", at(-9), nil, "100.00", "0")
 	insert(dup2, "DUP-1", "pending", at(-8), nil, "100.00", "0") // lowercase: normalized
 	insert(dup3, "DUP-1", "WEIRD", at(-7), nil, "100.00", "0")   // unknown: becomes PENDING
+	// A genuine suffixed number the vendor already held: the suffix pass must
+	// step past it (#3, #4) rather than collide and roll the migration back.
+	genuine := uuid.New()
+	insert(genuine, "DUP-1 #2", "PENDING", at(-6), nil, "100.00", "0")
 	nailed := uuid.New()
 	insert(nailed, "PAID-1", "PAID", at(-6), nil, "50.00", "50.00")
 	partial := uuid.New()
@@ -218,11 +222,14 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup1); got != "DUP-1" {
 		t.Errorf("the oldest duplicate = %q, want the bare DUP-1", got)
 	}
-	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup2); got != "DUP-1 #2" {
-		t.Errorf("the second duplicate = %q, want DUP-1 #2", got)
+	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup2); got != "DUP-1 #3" {
+		t.Errorf("the second duplicate = %q, want DUP-1 #3, the next free suffix", got)
 	}
-	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup3); got != "DUP-1 #3" {
-		t.Errorf("the third duplicate = %q, want DUP-1 #3", got)
+	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup3); got != "DUP-1 #4" {
+		t.Errorf("the third duplicate = %q, want DUP-1 #4", got)
+	}
+	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, genuine); got != "DUP-1 #2" {
+		t.Errorf("the genuine suffixed number = %q, want it kept as DUP-1 #2", got)
 	}
 
 	// The orphan po_id is set null; the others keep theirs.
@@ -325,7 +332,7 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 		t.Errorf("the down left unit_price at scale %s, want 2", got)
 	}
 	// Three of the up's writes are kept, each valid old shape data.
-	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup2); got != "DUP-1 #2" {
+	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dup2); got != "DUP-1 #3" {
 		t.Errorf("the down un-suffixed a duplicate: %s", got)
 	}
 
