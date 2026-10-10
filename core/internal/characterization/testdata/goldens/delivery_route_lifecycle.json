@@ -1208,5 +1208,37 @@
         "vehicle_name": "R1C Truck Renamed"
       }
     }
+  },
+  {
+    "name": "delivery.route.complete.empty_in_transit",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-9>/transitions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "to": "completed"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "route_empty",
+              "message": "the route holds no stops"
+            }
+          ],
+          "message": "a route with no stops cannot be completed"
+        },
+        "meta": {
+          "request_id": "<id-35>"
+        }
+      }
+    }
   }
 ]

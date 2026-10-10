@@ -426,6 +426,13 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.route.dispatch.empty", method: "POST", path: "/api/v1/delivery/routes/{c_route_empty}/transitions", maskMockGeo: true,
 					headers: map[string]string{"If-Match": `"1"`},
 					body:    map[string]any{"to": "in_transit"}},
+				// The empty route is in_transit and holds no stops; the
+				// in_transit completion path keeps the route_empty guard
+				// (PR 80 review round 1 P2-1: the guard was reachable but
+				// pinned by nothing before this step).
+				{name: "delivery.route.complete.empty_in_transit", method: "POST", path: "/api/v1/delivery/routes/{c_route_empty}/transitions",
+					headers: map[string]string{"If-Match": `"2"`},
+					body:    map[string]any{"to": "completed"}},
 			},
 		},
 		{
