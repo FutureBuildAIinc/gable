@@ -13,10 +13,12 @@ package delivery_test
 // once.
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/google/uuid"
 )
 
 // detailsByCode reports which code values appear in the envelope's
@@ -35,6 +37,30 @@ func (f *fixture) detailsByCode(t *testing.T, r resp) map[string]bool {
 		}
 	}
 	return out
+}
+
+// seedEmptyRoute inserts a DRAFT route with vehicle and driver but no
+// stops, the production shape that the wire-level empty-route cases
+// drive through dispatch and completion. Cleanup drops every row tied
+// to the route so a rerun is byte-stable.
+func (f *fixture) seedEmptyRoute(t *testing.T) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	vehicle, driver := f.seedFleet(t)
+	var route uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO delivery_routes (id, vehicle_id, driver_id, scheduled_date, status)
+		VALUES ($1, $2, $3, CURRENT_DATE, 'DRAFT') RETURNING id`,
+		uuid.New(), vehicle, driver).Scan(&route); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c := context.Background()
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM events_outbox WHERE entity_id = $1`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM audit_log WHERE entity_id = $1`, route)
+		_, _ = f.db.Pool.Exec(c, `DELETE FROM delivery_routes WHERE id = $1`, route)
+	})
+	return route
 }
 
 // Defect 2 (PR 80 review round 1 P1-3): a draft route cannot
@@ -118,6 +144,44 @@ func TestRouteComplete_FromCompletedIs409InvalidState(t *testing.T) {
 	// event.
 	if got := f.countEvents(t, route, "route.completed"); got != 1 {
 		t.Errorf("route.completed events after refused re-complete = %d, want 1", got)
+	}
+}
+
+// Defect 2 (PR 80 review round 1 P1-3): the in_transit route-empty
+// path. A route with no stops can be dispatched (the dispatch guard
+// checks only vehicle and driver), so the route_empty blocker is
+// reachable on the wire through dispatch + complete. The completion
+// must answer 409 invalid_state_transition with the route_empty
+// blocker (PR 80 review round 1 P2-1: the only previous test of the
+// guard was the DRAFT `delivery.route.complete.empty` golden, which
+// now exits on the invalid_state check ahead of the count read; this
+// case pins the count read on the wire).
+func TestRouteComplete_DispatchedEmptyIs409RouteEmpty(t *testing.T) {
+	f := newFixture(t)
+	route := f.seedEmptyRoute(t)
+
+	before := f.countEvents(t, route, "route.completed")
+
+	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/transitions",
+		`{"to":"in_transit","revision":1}`, nil); res.status != http.StatusOK {
+		t.Fatalf("dispatch = %d %s", res.status, res.raw)
+	}
+
+	res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/transitions",
+		`{"to":"completed","revision":2}`, nil)
+	if res.status != http.StatusConflict {
+		t.Fatalf("complete empty in_transit = %d %s, want 409", res.status, res.raw)
+	}
+	if got := f.errCode(t, res); got != httpx.CodeInvalidStateTransition {
+		t.Errorf("code = %s, want %s", got, httpx.CodeInvalidStateTransition)
+	}
+	if !f.detailsByCode(t, res)["route_empty"] {
+		t.Errorf("blockers = %v, want route_empty", f.detailsByCode(t, res))
+	}
+
+	// The refused complete writes no route.completed event.
+	if got := f.countEvents(t, route, "route.completed"); got != before {
+		t.Errorf("route.completed events before=%d after=%d; the refusal must not write one", before, got)
 	}
 }
 
