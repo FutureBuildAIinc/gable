@@ -371,8 +371,15 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 				"only a cash tender can give change: the over tender exceeds the cash taken")
 		}
 
-		// The credit check an ACCOUNT tender owes (ADR 0005 14.2 C2-5).
+		// The credit check an ACCOUNT tender owes (ADR 0005 14.2 C2-5), under
+		// the customer's credit advisory lock (section 11, step 1a, taken
+		// right after the sale row): without it two concurrent ACCOUNT sales
+		// each read an exposure that does not yet count the other and both
+		// pass.
 		if accountPortion > 0 {
+			if err := s.repo.LockCustomerCredit(ctx, customerID); err != nil {
+				return err
+			}
 			facts, err := s.repo.CustomerFacts(ctx, customerID)
 			if err != nil {
 				return err

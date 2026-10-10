@@ -69,6 +69,10 @@ type Repository interface {
 	GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error)
 	ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error)
 
+	// LockCustomerCredit serializes the acts that read one customer's
+	// credit exposure (section 11, step 1a: the same advisory lock the
+	// confirm and the fulfilment take).
+	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
 	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
@@ -650,6 +654,18 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 		out = append(out, *ret)
 	}
 	return out, rows.Err()
+}
+
+// LockCustomerCredit takes the transaction scoped advisory lock keyed on
+// the customer, the order module's own key ('order-credit:<customer id>'),
+// so a counter ACCOUNT sale and an order confirm serialize on one
+// customer's credit exposure.
+func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error {
+	if _, err := r.ex(ctx).Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('order-credit:' || $1::text, 0))`, customerID.String()); err != nil {
+		return fmt.Errorf("failed to serialize the customer's credit acts: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error) {
