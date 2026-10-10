@@ -375,9 +375,13 @@ before the switch is read, `BranchMiddleware` in
 `core/pkg/middleware/branch.go`). Its lists, by id reads and tree
 see that branch only, a request naming another branch in
 `X-Branch-Id` is a 403 `forbidden` audited as `key.branch_refused`,
-and a body `parent_id` or path id of another branch is a 403. The
-routes that mount no branch middleware are held to the pin by the
-key branch wall (`core/pkg/middleware/keybranch.go`, mounted through
+and a body `parent_id` or path id of another branch is a 403. A bound key is denied by default on the routes that mount no
+branch middleware: one allowlist
+(`core/pkg/middleware/keybranch_allow.go`) classifies every route a machine key can
+reach and the gate `KeyBranchRouteGate` in serve's chain refuses
+it every route the table does not admit (ADR 0007 section 5.5).
+The routes this module holds CONFINED run the key branch wall
+(`core/pkg/middleware/keybranch.go`, mounted through
 `WithKeyBranchWall`): a bound key writing another branch's location
 (`PUT` and `DELETE /api/v1/locations/{id}`), another branch itself
 (`PUT` and `DELETE /api/v1/branches/{id}`) or another branch in a
@@ -387,12 +391,12 @@ read whole, so a body that is not exactly one complete JSON value (trailing
 data after the first value, or unparsable) is refused rather than passed for
 the handler to read only in part; a location row that names no branch (a
 legacy shape the denorm trigger refuses today) is outside every pin and is
-refused like a foreign branch; the directory create
-(`POST /api/v1/branches`) and the known users list (`GET /api/v1/users`,
-every branch's subs) refuse a bound key outright;
-`GET /api/v1/branches/{id}/users` refuses it another branch and
+refused like a foreign branch; and
+`GET /api/v1/branches/{id}/users` refuses it another branch while
 `GET /api/v1/users/{sub}/branches` answers only its branch for it.
-The branch directory reads (`GET /api/v1/branches`, `GET
+The directory create (`POST /api/v1/branches`) and the known users
+list (`GET /api/v1/users`, every branch's subs) are REFUSED by the
+gate. The branch directory reads (`GET /api/v1/branches`, `GET
 /api/v1/branches/{id}`) stay reference data, unwalled by the PR 39
 decision, a stated limit. A bound key that sets a user's home to its own
 branch clears `is_home` on that user's other grant rows: a side effect

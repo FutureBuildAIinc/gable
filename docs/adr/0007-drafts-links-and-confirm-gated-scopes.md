@@ -684,26 +684,67 @@ null branch is today's behaviour. A bound key:
   `payload.branch_id`, by the branch rule of section 2.3, on draft routes
   and on the module's own create alike (PR 37's guard).
 
-A route that mounts no branch middleware is held to the pin the same way by
-the key branch wall (`pkg/middleware/keybranch.go`): a branch a request
-names in a path or body, or the branch of a row a path names, is compared to
-the pin and another branch is the same 403 with the same `key.branch_refused`
-row. A body is read whole: a body that is not exactly one complete JSON
-value (trailing data after the first value, or unparsable) is refused, so
-the wall and the handler can never disagree about what a body names. Routes
-that act across every branch refuse a bound key outright, being outside
-every pin: the branch directory's create, the exposure scan and the two
-exposure lists, the market index refresh (it re-checks every branch's
-quotes), the events feed, every reporting route, the dealer wide GL, AP and
-bank reconciliation reads, the sales team reads and the known users list.
-Routes that write a named customer's data are confined to the pin through
-that customer's `customer_branches`: the tax exemption writes and the
-customer priced rules (plain and category, single and bulk) refuse a bound
-key any customer whose branch set does not hold the pin. The branch
-directory reads (`GET /api/v1/branches`, `GET /api/v1/branches/{id}`) stay
-open to a bound key: they are reference data by the PR 39 decision (name,
-code, address and tax rate, no dealer transactions). Users and unbound keys
-keep exactly their reach on every route.
+A route that mounts no branch middleware is denied by default, not left to a
+per route wall: one allowlist, `pkg/middleware/keybranch_allow.go`,
+classifies every route a machine key can reach (method plus pattern, exactly
+as the route census `api/ROUTES.txt` names them) as exactly one of four
+classes. WALLED: the route runs behind the branch middleware, which honours
+the pin. CONFINED: the route mounts the key branch wall or the customer
+branch wall, which holds the request to the pin by the branch, customer, job
+or row it names. STATED LIMIT: the route is reachable unconfined by design,
+each entry with its one line reason. REFUSED: a bound key is answered 403
+`forbidden` with the `key.branch_refused` row. The one runtime check is
+`KeyBranchRouteGate`, mounted once in serve's chain inside auth and outside
+the confirm gate: it resolves the request's registered pattern against the
+serve mux and refuses a bound key every route the table does not admit,
+including a route the router resolves to no pattern, so a route a sweep
+missed, a route added without a class decision and a method no route
+registers all fail closed instead of open. A census test fails when a
+machine key reachable census route is unclassified or a table entry is
+stale, so a new route cannot appear without a class decision. Users and
+unbound keys keep exactly their reach on every route.
+
+The confinement contract the CONFINED routes hold: a body is read whole (a
+body that is not exactly one complete JSON value is refused, so the wall and
+the handler can never disagree about what a body names); a location row that
+names no branch is outside every pin and refused; a request that names
+customers is confined through their `customer_branches` (the tax exemption
+routes and the preview, the customer priced rules plain and category single
+and bulk, and the reads that name a customer in a path or query: the
+exemption read by its path customer, the category rule list by its
+`customer_id`, the rule audit by its row's customer, and resolve and
+calculate by their `customer_id`). A pricing rule names a customer through
+its `customer_id` or its `job_id` (a projects row belongs to exactly one
+customer, and a rule on the job prices that customer), and both are checked.
+A pricing rule that names neither a customer nor a job, and a category rule
+or bulk element that targets a tier, price every branch's customers and are
+refused. The unfiltered lists (`GET /pricing/rules`, the category rule list
+with no `customer_id`, `GET /pricing/matrix`) cannot be confined to one
+branch and are REFUSED.
+
+The stated limits, each with its one line reason in the table: the branch
+directory reads (`GET /api/v1/branches`, `GET /api/v1/branches/{id}`,
+reference data by the PR 39 decision); the dealer wide reference data that
+carries no branch fact (the unit catalogue, vendors, EDI partners and their
+catalogs, millwork and configurator options, governance rfcs, the vision
+scan, the parsing upload, the product pricing categories, the rebate
+programs and their claims, the price level vocabulary, the market index
+metadata list edit and history, the price escalation calculator, the match
+tolerances); the delivery fleet (drivers and vehicles carry no branch
+column); and the dealer wide switches (admin settings, the admin module kill
+switches, app enablement). An operator should not mint on a bound key the
+scopes that buy only these limits: `admin:settings`, `admin:modules`,
+`apps:write`, `units:write`, `vendors:write`, `configurator:write`,
+`millwork:write`, `vision:write`, `edi:write`, `governance:write` and
+`parsing:write`; `market-indices:write` and `pricing:write` reach stated
+limit writes (the index metadata; the categories and rebates) beside their
+confined uses, and `delivery:write` reaches the fleet, so mint them on a
+bound key only for those confined uses. REFUSED outright, whatever scope a
+key holds: the GL, AP and bank reconciliation surfaces (reads and writes
+alike), every report and builder route, the events feed, the sales team
+roster, the staff roster and its module grants, the known users list, the
+exposure lists and the scan, the market index refresh and its preview, the
+branch directory create, and the unfiltered pricing lists above.
 
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A

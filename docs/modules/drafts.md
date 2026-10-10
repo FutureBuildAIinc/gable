@@ -114,33 +114,54 @@ is read (`pkg/middleware/machinekey.go`, the `principal.BranchID
 != nil` branch in `handle`), and the routes that mount no branch
 middleware (the user-only prefixes `/api/v1/admin/keys` and
 `/api/v1/me`) are JWT user routes, so a machine key cannot
-reach them, bound or not. The routes that mount no branch middleware are held to the
-pin by the key branch wall (`core/pkg/middleware/keybranch.go`):
-a bound key naming another branch in a body `branch_id` or a
-path id, or a row of another branch (`PUT` and `DELETE
-/api/v1/locations/{id}`), is a 403 `forbidden` in the wire
-envelope naming the field, audited as `key.branch_refused`
-like the header rule; its own branch passes, and a body is
-read whole, so a body that is not exactly one complete JSON
-value (trailing data after the first value, or unparsable) is
+reach them, bound or not. A bound key is denied by default on the routes that mount no
+branch middleware: one allowlist
+(`core/pkg/middleware/keybranch_allow.go`) classifies every
+route a machine key can reach, method plus pattern as the
+route census names them, as WALLED (behind the branch
+middleware), CONFINED (held by the key branch wall of
+`core/pkg/middleware/keybranch.go` or the customer branch
+wall), a STATED LIMIT (reachable unconfined by design, with
+its reason) or REFUSED, and the one runtime check,
+`KeyBranchRouteGate` in serve's chain inside auth, refuses a
+bound key every route the table does not admit (a route the
+router resolves to no pattern included), with the 403
+`forbidden` of the wire envelope and the `key.branch_refused`
+row the header rule writes. A census test fails when a
+machine key reachable census route is unclassified, so a new
+route cannot appear without a class decision.
+
+On the CONFINED routes a bound key naming another branch in a
+body `branch_id` or a path id, or a row of another branch
+(`PUT` and `DELETE /api/v1/locations/{id}`), is that same 403
+naming the field; its own branch passes, and a body is read
+whole, so a body that is not exactly one complete JSON value
+(trailing data after the first value, or unparsable) is
 refused rather than passed for the handler to read only in
-part. The directory
-create (`POST /api/v1/branches`) refuses a bound key outright,
-and `PUT` and `DELETE /api/v1/branches/{id}` refuse it another
-branch. A bound key holding `users:grants` grants, revokes and
-moves home only its own branch. The routes that act across
-every branch refuse a bound key outright: the exposure scan
-and the two exposure lists, the market index refresh, the
-events feed (`GET /api/v1/events`), every reporting route,
-the dealer wide GL, AP and bank reconciliation reads, the
-sales team reads and the known users list (`GET /api/v1/users`).
-The routes that write a named customer's data are confined to
-the pin through that customer's `customer_branches`: the tax
-exemption writes and the customer priced rules, plain and
-category, single and bulk. The branch directory reads
+part. A bound key holding `users:grants` grants, revokes and
+moves home only its own branch. A request that names
+customers is confined through their `customer_branches`: the
+tax exemption routes and the preview, the customer priced
+rules plain and category single and bulk, and the reads that
+name a customer in a path or query (the exemption read, the
+category rule list by its `customer_id`, the rule audit,
+resolve and calculate). A pricing rule names a customer
+through its `customer_id` or its `job_id` (the job's projects
+row belongs to one customer), and a rule or category rule
+that would be dealer wide (naming neither, or targeting a
+tier) is refused. REFUSED outright, whatever the scope: the
+branch directory create, the exposure scan and the two
+exposure lists, the market index refresh and its preview,
+the events feed (`GET /api/v1/events`), every reporting
+route, the GL, AP and bank reconciliation surfaces, the
+sales team reads, the staff roster, the known users list
+(`GET /api/v1/users`) and the unfiltered pricing lists
+(`GET /pricing/rules`, `GET /pricing/matrix`, the category
+rule list with no `customer_id`). The branch directory reads
 (`GET /api/v1/branches`, `GET /api/v1/branches/{id}`) stay
-reference data (the PR 39 decision). An unbound key behaves
-as before.
+reference data (the PR 39 decision), the stated limits with
+their reasons are listed in ADR 0007 section 5.5. An unbound
+key behaves as before.
 
 ## Routes
 
