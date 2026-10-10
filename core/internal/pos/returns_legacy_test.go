@@ -283,3 +283,41 @@ func TestALegacyRefundBoundsTheLinesRemainingMoney(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (eighth review P3-1): a line the legacy return partly brought back
+// completes when the linked returns bring the rest: the return that does it
+// takes the line's whole remaining money and the sale's whole remaining tax,
+// so no cent is left owed. 3 at 5.50 less one cent (line 1649, tax 146, total
+// 1795) with a tenth of a unit legacy returned for 50 cents and 4 of tax: the
+// return of the other 2.9 takes 1599 and 142, and with the legacy 54 the sale
+// comes back whole.
+func TestAPartlyLegacyLineCompletesWithTheLinkedReturn(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, map[string]any{"product_id": f.productID.String(), "quantity": "3",
+		"discount_cents": 1, "discount_reason": "penny off"}); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, tender("cash", 1795)); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	legacyReturnOf(t, f, saleID, "0.1", "5.50", "0.50", "0.50", "0.04", "0.54", "CASH")
+	f.assertARInvariants(t)
+	r := f.returnOn(t, saleID, lineID, "2.9")
+	if r.status != http.StatusCreated {
+		t.Fatalf("the completing return = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "subtotal_cents"); got != -1599 {
+		t.Errorf("the completing return subtotal = %d, want -1599 (the line's remaining money)", got)
+	}
+	if got := num(t, r.body, "tax_cents"); got != -142 {
+		t.Errorf("the completing return tax = %d, want -142 (the sale's tax less the legacy 4)", got)
+	}
+	if got := f.accountBalance("1010"); got != 54 {
+		t.Errorf("cash balance = %d, want 54 (the sale in, the linked refund out; the legacy 54 never left this drawer)", got)
+	}
+	f.assertARInvariants(t)
+}

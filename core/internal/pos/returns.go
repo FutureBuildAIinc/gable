@@ -333,6 +333,19 @@ func (s *Service) applyReturnRemainders(ctx context.Context, st *returnState) er
 	if err != nil {
 		return err
 	}
+	legacyQty, err := s.repo.LegacyReturnedQtyByProduct(ctx, *st.in.OriginalSaleID)
+	if err != nil {
+		return err
+	}
+	// the legacy quantity of a product bears on its bearer line, so a line
+	// the legacy return partly brought back completes with the linked
+	// returns that bring the rest (eighth review P3-1)
+	legacyBack := func(l *salesdoc.Line) int64 {
+		if l.ProductID != nil && st.legacyBearer[*l.ProductID] == l.ID {
+			return int64(legacyQty[*l.ProductID])
+		}
+		return 0
+	}
 	st.backByLine = make(map[uuid.UUID]int64, len(returned))
 	for id, qty := range returned {
 		st.backByLine[id] = int64(qty)
@@ -346,7 +359,7 @@ func (s *Service) applyReturnRemainders(ctx context.Context, st *returnState) er
 			continue
 		}
 		st.completesTaxable = true
-		back := int64(returned[l.ID])
+		back := int64(returned[l.ID]) + legacyBack(l)
 		for j := range st.priced {
 			if st.priced[j].saleLine != nil && st.priced[j].saleLine.ID == l.ID {
 				back += int64(st.priced[j].in.Quantity)
@@ -362,7 +375,7 @@ func (s *Service) applyReturnRemainders(ctx context.Context, st *returnState) er
 		if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
 			continue
 		}
-		sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
+		sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])+legacyBack(p.saleLine)
 		remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
 		// the legacy refund of the product lowers the bearer line's
 		// remaining money, so the rounded shares of later linked
