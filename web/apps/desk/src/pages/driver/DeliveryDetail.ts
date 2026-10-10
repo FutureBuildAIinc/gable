@@ -167,7 +167,14 @@ export class DeliveryDetail extends LitElement {
                 }
             }
 
-            await deliveryService.updateStatus(this.delivery.id, {
+            // The uploads above moved the stop's revision (PR 70 review
+            // round 1 P3-1: the desk never re-reads inside the write, so it
+            // must reload here to send the post-upload revision on the
+            // transition).
+            const refreshed = await deliveryService.getDelivery(this.delivery.id);
+            this.delivery = refreshed;
+
+            const transition = await deliveryService.updateStatus(this.delivery.id, {
                 to: this.status,
                 pod_proof_url: proofUrl,
                 pod_signed_by: this.signedBy || 'Unknown',
@@ -176,8 +183,7 @@ export class DeliveryDetail extends LitElement {
             this.showPODModal = false;
             this.podPhotos.forEach(p => URL.revokeObjectURL(p.preview));
             this.podPhotos = [];
-            const updated = await deliveryService.getDelivery(this.delivery.id);
-            this.delivery = updated;
+            this.delivery = transition;
             ToastService.show('Delivery completed successfully', 'success');
         } catch {
             ToastService.show('Failed to update status', 'error');
