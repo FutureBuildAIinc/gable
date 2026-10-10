@@ -1115,8 +1115,23 @@ func TestWire_ConvertExactCentsOnOneToOneLines(t *testing.T) {
 		branchID, "WIRE-TX-"+branchID.String()[:8]); err != nil {
 		t.Fatalf("seed branch: %v", err)
 	}
+	// The quote and the converted order reference the branch (no cascade),
+	// so they go first, in the order convertWorld uses, and a failure is
+	// reported rather than swallowed.
 	t.Cleanup(func() {
-		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, branchID)
+		ctx := context.Background()
+		for _, q := range []string{
+			`DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
+			`DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE branch_id = $1)`,
+			`DELETE FROM orders WHERE branch_id = $1`,
+			`DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN (SELECT id FROM quotes WHERE branch_id = $1)`,
+			`DELETE FROM quotes WHERE branch_id = $1`,
+			`DELETE FROM locations WHERE id = $1`,
+		} {
+			if _, err := f.db.Pool.Exec(ctx, q, branchID); err != nil {
+				t.Errorf("cleanup %q: %v", q, err)
+			}
+		}
 	})
 
 	odd := f.line("3")
