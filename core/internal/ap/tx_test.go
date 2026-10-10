@@ -438,3 +438,63 @@ func TestTx_Concurrency_Pool4ThreeContenders(t *testing.T) {
 		t.Errorf("after the race: control %d, open %d", got, want)
 	}
 }
+
+// RULE (ADR 0008 7.4 and section 9): the payment locks the named bills in id
+// order whatever order the request named them, so concurrent payments of the
+// same bills serialize on the locks instead of deadlocking. Each round races
+// three payments that name the same three bills in rotated orders; a lock
+// order that follows the request would cancel a contender with a deadlock.
+func TestTx_PaymentLocksInIDOrder(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	f := newFixture(t, db)
+	svc := f.svc
+	ctx, cancel := context.WithTimeout(branchctx.WithSystem(context.Background()), 60*time.Second)
+	defer cancel()
+
+	const rounds = 5
+	for r := 0; r < rounds; r++ {
+		ids := make([]uuid.UUID, 3)
+		for i := range ids {
+			inv, err := svc.Create(ctx, f.createInput("TX-ORD-"+string(rune('A'+r))+string(rune('0'+i))), ap.Caller{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.Transition(ctx, inv.ID, &ap.TransitionInput{To: ap.StatusApproved}, revision(1), ap.Caller{}); err != nil {
+				t.Fatal(err)
+			}
+			ids[i] = inv.ID
+		}
+		orders := [][]uuid.UUID{
+			{ids[0], ids[1], ids[2]},
+			{ids[2], ids[1], ids[0]},
+			{ids[1], ids[2], ids[0]},
+		}
+		var wg sync.WaitGroup
+		errs := make(chan error, len(orders))
+		for i := range orders {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				// each bill owes 10 cents and every payment asks for 3, so
+				// every contender succeeds whatever order it wins the locks in.
+				if _, err := svc.PayVendor(ctx, payInput(f, 3, orders[i]...), ap.Caller{}); err != nil {
+					errs <- err
+				}
+			}(i)
+		}
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			t.Fatalf("round %d: concurrent payment across the same bills: %v", r, err)
+		}
+		applied := f.count(`SELECT ROUND(COALESCE(SUM(amount), 0) * 100)::bigint FROM ap_payment_applications a
+			JOIN vendor_invoices i ON i.id = a.invoice_id WHERE i.vendor_id = $1 AND i.number LIKE 'AP-%'`, f.vendor)
+		if want := int64(9 * (r + 1)); applied != want {
+			t.Fatalf("round %d: %d cents applied so far, want %d", r, applied, want)
+		}
+		if got, want := f.controlBalance(), f.openSum(); got != want {
+			t.Fatalf("round %d: control %d, open %d", r, got, want)
+		}
+	}
+}
