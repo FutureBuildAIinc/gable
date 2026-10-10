@@ -264,10 +264,11 @@ func TestFeedCommitOrderServesBoth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin A: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = txA.Exec(context.Background(), "ROLLBACK")
-		_, _ = txA.Exec(context.Background(), "ROLLBACK")
-	})
+	// Rollback (not Exec("ROLLBACK"), which leaves the transaction's
+	// connection unreleased) so a failure later in the test does not hang
+	// the fixture's pool close at the 10 minute go test timeout; a commit
+	// already happened makes this a no-op ErrTxClosed.
+	t.Cleanup(func() { _ = txA.Rollback(context.Background()) })
 	if _, err := txA.Exec(ctx,
 		"INSERT INTO draft_events (draft_id, module, branch_id, op, revision, status, actor_kind) "+
 		"VALUES ($1, 'quotes', (SELECT value::uuid FROM system_settings WHERE key='default_branch_id'), 'created', 1, 'OPEN', 'anonymous')",
@@ -282,10 +283,7 @@ func TestFeedCommitOrderServesBoth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin B: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = txB.Exec(context.Background(), "ROLLBACK")
-		_, _ = txB.Exec(context.Background(), "ROLLBACK")
-	})
+	t.Cleanup(func() { _ = txB.Rollback(context.Background()) })
 
 	insertBErr := make(chan error, 1)
 	go func() {
