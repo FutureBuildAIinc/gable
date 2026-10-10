@@ -176,13 +176,16 @@ paths:
         line_needs_account; a required chart of accounts code that is missing
         is a 409 blocker account_missing naming it). To voided: from pending
         (nothing posted) or
-        approved (the entry is reversed whole); a reason is required, a bill
-        with money applied is refused with the has_payments blocker, an
-        approved or partial bill with no linked journal entry (a legacy bill
-        whose posting was swallowed) with the entry_not_linked blocker, and a
-        bill whose linked entry does not balance (the base's one leg approve
-        shape) with the entry_unbalanced blocker; nothing is written on
-        either refusal.
+        approved (the entry is reversed whole; a bill that prices to zero
+        posted nothing and voids with nothing to reverse); a reason is
+        required, a bill with money applied is refused with the has_payments
+        blocker, an approved or partial bill that owes but has no linked
+        journal entry (a legacy bill whose posting was swallowed, or one
+        holding the removed sync's one leg credit) with the entry_not_linked
+        blocker, and a bill whose linked entry does not balance with the
+        entry_unbalanced blocker; nothing is written on either refusal. No
+        route links an entry to a bill yet: such a bill stays approved and
+        payable until a later repair item (a stated limit).
       parameters:
         - name: id
           in: path

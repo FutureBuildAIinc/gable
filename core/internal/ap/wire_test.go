@@ -725,6 +725,52 @@ func TestWire_PayAmountIsCents(t *testing.T) {
 // missing is refused rather than voided silently with the credit stranded in
 // 2010, and so is one whose linked entry is the base's one leg shape: a void
 // would mirror it into another unbalanced entry.
+// A bill that prices to zero (a zero price, or a positive price that rounds
+// to 0 cents at the line) approves with no entry, because there is nothing to
+// post. It owes nothing, so its void has nothing to reverse and goes through:
+// it must not be refused as a bill with no linked entry (review r6 P2-1).
+func TestWire_VoidZeroBill(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	for _, c := range []struct {
+		number string
+		price  int64
+	}{
+		{"V-ZERO-1", 0}, // a zero price
+		{"V-ZERO-2", 5}, // 0.0005 a unit, 0 cents at the line
+	} {
+		id, r1 := f.enter(c.number, "1", c.price)
+		a := f.approve(id, r1)
+		if a.status != http.StatusOK {
+			t.Fatalf("%s: approve = %d: %s", c.number, a.status, a.raw)
+		}
+		if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND total = 0 AND gl_entry_id IS NULL`, id); n != 1 {
+			t.Fatalf("%s: the approved bill is not a zero total with no entry", c.number)
+		}
+		if got, want := f.controlBalance(), f.openSum(); got != want {
+			t.Fatalf("%s: after the approve: control %d, open %d", c.number, got, want)
+		}
+		before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+		v := f.void(id, 2, "entered in error")
+		if v.status != http.StatusOK {
+			t.Fatalf("%s: void the zero bill = %d, want 200: %s", c.number, v.status, v.raw)
+		}
+		if str(t, v.body, "status") != "voided" {
+			t.Errorf("%s: the zero bill = %s, want voided", c.number, v.raw)
+		}
+		if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+			t.Errorf("%s: %d entries were written for a void with nothing to reverse", c.number, after-before)
+		}
+		if !f.balanced() {
+			t.Errorf("%s: an entry does not balance", c.number)
+		}
+		if got, want := f.controlBalance(), f.openSum(); got != want {
+			t.Errorf("%s: after the void: control %d, open %d", c.number, got, want)
+		}
+	}
+}
+
 func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))

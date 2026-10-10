@@ -469,12 +469,16 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 }
 
 // void is the transition that reverses the entry: a pending bill has nothing
-// posted and simply dies; an approved one's entry is reversed whole. A bill
+// posted and simply dies; an approved one's entry is reversed whole; a bill
+// that prices to zero posted nothing and voids with nothing to reverse. A bill
 // with money applied is refused: the payments have to be undone first. A bill
-// that owes (approved or partial) but never linked its entry is refused too:
-// there is nothing to reverse, and a silent void would strand the credit. So
-// is a linked entry that does not balance (the base's one leg approve shape):
-// its reversal would not balance either.
+// that owes (approved or partial, a nonzero total) but has no linked entry is
+// refused too: no route links an entry to a bill, and a legacy bill of that
+// shape may hold the removed sync's one leg credit, which a plain void would
+// strand. So is a linked entry that does not balance (that one leg shape,
+// linked by hand): its reversal would not balance either. Both refusals are a
+// stated limit: such a bill stays approved and payable until a later repair
+// item.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
@@ -497,12 +501,14 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 		if !from.allows(StatusVoided) {
 			return httpx.InvalidStateTransition("a " + from.Status() + " bill cannot be voided")
 		}
-		// An approved or partial bill that never linked its entry (a legacy
-		// bill whose posting was swallowed) must not void silently: the credit
-		// would stay in the control account with nothing to reverse.
-		if (from == StatusApproved || from == StatusPartial) && locked.GLEntryID == nil {
-			return httpx.InvalidStateTransition("the bill carries a posted balance but no linked journal entry",
-				httpx.Blocker("entry_not_linked", "the bill was approved without a linked journal entry; link one before it is voided"))
+		// An approved or partial bill that owes but has no linked entry (a
+		// legacy bill: its posting was swallowed, or it holds the removed
+		// sync's one leg credit) must not void silently: a credit may stay in
+		// the control account with nothing to reverse. A zero total bill posted
+		// nothing and owes nothing, so it voids.
+		if (from == StatusApproved || from == StatusPartial) && locked.GLEntryID == nil && locked.TotalCents != 0 {
+			return httpx.InvalidStateTransition("the bill has no linked journal entry, so a void could leave its credit in accounts payable",
+				httpx.Blocker("entry_not_linked", "no route links a journal entry to a bill yet; the bill stays approved and payable until a later repair item"))
 		}
 		var reversal *uuid.UUID
 		if locked.GLEntryID != nil {
@@ -516,7 +522,7 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 				}
 				if errors.Is(err, gl.ErrUnbalanced) {
 					return httpx.InvalidStateTransition("the linked entry does not balance and a void would mirror it into another unbalanced entry",
-						httpx.Blocker("entry_unbalanced", "the bill's linked journal entry has one leg only (the removed sync's shape); post the missing legs, then void"))
+						httpx.Blocker("entry_unbalanced", "the bill's linked journal entry does not balance (the removed sync's one leg shape); the bill stays approved and payable until a later repair item"))
 				}
 				return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
 			}
