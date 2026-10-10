@@ -122,9 +122,9 @@ func TestAssign_RouteCompletionRaceNeverLeavesPendingOnCompletedRoute(t *testing
 	results := make(chan outcome, racers)
 
 	// First the route prep completes the only seeded stop and then dispatches +
-// completes the route. The route revision moves to 1 after the stop
-// transition (TouchDelivery only bumps the stop's revision, not the
-// route's), so the route transition reads 1.
+	// completes the route. The route revision moves to 1 after the stop
+	// transition (TouchDelivery only bumps the stop's revision, not the
+	// route's), so the route transition reads 1.
 	if _, err := svc.TransitionStop(ctx, stop, deliveredTransition(), rev(1), ""); err != nil {
 		t.Fatalf("prep stop delivered: %v", err)
 	}

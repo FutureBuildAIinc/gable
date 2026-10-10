@@ -17,8 +17,8 @@ const CDL_CLASSES = ['', 'A', 'B', 'C'];
 
 // driverStatusColors is keyed by the lowercase wire vocabulary
 // (active/inactive/on_leave) the desk reads back. An unknown status falls
-// back to the active colour so the cell is never blank (the live failure:
-// every status rendered blank because the keys were the storage spelling).
+// back to the active colour so the cell stays filled for a value the table
+// does not know (a legacy uppercase value or a future wire value).
 export const driverStatusColors: Record<string, string> = {
   active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   inactive: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
@@ -27,7 +27,8 @@ export const driverStatusColors: Record<string, string> = {
 
 // driverStatusClass answers the Tailwind class for a status read off the
 // wire, falling back to the active class for any value the table does
-// not know (an uppercase legacy value or a future wire value).
+// not know (a legacy uppercase value, an empty string, an unknown future
+// wire value).
 export function driverStatusClass(status: string): string {
   return driverStatusColors[status] || driverStatusColors.active;
 }
@@ -435,7 +436,7 @@ export class FleetManagement extends LitElement {
                       </td>
                       <td class="px-4 py-3 font-mono text-xs text-zinc-300">${formatDate(d.hire_date)}</td>
                       <td class="px-4 py-3">
-                        <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${statusColors[d.status] || activeClass}">
+                        <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${driverStatusClass(d.status)}">
                           ${d.status.replace(/_/g, ' ')}
                         </span>
                       </td>

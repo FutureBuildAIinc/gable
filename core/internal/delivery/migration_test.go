@@ -203,3 +203,73 @@ func TestMigration104_BackfillsNullStatusAndSetsNotNull(t *testing.T) {
 		t.Errorf("after down a NULL status must be accepted again: %v", err)
 	}
 }
+
+// RULE (PR 70 review round 4 P3-2 and round 3's left P3): the up migration
+// also normalises a legacy lowercase or stored value to the UPPERCASE
+// vocabulary the model and scans carry, and routes a stored value outside
+// the known vocabulary to a stated blocking value (a route becomes DRAFT,
+// a stop becomes PENDING). The test inserts one of each shape the legacy
+// schema allows before applying migration 104 and reads back: the
+// lowercase values come through uppercase; the foreign values land on
+// the stated blocking value.
+func TestMigration104_NormalisesLowercaseAndUnknownStatuses(t *testing.T) {
+	conn, _ := scratchDB104(t)
+	before, target := migration104Files(t)
+	for _, f := range before {
+		apply104(t, conn, f)
+	}
+	branchSQL := `(SELECT id FROM locations WHERE code = 'NORM-104' LIMIT 1)`
+	seedBase := fmt.Sprintf(`
+		INSERT INTO locations (id, type, code, name)
+		VALUES ('00000000-0000-4000-8000-000000000104', 'BRANCH', 'NORM-104', 'Normalisation branch');
+		INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ('00000000-0000-4000-8000-0000000104cc', 'Norm co', 'NORM-104', %[1]s);
+		INSERT INTO customer_branches (customer_id, branch_id)
+		VALUES ('00000000-0000-4000-8000-0000000104cc', %[1]s);
+		INSERT INTO orders (id, customer_id, status, total_amount, branch_id, currency, delivery_type, number)
+		VALUES ('00000000-0000-4000-8000-00000001040a',
+			'00000000-0000-4000-8000-0000000104cc', 'CONFIRMED', 10, %[1]s, 'USD', 'DELIVERY', 'SO-NORM-A');
+		INSERT INTO vehicles (id, name, vehicle_type, license_plate)
+		VALUES ('00000000-0000-4000-8000-00000001040b', 'Norm van', 'VAN', 'NORM-V');
+		INSERT INTO drivers (id, name, license_number)
+		VALUES ('00000000-0000-4000-8000-00000001040c', 'Norm driver', 'NORM-D');
+	`, branchSQL)
+	if _, err := conn.Exec(context.Background(), seedBase); err != nil {
+		t.Fatalf("seed rows: %v", err)
+	}
+
+	// A lowercase known route vocabulary value (route 'in_transit') and a
+	// stored unknown route value ('weird_legacy'); a lowercase known stop
+	// value ('delivered') and a stored unknown stop value ('finished?'). The
+	// migration rewrites every one of these.
+	legacyRows := `
+		INSERT INTO delivery_routes (id, vehicle_id, driver_id, scheduled_date, status) VALUES
+			('00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'in_transit'),
+			('00000000-0000-4000-8000-0000000104de', '00000000-0000-4000-8000-00000001040b', '00000000-0000-4000-8000-00000001040c', CURRENT_DATE, 'weird_legacy');
+		INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status) VALUES
+			('00000000-0000-4000-8000-0000000104df', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 1, 'delivered'),
+			('00000000-0000-4000-8000-0000000104e0', '00000000-0000-4000-8000-0000000104dd', '00000000-0000-4000-8000-00000001040a', 2, 'finished?');
+	`
+	if _, err := conn.Exec(context.Background(), legacyRows); err != nil {
+		t.Fatalf("legacy rows: %v", err)
+	}
+
+	apply104(t, conn, target)
+
+	// The lowercase IN_TRANSIT is normalised to UPPER; a stored unknown
+	// route value moves to the stated blocking value (DRAFT).
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104dd"); got != "IN_TRANSIT" {
+		t.Errorf("lowercase route status after migration = %s, want IN_TRANSIT", got)
+	}
+	if got := scalar104[string](t, conn, `SELECT status FROM delivery_routes WHERE id = $1`, "00000000-0000-4000-8000-0000000104de"); got != "DRAFT" {
+		t.Errorf("unknown route status after migration = %s, want DRAFT", got)
+	}
+	// The lowercase DELIVERED is normalised to UPPER; an unknown stop value
+	// moves to the stated blocking value (PENDING).
+	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104df"); got != "DELIVERED" {
+		t.Errorf("lowercase stop status after migration = %s, want DELIVERED", got)
+	}
+	if got := scalar104[string](t, conn, `SELECT status FROM deliveries WHERE id = $1`, "00000000-0000-4000-8000-0000000104e0"); got != "PENDING" {
+		t.Errorf("unknown stop status after migration = %s, want PENDING", got)
+	}
+}

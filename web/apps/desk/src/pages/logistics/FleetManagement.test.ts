@@ -5,9 +5,11 @@ import { describe, it, expect } from 'vitest'
 import { driverStatusClass, driverStatusColors } from './FleetManagement'
 
 // RULE (PR 70 review round 1 P2-1): the colour map is the lowercase wire
-// vocabulary, the active class is the fallback for an unknown status.
-// The live failure: keys were the storage spelling (ACTIVE, INACTIVE,
-// ON_LEAVE) so every driver row rendered a blank status badge.
+// vocabulary the desk reads back (active, inactive, on_leave). The map
+// keys being the storage spelling (ACTIVE, INACTIVE, ON_LEAVE) would have
+// rendered every driver row with a blank status badge, since the wire
+// values never matched a key. The map keys are the wire values instead,
+// with the active class as the fallback for an unknown status.
 describe('driverStatusClass', () => {
   it.each([
     ['active', 'emerald'],
@@ -18,8 +20,10 @@ describe('driverStatusClass', () => {
   })
 
   it('falls back to the active class for an unknown status', () => {
-    // A legacy uppercase value would have rendered blank; the fallback now
-    // returns the active colour so the cell is never empty.
+    // An uppercase value is the storage spelling and would have rendered
+    // blank before the wire-color map; the fallback returns the active
+    // colour so the cell stays filled for any value the table does not
+    // know.
     expect(driverStatusClass('ACTIVE')).toBe(driverStatusColors.active)
     expect(driverStatusClass('')).toBe(driverStatusColors.active)
     expect(driverStatusClass('something_else')).toBe(driverStatusColors.active)

@@ -1029,7 +1029,7 @@ func TestBranchWall(t *testing.T) {
 		t.Errorf("%d deliveries were created despite a cross-branch assign", created)
 	}
 	// Cross-branch POD photo upload: a real multipart body (a small JPG
-// header) and the request must answer 404 (PR 70 review round 3 P2-N1).
+	// header) and the request must answer 404 (PR 70 review round 3 P2-N1).
 	podBody, podCT := buildMultipartPhoto(t, "a.jpg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10})
 	hdrP := map[string]string{"X-Test-Branch": other.String(), "Content-Type": podCT}
 	if res := f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+stop.String()+"/pod-photo", podBody, hdrP); res.status != http.StatusNotFound {
@@ -1047,8 +1047,8 @@ func TestBranchWall(t *testing.T) {
 		t.Errorf("cross branch optimize = %d, want 404", res.status)
 	}
 	// Cross-branch route transition: the route is not visible, so 404. The
-// request carries the same If-Match a real transition would; the wall fires
-// before the precondition is read.
+	// request carries the same If-Match a real transition would; the wall fires
+	// before the precondition is read.
 	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/transitions",
 		`{"to":"in_transit"}`,
 		map[string]string{"X-Test-Branch": other.String(), "If-Match": `"1"`}); res.status != http.StatusNotFound {
@@ -1241,7 +1241,9 @@ func TestBranchWall_PODPhotoRefusalLeavesNoFile(t *testing.T) {
 		otherBranch, "RFU-"+otherBranch.String()[:8]); err != nil {
 		t.Fatalf("seed other branch: %v", err)
 	}
-	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, otherBranch) })
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, otherBranch)
+	})
 	var customer uuid.UUID
 	if err := f.db.Pool.QueryRow(ctx, `
 		INSERT INTO customers (id, name, account_number, primary_branch_id)
@@ -1267,7 +1269,9 @@ func TestBranchWall_PODPhotoRefusalLeavesNoFile(t *testing.T) {
 		uuid.New()).Scan(&crossRoute); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM delivery_routes WHERE id = $1`, crossRoute) })
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM delivery_routes WHERE id = $1`, crossRoute)
+	})
 	var crossStop uuid.UUID
 	if err := f.db.Pool.QueryRow(ctx,
 		`INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status) VALUES ($1, $2, $3, 99, 'PENDING') RETURNING id`,

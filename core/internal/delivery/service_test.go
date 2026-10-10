@@ -25,14 +25,14 @@ type fakeRepo struct {
 	routes []Route
 
 	// Configurable inputs for the OptimizeRoute path.
-	stops       []Stop
-	branchID    uuid.UUID
-	branchOrg   *BranchOrigin
-	orderAddrs  map[uuid.UUID]string
-	orderBranch map[uuid.UUID]uuid.UUID
+	stops        []Stop
+	branchID     uuid.UUID
+	branchOrg    *BranchOrigin
+	orderAddrs   map[uuid.UUID]string
+	orderBranch  map[uuid.UUID]uuid.UUID
 	callerBranch *uuid.UUID
-	routeStops  map[uuid.UUID][]Stop
-	fetchedStop *Stop
+	routeStops   map[uuid.UUID][]Stop
+	fetchedStop  *Stop
 
 	// Configurable inputs for the single-stop and assign paths.
 	vehicle *Vehicle
@@ -73,7 +73,7 @@ func (m *fakeRepo) UpdateDriver(ctx context.Context, d *Driver) error { return n
 func (m *fakeRepo) DeleteDriver(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
-func (m *fakeRepo) LockDriver(ctx context.Context, id uuid.UUID) error       { return nil }
+func (m *fakeRepo) LockDriver(ctx context.Context, id uuid.UUID) error                 { return nil }
 func (m *fakeRepo) SetDriverPhoto(ctx context.Context, id uuid.UUID, url string) error { return nil }
 
 func (m *fakeRepo) CreateRoute(ctx context.Context, r *Route) error { return nil }
@@ -361,9 +361,9 @@ func TestOptimizeRoute_IndexAlignmentAndETA(t *testing.T) {
 	routeID := uuid.New()
 
 	repo := &fakeRepo{
-		routes:     []Route{{ID: routeID, Revision: 1, Status: RouteStatusDraft}},
-		stops:      []Stop{dA, dB, dC},
-		branchOrg:  &BranchOrigin{Latitude: fptr(49.0), Longitude: fptr(-119.0)},
+		routes:    []Route{{ID: routeID, Revision: 1, Status: RouteStatusDraft}},
+		stops:     []Stop{dA, dB, dC},
+		branchOrg: &BranchOrigin{Latitude: fptr(49.0), Longitude: fptr(-119.0)},
 	}
 	svc := NewService(repo)
 	svc.WithRouting(NewORSClient("k", srv.URL, "driving-hgv", discardLogger()), discardLogger())
@@ -722,8 +722,8 @@ func TestAssignOrderToRoute_CrossBranchOrderIs404(t *testing.T) {
 	callerBranch := uuid.New()
 	otherBranch := uuid.New()
 	repo := &fakeRepo{
-		routes:      []Route{{ID: routeID, VehicleID: &vehicleID, Status: RouteStatusDraft, Revision: 1}},
-		vehicle:     &Vehicle{ID: vehicleID},
+		routes:       []Route{{ID: routeID, VehicleID: &vehicleID, Status: RouteStatusDraft, Revision: 1}},
+		vehicle:      &Vehicle{ID: vehicleID},
 		callerBranch: &callerBranch,
 		orderBranch:  map[uuid.UUID]uuid.UUID{orderID: otherBranch},
 	}
