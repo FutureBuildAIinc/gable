@@ -124,9 +124,9 @@ func TestResolveLinePair(t *testing.T) {
 // stored (ADR 0006 2.2: each size is stored in canonical form).
 func TestStandardSizePairs(t *testing.T) {
 	for _, tc := range []struct {
-		code                   string
-		stdUnit, stdRef        httpx.Quantity
-		wantA, wantB           httpx.Quantity
+		code            string
+		stdUnit, stdRef httpx.Quantity
+		wantA, wantB    httpx.Quantity
 	}{
 		{"EA", q("1"), q("1"), q("1"), q("1")},
 		{"PCS", q("1"), q("1"), q("1"), q("1")},

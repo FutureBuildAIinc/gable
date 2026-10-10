@@ -316,6 +316,8 @@ POST	/api/v1/products/{id}/pim/generate/seo	internal/pim	h.HandleGenerateSEO
 GET	/api/v1/products/{id}/pim/media	internal/pim	h.HandleListMedia
 DELETE	/api/v1/products/{id}/pim/media/{mediaId}	internal/pim	h.HandleDeleteMedia
 PATCH	/api/v1/products/{id}/pim/media/{mediaId}/primary	internal/pim	h.HandleSetPrimaryMedia
+GET	/api/v1/products/{id}/units	internal/product	h.HandleGetUnitSet
+PUT	/api/v1/products/{id}/units	internal/product	h.HandlePutUnitSet
 GET	/api/v1/purchase-orders	internal/purchase_order	h.HandleListPOs
 POST	/api/v1/purchase-orders	internal/purchase_order	h.HandleCreatePO
 GET	/api/v1/purchase-orders/recommendations	internal/purchase_order	h.HandleGetRecommendations
@@ -368,6 +370,10 @@ POST	/api/v1/tax/exemptions	internal/tax	h.createExemption
 GET	/api/v1/tax/exemptions/{customerID}	internal/tax	h.getExemptions
 DELETE	/api/v1/tax/exemptions/{id}	internal/tax	h.deleteExemption
 POST	/api/v1/tax/preview	internal/tax	h.previewTax
+GET	/api/v1/units	internal/unit	h.handleList
+POST	/api/v1/units	internal/unit	h.handleCreate
+GET	/api/v1/units/{code}	internal/unit	h.handleGet
+PUT	/api/v1/units/{code}	internal/unit	h.handleUpdate
 GET	/api/v1/users	internal/location	h.ListKnownUsers
 GET	/api/v1/users/{sub}/branches	internal/location	h.ListUserBranches
 POST	/api/v1/users/{sub}/branches	internal/location	h.GrantUserBranch
