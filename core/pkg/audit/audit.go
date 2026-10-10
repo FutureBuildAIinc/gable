@@ -168,6 +168,35 @@ func cutRunes(s string, limit int) (string, bool) {
 	return s[:cut], true
 }
 
+// cutBeforePartialMarker removes a trailing partial marker from s, if any.
+// sanitiseString writes the six character marker `\u0000` in place of a
+// NUL byte; cutRunes can land at any byte offset within it (each char is
+// its own ASCII rune). A cut that lands inside a marker stores a path
+// ending with the first 1 to 5 chars of the marker: plain text and valid
+// UTF-8, but ambiguous to a reader. This function backs the cut up to
+// before the leading `\` of the partial marker. The loop re-checks the
+// (shorter) string because one removal can leave another partial marker
+// behind: a cut inside a back-to-back run of markers can drop several
+// marker prefixes in turn. The resulting string may be shorter than the
+// cap, which is allowed.
+func cutBeforePartialMarker(s string) string {
+	markerPrefixes := []string{`\u000`, `\u00`, `\u0`, `\u`, `\`}
+	for {
+		matched := false
+		for _, p := range markerPrefixes {
+			if strings.HasSuffix(s, p) {
+				s = s[:len(s)-len(p)]
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			break
+		}
+	}
+	return s
+}
+
 // sanitiseString makes a string safe for a Postgres text column and for the
 // jsonb marshalling that follows: a NUL byte (U+0000) is replaced with the
 // visible marker `\u0000` (the JSON escape spelled out as literal text, so
@@ -336,6 +365,11 @@ func (l *Logger) AuditKeyRefusal(ctx context.Context, keyID, action, scope, meth
 	pathTruncated := false
 	if len(storedPath) > maxRefusalPathBytes {
 		storedPath, pathTruncated = cutRunes(storedPath, maxRefusalPathBytes)
+		// Step the cut back to before any partial marker so the stored
+		// path never ends inside a marker (the marker is six ASCII
+		// chars, so cutRunes can land at any byte within it). The cap
+		// may be undershot; that's allowed.
+		storedPath = cutBeforePartialMarker(storedPath)
 	}
 	storedScope, scopeTruncated := cutRunes(scope, maxRefusalScopeBytes)
 	changes := map[string]interface{}{"method": method, "path": storedPath}
