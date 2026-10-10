@@ -639,6 +639,7 @@
         "customer_name": "Kelbrook Construction",
         "customer_po": null,
         "delivery_type": "pickup",
+        "deposit_unapplied_cents": 0,
         "hold_note": null,
         "hold_reason": null,
         "id": "<id-21>",

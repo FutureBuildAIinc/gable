@@ -130,8 +130,8 @@ paths:
       summary: Void an invoice
       description: 'The only client transition is void (roles admin, owner, finance; a reason is required). unpaid,
         partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition.
-        A void is refused with the blocker has_applications while a payment is recorded against the invoice or an
-        applied credit memo names it, and with has_credit_memos while a credit memo that is not void names it. It
+        A void is refused with the blocker has_applications while the invoice has a live application (a payment, an
+        applied credit memo, a discount or a write off), and with has_credit_memos while a credit memo that is not void names it. It
         runs in one transaction: it locks the invoice''s order row first, reverses the invoice''s whole journal
         entry (dated the void date), returns its billed stock to on hand, reduces the order lines'' fulfilled quantities,
         re-runs allocation for those quantities and derives the order status; the subledger is credited back. The
@@ -409,8 +409,10 @@ paths:
         down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original
         cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes
         no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock
-        and puts the credit back on the receivable. The statuses past open (partial, applied) arrive with the payment
-        and AR item and are not reachable here (409 invalid_state_transition). Writes credit_memo.posted or credit_memo.voided.'
+        and puts the credit back on the receivable. partial and applied are reached by applications and refunds
+        (POST /credit-memos/{id}/applications and /refunds) and reopened by reversing an application; asking for them
+        here is 409 invalid_state_transition. A credit memo is voided from open only while no application or refund
+        has used it (409 has_applications). Writes credit_memo.posted or credit_memo.voided.'
       parameters:
       - name: id
         in: path
@@ -430,6 +432,137 @@ paths:
       responses:
         '200':
           description: The credit memo after the transition.
+          headers: *id001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditMemo'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '401': *id002
+        '403': *id003
+        '500': *id004
+  /api/v1/invoices/{id}/write-offs:
+    post:
+      operationId: invoiceWriteOff
+      tags:
+      - invoice
+      summary: Write off part or all of an invoice's open amount
+      description: 'Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice
+        off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off
+        that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition
+        is the invoice''s revision. Refused with 409 exceeds_open_amount, invoice_not_open (invalid_state_transition)
+        or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated.
+        Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceWriteOffRequest'
+      responses:
+        '200':
+          description: The invoice after the write off.
+          headers: *id001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '401': *id002
+        '403': *id003
+        '500': *id004
+  /api/v1/invoices/{id}/payments:
+    get:
+      operationId: invoiceApplications
+      tags:
+      - invoice
+      summary: List an invoice's applications
+      description: 'The applications that settled (or settle) the invoice: payment applications, credit memo applications,
+        early pay discounts and write offs, oldest first, reversed ones included with their reversal. The path keeps
+        its name; the payments of a legacy invoice are its PAYMENT applications.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The applications, in the list envelope (one page, no further cursor).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceApplicationPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '401': *id002
+        '403': *id003
+  /api/v1/credit-memos/{id}/applications:
+    post:
+      operationId: creditMemoApply
+      tags:
+      - credit-memo
+      summary: Apply a credit memo's open credit to invoices
+      description: 'Uses the open credit of an open or partial credit memo on invoices of the same customer and currency.
+        No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application.
+        The precondition is the credit memo''s revision. Refused with 409 exceeds_open_credit, exceeds_open_amount,
+        invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and
+        invoice.partial or invoice.paid per invoice.'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/XBranchId'
+      - $ref: '#/components/parameters/IfMatch'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditMemoApplyRequest'
+      responses:
+        '200':
+          description: The credit memo after the applications.
           headers: *id001
           content:
             application/json:
@@ -617,8 +750,8 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'What is still owed: the total less the payments recorded against the invoice while it is
-            unpaid or partial, 0 when paid, written off or void.'
+          description: 'What is still owed: the total less the live applications (stored by the AR core as amount_open),
+            0 when paid, written off or void.'
         is_overdue:
           type: boolean
           description: 'Computed: open and its due_date is before the branch''s today. OVERDUE is not a status.'
@@ -800,8 +933,8 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'What is still owed: the total less the payments recorded against the invoice while it is
-            unpaid or partial, 0 when paid, written off or void.'
+          description: 'What is still owed: the total less the live applications (stored by the AR core as amount_open),
+            0 when paid, written off or void.'
         is_overdue:
           type: boolean
           description: 'Computed: open and its due_date is before the branch''s today. OVERDUE is not a status.'
@@ -1222,8 +1355,8 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'The credit not yet used: the total while the memo is open, 0 for a draft or a void memo.
-            NEGATIVE like the total.'
+          description: 'The credit not yet used: the total plus its applications and refunds (stored by the AR core as
+            amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.'
         gl_entry_id:
           type:
           - string
@@ -1361,8 +1494,8 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'The credit not yet used: the total while the memo is open, 0 for a draft or a void memo.
-            NEGATIVE like the total.'
+          description: 'The credit not yet used: the total plus its applications and refunds (stored by the AR core as
+            amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.'
         gl_entry_id:
           type:
           - string
@@ -1709,3 +1842,65 @@ components:
           type: string
           maxLength: 500
           description: Required by a void.
+    InvoiceWriteOffRequest:
+      type: object
+      required:
+      - amount_cents
+      - reason
+      properties:
+        amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+    CreditMemoApplicationRequest:
+      type: object
+      required:
+      - invoice_id
+      - amount_cents
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+    CreditMemoApplyRequest:
+      type: object
+      required:
+      - applications
+      properties:
+        applications:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreditMemoApplicationRequest'
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+    InvoiceApplicationPage:
+      type: object
+      required:
+      - items
+      - next_cursor
+      - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArApplication'
+        next_cursor:
+          type:
+          - string
+          - 'null'
+        limit:
+          type: integer

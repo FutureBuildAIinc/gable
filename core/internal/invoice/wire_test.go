@@ -211,7 +211,7 @@ func TestOverdueIsComputedNotStored(t *testing.T) {
 	current, _ := f.invoice("1")
 	paid, _ := f.invoice("1")
 	mustExec(t, db, `UPDATE invoices SET due_date = CURRENT_DATE - 40 WHERE id = ANY($1)`, []uuid.UUID{uuid.MustParse(late), uuid.MustParse(paid)})
-	mustExec(t, db, `UPDATE invoices SET status = 'PAID', paid_at = NOW() WHERE id = $1`, paid)
+	mustExec(t, db, `UPDATE invoices SET status = 'PAID', amount_open = 0, paid_at = NOW() WHERE id = $1`, paid)
 
 	list := func(q string) []string {
 		r := f.do("GET", "/api/v1/invoices?customer_id="+f.customerID.String()+q, nil)
@@ -401,7 +401,7 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 
 	// a payment recorded against the invoice
 	paid, _ := f.invoice("1")
-	mustExec(t, db, `INSERT INTO payments (invoice_id, amount, method, reference) VALUES ($1, 1.00, 'CASH', 'REF')`, paid)
+	f.liveApplication(paid, 100)
 	r := f.voidInvoice(paid, rev(t, f.getInvoice(paid)), "has a payment")
 	if code, blockers, _ := errorOf(t, r); r.status != 409 || code != "conflict" || fmt.Sprint(blockers) != "[has_applications]" {
 		t.Errorf("void with a payment = %d %q %v, want 409 conflict has_applications", r.status, code, blockers)
@@ -409,8 +409,9 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 
 	// an applied credit memo naming it
 	applied, _ := f.invoice("1")
-	mustExec(t, db, `INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number, memo_date, subtotal, tax_amount, total_amount, tax_rate)
-		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'OTHER', 'applied', 5, 'APPLIED', credit_memo_next_number(), CURRENT_DATE, -5, 0, -5, 0)`, applied, f.customerID)
+	mustExec(t, db, `INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number, memo_date, subtotal, tax_amount, total_amount, tax_rate, amount_open)
+		VALUES ($1, $2, `+defaultBranch+`, 'USD', 'OTHER', 'applied', 5, 'APPLIED', credit_memo_next_number(), CURRENT_DATE, -5, 0, -5, 0, 0)`, applied, f.customerID)
+	f.liveCreditApplication(applied)
 	r = f.voidInvoice(applied, rev(t, f.getInvoice(applied)), "has an applied memo")
 	if _, blockers, _ := errorOf(t, r); r.status != 409 || fmt.Sprint(blockers) != "[has_applications]" {
 		t.Errorf("void with an applied credit memo = %d %v, want has_applications", r.status, blockers)
@@ -432,9 +433,9 @@ func TestInvoiceVoidRefusals(t *testing.T) {
 	if r = f.voidInvoice(named, rev(t, f.getInvoice(named)), "now free"); r.status != 200 {
 		t.Errorf("void after the credit memo is void = %d: %s", r.status, r.raw)
 	}
-	// a payment against a void invoice is refused by the payment module
-	if n := countOf(t, db, `SELECT count(*) FROM payments WHERE invoice_id = $1`, named); n != 0 {
-		t.Errorf("%d payments on the void invoice", n)
+	// a payment against a void invoice is refused by the AR core
+	if n := countOf(t, db, `SELECT count(*) FROM ar_applications WHERE invoice_id = $1`, named); n != 0 {
+		t.Errorf("%d applications on the void invoice", n)
 	}
 }
 
@@ -850,5 +851,43 @@ func TestVoidOfAKitInvoiceReturnsWholeKits(t *testing.T) {
 		if lm["line_type"] == "component" && (str(t, lm, "quantity_allocated") != "8" || str(t, lm, "quantity_backordered") != "0") {
 			t.Errorf("component allocated %v backordered %v, want 8/0", lm["quantity_allocated"], lm["quantity_backordered"])
 		}
+	}
+}
+
+// CARRIED (the C2-3 round 4 review): the void of a fulfilled order's invoice
+// brings the order back to confirmed, and that reopen writes the
+// order.reopened event of ADR 0005 section 12, from fulfilled.
+func TestInvoiceVoidOfAFulfilledOrderWritesOrderReopened(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+	invID, orderID := f.invoice("10")
+	if o := f.do("GET", "/api/v1/orders/"+orderID, nil); str(t, o.body, "status") != "fulfilled" {
+		t.Fatalf("order before the void = %v, want fulfilled (billed whole)", o.body["status"])
+	}
+
+	r := f.voidInvoice(invID, rev(t, f.getInvoice(invID)), "billed in error")
+	if r.status != 200 {
+		t.Fatalf("void = %d: %s", r.status, r.raw)
+	}
+	rows, err := db.Pool.Query(context.Background(),
+		`SELECT type, COALESCE(data->>'from_status', '') FROM events_outbox WHERE entity_type = 'order' AND entity_id = $1 ORDER BY position`, orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var ty, from string
+		if err := rows.Scan(&ty, &from); err != nil {
+			t.Fatal(err)
+		}
+		if from != "" {
+			ty += "<" + from
+		}
+		got = append(got, ty)
+	}
+	if len(got) == 0 || got[len(got)-1] != "order.reopened<fulfilled" {
+		t.Errorf("order events = %v, want order.reopened<fulfilled last", got)
 	}
 }

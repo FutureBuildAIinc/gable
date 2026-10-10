@@ -19,7 +19,6 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
-	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
@@ -98,6 +97,7 @@ var modelBoundSchemas = []struct {
 	{"CreditMemoLine", invoice.CreditLine{}},
 	// payment
 	{"Payment", payment.Payment{}},
+	{"PaymentSummary", payment.Summary{}},
 	{"Refund", payment.Refund{}},
 	{"PaymentIntentResponse", payment.PaymentIntentResponse{}},
 	// product
@@ -137,12 +137,20 @@ var modelBoundSchemas = []struct {
 	// inventory
 	{"InventoryLevel", inventory.Level{}},
 	{"InventoryProductSummary", inventory.ProductSummary{}},
-	// deposits
-	{"Deposit", deposit.CustomerDeposit{}},
-	{"DepositApplication", deposit.DepositApplication{}},
-	// accounts
-	{"AccountSummary", account.AccountSummary{}},
-	{"CustomerTransaction", account.CustomerTransaction{}},
+	// accounts and the AR core (C2-4)
+	{"AccountSummary", account.Summary{}},
+	{"AccountTransaction", account.Transaction{}},
+	{"ArApplication", account.Application{}},
+	{"ArAgingItem", account.AgingItem{}},
+	{"ArAgingTotal", account.AgingTotal{}},
+	{"ArAgingSummary", account.AgingSummary{}},
+	{"ArStatement", account.Statement{}},
+	{"ArStatementCurrency", account.StatementCurrency{}},
+	{"ArStatementLine", account.StatementLine{}},
+	{"ArOpenDocument", account.OpenDocument{}},
+	{"ArReconciliation", account.Reconciliation{}},
+	{"ArDriftRow", account.DriftRow{}},
+	{"ArLedgerRow", account.LedgerRow{}},
 	// vendors
 	{"Vendor", vendor.Vendor{}},
 	// sales-team

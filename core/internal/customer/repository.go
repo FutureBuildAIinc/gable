@@ -535,7 +535,7 @@ func (r *PostgresRepository) OpenDocuments(ctx context.Context, customerID uuid.
 			EXISTS (SELECT 1 FROM orders WHERE customer_id = $1 AND status IN ('DRAFT', 'CONFIRMED', 'ON_HOLD')),
 			EXISTS (SELECT 1 FROM invoices WHERE customer_id = $1 AND status IN ('UNPAID', 'PARTIAL')),
 			EXISTS (SELECT 1 FROM credit_memos WHERE customer_id = $1 AND status IN ('DRAFT', 'OPEN', 'PARTIAL')),
-			EXISTS (SELECT 1 FROM customer_deposits WHERE customer_id = $1 AND status = 'OPEN' AND amount > applied_amount)`,
+			EXISTS (SELECT 1 FROM payments WHERE customer_id = $1 AND status = 'POSTED' AND amount_unapplied > 0)`,
 		customerID).Scan(&orders, &invoices, &memos, &deposits)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the customer's open documents: %w", err)
@@ -544,7 +544,7 @@ func (r *PostgresRepository) OpenDocuments(ctx context.Context, customerID uuid.
 	for _, k := range []struct {
 		open bool
 		name string
-	}{{orders, "orders"}, {invoices, "invoices"}, {memos, "credit memos"}, {deposits, "deposits"}} {
+	}{{orders, "orders"}, {invoices, "invoices"}, {memos, "credit memos"}, {deposits, "unapplied payments"}} {
 		if k.open {
 			kinds = append(kinds, k.name)
 		}

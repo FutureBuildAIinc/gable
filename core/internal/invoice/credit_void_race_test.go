@@ -53,7 +53,7 @@ func TestVoidOfADraftThatIsPostedMeanwhileIsRetryable(t *testing.T) {
 
 	logger := slog.Default()
 	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
-	acct := account.NewService(account.NewRepository(db), db, logger)
+	acct := account.NewService(db, glSvc, logger)
 	racing := &postAfterFirstRead{Store: invoice.NewRepository(db), hook: func() {
 		if r := f.postCredit(id, 1); r.status != http.StatusOK {
 			t.Errorf("competing post = %d: %s", r.status, r.raw)

@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -32,7 +31,6 @@ type fakeRepo struct {
 	branchOK   bool
 	branchSeen []*uuid.UUID
 
-	openBalance int64
 	existsOrder bool
 }
 
@@ -47,44 +45,12 @@ func (f *fakeRepo) CreateInvoice(_ context.Context, inv *LegacyInvoice) error {
 	return nil
 }
 func (f *fakeRepo) GetInvoice(context.Context, uuid.UUID) (*Invoice, error) { return nil, nil }
-func (f *fakeRepo) UpdateInvoice(context.Context, *Invoice) error           { return nil }
 func (f *fakeRepo) ExistsInvoiceForOrder(context.Context, uuid.UUID) (bool, error) {
 	return f.existsOrder, nil
-}
-func (f *fakeRepo) SumOpenBalanceCents(context.Context, uuid.UUID) (int64, error) {
-	return f.openBalance, nil
 }
 func (f *fakeRepo) GetBranchTaxRate(_ context.Context, branchID *uuid.UUID) (float64, bool) {
 	f.branchSeen = append(f.branchSeen, branchID)
 	return f.branchRate, f.branchOK
-}
-
-// fakeAccount records AR subledger postings.
-type fakeAccount struct {
-	posts []accountPost
-	err   error
-}
-
-type accountPost struct {
-	customerID uuid.UUID
-	txnType    account.TransactionType
-	amount     int64
-	refID      *uuid.UUID
-	desc       string
-}
-
-func (f *fakeAccount) PostTransaction(_ context.Context, customerID uuid.UUID, t account.TransactionType, amount int64, ref *uuid.UUID, desc string) (*account.CustomerTransaction, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	f.posts = append(f.posts, accountPost{customerID, t, amount, ref, desc})
-	return &account.CustomerTransaction{CustomerID: customerID, Type: t, Amount: amount}, nil
-}
-func (f *fakeAccount) GetAccountSummary(context.Context, uuid.UUID) (*account.AccountSummary, error) {
-	return nil, nil
-}
-func (f *fakeAccount) GetTransactions(context.Context, uuid.UUID) ([]account.CustomerTransaction, error) {
-	return nil, nil
 }
 
 func txCtx() context.Context { return testutil.TxContext(context.Background()) }
@@ -488,133 +454,5 @@ func TestCreateInvoice_RepositoryErrorPropagates(t *testing.T) {
 	err := svc.CreateInvoice(txCtx(), &LegacyInvoice{CustomerID: uuid.New(), Lines: []LegacyLine{line(1000, 1)}})
 	if err == nil {
 		t.Fatal("want the repository error to propagate")
-	}
-}
-
-// --- ledger posting (double entry) ------------------------------------------
-
-// CORRECTNESS: posting an invoice books a balanced GL entry (DR AR / CR Sales
-// Revenue) for the invoice total, and debits the customer's AR subledger by the
-// same amount. The GL and the subledger must never disagree.
-func TestPostInvoiceToLedger_BalancedAndAgreeing(t *testing.T) {
-	glRepo := newFakeGLRepo()
-	acct := &fakeAccount{}
-	svc := NewService(&fakeRepo{}, newGLService(glRepo), acct, nil)
-
-	inv := &LegacyInvoice{ID: uuid.New(), CustomerID: uuid.New(), TotalAmount: 11200}
-	if err := svc.PostInvoiceToLedger(context.Background(), inv); err != nil {
-		t.Fatalf("PostInvoiceToLedger: %v", err)
-	}
-
-	if len(glRepo.entries) != 1 {
-		t.Fatalf("wrote %d journal entries, want 1", len(glRepo.entries))
-	}
-	entry := glRepo.entries[0]
-
-	assertBalanced(t, entry)
-	assertLeg(t, glRepo, entry, arCode, revenueCode, inv.TotalAmount)
-
-	if len(acct.posts) != 1 {
-		t.Fatalf("made %d subledger postings, want 1", len(acct.posts))
-	}
-	post := acct.posts[0]
-	if post.amount != inv.TotalAmount {
-		t.Errorf("subledger amount = %d, want the invoice total %d", post.amount, inv.TotalAmount)
-	}
-	if post.customerID != inv.CustomerID {
-		t.Errorf("subledger posted against %s, want %s", post.customerID, inv.CustomerID)
-	}
-	if post.txnType != account.TransactionTypeInvoice {
-		t.Errorf("subledger type = %q, want %q", post.txnType, account.TransactionTypeInvoice)
-	}
-	if post.refID == nil || *post.refID != inv.ID {
-		t.Errorf("subledger reference = %v, want the invoice ID %s", post.refID, inv.ID)
-	}
-
-	// The invariant the two ledgers share.
-	var glDebitAR int64
-	arID := glRepo.idFor(arCode)
-	for _, l := range entry.Lines {
-		if l.AccountID == arID {
-			glDebitAR += l.Debit - l.Credit
-		}
-	}
-	if glDebitAR != post.amount {
-		t.Errorf("GL debited AR by %d but the subledger recorded %d", glDebitAR, post.amount)
-	}
-}
-
-// CORRECTNESS: if the GL leg fails, the AR subledger must not be posted —
-// otherwise the customer owes money that no journal entry explains.
-func TestPostInvoiceToLedger_GLFailureBlocksSubledger(t *testing.T) {
-	glRepo := newFakeGLRepo()
-	glRepo.accounts = nil // chart of accounts missing -> resolveAccountIDs fails
-	acct := &fakeAccount{}
-	svc := NewService(&fakeRepo{}, newGLService(glRepo), acct, nil)
-
-	err := svc.PostInvoiceToLedger(context.Background(), &LegacyInvoice{ID: uuid.New(), CustomerID: uuid.New(), TotalAmount: 5000})
-	if err == nil {
-		t.Fatal("want an error when the GL posting fails")
-	}
-	if len(acct.posts) != 0 {
-		t.Errorf("AR subledger was posted (%+v) despite the GL failing", acct.posts)
-	}
-}
-
-// CORRECTNESS: a store-credit return is the mirror of an invoice — the GL entry
-// reverses (DR Revenue / CR AR) and the subledger amount is NEGATIVE so the
-// customer owes less.
-func TestPostAccountReturnToLedger_MirrorsInvoice(t *testing.T) {
-	glRepo := newFakeGLRepo()
-	acct := &fakeAccount{}
-	svc := NewService(&fakeRepo{}, newGLService(glRepo), acct, nil)
-
-	custID, returnID := uuid.New(), uuid.New()
-	glEntryID, err := svc.PostAccountReturnToLedger(context.Background(), custID, returnID, 2500)
-	if err != nil {
-		t.Fatalf("PostAccountReturnToLedger: %v", err)
-	}
-	if glEntryID == uuid.Nil {
-		t.Error("want the GL entry ID returned so the return row can link to it")
-	}
-
-	if len(glRepo.entries) != 1 {
-		t.Fatalf("wrote %d journal entries, want 1", len(glRepo.entries))
-	}
-	assertBalanced(t, glRepo.entries[0])
-	assertLeg(t, glRepo, glRepo.entries[0], revenueCode, arCode, 2500)
-
-	if len(acct.posts) != 1 {
-		t.Fatalf("made %d subledger postings, want 1", len(acct.posts))
-	}
-	if acct.posts[0].amount != -2500 {
-		t.Errorf("subledger amount = %d, want -2500 — store credit must reduce what the customer owes",
-			acct.posts[0].amount)
-	}
-	if acct.posts[0].txnType != account.TransactionTypeRefund {
-		t.Errorf("subledger type = %q, want %q", acct.posts[0].txnType, account.TransactionTypeRefund)
-	}
-}
-
-// CORRECTNESS: with no GL wired (nil service) the money paths must degrade
-// quietly rather than panic — POS calls these best-effort after commit.
-func TestLedgerPosting_NilGLIsSafe(t *testing.T) {
-	acct := &fakeAccount{}
-	svc := NewService(&fakeRepo{}, nil, acct, nil)
-
-	if err := svc.PostCashSaleToGL(context.Background(), uuid.New().String(), 1000); err != nil {
-		t.Errorf("PostCashSaleToGL with no GL: %v", err)
-	}
-	id, err := svc.PostCashReturnToGL(context.Background(), uuid.New().String(), 1000)
-	if err != nil || id != uuid.Nil {
-		t.Errorf("PostCashReturnToGL with no GL = (%v, %v), want (uuid.Nil, nil)", id, err)
-	}
-
-	// The subledger leg still runs even without a GL.
-	if _, err := svc.PostAccountReturnToLedger(context.Background(), uuid.New(), uuid.New(), 500); err != nil {
-		t.Errorf("PostAccountReturnToLedger with no GL: %v", err)
-	}
-	if len(acct.posts) != 1 || acct.posts[0].amount != -500 {
-		t.Errorf("subledger postings = %+v, want one posting of -500", acct.posts)
 	}
 }

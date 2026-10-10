@@ -75,7 +75,7 @@ type Service struct {
 	tx        TxRunner
 	repo      Repository
 	gl        *gl.Service
-	account   account.Service
+	account   *account.Service
 	auditLog  *audit.Logger
 	db        *database.DB
 	events    EventRecorder
@@ -85,7 +85,7 @@ type Service struct {
 	now       func() time.Time
 }
 
-func NewService(repo Repository, glService *gl.Service, accountService account.Service, db *database.DB) *Service {
+func NewService(repo Repository, glService *gl.Service, accountService *account.Service, db *database.DB) *Service {
 	return &Service{repo: repo, gl: glService, account: accountService, db: db, now: time.Now}
 }
 
@@ -120,7 +120,6 @@ type Store interface {
 	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	VoidFactsFor(ctx context.Context, invoiceID uuid.UUID) (VoidFacts, error)
-	MarkVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error
 	BilledLines(ctx context.Context, invoiceID uuid.UUID) ([]BilledLine, error)
 	InvoiceEntryID(ctx context.Context, invoiceID uuid.UUID) (*uuid.UUID, error)
 
@@ -132,8 +131,6 @@ type Store interface {
 	InsertCreditMemo(ctx context.Context, h *CreditHeader) error
 	UpdateCreditDraft(ctx context.Context, h *CreditHeader) error
 	ReplaceCreditLines(ctx context.Context, memoID uuid.UUID, lines []CreditLine) error
-	PostCredit(ctx context.Context, h *CreditHeader, number string, glEntryID *uuid.UUID) error
-	MarkCreditVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error
 	NextCreditMemoNumber(ctx context.Context) (string, error)
 	CreditedAgainstInvoice(ctx context.Context, invoiceID, exclude uuid.UUID, includeDrafts bool) (CreditedAgainst, error)
 	CustomerCreditFacts(ctx context.Context, customerID uuid.UUID) (CreditFacts, error)
@@ -278,12 +275,6 @@ func (s *Service) ListInvoices(ctx context.Context, f ListFilter, wantTotal bool
 	return items, hasMore, total, nil
 }
 
-// GetCustomerOpenBalanceCents returns the customer's live outstanding AR balance
-// (sum of open invoices), in cents.
-func (s *Service) GetCustomerOpenBalanceCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
-	return s.repo.SumOpenBalanceCents(ctx, customerID)
-}
-
 // ExistsInvoiceForOrder reports whether the order has an invoice not void.
 func (s *Service) ExistsInvoiceForOrder(ctx context.Context, orderID uuid.UUID) (bool, error) {
 	return s.repo.ExistsInvoiceForOrder(ctx, orderID)
@@ -356,7 +347,7 @@ func (s *Service) VoidInvoice(ctx context.Context, id uuid.UUID, pre Preconditio
 			return err
 		}
 		switch {
-		case inv.Status != InvoiceStatusUnpaid || facts.Payments > 0 || facts.AppliedMemos > 0:
+		case inv.Status != InvoiceStatusUnpaid || facts.Applications > 0:
 			// paid, partial, written off, a payment recorded or an applied
 			// credit memo naming it: reverse them first (C2-4's live
 			// applications take over this check)
@@ -377,8 +368,9 @@ func (s *Service) VoidInvoice(ctx context.Context, id uuid.UUID, pre Preconditio
 			}
 		}
 
-		// Step 7 and 9: the customer row (the subledger's lock), then the
-		// reversal of the invoice's whole entry, dated the void date.
+		// Steps 7 and 9: the customer row (the subledger's lock), then the
+		// reversal of the invoice's whole entry, dated the void date, through
+		// the AR core.
 		date, err := st.BranchLocalDate(ctx, inv.BranchID, s.now())
 		if err != nil {
 			return err
@@ -399,20 +391,15 @@ func (s *Service) VoidInvoice(ctx context.Context, id uuid.UUID, pre Preconditio
 				return conflictBlocker("no_ledger_entry", "the invoice has no journal entry to reverse: it cannot be voided here")
 			}
 		}
-		if entryID != nil && s.gl != nil {
-			if _, err := s.gl.PostReversal(ctx, gl.ReversalInput{EntryID: *entryID, EntryDate: date,
-				Currency: inv.Currency, Reason: "invoice " + inv.Number + " voided", PostedBy: body.Actor}); err != nil {
-				return mapPostingError(err)
-			}
+		if s.account == nil {
+			return errors.New("invoice: the AR core is not wired")
 		}
-		if s.account != nil {
-			invID := inv.ID
-			if _, err := s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypeReversal, -int64(inv.TotalCents), &invID, "Void of invoice "+inv.Number); err != nil {
-				return fmt.Errorf("failed to reverse the invoice in the account ledger: %w", err)
+		if _, err := s.account.VoidInvoice(ctx, account.VoidInvoiceIn{InvoiceID: id, EntryID: entryID, Actor: body.Actor,
+			Reason: body.Reason, On: date}); err != nil {
+			if errors.Is(err, account.ErrHasApplications) {
+				return conflictBlocker("has_applications", "the invoice has payments or applied credit memos: reverse them before voiding it")
 			}
-		}
-		if err := st.MarkVoid(ctx, id, body.Actor, body.Reason, date); err != nil {
-			return err
+			return mapPostingError(err)
 		}
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{
@@ -541,20 +528,24 @@ func (s *Service) CreateInvoice(ctx context.Context, inv *LegacyInvoice) error {
 	})
 }
 
-// PostInvoiceToLedger posts an already-created legacy invoice to the GL (DR
-// Accounts Receivable / CR Sales Revenue) and the customer AR subledger. It
-// runs inside the caller's transaction so the invoice, entry and subledger
-// commit atomically.
+// PostInvoiceToLedger posts an already-created legacy invoice (the counter's
+// account charge) through the AR core: DR Accounts Receivable / CR Sales
+// Revenue and the subledger debit. It runs inside the caller's transaction so
+// the invoice, entry and subledger commit atomically. C2-5 retires the path.
 func (s *Service) PostInvoiceToLedger(ctx context.Context, inv *LegacyInvoice) error {
-	if s.gl != nil {
-		if err := s.gl.SyncInvoice(ctx, inv.ID.String(), inv.TotalAmount); err != nil {
-			return fmt.Errorf("failed to post invoice to GL: %w", err)
-		}
+	if s.account == nil {
+		return nil
 	}
-	if s.account != nil {
-		if _, err := s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypeInvoice, inv.TotalAmount, &inv.ID, "Invoice #"+inv.ID.String()); err != nil {
-			return fmt.Errorf("failed to post invoice to account ledger: %w", err)
-		}
+	branch := inv.BranchID
+	on, err := s.account.LocalDate(ctx, branch, s.account.Now())
+	if err != nil {
+		return err
+	}
+	if _, err := s.account.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: inv.ID, CustomerID: inv.CustomerID,
+		TotalCents: inv.TotalAmount, On: on, Legs: []gl.Leg{
+			{AccountCode: gl.AccountCodeRevenue, Description: "Sales Revenue", Credit: inv.TotalAmount},
+		}}); err != nil {
+		return fmt.Errorf("failed to post invoice to the ledger: %w", err)
 	}
 	return nil
 }
@@ -580,8 +571,8 @@ func (s *Service) PostCashReturnToGL(ctx context.Context, returnID string, amoun
 
 // PostAccountReturnToLedger books a POS return refunded as store credit: the
 // GL leg (DR Sales Revenue / CR Accounts Receivable) plus a balance-reducing
-// subledger entry. Best-effort at the POS layer (C2-5 turns it into a credit
-// memo). Returns the GL entry ID (uuid.Nil when no GL is wired).
+// subledger row through the AR core. Best-effort at the POS layer (C2-5 turns
+// it into a credit memo). Returns the GL entry ID (uuid.Nil when no GL is wired).
 func (s *Service) PostAccountReturnToLedger(ctx context.Context, customerID, returnID uuid.UUID, amountCents int64) (uuid.UUID, error) {
 	var glEntryID uuid.UUID
 	if s.gl != nil {
@@ -592,7 +583,7 @@ func (s *Service) PostAccountReturnToLedger(ctx context.Context, customerID, ret
 		glEntryID = id
 	}
 	if s.account != nil {
-		if _, err := s.account.PostTransaction(ctx, customerID, account.TransactionTypeRefund, -amountCents, &returnID, "POS return credit #"+returnID.String()); err != nil {
+		if err := s.account.PostLegacyReturnCredit(ctx, customerID, returnID, amountCents); err != nil {
 			return glEntryID, fmt.Errorf("failed to post account return to subledger: %w", err)
 		}
 	}

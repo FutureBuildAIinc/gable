@@ -341,3 +341,72 @@ func (l *CreditLineRequest) parse(v *httpx.Validator, path string) (CreditLineIn
 	}
 	return d, ok
 }
+
+// CreditApplicationRequest is one invoice a credit memo is applied to.
+type CreditApplicationRequest struct {
+	InvoiceID   *string         `json:"invoice_id"`
+	AmountCents json.RawMessage `json:"amount_cents"`
+}
+
+// CreditApplyRequest is the body of POST /credit-memos/{id}/applications.
+type CreditApplyRequest struct {
+	Applications []CreditApplicationRequest `json:"applications"`
+	Revision     json.RawMessage            `json:"revision"`
+}
+
+// Parse validates the request: every problem is one field error with its path.
+func (req *CreditApplyRequest) Parse() ([]CreditApplyLine, *int64, error) {
+	v := &httpx.Validator{}
+	v.Check(len(req.Applications) > 0, "applications", "name at least one invoice")
+	lines := make([]CreditApplyLine, 0, len(req.Applications))
+	for i, a := range req.Applications {
+		path := fmt.Sprintf("applications[%d]", i)
+		var l CreditApplyLine
+		if id, ok := v.UUID(path+".invoice_id", a.InvoiceID, true); ok {
+			l.InvoiceID = id
+		}
+		if n, ok := v.Int(path+".amount_cents", a.AmountCents, true); ok {
+			v.Check(n >= 1, path+".amount_cents", "must be 1 cent or more")
+			l.AmountCents = n
+		}
+		lines = append(lines, l)
+	}
+	var rev *int64
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		rev = &n
+	}
+	if err := v.Err(); err != nil {
+		return nil, nil, err
+	}
+	return lines, rev, nil
+}
+
+// WriteOffRequest is the body of POST /invoices/{id}/write-offs.
+type WriteOffRequest struct {
+	AmountCents json.RawMessage `json:"amount_cents"`
+	Reason      *string         `json:"reason"`
+	Revision    json.RawMessage `json:"revision"`
+}
+
+// Parse validates the request.
+func (req *WriteOffRequest) Parse() (amount int64, reason string, rev *int64, err error) {
+	v := &httpx.Validator{}
+	if n, ok := v.Int("amount_cents", req.AmountCents, true); ok {
+		v.Check(n >= 1, "amount_cents", "must be 1 cent or more")
+		amount = n
+	}
+	if req.Reason != nil {
+		reason = strings.TrimSpace(*req.Reason)
+	}
+	v.Check(reason != "", "reason", "is required")
+	v.Check(len(reason) <= 500, "reason", "must be at most 500 characters")
+	if n, ok := v.Int("revision", req.Revision, false); ok {
+		v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+		rev = &n
+	}
+	if err := v.Err(); err != nil {
+		return 0, "", nil, err
+	}
+	return amount, reason, rev, nil
+}

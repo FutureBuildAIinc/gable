@@ -94,8 +94,29 @@ mint.
   record exposes `ValidScopeGrammar()` beside the auth core so the mint and
   the auth core cannot disagree: every scope a registered route can require,
   finer names included, from one function.
+- An admin path whose second segment is "." or "..", or any admin path
+  not equal to path.Clean of itself, is refused before the scope check
+  for machine keys (alongside the empty second segment already refused),
+  so the "coarse scopes reach only routes no area declares" guarantee
+  no longer leans on the router. This is hardening: on the base branch
+  a dirty admin path passed the auth layer (the dot segment fell to the
+  coarse scope), the router's 307 redirect answered, and the follow up
+  was a fresh request authorised on its own clean path, so the guarantee
+  was kept by the router and not by the auth layer. The auth layer now
+  refuses such requests before the scope check, so the guarantee is
+  held by the layer that owns it; nothing on the clean path changes.
+  The rule is for machine keys on `/api/v1/admin` only: a person on a
+  dirty admin path still reaches the mux and gets the mux's 307 (or 404
+  for the encoded dot forms and the trailing slash), exactly as on the
+  base branch; the desk uses user JWTs, which never reach the machine
+  key middleware.
 - The confirm gated verbs (`propose`, `commit`) do not apply: no admin act is
   a draft (ADR 0002's known limit says so, ADR 0007 section 5.5 repeats it).
+- A refusal audit row whose path was sanitised carries `path_sanitised: true`
+  in its `changes`, so a sanitised NUL byte is distinguishable from a
+  caller's literal `\u0000` text (both read back as the six character
+  string). The marker itself is not unique; the second record is the
+  server log line, which carries the verbatim path.
 - Branch bound keys are C5-2a's (ADR 0007 section 5.5).
 - The integration seam keeps `X-Integration-Key` (ADR 0007 section 5.6).
 - `GET /api/v1/branches/{id}/users` lists the users (subs) holding a branch

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path"
 	"sort"
 	"strings"
 )
@@ -94,6 +95,7 @@ var machineKeyModules = map[string]struct{}{
 	"admin":           {},
 	"ap":              {},
 	"apps":            {},
+	"ar":              {},
 	"bankrecon":       {},
 	"branches":        {},
 	"configurator":    {},
@@ -102,7 +104,6 @@ var machineKeyModules = map[string]struct{}{
 	"customers":       {},
 	"dashboard":       {},
 	"delivery":        {},
-	"deposits":        {},
 	"documents":       {},
 	"edi":             {},
 	"events":          {},
@@ -203,15 +204,22 @@ var writeScopeOverrides = map[string]string{
 // admin:write fallback would be too wide for a path the request does not
 // name, and the "coarse scopes reach only routes no area declares" guarantee
 // (ADR 0009 section 5) must not depend on the router cleaning the path.
-func RequiredScopeForPath(method string, path string) (string, bool) {
-	module, ok := ModuleForPath(path)
+//
+// A "." or ".." segment under /api/v1/admin, or any path not equal to
+// path.Clean(path), is refused for the same reason: the request did not name
+// the clean area, so the area rule cannot be the answer. Without this check
+// the router's 307 redirect would authorise the redirected request on the
+// clean path, and the ADR 0009 guarantee would lean on the router cleaning
+// the path for it.
+func RequiredScopeForPath(method string, p string) (string, bool) {
+	module, ok := ModuleForPath(p)
 	if !ok {
 		return "", false
 	}
 	if module == "admin" {
-		rest, _ := strings.CutPrefix(path, "/api/v1/admin")
+		rest, _ := strings.CutPrefix(p, "/api/v1/admin")
 		segment, _, _ := strings.Cut(strings.TrimPrefix(rest, "/"), "/")
-		if segment == "" {
+		if segment == "" || segment == "." || segment == ".." || p != path.Clean(p) {
 			return "", false
 		}
 		if area, ok := adminAreaScopes[segment]; ok {

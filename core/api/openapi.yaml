@@ -22,6 +22,7 @@ tags:
   - name: admin
   - name: ap
   - name: apps
+  - name: ar
   - name: bankrecon
   - name: charge-codes
   - name: configurator
@@ -29,7 +30,6 @@ tags:
   - name: customer
   - name: dashboard
   - name: delivery
-  - name: deposits
   - name: documents
   - name: edi
   - name: events
@@ -151,67 +151,245 @@ paths:
   /api/v1/accounts/{id}:
     get:
       operationId: accountSummary
-      tags:
-        - accounts
+      tags: [accounts]
       summary: Get account summary
-      description: Balance due, credit limit and available credit, all in cents. Any service error, including an unknown customer, answers 500.
+      description: >-
+        The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404.
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: '#/components/parameters/XBranchId'
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
+        "200":
           description: The account summary.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AccountSummary'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/AccountSummary"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
   /api/v1/accounts/{id}/transactions:
     get:
       operationId: accountTransactions
-      tags:
-        - accounts
+      tags: [accounts]
       summary: List account transactions
-      description: 'The list is not paginated: limit and offset are not read.'
+      description: >-
+        The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope.
       parameters:
         - name: id
           in: path
           required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: '#/components/parameters/XBranchId'
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Every transaction of the customer, newest first. The body is null when there are none.
+        "200":
+          description: The page of subledger rows.
           content:
             application/json:
               schema:
-                type:
-                  - array
-                  - 'null'
-                items:
-                  $ref: '#/components/schemas/CustomerTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/AccountTransactionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+  /api/v1/ar/aging:
+    get:
+      operationId: arAging
+      tags: [ar]
+      summary: Receivable aging by customer, job or ship-to
+      description: >-
+        One item per group per currency, ordered by customer name, customer id, group id and currency. Every amount is taken as of as_of (default the branch's today), so the aging of a past date ignores later applications, counts an invoice voided after that date, and ties to the balances of 1020 and 2200 on it. current_cents is not yet due; the day buckets count days past the basis date; unapplied_cents is the open credit memos plus unapplied cash, negative, on the row of their own job (a payment carries a job, never a ship-to); total_cents is the buckets plus unapplied_cents. The fields of the coarser groupings are null.
+      parameters:
+        - name: group_by
+          in: query
+          required: false
+          schema: {type: string, enum: [customer, job, ship_to], default: customer}
+        - name: as_of
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: basis
+          in: query
+          required: false
+          schema: {type: string, enum: [due_date, invoice_date], default: due_date}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of aging rows.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArAgingPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+  /api/v1/ar/aging/summary:
+    get:
+      operationId: arAgingSummary
+      tags: [ar]
+      summary: Receivable aging bucket totals per currency
+      description: The same parameters as the aging (group_by is read and has no effect); the answer is not a list.
+      parameters:
+        - name: group_by
+          in: query
+          required: false
+          schema: {type: string, enum: [customer, job, ship_to]}
+        - name: as_of
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: basis
+          in: query
+          required: false
+          schema: {type: string, enum: [due_date, invoice_date], default: due_date}
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The bucket totals, one entry per currency.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArAgingSummary"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+  /api/v1/ar/customers/{id}/statement:
+    get:
+      operationId: arStatement
+      tags: [ar]
+      summary: Customer statement
+      description: >-
+        Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: from
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: to
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: job_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The statement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArStatement"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+  /api/v1/ar/reconciliation:
+    get:
+      operationId: arReconciliation
+      tags: [ar]
+      summary: Reconcile the subledger, the documents and the ledger
+      description: >-
+        Roles admin, owner, finance. Lists every customer whose balance_due, subledger sum and document open amounts disagree, per currency, and for each currency whether the sum of balances equals account 1020 and unapplied cash equals account 2200. Rows written before cycle 2 show here; nothing repairs a difference.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The drift and the ledger comparison.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArReconciliation"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+  /api/v1/ar/applications/{id}/reverse:
+    post:
+      operationId: arApplicationReverse
+      tags: [ar]
+      summary: Reverse one application
+      description: >-
+        Roles admin, owner, finance; a reason is required. Reverses one live application of any kind: a payment application (and the discount applications of the same act on the same invoice), a credit memo application, or a write off. A payment application posts the reversal of its own entry, or, when it has none (a migrated one), a new DR 1020 / CR 2200 entry. A discount alone is refused with 409 discount_stands_with_payment. Writes payment.unapplied or credit_memo.reopened (none for a write off), then invoice.reopened, then customer.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArApplicationReverseRequest"
+      responses:
+        "200":
+          description: The application, reversed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArApplication"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/activities:
     get:
       operationId: activityList
@@ -3828,141 +4006,6 @@ paths:
           $ref: '#/components/responses/ForbiddenEither'
         '500':
           $ref: '#/components/responses/InternalError'
-  /api/v1/deposits:
-    post:
-      operationId: depositCreate
-      tags:
-        - deposits
-      summary: Record a customer deposit
-      description: Every service failure, such as a non positive amount, answers 400.
-      parameters:
-        - $ref: '#/components/parameters/XBranchId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DepositCreate'
-      responses:
-        '201':
-          description: The recorded deposit.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Deposit'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-    get:
-      operationId: depositList
-      tags:
-        - deposits
-      summary: List a customer's deposits
-      description: A missing customer_id answers 400. The list is not paginated.
-      parameters:
-        - name: customer_id
-          in: query
-          required: true
-          description: Required.
-          schema:
-            type: string
-            format: uuid
-        - $ref: '#/components/parameters/XBranchId'
-      responses:
-        '200':
-          description: The deposits and the customer's open balance.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DepositList'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/v1/deposits/{id}:
-    get:
-      operationId: depositGet
-      tags:
-        - deposits
-      summary: Get one deposit
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: '#/components/parameters/XBranchId'
-      responses:
-        '200':
-          description: The deposit.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Deposit'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
-  /api/v1/deposits/{id}/apply:
-    post:
-      operationId: depositApply
-      tags:
-        - deposits
-      summary: Apply a deposit against AR
-      description: Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: '#/components/parameters/XBranchId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DepositApply'
-      responses:
-        '201':
-          description: The recorded application.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DepositApplication'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
   /api/v1/documents/print/invoice/{id}:
     get:
       operationId: documentsPrintInvoice
@@ -4595,6 +4638,14 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): omitted, every currency's rows are returned, each row naming its currency; given, that currency alone.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
       responses:
         "200":
           description: The trial balance rows.
@@ -4632,6 +4683,14 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the report is in that one currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
       responses:
         "200":
           description: The income statement in cents.
@@ -4662,6 +4721,14 @@ paths:
           schema:
             type: string
             format: date
+        - name: currency
+          in: query
+          required: false
+          description: >-
+            ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the sheet is in that one currency.
+          schema:
+            type: string
+            pattern: "^[A-Z]{3}$"
       responses:
         "200":
           description: The statement of financial position in cents.
@@ -5577,7 +5644,7 @@ paths:
       tags:
         - invoice
       summary: Void an invoice
-      description: 'The only client transition is void (roles admin, owner, finance; a reason is required). unpaid, partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition. A void is refused with the blocker has_applications while a payment is recorded against the invoice or an applied credit memo names it, and with has_credit_memos while a credit memo that is not void names it. It runs in one transaction: it locks the invoice''s order row first, reverses the invoice''s whole journal entry (dated the void date), returns its billed stock to on hand, reduces the order lines'' fulfilled quantities, re-runs allocation for those quantities and derives the order status; the subledger is credited back. The number is kept; nothing deletes an invoice. Writes invoice.voided (and order.backordered when the order cannot re-allocate) last.'
+      description: 'The only client transition is void (roles admin, owner, finance; a reason is required). unpaid, partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition. A void is refused with the blocker has_applications while the invoice has a live application (a payment, an applied credit memo, a discount or a write off), and with has_credit_memos while a credit memo that is not void names it. It runs in one transaction: it locks the invoice''s order row first, reverses the invoice''s whole journal entry (dated the void date), returns its billed stock to on hand, reduces the order lines'' fulfilled quantities, re-runs allocation for those quantities and derives the order status; the subledger is credited back. The number is kept; nothing deletes an invoice. Writes invoice.voided (and order.backordered when the order cannot re-allocate) last.'
       parameters:
         - name: id
           in: path
@@ -5834,7 +5901,7 @@ paths:
       tags:
         - credit-memo
       summary: Post or void a credit memo
-      description: 'draft to open posts the credit memo (roles admin, owner, finance): it locks the invoice it names (409 invoice_void when that invoice is void), recomputes its lines against what was posted, restocks the lines that restock, mints the gapless CM- number, posts the balanced entry (revenue and tax back, receivable down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock and puts the credit back on the receivable. The statuses past open (partial, applied) arrive with the payment and AR item and are not reachable here (409 invalid_state_transition). Writes credit_memo.posted or credit_memo.voided.'
+      description: 'draft to open posts the credit memo (roles admin, owner, finance): it locks the invoice it names (409 invoice_void when that invoice is void), recomputes its lines against what was posted, restocks the lines that restock, mints the gapless CM- number, posts the balanced entry (revenue and tax back, receivable down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock and puts the credit back on the receivable. partial and applied are reached by applications and refunds (POST /credit-memos/{id}/applications and /refunds) and reopened by reversing an application; asking for them here is 409 invalid_state_transition. A credit memo is voided from open only while no application or refund has used it (409 has_applications). Writes credit_memo.posted or credit_memo.voided.'
       parameters:
         - name: id
           in: path
@@ -5854,6 +5921,126 @@ paths:
       responses:
         '200':
           description: The credit memo after the transition.
+          headers: *id001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreditMemo'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500': *id004
+  /api/v1/invoices/{id}/write-offs:
+    post:
+      operationId: invoiceWriteOff
+      tags:
+        - invoice
+      summary: Write off part or all of an invoice's open amount
+      description: 'Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice''s revision. Refused with 409 exceeds_open_amount, invoice_not_open (invalid_state_transition) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvoiceWriteOffRequest'
+      responses:
+        '200':
+          description: The invoice after the write off.
+          headers: *id001
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+        '409':
+          $ref: '#/components/responses/ConflictEither'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500': *id004
+  /api/v1/invoices/{id}/payments:
+    get:
+      operationId: invoiceApplications
+      tags:
+        - invoice
+      summary: List an invoice's applications
+      description: 'The applications that settled (or settle) the invoice: payment applications, credit memo applications, early pay discounts and write offs, oldest first, reversed ones included with their reversal. The path keeps its name; the payments of a legacy invoice are its PAYMENT applications.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+      responses:
+        '200':
+          description: The applications, in the list envelope (one page, no further cursor).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvoiceApplicationPage'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401': *id002
+        '403': *id003
+        '404':
+          $ref: '#/components/responses/WireNotFound'
+  /api/v1/credit-memos/{id}/applications:
+    post:
+      operationId: creditMemoApply
+      tags:
+        - credit-memo
+      summary: Apply a credit memo's open credit to invoices
+      description: 'Uses the open credit of an open or partial credit memo on invoices of the same customer and currency. No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application. The precondition is the credit memo''s revision. Refused with 409 exceeds_open_credit, exceeds_open_amount, invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and invoice.partial or invoice.paid per invoice.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/XBranchId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreditMemoApplyRequest'
+      responses:
+        '200':
+          description: The credit memo after the applications.
           headers: *id001
           content:
             application/json:
@@ -7355,12 +7542,66 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
   /api/v1/payments:
+    get:
+      operationId: paymentList
+      tags: [payment]
+      summary: List payments
+      description: >-
+        The cursor list envelope, newest first (created_at, then id). customer_id, order_id and job_id filter on their document; status and method take comma separated lowercase lists; unapplied=true lists the posted payments that still hold unapplied cash and unapplied=false the rest. total appears only under include=total. A parameter the route does not declare, a value outside its vocabulary, a malformed cursor or an out of range limit is a 400.
+      parameters:
+        - name: customer_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: status
+          in: query
+          required: false
+          description: Comma separated lowercase statuses (posted, voided).
+          schema: {type: string}
+        - name: unapplied
+          in: query
+          required: false
+          schema: {type: string, enum: ["true", "false"]}
+        - name: order_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: job_id
+          in: query
+          required: false
+          schema: {type: string, format: uuid}
+        - name: method
+          in: query
+          required: false
+          description: Comma separated lowercase methods (cash, card, check, ach, other, account).
+          schema: {type: string}
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The page of payments.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       operationId: paymentCreate
       tags: [payment]
-      summary: Record a non card payment
-      description: Cash, check or account payments against an invoice.
+      summary: Record a payment
+      description: >-
+        Records a posted payment for a customer (cash, check, ach or other; a card is taken through POST /payments/card, and account is not a payment). The whole amount is posted to 2200 (DR 1010 / CR 2200). Without applications the payment is unapplied cash. With applications each invoice takes its cash (and an early pay discount, on or before the invoice's discount date, up to what its terms allow) in the same transaction, each application its own entry (DR 2200 / CR 1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied, exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch, discount_not_available, period_closed. Writes payment.recorded, then payment.applied and invoice.partial or invoice.paid per invoice, then customer.updated (part balance).
       parameters:
+        - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -7369,8 +7610,15 @@ paths:
             schema:
               $ref: "#/components/schemas/PaymentCreateRequest"
       responses:
-        "200":
+        "201":
           description: The recorded payment.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+            Location:
+              description: The payment's route.
+              schema: {type: string}
           content:
             application/json:
               schema:
@@ -7380,13 +7628,235 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/{id}:
+    get:
+      operationId: paymentGet
+      tags: [payment]
+      summary: Get one payment with its applications and refunds
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The payment.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+  /api/v1/payments/{id}/applications:
+    post:
+      operationId: paymentApply
+      tags: [payment]
+      summary: Apply a payment's unapplied cash to invoices
+      description: >-
+        Applies unapplied cash later, partly, across many invoices; each application posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The precondition is the payment's revision. Refused with 409 exceeds_unapplied, exceeds_open_amount, invoice_void, payment_voided, customer_mismatch, currency_mismatch, discount_not_available or period_closed. Writes payment.applied, invoice.partial or invoice.paid per invoice, and customer.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentApplyRequest"
+      responses:
+        "200":
+          description: The payment after the applications.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/{id}/transitions:
+    post:
+      operationId: paymentTransition
+      tags: [payment]
+      summary: Void a payment
+      description: >-
+        The only client transition is voided (roles admin, owner, finance; a reason is required). It reverses every live application (with its discounts), then posts the void entry (DR 2200 / CR 1010) for the amount still unapplied, which is the amount less refunds; a payment with refunds can be voided and the void covers only what was not refunded. A card payment is refused with 409 card_payment (it is refunded through the gateway). Writes payment.unapplied per reversed application, invoice.reopened per invoice, customer.updated and payment.voided.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentTransitionRequest"
+      responses:
+        "200":
+          description: The payment after the void.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Payment"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/payments/{id}/refunds:
+    post:
+      operationId: paymentRefund
+      tags: [payment]
+      summary: Refund a payment's unapplied cash
+      description: >-
+        Pays unapplied cash back out (DR 2200 / CR 1010), limited to the unapplied amount (409 exceeds_unapplied). A card payment is refunded through the gateway before the transaction. The precondition is the payment's revision. Writes payment.refunded.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentRefundRequest"
+      responses:
+        "201":
+          description: The refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/credit-memos/{id}/refunds:
+    post:
+      operationId: creditMemoRefund
+      tags: [payment]
+      summary: Pay a credit memo's open credit out
+      description: >-
+        Roles admin, owner, finance. Pays the open credit of an open or partial credit memo out (DR 1020 / CR 1010) by check, ach, other or card (a card refund names the card payment it goes back to and goes through the gateway before the transaction), limited to the open credit (409 exceeds_open_credit). The credit leaves the receivable: a REFUND subledger row. The precondition is the credit memo's revision. Writes credit_memo.refunded, then credit_memo.partial or credit_memo.applied, and customer.updated.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreditMemoRefundRequest"
+      responses:
+        "201":
+          description: The refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/payments/intent:
@@ -7405,7 +7875,7 @@ paths:
               $ref: "#/components/schemas/PaymentIntentRequest"
       responses:
         "200":
-          description: The public key and the echoed invoice and amount.
+          description: The public key and the echoed amount.
           content:
             application/json:
               schema:
@@ -7415,23 +7885,22 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ForbiddenEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          $ref: "#/components/responses/WireServiceUnavailable"
   /api/v1/payments/card:
     post:
       operationId: paymentCard
       tags: [payment]
       summary: Charge a tokenized card
       description: >-
-        A charge captured at the gateway whose persistence then fails is a generic 402; the token is never echoed back.
+        Charges the gateway (outside the transaction, in the customer's currency), then records and applies the payment as POST /payments does. An invoice that cannot take the payment (void, over open) is refused before the card is charged. When the system refuses the payment after the gateway approved the charge (409), the charge is voided (same day) or refunded before the refusal returns, and the message says which. When the void and the refund both fail the route answers 502 with code charge_not_reversed and a message saying the card was charged and finance must reconcile the named gateway transaction id (the id and nothing else about the card); the attempt is on record as the audit row payment.charge_reversal. A declined card or a gateway fault before anything is recorded is 402 payment_required. The token is never echoed back.
       parameters:
+        - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
@@ -7440,8 +7909,15 @@ paths:
             schema:
               $ref: "#/components/schemas/CardPaymentRequest"
       responses:
-        "200":
-          description: The processed payment.
+        "201":
+          description: The recorded card payment.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+            Location:
+              description: The payment's route.
+              schema: {type: string}
           content:
             application/json:
               schema:
@@ -7451,77 +7927,19 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "402":
-          $ref: "#/components/responses/PaymentRequired"
+          $ref: "#/components/responses/WirePaymentRequired"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          $ref: "#/components/responses/ForbiddenEither"
         "409":
-          $ref: "#/components/responses/IdempotencyConflict"
+          $ref: "#/components/responses/ConflictEither"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
-  /api/v1/payments/refund:
-    post:
-      operationId: paymentRefund
-      tags: [payment]
-      summary: Refund a card payment in part or full
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RefundRequest"
-      responses:
-        "200":
-          description: The processed refund.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Refund"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
-  /api/v1/invoices/{id}/payments:
-    get:
-      operationId: paymentHistory
-      tags: [payment]
-      summary: List an invoice's payments
-      description: Registered by the payment module on the invoice's path.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        "200":
-          description: The payments, a bare array that is null when the invoice has none.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PaymentList"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "500":
-          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/ChargeNotReversed"
+        "503":
+          $ref: "#/components/responses/WireServiceUnavailable"
   /api/portal/v1/login:
     post:
       operationId: portalLogin
@@ -13557,6 +13975,25 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/IntegrationError"
+    WirePaymentRequired:
+      description: The card was declined or the gateway could not take the charge; nothing was recorded.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    WireServiceUnavailable:
+      description: The payment gateway is not configured or cannot be reached.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    ChargeNotReversed:
+      description: >-
+        The card was charged, the system refused the payment, and neither the gateway void nor the refund went through. The message names the gateway transaction id finance must reconcile; it is the one 5xx whose message reaches the client.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
   schemas:
     Error:
       type: object
@@ -13605,6 +14042,8 @@ components:
                 - idempotency_in_progress
                 - invalid_state_transition
                 - conflict
+                - payment_required
+                - charge_not_reversed
                 - precondition_failed
                 - payload_too_large
                 - unsupported_media_type
@@ -13771,72 +14210,203 @@ components:
               type: string
     AccountSummary:
       type: object
-      required:
-        - customer_id
-        - balance_due
-        - credit_limit
-        - available_credit
+      required: [customer_id, currency, balance_cents, credit_limit_cents, available_credit_cents, unapplied_cents]
       properties:
-        customer_id:
-          type: string
-          format: uuid
-        balance_due:
-          type: integer
-          format: int64
-          description: Cents.
-        credit_limit:
-          type: integer
-          format: int64
-          description: Cents.
-        available_credit:
-          type: integer
-          format: int64
-          description: Cents.
-    CustomerTransaction:
+        customer_id: {type: string, format: uuid}
+        currency: {type: string}
+        balance_cents: {type: integer, format: int64}
+        credit_limit_cents: {type: [integer, "null"], format: int64, description: "null for no limit; 0 is no credit."}
+        available_credit_cents: {type: [integer, "null"], format: int64, description: "Limit less balance; null for no limit."}
+        unapplied_cents: {type: integer, format: int64, description: "Open credit memos plus unapplied cash, negative or zero."}
+    AccountTransactionType:
+      type: string
+      enum: [INVOICE, PAYMENT, ADJUSTMENT, REFUND, CREDIT_MEMO, DISCOUNT, WRITE_OFF, REVERSAL]
+    AccountTransaction:
       type: object
-      required:
-        - id
-        - customer_id
-        - type
-        - amount
-        - balance_after
-        - reference_id
-        - description
-        - created_at
+      required: [id, customer_id, type, amount_cents, balance_after_cents, currency, source_kind, reference_id, description, created_at]
       properties:
-        id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        type:
-          type: string
-          enum:
-            - INVOICE
-            - PAYMENT
-            - ADJUSTMENT
-            - REFUND
-            - CREDIT_MEMO
-            - REVERSAL
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        balance_after:
-          type: integer
-          format: int64
-          description: Cents.
-        reference_id:
-          type:
-            - string
-            - 'null'
-          format: uuid
-        description:
-          type: string
-        created_at:
-          type: string
-          format: date-time
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        type: {$ref: "#/components/schemas/AccountTransactionType"}
+        amount_cents: {type: integer, format: int64, description: "Signed, debit positive."}
+        balance_after_cents: {type: integer, format: int64}
+        currency: {type: string}
+        source_kind: {type: [string, "null"], description: "invoice, credit_memo, application, refund or pos_return; null on a row written before cycle 2."}
+        reference_id: {type: [string, "null"], format: uuid}
+        description: {type: string}
+        created_at: {type: string, format: date-time}
+    AccountTransactionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/AccountTransaction"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    ArApplicationKind:
+      type: string
+      enum: [payment, credit_memo, discount, write_off]
+    ArApplication:
+      type: object
+      required: [id, customer_id, currency, kind, payment_id, credit_memo_id, invoice_id, amount_cents, reason, applied_on, applied_by, act_id, gl_entry_id, reversed_at, reversed_by, reversal_reason, reversal_gl_entry_id, reversed_on, created_at]
+      description: The one record of AR being settled; a reversed application is never deleted.
+      properties:
+        id: {type: string, format: uuid}
+        customer_id: {type: string, format: uuid}
+        currency: {type: string}
+        kind: {$ref: "#/components/schemas/ArApplicationKind"}
+        payment_id: {type: [string, "null"], format: uuid}
+        credit_memo_id: {type: [string, "null"], format: uuid}
+        invoice_id: {type: string, format: uuid}
+        amount_cents: {type: integer, format: int64}
+        reason: {type: [string, "null"], description: "Required for a write off."}
+        applied_on: {type: string, format: date}
+        applied_by: {type: [string, "null"]}
+        act_id: {type: string, format: uuid, description: "Groups the applications one request made."}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        reversed_at: {type: [string, "null"], format: date-time}
+        reversed_by: {type: [string, "null"]}
+        reversal_reason: {type: [string, "null"]}
+        reversal_gl_entry_id: {type: [string, "null"], format: uuid}
+        reversed_on: {type: [string, "null"], format: date}
+        created_at: {type: string, format: date-time}
+    ArApplicationReverseRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 500}
+    ArAgingItem:
+      type: object
+      required: [customer_id, customer_name, job_id, job_name, ship_to_id, ship_to_code, currency, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, over_90_cents, unapplied_cents, total_cents]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        job_id: {type: [string, "null"], format: uuid}
+        job_name: {type: [string, "null"]}
+        ship_to_id: {type: [string, "null"], format: uuid}
+        ship_to_code: {type: [string, "null"]}
+        currency: {type: string}
+        current_cents: {type: integer, format: int64}
+        days_1_30_cents: {type: integer, format: int64}
+        days_31_60_cents: {type: integer, format: int64}
+        days_61_90_cents: {type: integer, format: int64}
+        over_90_cents: {type: integer, format: int64}
+        unapplied_cents: {type: integer, format: int64}
+        total_cents: {type: integer, format: int64}
+    ArAgingPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/ArAgingItem"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    ArAgingTotal:
+      type: object
+      required: [currency, current_cents, days_1_30_cents, days_31_60_cents, days_61_90_cents, over_90_cents, unapplied_cents, total_cents]
+      properties:
+        currency: {type: string}
+        current_cents: {type: integer, format: int64}
+        days_1_30_cents: {type: integer, format: int64}
+        days_31_60_cents: {type: integer, format: int64}
+        days_61_90_cents: {type: integer, format: int64}
+        over_90_cents: {type: integer, format: int64}
+        unapplied_cents: {type: integer, format: int64}
+        total_cents: {type: integer, format: int64}
+    ArAgingSummary:
+      type: object
+      required: [as_of, basis, totals]
+      properties:
+        as_of: {type: string, format: date}
+        basis: {type: string, enum: [due_date, invoice_date]}
+        totals:
+          type: array
+          items: {$ref: "#/components/schemas/ArAgingTotal"}
+    ArStatementLine:
+      type: object
+      required: [id, date, type, description, amount_cents, balance_after_cents, source_kind, reference_id, job_id]
+      properties:
+        id: {type: string, format: uuid}
+        date: {type: string, format: date}
+        type: {$ref: "#/components/schemas/AccountTransactionType"}
+        description: {type: string}
+        amount_cents: {type: integer, format: int64}
+        balance_after_cents: {type: integer, format: int64}
+        source_kind: {type: [string, "null"]}
+        reference_id: {type: [string, "null"], format: uuid}
+        job_id: {type: [string, "null"], format: uuid}
+    ArOpenDocument:
+      type: object
+      required: [kind, id, number, date, due_date, job_id, total_cents, open_cents]
+      properties:
+        kind: {type: string, enum: [invoice, credit_memo]}
+        id: {type: string, format: uuid}
+        number: {type: string}
+        date: {type: string, format: date}
+        due_date: {type: [string, "null"], format: date}
+        job_id: {type: [string, "null"], format: uuid}
+        total_cents: {type: integer, format: int64}
+        open_cents: {type: integer, format: int64, description: "Negative for a credit memo."}
+    ArStatementCurrency:
+      type: object
+      required: [currency, opening_balance_cents, lines, closing_balance_cents, open_documents]
+      properties:
+        currency: {type: string}
+        opening_balance_cents: {type: integer, format: int64}
+        lines:
+          type: array
+          items: {$ref: "#/components/schemas/ArStatementLine"}
+        closing_balance_cents: {type: integer, format: int64}
+        open_documents:
+          type: array
+          items: {$ref: "#/components/schemas/ArOpenDocument"}
+    ArStatement:
+      type: object
+      required: [customer_id, customer_name, from, to, job_id, currencies]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        job_id: {type: [string, "null"], format: uuid}
+        currencies:
+          type: array
+          items: {$ref: "#/components/schemas/ArStatementCurrency"}
+    ArDriftRow:
+      type: object
+      required: [customer_id, customer_name, currency, balance_cents, subledger_cents, documents_cents]
+      properties:
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        currency: {type: string}
+        balance_cents: {type: integer, format: int64}
+        subledger_cents: {type: integer, format: int64}
+        documents_cents: {type: integer, format: int64}
+    ArLedgerRow:
+      type: object
+      required: [currency, receivable_ledger_cents, balance_sum_cents, deposits_ledger_cents, unapplied_sum_cents, receivable_in_sync, deposits_in_sync]
+      properties:
+        currency: {type: string}
+        receivable_ledger_cents: {type: integer, format: int64}
+        balance_sum_cents: {type: integer, format: int64}
+        deposits_ledger_cents: {type: integer, format: int64}
+        unapplied_sum_cents: {type: integer, format: int64}
+        receivable_in_sync: {type: boolean}
+        deposits_in_sync: {type: boolean}
+    ArReconciliation:
+      type: object
+      required: [customers, currencies]
+      properties:
+        customers:
+          type: array
+          items: {$ref: "#/components/schemas/ArDriftRow"}
+        currencies:
+          type: array
+          items: {$ref: "#/components/schemas/ArLedgerRow"}
     ActivityType:
       type: string
       description: Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
@@ -16239,148 +16809,6 @@ components:
           type: integer
         total_distance_miles:
           type: number
-    Deposit:
-      type: object
-      description: deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when empty.
-      required:
-        - id
-        - customer_id
-        - amount
-        - applied_amount
-        - remaining
-        - status
-        - method
-        - created_at
-        - updated_at
-      properties:
-        id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        branch_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents, original.
-        applied_amount:
-          type: integer
-          format: int64
-          description: Cents, cumulative applied.
-        remaining:
-          type: integer
-          format: int64
-          description: Cents, amount minus applied.
-        status:
-          type: string
-          enum:
-            - OPEN
-            - APPLIED
-            - REFUNDED
-        method:
-          type: string
-          description: How the prepayment was taken; free text, CASH when the request leaves it empty.
-        reference:
-          type: string
-        note:
-          type: string
-        gl_entry_id:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-    DepositApplication:
-      type: object
-      description: deposit.DepositApplication. The invoice and ledger entry are omitted when empty.
-      required:
-        - id
-        - deposit_id
-        - customer_id
-        - amount
-        - created_at
-      properties:
-        id:
-          type: string
-          format: uuid
-        deposit_id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        invoice_id:
-          type: string
-          format: uuid
-        gl_entry_id:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-          format: date-time
-    DepositList:
-      type: object
-      description: The list wrapper; deposits is null when the customer has none.
-      required:
-        - deposits
-        - open_balance_cents
-      properties:
-        deposits:
-          type:
-            - array
-            - 'null'
-          items:
-            $ref: '#/components/schemas/Deposit'
-        open_balance_cents:
-          type: integer
-          format: int64
-    DepositCreate:
-      type: object
-      description: RecordDepositRequest.
-      required:
-        - customer_id
-        - amount_cents
-      properties:
-        customer_id:
-          type: string
-          format: uuid
-        branch_id:
-          type: string
-          format: uuid
-        amount_cents:
-          type: integer
-          format: int64
-          description: Must be positive.
-        method:
-          type: string
-          description: Free text; defaults to CASH.
-        reference:
-          type: string
-        note:
-          type: string
-    DepositApply:
-      type: object
-      description: ApplyDepositRequest.
-      required:
-        - amount_cents
-      properties:
-        amount_cents:
-          type: integer
-          format: int64
-          description: Must be positive and at most the remainder.
-        invoice_id:
-          type: string
-          format: uuid
     EdiTradingPartner:
       type: object
       required:
@@ -16726,9 +17154,12 @@ components:
         $ref: "#/components/schemas/GlFiscalPeriod"
     GlTrialBalanceRow:
       type: object
-      required: [account_id, account_code, account_name, account_type, debit, credit]
-      description: One trial balance row (gl.TrialBalanceRow). debit and credit are int64 cents.
+      required: [account_id, account_code, account_name, account_type, currency, debit, credit]
+      description: One trial balance row (gl.TrialBalanceRow), per account and currency. debit and credit are int64 cents.
       properties:
+        currency:
+          type: string
+          description: The ISO 4217 code of the entries summed in this row.
         account_id:
           type: string
           format: uuid
@@ -16767,9 +17198,11 @@ components:
           description: Cents.
     GlProfitAndLossReport:
       type: object
-      required: [start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
-      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents.
+      required: [currency, start_date, end_date, revenue, cogs, expenses, total_revenue, total_cogs, gross_profit, total_expenses, net_income]
+      description: The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency.
       properties:
+        currency:
+          type: string
         start_date:
           type: string
           description: YYYY-MM-DD.
@@ -16806,9 +17239,11 @@ components:
           format: int64
     GlBalanceSheetReport:
       type: object
-      required: [as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
-      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents.
+      required: [currency, as_of_date, assets, liabilities, equity, total_assets, total_liabilities, total_equity, retained_earnings]
+      description: The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency.
       properties:
+        currency:
+          type: string
         as_of_date:
           type: string
           description: YYYY-MM-DD.
@@ -17629,7 +18064,7 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'What is still owed: the total less the payments recorded against the invoice while it is unpaid or partial, 0 when paid, written off or void.'
+          description: 'What is still owed: the total less the live applications (stored by the AR core as amount_open), 0 when paid, written off or void.'
         is_overdue:
           type: boolean
           description: 'Computed: open and its due_date is before the branch''s today. OVERDUE is not a status.'
@@ -17810,7 +18245,7 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'What is still owed: the total less the payments recorded against the invoice while it is unpaid or partial, 0 when paid, written off or void.'
+          description: 'What is still owed: the total less the live applications (stored by the AR core as amount_open), 0 when paid, written off or void.'
         is_overdue:
           type: boolean
           description: 'Computed: open and its due_date is before the branch''s today. OVERDUE is not a status.'
@@ -18223,7 +18658,7 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'The credit not yet used: the total while the memo is open, 0 for a draft or a void memo. NEGATIVE like the total.'
+          description: 'The credit not yet used: the total plus its applications and refunds (stored by the AR core as amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.'
         gl_entry_id:
           type:
             - string
@@ -18360,7 +18795,7 @@ components:
         open_cents:
           type: integer
           format: int64
-          description: 'The credit not yet used: the total while the memo is open, 0 for a draft or a void memo. NEGATIVE like the total.'
+          description: 'The credit not yet used: the total plus its applications and refunds (stored by the AR core as amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.'
         gl_entry_id:
           type:
             - string
@@ -18694,6 +19129,68 @@ components:
           type: string
           maxLength: 500
           description: Required by a void.
+    InvoiceWriteOffRequest:
+      type: object
+      required:
+        - amount_cents
+        - reason
+      properties:
+        amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+    CreditMemoApplicationRequest:
+      type: object
+      required:
+        - invoice_id
+        - amount_cents
+      properties:
+        invoice_id:
+          type: string
+          format: uuid
+        amount_cents:
+          type: integer
+          format: int64
+          minimum: 1
+    CreditMemoApplyRequest:
+      type: object
+      required:
+        - applications
+      properties:
+        applications:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CreditMemoApplicationRequest'
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
+    InvoiceApplicationPage:
+      type: object
+      required:
+        - items
+        - next_cursor
+        - limit
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ArApplication'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+        limit:
+          type: integer
     LocationType:
       type: string
       enum: [branch, zone, aisle, rack, shelf, bin, yard]
@@ -19482,6 +19979,7 @@ components:
         - created_at
         - updated_at
         - invoice_ids
+        - deposit_unapplied_cents
       properties:
         id:
           type: string
@@ -19618,6 +20116,10 @@ components:
           items:
             type: string
             format: uuid
+        deposit_unapplied_cents:
+          type: integer
+          format: int64
+          description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
     Order:
       type: object
       description: The full order document.
@@ -19655,6 +20157,7 @@ components:
         - created_at
         - updated_at
         - invoice_ids
+        - deposit_unapplied_cents
         - ship_to
         - lines
       properties:
@@ -19793,6 +20296,10 @@ components:
           items:
             type: string
             format: uuid
+        deposit_unapplied_cents:
+          type: integer
+          format: int64
+          description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
         ship_to:
           type:
             - object
@@ -20178,137 +20685,188 @@ components:
           description: Float dollars.
     PaymentMethod:
       type: string
-      enum: [CASH, CARD, CHECK, ACCOUNT]
-    Payment:
-      type: object
-      required: [id, invoice_id, amount, method, reference, notes, created_at]
-      properties:
-        id:
-          type: string
-          format: uuid
-        invoice_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        method:
-          $ref: "#/components/schemas/PaymentMethod"
-        reference:
-          type: string
-        notes:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-        gateway_tx_id:
-          type: string
-        gateway_status:
-          type: string
-        card_last4:
-          type: string
-        card_brand:
-          type: string
-        auth_code:
-          type: string
-    PaymentCreateRequest:
-      type: object
-      required: [invoice_id, amount, method]
-      properties:
-        invoice_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        method:
-          $ref: "#/components/schemas/PaymentMethod"
-        reference:
-          type: string
-        notes:
-          type: string
-    PaymentIntentRequest:
-      type: object
-      required: [invoice_id, amount]
-      properties:
-        invoice_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-    PaymentIntentResponse:
-      type: object
-      required: [public_key, invoice_id, amount_cents]
-      properties:
-        public_key:
-          type: string
-        invoice_id:
-          type: string
-        amount_cents:
-          type: integer
-          format: int64
-          description: "Cents, echoed from the request's amount field under this name."
-    CardPaymentRequest:
-      type: object
-      required: [invoice_id, token_id, amount]
-      properties:
-        invoice_id:
-          type: string
-          format: uuid
-        token_id:
-          type: string
-          description: The Runner.js tokenization result; required.
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        notes:
-          type: string
-    RefundRequest:
-      type: object
-      required: [payment_id, amount]
-      properties:
-        payment_id:
-          type: string
-          format: uuid
-        amount:
-          type: integer
-          format: int64
-          description: Cents, partial or full.
-        reason:
-          type: string
+      enum: [cash, card, check, ach, other, account]
+      description: account stays for history and is refused on a new payment.
+    PaymentStatus:
+      type: string
+      enum: [posted, voided]
     Refund:
       type: object
-      required: [id, payment_id, amount, reason, status, created_at]
+      required: [id, payment_id, credit_memo_id, amount_cents, reason, method, gateway_refund_id, status, gl_entry_id, refunded_on, created_at]
       properties:
-        id:
-          type: string
-          format: uuid
-        payment_id:
-          type: string
-          format: uuid
-        amount:
+        id: {type: string, format: uuid}
+        payment_id: {type: [string, "null"], format: uuid}
+        credit_memo_id: {type: [string, "null"], format: uuid}
+        amount_cents: {type: integer, format: int64}
+        reason: {type: [string, "null"]}
+        method: {$ref: "#/components/schemas/PaymentMethod"}
+        gateway_refund_id: {type: [string, "null"]}
+        status: {type: string, enum: [PENDING, COMPLETE, FAILED]}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        refunded_on: {type: string, format: date}
+        created_at: {type: string, format: date-time}
+    PaymentSummary:
+      type: object
+      required: [id, number, customer_id, customer_name, branch_id, status, revision, currency, method, amount_cents, unapplied_cents, received_on, reference, notes, order_id, job_id, gl_entry_id, card_last4, card_brand, gateway_tx_id, auth_code, voided_at, voided_by, void_reason, created_at, updated_at]
+      description: A payment's head, a list item; the invoice a legacy payment named is not on the wire.
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "PAY-000001, human readable."}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        branch_id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/PaymentStatus"}
+        revision: {type: integer, format: int64}
+        currency: {type: string, description: "ISO 4217, the customer's at record time."}
+        method: {$ref: "#/components/schemas/PaymentMethod"}
+        amount_cents: {type: integer, format: int64}
+        unapplied_cents: {type: integer, format: int64, description: "amount less live applications and refunds; held in 2200."}
+        received_on: {type: string, format: date, description: "The business date."}
+        reference: {type: [string, "null"]}
+        notes: {type: [string, "null"]}
+        order_id: {type: [string, "null"], format: uuid, description: "Set on a deposit against an order."}
+        job_id: {type: [string, "null"], format: uuid}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        card_last4: {type: [string, "null"]}
+        card_brand: {type: [string, "null"]}
+        gateway_tx_id: {type: [string, "null"]}
+        auth_code: {type: [string, "null"]}
+        voided_at: {type: [string, "null"], format: date-time}
+        voided_by: {type: [string, "null"]}
+        void_reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    Payment:
+      type: object
+      required: [id, number, customer_id, customer_name, branch_id, status, revision, currency, method, amount_cents, unapplied_cents, received_on, reference, notes, order_id, job_id, gl_entry_id, card_last4, card_brand, gateway_tx_id, auth_code, voided_at, voided_by, void_reason, created_at, updated_at, applications, refunds]
+      description: The full payment document - the head with its applications and its refunds.
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "PAY-000001, human readable."}
+        customer_id: {type: string, format: uuid}
+        customer_name: {type: string}
+        branch_id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/PaymentStatus"}
+        revision: {type: integer, format: int64}
+        currency: {type: string, description: "ISO 4217, the customer's at record time."}
+        method: {$ref: "#/components/schemas/PaymentMethod"}
+        amount_cents: {type: integer, format: int64}
+        unapplied_cents: {type: integer, format: int64, description: "amount less live applications and refunds; held in 2200."}
+        received_on: {type: string, format: date, description: "The business date."}
+        reference: {type: [string, "null"]}
+        notes: {type: [string, "null"]}
+        order_id: {type: [string, "null"], format: uuid, description: "Set on a deposit against an order."}
+        job_id: {type: [string, "null"], format: uuid}
+        gl_entry_id: {type: [string, "null"], format: uuid}
+        card_last4: {type: [string, "null"]}
+        card_brand: {type: [string, "null"]}
+        gateway_tx_id: {type: [string, "null"]}
+        auth_code: {type: [string, "null"]}
+        voided_at: {type: [string, "null"], format: date-time}
+        voided_by: {type: [string, "null"]}
+        void_reason: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        applications:
+          type: array
+          items: {$ref: "#/components/schemas/ArApplication"}
+        refunds:
+          type: array
+          items: {$ref: "#/components/schemas/Refund"}
+    PaymentPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PaymentSummary"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    PaymentApplicationRequest:
+      type: object
+      required: [invoice_id, amount_cents]
+      properties:
+        invoice_id: {type: string, format: uuid}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        discount_cents:
           type: integer
           format: int64
-          description: Cents.
-        reason:
-          type: string
-        gateway_refund_id:
-          type: string
-        status:
-          type: string
-          enum: [PENDING, COMPLETE, FAILED]
-        created_at:
-          type: string
-          format: date-time
-    PaymentList:
-      type: [array, "null"]
-      items:
-        $ref: "#/components/schemas/Payment"
+          minimum: 0
+          description: The early pay discount taken beside this cash (a DISCOUNT application, DR 4050 / CR 1020).
+    PaymentCreateRequest:
+      type: object
+      required: [customer_id, amount_cents, method]
+      properties:
+        customer_id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid, description: "Defaults to the caller's branch, else the customer's primary branch."}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        method: {type: string, enum: [cash, check, ach, other]}
+        reference: {type: string, maxLength: 128}
+        notes: {type: string, maxLength: 2000}
+        received_on: {type: string, format: date, description: "Defaults to the branch's business date."}
+        order_id: {type: string, format: uuid, description: "A deposit against this order."}
+        job_id: {type: string, format: uuid}
+        applications:
+          type: array
+          items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
+    CardPaymentRequest:
+      type: object
+      required: [customer_id, token_id, amount_cents]
+      properties:
+        customer_id: {type: string, format: uuid}
+        branch_id: {type: string, format: uuid}
+        token_id: {type: string, description: "The gateway tokenizer's result; required."}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        notes: {type: string, maxLength: 2000}
+        order_id: {type: string, format: uuid}
+        job_id: {type: string, format: uuid}
+        applications:
+          type: array
+          items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
+    PaymentApplyRequest:
+      type: object
+      required: [applications]
+      properties:
+        applications:
+          type: array
+          minItems: 1
+          items: {$ref: "#/components/schemas/PaymentApplicationRequest"}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+    PaymentTransitionRequest:
+      type: object
+      required: [to, reason]
+      properties:
+        to: {$ref: "#/components/schemas/PaymentStatus"}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    PaymentRefundRequest:
+      type: object
+      required: [amount_cents, reason]
+      properties:
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+    CreditMemoRefundRequest:
+      type: object
+      required: [amount_cents, reason, method]
+      properties:
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        method: {type: string, enum: [card, check, ach, other]}
+        payment_id: {type: string, format: uuid, description: "The card payment a card refund goes back to; only for method card."}
+        revision: {type: integer, format: int64, description: "The precondition, beside If-Match."}
+    PaymentIntentRequest:
+      type: object
+      required: [amount_cents]
+      properties:
+        amount_cents: {type: integer, format: int64, minimum: 1}
+    PaymentIntentResponse:
+      type: object
+      required: [public_key, amount_cents]
+      properties:
+        public_key: {type: string}
+        amount_cents: {type: integer, format: int64}
     PortalLoginRequest:
       type: object
       required: [email, password]

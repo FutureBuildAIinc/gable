@@ -3,12 +3,12 @@
     "name": "deposit.create",
     "request": {
       "method": "POST",
-      "path": "/api/v1/deposits",
+      "path": "/api/v1/payments",
       "body": {
-        "amount_cents": 25000,
-        "branch_id": "<id-1>",
-        "customer_id": "<id-2>",
-        "method": "CHECK",
+        "amount_cents": 2500,
+        "customer_id": "<id-1>",
+        "method": "check",
+        "order_id": "<id-2>",
         "reference": "GOLD-DEP-1"
       }
     },
@@ -16,18 +16,34 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "amount": 25000,
-        "applied_amount": 0,
-        "branch_id": "<id-1>",
+        "amount_cents": 2500,
+        "applications": [],
+        "auth_code": null,
+        "branch_id": "<id-3>",
+        "card_brand": null,
+        "card_last4": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-2>",
-        "gl_entry_id": "<id-3>",
-        "id": "<id-4>",
-        "method": "CHECK",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-4>",
+        "id": "<id-5>",
+        "job_id": null,
+        "method": "check",
+        "notes": null,
+        "number": "PAY-000046",
+        "order_id": "<id-2>",
+        "received_on": "<day+0>",
         "reference": "GOLD-DEP-1",
-        "remaining": 25000,
-        "status": "OPEN",
-        "updated_at": "<ts+0d>"
+        "refunds": [],
+        "revision": 1,
+        "status": "posted",
+        "unapplied_cents": 2500,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
       }
     }
   },
@@ -35,35 +51,110 @@
     "name": "deposit.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/deposits/<id-4>"
+      "path": "/api/v1/payments/<id-5>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "amount": 25000,
-        "applied_amount": 0,
-        "branch_id": "<id-1>",
+        "amount_cents": 2500,
+        "applications": [],
+        "auth_code": null,
+        "branch_id": "<id-3>",
+        "card_brand": null,
+        "card_last4": null,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-2>",
-        "gl_entry_id": "<id-3>",
-        "id": "<id-4>",
-        "method": "CHECK",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-4>",
+        "id": "<id-5>",
+        "job_id": null,
+        "method": "check",
+        "notes": null,
+        "number": "PAY-000046",
+        "order_id": "<id-2>",
+        "received_on": "<day+0>",
         "reference": "GOLD-DEP-1",
-        "remaining": 25000,
-        "status": "OPEN",
-        "updated_at": "<ts+0d>"
+        "refunds": [],
+        "revision": 1,
+        "status": "posted",
+        "unapplied_cents": 2500,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
       }
+    }
+  },
+  {
+    "name": "deposit.list_by_order",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?order_id=<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "amount_cents": 2500,
+            "auth_code": null,
+            "branch_id": "<id-3>",
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "gateway_tx_id": null,
+            "gl_entry_id": "<id-4>",
+            "id": "<id-5>",
+            "job_id": null,
+            "method": "check",
+            "notes": null,
+            "number": "PAY-000046",
+            "order_id": "<id-2>",
+            "received_on": "<day+0>",
+            "reference": "GOLD-DEP-1",
+            "revision": 1,
+            "status": "posted",
+            "unapplied_cents": 2500,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "deposit.order_shows_unapplied",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/orders/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
     }
   },
   {
     "name": "deposit.create.bad_amount",
     "request": {
       "method": "POST",
-      "path": "/api/v1/deposits",
+      "path": "/api/v1/payments",
       "body": {
         "amount_cents": 0,
-        "customer_id": "<id-2>"
+        "customer_id": "<id-1>",
+        "method": "cash"
       }
     },
     "response": {
@@ -71,11 +162,77 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "amount_cents",
+              "message": "must be 1 cent or more"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "deposit.create.order_of_another_customer",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 100,
+        "customer_id": "<id-1>",
+        "method": "cash",
+        "order_id": "<id-7>"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "order_id",
+              "message": "no such order for this customer"
+            }
+          ],
+          "message": "the request is not valid"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "deposit.credit_memo.refund_needs_open",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/credit-memos/<id-9>/refunds",
+      "headers": {
+        "If-Match": "\"4\""
+      },
+      "body": {
+        "amount_cents": 100,
+        "method": "check",
+        "reason": "none"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "only an open credit memo can be refunded: it is void"
+        },
+        "meta": {
+          "request_id": "<id-10>"
         }
       }
     }

@@ -139,7 +139,7 @@
         "invoice_count": 11,
         "outstanding_ar": 23324.76,
         "start_date": "<day-30>",
-        "total_collected": 315854.09,
+        "total_collected": 315919.09,
         "total_invoiced": 76391.14
       }
     }
@@ -158,8 +158,8 @@
         "outstanding_ar": 9984277,
         "outstanding_ar_count": 15,
         "pending_dispatch": 28,
-        "today_revenue": 31342985,
-        "today_revenue_change": 310195.8617958618
+        "today_revenue": 31349485,
+        "today_revenue_change": 310260.21186021186
       }
     }
   },
@@ -187,7 +187,7 @@
         },
         {
           "date": "<day+0>",
-          "revenue": 31342985
+          "revenue": 31349485
         }
       ]
     }
@@ -344,16 +344,18 @@
           "account_id": "<id-12>",
           "account_name": "Cash",
           "account_type": "ASSET",
-          "credit": 0,
-          "debit": 35000
+          "credit": 5000,
+          "currency": "USD",
+          "debit": 31163382
         },
         {
           "account_code": "1020",
           "account_id": "<id-13>",
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
-          "credit": 75,
-          "debit": 3217
+          "credit": 31190099,
+          "currency": "USD",
+          "debit": 38489558
         },
         {
           "account_code": "1030",
@@ -361,6 +363,7 @@
           "account_name": "Inventory",
           "account_type": "ASSET",
           "credit": 2100,
+          "currency": "USD",
           "debit": 0
         },
         {
@@ -368,7 +371,8 @@
           "account_id": "<id-15>",
           "account_name": "Sales Tax Payable",
           "account_type": "LIABILITY",
-          "credit": 337,
+          "credit": 4123534,
+          "currency": "USD",
           "debit": 0
         },
         {
@@ -376,16 +380,18 @@
           "account_id": "<id-16>",
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
-          "credit": 25000,
-          "debit": 0
+          "credit": 31156524,
+          "currency": "USD",
+          "debit": 31154024
         },
         {
           "account_code": "4010",
           "account_id": "<id-17>",
           "account_name": "Sales Revenue",
           "account_type": "REVENUE",
-          "credit": 12880,
-          "debit": 75
+          "credit": 34372882,
+          "currency": "USD",
+          "debit": 41075
         },
         {
           "account_code": "5010",
@@ -393,6 +399,7 @@
           "account_name": "Cost of Goods Sold",
           "account_type": "EXPENSE",
           "credit": 0,
+          "currency": "USD",
           "debit": 2100
         }
       ]
@@ -416,22 +423,23 @@
             "amount": 2100
           }
         ],
+        "currency": "USD",
         "end_date": "<day+0>",
         "expenses": [],
-        "gross_profit": 10705,
-        "net_income": 10705,
+        "gross_profit": 6569584,
+        "net_income": 6569584,
         "revenue": [
           {
             "account_code": "4010",
             "account_id": "<id-17>",
             "account_name": "Sales Revenue",
-            "amount": 12805
+            "amount": 6571684
           }
         ],
         "start_date": "<day-30>",
         "total_cogs": 2100,
         "total_expenses": 0,
-        "total_revenue": 12805
+        "total_revenue": 6571684
       }
     }
   },
@@ -451,13 +459,13 @@
             "account_code": "1010",
             "account_id": "<id-12>",
             "account_name": "Cash",
-            "amount": 35000
+            "amount": 31158382
           },
           {
             "account_code": "1020",
             "account_id": "<id-13>",
             "account_name": "Accounts Receivable",
-            "amount": 3142
+            "amount": 7299459
           },
           {
             "account_code": "1030",
@@ -466,25 +474,26 @@
             "amount": -2100
           }
         ],
+        "currency": "USD",
         "equity": [],
         "liabilities": [
           {
             "account_code": "2020",
             "account_id": "<id-15>",
             "account_name": "Sales Tax Payable",
-            "amount": 337
+            "amount": 4123534
           },
           {
             "account_code": "2200",
             "account_id": "<id-16>",
             "account_name": "Customer Deposits",
-            "amount": 25000
+            "amount": 2500
           }
         ],
-        "retained_earnings": 10705,
-        "total_assets": 36042,
-        "total_equity": 10705,
-        "total_liabilities": 25337
+        "retained_earnings": 34329707,
+        "total_assets": 38455741,
+        "total_equity": 34329707,
+        "total_liabilities": 4126034
       }
     }
   }
