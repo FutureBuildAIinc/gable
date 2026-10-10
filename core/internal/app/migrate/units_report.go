@@ -19,6 +19,19 @@ import (
 // enter the catalogue (ADR 0006 section 2.1).
 var unitCodeRule = regexp.MustCompile(`^[A-Z]{1,6}$`)
 
+// seedUnitCodes are the twenty three units ADR 0006 section 2.2 seeds and
+// migration 099 inserts (the same list the migration's INSERT carries). The
+// pre flight report runs before 099, when the catalogue table does not
+// exist yet, so it compares against this list as well as the live
+// catalogue: a stored value the migration itself will seed is never a new
+// dealer unit, and only a code outside both is listed.
+var seedUnitCodes = map[string]bool{
+	"EA": true, "PCS": true, "PAIR": true, "DOZ": true, "C": true, "M": true,
+	"SET": true, "BOX": true, "CTN": true, "BAG": true, "BUNDLE": true, "RL": true,
+	"LF": true, "SF": true, "SQ": true, "CF": true, "CY": true, "GAL": true,
+	"LBS": true, "CWT": true, "TON": true, "BF": true, "MBF": true,
+}
+
 // unitsReportColumns are the columns A1 (migration 099) and B0 (C3-2B)
 // collect: each table and column whose stored unit values the catalogue
 // migration normalises, inserts as dealer units or refuses on. The counter
@@ -84,9 +97,13 @@ func RunUnitsReport() {
 func unitsReport(db *sql.DB) int {
 	fmt.Println("Units pre flight report (A1 of migration 099; C3-2B extends it to the counter and document lines)")
 	fmt.Println()
-	// The catalogue as it stands; before 099 there is none, and every
-	// valid code is new.
+	// The catalogue as it stands, plus the section 2.2 seed codes 099
+	// inserts: before 099 there is no catalogue table, and a seeded code is
+	// never a new dealer unit; only a code outside both is.
 	catalogued := map[string]bool{}
+	for code := range seedUnitCodes {
+		catalogued[code] = true
+	}
 	rows, err := db.Query(`SELECT code FROM units`)
 	if err == nil {
 		for rows.Next() {
