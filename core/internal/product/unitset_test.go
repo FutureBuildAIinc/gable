@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/database"
@@ -872,7 +873,7 @@ func TestUnitSetGatedSaturation(t *testing.T) {
 	const contenders = 4
 	gate := newSetGate(db, contenders)
 	var wg sync.WaitGroup
-	errs := make(chan error, contenders)
+	results := make(chan error, contenders)
 	for i := 0; i < contenders; i++ {
 		wg.Add(1)
 		go func(i int) {
@@ -884,20 +885,112 @@ func TestUnitSetGatedSaturation(t *testing.T) {
 				Units: []product.UnitRowRequest{{UOM: "PCS", Sell: true, Purchase: true, Price: true},
 					{UOM: "BOX", UnitQty: "100", StockQty: "1", Sell: true}},
 			}, product.RevisionPrecondition{Revision: &rev})
-			if err != nil && i > 0 {
-				errs <- err // the losers' stale revisions are expected
-			}
+			results <- err
 		}(i)
 	}
 	wg.Wait()
-	close(errs)
-	saw := 0
-	for err := range errs {
-		saw++
-		_ = err
+	close(results)
+	winners, losers := 0, 0
+	for err := range results {
+		var he *httpx.Error
+		switch {
+		case err == nil:
+			winners++
+		case errors.As(err, &he) && he.Code == httpx.CodeStaleRevision:
+			losers++
+		default:
+			t.Errorf("a contender failed with something other than a stale revision: %v", err)
+		}
+	}
+	if winners != 1 || losers != contenders-1 {
+		t.Fatalf("exactly one of %d contenders at one revision wins and the rest answer stale, got %d winners and %d stale losers", contenders, winners, losers)
 	}
 	if ctx.Err() != nil {
-		t.Fatalf("four contenders at pool size 4 did not finish: a transaction waited on a second pool connection (%d errors seen)", saw)
+		t.Fatalf("four contenders at pool size 4 did not finish: a transaction waited on a second pool connection")
+	}
+}
+
+// TestUnitSetTwoPutsAndAReceiveAtPool4 proves the write's product row lock
+// serializes a concurrent receive's new bin row (the inventory foreign key
+// takes a FOR KEY SHARE the write's FOR UPDATE holds back): two unit set
+// PUTs changing the stocking unit at one revision and a receive that INSERTs
+// a new bin run together at pool size 4 over several rounds. Every round
+// ends consistently: at most one PUT wins (the receive landing first turns
+// both into stock_unit_in_use), every loser answers a business refusal (a
+// stale revision, or stock_unit_in_use), and the receive always completes.
+func TestUnitSetTwoPutsAndAReceiveAtPool4(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	f := newKitFixture(t, nil, db)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	var locID string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1`).Scan(&locID); err != nil {
+		t.Fatal(err)
+	}
+
+	for round := 0; round < 5; round++ {
+		id, rev := f.createBoard(map[string]any{"description": "two puts and a receive", "stock_uom": "PCS"})
+		put := func(stock string) resp {
+			return f.putUnits(id, unitsBody(rev, stock, stock, stock, stock, []any{
+				unitRow(stock, true, true, true),
+			}))
+		}
+		results := make(chan resp, 2)
+		received := make(chan error, 1)
+		go func() { results <- put("LF") }()
+		go func() { results <- put("EA") }()
+		go func() {
+			_, err := db.Pool.Exec(ctx,
+				`INSERT INTO inventory (product_id, location, location_id, quantity) VALUES ($1, 'YARD', $2, 10)`,
+				id, locID)
+			received <- err
+		}()
+
+		winners, stockInUse, stale := 0, 0, 0
+		for i := 0; i < 2; i++ {
+			r := <-results
+			switch {
+			case r.status == http.StatusOK:
+				winners++
+			case r.status == http.StatusConflict && strings.Contains(string(r.raw), "stock_unit_in_use"):
+				stockInUse++
+			case r.status == http.StatusConflict && strings.Contains(string(r.raw), "stale_revision"):
+				stale++
+			default:
+				t.Fatalf("round %d: a PUT answered %d, want 200, stale or stock_unit_in_use: %s", round, r.status, r.raw)
+			}
+		}
+		if err := <-received; err != nil {
+			t.Fatalf("round %d: the receive completed, got %v", round, err)
+		}
+		if winners > 1 {
+			t.Fatalf("round %d: at most one PUT wins, got %d", round, winners)
+		}
+		if winners+stockInUse+stale != 2 {
+			t.Fatalf("round %d: both PUTs answered, got %d+%d+%d", round, winners, stockInUse, stale)
+		}
+		// The stored state agrees with the winner, and the receive's row is
+		// there whatever the interleaving was.
+		got := f.do("GET", "/api/v1/products/"+id, nil)
+		if got.status != http.StatusOK {
+			t.Fatalf("round %d: the product read = %d: %s", round, got.status, got.raw)
+		}
+		switch {
+		case winners == 1:
+			if got.body["stock_uom"] == "PCS" {
+				t.Fatalf("round %d: the winning PUT's stocking unit is stored, got %v", round, got.body["stock_uom"])
+			}
+		case got.body["stock_uom"] != "PCS":
+			t.Fatalf("round %d: no PUT won, so the stocking unit is still PCS, got %v", round, got.body["stock_uom"])
+		}
+		var bins int
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT count(*) FROM inventory WHERE product_id = $1 AND quantity = 10`, id).Scan(&bins); err != nil || bins != 1 {
+			t.Fatalf("round %d: the receive's row is stored, got %d (%v)", round, bins, err)
+		}
 	}
 }
 
