@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -238,6 +239,44 @@ func marshal(v any) json.RawMessage {
 
 func (s *Service) GetInvoice(ctx context.Context, id uuid.UUID) (*Invoice, error) {
 	return s.repo.GetInvoice(ctx, id)
+}
+
+// NumberPattern is the invoice's document number pattern, from the entity's
+// prefix and pad (ADR 0007 section 7): reads accept it in the {id} slot.
+var NumberPattern = regexp.MustCompile(`^IN-[0-9]{6,}$`)
+
+// ResolveRecordID parses a record URL's {id} slot: a UUID first, then the
+// entity's number pattern. A well formed number of another entity, or
+// anything else, is a 400 naming id; a value that names no visible row is
+// the caller's 404.
+func ResolveRecordID(raw string) (uuid.UUID, string, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		return id, "", nil
+	}
+	if NumberPattern.MatchString(raw) {
+		return uuid.Nil, raw, nil
+	}
+	return uuid.Nil, "", httpx.BadRequest("invalid invoice id",
+		httpx.FieldError{Field: "id", Message: "must be a UUID or an invoice number such as IN-000123"})
+}
+
+// GetInvoiceByIDOrNumber reads an invoice by its UUID or its document
+// number (ADR 0007 section 7): both spellings answer exactly the same body,
+// no redirect.
+func (s *Service) GetInvoiceByIDOrNumber(ctx context.Context, raw string) (*Invoice, error) {
+	id, number, err := ResolveRecordID(raw)
+	if err != nil {
+		return nil, err
+	}
+	if number != "" {
+		if r, ok := s.repo.(interface {
+			GetInvoiceByNumber(ctx context.Context, number string) (*Invoice, error)
+		}); ok {
+			return r.GetInvoiceByNumber(ctx, number)
+		}
+		return nil, httpx.NotFound("invoice not found")
+	}
+	return s.GetInvoice(ctx, id)
 }
 
 // GetInvoiceRecord reads an invoice for a caller that holds the record's own
