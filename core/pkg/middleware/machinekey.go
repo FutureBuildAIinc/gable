@@ -299,6 +299,7 @@ func (c ScopeClass) String() string {
 // modules, and cannot be granted.
 var confirmGatedModules = map[string]struct{}{
 	"quotes": {},
+	"orders": {},
 }
 
 // ConfirmGatedModules returns the confirm gated module set, sorted, for
