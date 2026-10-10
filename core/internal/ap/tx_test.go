@@ -15,6 +15,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -496,5 +497,56 @@ func TestTx_PaymentLocksInIDOrder(t *testing.T) {
 		if got, want := f.controlBalance(), f.openSum(); got != want {
 			t.Fatalf("round %d: control %d, open %d", r, got, want)
 		}
+	}
+}
+
+// RULE (the module recipe): a rolled back create abandons its document number
+// and never reuses it. The number comes from the column's sequence DEFAULT,
+// which mints through the writer's transaction: the rollback gives back the
+// row but not the number, so the next bill takes a later one. The behaviour
+// is the sequence's own; this test pins it (review r1 P3-1 asked for the
+// proof, not a change).
+func TestTx_RolledBackCreateAbandonsItsNumber(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	fail := f.service(failingEvents{}, audit.NewLogger(f.db), f.db)
+	good := f.svc
+	ctx := branchctx.WithSystem(context.Background())
+
+	first, err := good.Create(ctx, f.createInput("TX-NUM-1"), ap.Caller{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq := func() int64 {
+		var last int64
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT last_value FROM vendor_invoice_number_seq`).Scan(&last); err != nil {
+			t.Fatal(err)
+		}
+		return last
+	}
+	minted := seq()
+	if _, err := fail.Create(ctx, f.createInput("TX-NUM-2"), ap.Caller{}); err == nil {
+		t.Fatal("the create whose event write fails succeeded")
+	}
+	if after := seq(); after <= minted {
+		t.Errorf("the sequence stands at %d after a rolled back create that minted past %d: the abandoned number would be reused", after, minted)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE vendor_id = $1`, f.vendor); n != 1 {
+		t.Errorf("%d bills stand, want the one committed create", n)
+	}
+	next, err := good.Create(ctx, f.createInput("TX-NUM-3"), ap.Caller{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	numbered := func(s string) int64 {
+		n, err := strconv.ParseInt(strings.TrimPrefix(s, "AP-"), 10, 64)
+		if err != nil {
+			t.Fatalf("number %q: %v", s, err)
+		}
+		return n
+	}
+	if numbered(next.Number) <= numbered(first.Number) {
+		t.Errorf("the bill after a rolled back create takes number %s, not past %s: the abandoned number was reused", next.Number, first.Number)
 	}
 }
