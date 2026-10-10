@@ -100,6 +100,11 @@ test.describe('Quote flow on the new contract', () => {
 
   test('a line with no unit gets a select of the unit codes that stays while the server complains', async ({ page, request }) => {
     const { customer, product } = await firstCustomerAndProduct(request);
+    // The unit the successful send carries is read from the product's unit
+    // set: a line's uom must be a sale row of the set, so the code comes
+    // from the server, never from this file.
+    const set = await (await request.get(`/api/v1/products/${product.id}/units`)).json();
+    const saleUnit = (set.units as { uom: string; sell: boolean }[]).find((r) => r.sell)!.uom;
     // The catalogue answers one product with no stocking unit, so the builder
     // meets the empty-unit state the select exists for.
     await page.route(/\/api\/v1\/products(\?|$)/, async (route) => {
@@ -148,13 +153,13 @@ test.describe('Quote flow on the new contract', () => {
     await page.getByRole('button', { name: 'Create Quote' }).click();
     await expect(page.getByText(/uom: must be one of/)).toBeVisible();
     await expect(select).toBeVisible();
-    await select.selectOption('PCS');
+    await select.selectOption(saleUnit);
 
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
     await page.getByRole('button', { name: 'Create Quote' }).click();
     const res = await created;
     expect(res.status(), await res.text()).toBe(201);
-    expect(res.request().postDataJSON().lines[0].uom).toBe('PCS');
+    expect(res.request().postDataJSON().lines[0].uom).toBe(saleUnit);
   });
 
   test('editing a draft sends the loaded revision, and an edit made on a stale one reloads', async ({ page, request }) => {
@@ -208,6 +213,24 @@ test.describe('Quote flow on the new contract', () => {
 
   test('convert carries a line priced per another unit without loss (the R1-15 refusal lifted)', async ({ page, request }) => {
     const { customer, product } = await firstCustomerAndProduct(request);
+    // The line prices per M while the product stocks and sells in EA, so the
+    // set needs M as a price row first: one PUT adds it beside the existing
+    // rows, its pair (1 M = 1000 EA) derived from the two standard sizes.
+    const set = await (await request.get(`/api/v1/products/${product.id}/units`)).json();
+    const put = await request.put(`/api/v1/products/${product.id}/units`, {
+      data: {
+        revision: set.revision,
+        stock_uom: product.stock_uom, sale_uom: product.stock_uom,
+        price_uom: product.stock_uom, purchase_uom: product.stock_uom,
+        units: [
+          ...(set.units as { uom: string; sell: boolean; purchase: boolean; price: boolean }[]).map(
+            (r) => ({ uom: r.uom, sell: r.sell, purchase: r.purchase, price: r.price }),
+          ),
+          { uom: 'M', sell: true, purchase: true, price: true },
+        ],
+      },
+    });
+    expect(put.status(), await put.text()).toBe(200);
     const made = await (await request.post('/api/v1/quotes', {
       data: {
         customer_id: customer.id,

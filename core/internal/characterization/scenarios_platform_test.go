@@ -75,11 +75,16 @@ func millworkGroups() []groupDef {
 				path:   "/api/v1/millwork/options",
 				body: map[string]any{
 					"category": "Species", "name": "Golden Douglas Fir",
-					"price_adjustment": 1.5, "attributes": map[string]any{"grade": "Clear"},
+					"price_adjustment_cents": 150, "attributes": map[string]any{"grade": "Clear"},
 				},
 				extract: map[string]string{"myMillworkOption": "/id"},
 			},
-			{name: "millwork.option.list", method: "GET", path: "/api/v1/millwork/options?category=Species"},
+			{name: "millwork.option.get", method: "GET", path: "/api/v1/millwork/options/{myMillworkOption}"},
+			{name: "millwork.option.list", method: "GET", path: "/api/v1/millwork/options?category=Species&limit=2"},
+			{name: "millwork.option.list.unknown_param", method: "GET", path: "/api/v1/millwork/options?category=Species&zzz=1"},
+			// The module's event, read back from the feed (ADR 0003).
+			{name: "millwork.option.events", method: "GET",
+				path: "/api/v1/events?types=millwork_option.created&limit=1"},
 		},
 	}}
 }
@@ -88,12 +93,27 @@ func configuratorGroups() []groupDef {
 	return []groupDef{{
 		name: "configurator",
 		steps: []stepDef{
+			{name: "configurator.rules", method: "GET", path: "/api/v1/configurator/rules"},
+			{name: "configurator.presets", method: "GET", path: "/api/v1/configurator/presets"},
+			{name: "configurator.presets.filter", method: "GET", path: "/api/v1/configurator/presets?product_type=Door"},
 			{name: "configurator.options", method: "GET", path: "/api/v1/configurator/options?attribute_type=Species"},
+			// The selections ride as one declared parameter, not as any
+			// unknown query name (the strict query posture).
+			{name: "configurator.options.selected", method: "GET",
+				path: "/api/v1/configurator/options?attribute_type=Grade&selections=Species%3DSYP"},
+			{name: "configurator.options.unknown_param", method: "GET",
+				path: "/api/v1/configurator/options?attribute_type=Grade&Species=SYP"},
 			{
 				name:   "configurator.validate",
 				method: "POST",
 				path:   "/api/v1/configurator/validate",
 				body:   map[string]any{"selections": map[string]any{"Species": "SYP", "Grade": "#2"}},
+			},
+			{
+				name:   "configurator.validate.conflict",
+				method: "POST",
+				path:   "/api/v1/configurator/validate",
+				body:   map[string]any{"selections": map[string]any{"Species": "SYP", "Grade": "Appearance"}},
 			},
 			{
 				name:   "configurator.build_sku",
@@ -102,6 +122,15 @@ func configuratorGroups() []groupDef {
 				body: map[string]any{
 					"product_type": "Lumber",
 					"selections":   map[string]any{"Species": "SYP", "Grade": "#2", "Length": "8"},
+				},
+			},
+			{
+				name:   "configurator.build_sku.conflict",
+				method: "POST",
+				path:   "/api/v1/configurator/build-sku",
+				body: map[string]any{
+					"product_type": "Lumber",
+					"selections":   map[string]any{"Species": "SYP", "Grade": "Appearance"},
 				},
 			},
 			{name: "configurator.validate.empty", method: "POST", path: "/api/v1/configurator/validate",
@@ -125,6 +154,39 @@ func governanceGroups() []groupDef {
 				extract: map[string]string{"myRFC": "/id"},
 			},
 			{name: "governance.rfc.get", method: "GET", path: "/api/v1/governance/rfcs/{myRFC}"},
+			// The recipe's golden pins: the validation 400 with every field,
+			// the filter that filters and the one refused, the unsupported
+			// parameter, the missing and stale revision, the refused
+			// transition, and the module's events off the events feed.
+			{
+				name:   "governance.rfc.create.missing_fields",
+				method: "POST",
+				path:   "/api/v1/governance/rfcs",
+				body:   map[string]any{"title": "", "problem_statement": "", "proposed_solution": ""},
+			},
+			{name: "governance.rfc.create.carries_status", method: "POST", path: "/api/v1/governance/rfcs",
+				body: map[string]any{"title": "T", "problem_statement": "p", "proposed_solution": "s", "status": "review"}},
+			{name: "governance.rfc.list", method: "GET", path: "/api/v1/governance/rfcs?status=draft&limit=5"},
+			{name: "governance.rfc.list.uppercase_status", method: "GET", path: "/api/v1/governance/rfcs?status=DRAFT"},
+			{name: "governance.rfc.list.unknown_parameter", method: "GET", path: "/api/v1/governance/rfcs?author=none"},
+			{name: "governance.rfc.update.missing_revision", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "Golden RFC v2"}},
+			{name: "governance.rfc.update.stale_revision", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "Golden RFC v2", "revision": 9}},
+			{name: "governance.rfc.update", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "Golden RFC v2", "revision": 1}},
+			{name: "governance.rfc.update.carries_status", method: "PUT", path: "/api/v1/governance/rfcs/{myRFC}",
+				body: map[string]any{"title": "T", "revision": 2}},
+			// draft -> approved is not an edge; draft -> review is.
+			{name: "governance.rfc.transition.refused", method: "POST", path: "/api/v1/governance/rfcs/{myRFC}/transitions",
+				body: map[string]any{"to": "approved", "revision": 2}},
+			{name: "governance.rfc.transition", method: "POST", path: "/api/v1/governance/rfcs/{myRFC}/transitions",
+				body: map[string]any{"to": "review", "revision": 2}},
+			{
+				name:   "governance.rfc.events",
+				method: "GET",
+				path:   "/api/v1/events?types=rfc.created,rfc.updated,rfc.review&limit=50",
+			},
 		},
 	}}
 }
@@ -180,6 +242,21 @@ func portalGroups() []groupDef {
 				extract: map[string]string{"myProject": "/id"},
 			},
 			{name: "project.get", method: "GET", path: "/api/portal/v1/projects/{myProject}"},
+			// A write with no precondition is 428 (ADR 0001 section 11).
+			{name: "project.update.no_precondition", method: "PUT", path: "/api/portal/v1/projects/{myProject}",
+				body: map[string]any{"name": "Golden Project Renamed"}},
+			{name: "project.update", method: "PUT", path: "/api/portal/v1/projects/{myProject}",
+				headers: map[string]string{"If-Match": `\"1\"`},
+				body:    map[string]any{"status": "completed"}},
+			{name: "project.get.after_update", method: "GET", path: "/api/portal/v1/projects/{myProject}"},
+			// The list: the envelope, a filter that filters, an unknown
+			// parameter refused (the strict query posture).
+			{name: "project.list", method: "GET", path: "/api/portal/v1/projects?limit=2"},
+			{name: "project.list.filter", method: "GET", path: "/api/portal/v1/projects?status=completed"},
+			{name: "project.list.unknown_param", method: "GET", path: "/api/portal/v1/projects?zzz=1"},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "project.events", method: "GET",
+				path: "/api/v1/events?types=project.created,project.updated&limit=2", sortPrimaryArray: true},
 		},
 	}}
 }
@@ -190,10 +267,25 @@ func techadminGroups() []groupDef {
 		steps: []stepDef{
 			{name: "techadmin.keys.list", method: "GET", path: "/api/v1/admin/keys"},
 			{
-				name:   "techadmin.key.create",
+				name:    "techadmin.key.create",
+				method:  "POST",
+				path:    "/api/v1/admin/keys",
+				body:    map[string]any{"name": "golden-key", "scopes": []any{"quotes:read"}},
+				extract: map[string]string{"myKeyID": "/key/id"},
+			},
+			{name: "techadmin.keys.list.after_create", method: "GET", path: "/api/v1/admin/keys?limit=2"},
+			{name: "techadmin.keys.list.unknown_parameter", method: "GET", path: "/api/v1/admin/keys?status=active"},
+			// Revoking an unknown key is a 404; revoking the golden key is a
+			// 204, and revoking it again changes nothing.
+			{name: "techadmin.key.revoke.unknown", method: "DELETE",
+				path: "/api/v1/admin/keys/00000000-0000-0000-0000-0000000000e1"},
+			{name: "techadmin.key.revoke", method: "DELETE", path: "/api/v1/admin/keys/{myKeyID}"},
+			{name: "techadmin.key.revoke.again", method: "DELETE", path: "/api/v1/admin/keys/{myKeyID}"},
+			{
+				name:   "techadmin.key.create.missing_name",
 				method: "POST",
 				path:   "/api/v1/admin/keys",
-				body:   map[string]any{"name": "golden-key", "scopes": []any{"quotes:read"}},
+				body:   map[string]any{"name": "", "scopes": []any{""}},
 			},
 		},
 	}}
@@ -203,7 +295,10 @@ func staffGroups() []groupDef {
 	return []groupDef{{
 		name: "staff",
 		steps: []stepDef{
-			{name: "staff.list", method: "GET", path: "/api/v1/admin/staff"},
+			// The seeded roster's own order is not stable across runs (three
+			// rows seeded in one instant, random ids), so the list steps read
+			// pages that are: the newest member alone (this group's own
+			// create) and the empty inactive page.
 			{
 				name:   "staff.create",
 				method: "POST",
@@ -213,6 +308,10 @@ func staffGroups() []groupDef {
 				},
 				extract: map[string]string{"myStaff": "/id"},
 			},
+			{name: "staff.list", method: "GET", path: "/api/v1/admin/staff?limit=1"},
+			{name: "staff.list.active_filter", method: "GET", path: "/api/v1/admin/staff?active=false"},
+			{name: "staff.list.bad_filter", method: "GET", path: "/api/v1/admin/staff?active=maybe"},
+			{name: "staff.get", method: "GET", path: "/api/v1/admin/staff/{myStaff}"},
 			{name: "staff.modules", method: "GET", path: "/api/v1/admin/modules"},
 			{name: "staff.create.missing_fields", method: "POST", path: "/api/v1/admin/staff",
 				body: map[string]any{"email": "", "full_name": ""}},

@@ -91,7 +91,7 @@ func (h *Handler) HandlePrintInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inv, err := h.invoiceSvc.GetInvoice(r.Context(), id)
+	inv, err := h.invoiceSvc.GetInvoiceRecord(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
 		return
@@ -159,7 +159,7 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inv, err := h.invoiceSvc.GetInvoice(r.Context(), id)
+	inv, err := h.invoiceSvc.GetInvoiceRecord(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
 		return

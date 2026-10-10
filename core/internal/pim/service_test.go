@@ -17,6 +17,7 @@ import (
 
 	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
@@ -27,6 +28,34 @@ type stubProductRepo struct{ p *product.Product }
 func (r *stubProductRepo) CreateProduct(context.Context, *product.Product) error { return nil }
 func (r *stubProductRepo) GetProduct(context.Context, uuid.UUID) (*product.Product, error) {
 	return r.p, nil
+}
+
+// The unit set store, served empty: these tests create no unit sets.
+func (s *stubProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]product.UnitSetRowView, error) {
+	return []product.UnitSetRowView{}, nil
+}
+func (s *stubProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*product.UnitSetProduct, error) {
+	return nil, product.ErrNotFound
+}
+func (s *stubProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []product.UnitSetRowView,
+	_, _, _, _ string, _ *int64, _ int64) (int64, error) {
+	return 0, nil
+}
+func (s *stubProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
+func (s *stubProductRepo) ProductStockUnitInUse(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (s *stubProductRepo) ProductPriceHeld(_ context.Context, _ uuid.UUID) (bool, string, error) {
+	return false, "", nil
+}
+func (s *stubProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []string) (bool, string, error) {
+	return false, "", nil
 }
 func (r *stubProductRepo) ListProducts(context.Context) ([]product.Product, error) { return nil, nil }
 func (r *stubProductRepo) ListProductsPage(context.Context, *time.Time, *uuid.UUID, int) ([]product.Product, error) {

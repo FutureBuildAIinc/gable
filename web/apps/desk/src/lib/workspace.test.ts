@@ -64,6 +64,13 @@ describe('zoneForPath', () => {
     expect(zone?.label).toBe('Invoicing')
     expect(zone?.icon).toBeDefined()
   })
+
+  it('files the credit memo pages under the Invoicing tab, with both entries in its menu', () => {
+    for (const path of ['/credit-memos', '/credit-memos/new', '/credit-memos/abc', '/credit-memos/abc/edit']) {
+      expect(zoneForPath(path)?.key).toBe('invoice')
+    }
+    expect(menuForKey('invoice').map((m) => m.path)).toEqual(['/invoices', '/credit-memos'])
+  })
 })
 
 describe('menuForKey', () => {

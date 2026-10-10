@@ -5,34 +5,23 @@ package crm
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
+	"strings"
 
-	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
-// statusForRepoError maps a repository failure onto an HTTP status.
-//
-// ErrNotFound means the caller named a row that is not there, which is a client
-// error and a 404 — the same answer HandleGetActivity gives for the same
-// condition. Anything else falls through to the caller's default, so an
-// unexpected failure stays a 500 rather than being flattened into a 4xx that
-// tells the client a retry is pointless.
-func statusForRepoError(err error, fallback int) int {
-	if errors.Is(err, ErrNotFound) {
-		return http.StatusNotFound
-	}
-	return fallback
-}
+// activitiesScope names the list's ordering: created_at then id, newest
+// first. A cursor minted for any other ordering is refused (ADR 0001
+// section 2).
+const activitiesScope = "crm_activities.created_at_id_desc"
 
 type Handler struct {
-	repo Repository
+	service *Service
 }
 
-func NewHandler(repo Repository) *Handler {
-	return &Handler{repo: repo}
-}
+func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guard := func(handler http.HandlerFunc) http.HandlerFunc {
@@ -51,118 +40,234 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("DELETE /api/v1/activities/{id}", guard(h.HandleDeleteActivity))
 }
 
-func (h *Handler) HandleListActivities(w http.ResponseWriter, r *http.Request) {
-	customerID, err := uuid.Parse(r.PathValue("customerId"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
-		return
-	}
-
-	activities, err := h.repo.ListByCustomer(r.Context(), customerID)
-	if err != nil {
-		httputil.RespondError(w, r, "Failed to fetch activities", http.StatusInternalServerError, err)
-		return
-	}
-	// A customer with no logged activity gets [], not null. The repository
-	// returns a nil slice for an empty result set and encoding/json renders
-	// that as `null`, which is a different value from an empty list: this
-	// endpoint is declared Promise<Activity[]> on the client, and every other
-	// list endpoint in this backend guarantees an array.
-	if activities == nil {
-		activities = []Activity{}
-	}
-
+func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(activities)
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func pathID(r *http.Request, name, what string) (uuid.UUID, error) {
+	id, err := uuid.Parse(r.PathValue(name))
+	if err != nil {
+		return uuid.Nil, httpx.BadRequest("invalid "+what+" id",
+			httpx.FieldError{Field: "id", Message: "must be a UUID"})
+	}
+	return id, nil
+}
+
+func noQuery(r *http.Request) error {
+	_, err := httpx.StrictQuery(r)
+	return err
+}
+
+func writeActivity(w http.ResponseWriter, status int, a *Activity) {
+	httpx.WriteRevisionETag(w, a.Revision)
+	writeJSON(w, status, a)
+}
+
+func cursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+}
+
+// listParams reads the platform's list parameters (cursor, limit, include)
+// and the keyset position; the caller has already run StrictQuery.
+func listParams(r *http.Request, q map[string][]string) (limit int, after *httpx.Timestamp, afterID uuid.UUID, wantTotal bool, err error) {
+	page, err := httpx.ParseListQuery(r, activitiesScope)
+	if err != nil {
+		return 0, nil, uuid.Nil, false, err
+	}
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return 0, nil, uuid.Nil, false, httpx.BadRequest("include is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"})
+		}
+		set, ierr := httpx.ParseInclude(vals[0])
+		if ierr != nil {
+			return 0, nil, uuid.Nil, false, ierr
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			return 0, nil, uuid.Nil, false, cursorError()
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			return 0, nil, uuid.Nil, false, cursorError()
+		}
+		ts := httpx.TimestampOf(at)
+		after, afterID = &ts, id
+	}
+	return page.Limit, after, afterID, wantTotal, nil
+}
+
+func parseListFilter(r *http.Request) (f ListFilter, wantTotal bool, err error) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "activity_type", "contact_id")
+	if err != nil {
+		return f, false, err
+	}
+	limit, at, id, wantTotal, err := listParams(r, q)
+	if err != nil {
+		return f, false, err
+	}
+	f.Limit, f.AfterID = limit, id
+	if at != nil {
+		t := at.Time
+		f.AfterTime = &t
+	}
+	v := &httpx.Validator{}
+	if vals := q["activity_type"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "activity_type", "parameter is repeated")
+		} else if t, ok := ParseActivityType(vals[0]); ok {
+			f.Type = &t
+		} else {
+			v.Check(false, "activity_type", "must be one of: "+strings.Join(ActivityTypeNames(), ", "))
+		}
+	}
+	if vals := q["contact_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "contact_id", "parameter is repeated")
+		} else if id, ok := v.UUID("contact_id", &vals[0], true); ok {
+			f.ContactID = &id
+		}
+	}
+	if err := v.Err(); err != nil {
+		return f, false, err
+	}
+	return f, wantTotal, nil
+}
+
+func (h *Handler) HandleListActivities(w http.ResponseWriter, r *http.Request) {
+	customerID, err := pathID(r, "customerId", "customer")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f, wantTotal, err := parseListFilter(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items, hasMore, total, err := h.service.List(r.Context(), customerID, f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 {
+		last := items[len(items)-1]
+		if next, err = nextCursor(hasMore, last.CreatedAt, last.ID); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
+}
+
+func nextCursor(hasMore bool, created httpx.Timestamp, id uuid.UUID) (string, error) {
+	if !hasMore {
+		return "", nil
+	}
+	return httpx.MintCursor(activitiesScope, httpx.FormatKeyTime(created.Time), id.String())
 }
 
 func (h *Handler) HandleCreateActivity(w http.ResponseWriter, r *http.Request) {
-	customerID, err := uuid.Parse(r.PathValue("customerId"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	customerID, err := pathID(r, "customerId", "customer")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid customer ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	var a Activity
-	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req Request
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	a.CustomerID = customerID
-
-	if !ValidActivityType(a.ActivityType) {
-		httputil.RespondError(w, r, "Invalid activity_type: must be CALL, MEETING, EMAIL, or NOTE", http.StatusBadRequest, nil)
+	draft, err := req.Parse(false)
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.repo.Create(r.Context(), &a); err != nil {
-		httputil.RespondError(w, r, "failed to create activity", http.StatusInternalServerError, err)
+	a, err := h.service.Create(r.Context(), customerID, draft)
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(a)
+	w.Header().Set("Location", "/api/v1/activities/"+a.ID.String())
+	writeActivity(w, http.StatusCreated, a)
 }
 
 func (h *Handler) HandleGetActivity(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid activity ID", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	a, err := h.repo.Get(r.Context(), id)
+	id, err := pathID(r, "id", "activity")
 	if err != nil {
-		httputil.RespondError(w, r, "Activity not found", http.StatusNotFound, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(a)
+	a, err := h.service.Get(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeActivity(w, http.StatusOK, a)
 }
 
 func (h *Handler) HandleUpdateActivity(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "id", "activity")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid activity ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	var a Activity
-	if err := json.NewDecoder(r.Body).Decode(&a); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req Request
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	a.ID = id
-
-	if !ValidActivityType(a.ActivityType) {
-		httputil.RespondError(w, r, "Invalid activity_type: must be CALL, MEETING, EMAIL, or NOTE", http.StatusBadRequest, nil)
+	draft, err := req.Parse(true)
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.repo.Update(r.Context(), &a); err != nil {
-		httputil.RespondError(w, r, "failed to update activity",
-			statusForRepoError(err, http.StatusInternalServerError), err)
+	a, err := h.service.Update(r.Context(), id, draft, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision})
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(a)
+	writeActivity(w, http.StatusOK, a)
 }
 
+// HandleDeleteActivity deletes on the client's revision, carried by If-Match
+// (a DELETE has no body).
 func (h *Handler) HandleDeleteActivity(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "id", "activity")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid activity ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.repo.Delete(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to delete activity",
-			statusForRepoError(err, http.StatusInternalServerError), err)
+	if err := h.service.Delete(r.Context(), id, Precondition{IfMatch: r.Header.Get("If-Match")}); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
 	w.WriteHeader(http.StatusNoContent)
 }

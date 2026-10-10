@@ -5,298 +5,295 @@ package project
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
-// Projects are the contractor-facing job grouping on the portal: every project
-// read is scoped to the authenticated customer, and a project's dashboard rolls
-// up that job's orders, deliveries and invoices.
-//
-// project.Service takes the Repository interface declared in repository.go, so
-// this file covers the HTTP layer and the validation that returns before any
-// query; service_repo_test.go drives the service against a fake store.
-//
-// Tests are CORRECTNESS unless labelled CHARACTERIZATION.
+// The service's behaviour with a fake store (the recipe's service tests): the
+// order of calls inside one transaction (row, audit row, event last), the
+// name rule, and refusals writing nothing.
 
-// nilRepoService builds a service whose repository is nil. Any call that
-// reaches persistence panics, which is the signal that validation let it
-// through; the tests below only drive paths that must stop before that.
-func nilRepoService() *Service { return NewService(nil) }
+type fakeRepo struct {
+	stored map[uuid.UUID]*Project
+	calls  []string
+	order  *[]string
+	cust   uuid.UUID
+}
 
-// --- CreateProject validation -------------------------------------------
+func newFakeRepo(customer uuid.UUID) *fakeRepo {
+	return &fakeRepo{stored: map[uuid.UUID]*Project{}, cust: customer}
+}
 
-// CORRECTNESS: a project without a name is unusable — the portal lists jobs by
-// name and a blank one cannot be selected or distinguished. It must be
-// rejected before a row is written.
-func TestCreateProject_RequiresAName(t *testing.T) {
-	p, err := nilRepoService().CreateProject(context.Background(), uuid.New(), CreateProjectRequest{Name: ""})
-	if err == nil {
-		t.Fatalf("an empty name was accepted, returning %+v", p)
-	}
-	if p != nil {
-		t.Errorf("returned %+v alongside the error, want nil", p)
-	}
-	if !strings.Contains(err.Error(), "project name is required") {
-		t.Errorf("error = %q, want it to say the name is required", err)
+func (f *fakeRepo) note(call string) {
+	f.calls = append(f.calls, call)
+	if f.order != nil {
+		*f.order = append(*f.order, call)
 	}
 }
 
-// CHARACTERIZATION: the name check is a bare `req.Name == ""` with no trimming,
-// so a whitespace-only name passes validation and reaches persistence. In the
-// portal's job picker it renders as a blank, unselectable row.
-//
-// core/internal/project/service.go:26 —
-//
-//	if req.Name == "" {
-func TestCreateProject_WhitespaceNameIsNotRejected(t *testing.T) {
-	for _, name := range []string{" ", "\t", "\n", "   "} {
-		if !reachedPersistence(func() {
-			_, _ = nilRepoService().CreateProject(context.Background(), uuid.New(), CreateProjectRequest{Name: name})
-		}) {
-			t.Errorf("name %q was rejected; if the check now trims whitespace, this characterization test should become a rejection test", name)
+func (f *fakeRepo) List(_ context.Context, customerID uuid.UUID, _ ListFilter, _ bool) ([]Project, bool, *int64, error) {
+	f.note("list")
+	return nil, false, nil, nil
+}
+func (f *fakeRepo) Get(_ context.Context, id, customerID uuid.UUID) (*Project, error) {
+	f.note("get")
+	p, ok := f.stored[id]
+	if !ok || p.CustomerID != customerID {
+		return nil, ErrNotFound
+	}
+	cp := *p
+	return &cp, nil
+}
+func (f *fakeRepo) Create(_ context.Context, p *Project) error {
+	f.note("create")
+	cp := *p
+	cp.Revision = 1
+	f.stored[p.ID] = &cp
+	return nil
+}
+func (f *fakeRepo) Lock(_ context.Context, id, customerID uuid.UUID) error {
+	f.note("lock")
+	p, ok := f.stored[id]
+	if !ok || p.CustomerID != customerID {
+		return ErrNotFound
+	}
+	return nil
+}
+func (f *fakeRepo) Update(_ context.Context, p *Project, status *string) error {
+	f.note("update")
+	cur, ok := f.stored[p.ID]
+	if !ok || cur.CustomerID != p.CustomerID {
+		return ErrNotFound
+	}
+	cp := *p
+	// A NULL status keeps the stored spelling, as the SQL COALESCE does.
+	if status != nil {
+		cp.Status = fromStorage(*status)
+	} else {
+		cp.Status = cur.Status
+	}
+	cp.Revision = cur.Revision + 1
+	f.stored[p.ID] = &cp
+	return nil
+}
+func (f *fakeRepo) Entities(_ context.Context, _, _ uuid.UUID) ([]ProjectItem, []ProjectItem, []ProjectItem, error) {
+	f.note("entities")
+	return []ProjectItem{}, []ProjectItem{}, []ProjectItem{}, nil
+}
+
+type recordingEvents struct {
+	events []outbox.Event
+	err    error
+	order  *[]string
+}
+
+func (r *recordingEvents) Write(_ context.Context, ev outbox.Event) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.events = append(r.events, ev)
+	if r.order != nil {
+		*r.order = append(*r.order, "event")
+	}
+	return nil
+}
+
+type recordingAudit struct {
+	rows  []string
+	err   error
+	order *[]string
+}
+
+func (r *recordingAudit) Log(_ context.Context, e audit.Entry) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.rows = append(r.rows, e.Action)
+	if r.order != nil {
+		*r.order = append(*r.order, "audit:"+e.Action)
+	}
+	return nil
+}
+
+type runTx struct{}
+
+func (runTx) RunInTx(ctx context.Context, fn func(ctx context.Context) error) error { return fn(ctx) }
+
+func nameDraft(name string) *Draft { return &Draft{Name: &name} }
+
+// The create writes the row, re-reads it, then the audit row, then the event
+// last.
+func TestCreate_OrderRowAuditEvent(t *testing.T) {
+	cust := uuid.New()
+	repo := newFakeRepo(cust)
+	events := &recordingEvents{}
+	aud := &recordingAudit{}
+	var order []string
+	events.order, aud.order, repo.order = &order, &order, &order
+	svc := NewService(repo).WithOutbox(events).WithTxRunner(runTx{}).WithAudit(aud)
+	if _, err := svc.Create(context.Background(), cust, nameDraft("Phase one")); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"create", "get", "audit:project.created", "event"}
+	for i := range want {
+		if order[i] != want[i] {
+			t.Fatalf("order = %v, want %v", order, want)
 		}
+	}
+	if len(events.events) != 1 || events.events[0].Type != EventCreated {
+		t.Errorf("events = %v, want one %s", events.events, EventCreated)
 	}
 }
 
-// reachedPersistence runs fn and reports whether it got as far as touching the
-// nil repository (which panics). A validation rejection returns cleanly
-// instead, so a false result means the input was refused.
-func reachedPersistence(fn func()) (reached bool) {
-	defer func() {
-		if recover() != nil {
-			reached = true
+// A create defaults to the active status.
+func TestCreate_DefaultsToActive(t *testing.T) {
+	cust := uuid.New()
+	svc := NewService(newFakeRepo(cust))
+	p, err := svc.Create(context.Background(), cust, &Draft{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != StatusActive {
+		t.Errorf("status = %q, want active", p.Status)
+	}
+}
+
+// A failed event write fails the create and nothing is kept.
+func TestCreate_FailedEventFailsTheCreate(t *testing.T) {
+	cust := uuid.New()
+	svc := NewService(newFakeRepo(cust)).WithOutbox(&recordingEvents{err: errors.New("no")}).WithTxRunner(runTx{})
+	if _, err := svc.Create(context.Background(), cust, nameDraft("x")); err == nil {
+		t.Error("create succeeded though its event could not be written")
+	}
+}
+
+// The update refuses a write with no precondition and a stale one, and moves
+// only the fields the request named.
+func TestUpdate_PreconditionsAndChangedFields(t *testing.T) {
+	cust := uuid.New()
+	repo := newFakeRepo(cust)
+	existing := &Project{ID: uuid.New(), CustomerID: cust, Name: "Phase one", Status: StatusActive, Revision: 3}
+	repo.stored[existing.ID] = existing
+	svc := NewService(repo).WithTxRunner(runTx{})
+
+	if _, err := svc.Update(context.Background(), existing.ID, cust, nameDraft("x"), Precondition{}); err == nil {
+		t.Fatal("a write with neither If-Match nor body revision must be a 428")
+	} else if e, ok := err.(*httpx.Error); !ok || e.Status != http.StatusPreconditionRequired {
+		t.Fatalf("no precondition: got %v, want 428", err)
+	}
+	stale := int64(2)
+	if _, err := svc.Update(context.Background(), existing.ID, cust, nameDraft("x"), Precondition{Revision: &stale}); err == nil {
+		t.Fatal("a stale revision must be a 409")
+	} else if e, ok := err.(*httpx.Error); !ok || e.Status != http.StatusConflict || e.Code != "stale_revision" {
+		t.Fatalf("stale revision: got %v, want 409 stale_revision", err)
+	}
+	rev := int64(3)
+	rename := "Phase two"
+	done := StatusCompleted
+	p, err := svc.Update(context.Background(), existing.ID, cust, &Draft{Name: &rename, Status: done, Revision: &rev}, Precondition{Revision: &rev})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "Phase two" || p.Status != StatusCompleted || p.Revision != 4 {
+		t.Errorf("update = %+v", p)
+	}
+
+	// A re-read of a project of another customer's is a 404, not a leak.
+	if _, err := svc.Update(context.Background(), existing.ID, uuid.New(), nameDraft("x"), Precondition{IfMatch: `"4"`}); err == nil {
+		t.Error("another customer's project updated")
+	} else if e, ok := err.(*httpx.Error); !ok || e.Status != http.StatusNotFound {
+		t.Errorf("got %v, want 404", err)
+	}
+	_ = http.StatusOK
+}
+
+// The update's event carries the changed fields.
+func TestUpdate_EventCarriesChangedFields(t *testing.T) {
+	cust := uuid.New()
+	repo := newFakeRepo(cust)
+	existing := &Project{ID: uuid.New(), CustomerID: cust, Name: "Phase one", Status: StatusActive, Revision: 1}
+	repo.stored[existing.ID] = existing
+	events := &recordingEvents{}
+	svc := NewService(repo).WithOutbox(events).WithTxRunner(runTx{})
+	done := StatusCompleted
+	if _, err := svc.Update(context.Background(), existing.ID, cust, &Draft{Status: done}, Precondition{IfMatch: `"1"`}); err != nil {
+		t.Fatal(err)
+	}
+	if len(events.events) != 1 || events.events[0].Type != EventUpdated {
+		t.Fatalf("events = %v", events.events)
+	}
+	// The data is JSON; the changed list names status only.
+	data := string(events.events[0].Data)
+	if !contains(data, `"changed":["status"]`) {
+		t.Errorf("event data = %s, want changed [status]", data)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
 		}
-	}()
-	fn()
+	}
 	return false
 }
 
-// --- UpdateProject validation -------------------------------------------
-
-// CORRECTNESS: the status vocabulary is closed. An unrecognised status would
-// leave a project neither Active nor Completed, and the portal filters on those
-// two literals.
-//
-// Validation of the status happens after the project is loaded, so these cases
-// need a repository; what IS reachable without one is that a nil-status request
-// does not invent a status. That is covered through the handler below.
-func TestUpdateProjectRequest_StatusVocabulary(t *testing.T) {
-	// The vocabulary is asserted against the literals the service compares on,
-	// so a rename of either constant fails this test.
-	valid := map[string]bool{"Active": true, "Completed": true}
-	for _, s := range []string{"active", "COMPLETED", "Archived", "Cancelled", "", "Active "} {
-		if valid[s] {
-			t.Fatalf("test fixture error: %q should not be in the invalid set", s)
-		}
-	}
-	if !valid["Active"] || !valid["Completed"] {
-		t.Fatal("the two accepted statuses are Active and Completed")
-	}
-}
-
-// --- HTTP layer ----------------------------------------------------------
-
-func newTestMux(svc *Service) *http.ServeMux {
-	mux := http.NewServeMux()
-	NewHandler(svc).RegisterRoutes(mux, func(next http.Handler) http.Handler { return next })
-	return mux
-}
-
-func withCustomer(r *http.Request, id uuid.UUID) *http.Request {
-	return r.WithContext(context.WithValue(r.Context(), middleware.PortalClaimsKey,
-		&middleware.PortalClaims{CustomerID: id, Role: "Buyer"}))
-}
-
-func do(t *testing.T, mux *http.ServeMux, method, path, body string, customerID *uuid.UUID) *httptest.ResponseRecorder {
-	t.Helper()
-	var r *http.Request
-	if body == "" {
-		r = httptest.NewRequest(method, path, nil)
-	} else {
-		r = httptest.NewRequest(method, path, strings.NewReader(body))
-	}
-	if customerID != nil {
-		r = withCustomer(r, *customerID)
-	}
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, r)
-	return rec
-}
-
-// CORRECTNESS: a malformed project id is a client error and must be caught
-// before the service is called.
-func TestHandlers_MalformedProjectIDIs400(t *testing.T) {
-	mux := newTestMux(nilRepoService())
-	custID := uuid.New()
-
-	for _, tc := range []struct{ method, path, body string }{
-		{http.MethodGet, "/api/portal/v1/projects/not-a-uuid", ""},
-		{http.MethodPut, "/api/portal/v1/projects/not-a-uuid", `{"name":"x"}`},
+// The vocabulary: lowercase on the wire, only the writable spellings parse.
+func TestStatusVocabulary(t *testing.T) {
+	for wire, storage := range map[ProjectStatus]string{
+		StatusActive: "Active", StatusCompleted: "Completed", StatusInactive: "Inactive",
 	} {
-		rec := do(t, mux, tc.method, tc.path, tc.body, &custID)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s %s = %d, want 400", tc.method, tc.path, rec.Code)
+		if got := fromStorage(storage); got != wire {
+			t.Errorf("fromStorage(%q) = %q, want %q", storage, got, wire)
+		}
+	}
+	for _, ok := range []string{"active", "completed"} {
+		if _, parsed := ParseProjectStatus(ok); !parsed {
+			t.Errorf("ParseProjectStatus(%q) refused a writable status", ok)
+		}
+	}
+	for _, refused := range []string{"Active", "ACTIVE", "inactive", "done", ""} {
+		if _, parsed := ParseProjectStatus(refused); parsed {
+			t.Errorf("ParseProjectStatus(%q) accepted a non writable spelling", refused)
 		}
 	}
 }
 
-// CORRECTNESS: a malformed body is a client error, caught before the service.
-func TestHandleCreateProject_MalformedBodyIs400(t *testing.T) {
-	mux := newTestMux(nilRepoService())
-	custID := uuid.New()
-
-	rec := do(t, mux, http.MethodPost, "/api/portal/v1/projects", "{not json", &custID)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("status = %d, want 400", rec.Code)
+// The parse collects every problem into one 400.
+func TestRequestParse(t *testing.T) {
+	blank := "  "
+	req := &Request{Name: &blank, Status: strp("Active")}
+	_, err := req.Parse(false)
+	if err == nil {
+		t.Fatal("parse succeeded")
 	}
-}
-
-// CORRECTNESS: an empty project name is rejected by the service, and the
-// handler must surface that as a failure rather than a created project.
-func TestHandleCreateProject_EmptyNameIsRejected(t *testing.T) {
-	mux := newTestMux(nilRepoService())
-	custID := uuid.New()
-
-	rec := do(t, mux, http.MethodPost, "/api/portal/v1/projects", `{"name":""}`, &custID)
-	if rec.Code == http.StatusCreated {
-		t.Fatalf("an empty project name was created (status %d)", rec.Code)
+	e, ok := err.(*httpx.Error)
+	if !ok || e.Code != "validation_failed" {
+		t.Fatalf("got %v, want a validation_failed", err)
 	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status = %d, want the service's rejection surfaced (500 today)", rec.Code)
+	fields := map[string]bool{}
+	for _, d := range e.Details {
+		fields[d.Field] = true
 	}
-}
-
-// CORRECTNESS: the body is capped at 1MB on both write endpoints.
-func TestProjectWriteEndpoints_BodySizeLimit(t *testing.T) {
-	mux := newTestMux(nilRepoService())
-	custID := uuid.New()
-	huge := `{"name":"` + strings.Repeat("A", 2<<20) + `"}`
-
-	for _, tc := range []struct{ method, path string }{
-		{http.MethodPost, "/api/portal/v1/projects"},
-		{http.MethodPut, "/api/portal/v1/projects/" + uuid.NewString()},
-	} {
-		rec := do(t, mux, tc.method, tc.path, huge, &custID)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("%s %s = %d, want 400 for a body over the 1MB cap", tc.method, tc.path, rec.Code)
+	for _, want := range []string{"name", "status"} {
+		if !fields[want] {
+			t.Errorf("details = %v, want a %s entry", e.Details, want)
 		}
 	}
-}
 
-// CORRECTNESS (security): the customer id comes from the portal claims on the
-// context, never from the request. A caller must not be able to create or read
-// a project against another contractor's account by supplying an id.
-func TestHandleCreateProject_UsesTheAuthenticatedCustomer(t *testing.T) {
-	authed := uuid.New()
-	other := uuid.New()
-
-	// The service will panic when it reaches the nil repository. Recovering
-	// here lets the test prove the handler got that far with the right
-	// customer, which is the only observable seam available.
-	reached := reachedPersistence(func() {
-		mux := newTestMux(nilRepoService())
-		req := httptest.NewRequest(http.MethodPost, "/api/portal/v1/projects",
-			strings.NewReader(`{"name":"Maple Street Reno","customer_id":"`+other.String()+`"}`))
-		req = withCustomer(req, authed)
-		mux.ServeHTTP(httptest.NewRecorder(), req)
-	})
-	if !reached {
-		t.Fatal("the handler did not reach persistence; validation rejected a valid project")
+	// An update may send only the fields it changes; a create requires name.
+	if _, err := (&Request{Status: strp("completed")}).Parse(true); err != nil {
+		t.Errorf("a status only update: %v", err)
 	}
-	// CreateProjectRequest has no customer_id field at all, so the value in the
-	// body is discarded by the decoder — the strongest possible form of "the
-	// caller cannot choose the customer".
-	var req CreateProjectRequest
-	if err := json.Unmarshal([]byte(`{"name":"x","customer_id":"`+other.String()+`"}`), &req); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if req.Name != "x" {
-		t.Errorf("Name = %q, want x", req.Name)
+	if _, err := (&Request{}).Parse(false); err == nil {
+		t.Error("a create without a name parsed")
 	}
 }
 
-// CORRECTNESS (security): a request with no portal claims yields the zero
-// customer id, which must not match a real customer's projects. This pins that
-// the handler does not fall back to "any customer".
-func TestGetCustomerID_NoClaimsIsTheZeroUUID(t *testing.T) {
-	r := httptest.NewRequest(http.MethodGet, "/api/portal/v1/projects", nil)
-	if got := getCustomerID(r); got != uuid.Nil {
-		t.Errorf("getCustomerID with no claims = %s, want the zero UUID", got)
-	}
-
-	// A wrong type under the key must also yield the zero id rather than panic.
-	r2 := r.WithContext(context.WithValue(r.Context(), middleware.PortalClaimsKey, "not-claims"))
-	if got := getCustomerID(r2); got != uuid.Nil {
-		t.Errorf("getCustomerID with a wrong-typed context value = %s, want the zero UUID", got)
-	}
-
-	// Nil claims under the key must also be safe.
-	r3 := r.WithContext(context.WithValue(r.Context(), middleware.PortalClaimsKey, (*middleware.PortalClaims)(nil)))
-	if got := getCustomerID(r3); got != uuid.Nil {
-		t.Errorf("getCustomerID with nil claims = %s, want the zero UUID", got)
-	}
-}
-
-// --- wire format ---------------------------------------------------------
-
-// CORRECTNESS (contract): ProjectItem carries float64 DOLLARS, matching the
-// rest of the portal surface and not the ERP's int64 cents. The model has a
-// TODO to migrate; this pins the current side of the boundary so a migration
-// is a deliberate, visible change.
-func TestProjectItemJSON_MoneyIsDollars(t *testing.T) {
-	b, err := json.Marshal(ProjectItem{
-		ID: uuid.New(), Type: "INVOICE", Status: "UNPAID", TotalAmount: 4873.19, Reference: "Invoice #1001",
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(b, &raw); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if got := string(raw["total_amount"]); got != "4873.19" {
-		t.Errorf("total_amount = %s, want 4873.19 dollars", got)
-	}
-
-	// omitempty on TotalAmount means a zero-value item omits the field
-	// entirely rather than sending 0 — pinned because a client that reads
-	// `item.total_amount ?? null` behaves differently from one reading 0.
-	zero, err := json.Marshal(ProjectItem{ID: uuid.New(), Type: "ORDER"})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if strings.Contains(string(zero), "total_amount") {
-		t.Errorf("a zero total was serialised: %s", zero)
-	}
-}
-
-// CORRECTNESS: the dashboard DTO always names its three collections, so a
-// client can iterate them without a presence check.
-func TestProjectDashboardJSON_AlwaysCarriesItsCollections(t *testing.T) {
-	b, err := json.Marshal(ProjectDashboardDTO{Project: Project{ID: uuid.New(), Name: "Job"}})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	for _, field := range []string{`"orders"`, `"deliveries"`, `"invoices"`, `"project"`} {
-		if !strings.Contains(string(b), field) {
-			t.Errorf("the dashboard payload is missing %s: %s", field, b)
-		}
-	}
-}
-
-// CORRECTNESS: the seam is a consumer-defined interface and the Postgres
-// implementation satisfies it. If someone re-couples NewService to the concrete
-// type, this stops compiling and service_repo_test.go goes with it.
-func TestProjectSeam_ServiceTakesAnInterface(t *testing.T) {
-	var _ Repository = (*PostgresRepository)(nil)
-	if NewService(newFakeProjects()) == nil {
-		t.Fatal("NewService returned nil for a fake repository")
-	}
-}
+func strp(s string) *string { return &s }

@@ -1039,6 +1039,7 @@ components:
       - created_at
       - updated_at
       - invoice_ids
+      - deposit_unapplied_cents
       properties:
         id:
           type: string
@@ -1181,6 +1182,10 @@ components:
           items:
             type: string
             format: uuid
+        deposit_unapplied_cents:
+          type: integer
+          format: int64
+          description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
     Order:
       type: object
       description: The full order document.
@@ -1218,6 +1223,7 @@ components:
       - created_at
       - updated_at
       - invoice_ids
+      - deposit_unapplied_cents
       - ship_to
       - lines
       properties:
@@ -1362,6 +1368,10 @@ components:
           items:
             type: string
             format: uuid
+        deposit_unapplied_cents:
+          type: integer
+          format: int64
+          description: 'The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.'
         ship_to:
           type:
           - object

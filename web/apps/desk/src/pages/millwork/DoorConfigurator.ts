@@ -71,8 +71,11 @@ export class DoorConfigurator extends LitElement {
       `;
     }
 
-    const currentPrice = MillworkService.calculateDoorPrice(this._config);
-    const basePrice = 250.00;
+    // Money is integer cents end to end (ADR 0001 section 7); the two
+    // formatting helpers divide exactly once, at the display.
+    const currentPriceCents = MillworkService.calculateDoorPriceCents(this._config);
+    const basePriceCents = 25000;
+    const cents = (n: number): string => (n / 100).toFixed(2);
 
     return html`
       <div class="flex h-full bg-[#0A0B10] text-[#E0E0E0]">
@@ -94,7 +97,7 @@ export class DoorConfigurator extends LitElement {
                     }"
                   >
                     <div class="font-medium">${opt.name}</div>
-                    <div class="text-sm text-gray-500">+$${opt.price_adjustment}</div>
+                    <div class="text-sm text-gray-500">+$${cents(opt.price_adjustment_cents)}</div>
                   </button>
                 `)}
               </div>
@@ -113,7 +116,7 @@ export class DoorConfigurator extends LitElement {
                     }"
                   >
                     <div class="font-medium">${opt.name}</div>
-                    <div class="text-sm text-gray-500">+$${opt.price_adjustment}</div>
+                    <div class="text-sm text-gray-500">+$${cents(opt.price_adjustment_cents)}</div>
                   </button>
                 `)}
               </div>
@@ -166,7 +169,7 @@ export class DoorConfigurator extends LitElement {
                     }"
                   >
                     <span>${opt.name}</span>
-                    <span class="text-gray-500">+$${opt.price_adjustment}</span>
+                    <span class="text-gray-500">+$${cents(opt.price_adjustment_cents)}</span>
                   </button>
                 `)}
               </div>
@@ -197,25 +200,25 @@ export class DoorConfigurator extends LitElement {
             <div class="space-y-2 mb-4 text-sm">
               <div class="flex justify-between">
                 <span>Base Door (${this._config.width}" x ${this._config.height}")</span>
-                <span>$${basePrice.toFixed(2)}</span>
+                <span>$${cents(basePriceCents)}</span>
               </div>
               ${this._config.doorType ? html`
                 <div class="flex justify-between text-[#00FFA3]">
                   <span>${this._config.doorType.name}</span>
-                  <span>+$${this._config.doorType.price_adjustment.toFixed(2)}</span>
+                  <span>+$${cents(this._config.doorType.price_adjustment_cents)}</span>
                 </div>
               ` : nothing}
               ${this._config.material ? html`
                 <div class="flex justify-between text-[#00FFA3]">
                   <span>${this._config.material.name}</span>
-                  <span>+$${this._config.material.price_adjustment.toFixed(2)}</span>
+                  <span>+$${cents(this._config.material.price_adjustment_cents)}</span>
                 </div>
               ` : nothing}
             </div>
 
             <div class="border-t border-white/10 pt-4 flex justify-between items-end">
               <span class="text-gray-400">Total</span>
-              <span class="text-3xl font-mono font-bold text-white">$${currentPrice.toFixed(2)}</span>
+              <span class="text-3xl font-mono font-bold text-white">$${cents(currentPriceCents)}</span>
             </div>
 
             <!--

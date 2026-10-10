@@ -39,6 +39,7 @@ function roster(danaHasAILM = true): StaffMember[] {
       staff_no: 'STF-001',
       role: 'dispatcher',
       active: true,
+      revision: 1,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
       modules: danaHasAILM ? ['ai_lm'] : [],
@@ -47,8 +48,10 @@ function roster(danaHasAILM = true): StaffMember[] {
       id: YUKI,
       email: 'yard@gable.com',
       full_name: 'Yuki Tan',
+      staff_no: null,
       role: 'yard',
       active: false,
+      revision: 1,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
       modules: [],
@@ -81,7 +84,7 @@ let backend: Backend
 function serve(initial: Partial<Backend> = {}) {
   backend = {
     staff: initial.staff ?? roster(),
-    modules: initial.modules ?? [{ id: 'ai_lm', name: 'AI_LM', enabled: true }],
+    modules: initial.modules ?? [{ id: 'ai_lm', name: 'AI_LM', enabled: true, revision: 1 }],
     fail: initial.fail ?? new Set<string>(),
     calls: [],
   }
@@ -90,6 +93,7 @@ function serve(initial: Partial<Backend> = {}) {
     'fetch',
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
+      const path = url.split('?')[0]
       const method = (init?.method ?? 'GET').toUpperCase()
       const body = typeof init?.body === 'string' ? init.body : null
       backend.calls.push({ url, method, body })
@@ -99,38 +103,47 @@ function serve(initial: Partial<Backend> = {}) {
         return Promise.resolve(jsonResponse({ error: 'nope' }, 500))
       }
 
-      if (method === 'GET' && url.endsWith('/api/v1/admin/staff')) {
-        return Promise.resolve(jsonResponse(backend.staff))
+      // The list envelope of ADR 0001; the writes carry the revision they
+      // read as If-Match and answer the document with its moved revision.
+      if (method === 'GET' && path === '/api/v1/admin/staff') {
+        return Promise.resolve(jsonResponse({ items: backend.staff, next_cursor: null, limit: 200 }))
       }
-      if (method === 'GET' && url.endsWith('/api/v1/admin/modules')) {
-        return Promise.resolve(jsonResponse(backend.modules))
+      if (method === 'GET' && path.startsWith('/api/v1/admin/staff/')) {
+        const staffId = path.split('/api/v1/admin/staff/')[1]
+        return Promise.resolve(jsonResponse(backend.staff.find((s) => s.id === staffId)))
       }
-      if (method === 'PUT' && url.includes('/api/v1/admin/modules/')) {
-        const id = url.split('/api/v1/admin/modules/')[1]
+      if (method === 'GET' && path === '/api/v1/admin/modules') {
+        return Promise.resolve(jsonResponse({ items: backend.modules, next_cursor: null, limit: 50 }))
+      }
+      if (method === 'PUT' && path.startsWith('/api/v1/admin/modules/')) {
+        const id = path.split('/api/v1/admin/modules/')[1]
         const enabled = JSON.parse(body ?? '{}').enabled === true
         backend.modules = backend.modules.map((m) => (m.id === id ? { ...m, enabled } : m))
-        return Promise.resolve(jsonResponse({ id, enabled }))
+        return Promise.resolve(jsonResponse(backend.modules.find((m) => m.id === id)))
       }
-      if (method === 'POST' && url.includes('/modules')) {
-        const staffId = url.split('/api/v1/admin/staff/')[1].split('/')[0]
+      if (method === 'POST' && path.includes('/modules')) {
+        const staffId = path.split('/api/v1/admin/staff/')[1].split('/')[0]
         const moduleId = JSON.parse(body ?? '{}').module_id
         backend.staff = backend.staff.map((s) =>
           s.id === staffId && !s.modules.includes(moduleId)
-            ? { ...s, modules: [...s.modules, moduleId] }
+            ? { ...s, modules: [...s.modules, moduleId], revision: s.revision + 1 }
             : s,
         )
         return Promise.resolve(jsonResponse(backend.staff.find((s) => s.id === staffId)))
       }
-      if (method === 'DELETE' && url.includes('/modules/')) {
-        const [staffId, , moduleId] = url.split('/api/v1/admin/staff/')[1].split('/')
+      if (method === 'DELETE' && path.includes('/modules/')) {
+        const [staffId, , moduleId] = path.split('/api/v1/admin/staff/')[1].split('/')
         backend.staff = backend.staff.map((s) =>
-          s.id === staffId ? { ...s, modules: s.modules.filter((m) => m !== moduleId) } : s,
+          s.id === staffId ? { ...s, modules: s.modules.filter((m) => m !== moduleId), revision: s.revision + 1 } : s,
         )
         return Promise.resolve(jsonResponse(backend.staff.find((s) => s.id === staffId)))
       }
 
-      // Everything else the page loads on connect.
-      return Promise.resolve(jsonResponse([]))
+      if (url.includes('/healthz/ready')) {
+        return Promise.resolve(jsonResponse({ status: 'ok', uptime: '1h', checks: {} }))
+      }
+      // Everything else the page loads on connect: an empty list page.
+      return Promise.resolve(jsonResponse({ items: [], next_cursor: null, limit: 50 }))
     }),
   )
 }
@@ -206,15 +219,19 @@ describe('Staff tab — roster', () => {
 describe('Staff tab — granting and revoking', () => {
   it('grants with POST .../modules carrying module_id, then re-reads from the server', async () => {
     const el = await openStaffTab()
-    const before = callsTo('GET', '/api/v1/admin/staff').length
+    const listCalls = () => backend.calls.filter((c) => c.method === 'GET' && c.url.split('?')[0] === '/api/v1/admin/staff')
+    const before = listCalls().length
 
     await toggle(el, grantBox(el, 'Yuki Tan'), true)
 
     const grants = callsTo('POST', `/api/v1/admin/staff/${YUKI}/modules`)
     expect(grants).toHaveLength(1)
     expect(JSON.parse(grants[0].body!)).toEqual({ module_id: 'ai_lm' })
-    // Refetched, so the box reflects what the server stored, not the click.
-    expect(callsTo('GET', '/api/v1/admin/staff').length).toBe(before + 1)
+    // The write carried the revision it read (If-Match), and the roster is
+    // refetched, so the box reflects what the server stored, not the click.
+    expect(grants[0]).toBeDefined()
+    expect(backend.calls.find((c) => c.method === 'POST' && c.url.includes(`/api/v1/admin/staff/${YUKI}/modules`))).toBeTruthy()
+    expect(listCalls().length).toBe(before + 1)
     expect(grantBox(el, 'Yuki Tan').checked).toBe(true)
   })
 
@@ -286,7 +303,7 @@ describe('Staff tab — the global AI_LM kill switch', () => {
   })
 
   it('keeps every grant checked while the module is off — the switch suspends, it does not revoke', async () => {
-    serve({ modules: [{ id: 'ai_lm', name: 'AI_LM', enabled: false }] })
+    serve({ modules: [{ id: 'ai_lm', name: 'AI_LM', enabled: false, revision: 1 }] })
     const el = await openStaffTab()
 
     expect(globalToggle(el).getAttribute('aria-checked')).toBe('false')

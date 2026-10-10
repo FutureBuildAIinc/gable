@@ -789,25 +789,28 @@ func TestWire_CurrencyChangeRefusedWithAnOpenOrder(t *testing.T) {
 	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM invoices WHERE customer_id = $1`, id)
 }
 
-// ADR 0005 4.2: the enabled list holds one code until the ledger groups by
-// currency, whoever writes the setting.
-func TestCurrencySettingsRefuseASecondEnabledCode(t *testing.T) {
+// ADR 0005 4.2: with the GL reports grouped by currency (C2-4),
+// currency.enabled holds a comma separated list; malformed values are
+// refused, whoever writes the setting.
+func TestCurrencySettingsEnabledList(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
-	for _, bad := range []string{"USD,EUR", "usd", "", "US"} {
+	for _, bad := range []string{"usd", "", "US", "USD,EUR,usd", "USD,", "USD,,EUR"} {
 		if _, err := db.Pool.Exec(ctx, `UPDATE system_settings SET value = $1 WHERE key = 'currency.enabled'`, bad); err == nil {
 			t.Errorf("currency.enabled = %q was accepted", bad)
 			_, _ = db.Pool.Exec(ctx, `UPDATE system_settings SET value = 'USD' WHERE key = 'currency.enabled'`)
+		}
+	}
+	for _, good := range []string{"USD", "USD,EUR"} {
+		if _, err := db.Pool.Exec(ctx, `UPDATE system_settings SET value = $1 WHERE key = 'currency.enabled'`, good); err != nil {
+			t.Errorf("currency.enabled = %q was refused: %v", good, err)
 		}
 	}
 	if _, err := db.Pool.Exec(ctx, `UPDATE system_settings SET value = 'eur' WHERE key = 'currency.default'`); err == nil {
 		t.Error("currency.default = eur was accepted")
 		_, _ = db.Pool.Exec(ctx, `UPDATE system_settings SET value = 'USD' WHERE key = 'currency.default'`)
 	}
-	var enabled string
-	if err := db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'currency.enabled'`).Scan(&enabled); err != nil || enabled != "USD" {
-		t.Errorf("currency.enabled = %q (%v), want USD", enabled, err)
-	}
+	_, _ = db.Pool.Exec(ctx, `UPDATE system_settings SET value = 'USD' WHERE key = 'currency.enabled'`)
 }
 
 // The PO required flag is stored and read, on create and on edit.

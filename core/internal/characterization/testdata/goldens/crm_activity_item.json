@@ -6,20 +6,26 @@
       "path": "/api/v1/customers/<id-1>/activities",
       "body": {
         "activity_date": "<ts+0d>",
-        "activity_type": "CALL",
+        "activity_type": "call",
         "description": "golden item call"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
+      "headers": {
+        "ETag": "\"1\""
+      },
       "body": {
         "activity_date": "<ts+0d>",
-        "activity_type": "CALL",
+        "activity_type": "call",
+        "contact_id": null,
         "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "description": "golden item call",
         "id": "<id-2>",
+        "logged_by": null,
+        "revision": 1,
         "updated_at": "<ts+0d>"
       }
     }
@@ -33,13 +39,19 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
+      "headers": {
+        "ETag": "\"1\""
+      },
       "body": {
         "activity_date": "<ts+0d>",
-        "activity_type": "CALL",
+        "activity_type": "call",
+        "contact_id": null,
         "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "description": "golden item call",
         "id": "<id-2>",
+        "logged_by": null,
+        "revision": 1,
         "updated_at": "<ts+0d>"
       }
     }
@@ -55,8 +67,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "activity not found"
         },
         "meta": {
           "request_id": "<id-4>"
@@ -75,11 +87,41 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid activity id"
         },
         "meta": {
           "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.update.no_precondition",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/activities/<id-2>",
+      "body": {
+        "activity_type": "note",
+        "description": "no revision"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-6>"
         }
       }
     }
@@ -89,10 +131,12 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/activities/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "activity_date": "<ts+1d>",
-        "activity_type": "MEETING",
-        "customer_id": "<id-1>",
+        "activity_type": "meeting",
         "description": "golden item meeting"
       }
     },
@@ -101,11 +145,14 @@
       "content_type": "application/json",
       "body": {
         "activity_date": "<ts+1d>",
-        "activity_type": "MEETING",
-        "created_at": "<ts-106751d>",
+        "activity_type": "meeting",
+        "contact_id": null,
+        "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "description": "golden item meeting",
         "id": "<id-2>",
+        "logged_by": null,
+        "revision": 2,
         "updated_at": "<ts+0d>"
       }
     }
@@ -119,13 +166,19 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
+      "headers": {
+        "ETag": "\"2\""
+      },
       "body": {
         "activity_date": "<ts+1d>",
-        "activity_type": "MEETING",
+        "activity_type": "meeting",
+        "contact_id": null,
         "created_at": "<ts+0d>",
         "customer_id": "<id-1>",
         "description": "golden item meeting",
         "id": "<id-2>",
+        "logged_by": null,
+        "revision": 2,
         "updated_at": "<ts+0d>"
       }
     }
@@ -135,6 +188,9 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/activities/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
       "body": {
         "activity_type": "SMOKE_SIGNAL",
         "description": "x"
@@ -145,11 +201,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "activity_type",
+              "message": "must be one of: call, meeting, email, note"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -159,6 +221,9 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/activities/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      },
       "body": "not-an-object"
     },
     "response": {
@@ -166,11 +231,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -180,8 +245,11 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/activities/not-a-uuid",
+      "headers": {
+        "If-Match": "\"2\""
+      },
       "body": {
-        "activity_type": "NOTE",
+        "activity_type": "note",
         "description": "x"
       }
     },
@@ -190,11 +258,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid activity id"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -204,10 +278,12 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/activities/<id-3>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "activity_date": "<ts+0d>",
-        "activity_type": "NOTE",
-        "customer_id": "<id-1>",
+        "activity_type": "note",
         "description": "ghost"
       }
     },
@@ -216,11 +292,31 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "activity not found"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.delete.no_precondition",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/activities/<id-2>"
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match"
+        },
+        "meta": {
+          "request_id": "<id-11>"
         }
       }
     }
@@ -229,7 +325,10 @@
     "name": "crm.activity.delete",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/activities/<id-2>"
+      "path": "/api/v1/activities/<id-2>",
+      "headers": {
+        "If-Match": "\"2\""
+      }
     },
     "response": {
       "status": 204,
@@ -243,18 +342,21 @@
     "name": "crm.activity.delete.again",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/activities/<id-2>"
+      "path": "/api/v1/activities/<id-2>",
+      "headers": {
+        "If-Match": "\"3\""
+      }
     },
     "response": {
       "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "activity not found"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -270,11 +372,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid activity id"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -290,12 +398,149 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "activity not found"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-14>"
         }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/activities?limit=2"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "activity_date": "<ts+0d>",
+            "activity_type": "note",
+            "contact_id": null,
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "description": "golden characterisation note",
+            "id": "<id-15>",
+            "logged_by": null,
+            "revision": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "crm.activity.list.filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/activities?activity_type=call"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "crm.activity.list.unknown_param",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/customers/<id-1>/activities?zzz=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "zzz",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "crm.activity.events",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=activity.created,activity.updated,activity.deleted&limit=3"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "activity_type": "note",
+              "customer_id": "<id-1>",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-15>",
+              "kind": "activity"
+            },
+            "event_id": "<id-17>",
+            "org": "default",
+            "type": "activity.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "activity_type": "call",
+              "customer_id": "<id-1>",
+              "revision": 1
+            },
+            "entity": {
+              "id": "<id-2>",
+              "kind": "activity"
+            },
+            "event_id": "<id-18>",
+            "org": "default",
+            "type": "activity.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "activity_type": "meeting",
+              "customer_id": "<id-1>",
+              "revision": 2
+            },
+            "entity": {
+              "id": "<id-2>",
+              "kind": "activity"
+            },
+            "event_id": "<id-19>",
+            "org": "default",
+            "type": "activity.updated"
+          }
+        ],
+        "limit": 3,
+        "next_cursor": "<cursor>"
       }
     }
   }

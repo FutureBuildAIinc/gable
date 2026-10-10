@@ -1,0 +1,290 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The link resolver on the wire contract (ADR 0007 section 8, item C5-2a):
+# one route per entity answering every frontend's record URL for a record
+# the caller can see, so agents never embed route tables. The {id} slot is
+# a UUID or the entity's document number; the record segment in the links
+# is the number when the entity has one. The scope is read off the URL:
+# the module's read scope for an entity link, its propose and commit for a
+# draft link.
+paths:
+  /api/v1/links/quotes/{id}:
+    get:
+      operationId: linksQuoteResolve
+      tags: [links]
+      summary: Resolve a quote to every frontend's record URL
+      description: >-
+        The quote's links: the desk record path (absolute when
+        GABLE_PUBLIC_URL is set, origin relative otherwise), the front
+        door's open form (which signs a person in and then opens the
+        record), gable:// for the shell, a null portal until it has record
+        screens, and the agent slot from GABLE_AGENT_URL_TEMPLATE (null
+        when unset). A record the caller cannot see is the same 404 a
+        missing one gets.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: A UUID or a quote number such as Q-000123.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/orders/{id}:
+    get:
+      operationId: linksOrderResolve
+      tags: [links]
+      summary: Resolve an order to every frontend's record URL
+      description: The order's links; the {id} slot is a UUID or an order number such as SO-000123.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/invoices/{id}:
+    get:
+      operationId: linksInvoiceResolve
+      tags: [links]
+      summary: Resolve an invoice to every frontend's record URL
+      description: The invoice's links; the {id} slot is a UUID or an invoice number such as IN-000123.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/customers/{id}:
+    get:
+      operationId: linksCustomerResolve
+      tags: [links]
+      summary: Resolve a customer to every frontend's record URL
+      description: >-
+        The customer's links (the desk's accounts area); the {id} slot is a
+        UUID (customers carry no document number, so number is null and the
+        segment is the UUID).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/products/{id}:
+    get:
+      operationId: linksProductResolve
+      tags: [links]
+      summary: Resolve a product to every frontend's record URL
+      description: The product's links (the desk's inventory area); the {id} slot is a UUID and number is null.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/drafts/quotes/{id}:
+    get:
+      operationId: linksQuoteDraftResolve
+      tags: [links]
+      summary: Resolve a quote draft to every frontend's record URL
+      description: >-
+        The draft's links (the desk's quote drafts editor); the {id} slot is
+        the draft's UUID (a draft has no number). The draft link needs the
+        confirm verbs, not the module read scope: proposals are unfinished
+        work an existing read key must not start reading.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/links/drafts/orders/{id}:
+    get:
+      operationId: linksOrderDraftResolve
+      tags: [links]
+      summary: Resolve an order draft to every frontend's record URL
+      description: The draft's links (the desk's order drafts editor); the {id} slot is the draft's UUID.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The record and its links.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkAnswer"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+components:
+  schemas:
+    LinkAnswer:
+      type: object
+      description: >-
+        Who the record is, and every frontend's URL for it. The record
+        segment in the links is the document number when the entity has
+        one, otherwise the UUID; draft links use the draft's UUID. Optional
+        slots are present as null (ADR 0001 section 12).
+      required: [entity, module, id, number, links]
+      properties:
+        entity:
+          type: string
+          description: The entity name (quote, order, invoice, customer, product, draft).
+        module:
+          type: string
+          description: The module, the path segment under /api/v1.
+        id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          nullable: true
+        links:
+          type: object
+          required: [desk, front_door, portal, app, agent]
+          properties:
+            desk:
+              type: string
+              description: >-
+                The desk record route; absolute when GABLE_PUBLIC_URL is
+                configured, otherwise a path relative to the deployment's
+                origin.
+            front_door:
+              type: string
+              description: The front door's /?open=<record path> form, which signs a person in and then opens the record.
+            portal:
+              type: string
+              nullable: true
+              description: Null until the portal has a record screen for the entity.
+            app:
+              type: string
+              description: The gable:// deep link the Tauri shell parses.
+            agent:
+              type: string
+              nullable: true
+              description: >-
+                The agent UI's record URL from GABLE_AGENT_URL_TEMPLATE
+                ({module}, {entity}, {id}, {number} placeholders); null
+                when the template is unset, every deployment today.

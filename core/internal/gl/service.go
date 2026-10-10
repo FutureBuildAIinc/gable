@@ -241,11 +241,24 @@ func (s *Service) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID) error {
 
 // --- Trial Balance ---
 
-func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error) {
+// GetTrialBalance sums per account and per currency, never across two currencies
+// (ADR 0005 4.2). currency "" answers every currency's rows, each naming its
+// currency; a code answers that currency alone.
+func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
 	if asOfDate.IsZero() {
 		asOfDate = time.Now()
 	}
-	return s.repo.GetTrialBalance(ctx, asOfDate)
+	return s.repo.GetTrialBalance(ctx, asOfDate, currency)
+}
+
+// reportCurrency settles the currency of an income statement or a balance
+// sheet: the one named, else the dealer default. A statement is always in one
+// currency.
+func (s *Service) reportCurrency(ctx context.Context, currency string) (string, error) {
+	if currency != "" {
+		return currency, nil
+	}
+	return s.repo.DefaultCurrency(ctx)
 }
 
 // --- Financial Statements ---
@@ -255,7 +268,7 @@ const statementDateLayout = "2006-01-02"
 
 // GetProfitAndLoss assembles an income statement covering [startDate, endDate]
 // inclusive. Both dates are YYYY-MM-DD.
-func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error) {
+func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, currency string) (*ProfitAndLossReport, error) {
 	start, err := time.Parse(statementDateLayout, startDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid start date %q: %w", startDate, err)
@@ -268,16 +281,21 @@ func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate strin
 		return nil, fmt.Errorf("end date %s precedes start date %s", endDate, startDate)
 	}
 
-	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense})
+	if currency, err = s.reportCurrency(ctx, currency); err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense}, currency)
 	if err != nil {
 		return nil, err
 	}
-	return assembleProfitAndLoss(startDate, endDate, rows), nil
+	report := assembleProfitAndLoss(startDate, endDate, rows)
+	report.Currency = currency
+	return report, nil
 }
 
 // GetBalanceSheet assembles a statement of financial position as of asOfDate
 // (YYYY-MM-DD).
-func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error) {
+func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string) (*BalanceSheetReport, error) {
 	asOf, err := time.Parse(statementDateLayout, asOfDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid as_of date %q: %w", asOfDate, err)
@@ -286,17 +304,22 @@ func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate string) (*Balanc
 	// Both halves are inception-to-date. The permanent accounts give the
 	// face of the sheet; the temporary ones give retained earnings, which
 	// has no account of its own to read.
+	if currency, err = s.reportCurrency(ctx, currency); err != nil {
+		return nil, err
+	}
 	position, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity})
+		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity}, currency)
 	if err != nil {
 		return nil, err
 	}
 	earnings, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeRevenue, AccountTypeExpense})
+		[]string{AccountTypeRevenue, AccountTypeExpense}, currency)
 	if err != nil {
 		return nil, err
 	}
-	return assembleBalanceSheet(asOfDate, position, earnings), nil
+	report := assembleBalanceSheet(asOfDate, position, earnings)
+	report.Currency = currency
+	return report, nil
 }
 
 // signedBalance returns an account's balance in the direction that increases

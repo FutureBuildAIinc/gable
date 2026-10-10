@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -49,6 +50,33 @@ func (f *fakeRepo) LookupProducts(_ context.Context, ids []uuid.UUID) (map[uuid.
 		if p, ok := f.products[id]; ok {
 			out[id] = p
 		}
+	}
+	return out, nil
+}
+
+// LookupProductUnits answers the stocking-only set every fake product
+// carries: its stocking unit at (1, 1), every use allowed.
+func (f *fakeRepo) LookupProductUnits(_ context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductUnitSet, error) {
+	out := map[uuid.UUID]ProductUnitSet{}
+	for _, id := range ids {
+		p, ok := f.products[id]
+		if !ok {
+			continue
+		}
+		out[id] = ProductUnitSet{
+			StockUOM: p.UOMPrimary, SaleUOM: p.UOMPrimary, PriceUOM: p.UOMPrimary,
+			Rows: []ProductUnitRow{{UOM: p.UOMPrimary, UnitQty: one, StockQty: one,
+				Sell: true, Purchase: true, Price: true}},
+		}
+	}
+	return out, nil
+}
+
+// LookupCatalogue answers an active count unit for every code asked.
+func (f *fakeRepo) LookupCatalogue(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
 	}
 	return out, nil
 }
@@ -106,6 +134,14 @@ func (f *fakeRepo) ListQuotesByCustomer(context.Context, uuid.UUID) ([]QuoteSumm
 	return nil, nil
 }
 func (f *fakeRepo) GetQuoteAnalytics(context.Context) (*QuoteAnalytics, error) { return nil, nil }
+func (f *fakeRepo) GetQuoteByNumber(context.Context, string) (*Quote, error) {
+	return nil, ErrNotFound
+}
+
+func (f *fakeRepo) StoreOriginalFile(context.Context, uuid.UUID, []byte, string, string) error {
+	return nil
+}
+
 func (f *fakeRepo) GetOriginalFile(context.Context, uuid.UUID) ([]byte, string, string, error) {
 	return nil, "", "", ErrNotFound
 }

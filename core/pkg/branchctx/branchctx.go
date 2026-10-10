@@ -92,3 +92,21 @@ func IsSystem(ctx context.Context) bool {
 	v, _ := ctx.Value(systemKey{}).(bool)
 	return v
 }
+
+type keyBranchKey struct{}
+
+// WithKeyBranch records a branch bound machine key's pin (ADR 0007 section
+// 5.5). The machine-key auth core sets it once the key validates; the branch
+// middleware turns it into the request's branch Context, pinning every list,
+// read, draft, feed and link the key reaches to that branch, and the payload
+// branch guard holds a payload branch_id to it. The auth core has already
+// refused an X-Branch-Id naming another branch by the time any handler runs.
+func WithKeyBranch(ctx context.Context, branch uuid.UUID) context.Context {
+	return context.WithValue(ctx, keyBranchKey{}, branch)
+}
+
+// KeyBranchFromContext returns the branch bound key's pin, if any.
+func KeyBranchFromContext(ctx context.Context) (uuid.UUID, bool) {
+	id, ok := ctx.Value(keyBranchKey{}).(uuid.UUID)
+	return id, ok && id != uuid.Nil
+}

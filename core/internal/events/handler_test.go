@@ -24,15 +24,24 @@ import (
 // directly; the role gate is registration-time middleware, like every
 // module route.
 
+// newTestHandler builds the handler over the shared test database. The lock
+// keeps tests that truncate the outbox tables (this package no longer does)
+// from deleting these rows mid test. It is not what keeps foreign rows out of
+// a walk: tests in other packages that write the outbox without the lock are
+// harmless, because each test here writes event types under its own namespace
+// (see newNamespace) and reads the feed through the types filter.
 func newTestHandler(t *testing.T) (*Handler, *outbox.Writer) {
 	t.Helper()
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
-	if _, err := db.Pool.Exec(context.Background(),
-		`TRUNCATE events_outbox, event_subscriber_cursors, event_subscriber_parked`); err != nil {
-		t.Fatalf("truncate outbox: %v", err)
-	}
 	return NewHandler(db), outbox.NewWriter(db, "test-org")
+}
+
+// newNamespace returns a dot-delimited lowercase event type prefix no other
+// test or package writes, so a types filter built from it selects exactly this
+// test's events.
+func newNamespace() string {
+	return "evtfeed" + strings.ReplaceAll(uuid.NewString(), "-", "")
 }
 
 func writeEvent(t *testing.T, w *outbox.Writer, typ string, data string) outbox.Event {
@@ -105,11 +114,13 @@ func decodeItems(t *testing.T, env envelope) []item {
 // UTC timestamp at microsecond precision.
 func TestList_ServesTheEnvelopeInOrder(t *testing.T) {
 	h, w := newTestHandler(t)
+	ns := newNamespace()
+	typA, typB := ns+".quote.flagged", ns+".order.confirmed"
 
-	a := writeEvent(t, w, "quote.exposure.flagged", `{"a":1}`)
-	b := writeEvent(t, w, "order.confirmed", `{"b":2}`)
+	a := writeEvent(t, w, typA, `{"a":1}`)
+	b := writeEvent(t, w, typB, `{"b":2}`)
 
-	rec, env := get(t, h, "")
+	rec, env := get(t, h, "?types="+typA+","+typB)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
 	}
@@ -121,7 +132,7 @@ func TestList_ServesTheEnvelopeInOrder(t *testing.T) {
 		t.Errorf("events out of order: %s then %s", items[0].EventID, items[1].EventID)
 	}
 	first := items[0]
-	if first.Type != "quote.exposure.flagged" || first.Org != "test-org" {
+	if first.Type != typA || first.Org != "test-org" {
 		t.Errorf("type/org = %s/%s", first.Type, first.Org)
 	}
 	if first.Entity.Kind != "quote" || first.Entity.ID != a.EntityID.String() {
@@ -152,12 +163,14 @@ func TestList_ServesTheEnvelopeInOrder(t *testing.T) {
 // two-step probe from fix round 1).
 func TestList_TailCursorServesOnlyNewEvents(t *testing.T) {
 	h, w := newTestHandler(t)
+	typ := newNamespace() + ".tail"
+	filter := "&types=" + typ
 
 	for i := 0; i < 3; i++ {
-		writeEvent(t, w, "test.tail", fmt.Sprintf(`{"i":%d}`, i))
+		writeEvent(t, w, typ, fmt.Sprintf(`{"i":%d}`, i))
 	}
 
-	_, env := get(t, h, "?limit=50")
+	_, env := get(t, h, "?limit=50"+filter)
 	if len(env.Items) != 3 {
 		t.Fatalf("first read served %d items, want 3", len(env.Items))
 	}
@@ -165,8 +178,8 @@ func TestList_TailCursorServesOnlyNewEvents(t *testing.T) {
 		t.Fatal("next_cursor = null on a page shorter than the limit, want the tail cursor")
 	}
 
-	fresh := writeEvent(t, w, "test.tail", `{"i":3}`)
-	_, env = get(t, h, "?limit=50&cursor="+*env.NextCursor)
+	fresh := writeEvent(t, w, typ, `{"i":3}`)
+	_, env = get(t, h, "?limit=50"+filter+"&cursor="+*env.NextCursor)
 	items := decodeItems(t, env)
 	if len(items) != 1 || items[0].EventID != fresh.ID.String() {
 		t.Fatalf("read from the tail cursor served %v, want exactly the one new event %s", items, fresh.ID)
@@ -182,13 +195,15 @@ func TestList_TailCursorServesOnlyNewEvents(t *testing.T) {
 // a consumption claim).
 func TestList_PagesWithCursorsExactlyOnce(t *testing.T) {
 	h, w := newTestHandler(t)
+	typ := newNamespace() + ".page"
+	filter := "&types=" + typ
 	var ids []string
 	for i := 0; i < 5; i++ {
-		ids = append(ids, writeEvent(t, w, "test.page", fmt.Sprintf(`{"i":%d}`, i)).ID.String())
+		ids = append(ids, writeEvent(t, w, typ, fmt.Sprintf(`{"i":%d}`, i)).ID.String())
 	}
 
 	served := map[string]int{}
-	query := "?limit=2"
+	query := "?limit=2" + filter
 	pages := 0
 	for {
 		rec, env := get(t, h, query)
@@ -208,7 +223,7 @@ func TestList_PagesWithCursorsExactlyOnce(t *testing.T) {
 			served[it.EventID]++
 		}
 		pages++
-		query = "?limit=2&cursor=" + *env.NextCursor
+		query = "?limit=2" + filter + "&cursor=" + *env.NextCursor
 	}
 	if pages != 3 {
 		t.Errorf("walked %d pages, want 3", pages)
@@ -221,11 +236,11 @@ func TestList_PagesWithCursorsExactlyOnce(t *testing.T) {
 
 	// From the first page's cursor again, the later events are served a
 	// second time; that is what replay means on this feed.
-	_, first := get(t, h, "?limit=2")
+	_, first := get(t, h, "?limit=2"+filter)
 	if first.NextCursor == nil {
 		t.Fatal("first page has no next cursor")
 	}
-	_, again := get(t, h, "?limit=50&cursor="+*first.NextCursor)
+	_, again := get(t, h, "?limit=50"+filter+"&cursor="+*first.NextCursor)
 	for _, it := range decodeItems(t, again) {
 		if served[it.EventID] != 1 {
 			t.Fatalf("cursor %s served %s, which the walk already consumed", *first.NextCursor, it.EventID)
@@ -241,7 +256,9 @@ func TestList_PagesWithCursorsExactlyOnce(t *testing.T) {
 // for a first read), so a poller can adopt it without special casing.
 func TestList_EmptyFeedIsEmptyArray(t *testing.T) {
 	h, _ := newTestHandler(t)
-	rec, env := get(t, h, "")
+	// A namespace nothing writes to is an empty feed however many rows other
+	// packages' tests have put in the table.
+	rec, env := get(t, h, "?types="+newNamespace()+".none")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -304,11 +321,13 @@ func TestList_LimitIsStrict(t *testing.T) {
 // separated; an unknown name shape is a 400 naming types.
 func TestList_TypesFilter(t *testing.T) {
 	h, w := newTestHandler(t)
-	writeEvent(t, w, "quote.exposure.flagged", `{"n":1}`)
-	writeEvent(t, w, "order.confirmed", `{"n":2}`)
-	writeEvent(t, w, "order.cancelled", `{"n":3}`)
+	ns := newNamespace()
+	quoteFlagged, confirmed, cancelled := ns+".quote.flagged", ns+".order.confirmed", ns+".order.cancelled"
+	writeEvent(t, w, quoteFlagged, `{"n":1}`)
+	writeEvent(t, w, confirmed, `{"n":2}`)
+	writeEvent(t, w, cancelled, `{"n":3}`)
 
-	rec, env := get(t, h, "?types=order.confirmed,order.cancelled")
+	rec, env := get(t, h, "?types="+confirmed+","+cancelled)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
 	}
@@ -317,12 +336,12 @@ func TestList_TypesFilter(t *testing.T) {
 		t.Fatalf("filtered items = %d, want 2", len(items))
 	}
 	for _, it := range items {
-		if strings.HasPrefix(it.Type, "quote.") {
+		if it.Type == quoteFlagged {
 			t.Errorf("unlisted type %s passed the filter", it.Type)
 		}
 	}
 
-	rec, env = get(t, h, "?types=order.confirmed&types=order.cancelled")
+	rec, env = get(t, h, "?types="+confirmed+"&types="+cancelled)
 	if rec.Code != http.StatusOK || len(decodeItems(t, env)) != 2 {
 		t.Errorf("repeated types: status %d, want 200 and both events", rec.Code)
 	}
@@ -345,18 +364,21 @@ func TestList_TypesFilter(t *testing.T) {
 // 400 naming include.
 func TestList_IncludeTotal(t *testing.T) {
 	h, w := newTestHandler(t)
-	writeEvent(t, w, "quote.exposure.flagged", `{"n":1}`)
-	writeEvent(t, w, "order.confirmed", `{"n":2}`)
+	ns := newNamespace()
+	quoteFlagged, confirmed := ns+".quote.flagged", ns+".order.confirmed"
+	both := "&types=" + quoteFlagged + "," + confirmed
+	writeEvent(t, w, quoteFlagged, `{"n":1}`)
+	writeEvent(t, w, confirmed, `{"n":2}`)
 
-	_, env := get(t, h, "")
+	_, env := get(t, h, "?limit=50"+both)
 	if env.Total != nil {
 		t.Errorf("total = %v on an ordinary page, want it absent", *env.Total)
 	}
-	_, env = get(t, h, "?include=total")
+	_, env = get(t, h, "?include=total"+both)
 	if env.Total == nil || *env.Total != 2 {
 		t.Errorf("total = %v, want 2", env.Total)
 	}
-	_, env = get(t, h, "?include=total&types=order.confirmed")
+	_, env = get(t, h, "?include=total&types="+confirmed)
 	if env.Total == nil || *env.Total != 1 {
 		t.Errorf("filtered total = %v, want 1", env.Total)
 	}

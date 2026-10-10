@@ -6,9 +6,10 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ArrowLeft, AlertTriangle, ShoppingCart, Truck, FileText, Calendar } from 'lucide';
 import { ProjectService } from '../../services/ProjectService.ts';
+import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { router } from '../../lib/router.ts';
-import type { ProjectDashboardDTO, ProjectItem } from '../../types/project.ts';
+import type { ProjectDashboard as ProjectDashboardData, ProjectItem } from '../../types/project.ts';
 
 @customElement('gable-project-dashboard')
 export class ProjectDashboard extends LitElement {
@@ -16,7 +17,7 @@ export class ProjectDashboard extends LitElement {
 
     @property({ attribute: 'route-id' }) routeId = '';
 
-    @state() private data: ProjectDashboardDTO | null = null;
+    @state() private data: ProjectDashboardData | null = null;
     @state() private loading = true;
     @state() private error = '';
 
@@ -47,24 +48,30 @@ export class ProjectDashboard extends LitElement {
 
     private async _handleStatusToggle() {
         if (!this.data) return;
-        const newStatus = this.data.project.status === 'Active' ? 'Completed' : 'Active';
+        const newStatus = this.data.project.status === 'active' ? 'completed' : 'active';
         try {
-            await ProjectService.updateProject(this.data.project.id, { status: newStatus });
+            // The PUT carries the revision the dashboard loaded (ADR 0001
+            // section 11); a 409 stale_revision reloads the page's data.
+            await ProjectService.updateProject(this.data.project.id, { status: newStatus }, this.data.project.revision);
             this.data = {
                 ...this.data,
-                project: { ...this.data.project, status: newStatus }
+                project: { ...this.data.project, status: newStatus, revision: this.data.project.revision + 1 }
             };
             ToastService.show(`Project marked as ${newStatus}`, 'success');
         } catch (err) {
-            ToastService.show(err instanceof Error ? err.message : 'Failed to update status', 'error');
+            if (err instanceof ApiError && err.isStaleRevision) {
+                ToastService.show('This project changed elsewhere; reloading', 'info');
+                this._fetchDashboard();
+                return;
+            }
+            ToastService.show(apiErrorMessage(err, 'Failed to update status'), 'error');
         }
     }
 
-    // This page is served by the portal/project module, which returns total_amount
-    // as float64 DOLLARS (see backend project/model.go), NOT ERP int64 cents.
-    // Format directly — do NOT divide by 100.
-    private _formatCurrency(dollars: number): string {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(dollars || 0);
+    // The dashboard's item totals are integer cents on the wire (ADR 0001
+    // section 7); format from cents, never from a float.
+    private _formatCents(cents: number): string {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100);
     }
 
     private _renderItemRow(item: ProjectItem, iconData: Parameters<typeof icon>[0], colorClass: string, linkPrefix: string) {
@@ -89,9 +96,9 @@ export class ProjectDashboard extends LitElement {
                         </div>
                     </div>
                 </div>
-                ${item.total_amount !== undefined && item.total_amount > 0 ? html`
+                ${item.total_cents !== null && item.total_cents > 0 ? html`
                     <div class="font-mono text-sm text-white">
-                        ${this._formatCurrency(item.total_amount)}
+                        ${this._formatCents(item.total_cents)}
                     </div>
                 ` : nothing}
             </div>
@@ -129,8 +136,8 @@ export class ProjectDashboard extends LitElement {
         }
 
         const { project, orders, deliveries, invoices } = this.data;
-        const totalOrdersAmount = orders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-        const totalInvoicesAmount = invoices.reduce((sum, i) => sum + (i.total_amount || 0), 0);
+        const totalOrdersCents = orders.reduce((sum: number, o) => sum + (o.total_cents || 0), 0);
+        const totalInvoicesCents = invoices.reduce((sum: number, i) => sum + (i.total_cents || 0), 0);
 
         return html`
             <div>
@@ -151,7 +158,7 @@ export class ProjectDashboard extends LitElement {
                         </div>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-1 rounded border ${project.status === 'Active'
+                        <span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-1 rounded border ${project.status === 'active'
                             ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'
                             : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'
                         }">
@@ -161,7 +168,7 @@ export class ProjectDashboard extends LitElement {
                             @click=${() => this._handleStatusToggle()}
                             class="px-4 py-2 border border-white/10 text-white text-sm font-medium rounded-lg hover:bg-white/5 transition-colors"
                         >
-                            Mark ${project.status === 'Active' ? 'Completed' : 'Active'}
+                            Mark ${project.status === 'active' ? 'Completed' : 'Active'}
                         </button>
                     </div>
                 </div>
@@ -180,7 +187,7 @@ export class ProjectDashboard extends LitElement {
                                 </div>
                             </div>
                             <div class="text-sm text-zinc-500 border-t border-white/5 pt-3">
-                                Est. Value: <span class="font-mono text-white ml-1">${this._formatCurrency(totalOrdersAmount)}</span>
+                                Est. Value: <span class="font-mono text-white ml-1">${this._formatCents(totalOrdersCents)}</span>
                             </div>
                         </div>
                     </div>
@@ -197,7 +204,7 @@ export class ProjectDashboard extends LitElement {
                                 </div>
                             </div>
                             <div class="text-sm text-zinc-500 border-t border-white/5 pt-3">
-                                ${deliveries.filter(d => d.status === 'DELIVERED').length} completed deliveries
+                                ${deliveries.filter(d => d.status === 'delivered').length} completed deliveries
                             </div>
                         </div>
                     </div>
@@ -214,7 +221,7 @@ export class ProjectDashboard extends LitElement {
                                 </div>
                             </div>
                             <div class="text-sm text-zinc-500 border-t border-white/5 pt-3">
-                                Invoiced: <span class="font-mono text-white ml-1">${this._formatCurrency(totalInvoicesAmount)}</span>
+                                Invoiced: <span class="font-mono text-white ml-1">${this._formatCents(totalInvoicesCents)}</span>
                             </div>
                         </div>
                     </div>

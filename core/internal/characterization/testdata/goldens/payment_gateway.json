@@ -5,8 +5,8 @@
       "method": "POST",
       "path": "/api/v1/payments/card",
       "body": {
-        "amount": 100,
-        "invoice_id": "<id-1>",
+        "amount_cents": 100,
+        "customer_id": "<id-1>",
         "token_id": "tok_golden"
       }
     },
@@ -15,8 +15,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "PAYMENT_REQUIRED",
-          "message": "Payment Required"
+          "code": "payment_required",
+          "message": "card payment failed: the gateway could not be reached"
         },
         "meta": {
           "request_id": "<id-2>"
@@ -30,8 +30,8 @@
       "method": "POST",
       "path": "/api/v1/payments/card",
       "body": {
-        "amount": 100,
-        "invoice_id": "<id-1>"
+        "amount_cents": 100,
+        "customer_id": "<id-1>"
       }
     },
     "response": {
@@ -39,8 +39,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "token_id",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-3>"
@@ -60,8 +66,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-4>"
@@ -70,48 +76,20 @@
     }
   },
   {
-    "name": "payment.refund.no_gateway",
+    "name": "payment.legacy_refund_route_gone",
     "request": {
       "method": "POST",
       "path": "/api/v1/payments/refund",
       "body": {
         "amount": 100,
-        "payment_id": "<id-5>",
-        "reason": "golden refund"
+        "payment_id": "<id-5>"
       }
     },
     "response": {
-      "status": 500,
-      "content_type": "application/json",
+      "status": 405,
+      "content_type": "text/plain; charset=utf-8",
       "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-6>"
-        }
-      }
-    }
-  },
-  {
-    "name": "payment.refund.bad_body",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/payments/refund",
-      "body": "not-an-object"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-7>"
-        }
+        "text": "Method Not Allowed\n"
       }
     }
   }

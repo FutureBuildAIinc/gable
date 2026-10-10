@@ -110,3 +110,65 @@ func TestPostEntry(t *testing.T) {
 		t.Errorf("entry into a closed period = %v, want ErrPeriodClosed", err)
 	}
 }
+
+// RULE (ADR 0005 section 8.2): a reversal is the original's legs swapped,
+// source REVERSAL, linked to the original, dated and currencied as asked, once
+// per entry, inside the act's transaction.
+func TestPostReversal(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	ref := uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1 OR reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1))`, ref)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, ref)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, ref)
+	})
+	var orig uuid.UUID
+	day := time.Date(2031, 3, 4, 0, 0, 0, 0, time.UTC)
+	err := db.RunInTx(ctx, func(ctx context.Context) error {
+		e, err := svc.PostEntry(ctx, gl.PostingInput{EntryDate: time.Now(), Memo: "orig", Source: gl.SourceInvoice, SourceRefID: &ref, Currency: "CAD",
+			Legs: []gl.Leg{{AccountCode: gl.AccountCodeAR, Debit: 1100}, {AccountCode: gl.AccountCodeRevenue, Credit: 1000}, {AccountCode: gl.AccountCodeSalesTax, Credit: 100}}})
+		if err != nil {
+			return err
+		}
+		orig = e.ID
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PostReversal(ctx, gl.ReversalInput{EntryID: orig, EntryDate: day, Currency: "CAD"}); !errors.Is(err, gl.ErrNoTransaction) {
+		t.Fatalf("PostReversal outside a transaction = %v, want ErrNoTransaction", err)
+	}
+	err = db.RunInTx(ctx, func(ctx context.Context) error {
+		rev, err := svc.PostReversal(ctx, gl.ReversalInput{EntryID: orig, EntryDate: day, Currency: "CAD", Reason: "void", PostedBy: "tester"})
+		if err != nil || rev == nil {
+			t.Fatalf("PostReversal = %v, %v", rev, err)
+		}
+		if _, err := svc.PostReversal(ctx, gl.ReversalInput{EntryID: orig, EntryDate: day, Currency: "CAD"}); !errors.Is(err, gl.ErrAlreadyReversed) {
+			t.Errorf("second reversal = %v, want ErrAlreadyReversed", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source, cur string
+	var date time.Time
+	var debits, credits int64
+	if err := db.Pool.QueryRow(ctx, `
+		SELECT e.source, e.currency, e.entry_date, COALESCE(SUM(l.debit * 100), 0)::bigint, COALESCE(SUM(l.credit * 100), 0)::bigint
+		FROM gl_journal_entries e JOIN gl_journal_lines l ON l.journal_entry_id = e.id
+		WHERE e.reverses_entry_id = $1 GROUP BY e.id`, orig).Scan(&source, &cur, &date, &debits, &credits); err != nil {
+		t.Fatal(err)
+	}
+	if source != "REVERSAL" || cur != "CAD" || !date.Equal(day) || debits != 1100 || credits != 1100 {
+		t.Errorf("reversal = %s %s %s debit %d credit %d, want REVERSAL CAD %s 1100/1100", source, cur, date, debits, credits, day)
+	}
+	var arCredit int64
+	if err := db.Pool.QueryRow(ctx, `SELECT (l.credit * 100)::bigint FROM gl_journal_lines l JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+		JOIN gl_accounts a ON a.id = l.account_id WHERE e.reverses_entry_id = $1 AND a.code = $2`, orig, gl.AccountCodeAR).Scan(&arCredit); err != nil || arCredit != 1100 {
+		t.Errorf("the reversal credits AR %d, %v, want 1100 (the original's debit)", arCredit, err)
+	}
+}

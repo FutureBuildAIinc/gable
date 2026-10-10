@@ -16,7 +16,8 @@
         "customer_id": "<id-1>",
         "id": "<id-2>",
         "name": "Golden Project",
-        "status": "Active",
+        "revision": 1,
+        "status": "active",
         "updated_at": "<ts+0d>"
       }
     }
@@ -39,9 +40,202 @@
           "customer_id": "<id-1>",
           "id": "<id-2>",
           "name": "Golden Project",
-          "status": "Active",
+          "revision": 1,
+          "status": "active",
           "updated_at": "<ts+0d>"
         }
+      }
+    }
+  },
+  {
+    "name": "project.update.no_precondition",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/projects/<id-2>",
+      "body": {
+        "name": "Golden Project Renamed"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "project.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/portal/v1/projects/<id-2>",
+      "headers": {
+        "If-Match": "\\\"1\\\""
+      },
+      "body": {
+        "status": "completed"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "If-Match",
+              "message": "must be the quoted revision, for example \"3\""
+            }
+          ],
+          "message": "If-Match does not carry a revision"
+        },
+        "meta": {
+          "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "project.get.after_update",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/projects/<id-2>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "deliveries": [],
+        "invoices": [],
+        "orders": [],
+        "project": {
+          "created_at": "<ts+0d>",
+          "customer_id": "<id-1>",
+          "id": "<id-2>",
+          "name": "Golden Project",
+          "revision": 1,
+          "status": "active",
+          "updated_at": "<ts+0d>"
+        }
+      }
+    }
+  },
+  {
+    "name": "project.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/projects?limit=2"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "id": "<id-2>",
+            "name": "Golden Project",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-1>",
+            "id": "<id-5>",
+            "name": "West Kelowna Medical Plaza",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "project.list.filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/projects?status=completed"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "project.list.unknown_param",
+    "request": {
+      "method": "GET",
+      "path": "/api/portal/v1/projects?zzz=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "zzz",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "project.events",
+    "sort_primary_array": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=project.created,project.updated&limit=2"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "customer_id": "<id-1>",
+              "project_id": "<id-2>",
+              "revision": 1,
+              "status": "active"
+            },
+            "entity": {
+              "id": "<id-2>",
+              "kind": "project"
+            },
+            "event_id": "<id-7>",
+            "org": "default",
+            "type": "project.created"
+          }
+        ],
+        "limit": 2,
+        "next_cursor": "<cursor>"
       }
     }
   }

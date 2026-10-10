@@ -729,6 +729,102 @@ paths:
           $ref: '#/components/responses/WirePreconditionRequired'
         '500':
           $ref: '#/components/responses/InternalError'
+  /api/v1/products/{id}/units:
+    get:
+      operationId: productUnitSetGet
+      tags: [product]
+      summary: Read a product's unit set
+      description: >-
+        The set, the four defaults, the board measure facts the derivations
+        read and the product's revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The unit set.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitSetDoc'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      operationId: productUnitSetPut
+      tags: [product]
+      summary: Replace a product's unit set
+      description: >-
+        The whole set and the four default columns in one transaction at the
+        product's revision. The derivations of ADR 0006 section 3.2 complete
+        rows that arrive without a pair; the stocking unit holds of section
+        3.2 refuse their cases with 409 blockers (stock_unit_in_use,
+        unit_in_use, price_unit_held); until C3-2B the price unit is the
+        stocking unit (a PUT naming another is a 400 naming price_uom). The
+        answer carries the completed set and the warnings.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - name: If-Match
+          in: header
+          description: The revision precondition, beside the body revision.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UnitSetPut'
+      responses:
+        '200':
+          description: The completed set with the new revision and its ETag.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitSetDoc'
+        '400':
+          $ref: '#/components/responses/BadRequestEither'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/IdempotencyConflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '428':
+          $ref: '#/components/responses/WirePreconditionRequired'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/kit-components:
     get:
       operationId: productKitComponentsGet
@@ -876,10 +972,138 @@ components:
           type: integer
           format: int64
           description: The product's current revision; send it (or If-Match) on the next write.
+    UnitSetRow:
+      type: object
+      description: >-
+        One row of a product's unit set: unit_qty of the row's unit is
+        stock_qty of the product's stocking unit, canonical (ADR 0006 R2).
+      required: [uom, unit_qty, stock_qty, sell, purchase, price]
+      properties:
+        uom:
+          $ref: '#/components/schemas/UOM'
+        unit_qty:
+          $ref: '#/components/schemas/Quantity'
+        stock_qty:
+          $ref: '#/components/schemas/Quantity'
+        sell:
+          type: boolean
+        purchase:
+          type: boolean
+        price:
+          type: boolean
+    UnitSetDoc:
+      type: object
+      description: >-
+        GET /products/{id}/units and the PUT's answer: the set, the four
+        defaults, the board measure facts the derivations read, the base
+        price the hold guards, and the PUT's warnings (empty on a read, an
+        array always present).
+      required: [product_id, stock_uom, sale_uom, price_uom, purchase_uom,
+        base_price_ten_thousandths, board_thickness_in, board_width_in,
+        board_length_ft, random_length, units, warnings, revision]
+      properties:
+        product_id:
+          type: string
+          format: uuid
+        stock_uom:
+          $ref: '#/components/schemas/UOM'
+        sale_uom:
+          $ref: '#/components/schemas/UOM'
+        price_uom:
+          $ref: '#/components/schemas/UOM'
+        purchase_uom:
+          $ref: '#/components/schemas/UOM'
+        base_price_ten_thousandths:
+          type: integer
+          format: int64
+        board_thickness_in:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        board_width_in:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        board_length_ft:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        random_length:
+          type: boolean
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnitSetRow'
+        warnings:
+          type: array
+          description: >-
+            One entry per sell row whose unit does not convert exactly into
+            the stocking unit, naming the finer stocking unit that would make
+            every sell row exact (the 6x9 paver stocked in PCS and sold by
+            SF). The warning does not refuse.
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+        revision:
+          type: integer
+          format: int64
+    UnitSetPut:
+      type: object
+      required: [revision, stock_uom, sale_uom, price_uom, purchase_uom, units]
+      description: >-
+        The body of PUT /products/{id}/units: it replaces the whole set and
+        the four default columns at the product's revision. A row may omit
+        its pair (the derivations of ADR 0006 section 3.2 fill it); a sent
+        pair is stored canonically and must agree with every derivation that
+        applies. base_price_ten_thousandths simply sets the base price while
+        the price unit cannot leave the stocking unit. A field the PUT
+        cannot apply (the board measure columns) is a 400 naming it.
+      properties:
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        stock_uom:
+          $ref: '#/components/schemas/UOM'
+        sale_uom:
+          $ref: '#/components/schemas/UOM'
+        price_uom:
+          $ref: '#/components/schemas/UOM'
+        purchase_uom:
+          $ref: '#/components/schemas/UOM'
+        base_price_ten_thousandths:
+          type: integer
+          format: int64
+          minimum: 0
+        units:
+          type: array
+          items:
+            $ref: '#/components/schemas/UnitSetRowPut'
+    UnitSetRowPut:
+      type: object
+      required: [uom]
+      properties:
+        uom:
+          $ref: '#/components/schemas/UOM'
+        unit_qty:
+          $ref: '#/components/schemas/Quantity'
+        stock_qty:
+          $ref: '#/components/schemas/Quantity'
+        sell:
+          type: boolean
+        purchase:
+          type: boolean
+        price:
+          type: boolean
     UOM:
       type: string
-      description: The database unit of measure vocabulary, verbatim.
-      enum: [PCS, EA, LF, SF, BF, MBF, SQ, BOX, CTN, RL, GAL, LBS, BAG, BUNDLE, PAIR, SET]
+      pattern: '^[A-Z]{1,6}$'
+      description: A unit code of the catalogue (the closed enum is gone; ADR 0006 section 2).
     ProductView:
       type: object
       description: >-
@@ -891,7 +1115,8 @@ components:
         vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in,
         stackable, geometry_source, lead_time_days, reorder_point,
         reorder_qty, on_hand, allocated, available, revision, created_at,
-        updated_at]
+        updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in,
+        board_width_in, board_length_ft, random_length, units]
       properties:
         id:
           type: string
@@ -950,6 +1175,35 @@ components:
         revision:
           type: integer
           format: int64
+        sale_uom:
+          $ref: '#/components/schemas/UOM'
+        price_uom:
+          $ref: '#/components/schemas/UOM'
+          description: The unit the base price is per; the stocking unit until C3-2B.
+        purchase_uom:
+          $ref: '#/components/schemas/UOM'
+        board_thickness_in:
+          description: The nominal cross section of a board measure product (a 2x4 is 2), decimal string on the wire.
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        board_width_in:
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        board_length_ft:
+          description: The nominal length of a fixed length piece (a 2x4x8 is 8); null for random length.
+          oneOf:
+            - $ref: '#/components/schemas/Quantity'
+            - type: "null"
+        random_length:
+          type: boolean
+          description: The product is sold by tally (ADR 0006 section 4); requires LF stocking.
+        units:
+          type: array
+          description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
+          items:
+            $ref: '#/components/schemas/UnitSetRow'
         created_at:
           type: string
           format: date-time
@@ -992,6 +1246,17 @@ components:
           type: string
         reorder_qty:
           type: string
+        board_thickness_in:
+          type: [number, "null"]
+          description: The nominal cross section (a 2x4 is 2 and 4); both halves or neither.
+        board_width_in:
+          type: [number, "null"]
+        board_length_ft:
+          type: [number, "null"]
+          description: The nominal length of a fixed length piece; null for random length.
+        random_length:
+          type: boolean
+          description: The product is sold by tally; it stocks in LF and carries no fixed length.
     ProductPage:
       type: object
       required: [items, next_cursor, limit]

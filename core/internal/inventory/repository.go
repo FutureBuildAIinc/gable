@@ -35,6 +35,7 @@ type Repository interface {
 	DeallocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 	FulfillStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 	RestockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
+	UnstockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 }
 
 type PostgresRepository struct {
@@ -329,6 +330,21 @@ func (r *PostgresRepository) RestockQty(ctx context.Context, inventoryID uuid.UU
 	}
 	if ct.RowsAffected() == 0 {
 		return fmt.Errorf("inventory record not found for restock")
+	}
+	return nil
+}
+
+// UnstockQty takes delta (scale 4) off on hand, never below what is allocated:
+// the reverse of RestockQty (a voided restocking credit memo).
+func (r *PostgresRepository) UnstockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET quantity = quantity - $1::numeric / 10000, updated_at = NOW()
+		WHERE id = $2 AND (quantity - allocated) >= $1::numeric / 10000`, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to take stock back out: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrInsufficientAvailable
 	}
 	return nil
 }

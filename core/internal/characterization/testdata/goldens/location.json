@@ -27,7 +27,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V4V 1E2"
@@ -49,7 +49,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V4T 2E9"
@@ -71,7 +71,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V1X 7K2"
@@ -93,7 +93,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -426,7 +426,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -448,7 +448,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -470,7 +470,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -492,7 +492,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -514,7 +514,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -536,7 +536,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -558,7 +558,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "zone",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -580,7 +580,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V4V 1E2"
@@ -602,7 +602,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V4T 2E9"
@@ -624,7 +624,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V1X 7K2"
@@ -646,7 +646,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": null
@@ -867,28 +867,28 @@
           "code": "LK",
           "id": "<id-1>",
           "name": "Lake Country Outpost",
-          "timezone": "America/Vancouver"
+          "timezone": "Etc/UTC"
         },
         {
           "active": true,
           "code": "WK",
           "id": "<id-2>",
           "name": "West Kelowna Satellite",
-          "timezone": "America/Vancouver"
+          "timezone": "Etc/UTC"
         },
         {
           "active": true,
           "code": "KEL-MAIN",
           "id": "<id-3>",
           "name": "Kelowna Main Yard",
-          "timezone": "America/Vancouver"
+          "timezone": "Etc/UTC"
         },
         {
           "active": true,
           "code": "MAIN",
           "id": "<id-4>",
           "name": "Main Branch",
-          "timezone": "America/New_York"
+          "timezone": "Etc/UTC"
         }
       ]
     }
@@ -1119,7 +1119,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V4V 1E2"
@@ -1141,7 +1141,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V4T 2E9"
@@ -1163,7 +1163,7 @@
             "revision": 1,
             "state": "BC",
             "tax_jurisdiction_code": "BC",
-            "timezone": "America/Vancouver",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": "V1X 7K2"
@@ -1185,7 +1185,7 @@
             "revision": 1,
             "state": null,
             "tax_jurisdiction_code": null,
-            "timezone": "America/New_York",
+            "timezone": "Etc/UTC",
             "type": "branch",
             "updated_at": "<ts+0d>",
             "zip": null

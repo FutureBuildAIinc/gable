@@ -140,4 +140,19 @@ func TestQty_ReleaseFulfillRestock(t *testing.T) {
 	if err := w.svc.RestockQty(ctx, w.productID, uuid.New(), q(t, "1")); err == nil {
 		t.Error("restock at a branch with no row succeeded")
 	}
+
+	// The reverse (a voided restocking credit memo): 15 on hand, 2 allocated,
+	// so 13 are free; taking 13 back leaves exactly the allocation, 14 is refused.
+	if err := w.svc.UnrestockQty(ctx, w.productID, w.branchID, q(t, "13.0001")); !errors.Is(err, inventory.ErrInsufficientAvailable) {
+		t.Errorf("unrestock past the free stock = %v, want ErrInsufficientAvailable", err)
+	}
+	if got := read(`SELECT sum(quantity)::text FROM inventory WHERE product_id = $1`, w.productID); got != "15.0000" {
+		t.Errorf("a refused unrestock moved on hand: %s", got)
+	}
+	if err := w.svc.UnrestockQty(ctx, w.productID, w.branchID, q(t, "13")); err != nil {
+		t.Fatalf("unrestock: %v", err)
+	}
+	if got := read(`SELECT sum(quantity)::text || '/' || sum(allocated)::text FROM inventory WHERE product_id = $1`, w.productID); got != "2.0000/2.0000" {
+		t.Errorf("on hand/allocated after unrestocking 13 = %s, want 2.0000/2.0000", got)
+	}
 }

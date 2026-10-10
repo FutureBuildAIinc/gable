@@ -66,6 +66,11 @@ const staticZones: AppZone[] = [
   ] },
   { prefix: '/invoices', key: 'invoice', label: 'Invoicing', icon: Receipt, menu: [
     { label: 'Invoices', path: '/invoices' },
+    { label: 'Credit Memos', path: '/credit-memos' },
+  ] },
+  { prefix: '/credit-memos', key: 'invoice', label: 'Invoicing', icon: Receipt, menu: [
+    { label: 'Invoices', path: '/invoices' },
+    { label: 'Credit Memos', path: '/credit-memos' },
   ] },
   { prefix: '/reports/daily-till', key: 'pos', label: 'Daily Till', icon: CreditCard, menu: [
     { label: 'Daily Till', path: '/reports/daily-till' },

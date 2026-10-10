@@ -29,10 +29,11 @@ type Repository interface {
 	UpdateJournalEntryStatus(ctx context.Context, id uuid.UUID, status string, postedBy string) error
 
 	// Trial Balance
-	GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error)
+	GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error)
+	DefaultCurrency(ctx context.Context) (string, error)
 
 	// Financial Statements
-	GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]AccountActivity, error)
+	GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string) ([]AccountActivity, error)
 
 	// Fiscal Periods
 	ListFiscalPeriods(ctx context.Context) ([]FiscalPeriod, error)
@@ -319,20 +320,34 @@ func (r *PostgresRepository) UpdateJournalEntryStatus(ctx context.Context, id uu
 
 // --- Trial Balance ---
 
-func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error) {
+// DefaultCurrency is the dealer's default currency code (system_settings
+// currency.default, USD when absent).
+func (r *PostgresRepository) DefaultCurrency(ctx context.Context) (string, error) {
+	var code string
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')`).Scan(&code); err != nil {
+		return "", fmt.Errorf("failed to read the default currency: %w", err)
+	}
+	return code, nil
+}
+
+// GetTrialBalance sums the posted lines per account AND per currency, never
+// across two currencies (ADR 0005 4.2): currency "" returns every currency's
+// rows (each row names its currency), a code returns that currency alone.
+func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
 	query := `
-		SELECT a.id, a.code, a.name, a.type,
+		SELECT a.id, a.code, a.name, a.type, e.currency,
 		       COALESCE(SUM(l.debit), 0) AS total_debit,
 		       COALESCE(SUM(l.credit), 0) AS total_credit
 		FROM gl_accounts a
-		LEFT JOIN gl_journal_lines l ON l.account_id = a.id
-		LEFT JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED' AND e.entry_date <= $1
-		WHERE a.is_active = TRUE
-		GROUP BY a.id, a.code, a.name, a.type
+		JOIN gl_journal_lines l ON l.account_id = a.id
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED' AND e.entry_date <= $1
+		WHERE a.is_active = TRUE AND ($2 = '' OR e.currency = $2)
+		GROUP BY a.id, a.code, a.name, a.type, e.currency
 		HAVING COALESCE(SUM(l.debit), 0) > 0 OR COALESCE(SUM(l.credit), 0) > 0
-		ORDER BY a.code
+		ORDER BY e.currency, a.code
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, asOfDate, currency)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trial balance: %w", err)
 	}
@@ -342,7 +357,7 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 	for rows.Next() {
 		var row TrialBalanceRow
 		var debitFloat, creditFloat float64
-		if err := rows.Scan(&row.AccountID, &row.AccountCode, &row.AccountName, &row.AccountType, &debitFloat, &creditFloat); err != nil {
+		if err := rows.Scan(&row.AccountID, &row.AccountCode, &row.AccountName, &row.AccountType, &row.Currency, &debitFloat, &creditFloat); err != nil {
 			return nil, fmt.Errorf("failed to scan trial balance row: %w", err)
 		}
 		row.Debit = money.DollarsToCents(debitFloat)
@@ -370,7 +385,7 @@ func (r *PostgresRepository) GetTrialBalance(ctx context.Context, asOfDate time.
 // lands once per contra/unnatural-balance account and breaks
 // assets = liabilities + equity outright. Keeping the arithmetic in numeric
 // removes the failure mode rather than rounding it more carefully.
-func (r *PostgresRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string) ([]AccountActivity, error) {
+func (r *PostgresRepository) GetAccountActivity(ctx context.Context, start *time.Time, end time.Time, accountTypes []string, currency string) ([]AccountActivity, error) {
 	// Deliberately not filtered on a.is_active: an account that is deactivated
 	// while still carrying a balance does not stop being part of the entity's
 	// financial position, and excluding it would silently unbalance the sheet.
@@ -385,10 +400,11 @@ func (r *PostgresRepository) GetAccountActivity(ctx context.Context, start *time
 		  AND e.entry_date <= $1
 		  AND ($2::date IS NULL OR e.entry_date >= $2::date)
 		  AND a.type = ANY($3)
+		  AND e.currency = $4
 		GROUP BY a.id, a.code, a.name, a.type, a.subtype
 		ORDER BY a.code
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, end, start, accountTypes)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, end, start, accountTypes, currency)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account activity: %w", err)
 	}

@@ -109,9 +109,26 @@ var volatileStringFields = map[string]string{
 // which is drawn relative to the seed clock. A seed-day offset for them would
 // drift by one every day the calendar advances, so they normalise to the
 // plain timestamp placeholder (the shape check still applies).
+//
+// The demo seed's drivers are the same kind of fixture: a hardcoded CDL expiry
+// and hire date each, which moved one day per calendar day against the seed
+// day and turned delivery_fleet red on every day but the one it was recorded.
 var seedFixedDateFields = map[string]bool{
 	"insurance_expiry":  true,
 	"next_service_date": true,
+	"cdl_expiry":        true,
+	"hire_date":         true,
+}
+
+// runTimingTimeFields carry an instant computed from the server's clock plus a
+// few minutes (the mock route optimiser spaces ETAs 15 minutes apart from now).
+// A day offset for them is run timing: a run in the last minutes before UTC
+// midnight pushes the ETA onto the next day while the end-of-run guard, which
+// only compares the clock at the end with the seed day, does not fire. They
+// normalise to a placeholder (the shape check still applies; null stays null).
+var runTimingTimeFields = map[string]string{
+	"eta":               "<eta>",
+	"estimated_arrival": "<eta>",
 }
 
 func (n *normaliser) value(v any, key string) any {
@@ -122,6 +139,9 @@ func (n *normaliser) value(v any, key string) any {
 		}
 		if seedFixedDateFields[key] && (reTS.MatchString(x) || rePgTS.MatchString(x)) {
 			return "<ts>"
+		}
+		if ph, ok := runTimingTimeFields[key]; ok && (reTS.MatchString(x) || rePgTS.MatchString(x)) {
+			return ph
 		}
 		return n.string(x)
 	case json.Number:

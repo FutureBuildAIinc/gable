@@ -10,7 +10,7 @@ issues, do **not** open a public issue — follow [SECURITY.md](./SECURITY.md).
 
 ## Build & run
 
-**Prerequisites:** Docker (for Postgres), Go 1.25+, Node 20+, PostgreSQL 16
+**Prerequisites:** Docker (for Postgres), Go 1.26+, Node 20+, PostgreSQL 16
 (via Docker or your own instance).
 
 ```bash

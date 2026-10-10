@@ -16,18 +16,27 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "capacity_warning": null,
         "delivery": {
+          "address": "1 Golden Way, Kelowna BC",
           "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
           "delivery_instructions": "r1b c first stop",
+          "estimated_arrival": null,
           "id": "<id-3>",
           "latitude": 49.888,
           "longitude": -119.496,
           "order_id": "<id-1>",
+          "order_number": "SO-000088",
           "pod_proof_url": null,
           "pod_signed_by": null,
           "pod_timestamp": null,
+          "revision": 1,
           "route_id": "<id-2>",
-          "status": "PENDING",
+          "scheduled_end": null,
+          "scheduled_start": null,
+          "signature_data_url": null,
+          "status": "pending",
           "stop_sequence": 1,
           "updated_at": "<ts+0d>"
         }
@@ -50,18 +59,27 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "capacity_warning": null,
         "delivery": {
+          "address": "1 Golden Way, Kelowna BC",
           "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
           "delivery_instructions": null,
+          "estimated_arrival": null,
           "id": "<id-5>",
           "latitude": 49.888,
           "longitude": -119.496,
           "order_id": "<id-4>",
+          "order_number": "SO-000089",
           "pod_proof_url": null,
           "pod_signed_by": null,
           "pod_timestamp": null,
+          "revision": 1,
           "route_id": "<id-2>",
-          "status": "PENDING",
+          "scheduled_end": null,
+          "scheduled_start": null,
+          "signature_data_url": null,
+          "status": "pending",
           "stop_sequence": 2,
           "updated_at": "<ts+0d>"
         }
@@ -80,8 +98,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-6>"
@@ -101,15 +119,46 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "not_found",
+          "message": "record not found"
         },
         "meta": {
           "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.assign.unknown_field",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries",
+      "body": {
+        "order_id": "<id-1>",
+        "route_id": "<id-2>",
+        "smoke": "signal"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "smoke",
+              "message": "unknown field"
+            }
+          ],
+          "message": "request body has a field this route does not accept"
+        },
+        "meta": {
+          "request_id": "<id-9>"
         }
       }
     }
@@ -125,19 +174,25 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "address": "1 Golden Way, Kelowna BC",
         "created_at": "<ts+0d>",
         "customer_name": "Golden Harness Co",
         "delivery_instructions": "r1b c first stop",
+        "estimated_arrival": null,
         "id": "<id-3>",
         "latitude": 49.888,
         "longitude": -119.496,
         "order_id": "<id-1>",
-        "order_number": "<id-1>",
+        "order_number": "SO-000088",
         "pod_proof_url": null,
         "pod_signed_by": null,
         "pod_timestamp": null,
+        "revision": 1,
         "route_id": "<id-2>",
-        "status": "PENDING",
+        "scheduled_end": null,
+        "scheduled_start": null,
+        "signature_data_url": null,
+        "status": "pending",
         "stop_sequence": 1,
         "updated_at": "<ts+0d>"
       }
@@ -150,15 +205,15 @@
       "path": "/api/v1/delivery/deliveries/<id-7>"
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "not_found",
+          "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -174,11 +229,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid delivery id"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -193,60 +254,75 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "address": "1 Golden Way, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Golden Harness Co",
-          "delivery_instructions": "r1b c first stop",
-          "id": "<id-3>",
-          "latitude": 49.888,
-          "longitude": -119.496,
-          "order_id": "<id-1>",
-          "order_number": "<id-1>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-2>",
-          "status": "PENDING",
-          "stop_sequence": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "address": "1 Golden Way, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Golden Harness Co",
-          "delivery_instructions": null,
-          "id": "<id-5>",
-          "latitude": 49.888,
-          "longitude": -119.496,
-          "order_id": "<id-4>",
-          "order_number": "<id-4>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-2>",
-          "status": "PENDING",
-          "stop_sequence": 2,
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c first stop",
+            "estimated_arrival": null,
+            "id": "<id-3>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-1>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 1,
+            "route_id": "<id-2>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": null,
+            "estimated_arrival": null,
+            "id": "<id-5>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-4>",
+            "order_number": "SO-000089",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 1,
+            "route_id": "<id-2>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 2,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
     "name": "delivery.delivery.adjust_qty",
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/deliveries/<id-3>/adjust-qty",
       "body": {
-        "adjusted_by": "<id-11>",
+        "adjusted_by": "<id-12>",
         "adjustments": [
           {
-            "adjusted_qty": 8,
+            "adjusted_qty": "8",
             "notes": "two short",
-            "original_qty": 10,
-            "product_id": "<id-12>",
-            "reason_code": "SHORT_SHIP"
+            "original_qty": "10",
+            "product_id": "<id-13>",
+            "reason_code": "short_ship"
           }
         ]
       }
@@ -255,7 +331,188 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "status": "adjusted"
+        "address": "1 Golden Way, Kelowna BC",
+        "created_at": "<ts+0d>",
+        "customer_name": "Golden Harness Co",
+        "delivery_instructions": "r1b c first stop",
+        "estimated_arrival": null,
+        "id": "<id-3>",
+        "latitude": 49.888,
+        "longitude": -119.496,
+        "order_id": "<id-1>",
+        "order_number": "SO-000088",
+        "pod_proof_url": null,
+        "pod_signed_by": null,
+        "pod_timestamp": null,
+        "revision": 2,
+        "route_id": "<id-2>",
+        "scheduled_end": null,
+        "scheduled_start": null,
+        "signature_data_url": null,
+        "status": "pending",
+        "stop_sequence": 1,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.adjust_qty.float_qty",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-3>/adjust-qty",
+      "body": {
+        "adjusted_by": "<id-12>",
+        "adjustments": [
+          {
+            "adjusted_qty": 8,
+            "original_qty": 10,
+            "product_id": "<id-13>",
+            "reason_code": "short_ship"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "adjustments[0].original_qty",
+              "message": "must be a decimal string such as \"12.5\", not a JSON number"
+            },
+            {
+              "field": "adjustments[0].adjusted_qty",
+              "message": "must be a decimal string such as \"12.5\", not a JSON number"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.adjust_qty.uppercase_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-3>/adjust-qty",
+      "body": {
+        "adjusted_by": "<id-12>",
+        "adjustments": [
+          {
+            "adjusted_qty": "8",
+            "original_qty": "10",
+            "product_id": "<id-13>",
+            "reason_code": "SHORT_SHIP"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "adjustments[0].reason_code",
+              "message": "must be one of: short_ship, damaged, refused, wrong_product, other"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.list_board_stops",
+    "sort_envelope_items": true,
+    "mask_mock_geo": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/delivery/routes?date=<day+2>&include=stops"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-12>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-2>",
+            "notes": "r1b c main route",
+            "revision": 3,
+            "scheduled_date": "<day+2>",
+            "status": "draft",
+            "stop_count": 2,
+            "stops": [
+              {
+                "address": "1 Golden Way, Kelowna BC",
+                "created_at": "<ts+0d>",
+                "customer_name": "Golden Harness Co",
+                "delivery_instructions": "r1b c first stop",
+                "estimated_arrival": null,
+                "id": "<id-3>",
+                "latitude": 49.888,
+                "longitude": -119.496,
+                "order_id": "<id-1>",
+                "order_number": "SO-000088",
+                "pod_proof_url": null,
+                "pod_signed_by": null,
+                "pod_timestamp": null,
+                "revision": 2,
+                "route_id": "<id-2>",
+                "scheduled_end": null,
+                "scheduled_start": null,
+                "signature_data_url": null,
+                "status": "pending",
+                "stop_sequence": 1,
+                "updated_at": "<ts+0d>"
+              },
+              {
+                "address": "1 Golden Way, Kelowna BC",
+                "created_at": "<ts+0d>",
+                "customer_name": "Golden Harness Co",
+                "delivery_instructions": null,
+                "estimated_arrival": null,
+                "id": "<id-5>",
+                "latitude": 49.888,
+                "longitude": -119.496,
+                "order_id": "<id-4>",
+                "order_number": "SO-000089",
+                "pod_proof_url": null,
+                "pod_signed_by": null,
+                "pod_timestamp": null,
+                "revision": 1,
+                "route_id": "<id-2>",
+                "scheduled_end": null,
+                "scheduled_start": null,
+                "signature_data_url": null,
+                "status": "pending",
+                "stop_sequence": 2,
+                "updated_at": "<ts+0d>"
+              }
+            ],
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-16>",
+            "vehicle_name": "R1C Truck Renamed"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
       }
     }
   },
@@ -273,11 +530,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid delivery id"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-17>"
         }
       }
     }
@@ -294,11 +557,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-14>"
+          "request_id": "<id-18>"
         }
       }
     }
@@ -313,15 +576,25 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "adjusted_by",
+              "message": "is required"
+            },
+            {
+              "field": "adjustments",
+              "message": "must hold at least one line"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-19>"
         }
       }
     }
@@ -335,7 +608,11 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": []
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -355,11 +632,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "photo",
+              "message": "must be a jpg, jpeg, png or webp file"
+            }
+          ],
+          "message": "unsupported file type"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-20>"
         }
       }
     }
@@ -381,11 +664,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "photo",
+              "message": "a file is required"
+            }
+          ],
+          "message": "the photo field is required and must hold a file"
         },
         "meta": {
-          "request_id": "<id-17>"
+          "request_id": "<id-21>"
         }
       }
     }
@@ -407,11 +696,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid delivery id"
         },
         "meta": {
-          "request_id": "<id-18>"
+          "request_id": "<id-22>"
         }
       }
     }
@@ -429,15 +724,15 @@
       }
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "not_found",
+          "message": "record not found"
         },
         "meta": {
-          "request_id": "<id-19>"
+          "request_id": "<id-23>"
         }
       }
     }
@@ -453,11 +748,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid delivery id"
         },
         "meta": {
-          "request_id": "<id-20>"
+          "request_id": "<id-24>"
         }
       }
     }
@@ -469,9 +770,17 @@
       "path": "/api/v1/delivery/deliveries/<id-7>/pod-photos"
     },
     "response": {
-      "status": 200,
+      "status": 404,
       "content_type": "application/json",
-      "body": []
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "record not found"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
     }
   }
 ]

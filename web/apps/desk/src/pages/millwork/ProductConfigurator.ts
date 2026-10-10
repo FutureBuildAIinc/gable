@@ -90,10 +90,10 @@ export class ProductConfigurator extends LitElement {
       // Fall back to defaults for ProductType
       if (this._currentStep === 0) {
         this._availableOptions = [
-          { value: 'Lumber', allowed: true },
-          { value: 'Door', allowed: true },
-          { value: 'Trim', allowed: true },
-          { value: 'Panel', allowed: true },
+          { value: 'Lumber', allowed: true, message: null },
+          { value: 'Door', allowed: true, message: null },
+          { value: 'Trim', allowed: true, message: null },
+          { value: 'Panel', allowed: true, message: null },
         ];
       } else {
         this._error = 'Failed to load options. Please try again.';

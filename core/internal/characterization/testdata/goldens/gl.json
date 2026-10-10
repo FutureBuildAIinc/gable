@@ -10,7 +10,7 @@
       "content_type": "application/json",
       "body": [
         {
-          "balance": 0,
+          "balance": 31341985,
           "code": "1010",
           "created_at": "<ts+0d>",
           "description": "Cash and checking accounts",
@@ -23,7 +23,7 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "balance": 0,
+          "balance": 7100214,
           "code": "1020",
           "created_at": "<ts+0d>",
           "description": "Customer balances due",
@@ -101,7 +101,7 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "balance": 0,
+          "balance": -4123197,
           "code": "2020",
           "created_at": "<ts+0d>",
           "description": "Collected sales tax awaiting remittance",
@@ -166,7 +166,7 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "balance": 0,
+          "balance": -34319002,
           "code": "4010",
           "created_at": "<ts+0d>",
           "description": "Revenue from material sales",
@@ -206,10 +206,23 @@
         },
         {
           "balance": 0,
+          "code": "4050",
+          "created_at": "<ts+0d>",
+          "description": "Early pay discounts taken on invoices (contra revenue)",
+          "id": "<id-16>",
+          "is_active": true,
+          "name": "Sales Discounts",
+          "normal_balance": "DEBIT",
+          "subtype": "Operating",
+          "type": "REVENUE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "balance": 0,
           "code": "5010",
           "created_at": "<ts+0d>",
           "description": "Direct cost of materials sold",
-          "id": "<id-16>",
+          "id": "<id-17>",
           "is_active": true,
           "name": "Cost of Goods Sold",
           "normal_balance": "DEBIT",
@@ -222,7 +235,7 @@
           "code": "5020",
           "created_at": "<ts+0d>",
           "description": "Rent, utilities, wages, and general overhead",
-          "id": "<id-17>",
+          "id": "<id-18>",
           "is_active": true,
           "name": "Operating Expenses",
           "normal_balance": "DEBIT",
@@ -235,9 +248,22 @@
           "code": "5030",
           "created_at": "<ts+0d>",
           "description": "Till drawer counting variances (short = expense, over = credit)",
-          "id": "<id-18>",
+          "id": "<id-19>",
           "is_active": true,
           "name": "Cash Over/Short",
+          "normal_balance": "DEBIT",
+          "subtype": "Operating",
+          "type": "EXPENSE",
+          "updated_at": "<ts+0d>"
+        },
+        {
+          "balance": 0,
+          "code": "5040",
+          "created_at": "<ts+0d>",
+          "description": "Receivables written off as uncollectable",
+          "id": "<id-20>",
+          "is_active": true,
+          "name": "Bad Debt Expense",
           "normal_balance": "DEBIT",
           "subtype": "Operating",
           "type": "EXPENSE",
@@ -276,24 +302,24 @@
       "body": {
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 1,
-        "id": "<id-19>",
+        "entry_number": 127,
+        "id": "<id-21>",
         "lines": [
           {
             "account_id": "<id-1>",
             "credit": 0,
             "debit": 10000,
             "description": "golden debit",
-            "id": "<id-20>",
-            "journal_entry_id": "<id-19>"
+            "id": "<id-22>",
+            "journal_entry_id": "<id-21>"
           },
           {
             "account_id": "<id-13>",
             "credit": 10000,
             "debit": 0,
             "description": "golden credit",
-            "id": "<id-21>",
-            "journal_entry_id": "<id-19>"
+            "id": "<id-23>",
+            "journal_entry_id": "<id-21>"
           }
         ],
         "memo": "golden characterisation entry",
@@ -310,7 +336,7 @@
     "name": "gl.journal_entry.post",
     "request": {
       "method": "POST",
-      "path": "/api/v1/gl/journal-entries/<id-19>/post"
+      "path": "/api/v1/gl/journal-entries/<id-21>/post"
     },
     "response": {
       "status": 200,
@@ -347,7 +373,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-22>"
+          "request_id": "<id-24>"
         }
       }
     }

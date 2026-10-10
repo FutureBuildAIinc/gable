@@ -6,8 +6,12 @@
 // entry point run the same code.
 package main
 
-import "github.com/gablelbm/gable/internal/app/migrate"
+import (
+	"os"
+
+	"github.com/gablelbm/gable/internal/app/migrate"
+)
 
 func main() {
-	migrate.Run()
+	migrate.RunArgs(os.Args[1:])
 }

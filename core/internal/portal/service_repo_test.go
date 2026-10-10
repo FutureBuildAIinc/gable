@@ -19,6 +19,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
@@ -383,6 +384,34 @@ type fakeProductRepo struct {
 	gets     []uuid.UUID
 }
 
+// The unit set store, served empty: these tests create no unit sets.
+func (f *fakeProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]product.UnitSetRowView, error) {
+	return []product.UnitSetRowView{}, nil
+}
+func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*product.UnitSetProduct, error) {
+	return nil, product.ErrNotFound
+}
+func (f *fakeProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []product.UnitSetRowView,
+	_, _, _, _ string, _ *int64, _ int64) (int64, error) {
+	return 0, nil
+}
+func (f *fakeProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
+func (f *fakeProductRepo) ProductStockUnitInUse(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (f *fakeProductRepo) ProductPriceHeld(_ context.Context, _ uuid.UUID) (bool, string, error) {
+	return false, "", nil
+}
+func (f *fakeProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []string) (bool, string, error) {
+	return false, "", nil
+}
+
 var _ product.Repository = (*fakeProductRepo)(nil)
 
 func (f *fakeProductRepo) GetProduct(_ context.Context, id uuid.UUID) (*product.Product, error) {
@@ -499,6 +528,7 @@ func (f *fakeInventoryRepo) AllocateStockQty(context.Context, uuid.UUID, int64) 
 func (f *fakeInventoryRepo) DeallocateStockQty(context.Context, uuid.UUID, int64) error { return nil }
 func (f *fakeInventoryRepo) FulfillStockQty(context.Context, uuid.UUID, int64) error    { return nil }
 func (f *fakeInventoryRepo) RestockQty(context.Context, uuid.UUID, int64) error         { return nil }
+func (f *fakeInventoryRepo) UnstockQty(context.Context, uuid.UUID, int64) error         { return nil }
 
 type fakeOrderRepo struct {
 	created   []order.Order
@@ -509,6 +539,9 @@ type fakeOrderRepo struct {
 
 var _ order.Repository = (*fakeOrderRepo)(nil)
 
+func (f *fakeOrderRepo) GetOrderByNumber(_ context.Context, _ string) (*order.Order, error) {
+	return nil, order.ErrNotFound
+}
 func (f *fakeOrderRepo) SaveLineQuantities(context.Context, []order.OrderLine) error { return nil }
 func (f *fakeOrderRepo) QueueAllocationRequests(context.Context, uuid.UUID, []uuid.UUID) (int, error) {
 	return 0, nil
@@ -540,6 +573,13 @@ func (f *fakeOrderRepo) DeliveryRequestOrder(context.Context, uuid.UUID) (uuid.U
 	return uuid.Nil, false, nil
 }
 func (f *fakeOrderRepo) LockCustomerCredit(context.Context, uuid.UUID) error { return nil }
+func (f *fakeOrderRepo) LockOrderPayments(context.Context, uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeOrderRepo) LiveBilledByLine(context.Context, uuid.UUID) (map[uuid.UUID]order.LiveBilled, error) {
+	return nil, nil
+}
+
 func (f *fakeOrderRepo) UnbilledRemainderCents(context.Context, uuid.UUID) (int64, error) {
 	return 0, nil
 }
