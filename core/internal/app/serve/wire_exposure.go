@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/order"
@@ -176,9 +177,9 @@ func registerExposureRoutes(mux *http.ServeMux, r exposureRoutes) {
 	// Salesperson + owner surface: at-risk list, per-quote detail and actions,
 	// portfolio report, admin scan trigger. The key branch wall holds a branch
 	// bound key to its pin on the by id routes (their quote's branch) and
-	// refuses it the dealer wide scan; the two lists narrow no further here
-	// (narrowing them changes the exposure repository's contract, and the
-	// sweep lists them for the lead).
+	// refuses it the dealer wide routes outright: the scan re-checks every
+	// branch's quotes and the two lists (the at-risk and portfolio reports)
+	// return every branch's exposure rows.
 	var keyAuditor middleware.BranchRefusalAuditor // a nil logger must not ride a non nil interface
 	if r.AuditLog != nil {
 		keyAuditor = r.AuditLog
@@ -193,9 +194,30 @@ func registerExposureRoutes(mux *http.ServeMux, r exposureRoutes) {
 	// Buyer/admin surface: index refresh (+ dry-run preview), metadata edit,
 	// history time-series. Deliberately does NOT re-register
 	// GET /api/v1/market-indices: that belongs to pricing.EscalatorHandler and
-	// a duplicate pattern would panic the ServeMux.
+	// a duplicate pattern would panic the ServeMux. The refresh re-checks
+	// every branch's quotes, the same dealer wide effect the scan refusal
+	// closes, so a branch bound key is refused it; the index metadata and
+	// history are dealer wide reference data and keep the role guard alone.
 	pricing.NewIndexAdminHandler(r.Escalators, r.Exposure, r.Scanner, r.DB, r.Logger).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+		RegisterRoutes(mux, indexAdminGuard(keyWall))
+}
+
+// indexAdminGuard holds the market index admin surface to a branch bound key's
+// pin where it acts across branches: the refresh suffix route is refused
+// outright, everything else keeps the role guard alone.
+func indexAdminGuard(keyWall *middleware.KeyBranchWall) func(http.Handler) http.Handler {
+	role := middleware.RequireRole("admin", "owner")
+	refresh := middleware.Compose(role, keyWall.RefuseBound("the index refresh re-checks every branch's quotes"))
+	return func(next http.Handler) http.Handler {
+		refreshHandler, otherHandler := refresh(next), role(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refresh") {
+				refreshHandler.ServeHTTP(w, r)
+				return
+			}
+			otherHandler.ServeHTTP(w, r)
+		})
+	}
 }
 
 // quoteBranchOf resolves the branch a quote belongs to, the row branch the
@@ -219,20 +241,21 @@ func (r exposureRoutes) quoteBranchOf(ctx context.Context, id uuid.UUID) (*uuid.
 
 // exposureKeyBranchWall routes the exposure surface's handlers through the
 // wall their request shape demands: the five by id quote routes hold their
-// quote's branch to the pin, the admin scan refuses a bound key (it acts
-// across every branch), and the two list routes pass unchanged.
+// quote's branch to the pin, and the admin scan and the two list routes (the
+// at-risk and portfolio reports, which return every branch's rows) refuse a
+// bound key outright.
 func exposureKeyBranchWall(keyWall *middleware.KeyBranchWall, quoteBranchOf func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		byID := keyWall.RowBranch(quoteBranchOf)(next)
-		scan := keyWall.RefuseBound("the scan runs across every branch")(next)
+		dealerWide := keyWall.RefuseBound("the exposure surface acts across every branch")(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.URL.Path == "/api/v1/admin/exposure-scan":
-				scan.ServeHTTP(w, r)
+				dealerWide.ServeHTTP(w, r)
 			case r.PathValue("id") != "":
 				byID.ServeHTTP(w, r)
 			default:
-				next.ServeHTTP(w, r)
+				dealerWide.ServeHTTP(w, r)
 			}
 		})
 	}

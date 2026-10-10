@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
@@ -22,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
+	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -50,6 +52,56 @@ func newBranchWall(db *database.DB) *branchWall {
 		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
 	}
 	return w
+}
+
+// reporting mounts the reporting surface in its three registrations: every
+// report spans every branch's rows (the summaries, the till, the aging, the
+// statements, the builder, the exports, the saved runs and the schedules), so
+// a branch bound key is refused outright and the role guard alone serves
+// everyone else (ADR 0007 section 5.5). Three methods because serve builds
+// the scheduler between the registrations.
+func (w *branchWall) reporting(mux *http.ServeMux, h *reporting.Handler) {
+	h.RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner", "finance"),
+		w.keyWall.RefuseBound("reports span every branch")))
+}
+
+// reportingSchedules is reporting over the builder and schedule routes.
+func (w *branchWall) reportingSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor) {
+	wireReportSchedules(mux, h, executor, w.keyWall.RefuseBound("reports span every branch"))
+}
+
+// reportingBIIntegration is reporting over the BI export routes.
+func (w *branchWall) reportingBIIntegration(mux *http.ServeMux, h *reporting.Handler) {
+	h.RegisterBIIntegrationRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"),
+		w.keyWall.RefuseBound("reports span every branch")))
+}
+
+// eventsFeed mounts the events feed: the outbox carries every branch's events
+// with their payloads, so a branch bound key is refused outright and the role
+// guard alone serves everyone else.
+func (w *branchWall) eventsFeed(mux *http.ServeMux, h *events.Handler) {
+	h.RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"),
+		w.keyWall.RefuseBound("the event feed spans every branch")))
+}
+
+// dealerWideReads is the guard for a module whose books carry no branch
+// dimension (the GL, AP and bank reconciliation) and the sales team roster:
+// the reads span every branch, so a branch bound key is refused them, while
+// the writes, which carry no branch fact, keep the role guard alone for every
+// principal alike.
+func (w *branchWall) dealerWideReads(reason string, roles ...string) func(http.Handler) http.Handler {
+	role := middleware.RequireRole(roles...)
+	reads := middleware.Compose(role, w.keyWall.RefuseBound(reason))
+	return func(next http.Handler) http.Handler {
+		readHandler, writeHandler := reads(next), role(next)
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet || r.Method == http.MethodHead {
+				readHandler.ServeHTTP(rw, r)
+				return
+			}
+			writeHandler.ServeHTTP(rw, r)
+		})
+	}
 }
 
 // chargeCodes mounts the charge code master: every role that prices a line

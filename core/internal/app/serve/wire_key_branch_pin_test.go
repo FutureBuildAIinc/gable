@@ -26,6 +26,7 @@ import (
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
+	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/quote"
@@ -33,7 +34,6 @@ import (
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
-	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -155,18 +155,18 @@ func newKeyPinFixture(t *testing.T) *keyPinFixture {
 	// surface in its three registrations, the events feed, the GL, AP and bank
 	// reconciliation books and the sales team reads.
 	reportingHandler := reporting.NewHandler(reporting.NewService(reporting.NewRepository(db)))
-	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
-	wireReportSchedules(mux, reportingHandler, nil)
-	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
-	events.NewHandler(db).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.reporting(mux, reportingHandler)
+	wall.reportingSchedules(mux, reportingHandler, nil)
+	wall.reportingBIIntegration(mux, reportingHandler)
+	wall.eventsFeed(mux, events.NewHandler(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
-	gl.NewHandler(glSvc).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	gl.NewHandler(glSvc).RegisterRoutes(mux, wall.dealerWideReads("the general ledger spans every branch", "admin", "owner"))
 	ap.NewHandler(ap.NewService(db, ap.NewRepository(db), glSvc, slog.Default())).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+		RegisterRoutes(mux, wall.dealerWideReads("payables span every branch", "admin", "owner", "finance"))
 	bankrecon.NewHandler(bankrecon.NewService(db, bankrecon.NewRepository(db), glSvc, slog.Default())).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+		RegisterRoutes(mux, wall.dealerWideReads("bank reconciliation spans every branch", "admin", "owner", "finance"))
 	salesteam.NewHandler(salesteam.NewRepository(db)).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+		RegisterRoutes(mux, wall.dealerWideReads("the sales team roster spans every branch", "admin", "owner", "sales"))
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	mint := func(name string, branch *uuid.UUID) string {
