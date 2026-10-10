@@ -11,6 +11,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -41,6 +42,17 @@ func ParseArgs(args []string) (Options, error) {
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
 	}
+	// A -report given an empty value (an unset shell variable, say) is
+	// refused rather than read as no report, which would migrate.
+	reportSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "report" {
+			reportSet = true
+		}
+	})
+	if reportSet && opts.Report == "" {
+		return Options{}, fmt.Errorf("migrate -report: a report name is required (the one report is units)")
+	}
 	if fs.NArg() > 0 {
 		return Options{}, fmt.Errorf("migrate takes no arguments, got %q", fs.Args())
 	}
@@ -55,6 +67,10 @@ func ParseArgs(args []string) (Options, error) {
 // flag exits 2, like the one binary's other usage errors.
 func RunArgs(args []string) {
 	opts, err := ParseArgs(args)
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Print("usage: migrate [-report units]\n")
+		os.Exit(0)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "migrate: %v\nusage: migrate [-report units]\n", err)
 		os.Exit(2)

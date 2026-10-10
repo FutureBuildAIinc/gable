@@ -3,7 +3,11 @@
 
 package migrate
 
-import "testing"
+import (
+	"errors"
+	"flag"
+	"testing"
+)
 
 // TestParseArgs pins the one flag migrate takes: -report names a read only
 // pre flight report (units is the one there is); no flag means apply the
@@ -21,6 +25,8 @@ func TestParseArgs(t *testing.T) {
 		{[]string{"-report"}, "", true},
 		{[]string{"--port", "9999"}, "", true},
 		{[]string{"units"}, "", true},
+		{[]string{"-report", ""}, "", true},
+		{[]string{"-report="}, "", true},
 	} {
 		opts, err := ParseArgs(tc.args)
 		if tc.refused {
@@ -35,6 +41,16 @@ func TestParseArgs(t *testing.T) {
 		}
 		if opts.Report != tc.report {
 			t.Errorf("ParseArgs(%v).Report = %q, want %q", tc.args, opts.Report, tc.report)
+		}
+	}
+}
+
+// TestParseArgsHelp pins that -h asks for help (ErrHelp), so the entry
+// prints the usage and exits 0 like the other subcommands, never migrating.
+func TestParseArgsHelp(t *testing.T) {
+	for _, args := range [][]string{{"-h"}, {"--help"}} {
+		if _, err := ParseArgs(args); !errors.Is(err, flag.ErrHelp) {
+			t.Errorf("ParseArgs(%v) error = %v, want flag.ErrHelp", args, err)
 		}
 	}
 }
