@@ -176,6 +176,7 @@ var m101Names = []string{
 	"M4a", "M4b", "M4c", "M4d", "M4e", "M4f",
 	"D1", "D5a", "D5b", "D5c", "D5d", "D5e", "D5f", "D5h", "D5g", "D5m", "DX",
 	"E1r", "E1a", "E5ar", "E5b", "E5c", "E5d",
+	"I3w", "P3w", "I5e0", "R2",
 }
 
 var m101ID = func() map[string]string {
@@ -222,6 +223,8 @@ INSERT INTO invoices (id, customer_id, status, total_amount, subtotal, tax_amoun
 	('{I1b}','{C1}','PAID',60,60,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08','2031-03-09 08:00:00+00',NULL,NULL),
 	('{I2}','{C2}','UNPAID',100,100,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08',NULL,NULL,NULL),
 	('{I3v}','{C3}','VOID',100,100,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08',NULL,'2031-03-09 09:00:00+00','2031-03-09'),
+	('{I3w}','{C3}','WRITTEN_OFF',60,60,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08',NULL,NULL,NULL),
+	('{I5e0}','{C5e}','PAID',40,40,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-03-01','2031-03-09 08:30:00+00',NULL,NULL),
 	('{I3p}','{C3}','PAID',80,80,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08','2031-03-09 08:30:00+00',NULL,NULL),
 	('{I3u}','{C3}','UNPAID',90,90,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08',NULL,NULL,NULL),
 	('{I3z}','{C3}','UNPAID',0,0,0,'{B1}','USD','2031-03-09 08:00:00+00','2031-03-09 08:00:00+00','2031-03-09','2031-04-08',NULL,NULL,NULL),
@@ -249,9 +252,11 @@ INSERT INTO payments (id, invoice_id, amount, method, reference, created_at) VAL
 	('{P3u2}','{I3u}',40,'CASH','P3u2','2031-03-13 10:02:00+00'),
 	('{P4b}','{I4b}',70,'CASH','P4b','2031-03-14 10:00:00+00'),
 	('{P4c}','{I4c}',40,'CASH','P4c','2031-03-14 10:01:00+00'),
-	('{P5d}','{I5d}',60,'CARD','P5d','2031-03-14 10:02:00+00');
+	('{P5d}','{I5d}',60,'CARD','P5d','2031-03-14 10:02:00+00'),
+	('{P3w}','{I3w}',20,'CASH','P3w','2031-03-14 10:03:00+00');
 INSERT INTO payment_refunds (id, payment_id, amount, reason, status, created_at) VALUES
-	('{R1}','{P1}',70,'goods returned','COMPLETE','2031-03-10 22:00:00+00');
+	('{R1}','{P1}',70,'goods returned','COMPLETE','2031-03-10 22:00:00+00'),
+	('{R2}','{P4b}',25,'refund asked, never completed','PENDING','2031-03-14 11:00:00+00');
 
 INSERT INTO gl_journal_entries (id, entry_date, memo, source, status) VALUES
 	('{E1r}','2031-03-21','deposit receipt','DEPOSIT','POSTED'), ('{E1a}','2031-03-22','deposit applied','DEPOSIT','POSTED'),
@@ -405,8 +410,8 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 		"PAYMENT D5c>I5c 20.00 live",
 		"PAYMENT D5c>I5c 30.00 live",
 		"PAYMENT D5d>I5d 40.00 live",
-		"PAYMENT D5e>I5e1 60.00 live",
-		"PAYMENT D5e>I5e2 30.00 live",
+		"PAYMENT D5e>I5e0 40.00 live",
+		"PAYMENT D5e>I5e1 50.00 live",
 		"PAYMENT D5f>I5f 50.00 live",
 		"PAYMENT D5h>I5h 40.00 live",
 		"PAYMENT P1>I1 100.00 reversed",
@@ -414,7 +419,6 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 		"PAYMENT P2a>I2 100.00 live",
 		"PAYMENT P3u1>I3u 50.00 live",
 		"PAYMENT P3u2>I3u 40.00 live",
-		"PAYMENT P3v>I3v 30.00 live",
 		"PAYMENT P4b>I4b 70.00 live",
 		"PAYMENT P4c>I4c 40.00 live",
 		"PAYMENT P5d>I5d 60.00 live",
@@ -452,6 +456,8 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 		"I1b":  "PAID|0.00|kept",
 		"I2":   "PAID|0.00|updated_at",
 		"I3v":  "VOID|0.00|none",
+		"I3w":  "WRITTEN_OFF|0.00|cleared",
+		"I5e0": "PAID|0.00|kept",
 		"I3p":  "UNPAID|80.00|cleared",
 		"I3u":  "PAID|0.00|updated_at",
 		"I3z":  "PAID|0.00|updated_at",
@@ -462,8 +468,8 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 		"I5c":  "PARTIAL|50.00|cleared",
 		"I5d":  "PAID|0.00|updated_at",
 		"I5h":  "PARTIAL|60.00|cleared",
-		"I5e1": "PAID|0.00|updated_at",
-		"I5e2": "PARTIAL|20.00|cleared",
+		"I5e1": "PARTIAL|10.00|cleared",
+		"I5e2": "UNPAID|50.00|cleared",
 		"I5f":  "PAID|0.00|updated_at",
 		"I6":   "PAID|0.00|updated_at",
 		"I7":   "UNPAID|100.00|cleared",
@@ -498,6 +504,8 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 	}
 	excessWant := map[string]string{
 		"P1":  "migrated payment excess|APPLIED|-50.00|0.00",
+		"P3v": "migrated payment excess|OPEN|-30.00|-30.00",
+		"P3w": "migrated payment excess|OPEN|-20.00|-20.00",
 		"P2b": "migrated payment excess|OPEN|-25.00|-25.00",
 		"D5d": "migrated deposit application|OPEN|-40.00|-40.00",
 		"D5f": "migrated deposit application|OPEN|-20.00|-20.00",
@@ -508,18 +516,18 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 			t.Errorf("excess memo of %s = %s, want %s", name, got, want)
 		}
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM credit_memos`); n != 10 {
-		t.Errorf("%d credit memos, want 6 seeded + 4 excess", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM credit_memos`); n != 12 {
+		t.Errorf("%d credit memos, want 6 seeded + 6 excess", n)
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM credit_memos WHERE source_payment_id IS NOT NULL`); n != 4 {
-		t.Errorf("%d memos name a source payment, want only the 4 excess memos", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM credit_memos WHERE source_payment_id IS NOT NULL`); n != 6 {
+		t.Errorf("%d memos name a source payment, want only the 6 excess memos", n)
 	}
 	// each excess memo: numbered from the CM counter, no entry, branch and currency, one ADJUST line
-	if got := one101[string](t, conn, `SELECT count(*)::text || '|' || count(DISTINCT number)::text || '|' || min(number) FROM credit_memos WHERE source_payment_id IS NOT NULL AND number ~ '^CM-[0-9]{6}$'`); got != "4|4|CM-000006" {
-		t.Errorf("excess memo numbers = %s, want 4 distinct from CM-000006", got)
+	if got := one101[string](t, conn, `SELECT count(*)::text || '|' || count(DISTINCT number)::text || '|' || min(number) FROM credit_memos WHERE source_payment_id IS NOT NULL AND number ~ '^CM-[0-9]{6}$'`); got != "6|6|CM-000006" {
+		t.Errorf("excess memo numbers = %s, want 6 distinct from CM-000006", got)
 	}
-	if got := one101[int64](t, conn, `SELECT next_value FROM document_counters WHERE series = 'credit_memo'`); got != 10 {
-		t.Errorf("credit memo counter = %d, want 10", got)
+	if got := one101[int64](t, conn, `SELECT next_value FROM document_counters WHERE series = 'credit_memo'`); got != 12 {
+		t.Errorf("credit memo counter = %d, want 12", got)
 	}
 	if got := one101[string](t, conn, `SELECT (gl_entry_id IS NULL)::text || '|' || currency || '|' || reason_code || '|' || subtotal::text || '|' || tax_amount::text || '|' || memo_date::text || '|' || (branch_id = $2)::text
 		FROM credit_memos WHERE source_payment_id = $1`, m101ID["P1"], m101ID["B1"]); got != "true|USD|OTHER|-50.00|0.00|2031-03-11|true" {
@@ -529,7 +537,7 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 		FROM credit_memo_lines l JOIN credit_memos m ON m.id = l.credit_memo_id JOIN charge_codes cc ON cc.id = l.charge_code_id WHERE m.source_payment_id = $1`, m101ID["P1"]); got != "CHARGE|ADJUST|-1.0000|50.0000|-50.00|false" {
 		t.Errorf("worked case memo line = %s, want one ADJUST line", got)
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM credit_memo_lines l JOIN credit_memos m ON m.id = l.credit_memo_id WHERE m.source_payment_id IS NOT NULL`); n != 4 {
+	if n := one101[int](t, conn, `SELECT count(*) FROM credit_memo_lines l JOIN credit_memos m ON m.id = l.credit_memo_id WHERE m.source_payment_id IS NOT NULL`); n != 6 {
 		t.Errorf("%d lines on excess memos, want one each", n)
 	}
 	if got := one101[string](t, conn, `SELECT currency FROM credit_memos WHERE source_payment_id = $1`, m101ID["D5d"]); got != "USD" {
@@ -538,7 +546,7 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 
 	// payments: amount_unapplied and migrated_excess, and the recompute leaves them
 	payWant := map[string]string{
-		"P1": "0.00|50.00", "P6": "0.00|0.00", "P2a": "0.00|0.00", "P2b": "0.00|25.00", "P3v": "0.00|0.00",
+		"P1": "0.00|50.00", "P6": "0.00|0.00", "P2a": "0.00|0.00", "P2b": "0.00|25.00", "P3v": "0.00|30.00", "P3w": "0.00|20.00",
 		"P3u1": "0.00|0.00", "P3u2": "0.00|0.00", "P4b": "0.00|0.00", "P4c": "0.00|0.00", "P5d": "0.00|0.00",
 		"D1": "0.00|0.00", "D5a": "100.00|0.00", "D5b": "70.00|0.00", "D5c": "0.00|0.00", "D5d": "0.00|40.00",
 		"D5e": "0.00|0.00", "D5f": "0.00|20.00", "D5g": "0.00|0.00", "D5h": "0.00|0.00", "D5m": "25.00|0.00",
@@ -549,12 +557,12 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 			t.Errorf("payment %s unapplied|migrated_excess = %s, want %s", name, got, want)
 		}
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM payments`); n != 20 {
-		t.Errorf("%d payments, want 10 legacy + 10 deposits", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM payments`); n != 21 {
+		t.Errorf("%d payments, want 11 legacy + 10 deposits", n)
 	}
 	if n := one101[int](t, conn, `SELECT count(*) FROM payments p WHERE p.amount_unapplied IS DISTINCT FROM GREATEST(0, p.amount
 		- COALESCE((SELECT SUM(a.amount) FROM ar_applications a WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL), 0)
-		- COALESCE((SELECT SUM(f.amount) FROM payment_refunds f WHERE f.payment_id = p.id), 0) - p.migrated_excess)`); n != 0 {
+		- COALESCE((SELECT SUM(f.amount) FROM payment_refunds f WHERE f.payment_id = p.id AND f.status = 'COMPLETE'), 0) - p.migrated_excess)`); n != 0 {
 		t.Errorf("%d payments change on a recompute of amount_unapplied", n)
 	}
 	// the worked case in full
@@ -585,8 +593,12 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 			t.Errorf("refund of deposit %s = %s, want %s", name, got, want)
 		}
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM payment_refunds`); n != 4 {
-		t.Errorf("%d refund rows, want 4 (20, 50, and two deposit refunds; no refund for unrefunded deposits)", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM payment_refunds`); n != 5 {
+		t.Errorf("%d refund rows, want 5 (20, 50, the pending one untouched, and two deposit refunds; no refund for unrefunded deposits)", n)
+	}
+	// a refund that never completed returned nothing: the payment keeps its whole application and the row stays as it was
+	if got := one101[string](t, conn, `SELECT payment_id::text || '|' || amount::text || '|' || status FROM payment_refunds WHERE id = $1`, m101ID["R2"]); got != m101ID["P4b"]+"|25.00|PENDING" {
+		t.Errorf("the pending refund = %s, want it untouched on its payment", got)
 	}
 	if n := one101[int](t, conn, `SELECT count(*) FROM payment_refunds WHERE method IS NULL OR refunded_on IS NULL`); n != 0 {
 		t.Errorf("%d refunds lack a method or a date", n)
@@ -595,7 +607,7 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 	// numbering: PAY- in (created_at, id) order, legacy payments first, deposits after, ties by id
 	order := strs101(t, conn, `SELECT id::text FROM payments ORDER BY number`)
 	var wantOrder []string
-	for _, n := range []string{"P1", "P6", "P2a", "P2b", "P3v", "P3u1", "P3u2", "P4b", "P4c", "P5d", "D1", "D5a", "D5b", "D5c", "D5d", "D5e", "D5f", "D5h", "D5g", "D5m"} {
+	for _, n := range []string{"P1", "P6", "P2a", "P2b", "P3v", "P3u1", "P3u2", "P4b", "P4c", "P5d", "P3w", "D1", "D5a", "D5b", "D5c", "D5d", "D5e", "D5f", "D5h", "D5g", "D5m"} {
 		wantOrder = append(wantOrder, m101ID[n])
 	}
 	if fmt.Sprint(order) != fmt.Sprint(wantOrder) {
@@ -605,14 +617,14 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 		}
 		t.Errorf("payments by number = %v", names)
 	}
-	if got := one101[string](t, conn, `SELECT min(number) || ' ' || max(number) || ' ' || count(DISTINCT number)::text FROM payments`); got != "PAY-000001 PAY-000020 20" {
-		t.Errorf("payment numbers = %s, want PAY-000001 to PAY-000020", got)
+	if got := one101[string](t, conn, `SELECT min(number) || ' ' || max(number) || ' ' || count(DISTINCT number)::text FROM payments`); got != "PAY-000001 PAY-000021 21" {
+		t.Errorf("payment numbers = %s, want PAY-000001 to PAY-000021", got)
 	}
-	if got := one101[string](t, conn, `SELECT number FROM payments WHERE id = $1`, m101ID["D5h"]); got != "PAY-000018" {
-		t.Errorf("D5h number = %s, want PAY-000018 (it sorts before D5g on the tie)", got)
+	if got := one101[string](t, conn, `SELECT number FROM payments WHERE id = $1`, m101ID["D5h"]); got != "PAY-000019" {
+		t.Errorf("D5h number = %s, want PAY-000019 (it sorts before D5g on the tie)", got)
 	}
-	if got := one101[string](t, conn, `SELECT payment_next_number()`); got != "PAY-000021" {
-		t.Errorf("the next payment number = %s, want PAY-000021", got)
+	if got := one101[string](t, conn, `SELECT payment_next_number()`); got != "PAY-000022" {
+		t.Errorf("the next payment number = %s, want PAY-000022", got)
 	}
 
 	// received_on is the branch-local date of created_at; branch and currency are backfilled
@@ -635,8 +647,8 @@ func TestMigration101_BackfillsRowsThatExist(t *testing.T) {
 			t.Errorf("payment %s customer = %s, want %s", name, nm101(got), cust)
 		}
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM payments WHERE invoice_id IS NOT NULL`); n != 10 {
-		t.Errorf("%d payments keep an invoice_id, want the 10 legacy ones", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM payments WHERE invoice_id IS NOT NULL`); n != 11 {
+		t.Errorf("%d payments keep an invoice_id, want the 11 legacy ones", n)
 	}
 	if got := one101[string](t, conn, `SELECT is_nullable FROM information_schema.columns WHERE table_name = 'payments' AND column_name = 'invoice_id'`); got != "YES" {
 		t.Errorf("payments.invoice_id nullable = %s", got)
@@ -710,7 +722,12 @@ func TestMigration101_IdempotentThenDownThenUpAgain(t *testing.T) {
 			"memos":    strs101(t, conn, `SELECT id::text || '|' || total_amount::text FROM credit_memos ORDER BY id`),
 		}
 	}
+	// a legacy memo number that is not CM-<digits> must not stop the down file (the counter reads only the CM- numbers)
+	if _, err := conn.Exec(context.Background(), `UPDATE credit_memos SET number = 'AWK-CM1' WHERE id = $1`, m101ID["M4a"]); err != nil {
+		t.Fatal(err)
+	}
 	before := legacy()
+	refundRows := one101[int](t, conn, `SELECT count(*) FROM payment_refunds`)
 
 	// the migrated state, normalised so rows the migration mints fresh (new ids) compare by what they are
 	state := func() []string {
@@ -774,8 +791,14 @@ func TestMigration101_IdempotentThenDownThenUpAgain(t *testing.T) {
 			t.Errorf("after down, %s =\n%v\nwant (as the base held them)\n%v", key, after[key], before[key])
 		}
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM payment_refunds WHERE payment_id = $1`, m101ID["P1"]); n != 2 {
-		t.Errorf("worked case refund rows after down = %d, want the 20 and the 50 both back on the payment", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM payment_refunds WHERE payment_id = $1`, m101ID["P1"]); n != 1 {
+		t.Errorf("worked case refund rows after down = %d, want the 20 and the 50 merged back into the one legacy row", n)
+	}
+	if got := one101[string](t, conn, `SELECT id::text FROM payment_refunds WHERE payment_id = $1`, m101ID["P1"]); got != m101ID["R1"] {
+		t.Errorf("the merged refund is row %s, want the original row", got)
+	}
+	if n := one101[int](t, conn, `SELECT count(*) FROM payment_refunds`); n != refundRows {
+		t.Errorf("%d refund rows after down, want the %d the base held", n, refundRows)
 	}
 	if got := one101[string](t, conn, `SELECT sum(amount)::text FROM payment_refunds WHERE payment_id = $1`, m101ID["P1"]); got != "70.00" {
 		t.Errorf("worked case refunds after down total %s, want 70.00", got)
@@ -796,8 +819,8 @@ func TestMigration101_IdempotentThenDownThenUpAgain(t *testing.T) {
 	if n := one101[int](t, conn, `SELECT count(*) FROM payments WHERE id IN (SELECT id FROM customer_deposits)`); n != 0 {
 		t.Errorf("%d payments made from deposits remain after down", n)
 	}
-	if n := one101[int](t, conn, `SELECT count(*) FROM payments`); n != 10 {
-		t.Errorf("%d payments after down, want the 10 legacy ones", n)
+	if n := one101[int](t, conn, `SELECT count(*) FROM payments`); n != 11 {
+		t.Errorf("%d payments after down, want the 11 legacy ones", n)
 	}
 	if got := one101[string](t, conn, `SELECT is_nullable FROM information_schema.columns WHERE table_name = 'payments' AND column_name = 'invoice_id'`); got != "NO" {
 		t.Errorf("payments.invoice_id nullable after down = %s, want NO", got)

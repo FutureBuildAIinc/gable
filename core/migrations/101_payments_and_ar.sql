@@ -14,6 +14,14 @@
 --      APPLIED credit memo and legacy refund into applications (a legacy payment
 --      was never capped: its excess becomes an OPEN credit memo, not cash in
 --      2200; a refund consumes that credit first, then reopens the invoice).
+--      A void or written off invoice takes no application, so cash a legacy
+--      record put against one is excess too. Only a COMPLETE refund counts as
+--      money returned. A deposit with no invoice named goes to the customer's
+--      invoices by room left, whatever their stored status: a PAID invoice that no
+--      payment, memo or deposit names has no cash behind it, so it is owed, and
+--      step 4 reopens it the same way (the down file cannot tell it from an
+--      invoice that was always unpaid, so deciding by the stored status would make
+--      a second apply differ).
 --   3  customer_deposits and their applications become payments and
 --      applications (same id), the two tables renamed *_legacy.
 --   4  invoices.amount_open and credit_memos.amount_open from the applications;
@@ -195,11 +203,14 @@ BEGIN
     RETURN memo_id;
 END $$;
 
--- Applying a sum to an invoice: capped at what the invoice still owes.
+-- Applying a sum to an invoice: capped at what the invoice still owes. A void or
+-- written off invoice takes no application (ADR 0005 9.2), so its room is 0 and
+-- cash a legacy record put against one takes the excess path: an open credit memo.
 CREATE OR REPLACE FUNCTION pg_temp.mig101_invoice_room(p_invoice UUID) RETURNS NUMERIC
 LANGUAGE sql AS $$
-    SELECT GREATEST(0, i.total_amount - COALESCE((SELECT SUM(a.amount) FROM ar_applications a
-                                                  WHERE a.invoice_id = p_invoice AND a.reversed_at IS NULL), 0))
+    SELECT CASE WHEN i.status IN ('VOID', 'WRITTEN_OFF') THEN 0
+                ELSE GREATEST(0, i.total_amount - COALESCE((SELECT SUM(a.amount) FROM ar_applications a
+                                                            WHERE a.invoice_id = p_invoice AND a.reversed_at IS NULL), 0)) END
     FROM invoices i WHERE i.id = p_invoice
 $$;
 
@@ -276,7 +287,7 @@ BEGIN
         FOR r IN
             SELECT f.id AS refund_id, f.payment_id, f.amount AS refund_amount, f.created_at AS refund_at, f.refunded_on
             FROM payment_refunds f
-            WHERE f.payment_id IS NOT NULL AND f.credit_memo_id IS NULL
+            WHERE f.payment_id IS NOT NULL AND f.credit_memo_id IS NULL AND f.status = 'COMPLETE'
             ORDER BY f.payment_id, f.created_at, f.id
         LOOP
             rest := r.refund_amount;
@@ -417,7 +428,7 @@ UPDATE payments p
 SET amount_unapplied = GREATEST(0, p.amount
         - COALESCE((SELECT SUM(a.amount) FROM ar_applications a
                     WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.reversed_at IS NULL), 0)
-        - COALESCE((SELECT SUM(f.amount) FROM payment_refunds f WHERE f.payment_id = p.id), 0)
+        - COALESCE((SELECT SUM(f.amount) FROM payment_refunds f WHERE f.payment_id = p.id AND f.status = 'COMPLETE'), 0)
         - p.migrated_excess)
 WHERE p.amount_unapplied IS NULL;
 ALTER TABLE payments ALTER COLUMN amount_unapplied SET NOT NULL;
