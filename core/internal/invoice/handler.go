@@ -5,6 +5,7 @@ package invoice
 
 import (
 	"encoding/json"
+	"github.com/gablelbm/gable/internal/account"
 	"net/http"
 	"strings"
 	"time"
@@ -30,8 +31,7 @@ func NewHandler(svc *Service) *Handler {
 
 // RegisterRoutes mounts the invoice and credit memo routes (ADR 0005 6.2 and
 // 6.3). The document print and email routes keep their paths in the document
-// module. The payments of an invoice stay with the payment module until C2-4
-// converts them into applications.
+// module. The invoice's payments read is its applications (C2-4).
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guard := func(handler http.HandlerFunc) http.HandlerFunc {
 		if len(roleGuard) > 0 && roleGuard[0] != nil {
@@ -45,12 +45,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/invoices", guard(h.HandleList))
 	mux.HandleFunc("GET /api/v1/invoices/{id}", guard(h.HandleGet))
 	mux.HandleFunc("POST /api/v1/invoices/{id}/transitions", guard(h.HandleTransition))
+	mux.HandleFunc("POST /api/v1/invoices/{id}/write-offs", guard(h.HandleWriteOff))
+	mux.HandleFunc("GET /api/v1/invoices/{id}/payments", guard(h.HandleApplications))
 
 	mux.HandleFunc("GET /api/v1/credit-memos", guard(h.HandleListCreditMemos))
 	mux.HandleFunc("POST /api/v1/credit-memos", guard(h.HandleCreateCreditMemo))
 	mux.HandleFunc("GET /api/v1/credit-memos/{id}", guard(h.HandleGetCreditMemo))
 	mux.HandleFunc("PUT /api/v1/credit-memos/{id}", guard(h.HandleUpdateCreditMemo))
 	mux.HandleFunc("POST /api/v1/credit-memos/{id}/transitions", guard(h.HandleCreditTransition))
+	mux.HandleFunc("POST /api/v1/credit-memos/{id}/applications", guard(h.HandleCreditApply))
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -85,7 +88,7 @@ func actor(r *http.Request) string {
 // in process caller, a machine key).
 func callerRole(r *http.Request) string {
 	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
-		return claims.Role
+		return account.RoleOf(claims)
 	}
 	return ""
 }
@@ -511,4 +514,86 @@ func (h *Handler) HandleCreditTransition(w http.ResponseWriter, r *http.Request)
 type timeAndID struct {
 	at time.Time
 	id uuid.UUID
+}
+
+// HandleWriteOff runs POST /invoices/{id}/write-offs (ADR 0005 9.4).
+func (h *Handler) HandleWriteOff(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "invoice")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req WriteOffRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	amount, reason, rev, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	inv, err := h.svc.WriteOff(r.Context(), id, amount, reason, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: rev},
+		Transition{Actor: actor(r), Role: callerRole(r)})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, inv.Revision)
+	writeJSON(w, http.StatusOK, inv)
+}
+
+// HandleApplications runs GET /invoices/{id}/payments: the invoice's
+// applications (payments, credit memos, discounts and write offs), reversed ones
+// included, oldest first.
+func (h *Handler) HandleApplications(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "invoice")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	apps, err := h.svc.ListApplications(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteList(w, apps, "", len(apps))
+}
+
+// HandleCreditApply runs POST /credit-memos/{id}/applications.
+func (h *Handler) HandleCreditApply(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "credit memo")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req CreditApplyRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	lines, rev, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	cm, err := h.svc.ApplyCreditMemo(r.Context(), id, lines, Precondition{IfMatch: r.Header.Get("If-Match"), Revision: rev},
+		Transition{Actor: actor(r), Role: callerRole(r)})
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeCredit(w, http.StatusOK, cm)
 }

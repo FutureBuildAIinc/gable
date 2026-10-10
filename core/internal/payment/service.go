@@ -5,41 +5,67 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
-	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
+// EventRecorder writes a domain event into the transactional outbox, as the
+// LAST statement of the mutation's transaction (ADR 0003 section 2).
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
+// AuditSink writes an audit row (*audit.Logger satisfies it).
+type AuditSink interface {
+	Log(ctx context.Context, e audit.Entry) error
+}
+
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3).
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+}
+
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. *database.DB satisfies it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// Service is the payment module: the acts of ADR 0005 section 9.4. The money
+// moves in the AR core (internal/account); this layer parses, holds the branch
+// wall and the roles, calls the card gateway outside the transaction, and
+// writes the audit rows and the events inside it.
 type Service struct {
 	db            *database.DB
-	repo          Repository
-	invoiceRepo   invoice.Repository
-	account       account.Service
+	tx            TxRunner
+	repo          *Repository
+	account       *account.Service
 	gateway       PaymentGateway // Run Payments (or nil for non-card payments)
 	publicKey     string         // Run Payments public key for Runner.js (static fallback)
 	keyStore      *KeyStore      // Optional: DB-first key resolution (Tech Admin settable)
 	brainNotifier *BrainNotifier // FB Brain financial engine notifier (or nil)
 	brainOrgID    string         // Brain org_id for this tenant
-	auditLog      *audit.Logger
+	auditLog      AuditSink
+	events        EventRecorder
+	branches      BranchGuard
 	logger        *slog.Logger
+	now           func() time.Time
 }
 
-func NewService(db *database.DB, repo Repository, invoiceRepo invoice.Repository, accountService account.Service) *Service {
-	return &Service{
-		db:          db,
-		repo:        repo,
-		invoiceRepo: invoiceRepo,
-		account:     accountService,
-		logger:      slog.Default(),
-	}
+func NewService(db *database.DB, repo *Repository, accountService *account.Service) *Service {
+	return &Service{db: db, repo: repo, account: accountService, logger: slog.Default(), now: time.Now}
 }
 
 // WithGateway sets the payment gateway (Run Payments) and returns the service for chaining.
@@ -58,10 +84,20 @@ func (s *Service) WithBrainNotifier(n *BrainNotifier, orgID string) *Service {
 }
 
 // WithAuditLog sets the audit logger for financial operation tracking.
-func (s *Service) WithAuditLog(l *audit.Logger) *Service {
+func (s *Service) WithAuditLog(l AuditSink) *Service {
 	s.auditLog = l
 	return s
 }
+
+// WithOutbox sets the event writer.
+func (s *Service) WithOutbox(e EventRecorder) *Service { s.events = e; return s }
+
+// WithTxRunner replaces the database as the transaction runner (a test gates
+// transactions with it; serve leaves the database).
+func (s *Service) WithTxRunner(tx TxRunner) *Service { s.tx = tx; return s }
+
+// WithBranchGuard sets the payload branch rule for the write routes.
+func (s *Service) WithBranchGuard(g BranchGuard) *Service { s.branches = g; return s }
 
 // WithKeyStore enables DB-first gateway credential resolution so keys set
 // at runtime (system_settings via Tech Admin) take effect without restart.
@@ -80,431 +116,486 @@ func (s *Service) GetPublicKey() string {
 	return s.publicKey
 }
 
-// ErrInvoiceVoid is the refusal to record a payment against a void invoice.
-var ErrInvoiceVoid = errors.New("the invoice is void: it takes no payment")
-
-// ErrChargeNotReversed: the card was charged, the invoice refused the payment,
-// and neither the void nor the refund went through.
-var ErrChargeNotReversed = errors.New("the card was charged and the charge could not be reversed")
-
-// ChargeNotReversedError is the error ProcessCardPayment returns when the
-// reversal failed. It carries the gateway transaction id finance reconciles
-// and nothing else about the card; errors.Is(err, ErrChargeNotReversed) holds.
-type ChargeNotReversedError struct {
-	GatewayTxID string
-	Cause       error
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx != nil {
+		return s.tx.RunInTx(ctx, fn)
+	}
+	return s.db.RunInTx(ctx, fn)
 }
 
-func (e *ChargeNotReversedError) Error() string {
-	return fmt.Sprintf("%s (gateway transaction %s): %v", ErrChargeNotReversed, e.GatewayTxID, e.Cause)
+func (s *Service) record(ctx context.Context, ev outbox.Event) error {
+	if s.events == nil {
+		return nil
+	}
+	return s.events.Write(ctx, ev)
 }
 
-func (e *ChargeNotReversedError) Is(target error) bool { return target == ErrChargeNotReversed }
+func (s *Service) recordAll(ctx context.Context, evs []outbox.Event) error {
+	for _, ev := range evs {
+		if err := s.record(ctx, ev); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-func (e *ChargeNotReversedError) Unwrap() error { return e.Cause }
+func (s *Service) audit(ctx context.Context, e audit.Entry) error {
+	if s.auditLog == nil {
+		return nil
+	}
+	if err := s.auditLog.Log(ctx, e); err != nil {
+		return fmt.Errorf("failed to write the audit row: %w", err)
+	}
+	return nil
+}
 
-// reversalTimeout bounds the gateway calls and the audit write of a reversal,
-// which run detached from the request.
-const reversalTimeout = 30 * time.Second
+func conflictBlocker(code, message string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: message,
+		Details: []httpx.FieldError{httpx.Blocker(code, message)}}
+}
 
-// chargeReversal is how a reversal of an approved charge ended.
-type chargeReversal string
+func fieldError(field, message string) *httpx.Error {
+	return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed, Message: "the request is not valid",
+		Details: []httpx.FieldError{{Field: field, Message: message}}}
+}
 
+// Precondition is the client's revision for an act on the payment named in the
+// path (ADR 0001 section 11).
+type Precondition struct {
+	IfMatch  string
+	Revision *int64
+}
+
+func (p Precondition) missing() bool { return p.IfMatch == "" && p.Revision == nil }
+
+func (p Precondition) check(current int64) error {
+	return httpx.CheckRevision(current, p.IfMatch, p.Revision)
+}
+
+// Caller is who is acting: the audit subject and the role the finance rules
+// read. An in process caller has neither.
+type Caller struct {
+	Actor string
+	Role  string
+}
+
+func (c Caller) finance(what string) error {
+	if c.Role != "" && !account.FinanceRole(c.Role) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden, Message: what + " needs the admin, owner or finance role"}
+	}
+	return nil
+}
+
+// checkBranch is the record branch rule for a branch a payload names.
+func (s *Service) checkBranch(ctx context.Context, branch uuid.UUID, field string) error {
+	if s.branches == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, branch)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "the branch is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: field, Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
+}
+
+// resolved is a payment request checked against the database, ready to record.
+type resolved struct {
+	in       *Input
+	currency string
+	branch   uuid.UUID
+}
+
+// resolve reads what the request leaves to the database: the customer's
+// currency and branch, and holds the order, the job and the invoices it names
+// to the customer and the branch wall. Nothing is locked.
+func (s *Service) resolve(ctx context.Context, in *Input) (*resolved, error) {
+	facts, err := s.repo.CustomerFacts(ctx, in.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	branch := facts.Branch
+	if in.BranchID != nil {
+		branch = *in.BranchID
+	} else if ctxBranch := middleware.BranchIDForQuery(ctx); ctxBranch != nil {
+		branch = *ctxBranch
+	}
+	if err := s.checkBranch(ctx, branch, "branch_id"); err != nil {
+		return nil, err
+	}
+	if in.OrderID != nil {
+		exists, matches, err := s.repo.OrderBelongsTo(ctx, *in.OrderID, in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists || !matches {
+			return nil, fieldError("order_id", "no such order for this customer")
+		}
+	}
+	if in.JobID != nil {
+		exists, matches, err := s.repo.JobBelongsTo(ctx, *in.JobID, in.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !exists || !matches {
+			return nil, fieldError("job_id", "no such job for this customer")
+		}
+	}
+	for i, a := range in.Applications {
+		ok, err := s.repo.InvoiceVisible(ctx, a.InvoiceID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fieldError(fmt.Sprintf("applications[%d].invoice_id", i), "no such invoice")
+		}
+	}
+	return &resolved{in: in, currency: facts.Currency, branch: branch}, nil
+}
+
+// recordedEvent is payment.recorded: the payment as it stands after the act.
+func recordedEvent(p *Payment) outbox.Event {
+	branch := p.BranchID
+	data := map[string]any{
+		"number": p.Number, "customer_id": p.CustomerID, "status": p.Status.Status(), "revision": p.Revision, "currency": p.Currency,
+		"amount_cents": int64(p.AmountCents), "unapplied_cents": int64(p.UnappliedCents), "method": string(p.Method),
+	}
+	if p.OrderID != nil {
+		data["order_id"] = p.OrderID
+	}
+	return outbox.Event{Type: EventRecorded, EntityType: "payment", EntityID: p.ID, BranchID: &branch, Data: mustJSON(data)}
+}
+
+// Event types the payment module writes (the AR core writes the application
+// level ones).
 const (
-	chargeVoided   chargeReversal = "voided"
-	chargeRefunded chargeReversal = "refunded"
-	chargeFailed   chargeReversal = "failed"
+	EventRecorded = "payment.recorded"
+	EventRefunded = "payment.refunded"
+	EventVoided   = "payment.voided"
 )
 
-// lockInvoice reads the invoice under its row lock (ADR 0005 section 11,
-// step 4) so a payment and an invoice void serialize: the void checks for
-// payments under the same lock, and a payment never lands on a void invoice.
-// C2-4 moves this into the AR core with the rest of the payment acts.
-func (s *Service) lockInvoice(ctx context.Context, id uuid.UUID) (*invoice.Invoice, error) {
-	var inv *invoice.Invoice
-	var err error
-	if l, ok := s.invoiceRepo.(interface {
-		LockInvoice(ctx context.Context, id uuid.UUID) (*invoice.Invoice, error)
-	}); ok {
-		inv, err = l.LockInvoice(ctx, id)
-	} else {
-		inv, err = s.invoiceRepo.GetInvoice(ctx, id)
+// notifyPaid tells FB Brain's financial engine of the invoices an act closed,
+// after the commit.
+func (s *Service) notifyPaid(fx *account.Effects) {
+	if s.brainNotifier == nil || fx == nil {
+		return
 	}
+	for _, inv := range fx.PaidInvoices() {
+		s.brainNotifier.notifyInvoicePaid(s.brainOrgID, inv.ID, inv.TotalCents)
+	}
+}
+
+// Create records a payment (cash, check, ACH or other), applying it to the
+// invoices the request names in the same transaction. Without applications it
+// is unapplied cash held in 2200.
+func (s *Service) Create(ctx context.Context, in *Input, who Caller) (*Payment, error) {
+	res, err := s.resolve(ctx, in)
 	if err != nil {
 		return nil, err
 	}
-	if inv.Status == invoice.InvoiceStatusVoid {
-		return nil, ErrInvoiceVoid
-	}
-	return inv, nil
-}
-
-// ProcessPayment handles cash, check, and account payments (non-gateway).
-func (s *Service) ProcessPayment(ctx context.Context, invoiceID uuid.UUID, amountCents int64, method PaymentMethod, ref, notes string) (*Payment, error) {
-	if amountCents <= 0 {
-		return nil, fmt.Errorf("payment amount must be positive")
-	}
-
-	var p *Payment
-
-	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
-		inv, err := s.lockInvoice(ctx, invoiceID)
-		if errors.Is(err, ErrInvoiceVoid) {
-			return err
-		}
-		if err != nil {
-			return fmt.Errorf("invoice not found: %w", err)
-		}
-
-		p = &Payment{
-			InvoiceID: invoiceID,
-			Amount:    amountCents,
-			Method:    method,
-			Reference: ref,
-			Notes:     notes,
-		}
-
-		if err := s.repo.CreatePayment(ctx, p); err != nil {
-			return err
-		}
-
-		_, err = s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypePayment, -amountCents, &p.ID, "Payment "+ref)
-		if err != nil {
-			return fmt.Errorf("failed to post to account ledger: %w", err)
-		}
-
-		if err := s.updateInvoiceStatus(ctx, invoiceID, inv); err != nil {
-			return err
-		}
-
-		// Audit log: inside the transaction, so it shares the payment's fate
-		// — a rolled back payment leaves no audit row.
-		if s.auditLog != nil {
-			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action:     "payment.processed",
-				EntityType: "payment",
-				EntityID:   p.ID,
-				Changes: map[string]interface{}{
-					"invoice_id":   invoiceID,
-					"amount_cents": amountCents,
-					"method":       string(method),
-					"reference":    ref,
-				},
-			}); err != nil {
-				return fmt.Errorf("failed to write audit log: %w", err)
-			}
-		}
-		return nil
-	})
-
+	p, fx, err := s.record1(ctx, res, nil, who)
 	if err != nil {
 		return nil, err
 	}
-
+	s.notifyPaid(fx)
 	return p, nil
 }
 
-// ProcessCardPayment handles card payments through the Run Payments gateway.
-func (s *Service) ProcessCardPayment(ctx context.Context, invoiceID uuid.UUID, tokenID string, amountCents int64, notes string) (*Payment, error) {
-	if amountCents <= 0 {
-		return nil, fmt.Errorf("payment amount must be positive")
-	}
-	if s.gateway == nil {
-		return nil, fmt.Errorf("payment gateway not configured — set RUN_PAYMENTS_API_KEY")
-	}
-
-	// A void invoice takes no payment: refuse before the card is charged (the
-	// locked read inside the transaction below repeats the check).
-	if pre, err := s.invoiceRepo.GetInvoice(ctx, invoiceID); err == nil && pre.Status == invoice.InvoiceStatusVoid {
-		return nil, ErrInvoiceVoid
-	}
-
-	// 1. Charge through Run Payments
-	result, err := s.gateway.Charge(ctx, ChargeRequest{
-		TokenID:     tokenID,
-		AmountCents: amountCents,
-		Currency:    "USD",
-		Description: fmt.Sprintf("Invoice %s", invoiceID.String()[:8]),
-		InvoiceID:   invoiceID.String(),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("gateway charge failed: %w", err)
-	}
-
-	if result.Status == GatewayStatusDeclined {
-		return nil, fmt.Errorf("card declined: %s", result.AuthCode)
-	}
-	if result.Status != GatewayStatusApproved {
-		return nil, fmt.Errorf("unexpected gateway status: %s", result.Status)
-	}
-
-	// 2. Record payment in our DB within a transaction
-	var p *Payment
-	refused := false
-	began := false
-	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
-		began = true
-		inv, err := s.lockInvoice(ctx, invoiceID)
-		if errors.Is(err, ErrInvoiceVoid) {
-			refused = true
-			return err
-		}
-		if err != nil {
-			refused = true
-			return fmt.Errorf("invoice not found: %w", err)
-		}
-
-		p = &Payment{
-			InvoiceID:     invoiceID,
-			Amount:        amountCents,
-			Method:        PaymentMethodCard,
-			Reference:     fmt.Sprintf("Run:%s", result.TransactionID),
-			Notes:         notes,
-			GatewayTxID:   result.TransactionID,
-			GatewayStatus: string(result.Status),
-			TokenID:       tokenID,
-			CardLast4:     result.CardLast4,
-			CardBrand:     result.CardBrand,
-			AuthCode:      result.AuthCode,
-		}
-
-		if err := s.repo.CreatePayment(ctx, p); err != nil {
-			return err
-		}
-
-		_, err = s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypePayment, -amountCents, &p.ID, "Card Payment "+result.CardBrand+" ***"+result.CardLast4)
-		if err != nil {
-			return fmt.Errorf("failed to post to account ledger: %w", err)
-		}
-
-		if err := s.updateInvoiceStatus(ctx, invoiceID, inv); err != nil {
-			return err
-		}
-
-		// Audit log: inside the transaction, so it shares the payment's fate
-		// — a rolled back payment leaves no audit row.
-		if s.auditLog != nil {
-			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action:     "payment.processed",
-				EntityType: "payment",
-				EntityID:   p.ID,
-				Changes: map[string]interface{}{
-					"invoice_id":    invoiceID,
-					"amount_cents":  amountCents,
-					"method":        string(PaymentMethodCard),
-					"gateway_tx_id": result.TransactionID,
-					"card_brand":    result.CardBrand,
-					"card_last4":    result.CardLast4,
-				},
-			}); err != nil {
-				return fmt.Errorf("failed to write audit log: %w", err)
-			}
-		}
-		return nil
-	})
-
-	if err != nil && (refused || !began) {
-		// Nothing was recorded for an approved charge: the invoice refused
-		// it (a void committed during the call) or the transaction never
-		// opened (the request ended during the call). Give the money back
-		// before returning, so the customer is not charged with no document.
-		// The reversal does not ride the request: a client that gave up must
-		// not leave the card charged.
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
-		defer cancel()
-		outcome, cause := s.reverseCharge(rctx, result.TransactionID, invoiceID, amountCents)
-		if outcome == chargeFailed {
-			return nil, &ChargeNotReversedError{GatewayTxID: result.TransactionID, Cause: cause}
-		}
-		return nil, fmt.Errorf("payment refused after the gateway approved the charge, and the card charge was %s: %w", outcome, err)
-	}
-	if err != nil {
-		// Gateway charged but DB failed — log for manual reconciliation
-		s.logger.Error("CRITICAL: Gateway charged but DB commit failed",
-			"gateway_tx_id", result.TransactionID,
-			"invoice_id", invoiceID,
-			"amount_cents", amountCents,
-			"error", err,
-		)
-		return nil, fmt.Errorf("payment recorded at gateway but failed to save: %w", err)
-	}
-
-	return p, nil
-}
-
-// reverseCharge undoes an approved charge that no payment record backs: the
-// same-day void first, the refund when the void is refused (a settled
-// capture). It logs the outcome and writes it to the audit log, in its own
-// write after the rolled back transaction ended, naming the invoice and the
-// gateway transaction id (no card data). On failure it returns both causes for
-// manual reconciliation.
-func (s *Service) reverseCharge(ctx context.Context, gatewayTxID string, invoiceID uuid.UUID, amountCents int64) (chargeReversal, error) {
-	outcome, cause := chargeVoided, error(nil)
-	if _, voidErr := s.gateway.Void(ctx, gatewayTxID); voidErr != nil {
-		s.logger.Info("Gateway void refused, refunding instead",
-			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "error", voidErr)
-		if _, refundErr := s.gateway.Refund(ctx, gatewayTxID, amountCents); refundErr != nil {
-			outcome, cause = chargeFailed, fmt.Errorf("void: %v; refund: %v", voidErr, refundErr)
+// record1 is the one transaction that records a payment: the core's receipt
+// and applications, the audit row, then payment.recorded and the core's events
+// last. card is the gateway's result for a card payment.
+func (s *Service) record1(ctx context.Context, res *resolved, card *account.CardFacts, who Caller) (*Payment, *account.Effects, error) {
+	in := res.in
+	var out *Payment
+	var effects *account.Effects
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		on := time.Time{}
+		if in.ReceivedOn != nil {
+			on = *in.ReceivedOn
 		} else {
-			outcome = chargeRefunded
-		}
-	}
-	switch outcome {
-	case chargeFailed:
-		s.logger.Error("CRITICAL: Gateway charged, the invoice refused it, and the reversal failed",
-			"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents, "error", cause)
-	default:
-		s.logger.Warn("Gateway charge reversed: the invoice refused the payment",
-			"outcome", string(outcome), "gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "amount_cents", amountCents)
-	}
-	if s.auditLog != nil {
-		if err := s.auditLog.Log(ctx, audit.Entry{
-			Action:     "payment.charge_reversal",
-			EntityType: "invoice",
-			EntityID:   invoiceID,
-			Changes: map[string]interface{}{
-				"gateway_tx_id": gatewayTxID,
-				"amount_cents":  amountCents,
-				"outcome":       string(outcome),
-			},
-		}); err != nil {
-			s.logger.Error("CRITICAL: the charge reversal audit row was not written",
-				"gateway_tx_id", gatewayTxID, "invoice_id", invoiceID, "outcome", string(outcome), "error", err)
-		}
-	}
-	return outcome, cause
-}
-
-// RefundPayment issues a full or partial refund on a completed card payment.
-func (s *Service) RefundPayment(ctx context.Context, paymentID uuid.UUID, amountCents int64, reason string) (*Refund, error) {
-	if amountCents <= 0 {
-		return nil, fmt.Errorf("refund amount must be positive")
-	}
-	if s.gateway == nil {
-		return nil, fmt.Errorf("payment gateway not configured")
-	}
-
-	// Look up the original payment to get the gateway transaction ID
-	original, err := s.repo.GetPaymentByID(ctx, paymentID)
-	if err != nil {
-		return nil, fmt.Errorf("original payment not found: %w", err)
-	}
-
-	if original.GatewayTxID == "" {
-		return nil, fmt.Errorf("payment %s has no gateway transaction — only card payments can be refunded", paymentID)
-	}
-
-	if amountCents > original.Amount {
-		return nil, fmt.Errorf("refund amount (%d cents) exceeds original payment (%d cents)", amountCents, original.Amount)
-	}
-
-	// Process refund through gateway using the original transaction ID
-	result, err := s.gateway.Refund(ctx, original.GatewayTxID, amountCents)
-	if err != nil {
-		return nil, fmt.Errorf("gateway refund failed: %w", err)
-	}
-
-	// Persist the refund record within a transaction
-	var refund *Refund
-	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
-		// Look up invoice to get the customer ID for the ledger entry
-		inv, err := s.invoiceRepo.GetInvoice(ctx, original.InvoiceID)
-		if err != nil {
-			return fmt.Errorf("invoice not found for refund ledger: %w", err)
-		}
-
-		refund = &Refund{
-			PaymentID:       paymentID,
-			Amount:          amountCents,
-			Reason:          reason,
-			GatewayRefundID: result.TransactionID,
-			Status:          "COMPLETE",
-		}
-
-		if err := s.repo.CreateRefund(ctx, refund); err != nil {
-			return fmt.Errorf("failed to persist refund: %w", err)
-		}
-
-		// Post the refund as a credit to the customer's account ledger (positive = credit back)
-		_, err = s.account.PostTransaction(ctx, inv.CustomerID, account.TransactionTypePayment, amountCents, &refund.ID, "Refund: "+reason)
-		if err != nil {
-			return fmt.Errorf("failed to post refund to account ledger: %w", err)
-		}
-
-		// Audit log: inside the transaction, so it shares the refund's fate
-		// — a refund that fails to save leaves no audit row.
-		if s.auditLog != nil {
-			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action:     "payment.refunded",
-				EntityType: "refund",
-				EntityID:   refund.ID,
-				Changes: map[string]interface{}{
-					"payment_id":   paymentID,
-					"amount_cents": amountCents,
-					"reason":       reason,
-					"gateway_id":   result.TransactionID,
-				},
-			}); err != nil {
-				return fmt.Errorf("failed to write audit log: %w", err)
+			d, err := s.account.LocalDate(ctx, res.branch, s.now())
+			if err != nil {
+				return err
 			}
+			on = d
 		}
-
-		return nil
+		id, fx, err := s.account.RecordPayment(ctx, account.RecordPaymentIn{
+			CustomerID: in.CustomerID, BranchID: res.branch, Currency: res.currency, Method: string(in.Method), AmountCents: in.AmountCents,
+			Reference: in.Reference, Notes: in.Notes, ReceivedOn: on, OrderID: in.OrderID, ProjectID: in.JobID, Card: card,
+			Actor: who.Actor, Applications: in.Applications,
+		})
+		if err != nil {
+			return err
+		}
+		effects = fx
+		if out, err = s.repo.Get(ctx, id); err != nil {
+			return err
+		}
+		changes := map[string]interface{}{
+			"customer_id": in.CustomerID, "number": out.Number, "amount_cents": in.AmountCents, "method": string(in.Method),
+			"reference": in.Reference, "applications": len(in.Applications),
+		}
+		if card != nil {
+			changes["gateway_tx_id"], changes["card_brand"], changes["card_last4"] = card.GatewayTxID, card.Brand, card.Last4
+		}
+		if err := s.audit(ctx, audit.Entry{Action: "payment.processed", EntityType: "payment", EntityID: id, UserID: who.Actor, Changes: changes}); err != nil {
+			return err
+		}
+		if err := s.record(ctx, recordedEvent(out)); err != nil {
+			return err
+		}
+		return s.recordAll(ctx, fx.Events())
 	})
-
 	if err != nil {
-		// Gateway refunded but DB failed — log for manual reconciliation
-		s.logger.Error("CRITICAL: Gateway refunded but DB commit failed",
-			"gateway_refund_id", result.TransactionID,
-			"payment_id", paymentID,
-			"amount_cents", amountCents,
-			"error", err,
-		)
-		return nil, fmt.Errorf("refund processed at gateway but failed to save: %w", err)
+		return nil, nil, err
 	}
-
-	return refund, nil
+	return out, effects, nil
 }
 
-// GetHistory returns all payments for an invoice.
-func (s *Service) GetHistory(ctx context.Context, invoiceID uuid.UUID) ([]Payment, error) {
-	return s.repo.GetPaymentsByInvoiceID(ctx, invoiceID)
+// lockForWrite takes the payment row (section 11, step 2) held to the branch
+// wall, and checks the revision and the branch rule. It answers the payment as
+// read under the lock.
+func (s *Service) lockForWrite(ctx context.Context, id uuid.UUID, pre Precondition) (*Summary, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var locked uuid.UUID
+	if err := s.db.GetExecutor(ctx).QueryRow(ctx, `SELECT id FROM payments p WHERE p.id = $1 AND `+wall("p", 2, 3)+` FOR UPDATE`,
+		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&locked); err != nil {
+		return nil, errPaymentNotFound
+	}
+	p, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkBranch(ctx, p.BranchID, "id"); err != nil {
+		return nil, err
+	}
+	if err := pre.check(p.Revision); err != nil {
+		return nil, err
+	}
+	return &p.Summary, nil
 }
 
-// updateInvoiceStatus recalculates and updates the invoice status based on total payments.
-func (s *Service) updateInvoiceStatus(ctx context.Context, invoiceID uuid.UUID, inv *invoice.Invoice) error {
-	payments, err := s.repo.GetPaymentsByInvoiceID(ctx, invoiceID)
-	if err != nil {
-		return fmt.Errorf("failed to get payment history: %w", err)
-	}
-
-	var totalPaid int64
-	for _, pay := range payments {
-		totalPaid += pay.Amount
-	}
-
-	if totalPaid >= int64(inv.TotalCents) {
-		inv.Status = invoice.InvoiceStatusPaid
-		if inv.PaidAt == nil {
-			now := httpx.TimestampOf(time.Now())
-			inv.PaidAt = &now
+// Apply applies a payment's unapplied cash to invoices (section 9.2).
+func (s *Service) Apply(ctx context.Context, id uuid.UUID, lines []account.ApplyLine, pre Precondition, who Caller) (*Payment, error) {
+	for i, l := range lines {
+		ok, err := s.repo.InvoiceVisible(ctx, l.InvoiceID)
+		if err != nil {
+			return nil, err
 		}
-	} else if totalPaid > 0 {
-		inv.Status = invoice.InvoiceStatusPartial
-		inv.PaidAt = nil
-	} else {
-		inv.Status = invoice.InvoiceStatusUnpaid
-		inv.PaidAt = nil
+		if !ok {
+			return nil, fieldError(fmt.Sprintf("applications[%d].invoice_id", i), "no such invoice")
+		}
 	}
-
-	if err := s.invoiceRepo.UpdateInvoice(ctx, inv); err != nil {
-		return fmt.Errorf("failed to update invoice status: %w", err)
+	var out *Payment
+	var effects *account.Effects
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		head, err := s.lockForWrite(ctx, id, pre)
+		if err != nil {
+			return err
+		}
+		on, err := s.account.LocalDate(ctx, head.BranchID, s.now())
+		if err != nil {
+			return err
+		}
+		fx, err := s.account.Apply(ctx, account.ApplyIn{PaymentID: id, Lines: lines, On: on, Actor: who.Actor})
+		if err != nil {
+			return err
+		}
+		effects = fx
+		if err := s.audit(ctx, audit.Entry{Action: "payment.applied", EntityType: "payment", EntityID: id, UserID: who.Actor,
+			Changes: map[string]interface{}{"applications": len(lines), "application_ids": fx.ApplicationIDs}}); err != nil {
+			return err
+		}
+		if out, err = s.repo.Get(ctx, id); err != nil {
+			return err
+		}
+		return s.recordAll(ctx, fx.Events())
+	})
+	if err != nil {
+		return nil, err
 	}
+	s.notifyPaid(effects)
+	return out, nil
+}
 
-	// Notify FB Brain's financial engine when an invoice is fully paid.
-	if inv.Status == invoice.InvoiceStatusPaid && s.brainNotifier != nil {
-		s.brainNotifier.notifyInvoicePaid(s.brainOrgID, inv.ID, int64(inv.TotalCents))
+// Void voids a posted payment: every live application is reversed (with its
+// discounts), then the unapplied rest is paid back out of 2200. Finance roles
+// only; a card payment is refunded through the gateway instead.
+func (s *Service) Void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Payment, error) {
+	if err := who.finance("voiding a payment"); err != nil {
+		return nil, err
 	}
+	var out *Payment
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		head, err := s.lockForWrite(ctx, id, pre)
+		if err != nil {
+			return err
+		}
+		on, err := s.account.LocalDate(ctx, head.BranchID, s.now())
+		if err != nil {
+			return err
+		}
+		fx, err := s.account.VoidPayment(ctx, account.VoidPaymentIn{PaymentID: id, Reason: reason, Actor: who.Actor, On: on})
+		if err != nil {
+			return err
+		}
+		if err := s.audit(ctx, audit.Entry{Action: "payment.voided", EntityType: "payment", EntityID: id, UserID: who.Actor,
+			Changes: map[string]interface{}{"reason": reason, "number": head.Number, "amount_cents": int64(head.AmountCents), "reversed_applications": len(fx.ReversedIDs)}}); err != nil {
+			return err
+		}
+		if out, err = s.repo.Get(ctx, id); err != nil {
+			return err
+		}
+		if err := s.recordAll(ctx, fx.Events()); err != nil {
+			return err
+		}
+		branch := out.BranchID
+		return s.record(ctx, outbox.Event{Type: EventVoided, EntityType: "payment", EntityID: id, BranchID: &branch, Data: mustJSON(map[string]any{
+			"number": out.Number, "customer_id": out.CustomerID, "status": out.Status.Status(), "from_status": "posted", "revision": out.Revision,
+			"currency": out.Currency, "amount_cents": int64(out.AmountCents), "unapplied_cents": 0,
+		})})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
-	return nil
+// Refund pays unapplied cash back out. A card payment's refund goes through the
+// gateway before the transaction, as every gateway call does; a database
+// failure after a successful gateway refund is logged as critical for
+// reconciliation.
+func (s *Service) Refund(ctx context.Context, id uuid.UUID, in *RefundInput, pre Precondition, who Caller) (*Refund, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	facts, err := s.repo.GatewayFactsFor(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.checkBranch(ctx, facts.BranchID, "id"); err != nil {
+		return nil, err
+	}
+	head, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := pre.check(head.Revision); err != nil {
+		return nil, err
+	}
+	switch {
+	case facts.Status != StatusPosted:
+		return nil, conflictBlocker("payment_voided", "the payment is voided: it refunds nothing")
+	case in.AmountCents > facts.Unapplied:
+		return nil, conflictBlocker("exceeds_unapplied", fmt.Sprintf("the payment has %d cents unapplied: %d cents were asked", facts.Unapplied, in.AmountCents))
+	}
+	gatewayID := ""
+	if facts.Method == PaymentMethodCard {
+		if s.gateway == nil {
+			return nil, httpx.Unavailable("payment gateway not configured")
+		}
+		if facts.GatewayTxID == "" {
+			return nil, conflictBlocker("no_gateway_transaction", "the card payment has no gateway transaction to refund")
+		}
+		res, gerr := s.gateway.Refund(ctx, facts.GatewayTxID, in.AmountCents)
+		if gerr != nil {
+			return nil, &httpx.Error{Status: http.StatusBadGateway, Code: httpx.CodeUnavailable, Message: "gateway refund failed: " + gerr.Error()}
+		}
+		gatewayID = res.TransactionID
+	}
+	var refundID uuid.UUID
+	err = s.inTx(ctx, func(ctx context.Context) error {
+		locked, err := s.lockForWrite(ctx, id, pre)
+		if err != nil {
+			return err
+		}
+		on, err := s.account.LocalDate(ctx, locked.BranchID, s.now())
+		if err != nil {
+			return err
+		}
+		rid, _, err := s.account.RefundPayment(ctx, account.RefundPaymentIn{PaymentID: id, AmountCents: in.AmountCents, Reason: in.Reason,
+			GatewayRefundID: gatewayID, Actor: who.Actor, On: on})
+		if err != nil {
+			return err
+		}
+		refundID = rid
+		if err := s.audit(ctx, audit.Entry{Action: "payment.refunded", EntityType: "refund", EntityID: rid, UserID: who.Actor,
+			Changes: map[string]interface{}{"payment_id": id, "amount_cents": in.AmountCents, "reason": in.Reason, "gateway_id": gatewayID}}); err != nil {
+			return err
+		}
+		after, err := s.repo.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		branch := after.BranchID
+		return s.record(ctx, outbox.Event{Type: EventRefunded, EntityType: "payment", EntityID: id, BranchID: &branch, Data: mustJSON(map[string]any{
+			"number": after.Number, "customer_id": after.CustomerID, "status": after.Status.Status(), "revision": after.Revision,
+			"currency": after.Currency, "amount_cents": in.AmountCents, "unapplied_cents": int64(after.UnappliedCents), "refund_id": rid,
+		})})
+	})
+	if err != nil {
+		if gatewayID != "" {
+			s.logger.Error("CRITICAL: Gateway refunded but DB commit failed",
+				"gateway_refund_id", gatewayID, "payment_id", id, "amount_cents", in.AmountCents, "error", err)
+		}
+		return nil, err
+	}
+	refunds, err := s.repo.Refunds(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	for i := range refunds {
+		if refunds[i].ID == refundID {
+			return &refunds[i], nil
+		}
+	}
+	return nil, errors.New("payment: the refund was not found after it was recorded")
+}
+
+// Get reads one payment with its applications and refunds.
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (*Payment, error) {
+	p, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	apps, err := s.account.ListApplications(ctx, account.AppFilter{PaymentID: &id})
+	if err != nil {
+		return nil, err
+	}
+	p.Applications = apps
+	return p, nil
+}
+
+// List answers one page and whether another follows.
+func (s *Service) List(ctx context.Context, f ListFilter, wantTotal bool) ([]Summary, bool, *int64, error) {
+	asked := f.Limit
+	f.Limit = asked + 1
+	items, err := s.repo.List(ctx, f)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	more := len(items) > asked
+	if more {
+		items = items[:asked]
+	}
+	var total *int64
+	if wantTotal {
+		n, err := s.repo.Count(ctx, f)
+		if err != nil {
+			return nil, false, nil, err
+		}
+		total = &n
+	}
+	return items, more, total, nil
+}
+
+func mustJSON(v map[string]any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return []byte(`{}`)
+	}
+	return b
 }

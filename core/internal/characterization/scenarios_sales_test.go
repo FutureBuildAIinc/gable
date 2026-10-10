@@ -109,7 +109,7 @@ func customerGroups() []groupDef {
 				extract: map[string]string{"myCustomer": "/id", "myTerms": "/payment_terms_id"},
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
-			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3"},
+			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3", maskFields: map[string]any{"balance_cents": 999999, "credit_limit_cents": 999999}},
 			// The filters filter; an unsupported parameter, a tier outside the
 			// lowercase vocabulary and a broken cursor are 400s naming the field.
 			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"},
@@ -595,24 +595,85 @@ func invoiceGroups() []groupDef {
 }
 
 func paymentGroups() []groupDef {
+	json := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	return []groupDef{{
 		name: "payment",
 		steps: []stepDef{
+			// Unapplied cash: a payment with no application exists without an
+			// invoice (DR 1010 / CR 2200) and shows unapplied_cents (ADR 0005 9.4).
 			{
-				name:   "payment.create",
+				name:   "payment.create.unapplied",
 				method: "POST",
 				path:   "/api/v1/payments",
 				body: map[string]any{
-					"invoice_id": "{myInvoice}", "amount": 1000, "method": "CASH",
-					"reference": "GOLD-PAY-1",
+					"customer_id": "{myCustomer}", "amount_cents": 5000, "method": "check",
+					"reference": "GOLD-PAY-1", "notes": "golden unapplied cash",
 				},
-				extract: map[string]string{"myPayment": "/id"},
+				extract:        map[string]string{"myPayment": "/id"},
+				captureHeaders: []string{"ETag"},
 			},
+			{name: "payment.get", method: "GET", path: "/api/v1/payments/{myPayment}"},
+			{name: "payment.get.not_found", method: "GET", path: "/api/v1/payments/00000000-0000-0000-0000-0000000000aa"},
+			{name: "payment.list.unapplied", method: "GET", path: "/api/v1/payments?unapplied=true&customer_id={myCustomer}&include=total"},
+			{name: "payment.list.method_status", method: "GET", path: "/api/v1/payments?method=check&status=posted&customer_id={myCustomer}"},
+			{name: "payment.list.bad_status", method: "GET", path: "/api/v1/payments?status=POSTED"},
+			{name: "payment.list.bad_unapplied", method: "GET", path: "/api/v1/payments?unapplied=maybe"},
+			{name: "payment.list.unsupported_parameter", method: "GET", path: "/api/v1/payments?offset=1"},
+			{name: "payment.create.invalid", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0, "method": "bitcoin",
+					"applications": []map[string]any{{"invoice_id": "not-a-uuid", "amount_cents": -1}}}},
+			{name: "payment.create.card_method", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 100, "method": "card"}},
+			{name: "payment.create.account_method", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 100, "method": "account"}},
+			{name: "payment.create.unknown_customer", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "00000000-0000-0000-0000-0000000000aa", "amount_cents": 100, "method": "cash"}},
+			{name: "payment.create.bad_body", method: "POST", path: "/api/v1/payments", body: "not-an-object"},
+			// Applying later, partly: the invoice (3142 cents) goes partial.
+			{name: "payment.apply.missing_precondition", method: "POST", path: "/api/v1/payments/{myPayment}/applications",
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 2000}}}},
+			{name: "payment.apply.stale", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("9"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 2000}}}},
+			{name: "payment.apply.partial", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("1"),
+				body:           map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 2000}}},
+				captureHeaders: []string{"ETag"}},
+			{name: "payment.apply.exceeds_unapplied", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 9000}}}},
+			{name: "payment.apply.exceeds_open", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 1143}}}},
+			{name: "payment.apply.discount_not_available", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 100, "discount_cents": 10}}}},
+			{name: "invoice.after_partial_payment", method: "GET", path: "/api/v1/invoices/{myInvoice}", maskBody: true},
 			{name: "payment.history", method: "GET", path: "/api/v1/invoices/{myInvoice}/payments"},
+			{name: "payment.apply.closing", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 1142}}}},
+			{name: "invoice.after_closing_payment", method: "GET", path: "/api/v1/invoices/{myInvoice}", maskBody: true},
+			{name: "payment.apply.void_invoice_target", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("3"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 1}}}},
+			// Refund of unapplied cash (1858 left), then the void.
+			{name: "payment.refund.exceeds_unapplied", method: "POST", path: "/api/v1/payments/{myPayment}/refunds", headers: json("3"),
+				body: map[string]any{"amount_cents": 3000, "reason": "too much"}},
+			{name: "payment.refund.invalid", method: "POST", path: "/api/v1/payments/{myPayment}/refunds", headers: json("3"),
+				body: map[string]any{"amount_cents": 0}},
+			{name: "payment.refund", method: "POST", path: "/api/v1/payments/{myPayment}/refunds", headers: json("3"),
+				body: map[string]any{"amount_cents": 500, "reason": "golden refund"}},
+			{name: "payment.transition.needs_reason", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("4"),
+				body: map[string]any{"to": "voided"}},
+			{name: "payment.transition.posted", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("4"),
+				body: map[string]any{"to": "posted", "reason": "no"}},
+			{name: "payment.void", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("4"),
+				body: map[string]any{"to": "voided", "reason": "golden void"}},
+			{name: "invoice.after_void", method: "GET", path: "/api/v1/invoices/{myInvoice}", maskBody: true},
+			{name: "payment.void.again", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("5"),
+				body: map[string]any{"to": "voided", "reason": "twice"}},
+			{name: "payment.get.voided", method: "GET", path: "/api/v1/payments/{myPayment}"},
 			// No Run Payments public key is configured: the gateway intent
 			// answers 503, which is its configured-state behaviour.
 			{name: "payment.intent.no_gateway", method: "POST", path: "/api/v1/payments/intent",
-				body: map[string]any{"invoice_id": "{myInvoice}", "amount": 100}},
+				body: map[string]any{"amount_cents": 100}},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "payment.events", method: "GET",
+				path: "/api/v1/events?types=payment.recorded,payment.applied,payment.unapplied,payment.refunded,payment.voided,invoice.partial,invoice.paid,invoice.reopened&limit=20"},
 		},
 	}}
 }
@@ -622,29 +683,58 @@ func accountGroups() []groupDef {
 		name: "account",
 		steps: []stepDef{
 			{name: "account.summary", method: "GET", path: "/api/v1/accounts/{myCustomer}"},
-			// The customer was created by this run: pins the nullable list.
+			{name: "account.summary.not_found", method: "GET", path: "/api/v1/accounts/00000000-0000-0000-0000-0000000000aa"},
+			// The subledger, newest first, in the cursor envelope.
 			{name: "account.transactions", method: "GET", path: "/api/v1/accounts/{myCustomer}/transactions"},
+			{name: "account.transactions.unsupported_parameter", method: "GET", path: "/api/v1/accounts/{myCustomer}/transactions?offset=1"},
+			// The aging by customer, job and ship-to, and its summary.
+			{name: "ar.aging", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}"},
+			{name: "ar.aging.by_job", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}&group_by=job"},
+			{name: "ar.aging.by_ship_to", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}&group_by=ship_to&basis=invoice_date"},
+			{name: "ar.aging.past_date", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}&as_of={today-3650}"},
+			{name: "ar.aging.bad_group_by", method: "GET", path: "/api/v1/ar/aging?group_by=region"},
+			{name: "ar.aging.bad_date", method: "GET", path: "/api/v1/ar/aging?as_of=31/12/2000"},
+			{name: "ar.aging.unsupported_parameter", method: "GET", path: "/api/v1/ar/aging?offset=1"},
+			{name: "ar.aging.summary", method: "GET", path: "/api/v1/ar/aging/summary?customer_id={myCustomer}"},
+			{name: "ar.statement", method: "GET", path: "/api/v1/ar/customers/{myCustomer}/statement"},
+			{name: "ar.statement.bad_range", method: "GET", path: "/api/v1/ar/customers/{myCustomer}/statement?from={today+1}&to={today}"},
+			{name: "ar.statement.not_found", method: "GET", path: "/api/v1/ar/customers/00000000-0000-0000-0000-0000000000aa/statement"},
+			// The customer the harness made agrees with its documents and the ledger.
+			{name: "ar.reconciliation", method: "GET", path: "/api/v1/ar/reconciliation", maskBody: true},
+			{name: "ar.application.reverse.not_found", method: "POST",
+				path: "/api/v1/ar/applications/00000000-0000-0000-0000-0000000000aa/reverse", body: map[string]any{"reason": "none"}},
+			{name: "ar.application.reverse.needs_reason", method: "POST",
+				path: "/api/v1/ar/applications/00000000-0000-0000-0000-0000000000aa/reverse", body: map[string]any{}},
 		},
 	}}
 }
 
 func depositGroups() []groupDef {
+	json := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	return []groupDef{{
 		name: "deposit",
 		steps: []stepDef{
+			// A deposit is a payment with an order (ADR 0005 9.1): the order
+			// reads its unapplied cash, and a deposit applies to a later invoice.
 			{
 				name:   "deposit.create",
 				method: "POST",
-				path:   "/api/v1/deposits",
+				path:   "/api/v1/payments",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "branch_id": "{branch}", "amount_cents": 25000,
-					"method": "CHECK", "reference": "GOLD-DEP-1",
+					"customer_id": "{myCustomer}", "order_id": "{myCancelOrder}", "amount_cents": 2500,
+					"method": "check", "reference": "GOLD-DEP-1",
 				},
 				extract: map[string]string{"myDeposit": "/id"},
 			},
-			{name: "deposit.get", method: "GET", path: "/api/v1/deposits/{myDeposit}"},
-			{name: "deposit.create.bad_amount", method: "POST", path: "/api/v1/deposits",
-				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0}},
+			{name: "deposit.get", method: "GET", path: "/api/v1/payments/{myDeposit}"},
+			{name: "deposit.list_by_order", method: "GET", path: "/api/v1/payments?order_id={myCancelOrder}"},
+			{name: "deposit.order_shows_unapplied", method: "GET", path: "/api/v1/orders/{myCancelOrder}", maskBody: true},
+			{name: "deposit.create.bad_amount", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0, "method": "cash"}},
+			{name: "deposit.create.order_of_another_customer", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "order_id": "00000000-0000-0000-0000-0000000000aa", "amount_cents": 100, "method": "cash"}},
+			{name: "deposit.credit_memo.refund_needs_open", method: "POST", path: "/api/v1/credit-memos/{myCreditMemo}/refunds", headers: json("4"),
+				body: map[string]any{"amount_cents": 100, "reason": "none", "method": "check"}},
 		},
 	}}
 }

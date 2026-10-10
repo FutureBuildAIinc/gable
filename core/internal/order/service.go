@@ -94,6 +94,7 @@ type Service struct {
 	exposure  ExposureGate
 	inventory Inventory
 	invoices  InvoiceWriter
+	deposits  DepositApplier
 	overrider ExposureOverrider
 	audit     *audit.Logger
 	logger    *slog.Logger

@@ -33,6 +33,12 @@ const (
 	CodeRateLimited               = "rate_limited"
 	CodeUnavailable               = "unavailable"
 	CodeInternalError             = "internal_error"
+	// CodePaymentRequired is the 402 of a card charge that was declined or that
+	// the gateway could not take, before anything was recorded.
+	CodePaymentRequired = "payment_required"
+	// CodeChargeNotReversed is the 502 of a card charge the gateway approved,
+	// the system refused, and nothing gave back (ADR 0005 9.4).
+	CodeChargeNotReversed = "charge_not_reversed"
 )
 
 // internalErrorMessage is the only message a 5xx body carries. A handler
@@ -86,6 +92,12 @@ type Error struct {
 	Code    string
 	Message string
 	Details []FieldError
+	// Operator marks a 5xx whose message is written for the client by
+	// construction (it names no table, file or driver): WriteError keeps it
+	// verbatim instead of substituting the fixed internal message. The one
+	// user is charge_not_reversed, where finance must read which gateway
+	// transaction to reconcile.
+	Operator bool
 }
 
 func (e *Error) Error() string { return e.Message }
@@ -217,8 +229,10 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 
 	body := errorBody{Code: e.Code, Message: e.Message, Details: e.Details}
 	if e.Status >= 500 {
-		body.Message = internalErrorMessage
-		body.Details = nil
+		if !e.Operator {
+			body.Message = internalErrorMessage
+			body.Details = nil
+		}
 		slog.Error(e.Message,
 			"status", e.Status,
 			"method", r.Method,

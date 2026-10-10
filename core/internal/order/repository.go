@@ -107,6 +107,7 @@ type Repository interface {
 
 	// Fulfilment (ADR 0005 5.6).
 	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
+	LockOrderPayments(ctx context.Context, orderID uuid.UUID) ([]uuid.UUID, error)
 	UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error)
 	LiveBilledByLine(ctx context.Context, orderID uuid.UUID) (map[uuid.UUID]LiveBilled, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
@@ -181,7 +182,10 @@ const summaryColumns = `
 	o.hold_reason, o.hold_note, o.confirmed_at, o.created_at, o.updated_at,
 	COALESCE((
 		SELECT ARRAY_AGG(i.id ORDER BY i.created_at, i.id) FROM invoices i WHERE i.order_id = o.id AND i.status <> 'VOID'
-	), '{}')`
+	), '{}'),
+	COALESCE((
+		SELECT SUM(ROUND(pm.amount_unapplied * 100)::bigint) FROM payments pm WHERE pm.order_id = o.id AND pm.status = 'POSTED'
+	), 0)::bigint`
 
 const summaryFrom = `
 	FROM orders o
@@ -192,6 +196,7 @@ func (r *PostgresRepository) scanSummary(row pgx.Row, s *OrderSummary, extra ...
 	var (
 		status, delivery, taxSource string
 		subtotal, tax, total, cost  int64
+		deposit                     int64
 		taxRate                     *string
 		holdReason                  *string
 		confirmed                   *time.Time
@@ -203,7 +208,7 @@ func (r *PostgresRepository) scanSummary(row pgx.Row, s *OrderSummary, extra ...
 		&s.SalespersonID, &s.SalespersonName, &s.ScheduledDeliveryDate,
 		&subtotal, &tax, &taxRate, &s.TaxExempt, &taxSource, &total, &cost,
 		&holdReason, &s.HoldNote, &confirmed, &created, &updated,
-		&s.InvoiceIDs,
+		&s.InvoiceIDs, &deposit,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return err
@@ -213,6 +218,7 @@ func (r *PostgresRepository) scanSummary(row pgx.Row, s *OrderSummary, extra ...
 	s.TaxSource = salesdoc.TaxSource(taxSource)
 	s.SubtotalCents, s.TaxCents, s.TotalCents = httpx.Cents(subtotal), httpx.Cents(tax), httpx.Cents(total)
 	s.TotalCostCents = httpx.Cents(cost)
+	s.DepositUnappliedCents = httpx.Cents(deposit)
 	s.TotalMarginCents = s.SubtotalCents - s.TotalCostCents
 	if taxRate != nil {
 		if pct, err := RateToPercent(*taxRate); err == nil {
@@ -963,22 +969,23 @@ func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid
 	return exempt, nil
 }
 
-// OpenReceivableCents is the customer's open receivable plus the unbilled
+// OpenReceivableCents is the customer's open receivable (documents, less unapplied cash) plus the unbilled
 // remainder of the customer's other orders in confirmed, backordered or
 // on_hold (ADR 0005 5.3), minus the order being confirmed (its own total is
 // added by the caller): the credit check reads documents, never
 // customers.balance_due, which history left stale.
 func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID uuid.UUID, excludingOrder *uuid.UUID) (int64, error) {
 	var open int64
-	// The open receivable: each open invoice's total less the payments
-	// recorded against it (in C2-2 and C2-3 the sum over the customer's
-	// invoices in UNPAID or PARTIAL; OVERDUE is no longer a status).
+	// The open receivable (ADR 0005 5.3, from C2-4): the sum of amount_open over
+	// the customer's open invoices and open credit memos (negative), less the
+	// customer's unapplied cash, which is money held against what is owed.
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT COALESCE(SUM(ROUND(i.total_amount * 100)::bigint
-		                   - COALESCE((SELECT SUM(ROUND(p.amount * 100)::bigint)
-		                               FROM payments p WHERE p.invoice_id = i.id), 0)), 0)
-		FROM invoices i
-		WHERE i.customer_id = $1 AND i.status IN ('UNPAID', 'PARTIAL')`, customerID).Scan(&open)
+		SELECT COALESCE((SELECT SUM(ROUND(i.amount_open * 100)::bigint) FROM invoices i
+		                 WHERE i.customer_id = $1 AND i.status IN ('UNPAID', 'PARTIAL')), 0)
+		     + COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
+		                 WHERE m.customer_id = $1 AND m.status IN ('OPEN', 'PARTIAL')), 0)
+		     - COALESCE((SELECT SUM(ROUND(p.amount_unapplied * 100)::bigint) FROM payments p
+		                 WHERE p.customer_id = $1 AND p.status = 'POSTED'), 0)`, customerID).Scan(&open)
 	if err != nil {
 		return 0, fmt.Errorf("failed to sum the open receivable: %w", err)
 	}
@@ -1362,4 +1369,53 @@ func (r *PostgresRepository) DeliveryRequestOrder(ctx context.Context, deliveryI
 		return uuid.Nil, false, fmt.Errorf("failed to read the fulfilment request: %w", err)
 	}
 	return id, true, nil
+}
+
+// LockOrderPayments takes the order's posted payments that still have an
+// unapplied amount FOR UPDATE, in id order (section 11, step 2), and answers
+// them oldest first, the order the deposits are applied in (5.6 step 7).
+func (r *PostgresRepository) LockOrderPayments(ctx context.Context, orderID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT id FROM payments WHERE order_id = $1 AND status = 'POSTED' AND amount_unapplied > 0 ORDER BY id FOR UPDATE`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock the order's payments: %w", err)
+	}
+	locked := map[uuid.UUID]bool{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		locked[id] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(locked) == 0 {
+		return nil, nil
+	}
+	ordered, err := r.db.GetExecutor(ctx).Query(ctx, `SELECT id FROM payments WHERE order_id = $1 AND id = ANY($2) ORDER BY created_at, id`, orderID, keys(locked))
+	if err != nil {
+		return nil, fmt.Errorf("failed to order the order's payments: %w", err)
+	}
+	defer ordered.Close()
+	var out []uuid.UUID
+	for ordered.Next() {
+		var id uuid.UUID
+		if err := ordered.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, ordered.Err()
+}
+
+func keys(m map[uuid.UUID]bool) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(m))
+	for id := range m {
+		out = append(out, id)
+	}
+	return out
 }

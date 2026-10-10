@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -325,7 +326,11 @@ func (h *Handler) HandleTrialBalance(w http.ResponseWriter, r *http.Request) {
 		asOf = parsed
 	}
 
-	rows, err := h.svc.GetTrialBalance(r.Context(), asOf)
+	currency, ok := currencyParam(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.svc.GetTrialBalance(r.Context(), asOf, currency)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get trial balance", http.StatusInternalServerError, err)
 		return
@@ -369,7 +374,11 @@ func (h *Handler) HandleProfitAndLoss(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	report, err := h.svc.GetProfitAndLoss(r.Context(), startStr, endStr)
+	currency, ok := currencyParam(w, r)
+	if !ok {
+		return
+	}
+	report, err := h.svc.GetProfitAndLoss(r.Context(), startStr, endStr, currency)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get profit and loss report", http.StatusInternalServerError, err)
 		return
@@ -392,7 +401,11 @@ func (h *Handler) HandleBalanceSheet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	report, err := h.svc.GetBalanceSheet(r.Context(), asOfStr)
+	currency, ok := currencyParam(w, r)
+	if !ok {
+		return
+	}
+	report, err := h.svc.GetBalanceSheet(r.Context(), asOfStr, currency)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to get balance sheet report", http.StatusInternalServerError, err)
 		return
@@ -429,4 +442,19 @@ func (h *Handler) HandleCloseFiscalPeriod(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "closed"})
+}
+
+// currencyParam reads the optional currency parameter of the reports: three
+// capital letters, else a 400. Empty means the report's default (every
+// currency on the trial balance, the dealer default on a statement).
+func currencyParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	c := r.URL.Query().Get("currency")
+	if c == "" {
+		return "", true
+	}
+	if len(c) != 3 || strings.ToUpper(c) != c || strings.Trim(c, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") != "" {
+		httputil.RespondError(w, r, "invalid currency (expected three capital letters)", http.StatusBadRequest, nil)
+		return "", false
+	}
+	return c, true
 }

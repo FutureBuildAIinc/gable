@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { CreditMemoService } from '../../services/CreditMemoService.ts';
 import { OrderService } from '../../services/OrderService.ts';
@@ -18,7 +19,7 @@ import {
     formatReasonCode,
     getCreditMemoStatusColor,
 } from '../../types/creditMemo.ts';
-import type { Payment, CreatePaymentRequest } from '../../types/payment.ts';
+import type { PaymentApplication, CreatePaymentRequest } from '../../types/payment.ts';
 import { Download, CreditCard, Mail, RotateCcw, Ban } from 'lucide';
 import { formatCents, formatDay } from '../../lib/utils.ts';
 import { creditTextClass } from '../../lib/credit-display.ts';
@@ -51,7 +52,7 @@ export class GableInvoiceDetail extends LitElement {
 
     @state() private invoice: Invoice | null = null;
     @state() private orderNumber: string | null = null;
-    @state() private payments: Payment[] = [];
+    @state() private applications: PaymentApplication[] = [];
     @state() private creditMemos: CreditMemoSummary[] = [];
     @state() private loading = true;
     @state() private error = false;
@@ -102,10 +103,12 @@ export class GableInvoiceDetail extends LitElement {
 
     private async loadPayments(id: string) {
         try {
-            // the payments route answers null for an invoice with none
-            this.payments = (await paymentService.getHistory(id)) ?? [];
+            // the invoice's applications, newest first; a reversed one is
+            // still listed with its reversal date
+            this.applications = await paymentService.historyAll(id);
         } catch (error) {
             console.error('Failed to load payments', error);
+            ToastService.show(error instanceof WalkTruncatedError ? error.message : 'Failed to load payments', 'error');
         }
     }
 
@@ -169,7 +172,7 @@ export class GableInvoiceDetail extends LitElement {
         const isVoid = inv.status === 'void';
         const canPay = inv.status === 'unpaid' || inv.status === 'partial';
         const canVoid = inv.status === 'unpaid';
-        const totalPaid = this.payments.reduce((sum, p) => sum + p.amount, 0);
+        const totalPaid = this.applications.filter(a => !a.reversed_at).reduce((sum, a) => sum + a.amount_cents, 0);
 
         return html`
             <div class="space-y-6 max-w-6xl mx-auto pb-20">
@@ -291,7 +294,7 @@ export class GableInvoiceDetail extends LitElement {
                             `}
                         </div>
 
-                        ${this.payments.length > 0 ? html`
+                        ${this.applications.length > 0 ? html`
                             <div class="bg-slate-steel rounded-lg border border-white/10 overflow-hidden">
                                 <div class="px-6 py-4 border-b border-white/10 flex justify-between items-center">
                                     <h2 class="font-semibold text-white">Payment History</h2>
@@ -302,18 +305,18 @@ export class GableInvoiceDetail extends LitElement {
                                         <thead class="bg-white/5">
                                             <tr>
                                                 <th class="p-3 text-muted-foreground font-medium">Date</th>
-                                                <th class="p-3 text-muted-foreground font-medium">Method</th>
-                                                <th class="p-3 text-muted-foreground font-medium">Reference</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Kind</th>
+                                                <th class="p-3 text-muted-foreground font-medium">Status</th>
                                                 <th class="p-3 text-muted-foreground font-medium text-right">Amount</th>
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-white/5">
-                                            ${this.payments.map(p => html`
+                                            ${this.applications.map(a => html`
                                                 <tr>
-                                                    <td class="p-3 text-zinc-300">${new Date(p.created_at).toLocaleString()}</td>
-                                                    <td class="p-3 text-zinc-300 font-bold">${p.method}</td>
-                                                    <td class="p-3 text-zinc-400 font-mono text-xs">${p.reference || '-'}</td>
-                                                    <td class="p-3 text-right text-white font-mono font-bold">${formatCents(p.amount)}</td>
+                                                    <td class="p-3 text-zinc-300">${new Date(a.created_at).toLocaleString()}</td>
+                                                    <td class="p-3 text-zinc-300 font-bold">${a.kind}</td>
+                                                    <td class="p-3 ${a.reversed_at ? 'text-zinc-500' : 'text-zinc-300'}">${a.reversed_at ? `reversed ${new Date(a.reversed_at).toLocaleDateString()}` : 'live'}</td>
+                                                    <td class="p-3 text-right text-white font-mono font-bold">${formatCents(a.amount_cents)}</td>
                                                 </tr>
                                             `)}
                                         </tbody>
@@ -360,6 +363,7 @@ export class GableInvoiceDetail extends LitElement {
                 </div>
 
                 <gable-payment-modal
+                    customer-id=${inv.customer_id}
                     ?is-open=${this.isPaymentModalOpen}
                     @close=${() => { this.isPaymentModalOpen = false; }}
                     @save=${(e: CustomEvent<CreatePaymentRequest>) => this.handlePayment(e.detail)}

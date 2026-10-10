@@ -8,9 +8,11 @@
 package seed
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"strings"
@@ -184,6 +186,15 @@ func Run() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
+
+	// The AR core: every invoice, payment and credit memo the seed writes moves
+	// AR through it, never through a raw balance_due or subledger write.
+	ar, err := newReceivables(dbURL)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	defer ar.close()
+	seedCtx := context.Background()
 
 	demoUserID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	log.Println("Seeding started — Gable Lumber & Supply (Kelowna, BC)...")
@@ -619,12 +630,6 @@ func Run() {
 	}
 	fmt.Printf("Seed: %d Customers\n", len(customers))
 
-	// Park Glenmore Heritage Reno over its credit limit so the credit-hold UI
-	// has something realistic to render in demos.
-	if ghr, ok := customerIDs["Glenmore Heritage Reno"]; ok {
-		db.Exec(`UPDATE customers SET balance_due = credit_limit + 4500 WHERE id = $1`, ghr)
-	}
-
 	// =========================================================================
 	// 6. CUSTOMER CONTRACTS (Special SKU pricing for top customers)
 	// =========================================================================
@@ -720,6 +725,7 @@ func Run() {
 	// =========================================================================
 	totalOrders := 0
 	invoiceIDs := make([]uuid.UUID, 0)
+	var seeded []seedInvoice
 	orderIDs := make([]uuid.UUID, 0)
 	orderCustMap := make(map[uuid.UUID]uuid.UUID)
 
@@ -780,20 +786,20 @@ func Run() {
 				invID := uuid.New()
 				// A share of the invoices are paid in full, a share partly paid and a
 				// share left unpaid; overdue is computed from the due date, never stored.
-				invStatus := "UNPAID"
-				partPaid := false
+				// Every invoice is written UNPAID, open at its total, and posted through
+				// the AR core below with the check that paid it.
+				paidShare := 0.0
 				if rand.Float32() < 0.65 {
-					invStatus = "PAID"
+					paidShare = 1
 				} else if rand.Float32() < 0.3 {
-					// formerly stored as OVERDUE: now a partly paid invoice
-					invStatus, partPaid = "PARTIAL", true
+					paidShare = 0.4
 				}
 				dueDate := orderDate.AddDate(0, 1, 0)
 				taxRate := 0.12 // BC: GST 5% + PST 7% on building materials.
-				subtotal := orderTotal
-				taxAmt := subtotal * taxRate
-				total := subtotal + taxAmt
-
+				subCents := cents(orderTotal)
+				taxCents := cents(float64(subCents) / 100 * taxRate)
+				subtotal, taxAmt, total := float64(subCents)/100, float64(taxCents)/100, float64(subCents+taxCents)/100
+				invStatus := "UNPAID"
 				// number is left to the column DEFAULT: the seed numbers its invoices
 				// through the same gapless counter as every other writer.
 				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
@@ -808,20 +814,27 @@ func Run() {
 						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
 							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
-					switch {
-					case invStatus == "PAID":
-						db.Exec(`INSERT INTO payments (invoice_id, amount, method, reference, notes)
-							VALUES ($1,$2,'CHECK','CHK-'||floor(random()*10000+1000)::text,'Payment in full')`, invID, total)
-					case partPaid:
-						db.Exec(`INSERT INTO payments (invoice_id, amount, method, reference, notes)
-							VALUES ($1,ROUND($2::numeric * 0.4, 2),'CHECK','CHK-'||floor(random()*10000+1000)::text,'Partial payment')`, invID, total)
-					}
+					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: orderDate.AddDate(0, 0, 1),
+						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
 				}
 			}
 		}
 		_ = custName
 	}
-	fmt.Printf("Seed: %d Orders, %d Invoices\n", totalOrders, len(invoiceIDs))
+	postedInvoices := ar.post(seedCtx, seeded)
+	// Park Glenmore Heritage Reno over its credit limit so the credit-hold UI has
+	// something realistic to render in demos. The credit check reads documents
+	// (ADR 0005 5.3), so the limit is set 45.00 below what the customer's open
+	// invoices already come to: its receivable stands over the limit through the
+	// AR core's own figures, never through a hand-written balance.
+	if ghr, ok := customerIDs["Glenmore Heritage Reno"]; ok {
+		if _, err := db.Exec(`UPDATE customers c SET credit_limit = GREATEST(0, COALESCE(
+				(SELECT SUM(i.amount_open) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0) - 45)
+			WHERE c.id = $1`, ghr); err != nil {
+			log.Printf("Seed: parking Glenmore over its credit limit: %v", err)
+		}
+	}
+	fmt.Printf("Seed: %d Orders, %d Invoices (%d posted through the AR core)\n", totalOrders, len(invoiceIDs), postedInvoices)
 
 	// =========================================================================
 	// 7b. DISPATCH DAY — the one day AI_LM plans in a demo.
@@ -1046,28 +1059,6 @@ func Run() {
 	fmt.Printf("Seed: %d Purchase Orders\n", poCount)
 
 	// =========================================================================
-	// 12. CUSTOMER TRANSACTIONS (AR Ledger)
-	// =========================================================================
-	txCount := 0
-	for _, custID := range customerIDs {
-		var balance int64 = 0
-		for i := 0; i < 4+rand.Intn(5); i++ {
-			txType := "INVOICE"
-			amt := int64(500+rand.Intn(5000)) * 100
-			if rand.Float32() < 0.5 && balance > 0 {
-				txType = "PAYMENT"
-				amt = -int64(rand.Intn(int(balance/100)+1)) * 100
-			}
-			balance += amt
-			db.Exec(`INSERT INTO customer_transactions (customer_id, type, amount, balance_after, description, created_at)
-				VALUES ($1,$2,$3,$4,$5,$6)`, custID, txType, amt, balance,
-				fmt.Sprintf("Auto-generated %s", txType), recentDate(120))
-			txCount++
-		}
-	}
-	fmt.Printf("Seed: %d Customer Transactions\n", txCount)
-
-	// =========================================================================
 	// 13. PRICING RULES
 	// =========================================================================
 	// PERCENTS, not fractions. pricing_rules.discount_pct and
@@ -1232,15 +1223,16 @@ func Run() {
 		}
 		for i, m := range memos {
 			invID := invoiceIDs[i%len(invoiceIDs)]
-			// A posted memo numbers itself through the gapless counter (the column has
-			// no DEFAULT: a draft carries none); each memo has one ADJUST charge line.
-			var memoID string
+			// Every memo is inserted as a draft with its one ADJUST charge line; an
+			// OPEN one is then posted through the AR core, which numbers it, writes its
+			// entry and the subledger credit.
+			var memoID, custID, currency string
+			var memoDate time.Time
 			err := db.QueryRow(`INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status,
 					number, memo_date, subtotal, tax_amount, total_amount, tax_rate)
-				SELECT i.id, i.customer_id, i.branch_id, i.currency, $2::text, $3::text, $4::numeric, $5::text,
-					CASE WHEN $5::text = 'DRAFT' THEN NULL ELSE credit_memo_next_number() END,
-					i.invoice_date, -$4::numeric, 0, -$4::numeric, 0
-				FROM invoices i WHERE i.id = $1 RETURNING id`, invID, m.ReasonCode, m.Reason, m.Amt, m.Status).Scan(&memoID)
+				SELECT i.id, i.customer_id, i.branch_id, i.currency, $2::text, $3::text, $4::numeric, 'DRAFT',
+					NULL, i.invoice_date, -$4::numeric, 0, -$4::numeric, 0
+				FROM invoices i WHERE i.id = $1 RETURNING id, customer_id, currency, memo_date`, invID, m.ReasonCode, m.Reason, m.Amt).Scan(&memoID, &custID, &currency, &memoDate)
 			if err != nil {
 				log.Printf("Credit memo %q: %v", m.Reason, err)
 				continue
@@ -1249,6 +1241,11 @@ func Run() {
 					uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, revenue_account_code)
 				SELECT $1, 0, 'CHARGE', cc.id, $2, -1, 'EA', 'EA', 1, 1, $3::numeric, 'MANUAL', -$3::numeric, FALSE, cc.revenue_account_code
 				FROM charge_codes cc WHERE cc.code = 'ADJUST'`, memoID, m.Reason, m.Amt)
+			if m.Status == "OPEN" {
+				if err := ar.postMemo(seedCtx, uuid.MustParse(memoID), uuid.MustParse(custID), currency, cents(m.Amt), memoDate); err != nil {
+					log.Printf("Credit memo %q was not posted: %v", m.Reason, err)
+				}
+			}
 		}
 		fmt.Printf("Seed: %d Credit Memos\n", len(memos))
 	}
