@@ -162,6 +162,7 @@ func (f *kindFixture) payload(qty string) map[string]any {
 // its SO- number, and the outbox carries order.created before
 // draft.promoted.
 func TestOrderKind_CreateDraftPromotesToDraftOrder(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newKindFixture(t, testutil.RequireDB(t))
 	r := f.do("POST", "/api/v1/drafts/orders", map[string]any{"payload": f.payload("10")})
 	if r.status != http.StatusCreated {
@@ -213,6 +214,7 @@ func TestOrderKind_CreateDraftPromotesToDraftOrder(t *testing.T) {
 // that moved is stale (subject_stale); a subject that left draft refuses
 // (order_not_draft).
 func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newKindFixture(t, testutil.RequireDB(t))
 	r := f.do("POST", "/api/v1/orders", f.payload("10"))
 	if r.status != http.StatusCreated {

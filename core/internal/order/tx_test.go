@@ -432,6 +432,7 @@ func TestConcurrencyPool4SaturationNeedsNoSecondConnection(t *testing.T) {
 // only the list. A branch-bound context sees another branch's order as a
 // 404-shaped ErrNotFound.
 func TestRepositoryBranchWall(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	customerID, productID := seedForTx(t, &dbHandle{db})
 	ctx := context.Background()

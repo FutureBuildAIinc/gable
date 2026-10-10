@@ -161,6 +161,7 @@ func (f *fixture) as(t *testing.T, customer uuid.UUID, method, path, body string
 // The create shape: lowercase status, revision and the ETag, Location,
 // optional fields present as null.
 func TestCreate_Shape(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	res := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"Ridge roof"}`, nil)
 	if res.status != http.StatusCreated {
@@ -192,6 +193,7 @@ func TestCreate_Shape(t *testing.T) {
 // One 400 with every offending field; an unknown body field refused; a body
 // the route cannot consume is bad_request.
 func TestCreate_FieldValidation(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	res := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects",
 		`{"name":"  ","status":"Active"}`, nil)
@@ -229,6 +231,7 @@ func TestCreate_FieldValidation(t *testing.T) {
 // refused, an uppercase status refused, the cursor walks every row once,
 // include=total, an empty page is [].
 func TestList_EnvelopeFiltersCursor(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	for _, name := range []string{"one", "two", "three"} {
 		if res := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"`+name+`"}`, nil); res.status != http.StatusCreated {
@@ -297,6 +300,7 @@ func TestList_EnvelopeFiltersCursor(t *testing.T) {
 // Revision: 428 without a precondition, 409 stale_revision, If-Match strong
 // and weak, the new revision and ETag on success.
 func TestUpdate_Revision(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"Ridge roof"}`, nil)
 	id := created.body["id"].(string)
@@ -321,6 +325,7 @@ func TestUpdate_Revision(t *testing.T) {
 // A PUT that changes nothing is not a write: the row answers 200 with its
 // current revision, and no audit row or event is recorded for it.
 func TestUpdate_NoChangeIsNotAWrite(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"as is"}`, nil)
 	id := created.body["id"].(string)
@@ -353,6 +358,7 @@ func TestUpdate_NoChangeIsNotAWrite(t *testing.T) {
 // The customer scoping: another customer's project is a 404 on read and
 // write, and its list never shows.
 func TestCustomerScoping_AnotherCustomerIs404(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"mine only"}`, nil)
 	id := created.body["id"].(string)
@@ -372,6 +378,7 @@ func TestCustomerScoping_AnotherCustomerIs404(t *testing.T) {
 // The dashboard aggregates the project's orders, deliveries and invoices,
 // with totals in cents and lowercase statuses.
 func TestDashboard_Items(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	ctx := context.Background()
 	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"with docs"}`, nil)
@@ -418,6 +425,7 @@ func TestDashboard_Items(t *testing.T) {
 
 // The mutation writes its audit row and its event, in one transaction.
 func TestMutation_AuditRowAndEvent(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"audited"}`, nil)
 	id := created.body["id"].(string)
@@ -452,6 +460,7 @@ func TestMutation_AuditRowAndEvent(t *testing.T) {
 // status only when the body names it, so a rename never blanks or renames
 // what it did not name, and the stored spelling survives byte identical.
 func TestUpdate_NameOnlyKeepsOddStoredStatus(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	created := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"before"}`, nil)
 	id := created.body["id"].(string)
@@ -481,6 +490,7 @@ func TestUpdate_NameOnlyKeepsOddStoredStatus(t *testing.T) {
 // COMPLETED, all of which read back lowercase. An exact-match filter would
 // show one spelling of a status and hide another of the same one.
 func TestList_StatusFilterMatchesCaseInsensitively(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	ctx := context.Background()
 	names := map[string]string{
@@ -518,6 +528,7 @@ func TestList_StatusFilterMatchesCaseInsensitively(t *testing.T) {
 // returns the first response and makes one row; the same key with another
 // body is 422.
 func TestCreate_IdempotentReplay(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f, _ := newBothFixtures(t)
 	key := map[string]string{"Idempotency-Key": "proj-wire-" + uuid.NewString()}
 	first := do(t, f.srv, http.MethodPost, "/api/portal/v1/projects", `{"name":"once"}`, key)
