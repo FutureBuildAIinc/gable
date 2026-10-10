@@ -11,11 +11,29 @@ import type { Vehicle, Driver, CreateVehicleRequest, UpdateVehicleRequest, Creat
 
 type Tab = 'vehicles' | 'drivers';
 
-const VEHICLE_TYPES: VehicleType[] = ['BOX_TRUCK', 'FLATBED', 'PICKUP', 'VAN', 'CRANE'];
-const DRIVER_STATUSES: DriverStatus[] = ['ACTIVE', 'INACTIVE', 'ON_LEAVE'];
+const VEHICLE_TYPES: VehicleType[] = ['box_truck', 'flatbed', 'pickup', 'van', 'crane'];
+const DRIVER_STATUSES: DriverStatus[] = ['active', 'inactive', 'on_leave'];
 const CDL_CLASSES = ['', 'A', 'B', 'C'];
 
-function isDateWarning(dateStr?: string, daysThreshold = 30): 'expired' | 'warning' | null {
+// driverStatusColors is keyed by the lowercase wire vocabulary
+// (active/inactive/on_leave) the desk reads back. An unknown status falls
+// back to the active colour so the cell stays filled for a value the table
+// does not know (a legacy uppercase value or a future wire value).
+export const driverStatusColors: Record<string, string> = {
+  active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  inactive: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  on_leave: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+};
+
+// driverStatusClass answers the Tailwind class for a status read off the
+// wire, falling back to the active class for any value the table does
+// not know (a legacy uppercase value, an empty string, an unknown future
+// wire value).
+export function driverStatusClass(status: string): string {
+  return driverStatusColors[status] || driverStatusColors.active;
+}
+
+function isDateWarning(dateStr?: string | null, daysThreshold = 30): 'expired' | 'warning' | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   const now = new Date();
@@ -31,7 +49,7 @@ function dateBadgeClass(level: 'expired' | 'warning' | null): string {
   return 'text-zinc-300';
 }
 
-function formatDate(d?: string): string {
+function formatDate(d?: string | null): string {
   if (!d) return '\u2014';
   return new Date(d).toLocaleDateString();
 }
@@ -107,16 +125,16 @@ export class FleetManagement extends LitElement {
   private _defaultVehicleForm(vehicle?: Vehicle): CreateVehicleRequest & { id?: string } {
     return {
       name: vehicle?.name || '',
-      vehicle_type: vehicle?.vehicle_type || 'BOX_TRUCK',
+      vehicle_type: vehicle?.vehicle_type || 'box_truck',
       license_plate: vehicle?.license_plate || '',
-      capacity_weight_lbs: vehicle?.capacity_weight_lbs,
+      capacity_weight_lbs: vehicle?.capacity_weight_lbs ?? undefined,
       vin: vehicle?.vin || undefined,
       year: vehicle?.year || undefined,
       make: vehicle?.make || undefined,
       model: vehicle?.model || undefined,
       insurance_expiry: vehicle?.insurance_expiry?.split('T')[0] || undefined,
       next_service_date: vehicle?.next_service_date?.split('T')[0] || undefined,
-      odometer_miles: vehicle?.odometer_miles || undefined,
+      odometer_miles: vehicle?.odometer_miles ?? undefined,
       notes: vehicle?.notes || undefined,
     };
   }
@@ -125,7 +143,7 @@ export class FleetManagement extends LitElement {
     this._vForm = this._defaultVehicleForm(this._vehicleModalVehicle);
     this._vSaving = false;
     this._vDeleting = false;
-    this._vPhotoUrl = this._vehicleModalVehicle?.photo_url;
+    this._vPhotoUrl = this._vehicleModalVehicle?.photo_url ?? undefined;
     this._vUploading = false;
   }
 
@@ -133,7 +151,11 @@ export class FleetManagement extends LitElement {
     this._vSaving = true;
     try {
       if (this._vehicleModalVehicle) {
-        await deliveryService.updateVehicle(this._vehicleModalVehicle.id, this._vForm as UpdateVehicleRequest);
+        // The edit form loaded the vehicle once and carries its revision.
+        // A fresh re-read here would defeat the revision the user was
+        // editing on (PR 70 review round 1 P3-1: a stale form silently
+        // overwrites a newer change).
+        await deliveryService.updateVehicle(this._vehicleModalVehicle.id, this._vForm as UpdateVehicleRequest, this._vehicleModalVehicle.revision);
       } else {
         await deliveryService.createVehicle(this._vForm);
       }
@@ -146,7 +168,7 @@ export class FleetManagement extends LitElement {
     if (!this._vehicleModalVehicle || !confirm('Delete this vehicle? This action cannot be undone.')) return;
     this._vDeleting = true;
     try {
-      await deliveryService.deleteVehicle(this._vehicleModalVehicle.id);
+      await deliveryService.deleteVehicle(this._vehicleModalVehicle.id, this._vehicleModalVehicle.revision);
       this._onSaved();
       this._closeVehicleModal();
     } catch { ToastService.error('Failed to delete vehicle'); } finally { this._vDeleting = false; }
@@ -183,7 +205,7 @@ export class FleetManagement extends LitElement {
       name: driver?.name || '',
       license_number: driver?.license_number || undefined,
       phone_number: driver?.phone_number || undefined,
-      status: (driver?.status || 'ACTIVE') as DriverStatus,
+      status: (driver?.status || 'active') as DriverStatus,
       cdl_class: driver?.cdl_class || undefined,
       cdl_expiry: driver?.cdl_expiry?.split('T')[0] || undefined,
       hire_date: driver?.hire_date?.split('T')[0] || undefined,
@@ -195,7 +217,7 @@ export class FleetManagement extends LitElement {
     this._dForm = this._defaultDriverForm(this._driverModalDriver);
     this._dSaving = false;
     this._dDeleting = false;
-    this._dPhotoUrl = this._driverModalDriver?.photo_url;
+    this._dPhotoUrl = this._driverModalDriver?.photo_url ?? undefined;
     this._dUploading = false;
   }
 
@@ -203,7 +225,7 @@ export class FleetManagement extends LitElement {
     this._dSaving = true;
     try {
       if (this._driverModalDriver) {
-        await deliveryService.updateDriver(this._driverModalDriver.id, this._dForm as UpdateDriverRequest);
+        await deliveryService.updateDriver(this._driverModalDriver.id, this._dForm as UpdateDriverRequest, this._driverModalDriver.revision);
       } else {
         await deliveryService.createDriver(this._dForm as CreateDriverRequest);
       }
@@ -216,7 +238,7 @@ export class FleetManagement extends LitElement {
     if (!this._driverModalDriver || !confirm('Remove this driver? This action cannot be undone.')) return;
     this._dDeleting = true;
     try {
-      await deliveryService.deleteDriver(this._driverModalDriver.id);
+      await deliveryService.deleteDriver(this._driverModalDriver.id, this._driverModalDriver.revision);
       this._onSaved();
       this._closeDriverModal();
     } catch { ToastService.error('Failed to delete driver'); } finally { this._dDeleting = false; }
@@ -242,11 +264,8 @@ export class FleetManagement extends LitElement {
   }
 
   render() {
-    const statusColors: Record<string, string> = {
-      ACTIVE: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-      INACTIVE: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
-      ON_LEAVE: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    };
+    const statusColors = driverStatusColors;
+    const activeClass = driverStatusColors.active;
 
     return html`
       <div class="space-y-6">
@@ -288,11 +307,11 @@ export class FleetManagement extends LitElement {
           <div class="space-y-3">
             ${[1,2,3].map(() => html`<div class="h-16 bg-white/5 rounded-xl animate-pulse"></div>`)}
           </div>
-        ` : this._tab === 'vehicles' ? this._renderVehiclesTab() : this._renderDriversTab(statusColors)}
+        ` : this._tab === 'vehicles' ? this._renderVehiclesTab() : this._renderDriversTab()}
       </div>
 
       ${this._vehicleModalOpen ? this._renderVehicleModal() : nothing}
-      ${this._driverModalOpen ? this._renderDriverModal(statusColors) : nothing}
+      ${this._driverModalOpen ? this._renderDriverModal(statusColors, activeClass) : nothing}
     `;
   }
 
@@ -368,7 +387,7 @@ export class FleetManagement extends LitElement {
   }
 
   /* ---- Drivers Tab ---- */
-  private _renderDriversTab(statusColors: Record<string, string>) {
+  private _renderDriversTab() {
     return html`
       <div class="rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-md">
         <div class="p-0">
@@ -417,7 +436,7 @@ export class FleetManagement extends LitElement {
                       </td>
                       <td class="px-4 py-3 font-mono text-xs text-zinc-300">${formatDate(d.hire_date)}</td>
                       <td class="px-4 py-3">
-                        <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${statusColors[d.status] || statusColors.ACTIVE}">
+                        <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${driverStatusClass(d.status)}">
                           ${d.status.replace(/_/g, ' ')}
                         </span>
                       </td>
@@ -539,7 +558,7 @@ export class FleetManagement extends LitElement {
   }
 
   /* ---- Driver Modal ---- */
-  private _renderDriverModal(_statusColors: Record<string, string>) {
+  private _renderDriverModal(_statusColors: Record<string, string>, _activeClass: string) {
     const isEdit = !!this._driverModalDriver;
 
     return html`

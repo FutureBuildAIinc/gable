@@ -129,11 +129,12 @@ var modelBoundSchemas = []struct {
 	{"DeliveryVehicle", delivery.Vehicle{}},
 	{"DeliveryDriver", delivery.Driver{}},
 	{"DeliveryRoute", delivery.Route{}},
-	{"Delivery", delivery.Delivery{}},
+	{"Delivery", delivery.Stop{}},
 	{"DeliveryPodPhoto", delivery.PODPhoto{}},
-	{"DeliveryCapacityWarning", delivery.CapacityWarning{}},
-	{"DeliveryRouteLeg", delivery.RouteLeg{}},
-	{"DeliveryRouteOptimizationResult", delivery.RouteOptimizationResult{}},
+	{"DeliveryQtyAdjustment", delivery.QtyAdjustment{}},
+	// CapacityWarning has no binding of its own: the assign result carries
+	// it as an inlined nullable property, the way the order wire carries
+	// its ship_to address.
 	// inventory
 	{"InventoryLevel", inventory.Level{}},
 	{"InventoryProductSummary", inventory.ProductSummary{}},

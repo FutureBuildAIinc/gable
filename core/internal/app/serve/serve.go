@@ -713,7 +713,9 @@ func Run() {
 
 	// Delivery Module
 	deliveryRepo := delivery.NewRepository(db)
-	deliverySvc := delivery.NewService(deliveryRepo)
+	deliverySvc := delivery.NewService(deliveryRepo).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithAudit(auditLog)
 
 	// Wire OpenRouteService for route optimization + geocoding. The client reads
 	// its key dynamically (DB system_settings → env fallback), so an admin can
@@ -729,8 +731,7 @@ func Run() {
 		logger.Warn("OpenRouteService key not set — mock routing until configured via Tech Admin > Routing")
 	}
 
-	deliveryHandler := delivery.NewHandler(deliverySvc)
-	deliveryHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "warehouse", "driver"))
+	wall.delivery(mux, delivery.NewHandler(deliverySvc), "admin", "owner", "warehouse", "driver")
 
 	// Lumber index-aware quote price protection (the exposure module).
 	// Snapshots a baseline index when a quote is sent, detects moves past the

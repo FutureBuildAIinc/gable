@@ -85,6 +85,9 @@ type stepDef struct {
 	// sortPrimaryArray marks steps whose top-level response array is sorted
 	// before comparison (see capturedStep.SortPrimaryArray).
 	sortPrimaryArray bool
+	// sortEnvelopeItems marks steps whose cursor list envelope's items
+	// array is sorted before comparison (see capturedStep.SortEnvelopeItems).
+	sortEnvelopeItems bool
 	// maskCustomerIdentity marks steps whose customer identity fields are
 	// masked to a class placeholder before comparison (see
 	// capturedStep.MaskCustomerIdentity).

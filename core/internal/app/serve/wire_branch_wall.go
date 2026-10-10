@@ -11,6 +11,7 @@ import (
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -87,6 +88,17 @@ func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 // branch A finds branch B's activity a 404.
 func (w *branchWall) crm(mux *http.ServeMux, svc *crm.Service) {
 	crm.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+}
+
+// delivery mounts the delivery routes behind the branch middleware: a stop
+// walls through its order's branch and a route through its stops' orders (a
+// route with no stops carries no branch fact and is visible), so a caller
+// held to branch A finds branch B's stop or route a 404. Vehicles and
+// drivers carry no branch column (the fleet is dealer-wide), so their reads
+// run on the same mount without a wall, a stated limit of the module's
+// contract, listed in CONTRACT-CHANGES.md.
+func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...string) {
+	h.RegisterRoutes(mux, w.scoped(roles...))
 }
 
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {

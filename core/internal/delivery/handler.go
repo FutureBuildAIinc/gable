@@ -5,18 +5,29 @@ package delivery
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+)
+
+// The ordering scopes of the module's five lists (ADR 0001 section 2): a
+// cursor minted for any other ordering is refused.
+const (
+	vehiclesScope = "vehicles.created_at_id_desc"
+	driversScope  = "drivers.created_at_id_desc"
+	routesScope   = "delivery_routes.scheduled_date_id_desc"
+	stopsScope    = "deliveries.stop_sequence_id_asc"
+	photosScope   = "delivery_pod_photos.uploaded_at_id_asc"
 )
 
 type Handler struct {
@@ -43,420 +54,786 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/delivery/vehicles/{id}", guard(h.HandleGetVehicle))
 	mux.HandleFunc("PUT /api/v1/delivery/vehicles/{id}", guard(h.HandleUpdateVehicle))
 	mux.HandleFunc("DELETE /api/v1/delivery/vehicles/{id}", guard(h.HandleDeleteVehicle))
+	mux.HandleFunc("POST /api/v1/delivery/vehicles/{id}/photo", guard(h.HandleUploadVehiclePhoto))
 	mux.HandleFunc("GET /api/v1/delivery/drivers", guard(h.HandleListDrivers))
 	mux.HandleFunc("POST /api/v1/delivery/drivers", guard(h.HandleCreateDriver))
 	mux.HandleFunc("GET /api/v1/delivery/drivers/{id}", guard(h.HandleGetDriver))
 	mux.HandleFunc("PUT /api/v1/delivery/drivers/{id}", guard(h.HandleUpdateDriver))
 	mux.HandleFunc("DELETE /api/v1/delivery/drivers/{id}", guard(h.HandleDeleteDriver))
-	mux.HandleFunc("POST /api/v1/delivery/vehicles/{id}/photo", guard(h.HandleUploadVehiclePhoto))
 	mux.HandleFunc("POST /api/v1/delivery/drivers/{id}/photo", guard(h.HandleUploadDriverPhoto))
 
 	// Routes
 	mux.HandleFunc("GET /api/v1/delivery/routes", guard(h.HandleListRoutes))
 	mux.HandleFunc("POST /api/v1/delivery/routes", guard(h.HandleCreateRoute))
-	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/dispatch", guard(h.HandleDispatchRoute))
+	mux.HandleFunc("GET /api/v1/delivery/routes/{id}", guard(h.HandleGetRoute))
+	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/transitions", guard(h.HandleRouteTransition))
 	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/reorder", guard(h.HandleReorderStops))
 	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/optimize", guard(h.HandleOptimizeRoute))
-	mux.HandleFunc("POST /api/v1/delivery/routes/{id}/complete", guard(h.HandleCompleteRoute))
 
-	// Deliveries
+	// Stops
 	mux.HandleFunc("GET /api/v1/delivery/routes/{id}/deliveries", guard(h.HandleListDeliveries))
+	mux.HandleFunc("POST /api/v1/delivery/deliveries", guard(h.HandleAssignOrder))
 	mux.HandleFunc("GET /api/v1/delivery/deliveries/{id}", guard(h.HandleGetDelivery))
-	mux.HandleFunc("POST /api/v1/delivery/deliveries", guard(h.HandleAssignOrder))                     // Assign Order to Route
-	mux.HandleFunc("PUT /api/v1/delivery/deliveries/{id}/status", guard(h.HandleUpdateDeliveryStatus)) // Complete Delivery
+	mux.HandleFunc("POST /api/v1/delivery/deliveries/{id}/transitions", guard(h.HandleStopTransition))
 	mux.HandleFunc("POST /api/v1/delivery/deliveries/{id}/adjust-qty", guard(h.HandleAdjustQuantity))
-
-	// POD Photos
 	mux.HandleFunc("POST /api/v1/delivery/deliveries/{id}/pod-photo", guard(h.HandleUploadPODPhoto))
 	mux.HandleFunc("GET /api/v1/delivery/deliveries/{id}/pod-photos", guard(h.HandleListPODPhotos))
 }
 
-// Fleet
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func pathID(r *http.Request, what string) (uuid.UUID, error) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		return uuid.Nil, httpx.BadRequest("invalid "+what+" id",
+			httpx.FieldError{Field: "id", Message: "must be a UUID"})
+	}
+	return id, nil
+}
+
+func noQuery(r *http.Request) error {
+	_, err := httpx.StrictQuery(r)
+	return err
+}
+
+// actor reads the caller's subject for the audit rows.
+func actor(r *http.Request) string {
+	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
+		return claims.Subject
+	}
+	return ""
+}
+
+func writeVehicle(w http.ResponseWriter, status int, v *Vehicle) {
+	httpx.WriteRevisionETag(w, v.Revision)
+	writeJSON(w, status, v)
+}
+
+func writeDriver(w http.ResponseWriter, status int, d *Driver) {
+	httpx.WriteRevisionETag(w, d.Revision)
+	writeJSON(w, status, d)
+}
+
+func writeRoute(w http.ResponseWriter, status int, route *Route) {
+	httpx.WriteRevisionETag(w, route.Revision)
+	writeJSON(w, status, route)
+}
+
+func writeStop(w http.ResponseWriter, status int, s *Stop) {
+	httpx.WriteRevisionETag(w, s.Revision)
+	writeJSON(w, status, s)
+}
+
+func cursorError() error {
+	return httpx.BadRequest("cursor keyset is malformed",
+		httpx.FieldError{Field: "cursor", Message: "cursor keyset is malformed"})
+}
+
+// pageList reads the platform's list parameters (cursor, limit, include) and
+// the keyset position for the time-then-id orderings the fleet lists use.
+func pageList(r *http.Request, q map[string][]string) (limit int, after *time.Time, afterID uuid.UUID, wantTotal bool, err error) {
+	page, err := httpx.ParseListQuery(r, vehiclesScope)
+	if err != nil {
+		return 0, nil, uuid.Nil, false, err
+	}
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return 0, nil, uuid.Nil, false, httpx.BadRequest("include is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"})
+		}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			return 0, nil, uuid.Nil, false, ierr
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			return 0, nil, uuid.Nil, false, cursorError()
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			return 0, nil, uuid.Nil, false, cursorError()
+		}
+		after, afterID = &at, id
+	}
+	return page.Limit, after, afterID, wantTotal, nil
+}
+
+// nextTimeCursor mints the time-then-id continuation.
+func nextTimeCursor(scope string, hasMore bool, created time.Time, id uuid.UUID) (string, error) {
+	if !hasMore {
+		return "", nil
+	}
+	return httpx.MintCursor(scope, httpx.FormatKeyTime(created), id.String())
+}
+
+// Fleet: vehicles
 
 func (h *Handler) HandleListVehicles(w http.ResponseWriter, r *http.Request) {
-	vehicles, err := h.service.ListVehicles(r.Context())
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include")
 	if err != nil {
-		slog.Error("ListVehicles failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(vehicles)
+	limit, after, afterID, wantTotal, err := pageList(r, q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f := FleetListFilter{Limit: limit, AfterTime: after, AfterID: afterID}
+	items, more, total, err := h.service.ListVehicles(r.Context(), f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 {
+		last := items[len(items)-1]
+		if next, err = nextTimeCursor(vehiclesScope, more, last.CreatedAt.Time, last.ID); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
 }
 
 func (h *Handler) HandleCreateVehicle(w http.ResponseWriter, r *http.Request) {
-	var req CreateVehicleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	v, err := h.service.CreateVehicle(r.Context(), req)
+	var req VehicleRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse(false)
 	if err != nil {
-		slog.Error("CreateVehicle failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(v)
-}
-
-func (h *Handler) HandleListDrivers(w http.ResponseWriter, r *http.Request) {
-	drivers, err := h.service.ListDrivers(r.Context())
+	v, err := h.service.CreateVehicle(r.Context(), draft, actor(r))
 	if err != nil {
-		slog.Error("ListDrivers failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(drivers)
-}
-
-func (h *Handler) HandleCreateDriver(w http.ResponseWriter, r *http.Request) {
-	var req CreateDriverRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-	d, err := h.service.CreateDriver(r.Context(), req)
-	if err != nil {
-		slog.Error("CreateDriver failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(d)
-}
-
-// Routes
-
-func (h *Handler) HandleListRoutes(w http.ResponseWriter, r *http.Request) {
-	dateStr := r.URL.Query().Get("date")
-	var datePtr *string
-	if dateStr != "" {
-		datePtr = &dateStr
-	}
-
-	driverIDStr := r.URL.Query().Get("driver_id")
-	var driverID *uuid.UUID
-	if driverIDStr != "" {
-		id, err := uuid.Parse(driverIDStr)
-		if err != nil {
-			httputil.RespondError(w, r, "Invalid driver_id UUID", http.StatusBadRequest, err)
-			return
-		}
-		driverID = &id
-	}
-
-	routes, err := h.service.ListRoutes(r.Context(), datePtr, driverID)
-	if err != nil {
-		slog.Error("ListRoutes failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(routes)
-}
-
-func (h *Handler) HandleCreateRoute(w http.ResponseWriter, r *http.Request) {
-	var req CreateRouteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-	route, err := h.service.CreateRoute(r.Context(), req)
-	if err != nil {
-		slog.Error("CreateRoute failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(route)
-}
-
-func (h *Handler) HandleDispatchRoute(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	if err := h.service.DispatchRoute(r.Context(), id); err != nil {
-		slog.Error("DispatchRoute failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-func (h *Handler) HandleReorderStops(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	var req ReorderStopsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	if err := h.service.ReorderStops(r.Context(), id, req.OrderedDeliveryIDs); err != nil {
-		slog.Error("ReorderStops failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-// Deliveries
-
-func (h *Handler) HandleListDeliveries(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id") // Route ID
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	deliveries, err := h.service.ListDeliveries(r.Context(), id)
-	if err != nil {
-		slog.Error("ListDeliveries failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(deliveries)
-}
-
-func (h *Handler) HandleGetDelivery(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	d, err := h.service.GetDelivery(r.Context(), id)
-	if err != nil {
-		slog.Error("GetDelivery failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(d)
-}
-
-func (h *Handler) HandleAssignOrder(w http.ResponseWriter, r *http.Request) {
-	var req AssignOrderRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	d, capacityWarning, err := h.service.AssignOrderToRoute(r.Context(), req)
-	if err != nil {
-		// A pickup (will-call) order is never routed: 409 with the blocker
-		// pickup_order, in the platform's envelope (ADR 0005 5.5).
-		var he *httpx.Error
-		if errors.As(err, &he) {
-			httpx.WriteError(w, r, he)
-			return
-		}
-		slog.Error("AssignOrderToRoute failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-
-	response := struct {
-		Delivery        *Delivery        `json:"delivery"`
-		CapacityWarning *CapacityWarning `json:"capacity_warning,omitempty"`
-	}{
-		Delivery:        d,
-		CapacityWarning: capacityWarning,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
-}
-
-func (h *Handler) HandleUpdateDeliveryStatus(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	var req UpdateDeliveryStatusRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-
-	if err := h.service.CompleteDelivery(r.Context(), id, req); err != nil {
-		slog.Error("CompleteDelivery failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
-}
-
-func (h *Handler) HandleOptimizeRoute(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	result, err := h.service.OptimizeRoute(r.Context(), id)
-	if err != nil {
-		slog.Error("OptimizeRoute failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	w.Header().Set("Location", "/api/v1/delivery/vehicles/"+v.ID.String())
+	writeVehicle(w, http.StatusCreated, v)
 }
 
 func (h *Handler) HandleGetVehicle(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "vehicle")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
 	v, err := h.service.GetVehicle(r.Context(), id)
 	if err != nil {
-		slog.Error("GetVehicle failed", "error", err)
-		httputil.RespondError(w, r, "Vehicle not found", http.StatusNotFound, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	writeVehicle(w, http.StatusOK, v)
 }
 
 func (h *Handler) HandleUpdateVehicle(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "vehicle")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	var req UpdateVehicleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req VehicleRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	v, err := h.service.UpdateVehicle(r.Context(), id, req)
+	draft, err := req.Parse(true)
 	if err != nil {
-		slog.Error("UpdateVehicle failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(v)
+	v, err := h.service.UpdateVehicle(r.Context(), id, draft,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeVehicle(w, http.StatusOK, v)
 }
 
 func (h *Handler) HandleDeleteVehicle(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if err := h.service.DeleteVehicle(r.Context(), id); err != nil {
-		slog.Error("DeleteVehicle failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+	id, err := pathID(r, "vehicle")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if err := h.service.DeleteVehicle(r.Context(), id,
+		Precondition{IfMatch: r.Header.Get("If-Match")}, actor(r)); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) HandleGetDriver(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+// Fleet: drivers
+
+func (h *Handler) HandleListDrivers(w http.ResponseWriter, r *http.Request) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
+		return
+	}
+	limit, after, afterID, wantTotal, err := pageList(r, q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f := FleetListFilter{Limit: limit, AfterTime: after, AfterID: afterID}
+	items, more, total, err := h.service.ListDrivers(r.Context(), f, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 {
+		last := items[len(items)-1]
+		if next, err = nextTimeCursor(driversScope, more, last.CreatedAt.Time, last.ID); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
+}
+
+func (h *Handler) HandleCreateDriver(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req DriverRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse(false)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	d, err := h.service.CreateDriver(r.Context(), draft, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/delivery/drivers/"+d.ID.String())
+	writeDriver(w, http.StatusCreated, d)
+}
+
+func (h *Handler) HandleGetDriver(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "driver")
+	if err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	d, err := h.service.GetDriver(r.Context(), id)
 	if err != nil {
-		slog.Error("GetDriver failed", "error", err)
-		httputil.RespondError(w, r, "Driver not found", http.StatusNotFound, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(d)
+	writeDriver(w, http.StatusOK, d)
 }
 
 func (h *Handler) HandleUpdateDriver(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "driver")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	var req UpdateDriverRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
+	var req DriverRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	d, err := h.service.UpdateDriver(r.Context(), id, req)
+	draft, err := req.Parse(true)
 	if err != nil {
-		slog.Error("UpdateDriver failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(d)
+	d, err := h.service.UpdateDriver(r.Context(), id, draft,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeDriver(w, http.StatusOK, d)
 }
 
 func (h *Handler) HandleDeleteDriver(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-	if err := h.service.DeleteDriver(r.Context(), id); err != nil {
-		slog.Error("DeleteDriver failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+	id, err := pathID(r, "driver")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if err := h.service.DeleteDriver(r.Context(), id,
+		Precondition{IfMatch: r.Header.Get("If-Match")}, actor(r)); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) HandleCompleteRoute(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+// Routes
+
+// parseRouteList reads the route list's parameters: the platform's three,
+// the date, driver_id and status filters, and include=stops (the board
+// read: routes and stops in one payload) and include=total.
+func parseRouteList(r *http.Request) (f RouteListFilter, wantStops, wantTotal bool, err error) {
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include", "date", "driver_id", "status")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
+		return f, false, false, err
 	}
-	if err := h.service.CompleteRoute(r.Context(), id); err != nil {
-		httputil.RespondError(w, r, "failed to complete route", http.StatusBadRequest, err)
-		return
+	page, err := httpx.ParseListQuery(r, routesScope)
+	if err != nil {
+		return f, false, false, err
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "completed"})
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			return f, false, false, httpx.BadRequest("include is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"})
+		}
+		set, ierr := httpx.ParseInclude(vals[0], "stops", httpx.IncludeTotal)
+		if ierr != nil {
+			return f, false, false, ierr
+		}
+		wantStops, wantTotal = set.Has("stops"), set.Has(httpx.IncludeTotal)
+	}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			return f, false, false, cursorError()
+		}
+		at, terr := time.Parse("2006-01-02", page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil || !datePattern.MatchString(page.Key[0]) {
+			return f, false, false, cursorError()
+		}
+		key := at.Format("2006-01-02")
+		f.AfterDate, f.AfterID = &key, id
+	}
+	f.Limit = page.Limit
+	v := &httpx.Validator{}
+	if vals := q["date"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "date", "parameter is repeated")
+		} else if at, terr := time.Parse("2006-01-02", vals[0]); terr != nil || !datePattern.MatchString(vals[0]) {
+			v.Check(false, "date", "must be a date as YYYY-MM-DD")
+		} else {
+			day := at.Format("2006-01-02")
+			f.Date = &day
+		}
+	}
+	if vals := q["driver_id"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "driver_id", "parameter is repeated")
+		} else if id, ok := v.UUID("driver_id", &vals[0], true); ok {
+			f.DriverID = &id
+		}
+	}
+	if vals := q["status"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			v.Check(false, "status", "parameter is repeated")
+		} else if st, ok := ParseRouteStatus(vals[0]); ok {
+			f.Status = &st
+		} else {
+			v.Check(false, "status", "must be one of: "+strings.Join(RouteStatusNames(), ", "))
+		}
+	}
+	if err := v.Err(); err != nil {
+		return f, false, false, err
+	}
+	return f, wantStops, wantTotal, nil
 }
+
+func (h *Handler) HandleListRoutes(w http.ResponseWriter, r *http.Request) {
+	f, wantStops, wantTotal, err := parseRouteList(r)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	items, more, total, err := h.service.ListRoutes(r.Context(), f, wantStops, wantTotal)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 && more {
+		last := items[len(items)-1]
+		if next, err = httpx.MintCursor(routesScope, last.ScheduledDate, last.ID.String()); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if total != nil {
+		opts = append(opts, httpx.WithTotal(*total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
+}
+
+func (h *Handler) HandleCreateRoute(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req RouteRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	route, err := h.service.CreateRoute(r.Context(), draft, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/delivery/routes/"+route.ID.String())
+	writeRoute(w, http.StatusCreated, route)
+}
+
+func (h *Handler) HandleGetRoute(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "route")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	route, err := h.service.GetRoute(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRoute(w, http.StatusOK, route)
+}
+
+func (h *Handler) HandleRouteTransition(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "route")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req RouteTransitionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	route, err := h.service.TransitionRoute(r.Context(), id, draft,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRoute(w, http.StatusOK, route)
+}
+
+func (h *Handler) HandleReorderStops(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "route")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req ReorderRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	route, err := h.service.ReorderStops(r.Context(), id, draft,
+		Precondition{IfMatch: r.Header.Get("If-Match")}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRoute(w, http.StatusOK, route)
+}
+
+func (h *Handler) HandleOptimizeRoute(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "route")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	route, err := h.service.OptimizeRoute(r.Context(), id,
+		Precondition{IfMatch: r.Header.Get("If-Match")}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeRoute(w, http.StatusOK, route)
+}
+
+// Stops
+
+func (h *Handler) HandleListDeliveries(w http.ResponseWriter, r *http.Request) {
+	routeID, err := pathID(r, "route")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	q, err := httpx.StrictQuery(r, "cursor", "limit", "include")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	page, err := httpx.ParseListQuery(r, stopsScope)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	wantTotal := false
+	if vals := q["include"]; len(vals) > 0 {
+		if len(vals) > 1 {
+			httpx.WriteError(w, r, httpx.BadRequest("include is repeated",
+				httpx.FieldError{Field: "include", Message: "parameter is repeated"}))
+			return
+		}
+		set, ierr := httpx.ParseInclude(vals[0], httpx.IncludeTotal)
+		if ierr != nil {
+			httpx.WriteError(w, r, ierr)
+			return
+		}
+		wantTotal = set.Has(httpx.IncludeTotal)
+	}
+	f := StopListFilter{Limit: page.Limit}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		seq, serr := strconv.Atoi(page.Key[0])
+		id, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if serr != nil || uerr != nil || seq < 1 {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		f.AfterStopSeq, f.AfterID = &seq, id
+	}
+	items, more, err := h.service.ListDeliveries(r.Context(), routeID, f)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 && more {
+		last := items[len(items)-1]
+		if next, err = httpx.MintCursor(stopsScope, strconv.Itoa(last.StopSequence), last.ID.String()); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	var opts []httpx.ListOption
+	if wantTotal {
+		total, terr := h.service.CountDeliveries(r.Context(), routeID)
+		if terr != nil {
+			httpx.WriteError(w, r, terr)
+			return
+		}
+		opts = append(opts, httpx.WithTotal(total))
+	}
+	httpx.WriteList(w, items, next, f.Limit, opts...)
+}
+
+func (h *Handler) HandleAssignOrder(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req AssignStopRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	stop, warning, err := h.service.AssignOrderToRoute(r.Context(), draft, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	response := struct {
+		Delivery        *Stop            `json:"delivery"`
+		CapacityWarning *CapacityWarning `json:"capacity_warning"`
+	}{Delivery: stop, CapacityWarning: warning}
+	w.Header().Set("Location", "/api/v1/delivery/deliveries/"+stop.ID.String())
+	httpx.WriteRevisionETag(w, stop.Revision)
+	writeJSON(w, http.StatusCreated, response)
+}
+
+func (h *Handler) HandleGetDelivery(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "delivery")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	stop, err := h.service.GetDelivery(r.Context(), id)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeStop(w, http.StatusOK, stop)
+}
+
+func (h *Handler) HandleStopTransition(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "delivery")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req StopTransitionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	stop, err := h.service.TransitionStop(r.Context(), id, draft,
+		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: draft.Revision}, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeStop(w, http.StatusOK, stop)
+}
+
+func (h *Handler) HandleAdjustQuantity(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "delivery")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	var req AdjustRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	draft, err := req.Parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	stop, err := h.service.AdjustDeliveryQuantity(r.Context(), id, draft, actor(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeStop(w, http.StatusOK, stop)
+}
+
+// Photos
 
 const maxUploadSize = 10 << 20 // 10 MB
 
+var photoExtensions = map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true}
+
+// saveUpload stores one multipart photo on disk and returns its public URL.
+// Every client mistake is a 400 naming photo; a body over the bound is 413.
 func saveUpload(w http.ResponseWriter, r *http.Request, subdir string) (string, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
 	file, header, err := r.FormFile("photo")
 	if err != nil {
-		return "", fmt.Errorf("read form file: %w", err)
+		if strings.Contains(err.Error(), "request body too large") {
+			return "", httpx.PayloadTooLarge("the photo is over 10 MB")
+		}
+		return "", httpx.BadRequest("the photo field is required and must hold a file",
+			httpx.FieldError{Field: "photo", Message: "a file is required"})
 	}
 	defer file.Close()
 
 	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
-		return "", fmt.Errorf("unsupported file type: %s", ext)
+	if !photoExtensions[ext] {
+		return "", httpx.BadRequest("unsupported file type",
+			httpx.FieldError{Field: "photo", Message: "must be a jpg, jpeg, png or webp file"})
 	}
 
 	dir := filepath.Join("uploads", subdir)
@@ -480,172 +857,158 @@ func saveUpload(w http.ResponseWriter, r *http.Request, subdir string) (string, 
 }
 
 func (h *Handler) HandleUploadVehiclePhoto(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
+	id, err := pathID(r, "vehicle")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	// RULE (PR 70 review round 6 P3-1): a refused photo upload must leave
+	// no file on disk. Validate the vehicle through the read before the
+	// multipart body is saved; an unknown id answers 404 and saveUpload is
+	// never called, so the upload directory never sees a stray write.
+	if _, gerr := h.service.GetVehicle(r.Context(), id); gerr != nil {
+		httpx.WriteError(w, r, gerr)
+		return
+	}
 	url, err := saveUpload(w, r, "vehicles")
 	if err != nil {
-		httputil.RespondError(w, r, "failed to upload vehicle photo", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.service.SetVehiclePhoto(r.Context(), id, url); err != nil {
+	v, err := h.service.SetVehiclePhoto(r.Context(), id, url, actor(r))
+	if err != nil {
 		slog.Error("SetVehiclePhoto failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"photo_url": url})
+	writeVehicle(w, http.StatusOK, v)
 }
 
 func (h *Handler) HandleUploadDriverPhoto(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
+	id, err := pathID(r, "driver")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	// RULE (PR 70 review round 6 P3-1): a refused photo upload must leave
+	// no file on disk. Validate the driver through the read before the
+	// multipart body is saved; an unknown id answers 404 and saveUpload is
+	// never called, so the upload directory never sees a stray write.
+	if _, gerr := h.service.GetDriver(r.Context(), id); gerr != nil {
+		httpx.WriteError(w, r, gerr)
+		return
+	}
 	url, err := saveUpload(w, r, "drivers")
 	if err != nil {
-		httputil.RespondError(w, r, "failed to upload driver photo", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if err := h.service.SetDriverPhoto(r.Context(), id, url); err != nil {
+	d, err := h.service.SetDriverPhoto(r.Context(), id, url, actor(r))
+	if err != nil {
 		slog.Error("SetDriverPhoto failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"photo_url": url})
+	writeDriver(w, http.StatusOK, d)
 }
 
-func (h *Handler) HandleAdjustQuantity(w http.ResponseWriter, r *http.Request) {
-	idStr := r.PathValue("id")
-	deliveryID, err := uuid.Parse(idStr)
-	if err != nil {
-		httputil.RespondError(w, r, "Invalid UUID", http.StatusBadRequest, err)
-		return
-	}
-
-	var req QtyAdjustmentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httputil.RespondError(w, r, "Invalid request body", http.StatusBadRequest, err)
-		return
-	}
-	req.DeliveryID = deliveryID
-
-	if err := h.service.AdjustDeliveryQuantity(r.Context(), req); err != nil {
-		slog.Error("AdjustDeliveryQuantity failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "adjusted"})
-}
-
-// HandleUploadPODPhoto handles POST /api/v1/delivery/deliveries/{id}/pod-photo
+// HandleUploadPODPhoto attaches one proof-of-delivery photo to a stop.
 func (h *Handler) HandleUploadPODPhoto(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	id, err := pathID(r, "delivery")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid delivery ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	// Limit request body size before parsing
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-
-	// Parse multipart form (max 10MB)
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		httputil.RespondError(w, r, "File too large", http.StatusBadRequest, err)
+	// RULE (PR 70 review round 4 P3-1): a refused photo upload must leave
+	// no file on disk. Validate the stop through the walled read before
+	// the multipart body is saved; a stop the wall hides answers 404 and
+	// saveUpload is never called, so the upload directory never sees a
+	// stray write for a cross-branch or unknown id.
+	if _, gerr := h.service.GetDelivery(r.Context(), id); gerr != nil {
+		httpx.WriteError(w, r, gerr)
 		return
 	}
-
-	file, header, err := r.FormFile("photo")
+	url, err := saveUpload(w, r, "pod")
 	if err != nil {
-		httputil.RespondError(w, r, "Photo file required", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-	defer file.Close()
-
 	photoType := r.FormValue("photo_type")
 	if photoType == "" {
 		photoType = "site"
 	}
-
-	// Save file to uploads directory
-	uploadsDir := filepath.Join("uploads", "pod")
-	if err := os.MkdirAll(uploadsDir, 0755); err != nil {
-		slog.Error("Failed to create POD uploads dir", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+	if photoType != "signature" && photoType != "site" && photoType != "damage" {
+		httpx.WriteError(w, r, httpx.BadRequest("photo_type must be signature, site or damage",
+			httpx.FieldError{Field: "photo_type", Message: "must be one of: signature, site, damage"}))
 		return
 	}
-
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if ext == "" {
-		ext = ".jpg"
-	}
-	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
-		httputil.RespondError(w, r, fmt.Sprintf("unsupported file type: %s", ext), http.StatusBadRequest, nil)
-		return
-	}
-	filename := fmt.Sprintf("%s-%s%s", id.String(), uuid.New().String()[:8], ext)
-	filePath := filepath.Join(uploadsDir, filename)
-
-	dst, err := os.Create(filePath)
-	if err != nil {
-		slog.Error("Failed to create file", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-	defer dst.Close()
-
-	if _, err := io.Copy(dst, file); err != nil {
-		slog.Error("Failed to write file", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
-		return
-	}
-
-	photoURL := "/uploads/pod/" + filename
-
-	photo, err := h.service.UploadPODPhoto(r.Context(), id, photoURL, photoType)
+	photo, _, err := h.service.UploadPODPhoto(r.Context(), id, url, photoType, actor(r))
 	if err != nil {
 		slog.Error("UploadPODPhoto failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(photo)
+	writeJSON(w, http.StatusCreated, photo)
 }
 
-// HandleListPODPhotos handles GET /api/v1/delivery/deliveries/{id}/pod-photos
+// HandleListPODPhotos lists a stop's proof-of-delivery photos.
 func (h *Handler) HandleListPODPhotos(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(r.PathValue("id"))
+	id, err := pathID(r, "delivery")
 	if err != nil {
-		httputil.RespondError(w, r, "Invalid delivery ID", http.StatusBadRequest, err)
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	photos, err := h.service.GetPODPhotos(r.Context(), id)
-	if err != nil {
-		slog.Error("GetPODPhotos failed", "error", err)
-		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
+	if _, err := httpx.StrictQuery(r, "cursor", "limit", "include"); err != nil {
+		httpx.WriteError(w, r, err)
 		return
 	}
-
-	if photos == nil {
-		photos = []PODPhoto{}
+	if _, err := h.service.GetDelivery(r.Context(), id); err != nil {
+		httpx.WriteError(w, r, err)
+		return
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(photos)
+	page, err := httpx.ParseListQuery(r, photosScope)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	f := PhotoListFilter{Limit: page.Limit}
+	if page.Key != nil {
+		if len(page.Key) != 2 {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		at, terr := httpx.ParseKeyTime(page.Key[0])
+		pid, uerr := httpx.ParseKeyUUID(page.Key[1])
+		if terr != nil || uerr != nil {
+			httpx.WriteError(w, r, cursorError())
+			return
+		}
+		f.AfterTime, f.AfterID = &at, pid
+	}
+	items, more, err := h.service.GetPODPhotos(r.Context(), id, f)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	next := ""
+	if len(items) > 0 && more {
+		last := items[len(items)-1]
+		if next, err = httpx.MintCursor(photosScope, httpx.FormatKeyTime(last.UploadedAt.Time), last.ID.String()); err != nil {
+			httpx.WriteError(w, r, err)
+			return
+		}
+	}
+	httpx.WriteList(w, items, next, f.Limit)
 }
