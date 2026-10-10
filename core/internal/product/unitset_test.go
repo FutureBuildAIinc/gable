@@ -417,6 +417,107 @@ func TestUnitSetStockingUnitRefusals(t *testing.T) {
 	}
 }
 
+// TestUnitSetStockingUnitComesFromStockUOM proves the stocking unit the PUT
+// stores is the request's stock_uom, never the first (1, 1) row of the set:
+// a set carrying two (1, 1) rows (EA and PCS, the natural fastener set)
+// stores stock_uom's unit whatever the row order, the answer agrees with
+// what is stored, and the stock_unit_in_use and price_unit_held holds fire
+// as 409s, never a 500 from a deferred trigger.
+func TestUnitSetStockingUnitComesFromStockUOM(t *testing.T) {
+	f := newSetFixture(t)
+	ctx := context.Background()
+	var locID string
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT id FROM locations WHERE type = 'BRANCH' LIMIT 1`).Scan(&locID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A PCS product holding stock: a PUT whose stock_uom stays PCS with the
+	// EA row first (both rows are (1, 1)) keeps uom_primary PCS and the
+	// answer says so.
+	held, rev := f.createBoard(map[string]any{"description": "held by stock", "stock_uom": "PCS"})
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO inventory (product_id, location, location_id, quantity) VALUES ($1, 'YARD', $2, 10)`,
+		held, locID); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE product_id = $1`, held)
+	}()
+	res := f.putUnits(held, unitsBody(rev, "PCS", "PCS", "PCS", "PCS", []any{
+		unitRow("EA", true, true, true),
+		unitRow("PCS", true, true, true),
+	}))
+	if res.status != http.StatusOK {
+		t.Fatalf("a PUT whose stock_uom stays PCS under stock = %d: %s", res.status, res.raw)
+	}
+	if res.body["stock_uom"] != "PCS" {
+		t.Errorf("the answer's stock_uom is PCS, got %v", res.body["stock_uom"])
+	}
+	heldRev, _ := res.body["revision"].(json.Number).Int64()
+	if got := f.do("GET", "/api/v1/products/"+held, nil); got.status != http.StatusOK || got.body["stock_uom"] != "PCS" {
+		t.Errorf("the stored stocking unit is PCS whatever the row order, got %d %s", got.status, got.raw)
+	}
+	if got := f.do("GET", "/api/v1/products/"+held+"/units", nil); got.status != http.StatusOK || got.body["stock_uom"] != "PCS" {
+		t.Errorf("the stored set's stocking unit is PCS, got %d %s", got.status, got.raw)
+	}
+
+	// The same PUT on a priced product is served, not a 500 from a deferred
+	// trigger: the stocking unit does not change, so no hold fires.
+	priced, prev := f.createBoard(map[string]any{
+		"description": "priced product", "stock_uom": "PCS", "base_price_ten_thousandths": 5250000,
+	})
+	res = f.putUnits(priced, unitsBody(prev, "PCS", "PCS", "PCS", "PCS", []any{
+		unitRow("EA", true, true, true),
+		unitRow("PCS", true, true, true),
+	}))
+	if res.status != http.StatusOK || res.body["stock_uom"] != "PCS" {
+		t.Fatalf("a PUT whose stock_uom stays PCS on a priced product = %d: %s", res.status, res.raw)
+	}
+	pricedRev, _ := res.body["revision"].(json.Number).Int64()
+
+	// A stocking unit change under stock is the 409 stock_unit_in_use,
+	// whatever the row order.
+	res = f.putUnits(held, unitsBody(heldRev, "EA", "EA", "EA", "EA", []any{
+		unitRow("PCS", true, true, true),
+		unitRow("EA", true, true, true),
+	}))
+	if res.status != http.StatusConflict {
+		t.Fatalf("a stocking unit change under stock is a 409, got %d: %s", res.status, res.raw)
+	}
+	if res.body["error"].(map[string]any)["details"].([]any)[0].(map[string]any)["code"] != "stock_unit_in_use" {
+		t.Errorf("the blocker is stock_unit_in_use, got %s", res.raw)
+	}
+
+	// A stocking unit change on a priced product is the 409 price_unit_held,
+	// never a 500.
+	res = f.putUnits(priced, unitsBody(pricedRev, "EA", "EA", "EA", "EA", []any{
+		unitRow("EA", true, true, true),
+	}))
+	if res.status != http.StatusConflict {
+		t.Fatalf("a stocking unit change under a base price is a 409, got %d: %s", res.status, res.raw)
+	}
+	if res.body["error"].(map[string]any)["details"].([]any)[0].(map[string]any)["code"] != "price_unit_held" {
+		t.Errorf("the blocker is price_unit_held, got %s", res.raw)
+	}
+
+	// A stock_uom with no row of the set, or whose row is sent as another
+	// pair than (1, 1), is a 400 naming stock_uom: the stocking unit comes
+	// from stock_uom, never from row order.
+	res = f.putUnits(priced, unitsBody(pricedRev, "EA", "EA", "EA", "EA", []any{
+		unitRow("PCS", true, true, true),
+	}))
+	if res.status != http.StatusBadRequest || !strings.Contains(string(res.raw), `"stock_uom"`) {
+		t.Errorf("a stock_uom with no row is a 400 naming stock_uom, got %d: %s", res.status, res.raw)
+	}
+	res = f.putUnits(priced, unitsBody(pricedRev, "EA", "EA", "EA", "EA", []any{
+		unitRow("EA", true, true, true, "1", "2"),
+	}))
+	if res.status != http.StatusBadRequest || !strings.Contains(string(res.raw), `"stock_uom"`) {
+		t.Errorf("a stock_uom row sent as another pair is a 400 naming stock_uom, got %d: %s", res.status, res.raw)
+	}
+}
+
 // TestUnitSetFieldRefusals proves the parse rules: an inactive unit refused
 // on a new set row, a default that is not a row of the set with its flag
 // refused naming it, an unknown unit refused, and a body field the PUT does

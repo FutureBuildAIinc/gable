@@ -72,7 +72,7 @@ func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) 
 	return nil, ErrNotFound
 }
 func (f *fakeProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []UnitSetRowView,
-	_, _, _ string, _ *int64, _ int64) (int64, error) {
+	_, _, _, _ string, _ *int64, _ int64) (int64, error) {
 	return 0, nil
 }
 func (f *fakeProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
