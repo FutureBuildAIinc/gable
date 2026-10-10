@@ -50,6 +50,9 @@ The pages:
 | Configurator | [configurator.md](configurator.md) | The rule engine for non-stock SKUs. | C5-1b. |
 | Millwork | [millwork.md](millwork.md) | The millwork option catalog. | C5-1b. |
 | Payments | [payments.md](payments.md) | Today; the conversion is C2-4 (in flight at the time of writing). | pending C2-4. |
+| Tech admin | [tech-admin.md](tech-admin.md) | Machine API keys, the AI and routing settings, the apps catalog and toggles, and the finer admin scopes of ADR 0009. | C5-1a. |
+| Staff roster and module grants | [staff.md](staff.md) | The dealer roster the integrations surface authenticates against, the per staff module grants, and the global module kill switches. | C5-1a. |
+| Governance (RFCs) | [governance.md](governance.md) | The RFC drafting, review and status surface; the operator-installed governance app. | C5-1a. |
 
 ## Conventions every page uses
 
@@ -70,8 +73,16 @@ The pages:
   pages here: `invoices`, `quotes`, `orders`, `customers`,
   `products`, `inventory`, `activities`, `ship-tos`, `contacts`,
   `payment-terms`, `price_levels`, `credit-memos`, `configurator`,
-  `millwork`, `payments`). The user guard is composed at the serve
-  layer in `core/internal/app/serve/serve.go` and
+  `millwork`, `payments`, `governance`, `apps`). The admin module
+  declares finer area scopes in `core/pkg/middleware/machinekey.go`
+  (ADR 0009 section 1): `admin:settings` on
+  `/api/v1/admin/settings/...`, `admin:staff` on
+  `/api/v1/admin/staff/...`, `admin:modules` on
+  `/api/v1/admin/modules/...`. The key management routes under
+  `/api/v1/admin/keys/...` are user only and a machine key is
+  refused there whatever it holds (ADR 0002 section 4). The user
+  guard is composed at the serve layer in
+  `core/internal/app/serve/serve.go` and
   `core/internal/app/serve/wire_branch_wall.go`; the guard a page
   lists is the one the wiring code applies.
 - No calendar dates, no schedule durations, no em or en dashes.
