@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -207,6 +208,75 @@ func TestMigration103_AppliesOnASeededDatabaseAndReportsOffGrammarKeys(t *testin
 	if got := scalar103(t, conn,
 		`SELECT scopes::text FROM api_keys WHERE id = '11111111-1111-1111-1111-111111111111'`); got != "{quotes:writ}" {
 		t.Fatalf("the reported key's scopes were changed: %v", got)
+	}
+}
+
+// TestMigration103_ReportMatchesTheGoGrammar pins the report's grammar to
+// the mint's (review pr66-r3 P3-2): one key per scope of
+// ValidScopeGrammar (the propose and commit verbs apart, which the report
+// names as gaining reach by design, and the seeded test above covers) is
+// silent, and the scopes the Go grammar refuses that the SQL once accepted
+// (deposits:read, deposits:write, users:write) are named outside the grant
+// grammar. The finer names, the underscore modules, the orders scopes and
+// the units scopes all ride on the iteration, so a drift of either list in
+// either direction fails here.
+func TestMigration103_ReportMatchesTheGoGrammar(t *testing.T) {
+	conn, notices := scratchDB103(t)
+	before, target, _ := migrationFiles103(t)
+	for _, f := range before {
+		applySQL103(t, conn, f)
+	}
+
+	scopes := make([]string, 0, 64)
+	for _, scope := range middleware.ValidScopeGrammar() {
+		if strings.HasSuffix(scope, ":propose") || strings.HasSuffix(scope, ":commit") {
+			continue
+		}
+		scopes = append(scopes, scope)
+	}
+	sort.Strings(scopes)
+
+	// One key per grammar scope (prefix g_) and one per scope the mint
+	// refuses (prefix x_); the prefixes share no substring, so a notice
+	// names its side unambiguously.
+	rows := make([]string, 0, len(scopes)+3)
+	for i, scope := range scopes {
+		rows = append(rows, fmt.Sprintf(`(gen_random_uuid(), 'grammar %d', 'x$y', 'g_%03d', '{"%s"}')`, i, i, scope))
+	}
+	offGrammar := []string{"deposits:read", "deposits:write", "users:write"}
+	for i, scope := range offGrammar {
+		rows = append(rows, fmt.Sprintf(`(gen_random_uuid(), 'off grammar %d', 'x$y', 'x_%03d', '{"%s"}')`, i, i, scope))
+	}
+	if _, err := conn.Exec(context.Background(),
+		`INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes) VALUES `+strings.Join(rows, ",")); err != nil {
+		t.Fatalf("seed keys: %v", err)
+	}
+	applySQL103(t, conn, target)
+
+	named := make([]bool, len(offGrammar))
+	for _, n := range *notices {
+		// The report's notices name the key as "(prefix g_000)"; the
+		// scratch run also raises the earlier migrations' own "skipping"
+		// notices, which never carry a prefix clause.
+		if strings.Contains(n, "(prefix g_") {
+			t.Errorf("a scope of ValidScopeGrammar was reported: %s", n)
+		}
+		for i := range offGrammar {
+			if strings.Contains(n, fmt.Sprintf("(prefix x_%03d)", i)) && strings.Contains(n, "outside the grant grammar") {
+				named[i] = true
+			}
+		}
+	}
+	for i, scope := range offGrammar {
+		if !named[i] {
+			var reportNotices []string
+			for _, n := range *notices {
+				if strings.Contains(n, "(prefix ") {
+					reportNotices = append(reportNotices, n)
+				}
+			}
+			t.Errorf("%s was not named outside the grant grammar; the report's notices: %v", scope, reportNotices)
+		}
 	}
 }
 

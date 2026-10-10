@@ -196,7 +196,10 @@ BEGIN
         FOR s IN SELECT unnest(k.scopes) LOOP
             -- The grammar: the section 5.1 vocabulary, the confirm gated
             -- modules' two extra verbs, the finer names, and nothing else.
-            IF s IN ('users:grants',
+            -- users:read sits in the finer list because the module's write
+            -- override is users:grants: users:write (which the grammar
+            -- refuses) must fall through to the refusal.
+            IF s IN ('users:grants', 'users:read',
                      'admin:settings', 'admin:staff', 'admin:modules') THEN
                 -- in-grammar finer name
             ELSIF s ~ '^(quotes|orders):(propose|commit)$' THEN
@@ -207,17 +210,17 @@ BEGIN
                     'accounts','activities','admin','ap','apps','ar',
                     'bankrecon','branches','configurator','contacts',
                     'credit-memos','customers','dashboard','delivery',
-                    'deposits','documents','edi','events','gl',
+                    'documents','edi','events','gl',
                     'governance','inventory','invoices','locations',
                     'market-indices','matching','me','millwork','orders',
                     'parsing','payment-terms','payments','pos',
                     'price_levels','pricing','products','purchase-orders',
                     'quotes','reports','reporting','sales-team',
-                    'charge-codes','ship-tos','tax','users','vendors',
+                    'charge-codes','ship-tos','tax','units','vendors',
                     'vision') THEN
-                -- in-grammar coarse module scope
-            ELSIF s ~ '^(quotes|orders):(propose|commit)$' THEN
-                gaining_reach := TRUE;
+                -- in-grammar coarse module scope. deposits is absent (it
+                -- left the vocabulary with C2-4, its routes with it);
+                -- units joined with the unit catalogue.
             ELSE
                 bad_reach := TRUE;
             END IF;
