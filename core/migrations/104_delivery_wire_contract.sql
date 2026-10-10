@@ -29,6 +29,16 @@ UPDATE deliveries SET updated_at = created_at WHERE updated_at IS NULL;
 ALTER TABLE deliveries ALTER COLUMN created_at SET NOT NULL;
 ALTER TABLE deliveries ALTER COLUMN updated_at SET NOT NULL;
 
+-- 1a. Fill NULL route and stop statuses with the start state the model and
+--     the legacy scans treat as the only one for fresh rows, then set both
+--     NOT NULL: a legacy row with no status leaves every reader reading it
+--     as a NULL and one 500 too many.
+UPDATE delivery_routes SET status = 'DRAFT' WHERE status IS NULL;
+ALTER TABLE delivery_routes ALTER COLUMN status SET NOT NULL;
+
+UPDATE deliveries SET status = 'PENDING' WHERE status IS NULL;
+ALTER TABLE deliveries ALTER COLUMN status SET NOT NULL;
+
 -- 2. The revision every mutable document carries (ADR 0001 section 11).
 --    Existing rows start at 1; the DEFAULT serves raw writers (the seed, the
 --    frozen integration seam) so their rows carry one too.
