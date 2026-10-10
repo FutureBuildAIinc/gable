@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -357,6 +358,99 @@ func TestQuoteFileRoute_Status_Audit_Bound(t *testing.T) {
 	after := auditCount(t, db, "quote.file_attached")
 	if after-before < 1 {
 		t.Errorf("quote.file_attached rows: %d before, %d after, want +1", before, after)
+	}
+}
+
+// TestQuoteFileRouteRefusedOutsideDraft is the other half of the status
+// check the test above could not prove (review pr66-r3 P2-1): a quote that
+// left draft refuses the file route. The promoted quote moves to sent
+// through the module's own transition route, then the file PUT at the
+// CURRENT revision answers 409 invalid_state_transition with the
+// quote_not_draft blocker, writes no quote.file_attached row and leaves
+// the revision unchanged. Disable the status check in AttachFile and this
+// test goes red on the first assertion (the attach answers 200).
+func TestQuoteFileRouteRefusedOutsideDraft(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newFixture(t, db)
+
+	// A promoted quote: born in draft at revision 1.
+	id := f.create()
+	promote := f.do("POST", "/api/v1/drafts/quotes/"+id+"/promote", map[string]any{"revision": 1})
+	if promote.status != http.StatusCreated {
+		t.Fatalf("promote = %d: %s", promote.status, promote.raw)
+	}
+	promoted, _ := promote.body["promoted"].(map[string]any)
+	quoteID, _ := promoted["entity_id"].(string)
+	if quoteID == "" {
+		t.Fatalf("no entity_id in %s", promote.raw)
+	}
+
+	// Move the quote out of draft through the module's own route; the
+	// transition moves the revision to 2.
+	sent := f.do("POST", "/api/v1/quotes/"+quoteID+"/transitions", map[string]any{"to": "sent", "revision": 1})
+	if sent.status != http.StatusOK {
+		t.Fatalf("transition to sent = %d: %s", sent.status, sent.raw)
+	}
+	if s := str(f.t, sent.body, "status"); s != "sent" {
+		t.Fatalf("status after transition = %q, want sent", s)
+	}
+	rev := num(f.t, sent.body, "revision")
+
+	// The file PUT at the current revision: refused, the quote_not_draft
+	// blocker, no audit row, the revision unmoved.
+	fileRows := func() int {
+		f.t.Helper()
+		var n int
+		if err := db.Pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM audit_log WHERE action = 'quote.file_attached' AND entity_type = 'quote' AND entity_id = $1`,
+			quoteID).Scan(&n); err != nil {
+			f.t.Fatal(err)
+		}
+		return n
+	}
+	before := fileRows()
+	r := doRaw(t, http.MethodPut, f.srv.URL+"/api/v1/quotes/"+quoteID+"/file",
+		"application/pdf", []byte("%PDF-1.4 stub"), "If-Match", `"`+fmt.Sprint(rev)+`"`)
+	if r.status != http.StatusConflict {
+		t.Fatalf("attach outside draft = %d, want 409: %s", r.status, string(r.raw))
+	}
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details []struct {
+				Code string `json:"code"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(r.raw, &env); err != nil {
+		t.Fatalf("decode %s: %v", r.raw, err)
+	}
+	if env.Error.Code != "invalid_state_transition" {
+		t.Errorf("code = %q, want invalid_state_transition", env.Error.Code)
+	}
+	found := false
+	for _, d := range env.Error.Details {
+		if d.Code == "quote_not_draft" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("details = %s, want the quote_not_draft blocker", r.raw)
+	}
+	if after := fileRows(); after != before {
+		t.Errorf("quote.file_attached rows for the quote: %d before, %d after, want unchanged", before, after)
+	}
+
+	// The refused write left the quote alone: same revision, still sent.
+	g := f.do("GET", "/api/v1/quotes/"+quoteID, nil)
+	if g.status != http.StatusOK {
+		t.Fatalf("read back = %d: %s", g.status, g.raw)
+	}
+	if s := str(f.t, g.body, "status"); s != "sent" {
+		t.Errorf("status after the refusal = %q, want sent", s)
+	}
+	if got := num(f.t, g.body, "revision"); got != rev {
+		t.Errorf("revision after the refusal = %d, want unchanged %d", got, rev)
 	}
 }
 
