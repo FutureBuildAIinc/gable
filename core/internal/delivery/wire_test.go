@@ -737,6 +737,24 @@ func TestReorderStops(t *testing.T) {
 	}
 }
 
+// The assign's stop_sequence default is the route's next position, 1 or
+// more: the input parse refuses a client's 0, so the default must not mint
+// one either (an empty route's first stop is 1, not the column's old 0).
+func TestAssignStopSequenceDefault(t *testing.T) {
+	f := newFixture(t)
+	route, stop, order := f.seedStop(t, f.branch)
+	_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM deliveries WHERE id = $1`, stop)
+
+	res := f.assignOrder(t, route, order, nil)
+	if res.status != http.StatusCreated {
+		t.Fatalf("assign on an empty route = %d %s", res.status, res.raw)
+	}
+	wrapper, _ := res.body["delivery"].(map[string]any)
+	if wrapper["stop_sequence"] != float64(1) {
+		t.Errorf("an empty route's first stop_sequence = %v, want 1", wrapper["stop_sequence"])
+	}
+}
+
 // A driver's quantity adjustment is recorded (a delivery_qty_adjustments
 // row with decimal string quantities), validated with full paths, and the
 // reason vocabulary is lowercase only (the live failure: nothing was

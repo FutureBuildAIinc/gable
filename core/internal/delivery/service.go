@@ -90,16 +90,16 @@ const (
 	EventDriverUpdated  = "driver.updated"
 	EventDriverDeleted  = "driver.deleted"
 
-	EventRouteCreated    = "route.created"
-	EventRouteUpdated    = "route.updated"
-	EventRouteInTransit  = "route.in_transit"
-	EventRouteCompleted  = "route.completed"
-	EventStopCreated     = "delivery.created"
-	EventStopUpdated     = "delivery.updated"
-	EventStopDelivered   = "delivery.delivered"
-	EventStopFailed      = "delivery.failed"
-	EventStopPartial     = "delivery.partial"
-	EventStopAdjusted    = "delivery.adjusted"
+	EventRouteCreated   = "route.created"
+	EventRouteUpdated   = "route.updated"
+	EventRouteInTransit = "route.in_transit"
+	EventRouteCompleted = "route.completed"
+	EventStopCreated    = "delivery.created"
+	EventStopUpdated    = "delivery.updated"
+	EventStopDelivered  = "delivery.delivered"
+	EventStopFailed     = "delivery.failed"
+	EventStopPartial    = "delivery.partial"
+	EventStopAdjusted   = "delivery.adjusted"
 )
 
 // Precondition is the client's revision: the If-Match header and the body's
@@ -1008,9 +1008,12 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, ac
 	}
 
 	stop := &Stop{
-		RouteID:              &d.RouteID,
-		OrderID:              d.OrderID,
-		StopSequence:         0,
+		RouteID: &d.RouteID,
+		OrderID: d.OrderID,
+		// The default position starts at 1, the least the input parse
+		// accepts from a client, so an empty route's first stop is 1 and
+		// not the column's legacy 0.
+		StopSequence:         1,
 		Status:               StopStatusPending,
 		DeliveryInstructions: d.DeliveryInstructions,
 	}
