@@ -49,14 +49,14 @@ func ParseDimension(name string) (Dimension, bool) {
 // active flag. No unit is ever deleted; the write routes offer
 // deactivation only.
 type Unit struct {
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	Dimension  Dimension `json:"dimension"`
+	Code       string          `json:"code"`
+	Name       string          `json:"name"`
+	Dimension  Dimension       `json:"dimension"`
 	StdUnitQty *httpx.Quantity `json:"std_unit_qty"`
 	StdRefQty  *httpx.Quantity `json:"std_ref_qty"`
-	IsSystem   bool   `json:"is_system"`
-	IsActive   bool   `json:"is_active"`
-	Revision   int64  `json:"revision"`
+	IsSystem   bool            `json:"is_system"`
+	IsActive   bool            `json:"is_active"`
+	Revision   int64           `json:"revision"`
 	CreatedAt  httpx.Timestamp `json:"created_at"`
 	UpdatedAt  httpx.Timestamp `json:"updated_at"`
 }
