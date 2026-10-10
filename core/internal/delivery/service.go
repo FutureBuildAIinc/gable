@@ -1148,74 +1148,141 @@ func (s *Service) TransitionStop(ctx context.Context, id uuid.UUID, d *StopTrans
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
 	}
+	// PR 79 review round 1 P1: the route lock is taken first, then the
+	// stop lock. The old order (stop then route) formed a cycle with the
+	// route-first locks ReorderStops and OptimizeRoute take, and the pool
+	// dropped to 40P01 once a route held a single stop and the test pool
+	// was capped at 4. The route id is read with a plain walled SELECT,
+	// the route locked FOR UPDATE, then the stop locked, and the route id
+	// is re-read under the stop's lock to detect an assign that landed
+	// between the two reads (retry once, then 409 naming the stop).
+	// A stop without a route (the worker fulfilment row, will-call
+	// pickup) keeps today's path: lock the stop alone, no route check.
 	var out *Stop
-	err := s.inTx(ctx, func(ctx context.Context) error {
-		if err := s.repo.LockDelivery(ctx, id); err != nil {
-			return notFound(err)
-		}
-		cur, err := s.repo.GetDelivery(ctx, id)
-		if err != nil {
-			return notFound(err)
-		}
-		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
-			return err
-		}
-		if d.To != StopStatusDelivered && d.To != StopStatusFailed && d.To != StopStatusPartial {
-			return httpx.InvalidStateTransition("a stop cannot move to "+string(d.To),
-				httpx.Blocker("invalid_state", "this module completes stops: delivered, failed or partial"))
-		}
-		if cur.Status != StopStatusPending && cur.Status != StopStatusOutForDelivery {
-			return httpx.InvalidStateTransition("cannot complete a stop already "+string(cur.Status),
-				httpx.Blocker("invalid_state", "the stop is already in a terminal status"))
-		}
-		var pod *PODUpdate
-		if d.To == StopStatusDelivered || d.To == StopStatusPartial {
-			v := &httpx.Validator{}
-			if d.PODProofURL == nil {
-				v.Check(false, "pod_proof_url", "is required to complete a delivery")
+	attempts := 0
+	for {
+		attempts++
+		err := s.inTx(ctx, func(ctx context.Context) error {
+			routeID, err := s.repo.GetDeliveryRouteID(ctx, id)
+			if err != nil {
+				return notFound(err)
 			}
-			if d.PODSignedBy == nil {
-				v.Check(false, "pod_signed_by", "is required to complete a delivery")
+			var routeStatus RouteStatus
+			if routeID != nil {
+				if err := s.repo.LockRoute(ctx, *routeID); err != nil {
+					return notFound(err)
+				}
+				routeStatus, err = s.repo.GetRouteStatus(ctx, *routeID)
+				if err != nil {
+					return notFound(err)
+				}
 			}
-			if err := v.Err(); err != nil {
+			if err := s.repo.LockDelivery(ctx, id); err != nil {
+				return notFound(err)
+			}
+			// Recheck the route id under the stop's lock. An assign that
+			// landed between the unlocked read and the stop lock changed
+			// the route the transition is targeting: the locked route is no
+			// longer the one this stop belongs to. Retry once at the top
+			// level so a transient race gets through; a stop that moves on
+			// the second pass is a real conflict and we refuse 409.
+			routeIDNow, err := s.repo.GetDeliveryRouteID(ctx, id)
+			if err != nil {
+				return notFound(err)
+			}
+			if (routeID == nil) != (routeIDNow == nil) {
+				if attempts == 1 {
+					return ErrStopMovedDuringLock
+				}
+				return httpx.InvalidStateTransition(
+					"the stop moved off its route under the transition's lock",
+					httpx.Blocker("delivery_id",
+						"the stop "+id.String()+" changed route between attempts; retry"))
+			}
+			if routeID != nil && routeIDNow != nil && *routeID != *routeIDNow {
+				if attempts == 1 {
+					return ErrStopMovedDuringLock
+				}
+				return httpx.InvalidStateTransition(
+					"the stop moved to a different route under the transition's lock",
+					httpx.Blocker("delivery_id",
+						"the stop "+id.String()+" moved to "+routeIDNow.String()+
+							" between attempts; retry"))
+			}
+			cur, err := s.repo.GetDelivery(ctx, id)
+			if err != nil {
+				return notFound(err)
+			}
+			if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
 				return err
 			}
-			pod = &PODUpdate{ProofURL: *d.PODProofURL, SignedBy: *d.PODSignedBy, Time: time.Now().UTC()}
-			if d.SignatureDataURL != nil {
-				pod.SignatureDataURL = *d.SignatureDataURL
+			if routeID != nil && (routeStatus == RouteStatusCancelled || routeStatus == RouteStatusCompleted) {
+				return httpx.InvalidStateTransition(
+					"cannot complete a stop on a route already "+string(routeStatus),
+					httpx.Blocker("route_id",
+						"the route "+routeID.String()+" is "+string(routeStatus)+
+							" and takes no more stop transitions"))
 			}
-		}
-		if err := s.repo.UpdateDeliveryStatus(ctx, id, d.To, pod); err != nil {
-			return err
-		}
-		if d.To == StopStatusDelivered && s.fulfilment != nil {
-			if err := s.fulfilment.EnqueueFulfilment(ctx, id, cur.OrderID); err != nil {
+			if d.To != StopStatusDelivered && d.To != StopStatusFailed && d.To != StopStatusPartial {
+				return httpx.InvalidStateTransition("a stop cannot move to "+string(d.To),
+					httpx.Blocker("invalid_state", "this module completes stops: delivered, failed or partial"))
+			}
+			if cur.Status != StopStatusPending && cur.Status != StopStatusOutForDelivery {
+				return httpx.InvalidStateTransition("cannot complete a stop already "+string(cur.Status),
+					httpx.Blocker("invalid_state", "the stop is already in a terminal status"))
+			}
+			var pod *PODUpdate
+			if d.To == StopStatusDelivered || d.To == StopStatusPartial {
+				v := &httpx.Validator{}
+				if d.PODProofURL == nil {
+					v.Check(false, "pod_proof_url", "is required to complete a delivery")
+				}
+				if d.PODSignedBy == nil {
+					v.Check(false, "pod_signed_by", "is required to complete a delivery")
+				}
+				if err := v.Err(); err != nil {
+					return err
+				}
+				pod = &PODUpdate{ProofURL: *d.PODProofURL, SignedBy: *d.PODSignedBy, Time: time.Now().UTC()}
+				if d.SignatureDataURL != nil {
+					pod.SignatureDataURL = *d.SignatureDataURL
+				}
+			}
+			if err := s.repo.UpdateDeliveryStatus(ctx, id, d.To, pod); err != nil {
 				return err
 			}
-		}
-		got, err := s.repo.GetDelivery(ctx, id)
+			if d.To == StopStatusDelivered && s.fulfilment != nil {
+				if err := s.fulfilment.EnqueueFulfilment(ctx, id, cur.OrderID); err != nil {
+					return err
+				}
+			}
+			got, err := s.repo.GetDelivery(ctx, id)
+			if err != nil {
+				return notFound(err)
+			}
+			out = got
+			event := EventStopDelivered
+			switch d.To {
+			case StopStatusFailed:
+				event = EventStopFailed
+			case StopStatusPartial:
+				event = EventStopPartial
+			}
+			if err := s.log(ctx, event, "delivery", id,
+				map[string]any{"from_status": string(cur.Status), "revision": out.Revision, "actor": actor}); err != nil {
+				return err
+			}
+			return s.record(ctx, event, "delivery", id,
+				map[string]any{"from_status": stopStatusNames[cur.Status], "status": stopStatusNames[d.To], "revision": out.Revision})
+		})
 		if err != nil {
-			return notFound(err)
+			if errors.Is(err, ErrStopMovedDuringLock) && attempts == 1 {
+				continue
+			}
+			return nil, err
 		}
-		out = got
-		event := EventStopDelivered
-		switch d.To {
-		case StopStatusFailed:
-			event = EventStopFailed
-		case StopStatusPartial:
-			event = EventStopPartial
-		}
-		if err := s.log(ctx, event, "delivery", id,
-			map[string]any{"from_status": string(cur.Status), "revision": out.Revision, "actor": actor}); err != nil {
-			return err
-		}
-		return s.record(ctx, event, "delivery", id,
-			map[string]any{"from_status": stopStatusNames[cur.Status], "status": stopStatusNames[d.To], "revision": out.Revision})
-	})
-	if err != nil {
-		return nil, err
+		return out, nil
 	}
-	return out, nil
 }
 
 // AdjustDeliveryQuantity records a driver's on-site quantity adjustments

@@ -92,6 +92,30 @@ type Repository interface {
 	CountNonTerminalDeliveriesByRoute(ctx context.Context, routeID uuid.UUID) (int64, error)
 	NextStopSequenceForRoute(ctx context.Context, routeID uuid.UUID) (int, error)
 	LockRoute(ctx context.Context, id uuid.UUID) error
+	// LockRouteForStopTransition locks the route the named stop belongs
+	// to and returns its current status (and whether the stop has a
+	// route), so a stop transition can refuse a delivery on a terminal
+	// route under the route lock. A stop without a route returns
+	// hasRoute=false; the caller continues without a route check. See
+	// PR 70 review round 7 N3.
+	//
+	// Deprecated: TransitionStop takes the route lock before the stop
+	// lock (PR 79 review round 1 P1); the deadlock this method used to
+	// sit in the middle of is gone. New callers should use
+	// GetDeliveryRouteID, LockRoute, LockDelivery and the in-lock
+	// recheck in that order.
+	LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (status RouteStatus, hasRoute bool, err error)
+	// GetDeliveryRouteID returns the stop's current route_id (nil for a
+	// stop with no route) through the caller's branch wall, without any
+	// FOR UPDATE. TransitionStop uses it as the route-first lookup that
+	// decides which route to lock before locking the stop itself (PR 79
+	// review round 1 P1).
+	GetDeliveryRouteID(ctx context.Context, deliveryID uuid.UUID) (*uuid.UUID, error)
+	// GetRouteStatus returns the named route's status through the wall,
+	// without FOR UPDATE. TransitionStop reads it after LockRoute under the
+	// route lock so a cancel racing the transition cannot slip a
+	// delivered stop onto a cancelled route.
+	GetRouteStatus(ctx context.Context, id uuid.UUID) (RouteStatus, error)
 
 	// Stops
 	CreateDelivery(ctx context.Context, d *Stop) error
@@ -772,6 +796,84 @@ func (r *PostgresRepository) LockRoute(ctx context.Context, id uuid.UUID) error 
 		return fmt.Errorf("failed to lock route: %w", err)
 	}
 	return nil
+}
+
+// LockRouteForStopTransition locks the route the named stop belongs to
+// (FOR UPDATE OF the route row) and returns whether the stop has a route
+// and, if so, its current status. The stop lock that runs first keeps
+// the join honest when a concurrent cancel rewrites the route: a route
+// read without the lock would race a cancellation that lands between
+// the stop read and the status read. PR 70 review round 7 N3.
+//
+// Deprecated: TransitionStop takes the route lock before the stop
+// lock (PR 79 review round 1 P1); the deadlock this method used to
+// sit in the middle of is gone. Kept on the interface so callers
+// outside the package that still depend on the old order compile.
+func (r *PostgresRepository) LockRouteForStopTransition(ctx context.Context, deliveryID uuid.UUID) (status RouteStatus, hasRoute bool, err error) {
+	branch, sub := wallArgs(ctx)
+	var routeID *uuid.UUID
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT s.route_id FROM deliveries s
+			JOIN orders o ON o.id = s.order_id
+		   WHERE s.id = $1 AND `+stopVisible(2, 3),
+		deliveryID, branch, sub).Scan(&routeID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, ErrNotFound
+		}
+		return "", false, fmt.Errorf("failed to look up stop route: %w", err)
+	}
+	if routeID == nil {
+		return "", false, nil
+	}
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT status FROM delivery_routes WHERE id = $1 FOR UPDATE`,
+		*routeID).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, ErrNotFound
+		}
+		return "", false, fmt.Errorf("failed to lock route for stop transition: %w", err)
+	}
+	return status, true, nil
+}
+
+// GetDeliveryRouteID returns the stop's current route_id through the
+// caller's branch wall, with no FOR UPDATE. A stop without a route
+// returns a nil pointer; a missing or wall-rejected stop returns
+// ErrNotFound. The lookup is plain and cheap: the route id is needed to
+// decide which route the transition locks first, and the route itself
+// is locked separately (PR 79 review round 1 P1).
+func (r *PostgresRepository) GetDeliveryRouteID(ctx context.Context, deliveryID uuid.UUID) (*uuid.UUID, error) {
+	branch, sub := wallArgs(ctx)
+	var routeID *uuid.UUID
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT s.route_id FROM deliveries s
+			JOIN orders o ON o.id = s.order_id
+		   WHERE s.id = $1 AND `+stopVisible(2, 3),
+		deliveryID, branch, sub).Scan(&routeID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to look up stop route: %w", err)
+	}
+	return routeID, nil
+}
+
+// GetRouteStatus returns the route's status under the route lock the
+// caller already holds: it is the same SELECT LockRoute runs, but on
+// its own so a service that has the route locked can read the status
+// without taking the lock again. The caller's wall applies.
+func (r *PostgresRepository) GetRouteStatus(ctx context.Context, id uuid.UUID) (RouteStatus, error) {
+	branch, sub := wallArgs(ctx)
+	var status RouteStatus
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT status FROM delivery_routes r WHERE r.id = $1 AND `+routeVisible(2, 3),
+		id, branch, sub).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("failed to read route status: %w", err)
+	}
+	return status, nil
 }
 
 // Stops

@@ -4,6 +4,7 @@
 package delivery
 
 import (
+	"errors"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -322,6 +323,22 @@ var ErrNotFound = errNotFound{}
 type errNotFound struct{}
 
 func (errNotFound) Error() string { return "record not found" }
+
+// ErrStopMovedDuringLock is an internal sentinel: TransitionStop saw the
+// stop's route change between the unlocked route id lookup and the stop's
+// own row lock (PR 79 review round 1 P1). It is not an API error: the
+// service catches it once and retries the transition's transaction; a
+// stop that has moved again is a real conflict and is refused with 409.
+var ErrStopMovedDuringLock = errStopMovedDuringLock{}
+
+type errStopMovedDuringLock struct{}
+
+func (errStopMovedDuringLock) Error() string {
+	return "delivery changed route under the transition's lock"
+}
+
+// IsStopMovedDuringLock reports whether err is the internal sentinel.
+func IsStopMovedDuringLock(err error) bool { return errors.Is(err, ErrStopMovedDuringLock) }
 
 // dateOf formats a storage date as the wire's YYYY-MM-DD.
 func dateOf(t *time.Time) *string {
