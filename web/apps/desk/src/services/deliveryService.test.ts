@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 import type {
   CreateVehicleRequest,
-  CreateDriverRequest,
+  UpdateDriverRequest,
   TransitionDeliveryRequest,
 } from '../types/delivery'
 
@@ -51,7 +51,7 @@ describe('deliveryService carries the loaded revision', () => {
   })
 
   it('updateDriver sends the caller revision', async () => {
-    const body: CreateDriverRequest = { name: 'y', status: 'active' }
+    const body: UpdateDriverRequest = { name: 'y', status: 'active' }
     await deliveryService.updateDriver('d1', body, 5)
     const [, init] = fetchMock.mock.calls[0]
     expect(JSON.parse(String(init.body)).revision).toBe(5)
@@ -90,7 +90,7 @@ describe('deliveryService carries the loaded revision', () => {
 
   it('does not issue a fresh read before any of these writes', async () => {
     const vBody: CreateVehicleRequest = { name: '', vehicle_type: 'van', license_plate: '' }
-    const dBody: CreateDriverRequest = { name: '', status: 'active' }
+    const dBody: UpdateDriverRequest = { name: '', status: 'active' }
     const sBody: TransitionDeliveryRequest = { to: 'delivered' }
     await deliveryService.updateVehicle('v1', vBody, 1)
     await deliveryService.deleteVehicle('v1', 1)
