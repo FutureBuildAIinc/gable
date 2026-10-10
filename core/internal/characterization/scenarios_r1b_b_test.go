@@ -174,7 +174,7 @@ func r1bBBillingGroups() []groupDef {
 				},
 				extract: map[string]string{"b_route": "/route_id"}},
 			{name: "portal_billing.erp_route_deliveries", method: "GET", path: "/api/v1/delivery/routes/{b_route}/deliveries",
-				extract: map[string]string{"b_delivery": "/0/id"}},
+				extract: map[string]string{"b_delivery": "/items/0/id"}},
 			{name: "portal_billing.delivery.get", method: "GET", path: "/api/portal/v1/deliveries/{b_delivery}"},
 			{name: "portal_billing.delivery.bad_id", method: "GET", path: "/api/portal/v1/deliveries/not-a-uuid"},
 			{name: "portal_billing.delivery.unknown", method: "GET", path: "/api/portal/v1/deliveries/" + bNoSuchID},

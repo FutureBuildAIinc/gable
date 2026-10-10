@@ -405,26 +405,35 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "address": "1885 Formwork Rd, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Kelbrook Construction",
-          "delivery_instructions": null,
-          "id": "<id-21>",
-          "latitude": null,
-          "longitude": null,
-          "order_id": "<id-9>",
-          "order_number": "<id-9>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-20>",
-          "status": "PENDING",
-          "stop_sequence": 1,
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "address": "1885 Formwork Rd, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Kelbrook Construction",
+            "delivery_instructions": null,
+            "estimated_arrival": null,
+            "id": "<id-21>",
+            "latitude": null,
+            "longitude": null,
+            "order_id": "<id-9>",
+            "order_number": "SO-000094",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 1,
+            "route_id": "<id-20>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {

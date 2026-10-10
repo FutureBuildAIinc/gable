@@ -126,8 +126,7 @@ var modelBoundSchemas = []struct {
 	{"DeliveryPodPhoto", delivery.PODPhoto{}},
 	{"DeliveryQtyAdjustment", delivery.QtyAdjustment{}},
 	{"DeliveryCapacityWarning", delivery.CapacityWarning{}},
-	{"DeliveryRouteLeg", delivery.RouteLeg{}},
-	{"DeliveryRouteOptimizationResult", delivery.RouteOptimizationResult{}},
+	{"DeliveryQtyAdjustment", delivery.QtyAdjustment{}},
 	// inventory
 	{"InventoryLevel", inventory.Level{}},
 	{"InventoryProductSummary", inventory.ProductSummary{}},

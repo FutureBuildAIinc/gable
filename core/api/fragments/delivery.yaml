@@ -1,913 +1,1179 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The delivery module, transcribed from internal/delivery/handler.go and model.go
-# as they behave today: lists are nil slices (null when empty), a missing delivery,
-# vehicle update or route answers 500, and the photo routes take multipart forms.
+# The delivery module on the wire contract of ADR 0001 (item C5-1d): the
+# cursor list envelope on every list, the one error envelope, lowercase
+# vocabularies, business dates as YYYY-MM-DD, a revision with its ETag on
+# every record and the If-Match or body revision precondition on every
+# write, and every mutation's audit row and module event in one transaction.
+# Routes and stops carry the branch wall through the stop's order branch: a
+# second branch's request is a 404. Vehicles and drivers carry no branch
+# column (the fleet is dealer-wide), a stated limit. The board read is one
+# payload: the route list embeds each route's stops under include=stops.
 paths:
   /api/v1/delivery/vehicles:
     get:
       operationId: deliveryVehicleList
-      tags:
-      - delivery
+      tags: [delivery]
       summary: List vehicles
+      description: >-
+        The cursor list envelope, newest first on (created_at, id). The fleet
+        is dealer-wide, so no branch wall applies. total appears only under
+        include=total.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: All vehicles. The body is null when there are none.
+        "200":
+          description: The page of vehicles.
           content:
             application/json:
               schema:
-                type:
-                - array
-                - 'null'
-                items:
-                  $ref: '#/components/schemas/DeliveryVehicle'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryVehiclePage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: deliveryVehicleCreate
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Create a vehicle
+      description: >-
+        name, vehicle_type (lowercase) and license_plate are required; an
+        unknown body field, an uppercase vehicle_type or a malformed date is
+        a 400 naming the field. Writes the audit row vehicle.created and the
+        event vehicle.created in one transaction, the event last.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryVehicleCreate'
+              $ref: "#/components/schemas/DeliveryVehicleCreate"
       responses:
-        '201':
-          description: The created vehicle.
+        "201":
+          description: The created vehicle, with its ETag and Location.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryVehicle'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/vehicles/{id}:
     get:
       operationId: deliveryVehicleGet
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Get a vehicle
-      description: Any repository error, not only a missing row, answers 404.
+      description: A missing vehicle (or one soft deleted) is a 404 in the error envelope.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The vehicle.
+        "200":
+          description: The vehicle, with its revision's ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryVehicle'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: deliveryVehicleUpdate
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Update a vehicle
-      description: A missing vehicle answers 500, not 404.
+      description: >-
+        Replaces every mutable field on the client's revision: If-Match or a
+        body revision (428 without one, 409 stale_revision behind). An
+        omitted optional field clears it. Writes the audit row and the event
+        vehicle.updated.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryVehicleUpdate'
+              $ref: "#/components/schemas/DeliveryVehicleUpdate"
       responses:
-        '200':
-          description: The updated vehicle.
+        "200":
+          description: The updated vehicle, with the new revision and its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryVehicle'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     delete:
       operationId: deliveryVehicleDelete
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Delete a vehicle
+      description: >-
+        A soft delete on the client's revision, carried by If-Match alone (a
+        DELETE has no body). Writes the audit row and the event
+        vehicle.deleted.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
       responses:
-        '204':
+        "204":
           description: Vehicle deleted.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/vehicles/{id}/photo:
     post:
       operationId: deliveryVehiclePhoto
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Upload a vehicle photo
-      description: A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over
-        10 MB answers 400.
+      description: >-
+        A jpg, jpeg, png or webp file of at most 10 MB. The photo attach
+        takes no precondition (a photo is evidence appended to a record, and
+        a revision would fail the second of a run of uploads) but it moves
+        the revision, returns the vehicle with the new ETag, and writes the
+        audit row and event vehicle.updated (data part photo) in one
+        transaction.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/DeliveryPhotoUpload'
+              $ref: "#/components/schemas/DeliveryPhotoUpload"
       responses:
-        '200':
-          description: The stored photo URL.
+        "200":
+          description: The vehicle with the photo attached.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryPhotoUrl'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryVehicle"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/drivers:
     get:
       operationId: deliveryDriverList
-      tags:
-      - delivery
+      tags: [delivery]
       summary: List drivers
+      description: The cursor list envelope, newest first on (created_at, id). The roster is dealer-wide.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: All drivers. The body is null when there are none.
+        "200":
+          description: The page of drivers.
           content:
             application/json:
               schema:
-                type:
-                - array
-                - 'null'
-                items:
-                  $ref: '#/components/schemas/DeliveryDriver'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryDriverPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: deliveryDriverCreate
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Create a driver
+      description: >-
+        name is required; status defaults to active. Writes the audit row and
+        the event driver.created in one transaction, the event last.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryDriverCreate'
+              $ref: "#/components/schemas/DeliveryDriverCreate"
       responses:
-        '201':
-          description: The created driver, status ACTIVE.
+        "201":
+          description: The created driver, with its ETag and Location.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryDriver'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/drivers/{id}:
     get:
       operationId: deliveryDriverGet
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Get a driver
-      description: Any repository error, not only a missing row, answers 404.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The driver.
+        "200":
+          description: The driver, with its revision's ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryDriver'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     put:
       operationId: deliveryDriverUpdate
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Update a driver
-      description: A missing driver answers 500, not 404.
+      description: >-
+        Replaces every mutable field, status required, on the client's
+        revision (If-Match or body revision; 428 without one, 409 behind).
+        Writes the audit row and the event driver.updated.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryDriverUpdate'
+              $ref: "#/components/schemas/DeliveryDriverUpdate"
       responses:
-        '200':
-          description: The updated driver.
+        "200":
+          description: The updated driver, with the new revision and its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryDriver'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     delete:
       operationId: deliveryDriverDelete
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Delete a driver
+      description: A soft delete on the client's If-Match; writes the audit row and the event driver.deleted.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IfMatch"
       responses:
-        '204':
+        "204":
           description: Driver deleted.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/drivers/{id}/photo:
     post:
       operationId: deliveryDriverPhoto
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Upload a driver photo
-      description: A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over
-        10 MB answers 400.
+      description: >-
+        A jpg, jpeg, png or webp file of at most 10 MB. Like the vehicle
+        photo attach it takes no precondition but moves the revision and
+        writes the audit row and event driver.updated (data part photo).
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/DeliveryPhotoUpload'
+              $ref: "#/components/schemas/DeliveryPhotoUpload"
       responses:
-        '200':
-          description: The stored photo URL.
+        "200":
+          description: The driver with the photo attached.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryPhotoUrl'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryDriver"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/routes:
     get:
       operationId: deliveryRouteList
-      tags:
-      - delivery
+      tags: [delivery]
       summary: List routes
+      description: >-
+        The board read. The cursor list envelope, newest scheduled date
+        first on (scheduled_date, id). The date filter is honoured exactly
+        (an unparseable date is a 400 naming date), driver_id and status
+        filter, and include=stops embeds each route's stops in the same
+        payload. A route is visible when none of its stops belongs to a
+        branch the caller cannot see; a route with no stops is visible to
+        every branch.
       parameters:
-      - name: date
-        in: query
-        description: Filter to one scheduled date. An unparseable date answers 500.
-        schema:
-          type: string
-          format: date
-      - name: driver_id
-        in: query
-        description: Filter to one driver.
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: date
+          in: query
+          required: false
+          description: Only routes scheduled for this date.
+          schema:
+            type: string
+            format: date
+        - name: driver_id
+          in: query
+          required: false
+          description: Only this driver's routes.
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          description: One lowercase route status.
+          schema:
+            $ref: "#/components/schemas/DeliveryRouteStatus"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Routes. The body is null when there are none.
+        "200":
+          description: The page of routes, with stops under include=stops.
           content:
             application/json:
               schema:
-                type:
-                - array
-                - 'null'
-                items:
-                  $ref: '#/components/schemas/DeliveryRoute'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryRoutePage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
     post:
       operationId: deliveryRouteCreate
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Create a route
-      description: An unparseable scheduled_date answers 500.
+      description: >-
+        vehicle_id, driver_id and a scheduled_date as YYYY-MM-DD are
+        required; a missing vehicle or driver is a 400 naming the field. The
+        route starts draft. Writes the audit row and the event route.created.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryRouteCreate'
+              $ref: "#/components/schemas/DeliveryRouteCreate"
       responses:
-        '201':
-          description: The created route, status DRAFT.
+        "201":
+          description: The created route, with its ETag and Location.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryRoute'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/v1/delivery/routes/{id}/dispatch:
-    post:
-      operationId: deliveryRouteDispatch
-      tags:
-      - delivery
-      summary: Dispatch a route
-      description: Only a DRAFT or SCHEDULED route can be dispatched, otherwise 500. The route becomes
-        IN_TRANSIT.
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/delivery/routes/{id}:
+    get:
+      operationId: deliveryRouteGet
+      tags: [delivery]
+      summary: Get a route
+      description: The route document with its stops embedded, behind the branch wall.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Dispatched; the body is empty.
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "200":
+          description: The route with its stops, with its revision's ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/delivery/routes/{id}/transitions:
+    post:
+      operationId: deliveryRouteTransition
+      tags: [delivery]
+      summary: Move a route through its lifecycle
+      description: >-
+        to in_transit (from draft or scheduled) is the dispatch; to completed
+        needs every stop terminal and at least one stop (blockers
+        stop_not_terminal, route_empty). Takes the revision precondition
+        (428 without, 409 stale or invalid_state_transition). Writes the
+        audit row and the event route.in_transit or route.completed. The
+        former /dispatch and /complete action routes are removed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeliveryRouteTransition"
+      responses:
+        "200":
+          description: The route in its new status, with the new revision and its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/routes/{id}/reorder:
     post:
       operationId: deliveryRouteReorder
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Reorder the stops of a route
+      description: >-
+        The list must name every stop of the route exactly once (400 naming
+        ordered_delivery_ids or the offending entry otherwise). Takes the
+        route's revision by If-Match (428 without, 409 behind); each stop's
+        revision moves with its new position and the route's revision moves
+        with the write. Writes the audit row and the event route.updated
+        (data part stops).
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryRouteReorder'
+              $ref: "#/components/schemas/DeliveryRouteReorder"
       responses:
-        '200':
-          description: Reordered; the body is empty.
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "200":
+          description: The route with its stops in the new order.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/routes/{id}/optimize:
     post:
       operationId: deliveryRouteOptimize
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Optimize the stop order of a route
+      description: >-
+        Reorders the stops through the configured routing service and
+        persists the new order and the per-stop ETAs; a route with no
+        geocoded stops is returned unchanged. The routing and geocoding
+        calls run before the transaction opens and the route's revision is
+        re-checked inside it (If-Match, 428 without, 409 if the route moved
+        meanwhile). A route with no deliveries answers the unchanged route.
+        Writes the audit row and the event route.updated (data part stops).
+        The response is the route document now, not the optimizer's
+        intermediate result.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       responses:
-        '200':
-          description: 'The optimization result. A route with no deliveries or no geocoded stops answers
-            an empty result: null order and legs and zero totals.'
+        "200":
+          description: The route with its stops in the optimized order.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryRouteOptimizationResult'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/v1/delivery/routes/{id}/complete:
-    post:
-      operationId: deliveryRouteComplete
-      tags:
-      - delivery
-      summary: Complete a route
-      description: 'Every failure answers 400: a route with no deliveries, a delivery not yet DELIVERED,
-        FAILED or PARTIAL, or a repository fault.'
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
-      responses:
-        '200':
-          description: The route is completed.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DeliveryStatusAck'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+                $ref: "#/components/schemas/DeliveryRoute"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/routes/{id}/deliveries:
     get:
       operationId: deliveryRouteDeliveries
-      tags:
-      - delivery
-      summary: List the deliveries of a route
+      tags: [delivery]
+      summary: List the stops of a route
+      description: >-
+        The cursor list envelope in stop order on (stop_sequence, id). The
+        route is read behind the branch wall first, so a caller held to
+        another branch gets the same 404 as reading the route. total appears
+        under include=total.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Deliveries in stop order. The body is null when there are none.
+        "200":
+          description: The page of stops.
           content:
             application/json:
               schema:
-                type:
-                - array
-                - 'null'
-                items:
-                  $ref: '#/components/schemas/Delivery'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryStopPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries:
     post:
       operationId: deliveryCreate
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Assign an order to a route
-      description: 'A missing route, an order blocked by unresolved index exposure or any other failure
-        answers 500. A pickup (will-call) order is never routed (ADR 0005 5.5): 409 with the blocker
-        pickup_order, in the platform error envelope.'
+      description: >-
+        Creates the route's stop for the order, pending. A pickup (will-call)
+        order is never routed (ADR 0005 5.5): 409 with the blocker
+        pickup_order. An order with unresolved lumber-index exposure is
+        refused; a route the caller cannot see behind the branch wall is the
+        same 404 as reading it; a missing order is a 400 naming order_id.
+        stop_sequence defaults to the route's next position. The stop's
+        coordinates are geocoded when a routing key is configured, before
+        the transaction opens. A vehicle over its weight capacity answers
+        201 with a capacity_warning beside the stop (a soft warning).
+        Writes the audit row and the event delivery.created.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryCreate'
+              $ref: "#/components/schemas/DeliveryCreate"
       responses:
-        '201':
-          description: The created delivery, with a capacity warning when the vehicle would be over its
-            weight capacity.
+        "201":
+          description: The created stop, with its ETag and Location.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+            Location:
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryAssignResult'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/ConflictEither'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryAssignResult"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries/{id}:
     get:
       operationId: deliveryGet
-      tags:
-      - delivery
-      summary: Get a delivery
-      description: A missing delivery answers 500, not 404.
+      tags: [delivery]
+      summary: Get a stop
+      description: Behind the branch wall through the stop's order; a missing stop is a 404.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The delivery.
+        "200":
+          description: The stop, with its revision's ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Delivery'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
-  /api/v1/delivery/deliveries/{id}/status:
-    put:
-      operationId: deliveryUpdateStatus
-      tags:
-      - delivery
-      summary: Complete a delivery
-      description: Only DELIVERED, FAILED and PARTIAL are accepted. DELIVERED and PARTIAL need pod_proof_url
-        and pod_signed_by. Any other value or a missing proof answers 500.
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
+  /api/v1/delivery/deliveries/{id}/transitions:
+    post:
+      operationId: deliveryTransition
+      tags: [delivery]
+      summary: Complete a stop
+      description: >-
+        to delivered, failed or partial, from pending or out_for_delivery
+        (a terminal stop is 409 invalid_state_transition). delivered and
+        partial need pod_proof_url and pod_signed_by (a 400 naming them).
+        Takes the revision precondition (428 without, 409 behind). A
+        delivered stop queues its order's fulfilment request inside the same
+        transaction (ADR 0005 5.5). Writes the audit row and the event
+        delivery.delivered, delivery.failed or delivery.partial. The former
+        PUT /status route is removed.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryStatusUpdate'
+              $ref: "#/components/schemas/DeliveryStopTransition"
       responses:
-        '200':
-          description: Updated; the body is empty.
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        "200":
+          description: The stop in its terminal status, with the new revision and its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries/{id}/adjust-qty:
     post:
       operationId: deliveryAdjustQty
-      tags:
-      - delivery
-      summary: Adjust delivered quantities on site
+      tags: [delivery]
+      summary: Record a driver's on-site quantity adjustments
+      description: >-
+        One adjustment per line: product_id, the quantities as decimal
+        strings (a JSON number is a 400 naming the indexed path), and a
+        lowercase reason code (short_ship, damaged, refused, wrong_product,
+        other). The rows land in delivery_qty_adjustments (the live failure
+        wrote nothing, only a log line), the stop's revision moves, and the
+        audit row and the event delivery.adjusted are written in the same
+        transaction. Like the photo attaches it takes no precondition: it
+        records evidence of a fact already lived.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryAdjustQty'
+              $ref: "#/components/schemas/DeliveryAdjustQty"
       responses:
-        '200':
-          description: Adjusted.
+        "200":
+          description: The stop, with its moved revision and its ETag.
+          headers:
+            ETag:
+              description: The record's revision in quotes, for example "3". Send it back as If-Match.
+              schema:
+                type: string
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryAdjustAck'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/Delivery"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries/{id}/pod-photo:
     post:
       operationId: deliveryPodPhoto
-      tags:
-      - delivery
+      tags: [delivery]
       summary: Attach a proof of delivery photo
-      description: A missing photo, an unsupported extension (jpg, jpeg, png, webp) or a body over 10
-        MB answers 400.
+      description: >-
+        A jpg, jpeg, png or webp file of at most 10 MB, with an optional
+        photo_type of signature, site (the default) or damage. The photo
+        attach takes no precondition but moves the stop's revision and
+        writes the audit row and the event delivery.updated (data part
+        pod_photos) in one transaction.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/DeliveryPodPhotoUpload'
+              $ref: "#/components/schemas/DeliveryPodPhotoUpload"
       responses:
-        '201':
+        "201":
           description: The stored photo record.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DeliveryPodPhoto'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryPodPhoto"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/IdempotencyConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
   /api/v1/delivery/deliveries/{id}/pod-photos:
     get:
       operationId: deliveryPodPhotos
-      tags:
-      - delivery
+      tags: [delivery]
       summary: List the proof of delivery photos
+      description: >-
+        The cursor list envelope, oldest first on (uploaded_at, id). The
+        stop is read behind the branch wall first; a missing stop is a 404.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Photo records; an empty array when none.
+        "200":
+          description: The page of photo records.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/DeliveryPodPhoto'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/DeliveryPodPhotoPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalErrorEither"
 components:
   schemas:
+    DeliveryVehicleType:
+      type: string
+      enum: [box_truck, flatbed, pickup, van, crane]
     DeliveryVehicle:
       type: object
-      description: Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates
-        and serialized as date-times.
+      description: A fleet vehicle. Business dates are YYYY-MM-DD.
       required:
-      - id
-      - name
-      - vehicle_type
-      - license_plate
-      - capacity_weight_lbs
-      - vin
-      - year
-      - make
-      - model
-      - insurance_expiry
-      - next_service_date
-      - odometer_miles
-      - notes
-      - photo_url
-      - created_at
-      - updated_at
+        - id
+        - name
+        - vehicle_type
+        - license_plate
+        - capacity_weight_lbs
+        - vin
+        - year
+        - make
+        - model
+        - insurance_expiry
+        - next_service_date
+        - odometer_miles
+        - notes
+        - photo_url
+        - revision
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -915,200 +1181,192 @@ components:
         name:
           type: string
         vehicle_type:
-          $ref: '#/components/schemas/DeliveryVehicleType'
+          $ref: "#/components/schemas/DeliveryVehicleType"
         license_plate:
           type: string
         capacity_weight_lbs:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         vin:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         year:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         make:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         model:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         insurance_expiry:
-          type:
-          - string
-          - 'null'
-          format: date-time
+          type: [string, "null"]
+          format: date
         next_service_date:
-          type:
-          - string
-          - 'null'
-          format: date-time
+          type: [string, "null"]
+          format: date
         odometer_miles:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         notes:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         photo_url:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-    DeliveryVehicleType:
-      type: string
-      enum:
-      - BOX_TRUCK
-      - FLATBED
-      - PICKUP
-      - VAN
-      - CRANE
+    DeliveryVehiclePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryVehicle"
+        next_cursor:
+          type:
+            - string
+            - "null"
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Only under include=total.
     DeliveryVehicleCreate:
       type: object
-      description: CreateVehicleRequest. Nothing is validated; an unparseable date is silently dropped.
+      required: [name, vehicle_type, license_plate]
       properties:
         name:
           type: string
         vehicle_type:
-          $ref: '#/components/schemas/DeliveryVehicleType'
+          $ref: "#/components/schemas/DeliveryVehicleType"
         license_plate:
           type: string
         capacity_weight_lbs:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         vin:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         year:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         make:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         model:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         insurance_expiry:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         next_service_date:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         odometer_miles:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         notes:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
     DeliveryVehicleUpdate:
       type: object
-      description: 'UpdateVehicleRequest. The handler overwrites every field: an omitted optional date
-        or value clears it.'
+      required: [name, vehicle_type, license_plate]
       properties:
         name:
           type: string
         vehicle_type:
-          $ref: '#/components/schemas/DeliveryVehicleType'
+          $ref: "#/components/schemas/DeliveryVehicleType"
         license_plate:
           type: string
         capacity_weight_lbs:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         vin:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         year:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         make:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         model:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         insurance_expiry:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         next_service_date:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         odometer_miles:
           type:
-          - integer
-          - 'null'
+            - integer
+            - "null"
         notes:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+        revision:
+          type: integer
+          format: int64
+          description: The body half of the revision precondition.
     DeliveryPhotoUpload:
       type: object
-      required:
-      - photo
+      required: [photo]
       properties:
         photo:
           type: string
           format: binary
           description: jpg, jpeg, png or webp, at most 10 MB.
-    DeliveryPhotoUrl:
-      type: object
-      required:
-      - photo_url
-      properties:
-        photo_url:
-          type: string
     DeliveryDriverStatus:
       type: string
-      enum:
-      - ACTIVE
-      - INACTIVE
-      - ON_LEAVE
+      enum: [active, inactive, on_leave]
     DeliveryDriver:
       type: object
-      description: Transcribed from delivery.Driver.
       required:
-      - id
-      - name
-      - license_number
-      - status
-      - phone_number
-      - cdl_class
-      - cdl_expiry
-      - hire_date
-      - email
-      - photo_url
-      - created_at
-      - updated_at
+        - id
+        - name
+        - license_number
+        - status
+        - phone_number
+        - cdl_class
+        - cdl_expiry
+        - hire_date
+        - email
+        - photo_url
+        - revision
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -1117,130 +1375,145 @@ components:
           type: string
         license_number:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         status:
-          $ref: '#/components/schemas/DeliveryDriverStatus'
+          $ref: "#/components/schemas/DeliveryDriverStatus"
         phone_number:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         cdl_class:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         cdl_expiry:
-          type:
-          - string
-          - 'null'
-          format: date-time
+          type: [string, "null"]
+          format: date
         hire_date:
-          type:
-          - string
-          - 'null'
-          format: date-time
+          type: [string, "null"]
+          format: date
         email:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         photo_url:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+    DeliveryDriverPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryDriver"
+        next_cursor:
+          type:
+            - string
+            - "null"
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Only under include=total.
     DeliveryDriverCreate:
       type: object
-      description: CreateDriverRequest. Nothing is validated.
+      required: [name]
       properties:
         name:
           type: string
         license_number:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         phone_number:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         cdl_class:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         cdl_expiry:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         hire_date:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         email:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
     DeliveryDriverUpdate:
       type: object
-      description: UpdateDriverRequest.
+      required: [name, status]
       properties:
         name:
           type: string
         license_number:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         phone_number:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+        status:
+          $ref: "#/components/schemas/DeliveryDriverStatus"
         cdl_class:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         cdl_expiry:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         hire_date:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date
         email:
           type:
-          - string
-          - 'null'
-        status:
-          $ref: '#/components/schemas/DeliveryDriverStatus'
+            - string
+            - "null"
+        revision:
+          type: integer
+          format: int64
+          description: The body half of the revision precondition.
     DeliveryRouteStatus:
       type: string
-      enum:
-      - DRAFT
-      - SCHEDULED
-      - IN_TRANSIT
-      - COMPLETED
-      - CANCELLED
+      enum: [draft, scheduled, in_transit, completed, cancelled]
     DeliveryRoute:
       type: object
-      description: Transcribed from delivery.Route. The two totals and the joined vehicle and driver names
-        are omitted when empty.
+      description: >-
+        A run for one date. The joined vehicle and driver names are always
+        present; stops is null unless the list was asked for with
+        include=stops (the board read).
       required:
-      - id
-      - vehicle_id
-      - driver_id
-      - scheduled_date
-      - status
-      - notes
-      - created_at
-      - updated_at
-      - stop_count
+        - id
+        - vehicle_id
+        - driver_id
+        - scheduled_date
+        - status
+        - notes
+        - total_duration_mins
+        - total_distance_miles
+        - vehicle_name
+        - driver_name
+        - stop_count
+        - stops
+        - revision
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
@@ -1253,35 +1526,62 @@ components:
           format: uuid
         scheduled_date:
           type: string
-          format: date-time
+          format: date
         status:
-          $ref: '#/components/schemas/DeliveryRouteStatus'
+          $ref: "#/components/schemas/DeliveryRouteStatus"
         notes:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         total_duration_mins:
-          type: integer
+          type:
+            - integer
+            - "null"
         total_distance_miles:
-          type: number
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
+          type:
+            - number
+            - "null"
         vehicle_name:
           type: string
         driver_name:
           type: string
         stop_count:
           type: integer
+        stops:
+          type:
+            - array
+            - "null"
+          items:
+            $ref: "#/components/schemas/Delivery"
+        revision:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeliveryRoutePage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryRoute"
+        next_cursor:
+          type:
+            - string
+            - "null"
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Only under include=total.
     DeliveryRouteCreate:
       type: object
-      required:
-      - vehicle_id
-      - driver_id
-      - scheduled_date
+      required: [vehicle_id, driver_id, scheduled_date]
       properties:
         vehicle_id:
           type: string
@@ -1294,143 +1594,151 @@ components:
           format: date
         notes:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+    DeliveryRouteTransition:
+      type: object
+      required: [to]
+      properties:
+        to:
+          type: string
+          enum: [in_transit, completed]
+        revision:
+          type: integer
+          format: int64
+          description: The body half of the revision precondition.
     DeliveryRouteReorder:
       type: object
-      required:
-      - ordered_delivery_ids
+      required: [ordered_delivery_ids]
       properties:
         ordered_delivery_ids:
           type: array
+          minItems: 1
           items:
             type: string
             format: uuid
-    DeliveryStatus:
+    DeliveryStopStatus:
       type: string
-      enum:
-      - PENDING
-      - OUT_FOR_DELIVERY
-      - DELIVERED
-      - FAILED
-      - PARTIAL
-    DeliveryPodPhoto:
-      type: object
-      description: Transcribed from delivery.PODPhoto.
-      required:
-      - id
-      - delivery_id
-      - photo_url
-      - photo_type
-      - uploaded_at
-      properties:
-        id:
-          type: string
-          format: uuid
-        delivery_id:
-          type: string
-          format: uuid
-        photo_url:
-          type: string
-        photo_type:
-          type: string
-          description: signature, site or damage; site when the form leaves it empty.
-        uploaded_at:
-          type: string
-          format: date-time
+      enum: [pending, out_for_delivery, delivered, failed, partial]
     Delivery:
       type: object
-      description: Transcribed from delivery.Delivery. route_id is null for a stop not yet on a route.
-        The signature, the ETA, the scheduled window, the joined order fields and pod_photos are omitted
-        when empty.
+      description: >-
+        One stop on a route. route_id is null for a stop that exists and is
+        geocoded but is not on a route yet. order_number is the order's
+        document number. Optional fields are present with null.
       required:
-      - id
-      - route_id
-      - order_id
-      - stop_sequence
-      - status
-      - pod_proof_url
-      - pod_signed_by
-      - pod_timestamp
-      - delivery_instructions
-      - latitude
-      - longitude
-      - created_at
-      - updated_at
+        - id
+        - route_id
+        - order_id
+        - order_number
+        - stop_sequence
+        - status
+        - pod_proof_url
+        - pod_signed_by
+        - pod_timestamp
+        - signature_data_url
+        - delivery_instructions
+        - latitude
+        - longitude
+        - estimated_arrival
+        - scheduled_start
+        - scheduled_end
+        - customer_name
+        - address
+        - revision
+        - created_at
+        - updated_at
       properties:
         id:
           type: string
           format: uuid
         route_id:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: uuid
         order_id:
           type: string
           format: uuid
+        order_number:
+          type:
+            - string
+            - "null"
         stop_sequence:
           type: integer
         status:
-          $ref: '#/components/schemas/DeliveryStatus'
+          $ref: "#/components/schemas/DeliveryStopStatus"
         pod_proof_url:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         pod_signed_by:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         pod_timestamp:
-          type:
-          - string
-          - 'null'
+          type: [string, "null"]
           format: date-time
         signature_data_url:
-          type: string
+          type:
+            - string
+            - "null"
         delivery_instructions:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
         latitude:
           type:
-          - number
-          - 'null'
+            - number
+            - "null"
         longitude:
           type:
-          - number
-          - 'null'
+            - number
+            - "null"
         estimated_arrival:
-          type: string
+          type: [string, "null"]
           format: date-time
         scheduled_start:
-          type: string
+          type: [string, "null"]
           format: date-time
         scheduled_end:
-          type: string
+          type: [string, "null"]
           format: date-time
+        customer_name:
+          type:
+            - string
+            - "null"
+        address:
+          type:
+            - string
+            - "null"
+        revision:
+          type: integer
+          format: int64
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
-        customer_name:
-          type: string
-        order_number:
-          type: string
-        address:
-          type: string
-        pod_photos:
+    DeliveryStopPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
           type: array
           items:
-            $ref: '#/components/schemas/DeliveryPodPhoto'
+            $ref: "#/components/schemas/Delivery"
+        next_cursor:
+          type:
+            - string
+            - "null"
+        limit:
+          type: integer
+        total:
+          type: integer
+          description: Only under include=total.
     DeliveryCreate:
       type: object
-      description: AssignOrderRequest.
-      required:
-      - route_id
-      - order_id
+      required: [route_id, order_id]
       properties:
         route_id:
           type: string
@@ -1440,18 +1748,19 @@ components:
           format: uuid
         stop_sequence:
           type: integer
+          description: Defaults to the route's next position.
         delivery_instructions:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
     DeliveryCapacityWarning:
       type: object
       description: Soft warning only; the assignment still happens.
       required:
-      - vehicle_capacity_lbs
-      - current_load_lbs
-      - order_weight_lbs
-      - total_after_lbs
+        - vehicle_capacity_lbs
+        - current_load_lbs
+        - order_weight_lbs
+        - total_after_lbs
       properties:
         vehicle_capacity_lbs:
           type: number
@@ -1463,90 +1772,148 @@ components:
           type: number
     DeliveryAssignResult:
       type: object
-      required:
-      - delivery
+      required: [delivery, capacity_warning]
       properties:
         delivery:
-          $ref: '#/components/schemas/Delivery'
+          $ref: "#/components/schemas/Delivery"
         capacity_warning:
-          $ref: '#/components/schemas/DeliveryCapacityWarning'
-    DeliveryStatusUpdate:
+          type:
+            - object
+            - "null"
+          allOf:
+            - $ref: "#/components/schemas/DeliveryCapacityWarning"
+    DeliveryStopTransition:
       type: object
-      description: UpdateDeliveryStatusRequest.
-      required:
-      - status
+      required: [to]
       properties:
-        status:
-          $ref: '#/components/schemas/DeliveryStatus'
+        to:
+          type: string
+          enum: [delivered, failed, partial]
+        revision:
+          type: integer
+          format: int64
+          description: The body half of the revision precondition.
         pod_proof_url:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+          description: Required when to is delivered or partial.
         pod_signed_by:
           type:
-          - string
-          - 'null'
+            - string
+            - "null"
+          description: Required when to is delivered or partial.
         signature_data_url:
           type:
-          - string
-          - 'null'
-    DeliveryAdjustLine:
-      type: object
-      description: DeliveryLineAdjustment.
-      required:
-      - product_id
-      - original_qty
-      - adjusted_qty
-      - reason_code
-      properties:
-        product_id:
-          type: string
-          format: uuid
-        original_qty:
-          type: number
-        adjusted_qty:
-          type: number
-        reason_code:
-          type: string
-          description: SHORT_SHIP, DAMAGED, REFUSED, WRONG_PRODUCT or OTHER; not validated by the handler.
-        notes:
-          type: string
+            - string
+            - "null"
     DeliveryAdjustQty:
       type: object
-      description: QtyAdjustmentRequest; the delivery id comes from the path.
-      required:
-      - adjusted_by
-      - adjustments
+      required: [adjusted_by, adjustments]
       properties:
         adjusted_by:
           type: string
           format: uuid
         adjustments:
           type: array
+          minItems: 1
           items:
-            $ref: '#/components/schemas/DeliveryAdjustLine'
-    DeliveryAdjustAck:
+            $ref: "#/components/schemas/DeliveryAdjustLine"
+    DeliveryAdjustLine:
       type: object
-      required:
-      - status
+      required: [product_id, original_qty, adjusted_qty, reason_code]
       properties:
-        status:
+        product_id:
           type: string
-          enum:
-          - adjusted
-    DeliveryStatusAck:
+          format: uuid
+        original_qty:
+          type: string
+          description: A decimal string, at most 4 fraction digits.
+        adjusted_qty:
+          type: string
+          description: A decimal string, at most 4 fraction digits.
+        reason_code:
+          type: string
+          enum: [short_ship, damaged, refused, wrong_product, other]
+        notes:
+          type:
+            - string
+            - "null"
+    DeliveryQtyAdjustment:
       type: object
+      description: One recorded adjustment row (the module's own read of what it wrote).
       required:
-      - status
+        - id
+        - delivery_id
+        - product_id
+        - original_qty
+        - adjusted_qty
+        - reason_code
+        - notes
+        - adjusted_by
+        - created_at
       properties:
-        status:
+        id:
           type: string
-          enum:
-          - completed
+          format: uuid
+        delivery_id:
+          type: string
+          format: uuid
+        product_id:
+          type: string
+          format: uuid
+        original_qty:
+          type: string
+        adjusted_qty:
+          type: string
+        reason_code:
+          type: string
+          enum: [short_ship, damaged, refused, wrong_product, other]
+        notes:
+          type:
+            - string
+            - "null"
+        adjusted_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+    DeliveryPodPhoto:
+      type: object
+      required: [id, delivery_id, photo_url, photo_type, uploaded_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        delivery_id:
+          type: string
+          format: uuid
+        photo_url:
+          type: string
+        photo_type:
+          type: string
+          enum: [signature, site, damage]
+        uploaded_at:
+          type: string
+          format: date-time
+    DeliveryPodPhotoPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeliveryPodPhoto"
+        next_cursor:
+          type:
+            - string
+            - "null"
+        limit:
+          type: integer
     DeliveryPodPhotoUpload:
       type: object
-      required:
-      - photo
+      required: [photo]
       properties:
         photo:
           type: string
@@ -1554,49 +1921,5 @@ components:
           description: jpg, jpeg, png or webp, at most 10 MB.
         photo_type:
           type: string
-          description: signature, site or damage; defaults to site.
-    DeliveryRouteLeg:
-      type: object
-      description: RouteLeg.
-      required:
-      - stop_index
-      - duration_mins
-      - distance_miles
-      - eta
-      properties:
-        stop_index:
-          type: integer
-        duration_mins:
-          type: integer
-        distance_miles:
-          type: number
-        eta:
-          type: string
-          format: date-time
-          description: ISO 8601 timestamp.
-    DeliveryRouteOptimizationResult:
-      type: object
-      description: RouteOptimizationResult. optimized_order holds indices into the geocoded stops, not
-        delivery ids.
-      required:
-      - optimized_order
-      - legs
-      - total_duration_mins
-      - total_distance_miles
-      properties:
-        optimized_order:
-          type:
-          - array
-          - 'null'
-          items:
-            type: integer
-        legs:
-          type:
-          - array
-          - 'null'
-          items:
-            $ref: '#/components/schemas/DeliveryRouteLeg'
-        total_duration_mins:
-          type: integer
-        total_distance_miles:
-          type: number
+          enum: [signature, site, damage]
+          default: site

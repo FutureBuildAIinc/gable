@@ -737,12 +737,12 @@ func deliveryGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/delivery/vehicles",
 				body: map[string]any{
-					"name": "Golden Truck 01", "vehicle_type": "BOX_TRUCK", "license_plate": "GLD0001",
+					"name": "Golden Truck 01", "vehicle_type": "box_truck", "license_plate": "GLD0001",
 					"capacity_weight_lbs": 5000,
 				},
 				extract: map[string]string{"myVehicle": "/id"},
 			},
-			{name: "delivery.vehicle.list", method: "GET", path: "/api/v1/delivery/vehicles"},
+			{name: "delivery.vehicle.list", method: "GET", path: "/api/v1/delivery/vehicles?limit=200", sortEnvelopeItems: true},
 			{
 				name:   "delivery.driver.create",
 				method: "POST",
