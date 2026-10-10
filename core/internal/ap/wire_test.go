@@ -13,6 +13,7 @@ package ap_test
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"regexp"
 	"strings"
@@ -689,6 +690,20 @@ func TestWire_PayAmountIsCents(t *testing.T) {
 	}
 	if _, _, fields := errorOf(t, d); len(fields) == 0 || fields[0] != "amount_cents" {
 		t.Errorf("pay a decimal names %v, want amount_cents", fields)
+	}
+	// An amount past the payment column's NUMERIC(12,2) is a 400 naming the
+	// field, never a numeric overflow answered as a 500.
+	for _, huge := range []int64{math.MaxInt64, 1_000_000_000_000} {
+		h := f.do("POST", "/api/v1/ap/payments", body2(huge))
+		if h.status != http.StatusBadRequest {
+			t.Fatalf("pay %d cents = %d, want 400: %s", huge, h.status, h.raw)
+		}
+		if _, _, fields := errorOf(t, h); len(fields) == 0 || fields[0] != "amount_cents" {
+			t.Errorf("pay %d cents names %v, want amount_cents", huge, fields)
+		}
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want || !f.balanced() {
+		t.Errorf("after the refused huge amounts: control %d, open %d, balanced %v", got, want, f.balanced())
 	}
 	// The old float dollars field is not read.
 	old := f.do("POST", "/api/v1/ap/payments", map[string]any{

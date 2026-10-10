@@ -240,6 +240,9 @@ type PayInput struct {
 	InvoiceIDs  []uuid.UUID
 }
 
+// maxPaymentCents is the most the payment columns (NUMERIC(12,2)) hold.
+const maxPaymentCents = 999_999_999_999
+
 // Parse validates a pay request in one pass.
 func (req *PayRequest) Parse() (*PayInput, error) {
 	v := &httpx.Validator{}
@@ -249,6 +252,7 @@ func (req *PayRequest) Parse() (*PayInput, error) {
 	}
 	if n, ok := v.Int("amount_cents", req.AmountCents, true); ok {
 		v.Check(n > 0, "amount_cents", "must be more than zero")
+		v.Check(n <= maxPaymentCents, "amount_cents", "is more than a payment can hold")
 		in.AmountCents = n
 	}
 	if req.Method == nil {

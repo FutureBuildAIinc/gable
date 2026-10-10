@@ -264,6 +264,35 @@ BEGIN
     END IF;
 END $$;
 
+-- Two more legacy shapes the link cannot mend, each named by a notice (ADR
+-- 0008 7.4 says nothing of reversing a cancelled bill's credit, so the
+-- migration only counts them): a bill that is VOIDED here (hand cancelled, or
+-- a negative total) still holding a posted, unreversed entry keeps its credit
+-- in Accounts Payable, and a bill posted twice (the base read its status
+-- outside the transaction, so a double click could post it twice) links only
+-- its newest entry, leaving the other's credit standing after a void.
+DO $$
+DECLARE stranded BIGINT; doubled BIGINT;
+BEGIN
+    SELECT count(*) INTO stranded FROM vendor_invoices vi
+    WHERE vi.status = 'VOIDED'
+      AND EXISTS (SELECT 1 FROM gl_journal_entries e
+                  WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
+                    AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id));
+    IF stranded > 0 THEN
+        RAISE NOTICE 'migration 106: % voided or cancelled vendor invoice(s) still hold a posted, unreversed journal entry; their credit stays in Accounts Payable until it is reversed by hand', stranded;
+    END IF;
+    SELECT count(*) INTO doubled FROM vendor_invoices vi
+    WHERE (SELECT count(*) FROM gl_journal_entries e
+           WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
+             AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+             AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id)) > 1;
+    IF doubled > 0 THEN
+        RAISE NOTICE 'migration 106: % vendor invoice(s) were posted more than once (more than one posted, unreversed journal entry); only the newest is linked, reverse the others by hand', doubled;
+    END IF;
+END $$;
+
 -- amount_open: what the vendor is still owed, by the insert trigger's rule:
 -- zero on a voided or paid bill, the total less what was paid (clamped at
 -- zero) otherwise. A short-paid PAID bill and an overpaid PARTIAL one are

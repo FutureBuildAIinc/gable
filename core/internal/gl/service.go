@@ -690,7 +690,6 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 	return entry.ID, nil
 }
 
-// SyncVendorInvoice creates a journal entry: DR Expense/Inventory / CR Accounts Payable.
 // PostTillOverShort books a balanced journal entry for a drawer variance at
 // till close and returns the entry ID. over_short = counted − expected:
 //   - short (negative): DR Cash Over/Short, CR Cash (book cash drops to the

@@ -497,6 +497,12 @@ func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
 	insert(onelegged, "LEG-ONELEG", "APPROVED")
 	oneLegEntry(onelegged, newTime)
 
+	// A hand cancelled bill still holding a posted entry: it becomes VOIDED
+	// with its credit standing, and a notice counts it.
+	cancelled := uuid.New()
+	insert(cancelled, "LEG-CANCELLED", "CANCELLED")
+	entry(cancelled, newTime, nil)
+
 	apply106(t, conn, target)
 
 	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, linked); got != newest.String() {
@@ -517,6 +523,12 @@ func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
 	joined := strings.Join(*notices, " | ")
 	if !strings.Contains(joined, "no journal entry to link") {
 		t.Errorf("the notices (%s) do not name the unlinked approved bills", joined)
+	}
+	if !strings.Contains(joined, "1 voided or cancelled vendor invoice(s) still hold a posted, unreversed journal entry") {
+		t.Errorf("the notices (%s) do not count the cancelled bill that holds an entry", joined)
+	}
+	if !strings.Contains(joined, "1 vendor invoice(s) were posted more than once") {
+		t.Errorf("the notices (%s) do not count the bill posted twice", joined)
 	}
 	if !strings.Contains(joined, "one leg entry") {
 		t.Errorf("the notices (%s) do not name the one leg entry bills", joined)
