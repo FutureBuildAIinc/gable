@@ -78,6 +78,26 @@ func TestKeyBranchPin_CustomerConfinedReads(t *testing.T) {
 	f.refuseForeign(t, "GET", calc+B+"&quantity=1", "", nil)
 	f.allow(t, "bound", "GET", calc+A+"&quantity=1", "", nil, http.StatusNotFound)
 	f.parity(t, "GET", calc+B+"&quantity=1", "")
+
+	// The calculation also resolves job_id through its job's customer, the
+	// same resolution the write carries (round 5 F-3): the pin's customer
+	// with the foreign customer's job is refused, not answered with the job
+	// rule that prices the foreign customer.
+	jobRule := func(job uuid.UUID) string {
+		return fmt.Sprintf(`{"name":"pin calc job %s","rule_type":"job_override","job_id":%q,"fixed_price_ten_thousandths":10000}`,
+			job.String()[:8], job.String())
+	}
+	f.allow(t, "unbound", "POST", "/api/v1/pricing/rules", jobRule(f.jobB), nil, http.StatusCreated)
+	calcJob := "/api/v1/pricing/calculate?product_id=" + f.posProd.String() + "&quantity=1&customer_id="
+	f.refuseForeign(t, "GET", calcJob+A+"&job_id="+f.jobB.String(), "", nil)
+	f.parity(t, "GET", calcJob+A+"&job_id="+f.jobB.String(), "")
+	status, buf := f.key(t, f.bound, "GET", calcJob+A+"&job_id="+f.jobA.String(), "", nil)
+	if status == http.StatusForbidden {
+		t.Errorf("calculate with the pin's own job was refused: %s", buf)
+	}
+	if status == http.StatusOK && !strings.Contains(string(buf), `"price_basis":"retail"`) {
+		t.Errorf("calculate with the pin's own job answered %s, want the module's own answer", buf)
+	}
 	// The resolve preview answers a bare product with no match rather than a
 	// 404; what matters is that the pin's customer reaches that answer and
 	// the foreign one never reaches the module.

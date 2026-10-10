@@ -353,15 +353,51 @@ func taxCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles .
 	}
 }
 
+// calculateCustomersOf resolves the customers the price calculation names:
+// its query customer_id, and the customer of the job its job_id names (a job
+// rule prices that job's customer, the same resolution the rule write
+// carries, round 5 F-3). A job that does not exist names nothing the wall can
+// hold and the handler's own answer covers it; a query that names neither
+// passes (a retail calculation with no customer scope).
+func calculateCustomersOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		if db == nil {
+			return nil, errors.New("price calculation customer lookup: no database")
+		}
+		q := r.URL.Query()
+		var out []uuid.UUID
+		if vals := q["customer_id"]; len(vals) > 0 {
+			if id, err := uuid.Parse(vals[0]); err == nil {
+				out = append(out, id)
+			}
+		}
+		if vals := q["job_id"]; len(vals) > 0 {
+			if job, err := uuid.Parse(vals[0]); err == nil {
+				var customer *uuid.UUID
+				err := db.GetExecutor(ctx).QueryRow(ctx,
+					`SELECT customer_id FROM projects WHERE id = $1`, job).Scan(&customer)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return nil, err
+				}
+				if customer != nil {
+					out = append(out, *customer)
+				}
+			}
+		}
+		return out, nil
+	}
+}
+
 // pricingRulesCustomerWall composes the pricing role guard with the customer
 // branch wall on the rule create (its body names the customer, its job names
 // one, and a body naming neither is dealer wide and refused) and on the
-// calculation (its query names the customer). The unfiltered rule list is
-// REFUSED by the route allowlist gate and never reaches these arms.
+// calculation (its query names the customer, and its job names one through
+// that job's customer). The unfiltered rule list is REFUSED by the route
+// allowlist gate and never reaches these arms.
 func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
 	create := middleware.Compose(role, keyWall.CustomerBranch(pricingRuleCustomersOf(db)))
-	calculate := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", false)))
+	calculate := middleware.Compose(role, keyWall.CustomerBranch(calculateCustomersOf(db)))
 	return func(next http.Handler) http.Handler {
 		createHandler, calculateHandler, roleHandler := create(next), calculate(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
