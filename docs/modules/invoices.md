@@ -34,10 +34,11 @@ credits more tax than the invoice charged.
 Every route is in `core/api/fragments/invoice.yaml` and the registered
 handles are in `core/internal/invoice/handler.go`. The route census
 (`core/api/ROUTES.txt`) lists each one under the `internal/invoice`
-package (the route census has a `package` column, not a module
-column). Three of the routes below are registered under other
-packages: the email and print routes are `internal/document`, the
-invoice's payment list is `internal/payment`.
+module (the route census has a `module` column whose value is the
+registering package's directory relative to the Go module root).
+Three of the routes below are registered under other
+modules: the email and print routes are `internal/document`, the
+invoice's payment list is `internal/invoice`.
 
 | Method | Path | One line |
 |---|---|---|
