@@ -42,7 +42,7 @@ type Repository interface {
 
 	// The unit set store (ADR 0006 sections 3.1 to 3.3, item C3-2A-units).
 	GetUnitSetRows(ctx context.Context, productID uuid.UUID) ([]UnitSetRowView, error)
-	LockProductForUnitSet(ctx context.Context, id uuid.UUID) (*unitSetProduct, error)
+	LockProductForUnitSet(ctx context.Context, id uuid.UUID) (*UnitSetProduct, error)
 	ReplaceUnitSet(ctx context.Context, id uuid.UUID, rows []UnitSetRowView,
 		saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error)
 	CatalogueUnits(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)

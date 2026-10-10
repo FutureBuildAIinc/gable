@@ -68,7 +68,7 @@ func (f *fakeProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int,
 func (f *fakeProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]UnitSetRowView, error) {
 	return []UnitSetRowView{}, nil
 }
-func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*unitSetProduct, error) {
+func (f *fakeProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*UnitSetProduct, error) {
 	return nil, ErrNotFound
 }
 func (f *fakeProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []UnitSetRowView,

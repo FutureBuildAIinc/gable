@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/product"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/google/uuid"
 )
 
@@ -61,6 +62,34 @@ func (m *mockProductRepo) UpdateLeadTime(_ context.Context, _ uuid.UUID, _ *int,
 }
 func (m *mockProductRepo) ListProductsPage(_ context.Context, _ *time.Time, _ *uuid.UUID, _ int) ([]product.Product, error) {
 	return nil, nil
+}
+
+// The unit set store, served empty: the parsing tests create no unit sets.
+func (m *mockProductRepo) GetUnitSetRows(_ context.Context, _ uuid.UUID) ([]product.UnitSetRowView, error) {
+	return []product.UnitSetRowView{}, nil
+}
+func (m *mockProductRepo) LockProductForUnitSet(_ context.Context, _ uuid.UUID) (*product.UnitSetProduct, error) {
+	return nil, product.ErrNotFound
+}
+func (m *mockProductRepo) ReplaceUnitSet(_ context.Context, _ uuid.UUID, _ []product.UnitSetRowView,
+	_, _, _ string, _ *int64, _ int64) (int64, error) {
+	return 0, nil
+}
+func (m *mockProductRepo) CatalogueUnits(_ context.Context, codes []string) (map[string]units.CatalogueUnit, error) {
+	out := map[string]units.CatalogueUnit{}
+	for _, c := range codes {
+		out[c] = units.CatalogueUnit{Code: c, Dimension: units.DimCount, IsActive: true}
+	}
+	return out, nil
+}
+func (m *mockProductRepo) ProductStockUnitInUse(_ context.Context, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (m *mockProductRepo) ProductPriceHeld(_ context.Context, _ uuid.UUID) (bool, string, error) {
+	return false, "", nil
+}
+func (m *mockProductRepo) ProductUnitInUse(_ context.Context, _ uuid.UUID, _ []string) (bool, string, error) {
+	return false, "", nil
 }
 func (m *mockProductRepo) CountProducts(_ context.Context) (int64, error) {
 	return 0, nil
