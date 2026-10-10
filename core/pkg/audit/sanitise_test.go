@@ -87,3 +87,98 @@ func TestSanitiseString_OrdinaryMultibyteIsPreserved(t *testing.T) {
 		t.Errorf("sanitiseString(%q) = %q, want ordinary multibyte preserved", in, got)
 	}
 }
+
+// sanitiseNULEscape operates on the bytes json.Marshal writes for a changes
+// value. A NUL byte in the input becomes the six bytes `\u0000` in the
+// marshalled output, which the jsonb parser rejects with SQLSTATE 22P05.
+// The function rewrites every `\u0000` it finds to the seven byte marker
+// `\\u0000` so the jsonb parser reads the six characters `\u0000` and no
+// NUL byte reaches the jsonb value.
+//
+// The trick: a NUL byte in the source marshals to `\u0000` with no preceding
+// backslash, while a caller's literal `\u0000` text marshals to `\\u0000`
+// (each `\` becomes `\\`). The function MUST skip the trailing six bytes
+// of `\\u0000` so genuine caller text is stored unaltered. The skip is
+// wrong when it counts only ONE byte: a real NUL after one or more input
+// backslashes marshals to TWO, FOUR or SIX backslashes before `\u0000`,
+// and the byte-before test fires for every pair, losing the row. The fix
+// counts the run of backslashes before the match and skips only when the
+// run is ODD (the match's own leading `\` is itself escaped). This table
+// pins the fix: rows for 0 to 3 input backslashes before a real NUL (the
+// even-run rewrite must fire), and rows for genuine `\u0000` text with 0
+// to 3 extra backslashes (must be stored unaltered).
+//
+// Test inputs are the marshalled byte sequences. Each Go raw-string `\` is
+// one byte. A NUL byte in the source marshals to the six bytes `\u0000`
+// with NO preceding backslash; an input backslash marshals to `\\`, so a
+// source with n backslashes before the NUL produces 2n backslashes before
+// the `\u0000` in the marshalled bytes. A genuine `\u0000` text in the
+// source marshals to `\\u0000` (one source `\` becomes two marshalled
+// backslashes), so a source with n extra `\` chars produces 2n+1
+// backslashes before the `\u0000` match (always odd).
+func TestSanitiseNULEscape_BackslashRunBeforeRealNULIsRewritten(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// Real NUL: 0 source backslashes before it. Marshalled bytes
+		// have 0 backslashes before the `\u0000` match (even).
+		{name: "real NUL, 0 input backslashes",
+			in:   `{"v":"a\u0000b"}`,
+			want: `{"v":"a\\u0000b"}`},
+		// Real NUL: 1 source backslash before it. Marshalled bytes
+		// have 2 backslashes before the match (even).
+		{name: "real NUL, 1 input backslash",
+			in:   `{"v":"a\\\u0000b"}`,
+			want: `{"v":"a\\\\u0000b"}`},
+		// Real NUL: 2 source backslashes before it. Marshalled bytes
+		// have 4 backslashes before the match (even).
+		{name: "real NUL, 2 input backslashes",
+			in:   `{"v":"a\\\\\u0000b"}`,
+			want: `{"v":"a\\\\\\u0000b"}`},
+		// Real NUL: 3 source backslashes before it. Marshalled bytes
+		// have 6 backslashes before the match (even).
+		{name: "real NUL, 3 input backslashes",
+			in:   `{"v":"a\\\\\\\u0000b"}`,
+			want: `{"v":"a\\\\\\\\u0000b"}`},
+		// Genuine `\u0000` text in source (6 chars). Marshalled bytes
+		// have 2 backslashes before the match (the source `\` doubled);
+		// the run is 2 (even). The current code skips because the byte
+		// before the match is `\`. The fix skips only when odd, so 2 is
+		// even and would REWRITE. That is wrong: the genuine text MUST
+		// be stored unaltered. Hold on: the actual marshalled form has
+		// TWO `\\` then `u0000`. The match is `\u0000`, found at the
+		// second `\`. Before it: one `\` (the first of `\\`). k = 1
+		// (odd). Skip. So this case has 1 backslash before the match.
+		{name: "genuine \\u0000 text, 0 extra",
+			in:   `{"v":"a\\u0000b"}`,
+			want: `{"v":"a\\u0000b"}`},
+		// Genuine text: 1 extra source `\` (source `\\u0000`, 7 chars).
+		// Marshalled bytes have 4 backslashes then `u0000`; the match
+		// sits after THREE backslashes. k = 3 (odd). Skip.
+		{name: "genuine \\u0000 text, 1 extra",
+			in:   `{"v":"a\\\\u0000b"}`,
+			want: `{"v":"a\\\\u0000b"}`},
+		// Genuine text: 2 extra source `\` (source `\\\u0000`, 8 chars).
+		// Marshalled bytes have 6 backslashes then `u0000`; the match
+		// sits after FIVE backslashes. k = 5 (odd). Skip.
+		{name: "genuine \\u0000 text, 2 extra",
+			in:   `{"v":"a\\\\\\u0000b"}`,
+			want: `{"v":"a\\\\\\u0000b"}`},
+		// Genuine text: 3 extra source `\` (source `\\\\u0000`, 9 chars).
+		// Marshalled bytes have 8 backslashes then `u0000`; the match
+		// sits after SEVEN backslashes. k = 7 (odd). Skip.
+		{name: "genuine \\u0000 text, 3 extra",
+			in:   `{"v":"a\\\\\\\\u0000b"}`,
+			want: `{"v":"a\\\\\\\\u0000b"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(sanitiseNULEscape([]byte(tc.in)))
+			if got != tc.want {
+				t.Errorf("sanitiseNULEscape(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
