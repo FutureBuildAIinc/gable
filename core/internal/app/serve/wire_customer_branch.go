@@ -72,6 +72,24 @@ func exemptionCustomerPathOf() func(ctx context.Context, r *http.Request) ([]uui
 	}
 }
 
+// accountCustomerPathOf resolves the customer the account routes name in
+// their path ({id} is the customer): the summary, the subledger and the
+// statement read that customer's data, so they are confined exactly like a
+// write that names one.
+func accountCustomerPathOf() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		raw := r.PathValue("id")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		return []uuid.UUID{id}, nil
+	}
+}
+
 // previewCustomerOf resolves the customer the tax preview's body names. A
 // preview that names no customer is a plain rate calculation and passes; one
 // that names a customer reads that customer's exemptions and is confined.

@@ -268,9 +268,18 @@ func (r *PostgresRepository) AddLineItem(ctx context.Context, item *POSLineItem)
 	return nil
 }
 
+// RemoveLineItem deletes a line through its transaction's branch: a bound
+// key's branch context (or a user's grants) hides a transaction of another
+// branch, so its line deletes as missing and nothing is written.
 func (r *PostgresRepository) RemoveLineItem(ctx context.Context, itemID uuid.UUID) error {
-	query := `DELETE FROM pos_line_items WHERE id = $1`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID)
+	query := `
+		DELETE FROM pos_line_items li
+		USING pos_transactions t
+		WHERE li.id = $1
+		  AND t.id = li.transaction_id
+		  AND ($2::uuid IS NULL OR t.branch_id = $2)
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to remove POS line item: %w", err)
 	}

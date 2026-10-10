@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
 	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/bankrecon"
@@ -30,7 +31,11 @@ import (
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
+	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
@@ -74,6 +79,19 @@ type keyPinFixture struct {
 	taxExempt uuid.UUID // a tax exemption row of the foreign customer
 	jobA      uuid.UUID // a project of the pin's customer
 	jobB      uuid.UUID // a project of the foreign customer
+	regA      string    // a POS register per branch, on the branch's yard
+	regB      string
+	tillA     uuid.UUID // an OPEN till session per register
+	tillB     uuid.UUID
+	txnA      uuid.UUID // an OPEN POS transaction per branch
+	txnB      uuid.UUID
+	lineA     uuid.UUID // one line item on each transaction
+	lineB     uuid.UUID
+	retA      uuid.UUID // a completed POS return per branch
+	retB      uuid.UUID
+	zrA       uuid.UUID // a frozen Z report per branch's session
+	zrB       uuid.UUID
+	posProd   uuid.UUID // the product the POS lines carry
 	bound     string    // the key pinned to branch A
 	unbound   string    // the same scopes, no pin
 }
@@ -87,6 +105,7 @@ var pinKeyScopes = []string{
 	"admin:staff", "reports:read", "reporting:read", "reporting:write", "events:read",
 	"gl:read", "gl:write", "ap:read", "ap:write", "bankrecon:read", "bankrecon:write", "sales-team:read",
 	"market-indices:read", "market-indices:write", "tax:read", "tax:write", "pricing:read", "pricing:write",
+	"pos:read", "pos:write", "accounts:read", "ar:read",
 }
 
 func newKeyPinFixture(t *testing.T) *keyPinFixture {
@@ -109,6 +128,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		yardA: uuid.New(), yardB: uuid.New(), quoteA: uuid.New(), quoteB: uuid.New(), custID: uuid.New(),
 		custB: uuid.New(), category: uuid.New(), catRuleA: uuid.New(), catRuleB: uuid.New(), taxExempt: uuid.New(),
 		yardNull: uuid.New(), catRuleT: uuid.New(), jobA: uuid.New(), jobB: uuid.New(),
+		tillA: uuid.New(), tillB: uuid.New(), txnA: uuid.New(), txnB: uuid.New(), lineA: uuid.New(), lineB: uuid.New(),
+		retA: uuid.New(), retB: uuid.New(), zrA: uuid.New(), zrB: uuid.New(), posProd: uuid.New(),
+		regA: "PINREG-A-" + uuid.NewString()[:8], regB: "PINREG-B-" + uuid.NewString()[:8],
 	}
 	for _, r := range []struct {
 		id     uuid.UUID
@@ -192,6 +214,50 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET branch_id = NULL WHERE id = $1`, f.yardNull); err != nil {
 		t.Fatalf("null the branch: %v", err)
 	}
+	// The POS twins: a register on each branch's yard, an OPEN till session,
+	// an OPEN transaction with one line, a completed return and a frozen
+	// Z report, so the by id pos routes act on real records of each branch.
+	cashier := uuid.New()
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO products (id, sku, description, uom_primary, base_price) VALUES ($1, $2, 'pin pos item', 'EA', 1)`,
+		f.posProd, "PINP-"+f.posProd.String()[:8]); err != nil {
+		t.Fatalf("seed pos product: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO pos_registers (id, location_id, branch_id, name) VALUES ($1, $2, $3, 'pin reg A'), ($4, $5, $6, 'pin reg B')`,
+		f.regA, f.yardA, f.branchA, f.regB, f.yardB, f.branchB); err != nil {
+		t.Fatalf("seed registers: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO till_sessions (id, register_id, branch_id, cashier_id, status, opening_float)
+		VALUES ($1, $2, $3, $5, 'OPEN', 50), ($6, $4, $7, $5, 'OPEN', 50)`,
+		f.tillA, f.regA, f.branchA, f.regB, cashier, f.tillB, f.branchB); err != nil {
+		t.Fatalf("seed till sessions: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id)
+		VALUES ($1, $2, $4, 'OPEN', $5, $6), ($3, $7, $4, 'OPEN', $8, $9)`,
+		f.txnA, f.regA, f.txnB, cashier, f.branchA, f.tillA, f.regB, f.branchB, f.tillB); err != nil {
+		t.Fatalf("seed pos transactions: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO pos_line_items (id, transaction_id, product_id, description, quantity, uom, unit_price, line_total)
+		VALUES ($1, $2, $4, 'pin', 1, 'EA', 1, 1), ($3, $5, $4, 'pin', 1, 'EA', 1, 1)`,
+		f.lineA, f.txnA, f.lineB, f.posProd, f.txnB); err != nil {
+		t.Fatalf("seed pos lines: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, refund_method, status)
+		VALUES ($1, $2, $3, $5, 'CASH', 'COMPLETED'), ($6, $4, $7, $5, 'CASH', 'COMPLETED')`,
+		f.retA, f.regA, f.branchA, f.regB, cashier, f.retB, f.branchB); err != nil {
+		t.Fatalf("seed pos returns: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO till_z_reports (id, till_session_id, register_id, branch_id, over_short, payload)
+		VALUES ($1, $2, $3, $4, 0, '{}'), ($5, $6, $7, $8, 0, '{}')`,
+		f.zrA, f.tillA, f.regA, f.branchA, f.zrB, f.tillB, f.regB, f.branchB); err != nil {
+		t.Fatalf("seed z reports: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote_exposure_event'
 			AND entity_id IN (SELECT id::text FROM quote_exposure_events WHERE quote_id IN ($1, $2))`, f.quoteA, f.quoteB)
@@ -213,6 +279,16 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, f.custID, f.custB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub LIKE 'pin-%' OR user_sub = 'pin-both'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE code LIKE 'pin-new-%'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_z_reports WHERE id IN ($1, $2)`, f.zrA, f.zrB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_return_lines WHERE return_id IN ($1, $2)`, f.retA, f.retB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_returns WHERE id IN ($1, $2)`, f.retA, f.retB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_tenders WHERE transaction_id IN ($1, $2)`, f.txnA, f.txnB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id IN ($1, $2)`, f.txnA, f.txnB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id IN ($1, $2)`, f.txnA, f.txnB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE id IN ($1, $2)`, f.tillA, f.tillB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id IN ($1, $2)`, f.regA, f.regB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE product_id = $1`, f.posProd)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, f.posProd)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE parent_id IN ($1, $2, $3, $4)`, f.branchA, f.branchB, f.branchC, f.branchC2)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2, $3, $4, $5, $6, $7)`,
 			f.branchA, f.branchB, f.branchC, f.branchC2, f.yardA, f.yardB, f.yardNull)
@@ -279,6 +355,24 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 			WithOutbox(outbox.NewWriter(db, "")).
 			WithAudit(pricingAuditAdapter{l: audit.NewLogger(db)}),
 		customerSvc).RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+
+	// The account module exactly as serve registers it: the summary, the
+	// subledger and the statement name a customer in the path, and the aging
+	// and reconciliation reads come with the same mount.
+	accountSvc := account.NewService(db, glSvc, slog.Default())
+	wall.accounts(mux, accountSvc)
+
+	// The POS module exactly as serve registers it: the scoped role guard
+	// plus the branch middleware, and the repositories hold the pin on the
+	// till, Z report, return and line item rows.
+	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).
+		WithAuditLog(audit.NewLogger(db))
+	paymentSvc := payment.NewService(db, payment.NewRepository(db), accountSvc).
+		WithAuditLog(audit.NewLogger(db))
+	posSvc := pos.NewService(db, pos.NewRepository(db), productSvc,
+		inventory.NewService(inventory.NewRepository(db)), invoiceSvc, paymentSvc, slog.Default()).
+		WithAuditLog(audit.NewLogger(db))
+	pos.NewHandler(posSvc).RegisterRoutes(mux, wall.scoped("admin", "owner", "cashier"))
 
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	mint := func(name string, branch *uuid.UUID) string {
@@ -1089,4 +1183,143 @@ func TestKeyBranchPin_RowWithoutBranch(t *testing.T) {
 	}
 	f.putLocation(t, "unbound", f.yardNull, "pin free null edit", http.StatusOK)
 	f.putLocation(t, "user", f.yardNull, "pin user null edit", http.StatusOK)
+}
+
+// TestKeyBranchPin_PosAndAccountRows holds the pin on the POS and account by
+// id routes (round 5 P1, round 6 P1-2): a branch bound key reads or writes
+// branch B's till session, Z report, return, transaction line or account only
+// through its own branch. A foreign row answers exactly what a missing row
+// answers, never B data; nothing is written (row counts before and after);
+// the pin's own rows pass to the module; and the unbound key and the user
+// keep their reach. The reconciliation reads every branch's books and is
+// refused outright (the allowlist gate), like the GL surface.
+func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
+	f := newKeyPinFixture(t)
+	custA, custB := f.custID.String(), f.custB.String()
+	missing := uuid.NewString()
+	linesOn := func(tx uuid.UUID) (n int) {
+		t.Helper()
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM pos_line_items WHERE transaction_id = $1`, tx).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	tillOpen := func(id uuid.UUID) bool {
+		t.Helper()
+		var status string
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT status FROM till_sessions WHERE id = $1`, id).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		return status == "OPEN"
+	}
+	zReportsOn := func(session uuid.UUID) (n int) {
+		t.Helper()
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1`, session).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// The open till of the foreign register: no session answers, while the
+	// pin's own register answers its own.
+	_, buf := f.key(t, f.bound, "GET", "/api/v1/pos/till/current?register_id="+f.regB, "", nil)
+	if strings.Contains(string(buf), f.tillB.String()) {
+		t.Errorf("bound key till current of the foreign register answered the foreign session: %s", buf)
+	}
+	buf = f.allow(t, "bound", "GET", "/api/v1/pos/till/current?register_id="+f.regA, "", nil, http.StatusOK)
+	if !strings.Contains(string(buf), f.tillA.String()) {
+		t.Errorf("bound key till current of the own register did not answer the own session: %s", buf)
+	}
+
+	// The till report of the foreign session answers exactly what a missing
+	// session answers (never B data), and the unbound key reads the foreign
+	// one; the pin's own session answers its report.
+	sMiss, _ := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/report", "", nil)
+	sB, bB := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+f.tillB.String()+"/report", "", nil)
+	if sB != sMiss || strings.Contains(string(bB), f.regB) {
+		t.Errorf("bound key foreign till report: %d %s, want the missing row answer (%d, no B data)", sB, bB, sMiss)
+	}
+	f.allow(t, "unbound", "GET", "/api/v1/pos/till/"+f.tillB.String()+"/report", "", nil, http.StatusOK)
+	f.allow(t, "bound", "GET", "/api/v1/pos/till/"+f.tillA.String()+"/report", "", nil, http.StatusOK)
+
+	// The foreign till cannot be closed: no session write, no Z report.
+	f.key(t, f.bound, "POST", "/api/v1/pos/till/"+f.tillB.String()+"/close",
+		`{"counted_by_method":{"CASH":50}}`, nil)
+	if !tillOpen(f.tillB) {
+		t.Errorf("bound key closed the foreign till session")
+	}
+	if n := zReportsOn(f.tillB); n != 1 {
+		t.Errorf("bound key foreign till close wrote Z reports: %d rows for the session", n)
+	}
+
+	// The Z report of the foreign session answers what a missing one answers;
+	// the list carries the pin's own Z report and not the foreign one.
+	sMiss, _ = f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/zreport", "", nil)
+	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+f.tillB.String()+"/zreport", "", nil); sB != sMiss {
+		t.Errorf("bound key foreign Z report: %d, want the missing row answer %d", sB, sMiss)
+	}
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/zreports", "", nil)
+	if strings.Contains(string(buf), f.zrB.String()) {
+		t.Errorf("bound key Z report list carries the foreign Z report: %s", buf)
+	}
+	if !strings.Contains(string(buf), f.zrA.String()) {
+		t.Errorf("bound key Z report list does not carry the pin's own Z report: %s", buf)
+	}
+
+	// The returns list carries the pin's own return and not the foreign one;
+	// the foreign return reads as missing, the own one answers.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/returns", "", nil)
+	if strings.Contains(string(buf), f.retB.String()) {
+		t.Errorf("bound key returns list carries the foreign return: %s", buf)
+	}
+	if !strings.Contains(string(buf), f.retA.String()) {
+		t.Errorf("bound key returns list does not carry the pin's own return: %s", buf)
+	}
+	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/returns/"+f.retB.String(), "", nil); sB != http.StatusNotFound {
+		t.Errorf("bound key foreign return read: %d, want 404", sB)
+	}
+	f.allow(t, "unbound", "GET", "/api/v1/pos/returns/"+f.retB.String(), "", nil, http.StatusOK)
+	f.allow(t, "bound", "GET", "/api/v1/pos/returns/"+f.retA.String(), "", nil, http.StatusOK)
+
+	// The transaction reads hold the pin already (branch_id predicate); the
+	// line writes now hold it too: no line is written on or removed from the
+	// foreign transaction, and the pin's own transaction takes the write.
+	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/transactions/"+f.txnB.String(), "", nil); sB != http.StatusNotFound {
+		t.Errorf("bound key foreign transaction read: %d, want 404", sB)
+	}
+	before := linesOn(f.txnB)
+	f.key(t, f.bound, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items",
+		fmt.Sprintf(`{"product_id":%q,"quantity":1,"uom":"EA"}`, f.posProd.String()), nil)
+	if after := linesOn(f.txnB); after != before {
+		t.Errorf("bound key line insert on the foreign transaction wrote: %d rows then %d", before, after)
+	}
+	f.key(t, f.bound, "DELETE", "/api/v1/pos/transactions/"+f.txnB.String()+"/items/"+f.lineB.String(), "", nil)
+	if after := linesOn(f.txnB); after != before {
+		t.Errorf("bound key line delete on the foreign transaction wrote: %d rows then %d", before, after)
+	}
+	before = linesOn(f.txnA)
+	f.allow(t, "bound", "POST", "/api/v1/pos/transactions/"+f.txnA.String()+"/items",
+		fmt.Sprintf(`{"product_id":%q,"quantity":1,"uom":"EA"}`, f.posProd.String()), nil, http.StatusOK)
+	if after := linesOn(f.txnA); after != before+1 {
+		t.Errorf("bound key line insert on the own transaction: %d rows then %d, want one new line", before, after)
+	}
+
+	// The account routes name a customer in the path: the foreign customer is
+	// refused with the audit row, the pin's own answers, and the
+	// reconciliation (every branch's books) is refused outright.
+	f.refuseForeign(t, "GET", "/api/v1/accounts/"+custB, "", nil)
+	f.refuseForeign(t, "GET", "/api/v1/accounts/"+custB+"/transactions", "", nil)
+	f.refuseForeign(t, "GET", "/api/v1/ar/customers/"+custB+"/statement", "", nil)
+	f.refuseForeign(t, "GET", "/api/v1/ar/reconciliation", "", nil)
+	f.allow(t, "bound", "GET", "/api/v1/accounts/"+custA, "", nil, http.StatusOK)
+	f.allow(t, "bound", "GET", "/api/v1/accounts/"+custA+"/transactions", "", nil, http.StatusOK)
+	f.allow(t, "bound", "GET", "/api/v1/ar/customers/"+custA+"/statement", "", nil, http.StatusOK)
+	for _, who := range []string{"unbound", "user"} {
+		f.allow(t, who, "GET", "/api/v1/accounts/"+custB, "", nil, http.StatusOK)
+		f.allow(t, who, "GET", "/api/v1/ar/customers/"+custB+"/statement", "", nil, http.StatusOK)
+		f.allow(t, who, "GET", "/api/v1/ar/reconciliation", "", nil, http.StatusOK)
+	}
 }

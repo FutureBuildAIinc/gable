@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -104,7 +105,8 @@ func (r *PostgresRepository) scanReturn(row pgx.Row) (*POSReturn, error) {
 
 func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*POSReturn, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT `+returnColumns+` FROM pos_returns WHERE id = $1`, id)
+		`SELECT `+returnColumns+` FROM pos_returns WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
+		id, branchctx.IDForQuery(ctx))
 	ret, err := r.scanReturn(row)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get return: %w", err)
@@ -140,11 +142,13 @@ func (r *PostgresRepository) getReturnLines(ctx context.Context, returnID uuid.U
 }
 
 func (r *PostgresRepository) ListReturns(ctx context.Context, registerID string, date time.Time) ([]POSReturn, error) {
-	q := `SELECT ` + returnColumns + ` FROM pos_returns WHERE ($1 = '' OR register_id = $1)`
-	args := []any{registerID}
+	branch := branchctx.IDForQuery(ctx)
+	q := `SELECT ` + returnColumns + ` FROM pos_returns
+		WHERE ($1 = '' OR register_id = $1) AND ($2::uuid IS NULL OR branch_id = $2)`
+	args := []any{registerID, branch}
 	if !date.IsZero() {
 		start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-		q += ` AND created_at >= $2 AND created_at < $3`
+		q += ` AND created_at >= $3 AND created_at < $4`
 		args = append(args, start, start.Add(24*time.Hour))
 	}
 	q += ` ORDER BY created_at DESC`

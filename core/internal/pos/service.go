@@ -143,6 +143,15 @@ func (s *Service) StartTransaction(ctx context.Context, registerID string, cashi
 
 // AddItem adds a product to the transaction cart.
 func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRequest) (*POSTransaction, error) {
+	// The transaction must be visible before anything is written: the read
+	// carries the branch predicate, so a transaction of a branch the caller's
+	// branch context may not target (or a missing one) names nothing the
+	// caller may add to, and the line insert never happens (round 6 P1-2:
+	// the insert used to land and the recalculation fail after it).
+	tx, err := s.repo.GetTransaction(ctx, txID)
+	if err != nil {
+		return nil, err
+	}
 	// Get the product to populate description and pricing
 	prod, err := s.productSvc.GetProduct(ctx, req.ProductID)
 	if err != nil {
@@ -151,13 +160,9 @@ func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRe
 
 	// Resolve effective price (customer-specific if available)
 	effectivePrice := prod.BasePrice
-	if s.priceCalc != nil {
-		// Get the transaction to check for customer association
-		tx, txErr := s.repo.GetTransaction(ctx, txID)
-		if txErr == nil && tx.CustomerID != nil {
-			if resolved, pErr := s.priceCalc.CalculateItemPrice(ctx, *tx.CustomerID, req.ProductID, prod.BasePrice, req.Quantity); pErr == nil {
-				effectivePrice = resolved
-			}
+	if s.priceCalc != nil && tx.CustomerID != nil {
+		if resolved, pErr := s.priceCalc.CalculateItemPrice(ctx, *tx.CustomerID, req.ProductID, prod.BasePrice, req.Quantity); pErr == nil {
+			effectivePrice = resolved
 		}
 	}
 
