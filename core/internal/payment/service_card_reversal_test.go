@@ -37,6 +37,10 @@ type approvingGateway struct {
 	// the route's early check and its transaction.
 	voidInvoice func()
 	voids       []string
+	// cancel ends the request's context inside Charge: the client gave up
+	// while the charge was at the gateway.
+	cancel      func()
+	voidCtxErrs []error
 	refunds     map[string]int64
 	refundErr   error
 }
@@ -46,11 +50,15 @@ func (g *approvingGateway) Charge(ctx context.Context, req payment.ChargeRequest
 	if g.voidInvoice != nil {
 		g.voidInvoice()
 	}
+	if g.cancel != nil {
+		g.cancel()
+	}
 	return &payment.GatewayResult{TransactionID: tx, Status: payment.GatewayStatusApproved,
 		CardLast4: "4242", CardBrand: "visa", AuthCode: "A1"}, nil
 }
 
 func (g *approvingGateway) Void(ctx context.Context, txID string) (*payment.GatewayResult, error) {
+	g.voidCtxErrs = append(g.voidCtxErrs, ctx.Err())
 	if g.voidErr != nil {
 		return nil, g.voidErr
 	}
@@ -254,5 +262,43 @@ func TestCardReversalOutcomeSurvivesAFailingAuditLogger(t *testing.T) {
 	if err := w.db.Pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM payments WHERE customer_id = $1`, w.customerID).Scan(&n); err != nil || n != 0 {
 		t.Errorf("%d payments recorded (err %v), want none", n, err)
+	}
+}
+
+// RULE (PR 46 round 3 P3-1, carried): the reversal does not ride the request's
+// context. A client that gives up while the charge is at the gateway must not
+// stop the charge being given back.
+func TestReversalSurvivesACancelledRequestContext(t *testing.T) {
+	w := newCardWorld(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	gw := &approvingGateway{txPrefix: "gwcancel", cancel: cancel}
+	gw.voidInvoice = func() {
+		if _, err := w.db.Pool.Exec(context.Background(),
+			`UPDATE invoices SET status = 'VOID', voided_at = now(), voided_on = current_date WHERE id = $1`, w.invoiceID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.svc.WithGateway(gw, "pk-test")
+
+	_, err := w.svc.CreateCard(ctx, &payment.Input{
+		CustomerID: w.customerID, AmountCents: 5000, Method: payment.PaymentMethodCard, TokenID: "tok_test",
+		Applications: []account.ApplyLine{{InvoiceID: w.invoiceID, AmountCents: 5000}},
+	}, payment.Caller{Actor: "u-test"})
+	if err == nil || errors.Is(err, payment.ErrChargeNotReversed) {
+		t.Fatalf("err = %v, want a refusal after a reversal", err)
+	}
+	if len(gw.voids) != 1 {
+		t.Fatalf("voided %v, want the one void despite the cancelled request", gw.voids)
+	}
+	for _, e := range gw.voidCtxErrs {
+		if e != nil {
+			t.Errorf("the reversal saw a context error: %v", e)
+		}
+	}
+	var outcome string
+	if err := w.db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'outcome' FROM audit_log WHERE action = 'payment.charge_reversal' AND entity_id = $1`, w.customerID).Scan(&outcome); err != nil || outcome != "voided" {
+		t.Errorf("reversal audit outcome = %q (err %v), want voided", outcome, err)
 	}
 }

@@ -20,6 +20,23 @@ type EventRecorder interface {
 	Write(ctx context.Context, ev outbox.Event) error
 }
 
+// TxRunner runs fn inside one transaction, joining the caller's when ctx
+// already carries one. *database.DB satisfies it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// WithTxRunner replaces the database as the transaction runner of the HTTP
+// level acts (a test gates transactions with it; serve leaves the database).
+func (s *Service) WithTxRunner(tx TxRunner) *Service { s.tx = tx; return s }
+
+func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	if s.tx != nil {
+		return s.tx.RunInTx(ctx, fn)
+	}
+	return s.db.RunInTx(ctx, fn)
+}
+
 // WithAuditLog sets the audit logger the HTTP level acts write through.
 func (s *Service) WithAuditLog(l *audit.Logger) *Service { s.auditLog = l; return s }
 
@@ -66,7 +83,7 @@ func (s *Service) ReverseApplication(ctx context.Context, id uuid.UUID, req Reve
 		return nil, httpx.Forbidden("reversing an application needs the admin, owner or finance role")
 	}
 	var out *Application
-	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
 		app, err := s.GetApplication(ctx, id)
 		if err != nil {
 			return err
