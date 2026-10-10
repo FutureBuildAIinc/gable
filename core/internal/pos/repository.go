@@ -54,9 +54,11 @@ type Repository interface {
 	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
 	// RefundedCentsByLine sums the cents every earlier return refunded per
 	// sale line, and RefundedTaxCents the tax they took back: the remainder
-	// rule of repeated partial returns reads them.
+	// rule of repeated partial returns reads them. CardRefundedCents sums
+	// what the card returns took, for the card refund's cap.
 	RefundedCentsByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
 	RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error)
+	CardRefundedCents(ctx context.Context, saleID uuid.UUID) (int64, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
 	// InvoiceLineCosts reads an invoice's lines with the unit cost the sale
 	// relieved (a linked return's restock cost, found by the stored link).
@@ -607,6 +609,20 @@ func (r *PostgresRepository) RefundedTaxCents(ctx context.Context, saleID uuid.U
 		saleID).Scan(&cents)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read the sale's refunded tax: %w", err)
+	}
+	return cents, nil
+}
+
+// CardRefundedCents sums the cents the card returns of the sale already took
+// (the stored totals are negative, so the sum is negated back): a card
+// return is capped at the card tender less this.
+func (r *PostgresRepository) CardRefundedCents(ctx context.Context, saleID uuid.UUID) (int64, error) {
+	var cents int64
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT COALESCE(-ROUND(SUM(total) * 100)::bigint, 0) FROM pos_returns
+		 WHERE original_transaction_id = $1 AND refund_method = 'CARD'`, saleID).Scan(&cents)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read the sale's card refunds: %w", err)
 	}
 	return cents, nil
 }

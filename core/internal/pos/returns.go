@@ -341,24 +341,66 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	// decline aborts with nothing persisted. Every guard that needs no lock
 	// (the sale's status, the caps) has run by now; a refund the transaction
 	// then refuses is recorded in a committed row of its own (gateway.go).
+	// The refund targets the sale's own card tender's gateway transaction,
+	// never a transaction the client names, and never more than that tender
+	// kept net of change and of earlier card refunds (third review P2-1,
+	// fourth review P2-4): a return with no sale behind it has no card of
+	// the business to refund.
 	var refundTaken *gatewayRefund
-	if in.RefundMethod == RefundCard && in.GatewayTxID != "" {
+	if in.RefundMethod == RefundCard {
+		if in.GatewayTxID != "" {
+			return nil, invalid("gateway_tx_id",
+				"the card refund goes to the card the sale was paid with: drop gateway_tx_id")
+		}
+		if in.OriginalSaleID == nil {
+			return nil, conflict("card_refund_needs_sale",
+				"a card return needs the sale it refunds: no sale, no card of the business to refund")
+		}
+		cardTenders, err := s.repo.GetTenders(ctx, *in.OriginalSaleID)
+		if err != nil {
+			return nil, err
+		}
+		var target *Tender
+		for i := range cardTenders {
+			t := &cardTenders[i]
+			if t.Method != TenderCard || t.GatewayTxID == nil || *t.GatewayTxID == "" {
+				continue
+			}
+			if target != nil {
+				return nil, conflict("card_tender",
+					"the sale was paid with several card tenders: a card return cannot pick one; refund it from the drawer")
+			}
+			target = t
+		}
+		if target == nil {
+			return nil, conflict("card_tender",
+				"the sale was not paid by card: refund it from the drawer or leave it on the account")
+		}
 		if s.gateway == nil {
 			return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card")
 		}
-		res, err := s.gateway.Refund(ctx, in.GatewayTxID, -total)
+		already, err := s.repo.CardRefundedCents(ctx, *in.OriginalSaleID)
+		if err != nil {
+			return nil, err
+		}
+		if -total > int64(target.AmountCents)-already {
+			return nil, conflict("exceeds_card_tender",
+				fmt.Sprintf("the card tender kept %d cents less the %d already refunded to the card: refund the rest from the drawer",
+					int64(target.AmountCents), already))
+		}
+		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, -total)
 		if err != nil {
 			return nil, fmt.Errorf("card refund failed: %w", err)
 		}
 		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
-		entity := uuid.Nil
-		if in.OriginalSaleID != nil {
-			entity = *in.OriginalSaleID
-		}
-		refundTaken = &gatewayRefund{gatewayTxID: in.GatewayTxID, refundTxID: res.TransactionID,
-			amountCents: -total, act: "return", entity: entity, actor: actor}
+		gatewayTxID := *target.GatewayTxID
+		refundTaken = &gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
+			amountCents: -total, act: "return", entity: *in.OriginalSaleID, actor: actor}
+		// the refund row names the tender's own gateway transaction, so the
+		// money is reconcilable against the charge it came from
+		in.GatewayTxID = gatewayTxID
 	}
 	var tillSessionID *uuid.UUID
 	if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
