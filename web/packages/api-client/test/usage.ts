@@ -54,6 +54,39 @@ async function _happy() {
   );
   const cancelledStatus: string | undefined = cancelled.body?.status;
 
+  // The delivery board read is one payload: routes with their stops
+  // embedded (include=stops), the date filter honoured.
+  const board = await client.get("/api/v1/delivery/routes", {
+    query: { date: "2030-05-06", include: "stops,total", limit: 50 },
+  });
+  const boardStops: number = board.body.items[0]?.stops?.length ?? 0;
+  const boardTotal: number | undefined = board.body.total;
+  const routeStatus: "draft" | "scheduled" | "in_transit" | "completed" | "cancelled" | undefined =
+    board.body.items[0]?.status;
+
+  const stopCreated = await client.post(
+    "/api/v1/delivery/deliveries",
+    { route_id: customerId, order_id: customerId, stop_sequence: 1 },
+  );
+  const stopRevision: number = stopCreated.body.delivery.revision ?? 1;
+
+  const delivered = await client.post(
+    "/api/v1/delivery/deliveries/{id}/transitions",
+    { to: "delivered", revision: stopRevision, pod_proof_url: "/uploads/pod/x.png", pod_signed_by: "foreman" },
+    { path: { id: stopCreated.body.delivery.id } },
+  );
+  const podTime: string | null = delivered.body.pod_timestamp;
+
+  const adjusted = await client.post(
+    "/api/v1/delivery/deliveries/{id}/adjust-qty",
+    {
+      adjusted_by: customerId,
+      adjustments: [{ product_id: customerId, original_qty: "10", adjusted_qty: "8", reason_code: "short_ship" }],
+    },
+    { path: { id: stopCreated.body.delivery.id } },
+  );
+  const adjustedRevision: number = adjusted.body.revision;
+
   const customers = await client.get("/api/v1/customers", { query: { q: "acme", tier: "gold", is_active: true, limit: 20 } });
   const limit: number | null | undefined = customers.body.items[0]?.credit_limit_cents;
   const terms: string | undefined = customers.body.items[0]?.payment_terms.code;
@@ -143,6 +176,12 @@ async function _wrong() {
   // @ts-expect-error unknown query parameter (the quote list is cursor paged: no offset)
   await client.get("/api/v1/quotes", { query: { offset: 10 } });
 
+  const adjustWrong = {
+    adjusted_by: "8f14e45f",
+    adjustments: [{ product_id: "8f14e45f", original_qty: 10, adjusted_qty: 8, reason_code: "short_ship" as const }],
+  };
+  // @ts-expect-error a quantity is a decimal string, never a JSON number
+  await client.post("/api/v1/delivery/deliveries/{id}/adjust-qty", adjustWrong, { path: { id: "8f14e45f" } });
   // @ts-expect-error the wire status is lowercase
   await client.post("/api/v1/quotes/{id}/transitions", { to: "SENT" }, { path: { id: "8f14e45f" } });
 
