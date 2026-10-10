@@ -131,12 +131,12 @@ naming the table and the value; the migration never guesses a
 mapping. An operator runs the read-only report first:
 
 ```
-cd core && go run ./cmd/migrate -report units
+cd core && go run ./cmd/core migrate -report units
 ```
 
-(`migrate.Run` reads `os.Args[1]`; the `core migrate` form does
-not accept the flag and answers `flag provided but not defined:
--report`.) The report prints, per table and column, the values
+(the old entry `go run ./cmd/migrate -report units` runs the same
+report; both parse the flag through `migrate.ParseArgs`.) The
+report prints, per table and column, the values
 that would be inserted as new dealer units with their row counts,
 and the values that would abort the migration (the latter exit
 code `1`). The report is the same shape B0 (C3-2B) extends to the
@@ -174,7 +174,7 @@ is `stock_qty` of the product's stocking unit, in canonical form.
 | `stock_qty` | quantity | The right side of the pair, scale 4. |
 | `sell` | boolean | The row can be a sale unit. |
 | `purchase` | boolean | The row can be a purchase unit. |
-| `price` | boolean | The row can be a price unit. A change of the stocking unit (the `price_unit_held` hold of ADR 0006 9.1) is refused while the product has a nonzero `base_price` or any contract or fixed price rule names it. |
+| `price` | boolean | The row can be a price unit. A change of the stocking unit (the `price_unit_held` hold of ADR 0006 9.1) is refused while the product has a nonzero `base_price_ten_thousandths` or any contract or fixed price rule names it. |
 
 `UnitSetPut` replaces the whole set and the four default columns at
 the product's revision. A row may omit its pair (the derivations of
@@ -295,11 +295,12 @@ examples below show the production header shape).
 The pre flight report runs before migration 099:
 
 ```
-cd core && go run ./cmd/migrate -report units
+cd core && go run ./cmd/core migrate -report units
 ```
 
-(`core migrate -report units` does not take the flag and is
-refused with `flag provided but not defined: -report`.) It prints
+(the old entry `go run ./cmd/migrate -report units` runs the same
+report; both parse the flag through `migrate.ParseArgs` in
+`core/internal/app/migrate/migrate.go`). It prints
 the new dealer units it would insert (with row counts across the
 columns) and the values that would abort the migration (exit code
 `1`). Migration 099 inserts the 23 standard units
