@@ -891,16 +891,30 @@ func apGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/ap/invoices",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "invoice_number": "GOLD-AP-001",
-					"invoice_date": "{today}", "due_date": "{today}", "tax_amount": 0,
+					"vendor_id": "{vendor}", "vendor_invoice_number": "GOLD-AP-001",
+					"invoice_date": "{today}", "due_date": "{today}", "tax_cents": 0,
 					"lines": []map[string]any{
-						{"description": "golden ap line", "quantity": 1, "unit_price": 100.0},
+						{"description": "golden ap line", "quantity": "1",
+							"unit_price_ten_thousandths": 1000000, "gl_account_id": "{expenseAccount}"},
 					},
 				},
 				extract: map[string]string{"myAPInvoice": "/id"},
 			},
+			{name: "ap.invoice.create.validation", method: "POST", path: "/api/v1/ap/invoices",
+				body: map[string]any{
+					"vendor_id": "{vendor}", "vendor_invoice_number": "GOLD-AP-002",
+					"invoice_date": "{today}", "due_date": "{today}",
+					"lines": []map[string]any{
+						{"description": "no account", "quantity": "1", "unit_price_ten_thousandths": 100},
+					},
+				}},
 			{name: "ap.invoice.get", method: "GET", path: "/api/v1/ap/invoices/{myAPInvoice}"},
 			{name: "ap.invoice.list", method: "GET", path: "/api/v1/ap/invoices?limit=3"},
+			{name: "ap.invoice.list.status", method: "GET", path: "/api/v1/ap/invoices?limit=3&status=pending"},
+			{name: "ap.invoice.list.bad_status", method: "GET", path: "/api/v1/ap/invoices?status=PENDING"},
+			{name: "ap.invoice.void.pending", method: "POST", path: "/api/v1/ap/invoices/{myAPInvoice}/transitions",
+				body: map[string]any{"to": "voided", "revision": 1, "reason": "golden void"}},
+			{name: "ap.invoice.voided.get", method: "GET", path: "/api/v1/ap/invoices/{myAPInvoice}"},
 		},
 	}, {
 		name: "edi",
