@@ -121,7 +121,7 @@ func TestRoute_StopTransitionRefusedWhenRouteIsCancelled(t *testing.T) {
 	if f.errCode(t, res) != httpx.CodeInvalidStateTransition {
 		t.Errorf("code = %s, want %s", f.errCode(t, res), httpx.CodeInvalidStateTransition)
 	}
-	if !f.fields(t, res)["route_id"] {
+	if !hasBlockerCode(t, res, "route_id") {
 		t.Errorf("the 409 must carry a route_id blocker, got %v", res.body)
 	}
 	ctx := context.Background()
@@ -156,4 +156,22 @@ func (f *fixture) cancelledRouteStopWire(t *testing.T, branch uuid.UUID) (route,
 			`UPDATE delivery_routes SET status = 'DRAFT' WHERE id = $1`, route)
 	})
 	return route, stop
+}
+
+// hasBlockerCode walks the envelope's details and returns true if any
+// detail carries the named code (a blocker is a FieldError whose `code`
+// is set and whose `field` is empty; the wire's `fields` helper only
+// matches `field`, so a code matcher is needed for blockers).
+func hasBlockerCode(t *testing.T, r resp, code string) bool {
+	t.Helper()
+	env, _ := r.body["error"].(map[string]any)
+	details, _ := env["details"].([]any)
+	for _, d := range details {
+		if m, ok := d.(map[string]any); ok {
+			if c, ok := m["code"].(string); ok && c == code {
+				return true
+			}
+		}
+	}
+	return false
 }
