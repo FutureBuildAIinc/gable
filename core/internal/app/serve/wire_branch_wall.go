@@ -87,7 +87,7 @@ func (w *branchWall) crm(mux *http.ServeMux, svc *crm.Service) {
 // route with no stops carries no branch fact and is visible), so a caller
 // held to branch A finds branch B's stop or route a 404. Vehicles and
 // drivers carry no branch column (the fleet is dealer-wide), so their reads
-// run on the same mount without a wall — a stated limit of the module's
+// run on the same mount without a wall, a stated limit of the module's
 // contract, listed in CONTRACT-CHANGES.md.
 func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...string) {
 	h.RegisterRoutes(mux, w.scoped(roles...))

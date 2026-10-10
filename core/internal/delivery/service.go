@@ -726,7 +726,7 @@ func (s *Service) OptimizeRoute(ctx context.Context, routeID uuid.UUID, pre Prec
 				coord = s.geocodeDeliveryOnDemand(ctx, d)
 				geocodeCache[d.OrderID] = coord
 			} else if coord != nil {
-				// Same order already geocoded this run — reuse it, persisting
+				// Same order already geocoded this run, reuse it, persisting
 				// to this delivery row too rather than re-hitting the geocoder.
 				if err := s.repo.SetDeliveryLatLng(ctx, d.ID, coord.Lat, coord.Lng); err != nil {
 					s.logger.Warn("OptimizeRoute: failed to persist cached geocode", "delivery_id", d.ID, "error", err)

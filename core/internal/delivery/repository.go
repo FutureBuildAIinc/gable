@@ -149,7 +149,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 
 // wallArgs are the two parameters every walled predicate carries: the
 // context branch and the caller's grants subject, each passed as a typed
-// nil (SQL NULL) when absent — a dereferenced zero value would make the
+// nil (SQL NULL) when absent, a dereferenced zero value would make the
 // predicate's IS NULL arms false and wall everything.
 func wallArgs(ctx context.Context) (any, any) {
 	var branch, sub any
