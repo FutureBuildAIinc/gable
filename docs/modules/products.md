@@ -167,6 +167,7 @@ forbidden`; the audit row carries the refused scope.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
 - [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 2.6: the kit definition; section 2.1: the line types.
 - [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) sections 6, 7.1: the product on the wire, the stock totals.
+- The product's unit set is documented in [units.md](units.md): the `units` array, the four defaults, the board measure facts, the inexact refusal and the warnings list.
 
 ## How to try it locally
 

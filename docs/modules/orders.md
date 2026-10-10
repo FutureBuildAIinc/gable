@@ -241,6 +241,7 @@ the scope is `403 forbidden`; the audit row carries the refused scope.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
 - [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) sections 2, 3, 4.1, 4.2, 5, 6, 7, 8.4: the shared line shape, totals and tax, document numbers, currency, the order state machine, the credit and contact checks, allocation and back orders, fulfillment, the cost basis, the kit definition.
 - [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) section 4.4: the `lines[].tally` field on fulfillment.
+- The order's deposits and the fulfilment that applies them live in [payments.md](payments.md) (C2-4); the unit set that the fulfilment reads lives in [units.md](units.md) (C3-2A-units).
 
 ## How to try it locally
 
