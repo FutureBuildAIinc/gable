@@ -186,6 +186,24 @@ func (s *Service) build(ctx context.Context, d *Draft, branchID uuid.UUID, actor
 			Details: []httpx.FieldError{{Field: "customer_id", Message: "no such customer"}}}
 	}
 
+	// A ship-to or a contact the customer does not own is refused for every
+	// caller, as the credit memo create refuses it (round 9 P1-2): the
+	// snapshot would carry another customer's address.
+	shipOK, contactOK, err := s.repo.OwnedBy(ctx, d.CustomerID, d.ShipToID, d.OrderedByContactID)
+	if err != nil {
+		return nil, err
+	}
+	var notOwned []httpx.FieldError
+	if !shipOK {
+		notOwned = append(notOwned, httpx.FieldError{Field: "ship_to_id", Message: "is not a ship-to of this customer"})
+	}
+	if !contactOK {
+		notOwned = append(notOwned, httpx.FieldError{Field: "ordered_by_contact_id", Message: "is not a contact of this customer"})
+	}
+	if len(notOwned) > 0 {
+		return nil, validationFailed("one or more fields failed validation", notOwned...)
+	}
+
 	o := Order{}
 	o.ID = uuid.New()
 	o.BranchID = branchID

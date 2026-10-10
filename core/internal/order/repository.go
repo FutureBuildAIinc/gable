@@ -79,6 +79,9 @@ type Repository interface {
 	CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error)
 	ContactAuthority(ctx context.Context, contactID uuid.UUID) (ContactAuthority, error)
 	DefaultShipToID(ctx context.Context, customerID uuid.UUID) (*uuid.UUID, error)
+	// OwnedBy checks that the ship-to and the contact a document names belong
+	// to its customer: the foreign keys alone would accept another customer's.
+	OwnedBy(ctx context.Context, customerID uuid.UUID, shipToID, contactID *uuid.UUID) (shipToOK, contactOK bool, err error)
 	ShipTo(ctx context.Context, shipToID uuid.UUID) (snapshot *ShipToSnapshot, rate *string, err error)
 	BranchTaxRate(ctx context.Context, branchID uuid.UUID) (*string, error)
 	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
@@ -909,6 +912,23 @@ func (r *PostgresRepository) ContactAuthority(ctx context.Context, contactID uui
 		a.OrderLimitCents = &c
 	}
 	return a, nil
+}
+
+func (r *PostgresRepository) OwnedBy(ctx context.Context, customerID uuid.UUID, shipToID, contactID *uuid.UUID) (shipToOK, contactOK bool, err error) {
+	shipToOK, contactOK = true, true
+	if shipToID != nil {
+		if err = r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM customer_ship_tos WHERE id = $1 AND customer_id = $2)`, *shipToID, customerID).Scan(&shipToOK); err != nil {
+			return false, false, fmt.Errorf("failed to check the ship-to: %w", err)
+		}
+	}
+	if contactID != nil {
+		if err = r.db.GetExecutor(ctx).QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM customer_contacts WHERE id = $1 AND customer_id = $2)`, *contactID, customerID).Scan(&contactOK); err != nil {
+			return false, false, fmt.Errorf("failed to check the contact: %w", err)
+		}
+	}
+	return shipToOK, contactOK, nil
 }
 
 func (r *PostgresRepository) DefaultShipToID(ctx context.Context, customerID uuid.UUID) (*uuid.UUID, error) {
