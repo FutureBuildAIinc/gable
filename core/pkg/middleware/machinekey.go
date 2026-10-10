@@ -427,6 +427,24 @@ func ScopeTarget(method, path string) (module string, class ScopeClass, ok bool)
 	}
 }
 
+// PolicyModuleForPath names the module whose scope policy judges a path: the
+// first segment, except under the delegating segments (drafts and links),
+// where the module is the one ScopeTarget delegates to, because the segments
+// themselves are not modules and never appear in the vocabulary (ADR 0007
+// section 5.2). The auth core and the census test share it, so a keyed
+// request and the drift gate cannot disagree.
+func PolicyModuleForPath(method, path string) (string, bool) {
+	first, ok := ModuleForPath(path)
+	if !ok {
+		return "", false
+	}
+	if first == "drafts" || first == "links" {
+		module, _, ok := ScopeTarget(method, path)
+		return module, ok
+	}
+	return first, true
+}
+
 // AdmittedScopes returns the scopes that admit a keyed request on a module's
 // route class, the whole policy table of ADR 0007 section 5.1: matching is
 // exact, with no wildcard and no implication between verbs, and a grant
@@ -715,8 +733,8 @@ func (a *MachineKeyAuth) handle(w http.ResponseWriter, r *http.Request, rawKey s
 	// under them the policy table does not name fails closed here, so a
 	// later draft route cannot quietly fall into the draft write class.
 	scopeModule, class, isRoute := ScopeTarget(r.Method, r.URL.Path)
-	pathModule, _ := ModuleForPath(r.URL.Path)
-	if !isRoute || ModuleScopePolicyFor(pathModule) != ModuleScopeAllowed {
+	policyModule, _ := PolicyModuleForPath(r.Method, r.URL.Path)
+	if !isRoute || ModuleScopePolicyFor(policyModule) != ModuleScopeAllowed {
 		// Fail closed: a machine key is a principal on declared /api/v1
 		// module routes only. Public seams never reach here (the caller's
 		// public path check runs first); anything else is refused.
