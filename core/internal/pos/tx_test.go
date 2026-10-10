@@ -233,8 +233,10 @@ func TestVoidRacingAReturn(t *testing.T) {
 		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
 	}()
 	wg.Wait()
-	if voidStatus == httpOK && returnStatus == httpOK {
-		t.Fatal("both the void and the return won")
+	t.Logf("void status %d, return status %d, stock %s", voidStatus, returnStatus, f.stock())
+	won := func(status int) bool { return status >= 200 && status < 300 }
+	if won(voidStatus) && won(returnStatus) {
+		t.Fatalf("both the void and the return won (%d, %d)", voidStatus, returnStatus)
 	}
 	f.assertARInvariants(t)
 	// the stock is whole either way: voided returns all 6, a return returns

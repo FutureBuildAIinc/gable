@@ -190,7 +190,8 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._success = null;
       this._pendingTenders = [];
-      this._completed = null;
+      // The last completed sale stays offerable for a void or a return
+      // until the next completion replaces it.
       const sale = await posService.startSale(REGISTER_ID);
       this._sale = sale;
       this._showTender = false;

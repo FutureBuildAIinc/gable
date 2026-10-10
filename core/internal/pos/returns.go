@@ -86,32 +86,47 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	for i := range saleLines {
 		byID[saleLines[i].ID] = saleLines[i]
 	}
-	productIDs := make([]uuid.UUID, 0, len(in.Lines))
+	// First pass: fill each line from the sale line it names, so the product
+	// lookup covers the resolved products too; a line that named no sale line
+	// stands alone on the product the request named.
+	resolved := make([]ReturnLineIn, len(in.Lines))
 	for i := range in.Lines {
-		if in.Lines[i].ProductID != nil {
-			productIDs = append(productIDs, *in.Lines[i].ProductID)
+		rl := in.Lines[i]
+		if rl.SaleLineID != nil {
+			src, ok := byID[*rl.SaleLineID]
+			if !ok {
+				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i), "names no line of the original sale")
+			}
+			if rl.UnitPrice == nil && src.UnitPrice != nil {
+				p := *src.UnitPrice
+				rl.UnitPrice = &p
+			}
+			if rl.Description == "" {
+				rl.Description = src.Description
+			}
+			if rl.ProductID == nil && src.ProductID != nil {
+				p := *src.ProductID
+				rl.ProductID = &p
+			}
+		}
+		resolved[i] = rl
+	}
+	productIDs := make([]uuid.UUID, 0, len(resolved))
+	for i := range resolved {
+		if resolved[i].ProductID != nil {
+			productIDs = append(productIDs, *resolved[i].ProductID)
 		}
 	}
 	refs, err := s.repo.LookupProducts(ctx, productIDs)
 	if err != nil {
 		return nil, err
 	}
-	priced := make([]returnLinePriced, 0, len(in.Lines))
-	for i := range in.Lines {
-		rl := in.Lines[i]
-		if rl.SaleLineID != nil {
-			if src, ok := byID[*rl.SaleLineID]; ok {
-				if rl.UnitPrice == nil && src.UnitPrice != nil {
-					p := *src.UnitPrice
-					rl.UnitPrice = &p
-				}
-				if rl.Description == "" {
-					rl.Description = src.Description
-				}
-				if rl.ProductID == nil && src.ProductID != nil {
-					p := *src.ProductID
-					rl.ProductID = &p
-				}
+	priced := make([]returnLinePriced, 0, len(resolved))
+	for i := range resolved {
+		rl := resolved[i]
+		if rl.SaleLineID == nil && rl.ProductID != nil {
+			if _, ok := refs[rl.ProductID.String()]; !ok {
+				return nil, invalid(fmt.Sprintf("lines[%d].product_id", i), "no such product")
 			}
 		}
 		if rl.UnitPrice == nil {
@@ -185,6 +200,28 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	}
 	var out *Return
 	err = s.inTx(ctx, func(ctx context.Context) error {
+		// The sale row first (section 11, step 1): a void racing this return
+		// serializes here, and the loser sees the sale it priced change under
+		// it. Only a completed sale's goods come back; a voided sale's came
+		// back with the void.
+		if in.OriginalSaleID != nil {
+			if err := s.repo.LockSale(ctx, *in.OriginalSaleID); err != nil {
+				return err
+			}
+			sale, err := s.repo.GetSale(ctx, *in.OriginalSaleID)
+			if err != nil {
+				return err
+			}
+			if sale.Status != StatusCompleted {
+				return httpx.InvalidStateTransition(
+					fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", sale.Status.Status()))
+			}
+			// The return touches the sale: its revision moves, in process, so
+			// a void built on the earlier revision is refused stale.
+			if err := s.repo.BumpSaleRevision(ctx, sale.ID); err != nil {
+				return err
+			}
+		}
 		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
 		if err != nil {
 			return err

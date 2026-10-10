@@ -229,12 +229,16 @@ func (r *returnRequest) parse() (*ReturnIn, error) {
 		l := &r.Lines[i]
 		field := func(name string) string { return fmt.Sprintf("lines[%d].%s", i, name) }
 		rl := ReturnLineIn{Restock: true}
-		if id, ok := v.UUID(field("product_id"), l.ProductID, true); ok {
+		if id, ok := v.UUID(field("product_id"), l.ProductID, false); ok {
 			rl.ProductID = &id
 		}
 		if id, ok := v.UUID(field("line_id"), l.LineID, false); ok {
 			rl.SaleLineID = &id
 		}
+		// A line names the sale line it returns (its product, price and cost
+		// follow) or stands alone on its own product.
+		v.Check(rl.ProductID != nil || rl.SaleLineID != nil, field("product_id"),
+			"name the sale line or a product")
 		if l.Description != nil {
 			rl.Description = *l.Description
 		}

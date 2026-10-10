@@ -27,6 +27,7 @@ type Repository interface {
 	// Sales
 	CreateSale(ctx context.Context, s *Sale) error
 	LockSale(ctx context.Context, id uuid.UUID) error
+	BumpSaleRevision(ctx context.Context, id uuid.UUID) error
 	GetSale(ctx context.Context, id uuid.UUID) (*Sale, error)
 	UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error
 	CompleteSale(ctx context.Context, id, invoiceID uuid.UUID, subtotal, tax, total, change int64) error
@@ -215,6 +216,18 @@ func (r *PostgresRepository) LockSale(ctx context.Context, id uuid.UUID) error {
 		return httpx.NotFound("sale not found")
 	}
 	return err
+}
+
+// BumpSaleRevision moves a sale's revision in process (the recipe's rule for
+// an act that touches a document it does not own the status of): a return
+// against the sale does it, so a void built on the earlier revision is
+// refused stale instead of also restocking the goods.
+func (r *PostgresRepository) BumpSaleRevision(ctx context.Context, id uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET revision = revision + 1, updated_at = NOW() WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("failed to move the sale's revision: %w", err)
+	}
+	return nil
 }
 
 const saleCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.cashier_id, t.customer_id, t.currency,
