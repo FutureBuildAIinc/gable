@@ -46,3 +46,29 @@ func TestAWalkInReturnRefusesAccount(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (third review P3-D): naming the walk-in customer's id explicitly is
+// still the walk-in: the account refund is refused whatever way the customer
+// was named.
+func TestAWalkInReturnNamedAsTheWalkInIsRefusedToo(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	saleID, body := f.saleOf("1", tender("cash", 599))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	walkIn := f.scalar(`SELECT id::text FROM customers WHERE account_number = 'WALK-IN'`).(string)
+	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "customer_id": walkIn, "original_sale_id": saleID, "refund_method": "account",
+		"reason": "named walk-in", "lines": []map[string]any{{"line_id": lineID, "quantity": "1"}},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("named walk-in account return = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "walk_in_account" {
+		t.Errorf("blockers = %v, want walk_in_account", blockers)
+	}
+	if got := f.counterMemos(t); got != 0 {
+		t.Errorf("%d memos on the walk-in customer, want 0", got)
+	}
+	f.assertARInvariants(t)
+}

@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // returnOn is a linked cash return of qty of the sale's first line. A cash
@@ -289,6 +290,43 @@ func TestRepeatedPartialReturnsRefundNoMoreThanTheSale(t *testing.T) {
 	// the line is fully returned: nothing more comes back
 	if r := f.returnOn(t, saleID, lineID, "1"); r.status != http.StatusConflict {
 		t.Fatalf("return past the sold quantity = %d, want 409: %s", r.status, r.raw)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (fourth review P3-3): a legacy return line the migration could not
+// link to a sale line still counts against the cap, by its product: a sale
+// half returned before the contract cannot be returned in full again through
+// the linked route.
+func TestALegacyUnlinkedReturnCountsAgainstTheCap(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	saleID, body := f.saleOf("1", tender("cash", 599))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// a legacy return of half the unit, in the base shape: no sale line link
+	legacy := uuid.New()
+	mustExec(t, f.db, `INSERT INTO pos_returns (id, register_id, cashier_id, original_transaction_id, subtotal, tax_amount, total,
+		refund_method, reason, currency) VALUES ($1, $2, $3, $4, -2.75, -0.24, -2.99, 'CASH', 'legacy half', 'USD')`,
+		legacy, f.register, mustUUID(t), saleID)
+	mustExec(t, f.db, `INSERT INTO pos_return_lines (id, return_id, position, line_type, product_id, description, quantity,
+		uom, unit_price, line_total) VALUES ($1, $2, 0, 'PRODUCT', $3, 'legacy half', -0.5, 'PCS', 5.5, -2.75)`,
+		uuid.New(), legacy, f.productID)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM pos_return_lines WHERE return_id = $1`, legacy)
+		mustExec(t, f.db, `DELETE FROM pos_returns WHERE id = $1`, legacy)
+	})
+	// the whole unit back is refused: half already came home
+	r := f.returnOn(t, saleID, lineID, "1")
+	if r.status != http.StatusConflict {
+		t.Fatalf("return over a legacy half = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "exceeds_sold" {
+		t.Errorf("blockers = %v, want exceeds_sold", blockers)
+	}
+	// the other half still comes back
+	if r := f.returnOn(t, saleID, lineID, "0.5"); r.status != http.StatusCreated {
+		t.Fatalf("return of the other half = %d: %s", r.status, r.raw)
 	}
 	f.assertARInvariants(t)
 }

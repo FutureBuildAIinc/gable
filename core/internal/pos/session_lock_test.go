@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/testutil"
 )
@@ -112,4 +113,76 @@ func (f *fixture) tillExpected(t *testing.T, sessionID string) map[string]int64 
 		t.Fatal(err)
 	}
 	return expected
+}
+
+// RULE (third review P3-E): the completion's FOR SHARE and the close's FOR
+// UPDATE on the session row are real locks, proven deterministically: with
+// the row held FOR UPDATE by another transaction, both acts block until it
+// releases, then run. A completion that skipped the lock would finish beside
+// the holder; so would a close that aggregated without the lock.
+func TestTheCompletionAndTheCloseBlockOnTheSessionRowLock(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	ctx := context.Background()
+
+	// the completion blocks on its FOR SHARE of the session row
+	sessionID := f.openTill(0)
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("1")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	holder, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan int, 1)
+	go func() {
+		done <- f.completeSale(saleID, tender("cash", 599)).status
+	}()
+	select {
+	case st := <-done:
+		t.Fatalf("the completion finished beside the lock holder (status %d): its FOR SHARE of the session row is missing", st)
+	case <-time.After(400 * time.Millisecond):
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := <-done; st != http.StatusOK {
+		t.Fatalf("the completion after the release = %d, want 200", st)
+	}
+	f.assertARInvariants(t)
+	if r := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{
+		"counted_by_method": map[string]any{"cash": 599}}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK {
+		t.Fatalf("close the first session = %d: %s", r.status, r.raw)
+	}
+
+	// the close blocks on its FOR UPDATE of the session row
+	sessionID2 := f.openTill(0)
+	holder2, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder2.Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, sessionID2); err != nil {
+		t.Fatal(err)
+	}
+	done2 := make(chan int, 1)
+	go func() {
+		done2 <- f.do("POST", "/api/v1/pos/till/"+sessionID2+"/close", map[string]any{
+			"counted_by_method": map[string]any{"cash": 0}}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
+	}()
+	select {
+	case st := <-done2:
+		t.Fatalf("the close finished beside the lock holder (status %d): its FOR UPDATE of the session row is missing", st)
+	case <-time.After(400 * time.Millisecond):
+	}
+	if err := holder2.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := <-done2; st != http.StatusOK {
+		t.Fatalf("the close after the release = %d, want 200", st)
+	}
+	f.assertARInvariants(t)
 }

@@ -193,14 +193,6 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, err
 		}
 	}
-	// The credit check an ACCOUNT tender owes, read before the card is
-	// charged (a refusal must never move money at the terminal); the
-	// transaction repeats it under the customer's credit lock.
-	if accountPortion > 0 {
-		if err := s.checkAccountCredit(ctx, realCustomerID, accountPortion); err != nil {
-			return nil, err
-		}
-	}
 	// Card charges: outside the transaction, with the sale's own currency
 	// (the hard coded USD of the base commit is the bug this fixes). Every
 	// charge the transaction then refuses is reversed (gateway.go), and a

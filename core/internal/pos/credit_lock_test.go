@@ -5,9 +5,9 @@ package pos_test
 
 // The credit check is serialized (ADR 0005 section 11 step 1a, second
 // review P2-1): the completion takes the customer's credit advisory lock
-// before it reads the open receivable, so two ACCOUNT sales for one customer
-// cannot both read an exposure that does not yet count the other and end
-// over the limit together.
+// before it reads the open receivable, so concurrent ACCOUNT sales for one
+// customer cannot each read an exposure that does not yet count the others
+// and end over the limit together (three contenders, the recipe's shape).
 
 import (
 	"sync"
@@ -16,16 +16,17 @@ import (
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
-func TestTwoAccountSalesCannotBothPassTheCreditCheck(t *testing.T) {
+func TestThreeAccountSalesCannotAllPassTheCreditCheck(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	mustExec(t, f.db, `UPDATE customers SET credit_limit = 30.00 WHERE id = $1`, f.customerID)
 	t.Cleanup(func() {
 		mustExec(t, f.db, `UPDATE customers SET credit_limit = NULL WHERE id = $1`, f.customerID)
 	})
-	// Two sales that each fit the limit alone (2395 of a 3000 limit) but not
-	// together; completed at the same time at pool size 4.
-	sales := make([]string, 2)
+	// Three sales that each fit the limit alone (2395 of a 3000 limit) but
+	// not together; completed at the same time at pool size 4, three
+	// contenders (the recipe's shape).
+	sales := make([]string, 3)
 	for i := range sales {
 		sales[i] = f.startSale(&f.customerID)
 		if r := f.addLine(sales[i], f.productLine("4")); r.status != 200 {
@@ -33,7 +34,7 @@ func TestTwoAccountSalesCannotBothPassTheCreditCheck(t *testing.T) {
 		}
 	}
 	var wg sync.WaitGroup
-	statuses := make([]int, 2)
+	statuses := make([]int, 3)
 	for i := range sales {
 		wg.Add(1)
 		go func(i int) {
@@ -49,7 +50,7 @@ func TestTwoAccountSalesCannotBothPassTheCreditCheck(t *testing.T) {
 		}
 	}
 	if wins != 1 {
-		t.Errorf("statuses = %v, want exactly one 200 (the other refused credit_limit)", statuses)
+		t.Errorf("statuses = %v, want exactly one 200 (the others refused credit_limit)", statuses)
 	}
 	if got := f.balance(); got > 3000 {
 		t.Errorf("balance_due = %d, want at most the 3000 limit", got)

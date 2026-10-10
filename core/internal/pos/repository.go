@@ -56,9 +56,12 @@ type Repository interface {
 	// sale line, and RefundedTaxCents the tax they took back: the remainder
 	// rule of repeated partial returns reads them. CardRefundedCents sums
 	// what the card returns took, for the card refund's cap.
+	// LegacyReturnedQtyByProduct sums the unlinked (pre contract) return
+	// lines of a sale by product, so the cap counts them too.
 	RefundedCentsByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]int64, error)
 	RefundedTaxCents(ctx context.Context, saleID uuid.UUID) (int64, error)
 	CardRefundedCents(ctx context.Context, saleID uuid.UUID) (int64, error)
+	LegacyReturnedQtyByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
 	// InvoiceLineCosts reads an invoice's lines with the unit cost the sale
 	// relieved (a linked return's restock cost, found by the stored link).
@@ -625,6 +628,33 @@ func (r *PostgresRepository) CardRefundedCents(ctx context.Context, saleID uuid.
 		return 0, fmt.Errorf("failed to read the sale's card refunds: %w", err)
 	}
 	return cents, nil
+}
+
+// LegacyReturnedQtyByProduct sums, per product, the quantity the sale's
+// legacy return lines brought back: the lines migration 105 could not link
+// to a sale line (their sale_line_id is null), counted by product so the
+// cap still bounds a linked return of the same goods.
+func (r *PostgresRepository) LegacyReturnedQtyByProduct(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT rl.product_id, -ROUND(SUM(rl.quantity) * 10000)::bigint
+		FROM pos_return_lines rl
+		JOIN pos_returns r ON r.id = rl.return_id
+		WHERE r.original_transaction_id = $1 AND rl.sale_line_id IS NULL AND rl.product_id IS NOT NULL
+		GROUP BY rl.product_id`, saleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the sale's unlinked return lines: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]httpx.Quantity{}
+	for rows.Next() {
+		var id uuid.UUID
+		var qty httpx.Quantity
+		if err := rows.Scan(&id, &qty); err != nil {
+			return nil, err
+		}
+		out[id] = qty
+	}
+	return out, rows.Err()
 }
 
 // InvoiceLineCost is one invoice line's id and the unit cost the sale

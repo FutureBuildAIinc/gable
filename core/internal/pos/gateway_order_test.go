@@ -412,3 +412,39 @@ func TestAChargeNeitherVoidNorRefundCanReverseAnswers502(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (third review P3-C): a return whose transaction refuses after the
+// gateway refund leaves the money accounted for: the refund is recorded in
+// its own committed audit row carrying the gateway ids, while no memo, no
+// return row and no stock move survive.
+func TestAReturnTheTransactionRefusesRecordsItsGatewayRefund(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+		f.events.fail = "pos_return.completed"
+	})
+	f.openTill(0)
+	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	r := f.cardReturnOn(t, saleID, lineID, "1")
+	if r.status == http.StatusCreated {
+		t.Fatalf("the return committed under a failing event write: %s", r.raw)
+	}
+	// the refund was made against the sale's own charge, exactly once
+	if len(gw.refunds) != 1 || gw.refunds[0] != "gw-1" {
+		t.Fatalf("gateway refunds = %v, want one against the sale's own gw-1", gw.refunds)
+	}
+	n := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned'
+		AND entity_id = $1 AND changes->>'act' = 'return'`, saleID)
+	if n != 1 {
+		t.Errorf("%d orphaned refund rows for the refused return, want 1", n)
+	}
+	if got := f.counterMemos(t); got != 0 {
+		t.Errorf("%d memos after the refused return, want 0", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
+		t.Errorf("sale status = %q, want completed (the return rolled back)", got)
+	}
+	f.assertARInvariants(t)
+}

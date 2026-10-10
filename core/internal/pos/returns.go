@@ -102,6 +102,13 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		customerID = &walkInID
 		isWalkIn = true
+	} else if walkInID, _, err := s.repo.WalkInCustomer(ctx); err != nil {
+		return nil, err
+	} else if walkInID == *customerID {
+		// naming the walk-in customer's id explicitly is still the walk-in
+		// (third review P3-D): the credit a return leaves open cannot sit
+		// on it whatever way it was named
+		isWalkIn = true
 	}
 	// The walk-in customer cannot hold account credit: as the sale side
 	// refuses an ACCOUNT tender for it, a return left on its account is
@@ -809,12 +816,19 @@ func (s *Service) checkReturnCaps(ctx context.Context, saleID *uuid.UUID, priced
 	if err != nil {
 		return err
 	}
+	legacy, err := s.repo.LegacyReturnedQtyByProduct(ctx, *saleID)
+	if err != nil {
+		return err
+	}
 	for lineID, want := range requested {
 		src, ok := byID[lineID]
 		if !ok || src.Quantity == nil {
 			continue
 		}
 		already := int64(returned[lineID])
+		if src.ProductID != nil {
+			already += int64(legacy[*src.ProductID])
+		}
 		if want+already > int64(*src.Quantity) {
 			return conflict("exceeds_sold",
 				fmt.Sprintf("the line sold %s and %s is already returned: %s more is refused",
