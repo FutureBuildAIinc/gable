@@ -51,24 +51,45 @@ describe('driverStatusClass', () => {
 const drivers: Driver[] = [
   {
     id: 'd-active',
-    name: 'Ada Active',
+    name: 'Driver Active',
     status: 'active',
+    license_number: null,
+    phone_number: null,
+    cdl_class: null,
+    cdl_expiry: null,
+    hire_date: null,
+    email: null,
+    photo_url: null,
     revision: 1,
     created_at: '',
     updated_at: '',
   },
   {
     id: 'd-leave',
-    name: 'Lee Leave',
+    name: 'Driver On Leave',
     status: 'on_leave',
+    license_number: null,
+    phone_number: null,
+    cdl_class: null,
+    cdl_expiry: null,
+    hire_date: null,
+    email: null,
+    photo_url: null,
     revision: 1,
     created_at: '',
     updated_at: '',
   },
   {
     id: 'd-inactive',
-    name: 'Ina Inactive',
+    name: 'Driver Inactive',
     status: 'inactive',
+    license_number: null,
+    phone_number: null,
+    cdl_class: null,
+    cdl_expiry: null,
+    hire_date: null,
+    email: null,
+    photo_url: null,
     revision: 1,
     created_at: '',
     updated_at: '',
@@ -106,9 +127,9 @@ describe('FleetManagement render wires the driver status colour from the row', (
     await el.updateComplete
 
     const rowsByName: Record<string, HTMLElement | null> = {
-      'Ada Active': null,
-      'Lee Leave': null,
-      'Ina Inactive': null,
+      'Driver Active': null,
+      'Driver On Leave': null,
+      'Driver Inactive': null,
     }
     el.querySelectorAll('tbody tr').forEach((row) => {
       const nameCell = row.querySelector('td:nth-child(2)')
@@ -117,13 +138,13 @@ describe('FleetManagement render wires the driver status colour from the row', (
         rowsByName[name] = row as HTMLElement
       }
     })
-    expect(rowsByName['Ada Active']).not.toBeNull()
-    expect(rowsByName['Lee Leave']).not.toBeNull()
-    expect(rowsByName['Ina Inactive']).not.toBeNull()
+    expect(rowsByName['Driver Active']).not.toBeNull()
+    expect(rowsByName['Driver On Leave']).not.toBeNull()
+    expect(rowsByName['Driver Inactive']).not.toBeNull()
 
-    const activeSpan = rowsByName['Ada Active']?.querySelector('span')
-    const leaveSpan = rowsByName['Lee Leave']?.querySelector('span')
-    const inactiveSpan = rowsByName['Ina Inactive']?.querySelector('span')
+    const activeSpan = rowsByName['Driver Active']?.querySelector('span')
+    const leaveSpan = rowsByName['Driver On Leave']?.querySelector('span')
+    const inactiveSpan = rowsByName['Driver Inactive']?.querySelector('span')
     expect(activeSpan?.className).toContain('emerald')
     expect(leaveSpan?.className).toContain('amber')
     expect(inactiveSpan?.className).toContain('zinc')
