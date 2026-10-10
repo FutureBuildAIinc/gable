@@ -5103,6 +5103,30 @@ export interface paths {
         patch: operations["productUpdateLeadTime"];
         trace?: never;
     };
+    "/api/v1/products/{id}/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a product's unit set
+         * @description The set, the four defaults, the board measure facts the derivations read and the product's revision.
+         */
+        get: operations["productUnitSetGet"];
+        /**
+         * Replace a product's unit set
+         * @description The whole set and the four default columns in one transaction at the product's revision. The derivations of ADR 0006 section 3.2 complete rows that arrive without a pair; the stocking unit holds of section 3.2 refuse their cases with 409 blockers (stock_unit_in_use, unit_in_use, price_unit_held); until C3-2B the price unit is the stocking unit (a PUT naming another is a 400 naming price_uom). The answer carries the completed set and the warnings.
+         */
+        put: operations["productUnitSetPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products/{id}/kit-components": {
         parameters: {
             query?: never;
@@ -6039,6 +6063,54 @@ export interface paths {
          * @description Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents.
          */
         post: operations["taxPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List units
+         * @description The keyset envelope of ADR 0001 section 1, ordered units.code, with the dimension and is_active filters.
+         */
+        get: operations["unitList"];
+        put?: never;
+        /**
+         * Create a unit
+         * @description A dealer unit. The code is immutable and must match ^[A-Z]{1,6}$; the dimension and the standard size are immutable once any product unit set or line names the unit. Seeded rows cannot be created again: a duplicate code is a 409.
+         */
+        post: operations["unitCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a unit
+         * @description The unit row with its standard size in canonical form.
+         */
+        get: operations["unitGet"];
+        /**
+         * Update a unit
+         * @description name and is_active always; the dimension and the standard size only while the unit is neither a system row nor named by any product unit set row or line. Deactivation is the only removal: a field the PUT cannot change (code, is_system) is a 400 naming it.
+         */
+        put: operations["unitUpdate"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11529,11 +11601,60 @@ export interface components {
              */
             revision: number;
         };
-        /**
-         * @description The database unit of measure vocabulary, verbatim.
-         * @enum {string}
-         */
-        UOM: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
+        /** @description One row of a product's unit set: unit_qty of the row's unit is stock_qty of the product's stocking unit, canonical (ADR 0006 R2). */
+        UnitSetRow: {
+            uom: components["schemas"]["UOM"];
+            unit_qty: components["schemas"]["Quantity"];
+            stock_qty: components["schemas"]["Quantity"];
+            sell: boolean;
+            purchase: boolean;
+            price: boolean;
+        };
+        /** @description GET /products/{id}/units and the PUT's answer: the set, the four defaults, the board measure facts the derivations read, the base price the hold guards, and the PUT's warnings (empty on a read, an array always present). */
+        UnitSetDoc: {
+            /** Format: uuid */
+            product_id: string;
+            stock_uom: components["schemas"]["UOM"];
+            sale_uom: components["schemas"]["UOM"];
+            price_uom: components["schemas"]["UOM"];
+            purchase_uom: components["schemas"]["UOM"];
+            /** Format: int64 */
+            base_price_ten_thousandths: number;
+            board_thickness_in: components["schemas"]["Quantity"] | null;
+            board_width_in: components["schemas"]["Quantity"] | null;
+            board_length_ft: components["schemas"]["Quantity"] | null;
+            random_length: boolean;
+            units: components["schemas"]["UnitSetRow"][];
+            /** @description One entry per sell row whose unit does not convert exactly into the stocking unit, naming the finer stocking unit that would make every sell row exact (the 6x9 paver stocked in PCS and sold by SF). The warning does not refuse. */
+            warnings: {
+                field: string;
+                message: string;
+            }[];
+            /** Format: int64 */
+            revision: number;
+        };
+        /** @description The body of PUT /products/{id}/units: it replaces the whole set and the four default columns at the product's revision. A row may omit its pair (the derivations of ADR 0006 section 3.2 fill it); a sent pair is stored canonically and must agree with every derivation that applies. base_price_ten_thousandths simply sets the base price while the price unit cannot leave the stocking unit. A field the PUT cannot apply (the board measure columns) is a 400 naming it. */
+        UnitSetPut: {
+            /** Format: int64 */
+            revision: number;
+            stock_uom: components["schemas"]["UOM"];
+            sale_uom: components["schemas"]["UOM"];
+            price_uom: components["schemas"]["UOM"];
+            purchase_uom: components["schemas"]["UOM"];
+            /** Format: int64 */
+            base_price_ten_thousandths?: number;
+            units: components["schemas"]["UnitSetRowPut"][];
+        };
+        UnitSetRowPut: {
+            uom: components["schemas"]["UOM"];
+            unit_qty?: components["schemas"]["Quantity"];
+            stock_qty?: components["schemas"]["Quantity"];
+            sell?: boolean;
+            purchase?: boolean;
+            price?: boolean;
+        };
+        /** @description A unit code of the catalogue (the closed enum is gone; ADR 0006 section 2). */
+        UOM: string;
         /** @description The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit. */
         ProductView: {
             /** Format: uuid */
@@ -11571,6 +11692,19 @@ export interface components {
             available: string;
             /** Format: int64 */
             revision: number;
+            sale_uom: components["schemas"]["UOM"];
+            /** @description The unit the base price is per; the stocking unit until C3-2B. */
+            price_uom: components["schemas"]["UOM"];
+            purchase_uom: components["schemas"]["UOM"];
+            /** @description The nominal cross section of a board measure product (a 2x4 is 2), decimal string on the wire. */
+            board_thickness_in: components["schemas"]["Quantity"] | null;
+            board_width_in: components["schemas"]["Quantity"] | null;
+            /** @description The nominal length of a fixed length piece (a 2x4x8 is 8); null for random length. */
+            board_length_ft: components["schemas"]["Quantity"] | null;
+            /** @description The product is sold by tally (ADR 0006 section 4); requires LF stocking. */
+            random_length: boolean;
+            /** @description The product's unit set (ADR 0006 sections 3.1 and 3.2). */
+            units: components["schemas"]["UnitSetRow"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -11594,6 +11728,13 @@ export interface components {
             geometry_source?: string | null;
             reorder_point?: string;
             reorder_qty?: string;
+            /** @description The nominal cross section (a 2x4 is 2 and 4); both halves or neither. */
+            board_thickness_in?: number | null;
+            board_width_in?: number | null;
+            /** @description The nominal length of a fixed length piece; null for random length. */
+            board_length_ft?: number | null;
+            /** @description The product is sold by tally; it stocks in LF and carries no fixed length. */
+            random_length?: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ProductPage: {
@@ -12126,6 +12267,12 @@ export interface components {
              * @description Null for a special order line the dealer does not stock.
              */
             product_id: string | null;
+            /** @description The product's stocking unit at the line's create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4 (R5); null on a line without a product. */
+            stock_quantity: components["schemas"]["Quantity"] | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             sku: string;
             description: string;
             /** @description What a portal user wrote when asking for the line to be priced; an edit that keeps the line id keeps it. */
@@ -12153,11 +12300,26 @@ export interface components {
         };
         /** @description A plain decimal string with at most four fraction digits, never a JSON number. */
         Quantity: string;
-        /**
-         * @description Units of measure keep their standard uppercase codes.
-         * @enum {string}
-         */
-        QuoteUom: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
+        /** @description A unit code of the catalogue (ADR 0006 section 2); on a product line, a sale unit of the product's set. */
+        QuoteUom: string;
+        /** @description A random length line's tally (ADR 0006 section 4.3): pieces by length, the cross section snapshotted from the product, the exact linear feet the line's quantity carries, and the board feet display rounding of R4.3 (read by nothing). Pieces are JSON integers; the lengths and derived fields are decimal strings. */
+        Tally: {
+            thickness_in: components["schemas"]["Quantity"] | null;
+            /** @description Null beside a null thickness: a tally without a cross section. */
+            width_in: components["schemas"]["Quantity"] | null;
+            rows: components["schemas"]["TallyRow"][];
+            linear_feet: components["schemas"]["Quantity"];
+            /** @description Linear feet x thickness x width / 12, rounded once to scale 4 for display. */
+            board_feet: components["schemas"]["Quantity"] | null;
+        };
+        TallyRow: {
+            pieces: number;
+            length_ft: components["schemas"]["Quantity"];
+        };
+        /** @description The tally a line carries: rows only. thickness_in, width_in, linear_feet and board_feet are read only, and one in a request is a 400 naming it. Allowed on a random length product line only, its sale unit LF; the linear feet are the line's quantity. */
+        TallyRequest: {
+            rows: components["schemas"]["TallyRow"][];
+        };
         /** @description The body of POST /quotes and PUT /quotes/{id}. A field the schema does not name is a 400. revision is the PUT precondition beside If-Match; a create has no revision and refuses one with a 400. A PUT refuses the create-only fields (branch_id, source, margin_total_cents, original_file, original_filename, original_content_type, parse_map). */
         QuoteRequest: {
             /** Format: uuid */
@@ -12189,7 +12351,7 @@ export interface components {
             revision?: number;
             lines: components["schemas"]["QuoteLineRequest"][];
         };
-        /** @description uom defaults from the product's own unit when the line names a product; a line with neither uom nor product_id is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to uom; when it differs, uom_qty and price_uom_qty (both) are required. */
+        /** @description uom defaults to the product's sale unit when the line names a product; a line with neither uom nor product_id is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to the product's price unit on a product line and to uom on the others. The pair is resolved by the server from the product's unit set on a product line (ADR 0006 section 3.3); a sent pair must equal the resolved one as a ratio. A line without a product carries the client's pair, required when the two units differ unless their standard sizes derive it. quantity is required unless the line carries a tally, whose linear feet are the quantity. */
         QuoteLineRequest: {
             /** Format: uuid */
             id?: string;
@@ -12198,7 +12360,7 @@ export interface components {
             sku?: string;
             description?: string;
             customer_note?: string;
-            quantity: components["schemas"]["Quantity"];
+            quantity?: components["schemas"]["Quantity"];
             uom?: components["schemas"]["QuoteUom"];
             /** @description A unit code of one to six capital letters; defaults to uom. */
             price_uom?: string;
@@ -12206,6 +12368,7 @@ export interface components {
             price_uom_qty?: components["schemas"]["Quantity"];
             /** Format: int64 */
             unit_price_ten_thousandths: number;
+            tally?: components["schemas"]["TallyRequest"];
         };
         QuoteTransitionRequest: {
             to: components["schemas"]["QuoteStatus"];
@@ -12728,6 +12891,54 @@ export interface components {
             lines: components["schemas"]["TaxLine"][];
             /** @description True when the flat rate fallback was used. */
             is_estimate: boolean;
+        };
+        /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
+        Unit: {
+            /** @description Immutable; the value every unit column holds. */
+            code: string;
+            name: string;
+            /** @enum {string} */
+            dimension: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            std_unit_qty: components["schemas"]["Quantity"] | null;
+            std_ref_qty: components["schemas"]["Quantity"] | null;
+            /** @description True on seeded rows: their code, dimension and standard size cannot change. */
+            is_system: boolean;
+            /** @description An inactive unit cannot enter a new unit set row or a new line; existing rows keep it. */
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The create body. The dimension defaults to count; the standard size is both halves or neither. is_system and revision are never accepted. */
+        UnitCreate: {
+            code: string;
+            name: string;
+            /** @enum {string} */
+            dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            std_unit_qty?: components["schemas"]["Quantity"];
+            std_ref_qty?: components["schemas"]["Quantity"];
+        };
+        /** @description The update body at the unit's revision: If-Match or revision. A field the PUT cannot change is a 400 naming it. */
+        UnitUpdate: {
+            name?: string;
+            is_active?: boolean;
+            /** @enum {string} */
+            dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            std_unit_qty?: components["schemas"]["Quantity"];
+            std_ref_qty?: components["schemas"]["Quantity"];
+            /** Format: int64 */
+            revision?: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1 over units. */
+        UnitPage: {
+            items: components["schemas"]["Unit"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Present only under include=total. */
+            total?: number;
         };
         /** @description vendor.Vendor. */
         Vendor: {
@@ -23684,6 +23895,75 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    productUnitSetGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The unit set. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSetDoc"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productUnitSetPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision precondition, beside the body revision. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitSetPut"];
+            };
+        };
+        responses: {
+            /** @description The completed set with the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSetDoc"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     productKitComponentsGet: {
         parameters: {
             query?: never;
@@ -25501,6 +25781,146 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+                /** @description The dimension filter, lowercase (count, length, area, volume, weight, board_measure). */
+                dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+                /** @description The active filter, true or false. */
+                is_active?: "true" | "false";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of units. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitCreate"];
+            };
+        };
+        responses: {
+            /** @description The created unit, revision 1, with its ETag and Location. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The unit. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision precondition, beside the body revision. */
+                "If-Match"?: string;
+            };
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated unit with its new revision and ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };

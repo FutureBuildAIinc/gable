@@ -101,7 +101,9 @@ func (f *kitFixture) do(method, path string, body any, headers ...string) resp {
 	raw, _ := io.ReadAll(httpRes.Body)
 	out := resp{status: httpRes.StatusCode, header: httpRes.Header, raw: raw}
 	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &out.body)
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		_ = dec.Decode(&out.body)
 	}
 	return out
 }
@@ -222,7 +224,7 @@ func TestKitComponentsPut_RequiresTheProductRevision(t *testing.T) {
 	if res.status != http.StatusOK {
 		t.Fatalf("PUT at the current revision: status = %d, body %s", res.status, res.raw)
 	}
-	if rev := res.body["revision"]; rev != float64(2) {
+	if rev := res.body["revision"]; rev != json.Number("2") {
 		t.Errorf("response revision = %v, want 2 (the write bumps the product's revision)", rev)
 	}
 	if etag := res.header.Get("ETag"); etag != `"2"` {
@@ -234,7 +236,7 @@ func TestKitComponentsPut_RequiresTheProductRevision(t *testing.T) {
 	if prod.status != http.StatusOK {
 		t.Fatalf("read the kit product: %d %s", prod.status, prod.raw)
 	}
-	if rev := prod.body["revision"]; rev != float64(2) {
+	if rev := prod.body["revision"]; rev != json.Number("2") {
 		t.Errorf("product revision after the kit PUT = %v, want 2", rev)
 	}
 
@@ -339,7 +341,7 @@ func TestKitComponentsPut_FaultPartwayLeavesTheKitUnchanged(t *testing.T) {
 	if first != "2" {
 		t.Errorf("component A quantity = %q after a rolled back replace, want 2", first)
 	}
-	if rev := after.body["revision"]; rev != float64(2) {
+	if rev := after.body["revision"]; rev != json.Number("2") {
 		t.Errorf("product revision = %v after a rolled back replace, want 2", rev)
 	}
 	var isKit bool
@@ -471,7 +473,7 @@ func TestKitComponentsPut_Pool4ThreeContenders(t *testing.T) {
 		t.Errorf("%d winners and %d losers, want exactly one winner and two 409s", ok, stale)
 	}
 	after := f.do("GET", kitPath(kitID), nil)
-	if rev := after.body["revision"]; rev != float64(2) {
+	if rev := after.body["revision"]; rev != json.Number("2") {
 		t.Errorf("product revision = %v after three contenders, want 2 (one winner)", rev)
 	}
 	if n := len(after.body["components"].([]any)); n != 1 {
