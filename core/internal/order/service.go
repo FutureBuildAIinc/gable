@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -838,6 +839,42 @@ func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
 		return nil, notFound(err)
 	}
 	return o, nil
+}
+
+// NumberPattern is the order's document number pattern, from the entity's
+// prefix and pad (ADR 0007 section 7): reads accept it in the {id} slot.
+var NumberPattern = regexp.MustCompile(`^SO-[0-9]{6,}$`)
+
+// ResolveRecordID parses a record URL's {id} slot: a UUID first, then the
+// entity's number pattern. A well formed number of another entity, or
+// anything else, is a 400 naming id; a value that names no visible row is
+// the caller's 404.
+func ResolveRecordID(raw string) (uuid.UUID, string, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		return id, "", nil
+	}
+	if NumberPattern.MatchString(raw) {
+		return uuid.Nil, raw, nil
+	}
+	return uuid.Nil, "", httpx.BadRequest("invalid order id",
+		httpx.FieldError{Field: "id", Message: "must be a UUID or an order number such as SO-000123"})
+}
+
+// GetOrderByIDOrNumber reads an order by its UUID or its document number
+// (section 7): both spellings answer exactly the same body, no redirect.
+func (s *Service) GetOrderByIDOrNumber(ctx context.Context, raw string) (*Order, error) {
+	id, number, err := ResolveRecordID(raw)
+	if err != nil {
+		return nil, err
+	}
+	if number != "" {
+		o, err := s.repo.GetOrderByNumber(ctx, number)
+		if err != nil {
+			return nil, notFound(err)
+		}
+		return o, nil
+	}
+	return s.GetOrder(ctx, id)
 }
 
 // ListOrders returns one page: up to f.Limit rows and whether more follow.

@@ -65,6 +65,7 @@ type Repository interface {
 	// fallback the order insert's COALESCE always used for raw writers.
 	DefaultBranchID(ctx context.Context) (uuid.UUID, error)
 	GetOrder(ctx context.Context, id uuid.UUID) (*Order, error)
+	GetOrderByNumber(ctx context.Context, number string) (*Order, error)
 	LockOrder(ctx context.Context, id uuid.UUID) error
 	InsertOrder(ctx context.Context, o *Order) error
 	ReplaceDraft(ctx context.Context, o *Order) error
@@ -376,6 +377,25 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 	}
 	o.Lines = lines
 	return o, nil
+}
+
+// GetOrderByNumber reads an order by its document number, behind the same
+// branch wall the id read carries, for the record URLs that name the number
+// (ADR 0007 section 7). It resolves the id and reads through GetOrder, so
+// both spellings answer exactly the same body.
+func (r *PostgresRepository) GetOrderByNumber(ctx context.Context, number string) (*Order, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT o.id FROM orders o
+		 WHERE o.number = $1 AND ($2::uuid IS NULL OR o.branch_id = $2)`,
+		number, middleware.BranchIDForQuery(ctx)).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to read the order's id by number: %w", err)
+	}
+	return r.GetOrder(ctx, id)
 }
 
 const lineColumns = `

@@ -240,6 +240,26 @@ func (r *PostgresRepository) GetInvoice(ctx context.Context, id uuid.UUID) (*Inv
 	return inv, nil
 }
 
+// GetInvoiceByNumber reads an invoice by its document number, behind the
+// same branch wall the id read carries, for the record URLs that name the
+// number (ADR 0007 section 7). It resolves the id and reads through
+// GetInvoice, so both spellings answer exactly the same body.
+func (r *PostgresRepository) GetInvoiceByNumber(ctx context.Context, number string) (*Invoice, error) {
+	var id uuid.UUID
+	grants := middleware.GrantsSubForQuery(ctx)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT i.id FROM invoices i
+		WHERE i.number = $1 AND `+wall("i", 2, 3),
+		number, middleware.BranchIDForQuery(ctx), grants).Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errInvoiceNotFound
+		}
+		return nil, fmt.Errorf("failed to read the invoice's id by number: %w", err)
+	}
+	return r.GetInvoice(ctx, id)
+}
+
 // LockInvoice takes the invoice row FOR UPDATE (section 11, step 4), held to
 // the branch wall, and reads it. Lock first, read second: a joined select
 // cannot lock the joined rows.
