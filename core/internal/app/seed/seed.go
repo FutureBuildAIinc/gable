@@ -629,19 +629,6 @@ func Run() {
 	}
 	fmt.Printf("Seed: %d Customers\n", len(customers))
 
-	// Park Glenmore Heritage Reno over its credit limit so the credit-hold UI
-	// has something realistic to render in demos: the over-limit invoice is
-	// written with the other seeded invoices below and posted through the AR core
-	// (the credit check reads documents, so a raw balance_due would hold nothing).
-	var overLimit *seedInvoice
-	if ghr, ok := customerIDs["Glenmore Heritage Reno"]; ok {
-		var limit float64
-		if err := db.QueryRow(`SELECT COALESCE(credit_limit, 0) FROM customers WHERE id = $1`, ghr).Scan(&limit); err == nil && limit > 0 {
-			sub := cents(limit + 4500)
-			overLimit = &seedInvoice{ID: uuid.New(), CustomerID: ghr, BranchID: custToBranch[ghr], Date: time.Now().AddDate(0, 0, -20), Subtotal: sub}
-		}
-	}
-
 	// =========================================================================
 	// 6. CUSTOMER CONTRACTS (Special SKU pricing for top customers)
 	// =========================================================================
@@ -833,18 +820,19 @@ func Run() {
 		}
 		_ = custName
 	}
-	if overLimit != nil {
-		// no order: a standalone invoice, like a counter account charge
-		if _, err := db.Exec(`INSERT INTO invoices (id, customer_id, branch_id, status, origin, total_amount, subtotal, tax_rate, tax_amount,
-				due_date, payment_terms_id, invoice_date, created_at)
-			VALUES ($1,$2,$3,'UNPAID','POS',$4,$4,0,0,$5::date,(SELECT payment_terms_id FROM customers WHERE id = $2),$5::date,$5)`,
-			overLimit.ID, overLimit.CustomerID, overLimit.BranchID, float64(overLimit.Subtotal)/100, overLimit.Date); err != nil {
-			log.Printf("Seed: the over-limit invoice: %v", err)
-		} else {
-			seeded = append(seeded, *overLimit)
+	postedInvoices := ar.post(seedCtx, seeded)
+	// Park Glenmore Heritage Reno over its credit limit so the credit-hold UI has
+	// something realistic to render in demos. The credit check reads documents
+	// (ADR 0005 5.3), so the limit is set 45.00 below what the customer's open
+	// invoices already come to: its receivable stands over the limit through the
+	// AR core's own figures, never through a hand-written balance.
+	if ghr, ok := customerIDs["Glenmore Heritage Reno"]; ok {
+		if _, err := db.Exec(`UPDATE customers c SET credit_limit = GREATEST(0, COALESCE(
+				(SELECT SUM(i.amount_open) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0) - 45)
+			WHERE c.id = $1`, ghr); err != nil {
+			log.Printf("Seed: parking Glenmore over its credit limit: %v", err)
 		}
 	}
-	postedInvoices := ar.post(seedCtx, seeded)
 	fmt.Printf("Seed: %d Orders, %d Invoices (%d posted through the AR core)\n", totalOrders, len(invoiceIDs), postedInvoices)
 
 	// =========================================================================

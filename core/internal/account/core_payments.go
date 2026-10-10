@@ -554,6 +554,16 @@ func (s *Service) reverseApps(ctx context.Context, fx *Effects, r *reversal, app
 	if _, err := s.lockCustomer(ctx, apps[0].CustomerID); err != nil {
 		return err
 	}
+	// The applications are locked in id order (section 11, step 5) but undone in
+	// the order they were made, so the subledger reads the same history backwards
+	// whichever ids they drew.
+	apps = append([]*appRow(nil), apps...)
+	sort.SliceStable(apps, func(x, y int) bool {
+		if !apps[x].CreatedAt.Equal(apps[y].CreatedAt) {
+			return apps[x].CreatedAt.Before(apps[y].CreatedAt)
+		}
+		return apps[x].ID.String() < apps[y].ID.String()
+	})
 	for _, a := range apps {
 		inv := r.invoices[a.InvoiceID]
 		var rev *uuid.UUID
