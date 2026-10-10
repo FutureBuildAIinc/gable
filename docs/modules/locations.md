@@ -55,8 +55,9 @@ branch they cover. The branch middleware settles a request's branch
 context from the `X-Branch-Id` header, the JWT and the grants, but
 only while the setting `multi_branch_enabled` in `system_settings` is
 `true`. Migration 059 installs it as `false`: until an operator sets
-it, every caller is treated as an administrator, no `X-Branch-Id` is
-checked, and none of the wall statements below apply (a change takes
+it, every caller except a branch bound key is treated as an
+administrator, no `X-Branch-Id` is checked, and none of the wall
+statements below apply to them (a change takes
 up to 30 seconds to reach a running server, the middleware's
 `killSwitchTTL`). With it on, the location handler holds each by id
 read, the list and each create to that context, so a caller granted
@@ -367,12 +368,25 @@ machine key never reaches the caller's grants even when the key
 holds every scope. The `users` write scope is `users:grants`; a key
 with only `users:read` cannot grant, revoke, or set home.
 
+A machine key may be branch bound (`branch_id` at mint, `POST
+/api/v1/admin/keys`; ADR 0007 section 5.5): the key is pinned to its
+branch whether or not `multi_branch_enabled` is on (the pin is set
+before the switch is read, `BranchMiddleware` in
+`core/pkg/middleware/branch.go`). Its lists, by id reads and tree
+see that branch only, a request naming another branch in
+`X-Branch-Id` is a 403 `forbidden` audited as `key.branch_refused`,
+and a body `parent_id` or path id of another branch is a 403. The
+routes that mount no branch middleware (`GET /api/v1/branches`, `GET
+/api/v1/branches/{id}`, `GET /api/v1/branches/{id}/users`, `GET
+/api/v1/users`) are not narrowed by the pin. An unbound key behaves
+as before.
+
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 5, 6, 9, 11, 12: section 1 (the list envelope, `cursor`, `limit`, `include=total`), section 2 (the keyset position), section 5 (strict query parameters; `include_inactive` on `/branches` is the boolean the section requires), section 6 (enums lowercase on the wire; `location.type` is one such enum, with the legacy UPPERCASE a 400), section 9 (idempotency keys on the creates), section 11 (revision and `If-Match`, the in place rule on the updates and the deletes), and section 12 (timestamps RFC 3339 UTC, every optional field present as null).
-- [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2 (the segment scope rule: `<module>:read` and `<module>:write`, so `locations:read` / `locations:write`, `branches:read` / `branches:write`, `users:read`), section 3 (a key as a principal), section 4 (roles), section 5 (refusals and the audit row), section 6 (branch scoped keys).
+- [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2 (the segment scope rule: `<module>:read` and `<module>:write`, so `locations:read` / `locations:write`, `branches:read` / `branches:write`, `users:read`), section 3 (a key as a principal), section 4 (roles), section 5 (refusals and the audit row), section 6 (branch scoping; the branch bound key of ADR 0007 section 5.5 now supersedes its first known limit).
 - [`docs/adr/0009-finer-admin-scopes.md`](../adr/0009-finer-admin-scopes.md): the `users` write scope narrowed to `users:grants`.
-- [`docs/adr/0007-drafts-links-and-confirm-gated-scopes.md`](../adr/0007-drafts-links-and-confirm-gated-scopes.md) section 2.3: the payload branch rule (`CheckPayloadBranch`, `CheckPayloadLocation`, the verdict `ErrPayloadBranchRefused`). The location handler holds every body `parent_id` and every path id with parameters this ADR's rule.
+- [`docs/adr/0007-drafts-links-and-confirm-gated-scopes.md`](../adr/0007-drafts-links-and-confirm-gated-scopes.md) section 2.3: the payload branch rule, and section 5.5: the branch bound key (`CheckPayloadBranch`, `CheckPayloadLocation`, the verdict `ErrPayloadBranchRefused`). The location handler holds every body `parent_id` and every path id with parameters this ADR's rule.
 
 ## How to try it locally
 
@@ -401,9 +415,14 @@ seconds. Migration 093 fills
 `locations.created_at` (backfilling from `updated_at` where the
 column was null), adds `revision BIGINT NOT NULL DEFAULT 1`, and
 creates the keyset index `idx_locations_created_at_id`. The seed
-truncates the order, invoice, quote, delivery, payment, purchase
-order, ledger and POS tables (and the locations tree when it finds
-duplicate branches), so run it only against a throwaway database.
+truncates the transactional tables (orders, invoices, quotes,
+deliveries, payments, purchase orders, the ledger, POS, projects,
+CRM activities, contacts, rebates, saved reports, EDI partners and drafts, and the
+locations tree when it finds duplicate branches), so run it only
+against a throwaway database. In `AUTH_MODE=dev` there are no
+claims, so the per user grants never apply; only an `X-Branch-Id`
+context narrows a list once the switch is on. To see the grants,
+run against a real token issuer.
 Then, with an admin role bearer and the seeded branch:
 
 ```
