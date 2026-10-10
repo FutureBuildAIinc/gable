@@ -866,6 +866,14 @@ func (h *Handler) HandleUploadVehiclePhoto(w http.ResponseWriter, r *http.Reques
 		httpx.WriteError(w, r, err)
 		return
 	}
+	// RULE (PR 70 review round 6 P3-1): a refused photo upload must leave
+	// no file on disk. Validate the vehicle through the read before the
+	// multipart body is saved; an unknown id answers 404 and saveUpload is
+	// never called, so the upload directory never sees a stray write.
+	if _, gerr := h.service.GetVehicle(r.Context(), id); gerr != nil {
+		httpx.WriteError(w, r, gerr)
+		return
+	}
 	url, err := saveUpload(w, r, "vehicles")
 	if err != nil {
 		httpx.WriteError(w, r, err)
@@ -888,6 +896,14 @@ func (h *Handler) HandleUploadDriverPhoto(w http.ResponseWriter, r *http.Request
 	id, err := pathID(r, "driver")
 	if err != nil {
 		httpx.WriteError(w, r, err)
+		return
+	}
+	// RULE (PR 70 review round 6 P3-1): a refused photo upload must leave
+	// no file on disk. Validate the driver through the read before the
+	// multipart body is saved; an unknown id answers 404 and saveUpload is
+	// never called, so the upload directory never sees a stray write.
+	if _, gerr := h.service.GetDriver(r.Context(), id); gerr != nil {
+		httpx.WriteError(w, r, gerr)
 		return
 	}
 	url, err := saveUpload(w, r, "drivers")

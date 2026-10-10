@@ -1318,6 +1318,100 @@ func TestBranchWall_PODPhotoRefusalLeavesNoFile(t *testing.T) {
 	}
 }
 
+// RULE (PR 70 review round 6 P3-1): the vehicle and driver photo upload
+// handlers must read the vehicle or driver before saveUpload, so an
+// upload to an unknown id answers 404 without leaving a file on disk.
+// The prior round's fix covered the POD handler only; the r4 finding
+// named all three handlers. The test points saveUpload at a temporary
+// directory, sends a real multipart body to each handler for an
+// unknown id, and counts files in the upload directory before and
+// after: the refused request must not have written a file.
+func TestBranchWall_VehicleAndDriverPhotoRefusalLeaveNoFile(t *testing.T) {
+	f := newFixture(t)
+	uploadDir := t.TempDir()
+	t.Chdir(uploadDir)
+	ctx := context.Background()
+
+	// A real vehicle and a real driver, each written so the accepted
+	// uploads check the success path on the same test (the test must
+	// leave a file when the id is known, otherwise the fix is a no op).
+	var vehicleID uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO vehicles (id, name, vehicle_type, license_plate)
+		VALUES ($1, $2, 'VAN', $3) RETURNING id`,
+		uuid.New(), "Refused photo vehicle", "RFU-V-"+uuid.NewString()[:8]).Scan(&vehicleID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM vehicles WHERE id = $1`, vehicleID) })
+	var driverID uuid.UUID
+	if err := f.db.Pool.QueryRow(ctx, `
+		INSERT INTO drivers (id, name, license_number)
+		VALUES ($1, $2, $3) RETURNING id`,
+		uuid.New(), "Refused photo driver", "RFU-D-"+uuid.NewString()[:8]).Scan(&driverID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM drivers WHERE id = $1`, driverID) })
+
+	body, ctype := buildMultipartPhoto(t, "refused.jpg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10})
+
+	countVehicleFiles := func() int {
+		dir := filepath.Join(uploadDir, "uploads", "vehicles")
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read uploads/vehicles: %v", err)
+		}
+		return len(entries)
+	}
+	countDriverFiles := func() int {
+		dir := filepath.Join(uploadDir, "uploads", "drivers")
+		entries, err := os.ReadDir(dir)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read uploads/drivers: %v", err)
+		}
+		return len(entries)
+	}
+
+	// Unknown vehicle id: the read returns 404, no saveUpload, no file.
+	res := f.do(t, http.MethodPost, "/api/v1/delivery/vehicles/"+uuid.NewString()+"/photo",
+		body, map[string]string{"Content-Type": ctype})
+	if res.status != http.StatusNotFound {
+		t.Errorf("unknown vehicle photo = %d, want 404", res.status)
+	}
+	if n := countVehicleFiles(); n != 0 {
+		t.Errorf("unknown vehicle upload left %d files in uploads/vehicles, want 0 (the read must run before saveUpload)", n)
+	}
+
+	// Unknown driver id: the read returns 404, no saveUpload, no file.
+	res = f.do(t, http.MethodPost, "/api/v1/delivery/drivers/"+uuid.NewString()+"/photo",
+		body, map[string]string{"Content-Type": ctype})
+	if res.status != http.StatusNotFound {
+		t.Errorf("unknown driver photo = %d, want 404", res.status)
+	}
+	if n := countDriverFiles(); n != 0 {
+		t.Errorf("unknown driver upload left %d files in uploads/drivers, want 0 (the read must run before saveUpload)", n)
+	}
+
+	// Known vehicle: the read passes, saveUpload runs, one file lands.
+	res = f.do(t, http.MethodPost, "/api/v1/delivery/vehicles/"+vehicleID.String()+"/photo",
+		body, map[string]string{"Content-Type": ctype})
+	if res.status != http.StatusOK {
+		t.Errorf("known vehicle photo = %d, want 200", res.status)
+	}
+	if n := countVehicleFiles(); n != 1 {
+		t.Errorf("known vehicle upload left %d files in uploads/vehicles, want 1", n)
+	}
+
+	// Known driver: the read passes, saveUpload runs, one file lands.
+	res = f.do(t, http.MethodPost, "/api/v1/delivery/drivers/"+driverID.String()+"/photo",
+		body, map[string]string{"Content-Type": ctype})
+	if res.status != http.StatusOK {
+		t.Errorf("known driver photo = %d, want 200", res.status)
+	}
+	if n := countDriverFiles(); n != 1 {
+		t.Errorf("known driver upload left %d files in uploads/drivers, want 1", n)
+	}
+}
+
 // buildMultipartPhoto builds a minimal multipart/form-data body with a single
 // photo part whose bytes are a JPEG header so the extension check passes.
 func buildMultipartPhoto(t *testing.T, filename string, body []byte) (string, string) {
