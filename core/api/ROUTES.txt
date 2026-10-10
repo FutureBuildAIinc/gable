@@ -124,10 +124,10 @@ GET	/api/v1/branches/{id}	internal/location	h.GetBranch
 PUT	/api/v1/branches/{id}	internal/location	h.UpdateBranch
 GET	/api/v1/branches/{id}/tree	internal/location	tree
 GET	/api/v1/branches/{id}/users	internal/location	h.ListBranchUsers
-GET	/api/v1/charge-codes	internal/chargecode	h.HandleList
-POST	/api/v1/charge-codes	internal/chargecode	h.HandleCreate
-GET	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleGet
-PUT	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleUpdate
+GET	/api/v1/charge-codes	internal/chargecode	wrap(read, h.HandleList)
+POST	/api/v1/charge-codes	internal/chargecode	wrap(write, h.HandleCreate)
+GET	/api/v1/charge-codes/{id}	internal/chargecode	wrap(read, h.HandleGet)
+PUT	/api/v1/charge-codes/{id}	internal/chargecode	wrap(write, h.HandleUpdate)
 POST	/api/v1/configurator/build-sku	internal/configurator	h.handleBuildSKU
 GET	/api/v1/configurator/options	internal/configurator	h.handleGetOptions
 GET	/api/v1/configurator/presets	internal/configurator	h.handleGetPresets
