@@ -513,21 +513,37 @@ const routeColumns = `r.id, r.vehicle_id, r.driver_id, r.scheduled_date, r.statu
 	r.revision, r.created_at, r.updated_at`
 
 const routeFrom = ` FROM delivery_routes r
-	JOIN vehicles v ON r.vehicle_id = v.id
-	JOIN drivers d ON r.driver_id = d.id`
+	LEFT JOIN vehicles v ON r.vehicle_id = v.id
+	LEFT JOIN drivers d ON r.driver_id = d.id`
 
 func scanRoute(row pgx.Row) (*Route, error) {
 	var (
 		route            Route
+		vehicleID        *uuid.UUID
+		driverID         *uuid.UUID
+		vehicleName      *string
+		driverName       *string
 		scheduled        time.Time
 		created, updated time.Time
 	)
-	err := row.Scan(&route.ID, &route.VehicleID, &route.DriverID, &scheduled, &route.Status, &route.Notes,
+	err := row.Scan(&route.ID, &vehicleID, &driverID, &scheduled, &route.Status, &route.Notes,
 		&route.TotalDurationMins, &route.TotalDistanceMiles,
-		&route.VehicleName, &route.DriverName, &route.StopCount,
+		&vehicleName, &driverName, &route.StopCount,
 		&route.Revision, &created, &updated)
 	if err != nil {
 		return nil, err
+	}
+	if vehicleID != nil {
+		route.VehicleID = *vehicleID
+	}
+	if driverID != nil {
+		route.DriverID = *driverID
+	}
+	if vehicleName != nil {
+		route.VehicleName = *vehicleName
+	}
+	if driverName != nil {
+		route.DriverName = *driverName
 	}
 	route.ScheduledDate = scheduled.Format("2006-01-02")
 	route.CreatedAt, route.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)

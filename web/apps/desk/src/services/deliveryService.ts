@@ -33,7 +33,8 @@ async function walk<T>(path: string): Promise<T[]> {
     const out: T[] = [];
     let cursor: string | undefined;
     while (out.length < LIST_WALK_CAP) {
-        const url = new URL(`${API_BASE}${path}`, window.location.origin);
+        const base = API_BASE || window.location.origin;
+        const url = new URL(path, base);
         url.searchParams.set('limit', '200');
         if (cursor) url.searchParams.set('cursor', cursor);
         const one = await page<T>(url.pathname + (url.search || ''));
