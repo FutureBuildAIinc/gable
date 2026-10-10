@@ -201,13 +201,13 @@ func TestLog_NULAfterBackslashRunStillWritesRow(t *testing.T) {
 	// (the leading `\` of the marker), totalling n+1 backslashes. The
 	// expectInput strings are raw literals so each `\` is one character.
 	cases := []struct {
-		name        string
-		changes     map[string]interface{}
+		name    string
+		changes map[string]interface{}
 		// readParts is the jsonb path (split into segments) used in
 		// the `changes #>> $1` query, where pgx maps a Go []string to
 		// the text[] the operator expects. Each segment is a single
 		// key name in the jsonb map.
-		readParts    []string
+		readParts   []string
 		expectInput string
 	}{
 		// Real NUL cases: stored value must NOT contain a NUL byte.

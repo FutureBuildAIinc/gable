@@ -238,8 +238,8 @@ func sanitiseStringChanged(s string) (string, bool) {
 // The marker text itself is NOT a valid JSON escape of NUL (the `\u0000`
 // is preceded by `\\`, so it is no longer a `\u` escape).
 var (
-	nulJSONEscape    = []byte(`\u0000`)
-	nulJSONMarker    = []byte(`\\u0000`)
+	nulJSONEscape = []byte(`\u0000`)
+	nulJSONMarker = []byte(`\\u0000`)
 )
 
 // sanitiseNULEscape rewrites every NUL escape in a json.Marshal output
