@@ -47,7 +47,7 @@ package.
 | POST | `/api/v1/quotes/{id}/transitions` | Move a quote along its lifecycle, on the client's revision. |
 | POST | `/api/v1/quotes/{id}/convert` | Accept the quote (the `quote.accepted` transition) and create the order in one transaction, answering 201 with the order (ETag and Location); the quote's `freight_cents` becomes one `FREIGHT` charge line on the order; a stocked line sold in a unit other than its product's stocking unit is 409 with the `unit_not_stock_unit` blocker until cycle 3; a quote that already has an order not cancelled is 409 with the `already_converted` blocker; events `quote.accepted` then `order.created`. |
 | GET | `/api/v1/quotes/{id}/file` | Download the original parsed file. |
-| PUT | `/api/v1/quotes/{id}/file` | Attach the AI parse's original file after promotion; `application/octet-stream` body, 5 MiB bound (413 above it); `filename` query parameter carries the original file name; the revision precondition (`If-Match` or body `revision`) is required (428 without); only while the quote is in status `draft`, else 409 with the `quote_not_draft` blocker; the quote is returned with its new ETag and revision plus one; the audit row `quote.file_attached` is written and no outbox event; the route is gated by `quotes:write`. |
+| PUT | `/api/v1/quotes/{id}/file` | Attach the AI parse's original file after promotion; `application/octet-stream` body, 5 MiB bound (413 above it); the route takes no query parameter (any is a 400 `unsupported_query_parameter`); the revision precondition is the `If-Match` header, required (428 without); only while the quote is in status `draft`, else 409 with the `quote_not_draft` blocker; the quote is returned with its new ETag and revision plus one; the audit row `quote.file_attached` is written and no outbox event; the route is gated by `quotes:write`. |
 
 The exposure routes at `/api/v1/quotes/exposure` and
 `/api/v1/quotes/{id}/exposure/...` belong to the pricing module and
@@ -148,7 +148,7 @@ the units agree, the pair is 1 and 1.
 | `original_content_type` | text | Create-only. |
 | `parse_map` | array, nullable | The AI parse mapping; create-only. |
 | `revision` | integer | The PUT precondition beside `If-Match`; a create carrying one is a 400. |
-| `lines` | array of `QuoteLineRequest` | One or more lines; see the line request below. |
+| `lines` | array of `QuoteLineRequest` | The quote's lines; see the line request below. |
 
 A PUT refuses the create-only fields
 (`branch_id`, `source`, `margin_total_cents`, `original_file`,

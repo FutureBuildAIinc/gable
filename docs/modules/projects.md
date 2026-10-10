@@ -103,13 +103,13 @@ own list cursor is the keyset cursor of ADR 0001 section 2.
 
 ### Headers and codes
 
-`Idempotency-Key` is required on every mutating request (create and
-update); `ETag` is returned on every record (GET, POST and PUT); the
+`Idempotency-Key` is accepted on every mutating request (create and
+update) for an opt in replay; `ETag` is returned on every record (GET, POST and PUT); the
 create response carries a `Location` header. A write without
 `If-Match` and without a body `revision` is `428
 precondition_required`; a body or header that disagrees with the
 server revision is `409 stale_revision`; `If-Match: *` or an
-`If-Match` that is a list is `400 validation_failed`.
+`If-Match` that is a list is `400 bad_request`.
 
 ## Lifecycle and transitions
 
