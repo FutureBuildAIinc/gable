@@ -63,7 +63,7 @@ func (s *Service) resolveAccountIDs(ctx context.Context, codes ...string) (map[s
 	for _, c := range codes {
 		id, ok := byCode[c]
 		if !ok {
-			return nil, fmt.Errorf("required GL account %q not found in chart of accounts", c)
+			return nil, fmt.Errorf("%w: %q", ErrAccountMissing, c)
 		}
 		out[c] = id
 	}

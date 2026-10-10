@@ -173,7 +173,9 @@ paths:
         the line accounts pro rata, the credit to Accounts Payable), and a
         posting failure fails the act (a closed period is a 409 blocker
         period_closed; a line with no account is a 409 blocker
-        line_needs_account). To voided: from pending (nothing posted) or
+        line_needs_account; a required chart of accounts code that is missing
+        is a 409 blocker account_missing naming it). To voided: from pending
+        (nothing posted) or
         approved (the entry is reversed whole); a reason is required, a bill
         with money applied is refused with the has_payments blocker, and an
         approved or partial bill with no linked journal entry (a legacy bill
@@ -276,8 +278,9 @@ paths:
         naming its index (appears twice); more than the named bills still owe
         is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside
         the act's transaction (DR Accounts Payable, CR Cash), and a posting
-        failure fails the act (a closed period is a 409 blocker
-        period_closed).
+        failure fails the act (a closed period is a 409 blocker period_closed;
+        a missing chart of accounts code is a 409 blocker account_missing
+        naming it).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:

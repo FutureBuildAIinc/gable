@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/gl"
@@ -452,6 +453,10 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 		if errors.Is(err, gl.ErrPeriodClosed) {
 			return nil, conflictBlocker("period_closed", "the entry would be dated into a closed fiscal period")
 		}
+		if errors.Is(err, gl.ErrAccountMissing) {
+			return nil, conflictBlocker("account_missing",
+				"the chart of accounts holds no "+strings.TrimPrefix(err.Error(), gl.ErrAccountMissing.Error()+": "))
+		}
 		if errors.Is(err, gl.ErrUnbalanced) {
 			return nil, conflictBlocker("entry_unbalanced", "the bill's lines do not balance against its total")
 		}
@@ -675,6 +680,10 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 			if err != nil {
 				if errors.Is(err, gl.ErrPeriodClosed) {
 					return conflictBlocker("period_closed", "the entry would be dated into a closed fiscal period")
+				}
+				if errors.Is(err, gl.ErrAccountMissing) {
+					return conflictBlocker("account_missing",
+						"the chart of accounts holds no "+strings.TrimPrefix(err.Error(), gl.ErrAccountMissing.Error()+": "))
 				}
 				return fmt.Errorf("failed to post the vendor payment entry: %w", err)
 			}

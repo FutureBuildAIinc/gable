@@ -555,6 +555,56 @@ func TestWire_PaymentAppliesAndTies(t *testing.T) {
 	}
 }
 
+// RULE: an operator's gap in the chart of accounts (no 2010) is a 409 blocker
+// naming the account, not a 500: nothing is written either way, but the wire
+// answer must tell the operator what to mend (review r2 P3-3).
+func TestWire_ApproveAccountMissing(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	mustExec(t, f.db, `UPDATE gl_accounts SET code = 'X2010' WHERE code = '2010'`)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `UPDATE gl_accounts SET code = '2010' WHERE code = 'X2010'`)
+	})
+	id, r1 := f.enter("V-NOAP", "1", 1000)
+	a := f.approve(id, r1)
+	if a.status != http.StatusConflict {
+		t.Fatalf("approve with no 2010 = %d, want 409: %s", a.status, a.raw)
+	}
+	if code, blockers, _ := errorOf(t, a); code != "conflict" || blockers[0] != "account_missing" {
+		t.Errorf("approve with no 2010 = %q %v, want account_missing", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'PENDING' AND revision = 1`, id); n != 1 {
+		t.Error("the bill did not stay pending at revision 1")
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries WHERE source_ref_id = $1`, id); n != 0 {
+		t.Errorf("%d entries posted without the control account", n)
+	}
+	// A payment already made on an approved bill leaves the same gap on its
+	// entry (DR 2010), so the payment act refuses the same way.
+	mustExec(t, f.db, `UPDATE gl_accounts SET code = '2010' WHERE code = 'X2010'`)
+	aa := f.approve(id, r1)
+	if aa.status != http.StatusOK {
+		t.Fatal(aa.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Fatalf("after the approve: control %d, open %d", got, want)
+	}
+	mustExec(t, f.db, `UPDATE gl_accounts SET code = 'X2010' WHERE code = '2010'`)
+	p := f.pay(10, id)
+	if p.status != http.StatusConflict {
+		t.Fatalf("pay with no 2010 = %d, want 409: %s", p.status, p.raw)
+	}
+	if _, blockers, _ := errorOf(t, p); blockers[0] != "account_missing" {
+		t.Errorf("pay with no 2010 = %v, want account_missing", blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM ap_payments WHERE vendor_id = $1`, f.vendor); n != 0 {
+		t.Errorf("%d payments survived the refusal", n)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+}
+
 // RULE (ADR 0001 section 4): a client mistake is a 400 naming the field, never
 // a 500. A payment naming one bill twice would apply it twice (the second pass
 // reuses the stale locked summary) and only the amount_open CHECK stops it, so

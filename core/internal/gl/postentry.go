@@ -39,6 +39,9 @@ var (
 	// ErrPeriodClosed is the 077 trigger's refusal, mapped: the act answers 409
 	// with the blocker period_closed.
 	ErrPeriodClosed = errors.New("gl: the entry is dated into a closed fiscal period")
+	// ErrAccountMissing names a code the chart of accounts does not hold, so
+	// the act can answer a 409 telling the operator what to mend.
+	ErrAccountMissing = errors.New("gl: a required account is missing from the chart of accounts")
 )
 
 // Leg is one leg of a posting, by stable account code. A leg with a zero
