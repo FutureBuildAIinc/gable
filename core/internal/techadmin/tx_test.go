@@ -76,7 +76,7 @@ func TestCreateKey_FailedEventWriteRollsBackTheMint(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	svc := techadmin.NewService(techadmin.NewRepository(db)).WithOutbox(failingEvents{}).WithTxRunner(db)
-	if _, _, err := svc.GenerateKey(context.Background(), "rollback me", []string{"quotes:read"}); err == nil {
+	if _, _, err := svc.GenerateKey(context.Background(), "rollback me", []string{"quotes:read"}, nil); err == nil {
 		t.Fatal("GenerateKey succeeded though its event could not be written")
 	}
 	if n := countRows(t, db, `SELECT count(*) FROM api_keys WHERE name = 'rollback me'`); n != 0 {
@@ -110,7 +110,7 @@ func TestRevokeKey_FailedEventWriteRollsBackTheRevoke(t *testing.T) {
 	db := testutil.RequireDB(t)
 	good := techadmin.NewService(techadmin.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
-	_, key, err := good.GenerateKey(context.Background(), "revoke rollback me", []string{"quotes:read"})
+	_, key, err := good.GenerateKey(context.Background(), "revoke rollback me", []string{"quotes:read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestCreateKey_FailedAuditWriteFailsTheMint(t *testing.T) {
 	db := testutil.RequireDB(t)
 	svc := techadmin.NewService(techadmin.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAuditLog(failingAudit{})
-	if _, _, err := svc.GenerateKey(context.Background(), "audit rollback me", []string{}); err == nil {
+	if _, _, err := svc.GenerateKey(context.Background(), "audit rollback me", []string{}, nil); err == nil {
 		t.Fatal("GenerateKey succeeded though its audit row could not be written")
 	}
 	if n := countRows(t, db, `SELECT count(*) FROM api_keys WHERE name = 'audit rollback me'`); n != 0 {
@@ -194,7 +194,7 @@ func TestConcurrency_Pool4ThreeContenders(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, key, err := svc.GenerateKey(ctx, "contender", []string{})
+			_, key, err := svc.GenerateKey(ctx, "contender", []string{}, nil)
 			if err != nil {
 				errs <- err
 				return
@@ -356,7 +356,7 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 	defer cancel()
 
 	seed := func() uuid.UUID {
-		_, key, err := svc.GenerateKey(ctx, "saturation", []string{})
+		_, key, err := svc.GenerateKey(ctx, "saturation", []string{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -410,7 +410,7 @@ func TestConcurrency_Pool4SaturationNeedsNoSecondConnection(t *testing.T) {
 		}
 	}
 	phase("mint", func(s *techadmin.Service, i int) error {
-		_, key, err := s.GenerateKey(ctx, "sat", []string{})
+		_, key, err := s.GenerateKey(ctx, "sat", []string{}, nil)
 		if err == nil {
 			_, _ = db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_type = 'api_key' AND entity_id = $1`, key.ID)
 			_, _ = db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id = $1`, key.ID)

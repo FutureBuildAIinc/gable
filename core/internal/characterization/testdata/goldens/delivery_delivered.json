@@ -112,13 +112,19 @@
       "body": {
         "created_at": "<ts+0d>",
         "driver_id": "<id-6>",
+        "driver_name": "R1C Driver Renamed",
         "id": "<id-8>",
         "notes": "r1b c delivered route",
-        "scheduled_date": "<ts+4d>",
-        "status": "DRAFT",
+        "revision": 1,
+        "scheduled_date": "<day+4>",
+        "status": "draft",
         "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
         "updated_at": "<ts+0d>",
-        "vehicle_id": "<id-7>"
+        "vehicle_id": "<id-7>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
@@ -138,18 +144,27 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
+        "capacity_warning": null,
         "delivery": {
+          "address": "1 Golden Way, Kelowna BC",
           "created_at": "<ts+0d>",
+          "customer_name": "Golden Harness Co",
           "delivery_instructions": null,
+          "estimated_arrival": null,
           "id": "<id-9>",
           "latitude": 49.888,
           "longitude": -119.496,
           "order_id": "<id-4>",
+          "order_number": "SO-000095",
           "pod_proof_url": null,
           "pod_signed_by": null,
           "pod_timestamp": null,
+          "revision": 1,
           "route_id": "<id-8>",
-          "status": "PENDING",
+          "scheduled_end": null,
+          "scheduled_start": null,
+          "signature_data_url": null,
+          "status": "pending",
           "stop_sequence": 1,
           "updated_at": "<ts+0d>"
         }
@@ -175,19 +190,30 @@
   {
     "name": "delivery.delivery.status.delivered_missing_pod",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-9>/status",
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-9>/transitions",
       "body": {
-        "status": "DELIVERED"
+        "revision": 1,
+        "to": "delivered"
       }
     },
     "response": {
-      "status": 500,
+      "status": 400,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "pod_proof_url",
+              "message": "is required to complete a delivery"
+            },
+            {
+              "field": "pod_signed_by",
+              "message": "is required to complete a delivery"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-10>"
@@ -212,23 +238,79 @@
     }
   },
   {
-    "name": "delivery.delivery.status.delivered",
+    "name": "fulfilment.request.after_refusal",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-9>/status",
+      "method": "SQL",
+      "path": "SELECT count(*) AS requests FROM order_fulfillment_requests WHERE order_id = '<id-4>'::uuid"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "requests": 0
+        }
+      ]
+    }
+  },
+  {
+    "name": "delivery.delivery.status.delivered",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-9>/transitions",
       "body": {
         "pod_proof_url": "/uploads/pod/golden-delivered.png",
         "pod_signed_by": "R1C Receiver",
+        "revision": 1,
         "signature_data_url": "data:image/png;base64,AAAA",
-        "status": "DELIVERED"
+        "to": "delivered"
       }
     },
     "response": {
       "status": 200,
-      "content_type": "",
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "address": "1 Golden Way, Kelowna BC",
+        "created_at": "<ts+0d>",
+        "customer_name": "Golden Harness Co",
+        "delivery_instructions": null,
+        "estimated_arrival": null,
+        "id": "<id-9>",
+        "latitude": 49.888,
+        "longitude": -119.496,
+        "order_id": "<id-4>",
+        "order_number": "SO-000095",
+        "pod_proof_url": "/uploads/pod/golden-delivered.png",
+        "pod_signed_by": "R1C Receiver",
+        "pod_timestamp": "<ts+0d>",
+        "revision": 2,
+        "route_id": "<id-8>",
+        "scheduled_end": null,
+        "scheduled_start": null,
+        "signature_data_url": "data:image/png;base64,AAAA",
+        "status": "delivered",
+        "stop_sequence": 1,
+        "updated_at": "<ts+0d>"
       }
+    }
+  },
+  {
+    "name": "fulfilment.request.after_delivered",
+    "request": {
+      "method": "SQL",
+      "path": "SELECT attempts, COALESCE(last_error, '') AS last_error, (parked_at IS NOT NULL) AS parked FROM order_fulfillment_requests WHERE order_id = '<id-4>'::uuid"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/x-sql-rows",
+      "body": [
+        {
+          "attempts": 0,
+          "last_error": "",
+          "parked": false
+        }
+      ]
     }
   },
   {
@@ -242,19 +324,25 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "address": "1 Golden Way, Kelowna BC",
         "created_at": "<ts+0d>",
         "customer_name": "Golden Harness Co",
         "delivery_instructions": null,
+        "estimated_arrival": null,
         "id": "<id-9>",
         "latitude": 49.888,
         "longitude": -119.496,
         "order_id": "<id-4>",
-        "order_number": "<id-4>",
+        "order_number": "SO-000095",
         "pod_proof_url": "/uploads/pod/golden-delivered.png",
         "pod_signed_by": "R1C Receiver",
         "pod_timestamp": "<ts+0d>",
+        "revision": 2,
         "route_id": "<id-8>",
-        "status": "DELIVERED",
+        "scheduled_end": null,
+        "scheduled_start": null,
+        "signature_data_url": "data:image/png;base64,AAAA",
+        "status": "delivered",
         "stop_sequence": 1,
         "updated_at": "<ts+0d>"
       }

@@ -19,10 +19,10 @@ const formatDate = (dateString: string) => {
 
 function statusBadgeClass(status: RouteStatus): string {
   switch (status) {
-    case 'SCHEDULED': return 'bg-sky-500/10 text-sky-400 border-sky-500/20';
-    case 'IN_TRANSIT': return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-    case 'COMPLETED': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-    case 'CANCELLED': return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
+    case 'scheduled': return 'bg-sky-500/10 text-sky-400 border-sky-500/20';
+    case 'in_transit': return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+    case 'completed': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+    case 'cancelled': return 'bg-rose-500/10 text-rose-400 border-rose-500/20';
     default: return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
   }
 }
@@ -54,9 +54,9 @@ export class GableRouteListComponent extends LitElement {
     }
   }
 
-  private _selectRoute(routeId: string, vehicleId?: string, routeStatus?: RouteStatus) {
+  private _selectRoute(routeId: string, vehicleId?: string, routeStatus?: RouteStatus, routeRevision?: number) {
     this.dispatchEvent(new CustomEvent('select-route', {
-      detail: { routeId, vehicleId, routeStatus },
+      detail: { routeId, vehicleId, routeStatus, routeRevision },
       bubbles: true,
       composed: true,
     }));
@@ -84,7 +84,7 @@ export class GableRouteListComponent extends LitElement {
             const isSelected = this.selectedRouteId === route.id;
             return html`
               <div
-                @click=${() => this._selectRoute(route.id, route.vehicle_id, route.status)}
+                @click=${() => this._selectRoute(route.id, route.vehicle_id, route.status, route.revision)}
                 class="p-4 rounded-lg border transition-all duration-200 cursor-pointer group relative overflow-hidden ${isSelected
                   ? 'bg-gable-green/10 border-gable-green/50 shadow-[0_0_15px_rgba(0,255,163,0.1)]'
                   : 'bg-[#161821] border-white/5 hover:border-white/20 hover:bg-white/5'

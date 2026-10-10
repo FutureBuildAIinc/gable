@@ -36,7 +36,7 @@ export class GableCreateRouteModal extends LitElement {
         deliveryService.listDrivers(),
       ]);
       this._vehicles = v;
-      this._drivers = d.filter((dr: Driver) => dr.status === 'ACTIVE');
+      this._drivers = d.filter((dr: Driver) => dr.status === 'active');
     } catch {
       ToastService.show('Failed to load fleet data', 'error');
     }

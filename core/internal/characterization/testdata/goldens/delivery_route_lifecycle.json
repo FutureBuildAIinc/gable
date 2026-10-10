@@ -1,34 +1,100 @@
 [
   {
-    "name": "delivery.route.optimize",
+    "name": "delivery.route.optimize.no_precondition",
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/optimize"
     },
     "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.optimize",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-1>/optimize",
+      "headers": {
+        "If-Match": "\"3\""
+      }
+    },
+    "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "legs": [
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-3>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-1>",
+        "notes": "r1b c main route",
+        "revision": 4,
+        "scheduled_date": "<day+2>",
+        "status": "draft",
+        "stop_count": 2,
+        "stops": [
           {
-            "distance_miles": 5,
-            "duration_mins": 15,
-            "eta": "<eta>",
-            "stop_index": 0
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c first stop",
+            "estimated_arrival": "<eta>",
+            "id": "<id-4>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-5>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 3,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
           },
           {
-            "distance_miles": 5,
-            "duration_mins": 15,
-            "eta": "<eta>",
-            "stop_index": 1
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": null,
+            "estimated_arrival": "<eta>",
+            "id": "<id-6>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-7>",
+            "order_number": "SO-000089",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 3,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 2,
+            "updated_at": "<ts+0d>"
           }
         ],
-        "optimized_order": [
-          0,
-          1
-        ],
-        "total_distance_miles": 10,
-        "total_duration_mins": 30
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-8>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
@@ -36,16 +102,30 @@
     "name": "delivery.route.optimize.empty",
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-2>/optimize"
+      "path": "/api/v1/delivery/routes/<id-9>/optimize",
+      "headers": {
+        "If-Match": "\"1\""
+      }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "legs": null,
-        "optimized_order": null,
-        "total_distance_miles": 0,
-        "total_duration_mins": 0
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-3>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-9>",
+        "notes": null,
+        "revision": 1,
+        "scheduled_date": "<day+3>",
+        "status": "draft",
+        "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-8>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
@@ -60,11 +140,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid route id"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -79,53 +165,104 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "address": "1 Golden Way, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Golden Harness Co",
-          "delivery_instructions": "r1b c first stop",
-          "estimated_arrival": "<eta>",
-          "id": "<id-4>",
-          "latitude": 49.888,
-          "longitude": -119.496,
-          "order_id": "<id-5>",
-          "order_number": "<id-5>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-1>",
-          "status": "PENDING",
-          "stop_sequence": 1,
-          "updated_at": "<ts+0d>"
+      "body": {
+        "items": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c first stop",
+            "estimated_arrival": "<eta>",
+            "id": "<id-4>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-5>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 3,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": null,
+            "estimated_arrival": "<eta>",
+            "id": "<id-6>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-7>",
+            "order_number": "SO-000089",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 3,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 2,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "delivery.route.reorder.partial",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-1>/reorder",
+      "headers": {
+        "If-Match": "\"4\""
+      },
+      "body": {
+        "ordered_delivery_ids": [
+          "<id-6>"
+        ]
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "ordered_delivery_ids",
+              "message": "the route holds 2 stops and the list names 1"
+            }
+          ],
+          "message": "the reorder list must name every stop of the route exactly once"
         },
-        {
-          "address": "1 Golden Way, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Golden Harness Co",
-          "delivery_instructions": null,
-          "estimated_arrival": "<eta>",
-          "id": "<id-6>",
-          "latitude": 49.888,
-          "longitude": -119.496,
-          "order_id": "<id-7>",
-          "order_number": "<id-7>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-1>",
-          "status": "PENDING",
-          "stop_sequence": 2,
-          "updated_at": "<ts+0d>"
+        "meta": {
+          "request_id": "<id-11>"
         }
-      ]
+      }
     }
   },
   {
     "name": "delivery.route.reorder",
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
+      "headers": {
+        "If-Match": "\"4\""
+      },
       "body": {
         "ordered_delivery_ids": [
           "<id-6>",
@@ -135,9 +272,70 @@
     },
     "response": {
       "status": 200,
-      "content_type": "",
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-3>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-1>",
+        "notes": "r1b c main route",
+        "revision": 5,
+        "scheduled_date": "<day+2>",
+        "status": "draft",
+        "stop_count": 2,
+        "stops": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": null,
+            "estimated_arrival": "<eta>",
+            "id": "<id-6>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-7>",
+            "order_number": "SO-000089",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 4,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c first stop",
+            "estimated_arrival": "<eta>",
+            "id": "<id-4>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-5>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 4,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 2,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-8>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
@@ -146,6 +344,9 @@
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/routes/not-a-uuid/reorder",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "ordered_delivery_ids": []
       }
@@ -155,11 +356,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid route id"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-12>"
         }
       }
     }
@@ -176,11 +383,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -190,17 +397,32 @@
     "request": {
       "method": "POST",
       "path": "/api/v1/delivery/routes/<id-1>/reorder",
+      "headers": {
+        "If-Match": "\"5\""
+      },
       "body": {
         "ordered_delivery_ids": [
-          "<id-10>"
+          "<id-14>"
         ]
       }
     },
     "response": {
-      "status": 200,
-      "content_type": "",
+      "status": 400,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "ordered_delivery_ids",
+              "message": "the route holds 2 stops and the list names 1"
+            }
+          ],
+          "message": "the reorder list must name every stop of the route exactly once"
+        },
+        "meta": {
+          "request_id": "<id-15>"
+        }
       }
     }
   },
@@ -214,175 +436,76 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "address": "1 Golden Way, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Golden Harness Co",
-          "delivery_instructions": null,
-          "estimated_arrival": "<eta>",
-          "id": "<id-6>",
-          "latitude": 49.888,
-          "longitude": -119.496,
-          "order_id": "<id-7>",
-          "order_number": "<id-7>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-1>",
-          "status": "PENDING",
-          "stop_sequence": 1,
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "address": "1 Golden Way, Kelowna BC",
-          "created_at": "<ts+0d>",
-          "customer_name": "Golden Harness Co",
-          "delivery_instructions": "r1b c first stop",
-          "estimated_arrival": "<eta>",
-          "id": "<id-4>",
-          "latitude": 49.888,
-          "longitude": -119.496,
-          "order_id": "<id-5>",
-          "order_number": "<id-5>",
-          "pod_proof_url": null,
-          "pod_signed_by": null,
-          "pod_timestamp": null,
-          "route_id": "<id-1>",
-          "status": "PENDING",
-          "stop_sequence": 2,
-          "updated_at": "<ts+0d>"
-        }
-      ]
-    }
-  },
-  {
-    "name": "delivery.route.complete.pending",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-1>/complete"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
       "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-11>"
-        }
+        "items": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": null,
+            "estimated_arrival": "<eta>",
+            "id": "<id-6>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-7>",
+            "order_number": "SO-000089",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 4,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c first stop",
+            "estimated_arrival": "<eta>",
+            "id": "<id-4>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-5>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 4,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 2,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
       }
     }
   },
   {
-    "name": "delivery.route.complete.empty",
+    "name": "delivery.route.complete.no_precondition",
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-2>/complete"
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "body": {
+        "to": "completed"
+      }
     },
     "response": {
-      "status": 400,
+      "status": 428,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-12>"
-        }
-      }
-    }
-  },
-  {
-    "name": "delivery.route.complete.bad_id",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/delivery/routes/not-a-uuid/complete"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-13>"
-        }
-      }
-    }
-  },
-  {
-    "name": "delivery.route.dispatch",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-1>/dispatch"
-    },
-    "response": {
-      "status": 200,
-      "content_type": "",
-      "body": {
-        "text": ""
-      }
-    }
-  },
-  {
-    "name": "delivery.route.dispatch.again",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-1>/dispatch"
-    },
-    "response": {
-      "status": 500,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-14>"
-        }
-      }
-    }
-  },
-  {
-    "name": "delivery.route.dispatch.bad_id",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/delivery/routes/not-a-uuid/dispatch"
-    },
-    "response": {
-      "status": 400,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
-        },
-        "meta": {
-          "request_id": "<id-15>"
-        }
-      }
-    }
-  },
-  {
-    "name": "delivery.route.dispatch.not_found",
-    "request": {
-      "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-10>/dispatch"
-    },
-    "response": {
-      "status": 500,
-      "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
         },
         "meta": {
           "request_id": "<id-16>"
@@ -391,41 +514,30 @@
     }
   },
   {
-    "name": "delivery.delivery.status.partial",
+    "name": "delivery.route.complete.pending",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-4>/status",
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"5\""
+      },
       "body": {
-        "pod_proof_url": "/uploads/pod/golden.png",
-        "pod_signed_by": "R1C Receiver",
-        "signature_data_url": "data:image/png;base64,AAAA",
-        "status": "PARTIAL"
+        "to": "completed"
       }
     },
     "response": {
-      "status": 200,
-      "content_type": "",
-      "body": {
-        "text": ""
-      }
-    }
-  },
-  {
-    "name": "delivery.delivery.status.missing_pod",
-    "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-6>/status",
-      "body": {
-        "status": "DELIVERED"
-      }
-    },
-    "response": {
-      "status": 500,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "only an in_transit route can be completed"
+            }
+          ],
+          "message": "cannot complete a route in status DRAFT"
         },
         "meta": {
           "request_id": "<id-17>"
@@ -434,21 +546,30 @@
     }
   },
   {
-    "name": "delivery.delivery.status.invalid",
+    "name": "delivery.route.complete.empty",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-6>/status",
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-9>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
-        "status": "TELEPORTED"
+        "to": "completed"
       }
     },
     "response": {
-      "status": 500,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "only an in_transit route can be completed"
+            }
+          ],
+          "message": "cannot complete a route in status DRAFT"
         },
         "meta": {
           "request_id": "<id-18>"
@@ -457,12 +578,12 @@
     }
   },
   {
-    "name": "delivery.delivery.status.bad_id",
+    "name": "delivery.route.complete.bad_id",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/not-a-uuid/status",
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/not-a-uuid/transitions",
       "body": {
-        "status": "FAILED"
+        "to": "completed"
       }
     },
     "response": {
@@ -470,8 +591,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid route id"
         },
         "meta": {
           "request_id": "<id-19>"
@@ -480,19 +607,30 @@
     }
   },
   {
-    "name": "delivery.delivery.status.bad_body",
+    "name": "delivery.route.transition.invalid_target",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-6>/status",
-      "body": "not an object"
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"5\""
+      },
+      "body": {
+        "to": "scheduled"
+      }
     },
     "response": {
-      "status": 400,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "this module dispatches and completes routes only"
+            }
+          ],
+          "message": "a route cannot move to SCHEDULED"
         },
         "meta": {
           "request_id": "<id-20>"
@@ -501,35 +639,113 @@
     }
   },
   {
-    "name": "delivery.delivery.status.not_found",
+    "name": "delivery.route.dispatch",
+    "mask_mock_geo": true,
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-10>/status",
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"5\""
+      },
       "body": {
-        "status": "FAILED"
+        "to": "in_transit"
       }
     },
     "response": {
       "status": 200,
-      "content_type": "",
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-3>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-1>",
+        "notes": "r1b c main route",
+        "revision": 6,
+        "scheduled_date": "<day+2>",
+        "status": "in_transit",
+        "stop_count": 2,
+        "stops": [
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": null,
+            "estimated_arrival": "<eta>",
+            "id": "<id-6>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-7>",
+            "order_number": "SO-000089",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 4,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 1,
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "address": "1 Golden Way, Kelowna BC",
+            "created_at": "<ts+0d>",
+            "customer_name": "Golden Harness Co",
+            "delivery_instructions": "r1b c first stop",
+            "estimated_arrival": "<eta>",
+            "id": "<id-4>",
+            "latitude": 49.888,
+            "longitude": -119.496,
+            "order_id": "<id-5>",
+            "order_number": "SO-000088",
+            "pod_proof_url": null,
+            "pod_signed_by": null,
+            "pod_timestamp": null,
+            "revision": 4,
+            "route_id": "<id-1>",
+            "scheduled_end": null,
+            "scheduled_start": null,
+            "signature_data_url": null,
+            "status": "pending",
+            "stop_sequence": 2,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-8>",
+        "vehicle_name": "R1C Truck Renamed"
       }
     }
   },
   {
-    "name": "delivery.route.complete.one_pending",
+    "name": "delivery.route.dispatch.again",
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-1>/complete"
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"6\""
+      },
+      "body": {
+        "to": "in_transit"
+      }
     },
     "response": {
-      "status": 400,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "only a draft or scheduled route can be dispatched"
+            }
+          ],
+          "message": "cannot dispatch a route in status IN_TRANSIT"
         },
         "meta": {
           "request_id": "<id-21>"
@@ -538,19 +754,289 @@
     }
   },
   {
-    "name": "delivery.delivery.status.failed",
+    "name": "delivery.route.dispatch.bad_id",
     "request": {
-      "method": "PUT",
-      "path": "/api/v1/delivery/deliveries/<id-6>/status",
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/not-a-uuid/transitions",
       "body": {
-        "status": "FAILED"
+        "to": "in_transit"
       }
     },
     "response": {
-      "status": 200,
-      "content_type": "",
+      "status": 400,
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid route id"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.dispatch.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-14>/transitions",
+      "body": {
+        "to": "in_transit"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.no_precondition",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-4>/transitions",
+      "body": {
+        "to": "partial"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-24>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.partial",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-4>/transitions",
+      "body": {
+        "pod_proof_url": "/uploads/pod/golden.png",
+        "pod_signed_by": "R1C Receiver",
+        "revision": 2,
+        "signature_data_url": "data:image/png;base64,AAAA",
+        "to": "partial"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-25>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.missing_pod",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-6>/transitions",
+      "body": {
+        "revision": 1,
+        "to": "delivered"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-26>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-6>/transitions",
+      "body": {
+        "revision": 1,
+        "to": "teleported"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "to",
+              "message": "must be one of: pending, out_for_delivery, delivered, failed, partial"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-27>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.bad_id",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/not-a-uuid/transitions",
+      "body": {
+        "to": "failed"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid delivery id"
+        },
+        "meta": {
+          "request_id": "<id-28>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-6>/transitions",
+      "body": "not an object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.not_found",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-14>/transitions",
+      "body": {
+        "to": "failed"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-30>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.route.complete.one_pending",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"6\""
+      },
+      "body": {
+        "to": "completed"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "stop_not_terminal",
+              "message": "every stop must be delivered, failed or partial before the route completes"
+            }
+          ],
+          "message": "cannot complete a route with 2 stop(s) not yet delivered, failed or partial"
+        },
+        "meta": {
+          "request_id": "<id-31>"
+        }
+      }
+    }
+  },
+  {
+    "name": "delivery.delivery.status.failed",
+    "mask_mock_geo": true,
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/deliveries/<id-6>/transitions",
+      "body": {
+        "revision": 1,
+        "to": "failed"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
       }
     }
   },
@@ -565,6 +1051,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "address": "1 Golden Way, Kelowna BC",
         "created_at": "<ts+0d>",
         "customer_name": "Golden Harness Co",
         "delivery_instructions": "r1b c first stop",
@@ -573,12 +1060,16 @@
         "latitude": 49.888,
         "longitude": -119.496,
         "order_id": "<id-5>",
-        "order_number": "<id-5>",
-        "pod_proof_url": "/uploads/pod/golden.png",
-        "pod_signed_by": "R1C Receiver",
-        "pod_timestamp": "<ts+0d>",
+        "order_number": "SO-000088",
+        "pod_proof_url": null,
+        "pod_signed_by": null,
+        "pod_timestamp": null,
+        "revision": 4,
         "route_id": "<id-1>",
-        "status": "PARTIAL",
+        "scheduled_end": null,
+        "scheduled_start": null,
+        "signature_data_url": null,
+        "status": "pending",
         "stop_sequence": 2,
         "updated_at": "<ts+0d>"
       }
@@ -586,15 +1077,34 @@
   },
   {
     "name": "delivery.route.complete",
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-1>/complete"
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"6\""
+      },
+      "body": {
+        "to": "completed"
+      }
     },
     "response": {
-      "status": 200,
+      "status": 409,
       "content_type": "application/json",
       "body": {
-        "status": "completed"
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "stop_not_terminal",
+              "message": "every stop must be delivered, failed or partial before the route completes"
+            }
+          ],
+          "message": "cannot complete a route with 2 stop(s) not yet delivered, failed or partial"
+        },
+        "meta": {
+          "request_id": "<id-33>"
+        }
       }
     }
   },
@@ -607,54 +1117,127 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "driver_id": "<id-22>",
-          "driver_name": "R1C Driver Renamed",
-          "id": "<id-1>",
-          "notes": "r1b c main route",
-          "scheduled_date": "<ts+2d>",
-          "status": "COMPLETED",
-          "stop_count": 2,
-          "updated_at": "<ts+0d>",
-          "vehicle_id": "<id-23>",
-          "vehicle_name": "R1C Truck Renamed"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "driver_id": "<id-3>",
+            "driver_name": "R1C Driver Renamed",
+            "id": "<id-1>",
+            "notes": "r1b c main route",
+            "revision": 6,
+            "scheduled_date": "<day+2>",
+            "status": "in_transit",
+            "stop_count": 2,
+            "stops": null,
+            "total_distance_miles": null,
+            "total_duration_mins": null,
+            "updated_at": "<ts+0d>",
+            "vehicle_id": "<id-8>",
+            "vehicle_name": "R1C Truck Renamed"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
     "name": "delivery.route.dispatch.completed",
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-1>/dispatch"
+      "path": "/api/v1/delivery/routes/<id-1>/transitions",
+      "headers": {
+        "If-Match": "\"6\""
+      },
+      "body": {
+        "to": "in_transit"
+      }
     },
     "response": {
-      "status": 500,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "invalid_state",
+              "message": "only a draft or scheduled route can be dispatched"
+            }
+          ],
+          "message": "cannot dispatch a route in status IN_TRANSIT"
         },
         "meta": {
-          "request_id": "<id-24>"
+          "request_id": "<id-34>"
         }
       }
     }
   },
   {
     "name": "delivery.route.dispatch.empty",
+    "mask_mock_geo": true,
     "request": {
       "method": "POST",
-      "path": "/api/v1/delivery/routes/<id-2>/dispatch"
+      "path": "/api/v1/delivery/routes/<id-9>/transitions",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "to": "in_transit"
+      }
     },
     "response": {
       "status": 200,
-      "content_type": "",
+      "content_type": "application/json",
       "body": {
-        "text": ""
+        "created_at": "<ts+0d>",
+        "driver_id": "<id-3>",
+        "driver_name": "R1C Driver Renamed",
+        "id": "<id-9>",
+        "notes": null,
+        "revision": 2,
+        "scheduled_date": "<day+3>",
+        "status": "in_transit",
+        "stop_count": 0,
+        "stops": null,
+        "total_distance_miles": null,
+        "total_duration_mins": null,
+        "updated_at": "<ts+0d>",
+        "vehicle_id": "<id-8>",
+        "vehicle_name": "R1C Truck Renamed"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.complete.empty_in_transit",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-9>/transitions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "to": "completed"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "route_empty",
+              "message": "the route holds no stops"
+            }
+          ],
+          "message": "a route with no stops cannot be completed"
+        },
+        "meta": {
+          "request_id": "<id-35>"
+        }
       }
     }
   }

@@ -1,0 +1,531 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The quotes draft kind on the wire contract (ADR 0007, item C5-2a): the
+# draft resource under /api/v1/drafts/quotes, shared between an agent tool
+# and a person's screen, with a revision for optimistic concurrency, the
+# SSE change feed, the discard and reopen transitions, and the one
+# transactional promotion that turns a draft into its quote. The scope a
+# key needs is read off the URL: quotes:propose or quotes:commit for the
+# draft routes, quotes:commit alone for the promotion.
+paths:
+  /api/v1/drafts/quotes:
+    get:
+      operationId: quotesDraftList
+      tags: [draft]
+      summary: List quote drafts
+      description: >-
+        The cursor list envelope, newest first on created_at then id (never
+        updated_at: a keyset on a column that moves would repeat or skip
+        rows). Filters status (open, promoted, discarded), subject_id (the
+        open proposals on one quote) and created_by_kind; total appears only
+        under include=total. Drafts are shared, not owned: any caller the
+        kind admits sees every draft of the branch wall it reads through.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: A lowercase status (open, promoted, discarded).
+          schema:
+            type: string
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: created_by_kind
+          in: query
+          required: false
+          description: One of user, key, agent, anonymous.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The list envelope of quote draft summaries (no payload, validation.ready only).
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    post:
+      operationId: quotesDraftCreate
+      tags: [draft]
+      summary: Create a quote draft
+      description: >-
+        A create draft (subject_id null) carries the quote create request
+        as its payload; an edit draft names the quote it edits and may
+        assert subject_revision (a mismatch is 409 stale_revision with the
+        subject_stale blocker). The payload is the module's own body, never
+        a file and never a revision of its own; the branch is fixed at
+        create. validation is computed from the payload alone on every
+        read, so an unfinished draft saves.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotesDraftCreateRequest"
+      responses:
+        "201":
+          description: The open draft; Location names it and the ETag is its revision.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes/feed:
+    get:
+      operationId: quotesDraftFeed
+      tags: [draft]
+      summary: The quote drafts change feed
+      description: >-
+        A text/event-stream of the draft change rows, never payloads: event
+        ready opens with the head cursor, event draft carries each write's
+        summary with its by actor, event cursor advances a filtered stream
+        past rows its filters exclude, event reset tells a resuming client
+        its cursor aged out behind the purge, and event reauth closes the
+        stream at the token's exp, the lifetime bound or a revoked key. The
+        cursor resumes through Last-Event-ID (which wins when both are
+        present) or the cursor parameter; any other parameter is a 400
+        before the stream opens.
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: The cursor this feed minted (an SSE id); no cursor means from now.
+          schema:
+            type: string
+        - name: draft_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: subject_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: What an SSE client sends on reconnect; it wins over the cursor parameter.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The stream (Cache-Control no-store, X-Accel-Buffering no).
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "429":
+          description: This principal holds its draft feed stream limit, answered before the stream opens.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "503":
+          $ref: "#/components/responses/WireUnavailable"
+  /api/v1/drafts/quotes/{id}:
+    get:
+      operationId: quotesDraftGet
+      tags: [draft]
+      summary: Read a quote draft
+      description: >-
+        The draft with its payload and its computed validation; the ETag is
+        the revision. A draft outside the caller's branch wall is a 404.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The draft; the ETag is its revision.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    put:
+      operationId: quotesDraftReplace
+      tags: [draft]
+      summary: Replace a quote draft's payload
+      description: >-
+        The whole-payload compare and swap: If-Match or the body revision
+        is required (428 without), a moved revision is 409 stale_revision,
+        and any status but open is 409 with the draft_not_open blocker (an
+        edit is not a transition). subject_revision may move forward, never
+        past the subject's current revision.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuotesDraftReplaceRequest"
+      responses:
+        "200":
+          description: The draft at its new revision; the ETag moved with it.
+          headers:
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes/{id}/transitions:
+    post:
+      operationId: quotesDraftTransition
+      tags: [draft]
+      summary: Discard or reopen a quote draft
+      description: >-
+        open to discarded and discarded to open, on the revision
+        precondition; promoted is terminal (its retry is told
+        already_promoted) and anything else is an invalid state transition.
+        Discard is reversible by reopen; the audit trail keeps who did what.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, revision]
+              properties:
+                to:
+                  type: string
+                  enum: [discarded, open]
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "200":
+          description: The draft in its new status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/drafts/quotes/{id}/promote:
+    post:
+      operationId: quotesDraftPromote
+      tags: [draft]
+      summary: Promote a quote draft, in one transaction
+      description: >-
+        The confirm: exactly the revision the committer read becomes a
+        quote (428 without a precondition, 409 stale_revision on a moved
+        one, 409 already_promoted on a keyless retry, 409 draft_discarded),
+        born in status draft with its Q- number and quote.created, beside
+        draft.promoted. The body carries nothing but the revision: what is
+        committed is what was reviewed. A failure rolls the whole
+        transaction back and the draft stays open at the same revision,
+        with the module's own error carried out (payload.-prefixed fields
+        on a 400, subject_stale added when the subject moved).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                revision:
+                  type: integer
+                  format: int64
+      responses:
+        "201":
+          description: >-
+            A create draft's promotion; Location is the quote's URL and the
+            body is the promoted draft with promoted filled. An edit
+            draft's promotion answers 200.
+          headers:
+            Location:
+              schema:
+                type: string
+            ETag:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "200":
+          description: An edit draft's promotion; the body is the promoted draft.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotesDraftDocument"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+components:
+  schemas:
+    QuotesDraftStatus:
+      type: string
+      enum: [open, promoted, discarded]
+      description: The draft lifecycle, lowercase on the wire; promoted is terminal.
+    QuotesDraftActor:
+      type: object
+      description: >-
+        What pkg/actor resolved for the request: the user's subject for an
+        agent acting with a person's session, the key's id for a keyed
+        writer; acting_as and tool carry the agent marker and tool name.
+      properties:
+        kind:
+          type: string
+          enum: [user, key, agent, anonymous]
+        id:
+          type: string
+          nullable: true
+        acting_as:
+          type: string
+          nullable: true
+        tool:
+          type: string
+          nullable: true
+    QuotesDraftValidation:
+      type: object
+      description: >-
+        Computed on every read and write from the payload alone: ready is
+        true when the kind's parser would accept the payload as a create
+        (or update) request, and problems is exactly that 400's details
+        with payload.-prefixed fields. It tells an editor what still blocks
+        a promotion without refusing the save.
+      required: [ready]
+      properties:
+        ready:
+          type: boolean
+        problems:
+          type: array
+          items:
+            $ref: "#/components/schemas/WireErrorDetail"
+    QuotesDraftPromoted:
+      type: object
+      description: Set once, at promotion, with the entity's id and document number.
+      required: [entity_id, at]
+      properties:
+        entity_id:
+          type: string
+          format: uuid
+        number:
+          type: string
+          nullable: true
+        at:
+          type: string
+        by:
+          $ref: "#/components/schemas/QuotesDraftActor"
+    QuotesDraftDocument:
+      type: object
+      description: >-
+        The draft resource: one wire type from every draft route, promotion
+        included. Optional fields are present as null (ADR 0001 section
+        12). The summary form (the list) is the same object without
+        payload and without validation.problems.
+      required: [id, module, status, revision, branch_id, payload, validation, created_by, updated_by, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        module:
+          type: string
+          enum: [quotes]
+        status:
+          $ref: "#/components/schemas/QuotesDraftStatus"
+        revision:
+          type: integer
+          format: int64
+        branch_id:
+          type: string
+          format: uuid
+        subject_id:
+          type: string
+          format: uuid
+          nullable: true
+        subject_revision:
+          type: integer
+          format: int64
+          nullable: true
+        payload:
+          type: object
+          description: The module's own request body as JSON.
+        validation:
+          $ref: "#/components/schemas/QuotesDraftValidation"
+        created_by:
+          $ref: "#/components/schemas/QuotesDraftActor"
+        updated_by:
+          $ref: "#/components/schemas/QuotesDraftActor"
+        promoted:
+          allOf:
+            - $ref: "#/components/schemas/QuotesDraftPromoted"
+          nullable: true
+        discarded:
+          type: object
+          nullable: true
+          properties:
+            at:
+              type: string
+            by:
+              $ref: "#/components/schemas/QuotesDraftActor"
+        created_at:
+          type: string
+        updated_at:
+          type: string
+    QuotesDraftCreateRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+          description: >-
+            The quote create request (or, with subject_id, the update
+            request): never a revision, never a file; at most 256 KiB of
+            JSON.
+        subject_id:
+          type: string
+          format: uuid
+          description: The quote an edit draft edits; null on a create draft.
+        subject_revision:
+          type: integer
+          format: int64
+          description: >-
+            The entity revision the edit was built on; asserted at create
+            (a mismatch is 409 subject_stale), taken from the subject when
+            omitted, moved forward by a bounded rebase on PUT.
+    QuotesDraftReplaceRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+        revision:
+          type: integer
+          format: int64
+          description: The body form of the precondition, beside If-Match.
+        subject_revision:
+          type: integer
+          format: int64
+          description: The bounded rebase, never past the subject's current revision.

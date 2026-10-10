@@ -22,6 +22,7 @@ import (
 	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -122,6 +123,16 @@ func Run() {
 		logger.Error("outbox purge failed to start; the outbox grows until it runs", "error", err)
 	}
 
+	// Draft events retention (ADR 0007 section 3.2): delete draft_events rows
+	// past DRAFT_EVENTS_RETENTION in batches, recording the highest purged
+	// position so a resuming client is told to re-read (event: reset). Unlike
+	// the outbox purge there are no subscriber cursors to respect: this feed
+	// has no in process drain. A zero or negative retention keeps it off.
+	draftPurge := drafts.NewPurgeRunner(db, logger, cfg.DraftEventsRetention)
+	if err := draftPurge.Start(context.Background()); err != nil {
+		logger.Error("draft_events purge failed to start; draft_events grows until it runs", "error", err)
+	}
+
 	// The order queues (ADR 0005 5.4): the back order release, served oldest
 	// first, one order per transaction. It runs only here, beside the drain
 	// whose subscriber fills it, never in serve.
@@ -132,7 +143,7 @@ func Run() {
 	fulfilment := newQueueRunner("order-fulfilment", orderSvc.ServeFulfilmentRequest, logger)
 	fulfilment.Start()
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,order-allocation,order-fulfilment")
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,draft-events-purge,order-allocation,order-fulfilment")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -146,6 +157,9 @@ func Run() {
 	logger.Info("Shutdown step 1/2: stopping outbox purge...")
 	purge.Stop()
 	logger.Info("Shutdown step 1/2: outbox purge stopped")
+	logger.Info("Shutdown step 1/2: stopping draft_events purge...")
+	draftPurge.Stop()
+	logger.Info("Shutdown step 1/2: draft_events purge stopped")
 	logger.Info("Shutdown step 1/2: stopping outbox drain...")
 	drain.Stop()
 	logger.Info("Shutdown step 1/2: outbox drain stopped")

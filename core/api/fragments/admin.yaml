@@ -654,7 +654,7 @@ components:
   schemas:
     ApiKey:
       type: object
-      required: [id, name, prefix, scopes, created_at, last_used_at, revoked_at]
+      required: [id, name, prefix, scopes, branch_id, created_at, last_used_at, revoked_at]
       description: >-
         Go type techadmin.APIKey. The hash field is tagged out of the JSON and
         never leaves the package; only the 12 character prefix identifies a
@@ -671,6 +671,13 @@ components:
           type: array
           items:
             type: string
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+          description: >-
+            The branch a branch bound key is pinned to (ADR 0007 section
+            5.5), set at mint and never edited; null is today's unbound
+            behaviour.
         created_at:
           type: string
           format: date-time

@@ -19,15 +19,17 @@ export class DispatchBoard extends LitElement {
   @state() private _selectedRouteId: string | null = null;
   @state() private _selectedVehicleId: string | undefined = undefined;
   @state() private _selectedRouteStatus: RouteStatus | undefined = undefined;
+  @state() private _selectedRouteRevision: number = 0;
   @state() private _currentDeliveries: Delivery[] = [];
 
-  private _handleSelectRoute(routeId: string, vehicleId?: string, routeStatus?: RouteStatus) {
+  private _handleSelectRoute(routeId: string, vehicleId?: string, routeStatus?: RouteStatus, routeRevision?: number) {
     if (routeId !== this._selectedRouteId) {
       this._currentDeliveries = [];
     }
     this._selectedRouteId = routeId;
     this._selectedVehicleId = vehicleId;
     this._selectedRouteStatus = routeStatus;
+    if (typeof routeRevision === 'number') this._selectedRouteRevision = routeRevision;
   }
 
   private _handleDeliveriesChange(deliveries: Delivery[]) {
@@ -62,8 +64,8 @@ export class DispatchBoard extends LitElement {
               <gable-route-list-component
                 .selectedRouteId=${this._selectedRouteId}
                 @select-route=${(e: CustomEvent) => {
-                  const { routeId, vehicleId, routeStatus } = e.detail;
-                  this._handleSelectRoute(routeId, vehicleId, routeStatus);
+                  const { routeId, vehicleId, routeStatus, routeRevision } = e.detail;
+                  this._handleSelectRoute(routeId, vehicleId, routeStatus, routeRevision);
                 }}
               ></gable-route-list-component>
             </div>
@@ -77,6 +79,7 @@ export class DispatchBoard extends LitElement {
                   .routeId=${this._selectedRouteId}
                   .vehicleId=${this._selectedVehicleId}
                   .routeStatus=${this._selectedRouteStatus}
+                  .routeRevision=${this._selectedRouteRevision}
                   @deliveries-change=${(e: CustomEvent) => this._handleDeliveriesChange(e.detail)}
                 ></gable-delivery-list>
               </div>

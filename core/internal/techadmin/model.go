@@ -11,14 +11,18 @@ import (
 // APIKey is a machine key row. The Argon2 hash never leaves the package
 // (json:"-"); the wire shape is the summary a list or a mint answers with,
 // the one identifying detail being the 12 character prefix, since the raw
-// key is shown exactly once, at mint.
+// key is shown exactly once, at mint. BranchID is the branch bound key's
+// pin (ADR 0007 section 5.5): null is today's unbound behaviour, a branch
+// pins every request the key authenticates to it. It is set at mint and
+// never edited; a key that must move branches is revoked and minted again.
 type APIKey struct {
-	ID        uuid.UUID       `json:"id"`
-	Name      string          `json:"name"`
-	KeyHash   string          `json:"-"`
-	KeyPrefix string          `json:"prefix"`
-	Scopes    []string        `json:"scopes"`
-	CreatedAt httpx.Timestamp `json:"created_at"`
+	ID        uuid.UUID        `json:"id"`
+	Name      string           `json:"name"`
+	KeyHash   string           `json:"-"`
+	KeyPrefix string           `json:"prefix"`
+	Scopes    []string         `json:"scopes"`
+	BranchID  *uuid.UUID       `json:"branch_id"`
+	CreatedAt httpx.Timestamp  `json:"created_at"`
 	LastUsed  *httpx.Timestamp `json:"last_used_at"`
 	Revoked   *httpx.Timestamp `json:"revoked_at"`
 }
@@ -26,8 +30,8 @@ type APIKey struct {
 // CreatedKey is the mint answer: the raw key (the only time it is visible)
 // beside its row.
 type CreatedKey struct {
-	APIKey string  `json:"api_key"`
-	Key    APIKey  `json:"key"`
+	APIKey string `json:"api_key"`
+	Key    APIKey `json:"key"`
 }
 
 // The settings resources the module owns, each a named set of system_settings
