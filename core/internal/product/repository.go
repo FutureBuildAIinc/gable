@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -38,6 +39,16 @@ type Repository interface {
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error)
 	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error)
+
+	// The unit set store (ADR 0006 sections 3.1 to 3.3, item C3-2A-units).
+	GetUnitSetRows(ctx context.Context, productID uuid.UUID) ([]UnitSetRowView, error)
+	LockProductForUnitSet(ctx context.Context, id uuid.UUID) (*unitSetProduct, error)
+	ReplaceUnitSet(ctx context.Context, id uuid.UUID, rows []UnitSetRowView,
+		saleUOM, priceUOM, purchaseUOM string, basePrice *int64, revision int64) (int64, error)
+	CatalogueUnits(ctx context.Context, codes []string) (map[string]units.CatalogueUnit, error)
+	ProductStockUnitInUse(ctx context.Context, id uuid.UUID) (bool, error)
+	ProductPriceHeld(ctx context.Context, id uuid.UUID) (bool, string, error)
+	ProductUnitInUse(ctx context.Context, id uuid.UUID, removed []string) (bool, string, error)
 }
 
 // KitStore is the kit definition store the kit component routes use. It is
@@ -63,13 +74,16 @@ func NewRepository(db *database.DB) *PostgresRepository {
 
 // productColumns reads every column the domain row carries, with the scaled
 // and quantity columns read as text so the scan is exact (ADR 0001 section
-// 7: never through float64).
+// 7: never through float64). The unit set columns of ADR 0006 section 3.1
+// (C3-2A-units) ride at the end.
 const productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::text, p.vendor, p.vendor_id, p.upc,
-	       COALESCE(p.weight_lbs, 0)::text,
-	       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
-	       COALESCE(p.reorder_point, 0)::text, COALESCE(p.reorder_qty, 0)::text,
-	       p.lead_time_days, p.revision, p.created_at, p.updated_at,
-	       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0)`
+		       COALESCE(p.weight_lbs, 0)::text,
+		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
+		       COALESCE(p.reorder_point, 0)::text, COALESCE(p.reorder_qty, 0)::text,
+		       p.lead_time_days, p.revision, p.created_at, p.updated_at,
+		       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
+		       p.sale_uom, p.price_uom, p.purchase_uom,
+		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length`
 
 // stockColumns and stockJoin read a product's stock totals in the same
 // statement as the product, in the stocking unit (ADR 0006 7.1): one
@@ -106,6 +120,7 @@ func scanProductStock(scanner interface{ Scan(dest ...any) error }) (*Product, e
 func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock bool) (*Product, error) {
 	var p Product
 	var basePrice, weight, reorderPoint, reorderQty, avgCost, onHand, allocated string
+	var boardThick, boardWidth, boardLength *string
 	var created, updated time.Time
 	dest := []any{
 		&p.ID, &p.SKU, &p.Description, &p.UOMPrimary, &basePrice, &p.Vendor, &p.VendorID, &p.UPC,
@@ -114,6 +129,8 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&reorderPoint, &reorderQty,
 		&p.LeadTimeDays, &p.Revision, &created, &updated,
 		&avgCost, &p.TargetMargin, &p.CommissionRate,
+		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
+		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
 	}
 	if withStock {
 		dest = append(dest, &onHand, &allocated)
@@ -122,6 +139,21 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		return nil, err
 	}
 	var err error
+	for _, col := range []struct {
+		text *string
+		dst  **httpx.Quantity
+	}{
+		{boardThick, &p.BoardThicknessIn}, {boardWidth, &p.BoardWidthIn}, {boardLength, &p.BoardLengthFT},
+	} {
+		if col.text == nil {
+			continue
+		}
+		q, qerr := httpx.ParseQuantity(*col.text)
+		if qerr != nil {
+			return nil, fmt.Errorf("failed to read a board measure column: %w", qerr)
+		}
+		*col.dst = &q
+	}
 	if withStock {
 		q, err := httpx.ParseQuantity(onHand)
 		if err != nil {
@@ -161,14 +193,19 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 // qtyFloat renders a quantity as the float the unconverted readers expect.
 func qtyFloat(q httpx.Quantity) float64 { return float64(q) / 10_000 }
 
-// CreateProduct inserts a new product into the database
+// CreateProduct inserts a new product into the database. The unit set's
+// defaults and stocking row are written by the row triggers migration 099
+// gave the table, so a raw and a routed insert land the same set.
 func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) error {
 	query := `
 		INSERT INTO products (sku, description, uom_primary, base_price, vendor, vendor_id, upc,
 		                      weight_lbs, length_in, width_in, height_in, stackable, geometry_source,
-		                      reorder_point, reorder_qty)
-		VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14::numeric, $15::numeric)
-		RETURNING id, created_at, updated_at, revision, average_unit_cost::text, target_margin, commission_rate`
+		                      reorder_point, reorder_qty,
+		                      board_thickness_in, board_width_in, board_length_ft, random_length)
+		VALUES ($1, $2, $3, $4::numeric, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14::numeric, $15::numeric,
+			$16::numeric / 10000, $17::numeric / 10000, $18::numeric / 10000, $19)
+		RETURNING id, created_at, updated_at, revision, average_unit_cost::text, target_margin, commission_rate,
+		          sale_uom, price_uom, purchase_uom`
 
 	var avgCost string
 	var created, updated time.Time
@@ -176,8 +213,10 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 		p.BasePriceScaled.DecimalString(), p.Vendor, p.VendorID, p.UPC,
 		p.WeightLbs, p.LengthIn, p.WidthIn, p.HeightIn, p.Stackable, p.GeometrySource,
 		p.ReorderPointQ.DecimalString(), p.ReorderQtyQ.DecimalString(),
+		qtyArg(p.BoardThicknessIn), qtyArg(p.BoardWidthIn), qtyArg(p.BoardLengthFT), p.RandomLength,
 	).Scan(
 		&p.ID, &created, &updated, &p.Revision, &avgCost, &p.TargetMargin, &p.CommissionRate,
+		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 	)
 	if err != nil {
 		return mapWriteError(err)
@@ -188,6 +227,14 @@ func (r *PostgresRepository) CreateProduct(ctx context.Context, p *Product) erro
 	p.AverageUnitCost = float64(p.AverageUnitCostScaled) / 10_000
 	p.CreatedAt, p.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
 	return nil
+}
+
+// qtyArg renders an optional quantity column for a parameterised write.
+func qtyArg(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return int64(*q)
 }
 
 // mapWriteError turns a database refusal into the boundary error the handler
