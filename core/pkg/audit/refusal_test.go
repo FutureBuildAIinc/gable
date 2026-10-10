@@ -109,3 +109,74 @@ func TestAuditKeyRefusal_TruncationIsAfterSanitising(t *testing.T) {
 		t.Errorf("stored path still contains a NUL byte: %q", path)
 	}
 }
+
+// The 512 byte cap is applied on a rune boundary, but the six character
+// marker `\u0000` is six ASCII chars (each is its own rune). A cut that
+// lands inside a marker would store a path ending with a partial marker
+// (the first 1 to 5 chars of `\u0000`): plain text, valid UTF-8, at most
+// 512 bytes, flagged both `path_sanitised` and `path_truncated` — so not
+// harmful, but ambiguous to a reader. The fix steps the cut back to before
+// the partial marker. The cap may be undershot (the path becomes shorter
+// than 512), which is allowed.
+func TestAuditKeyRefusal_TruncationDoesNotEndInsideMarker(t *testing.T) {
+	db := testutil.RequireDB(t)
+	logger := audit.NewLogger(db)
+
+	cases := []struct {
+		name string
+		path string
+	}{
+		// 509 `a` then one NUL: post-sanitise the marker adds six
+		// chars to 509, total 515. A 512 byte cut lands 3 chars into
+		// the marker, leaving a stored path ending `\u0`. The fix
+		// steps the cut back so the path ends before the marker.
+		{name: "cut lands 3 chars into marker (\\u0)",
+			path: strings.Repeat("a", 509) + "\x00"},
+		// 510 `a` then one NUL: post-sanitise 516. Cut at 512 lands
+		// 2 chars into the marker, ending `\u`. The fix steps back.
+		{name: "cut lands 2 chars into marker (\\u)",
+			path: strings.Repeat("a", 510) + "\x00"},
+		// 511 `a` then one NUL: post-sanitise 517. Cut at 512 lands
+		// 1 char into the marker, ending `\`. The fix steps back.
+		{name: "cut lands 1 char into marker (\\)",
+			path: strings.Repeat("a", 511) + "\x00"},
+		// 600 NULs: post-sanitise 3600. 85 full markers = 510 chars,
+		// the 86th marker contributes 2 chars (`\u`). Stored path
+		// ends `\u`. The fix steps back to the last full marker.
+		{name: "cut lands in many markers, ending \\u",
+			path: strings.Repeat("\x00", 600)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			keyID := uuid.New()
+			logger.AuditKeyRefusal(context.Background(), keyID.String(),
+				"key.scope_refused", "admin:settings", "GET", tc.path)
+
+			var storedPath string
+			if err := db.Pool.QueryRow(context.Background(),
+				`SELECT changes->>'path' FROM audit_log
+				   WHERE entity_id = $1 AND action = 'key.scope_refused'`, keyID).
+				Scan(&storedPath); err != nil {
+				t.Fatalf("no key.scope_refused row: %v", err)
+			}
+			if len(storedPath) > 512 {
+				t.Errorf("stored path is %d bytes, want at most 512", len(storedPath))
+			}
+			if strings.ContainsRune(storedPath, '\x00') {
+				t.Errorf("stored path still contains a NUL byte: %q", storedPath)
+			}
+			// The stored path must not end inside the marker: the
+			// last 1 to 5 chars must not be the first 1 to 5 chars
+			// of `\u0000`. A full marker (all 6 chars) is fine; an
+			// empty suffix is also fine.
+			marker := `\u0000`
+			for n := 1; n <= 5; n++ {
+				if len(storedPath) >= n && strings.HasSuffix(storedPath, marker[:n]) {
+					t.Errorf("stored path %q ends inside the marker (last %d chars match the first %d chars of %q)",
+						storedPath, n, n, marker)
+				}
+			}
+		})
+	}
+}
