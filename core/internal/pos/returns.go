@@ -80,6 +80,16 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			return nil, httpx.InvalidStateTransition(
 				fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", original.Status.Status()))
 		}
+		// A return that names the sale names its lines (third review P1-1):
+		// a product line at a client price would stand outside every cap, so
+		// every line of a named sale carries the sale line it returns. Only
+		// a return that names no sale stands free.
+		for i := range in.Lines {
+			if in.Lines[i].SaleLineID == nil {
+				return nil, invalid(fmt.Sprintf("lines[%d].line_id", i),
+					"a return that names the original sale names the line of it: every line carries line_id")
+			}
+		}
 		if customerID == nil {
 			customerID = original.CustomerID
 		}

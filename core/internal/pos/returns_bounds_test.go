@@ -133,3 +133,36 @@ func TestADiscountedLineReturnsAtItsDiscountedAmount(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (third review P1-1): a return that names a sale names its lines: a
+// product line with a client price on a named sale is refused, so every line
+// of a named sale is bounded by the line it returns. Only a return that names
+// no sale stands free.
+func TestAProductLineOnANamedSaleIsRefused(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	saleID, _ := f.saleOf("1", tender("cash", 599))
+	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
+		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"refund_method": "cash", "reason": "no line named", "lines": []map[string]any{{
+			"product_id": f.productID.String(), "quantity": "1",
+			"unit_price_ten_thousandths": 55000,
+		}},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("product line on a named sale = %d, want 400: %s", r.status, r.raw)
+	}
+	_, _, fields := errorOf(t, r)
+	if len(fields) == 0 || fields[0] != "lines[0].line_id" {
+		t.Errorf("fields = %v, want lines[0].line_id", fields)
+	}
+	// nothing moved: the drawer still holds the sale, the stock still 99
+	if got := f.accountBalance("1010"); got != 599 {
+		t.Errorf("cash balance = %d, want 599 (the refused return paid nothing)", got)
+	}
+	if got := f.stock(); got != "99.0000/0.0000" {
+		t.Errorf("stock = %s, want 99", got)
+	}
+	f.assertARInvariants(t)
+}
