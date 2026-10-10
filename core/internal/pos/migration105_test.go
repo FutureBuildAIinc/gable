@@ -325,6 +325,31 @@ func TestMigration105_POSWireContract(t *testing.T) {
 		}
 	}
 
+	// A completion under 105 stores its links: an invoice behind the
+	// completed sale, its lines, and each sale line's invoice line id (the
+	// sixth review's P3-3 cycle).
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO invoices (id, customer_id, branch_id, number, status, invoice_date, currency,
+		                      subtotal, tax_amount, total_amount, amount_open, created_at, updated_at)
+		VALUES ('00000000-0000-0000-0000-0000000000b5', '00000000-0000-0000-0000-0000000000a1',
+		        `+mig105Branch+`, 'INV-MIG-1', 'UNPAID', '2026-01-01', 'USD', 16.50, 0.98, 17.48, 17.48,
+		        '2026-01-01T11:02:00Z', '2026-01-01T11:02:00Z');
+		INSERT INTO invoice_lines (id, invoice_id, product_id, description, quantity, uom, price_uom,
+		                           uom_qty, price_uom_qty, unit_price, line_total, unit_cost, position, created_at)
+		VALUES
+			('00000000-0000-0000-0000-0000000000c5', '00000000-0000-0000-0000-0000000000b5',
+			 '00000000-0000-0000-0000-0000000000f1', '2x4x8', 2, 'PCS', 'PCS', 1, 1, 5.50, 11.00, 3.25, 0, '2026-01-01T11:02:00Z'),
+			('00000000-0000-0000-0000-0000000000c6', '00000000-0000-0000-0000-0000000000b5',
+			 '00000000-0000-0000-0000-0000000000f1', '2x4x8', 1, 'PCS', 'PCS', 1, 1, 5.50, 5.50, 3.25, 1, '2026-01-01T11:02:00Z');
+		UPDATE pos_transactions SET invoice_id = '00000000-0000-0000-0000-0000000000b5'
+		 WHERE id = '00000000-0000-0000-0000-0000000000b1';
+		UPDATE pos_line_items SET invoice_line_id = '00000000-0000-0000-0000-0000000000c5'
+		 WHERE id = '00000000-0000-0000-0000-0000000000c1';
+		UPDATE pos_line_items SET invoice_line_id = '00000000-0000-0000-0000-0000000000c6'
+		 WHERE id = '00000000-0000-0000-0000-0000000000c2';`); err != nil {
+		t.Fatalf("seed the completion's links: %v", err)
+	}
+
 	// The down: the memo and its lines go, the walk-in customer goes (its
 	// setting first), the new columns go, the line shape returns to the
 	// base commit's, and the text line the up's shape allowed is deleted.
@@ -333,7 +358,7 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	for _, c := range [][2]string{
 		{"pos_transactions", "number"}, {"pos_transactions", "currency"}, {"pos_transactions", "revision"},
 		{"pos_returns", "number"}, {"pos_returns", "credit_memo_id"},
-		{"pos_line_items", "line_type"}, {"pos_tenders", "payment_id"},
+		{"pos_line_items", "line_type"}, {"pos_line_items", "invoice_line_id"}, {"pos_tenders", "payment_id"},
 		{"pos_return_lines", "sale_line_id"},
 	} {
 		if n := mig105Scalar[int](t, conn, `SELECT count(*) FROM information_schema.columns WHERE table_name = $1 AND column_name = $2`, c[0], c[1]); n != 0 {
@@ -352,6 +377,12 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	if got := mig105Scalar[int](t, conn, `SELECT count(*) FROM pos_line_items`); got != 2 {
 		t.Errorf("%d lines after the down; want the 2 legacy product lines", got)
 	}
+	// the invoice link column survives the down (the invoices do: 105 never
+	// created them), so the up can backfill the line links again
+	if got := mig105Scalar[int](t, conn, `SELECT count(*) FROM pos_transactions
+		WHERE id = '00000000-0000-0000-0000-0000000000b1' AND invoice_id = '00000000-0000-0000-0000-0000000000b5'`); got != 1 {
+		t.Errorf("the completed sale lost its invoice link in the down")
+	}
 	if scale := mig105Scalar[int](t, conn, `SELECT numeric_scale FROM information_schema.columns WHERE table_name = 'pos_line_items' AND column_name = 'unit_price'`); scale != 2 {
 		t.Errorf("unit_price scale after the down = %d, want 2", scale)
 	}
@@ -369,6 +400,17 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	}
 	if got := mig105Scalar[int](t, conn, `SELECT count(DISTINCT number) FROM pos_transactions`); got != mig105Scalar[int](t, conn, `SELECT count(*) FROM pos_transactions WHERE number IS NOT NULL`) {
 		t.Errorf("the re-up duplicated a sale number")
+	}
+	// the backfill restored each sale line's own invoice line, by product
+	// and order within the invoice: the linked return of a sale completed
+	// before, or downed and upped under, this item keeps its cost link
+	for line, want := range map[string]string{
+		"00000000-0000-0000-0000-0000000000c1": "00000000-0000-0000-0000-0000000000c5",
+		"00000000-0000-0000-0000-0000000000c2": "00000000-0000-0000-0000-0000000000c6",
+	} {
+		if got := mig105Scalar[string](t, conn, `SELECT invoice_line_id::text FROM pos_line_items WHERE id = $1`, line); got != want {
+			t.Errorf("sale line %s links invoice line %s after the re-up, want its own %s (the backfill)", line, got, want)
+		}
 	}
 }
 

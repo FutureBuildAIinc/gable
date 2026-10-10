@@ -21,6 +21,10 @@
 --      return's, no new entry), linked through pos_returns.credit_memo_id.
 --   4  the walk-in customer: a customers row (account_number WALK-IN, name
 --      Walk-in) and system_settings pos.walk_in_customer_id, when absent.
+--   4b the sale lines' invoice line links are backfilled from the sale's
+--      invoice (by product and order within it), so the sales completed
+--      before this item, and any down then up cycle, keep them; the down
+--      keeps the sale's invoice_id link column for the same reason.
 --   5  pos_refund_intents: the committed claim that serializes every card
 --      refund of a tender (one live intent per sale and tender), because the
 --      gateway is called before the transaction (ADR 0005 section 11) and
@@ -227,8 +231,31 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_refund_intents_pending
 -- The invoice line completion built from each sale line: a linked return
 -- reads its cost link from the stored id, never from a position (a removed
 -- cart line leaves the sale's positions gapped while the invoice numbers its
--- own lines from zero).
+-- own lines from zero). The links of the sales completed before this item
+-- are backfilled from their invoices, by product and order within it (the
+-- invoices were built from those lines in order); the same backfill runs on
+-- every apply, so a down then up cycle restores them, because the down
+-- drops the column with the rest of this step.
 ALTER TABLE pos_line_items ADD COLUMN IF NOT EXISTS invoice_line_id UUID NULL REFERENCES invoice_lines (id);
+WITH sale_lines AS (
+    SELECT l.id, t.invoice_id, l.product_id,
+           row_number() OVER (PARTITION BY t.invoice_id, l.product_id
+                              ORDER BY l.position, l.created_at, l.id) AS n
+    FROM pos_line_items l
+    JOIN pos_transactions t ON t.id = l.transaction_id
+    WHERE t.invoice_id IS NOT NULL AND l.product_id IS NOT NULL AND l.invoice_line_id IS NULL
+),
+inv_lines AS (
+    SELECT il.id, i.id AS invoice_id, il.product_id,
+           row_number() OVER (PARTITION BY i.id, il.product_id
+                              ORDER BY il.position, il.created_at, il.id) AS n
+    FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id
+)
+UPDATE pos_line_items l
+SET invoice_line_id = v.id
+FROM sale_lines s
+JOIN inv_lines v ON v.invoice_id = s.invoice_id AND v.product_id = s.product_id AND v.n = s.n
+WHERE l.id = s.id;
 CREATE INDEX IF NOT EXISTS idx_pos_line_items_invoice_line ON pos_line_items (invoice_line_id)
     WHERE invoice_line_id IS NOT NULL;
 

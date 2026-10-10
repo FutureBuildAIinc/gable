@@ -344,6 +344,125 @@ func TestAVoidWhoseSecondCardRefundFailsRecordsTheFirst(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE (fifth review P3-2 and P3-3): a sale paid with two card tenders
+// refuses a card return outright (a return cannot pick one), and a card
+// return past the sold quantity is refused before the claim and the
+// terminal: neither moves gateway money nor claims an intent.
+func TestATwoCardTenderSaleAndAnOverQuantityReturnRefuseBeforeTheTerminal(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, withToken(tender("card", 2000)), withToken(tender("card", 395))); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// two card tenders: a card return cannot pick one
+	r := f.cardReturnOn(t, saleID, lineID, "1")
+	if r.status != http.StatusConflict {
+		t.Fatalf("card return of a two card tender sale = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "card_tender" {
+		t.Errorf("blockers = %v, want card_tender", blockers)
+	}
+	// past the sold quantity: refused before the claim and the terminal
+	r = f.cardReturnOn(t, saleID, lineID, "5")
+	if r.status != http.StatusConflict {
+		t.Fatalf("card return past the sold quantity = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ = errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "exceeds_sold" {
+		t.Errorf("blockers = %v, want exceeds_sold (the pre claim cap check)", blockers)
+	}
+	if len(gw.refunds) != 0 {
+		t.Fatalf("%d gateway refunds, want 0 (both refusals came before the terminal)", len(gw.refunds))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1`, saleID); got != 0 {
+		t.Errorf("%d refund intents claimed by the refusals, want 0", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (fifth review P3-6): a void whose card payment's application read
+// fails answers the read's 500, never a confusing reversal refusal, and the
+// refund it already took at the gateway is recorded beside its standing
+// intent.
+func TestAVoidWhoseCardApplicationReadFailsAnswers500(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))
+	// the application row the void's reversal reads is gone: the read fails
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`DELETE FROM ar_applications WHERE payment_id IN (SELECT payment_id FROM pos_tenders WHERE transaction_id = $1)`, saleID); err != nil {
+		t.Fatal(err)
+	}
+	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "application gone", "revision": rev(t, body)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusInternalServerError {
+		t.Fatalf("the void under a failed application read = %d, want 500: %s", r.status, r.raw)
+	}
+	if len(gw.refunds) != 1 {
+		t.Fatalf("%d gateway refunds, want 1 (taken before the transaction)", len(gw.refunds))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 1 {
+		t.Errorf("%d orphaned refund rows, want 1 (the refund the refused void left standing)", got)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING'`, saleID); got != 1 {
+		t.Errorf("%d standing intents, want 1", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
+		t.Errorf("sale status = %q, want completed (the void rolled back)", got)
+	}
+	// no invariant read here: the hand deleted application row leaves the
+	// documents leg of 9.3 unable to tie by construction; the subject is
+	// the error path, and the books it leaves are the refused void's
+}
+
+// RULE (fifth review P3-7): a refused completion attempts the reversal of
+// every charge it already took, not only the first: the charge whose
+// reversal fails is answered, and the later ones are still put back.
+func TestARefusedCompletionAttemptsEveryChargeReversal(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{
+		charges:    []*payment.GatewayResult{approvedCharge(), approvedCharge()},
+		voidErrs:   []error{fmt.Errorf("void refused")},
+		refundErrs: []error{fmt.Errorf("refund refused")},
+	}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+		f.events.fail = "pos_transaction.completed"
+	})
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	r := f.completeSale(saleID, withToken(tender("card", 2000)), withToken(tender("card", 395)))
+	if r.status != http.StatusBadGateway {
+		t.Fatalf("the refused completion = %d, want 502: %s", r.status, r.raw)
+	}
+	if code, _, _ := errorOf(t, r); code != "charge_not_reversed" {
+		t.Errorf("code = %q, want charge_not_reversed", code)
+	}
+	if len(gw.voids) != 2 {
+		t.Errorf("%d gateway voids, want 2 (every charge's reversal attempted, the first failed and the second went through)", len(gw.voids))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.card_charge_reversal' AND entity_id = $1`, saleID); got != 2 {
+		t.Errorf("%d charge reversal rows, want 2 (one per attempted charge)", got)
+	}
+	f.assertARInvariants(t)
+}
+
 // RULE (fourth review P1-3): a completion whose second card charge is
 // declined reverses the charge the first tender already took: no card is
 // left charged behind a sale that never was.

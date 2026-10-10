@@ -103,6 +103,10 @@ ALTER TABLE pos_line_items DROP COLUMN IF EXISTS line_type;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS position;
 ALTER TABLE pos_line_items DROP COLUMN IF EXISTS taxable;
 
+-- 1. the sales. The invoice link column stays: the invoices themselves
+-- survive this down (105 never created them), so the link is history, and
+-- keeping it lets the up's backfill restore each sale line's invoice line
+-- link after a down then up cycle (the r6 note on P3-3).
 -- 1. the sales.
 ALTER TABLE pos_transactions DROP CONSTRAINT IF EXISTS pos_transactions_status_check;
 ALTER TABLE pos_transactions DROP CONSTRAINT IF EXISTS pos_transactions_number_key;
@@ -110,7 +114,6 @@ ALTER TABLE pos_transactions ALTER COLUMN number DROP NOT NULL;
 ALTER TABLE pos_transactions ALTER COLUMN number DROP DEFAULT;
 ALTER TABLE pos_transactions DROP COLUMN IF EXISTS number;
 DROP SEQUENCE IF EXISTS pos_transaction_number_seq;
-ALTER TABLE pos_transactions DROP COLUMN IF EXISTS invoice_id;
 ALTER TABLE pos_transactions DROP CONSTRAINT IF EXISTS pos_transactions_currency_check;
 ALTER TABLE pos_transactions DROP COLUMN IF EXISTS currency;
 ALTER TABLE pos_transactions DROP COLUMN IF EXISTS revision;

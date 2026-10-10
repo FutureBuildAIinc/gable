@@ -216,11 +216,18 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 		}
 		res, err := s.gateway.Charge(ctx, chargeRequest(saleID, t, pre.Currency))
 		if err != nil || res.Status != chargeApproved {
-			// the charges already made go back before the refusal answers
+			// the charges already made go back before the refusal answers,
+			// every one of them (a reversal that fails must not leave the
+			// later charges standing): the first failure is answered, the
+			// rest are still attempted
+			var firstErr error
 			for _, c := range chargesMade {
-				if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil {
-					return nil, rerr
+				if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil && firstErr == nil {
+					firstErr = rerr
 				}
+			}
+			if firstErr != nil {
+				return nil, firstErr
 			}
 			if err != nil {
 				return nil, fmt.Errorf("card charge failed: %w", err)
@@ -235,12 +242,18 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if err != nil {
 		// The transaction refused after the gateway approved a charge: the
 		// charge is put back before the refusal returns, so no card is left
-		// charged behind a sale that never was; a reversal that fails too
-		// answers 502 charge_not_reversed instead of the refusal.
+		// charged behind a sale that never was; every charge is attempted
+		// (a reversal that fails must not leave the later charges standing)
+		// and a reversal that fails too answers 502 charge_not_reversed
+		// instead of the refusal.
+		var firstErr error
 		for _, c := range chargesMade {
-			if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil {
-				return nil, rerr
+			if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil && firstErr == nil {
+				firstErr = rerr
 			}
+		}
+		if firstErr != nil {
+			return nil, firstErr
 		}
 		return nil, err
 	}

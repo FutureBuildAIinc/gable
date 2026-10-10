@@ -196,6 +196,9 @@ func TestTheCompletionAndTheCloseBlockOnTheSessionRowLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// a failure after this point must never leave the holder open: the
+	// package would hang on the session row
+	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
 	if _, err := holder.Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, sessionID); err != nil {
 		t.Fatal(err)
 	}
@@ -226,6 +229,7 @@ func TestTheCompletionAndTheCloseBlockOnTheSessionRowLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = holder2.Rollback(context.Background()) })
 	if _, err := holder2.Exec(ctx, `SELECT 1 FROM till_sessions WHERE id = $1 FOR UPDATE`, sessionID2); err != nil {
 		t.Fatal(err)
 	}

@@ -268,6 +268,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	// transaction (the guards) and again under the sale row lock (the
 	// authority the memo is written from).
 	var taxAlreadyBack int64
+	// backByLine carries, per sale line, what every earlier return brought
+	// back (the restock cost telescopes on it); completesTaxable says this
+	// return finishes every taxable line of the sale (the tax then completes
+	// too, sixth review P3-1).
+	var backByLine map[uuid.UUID]int64
+	var completesTaxable bool
 	applyRemainders := func(ctx context.Context) error {
 		if in.OriginalSaleID == nil {
 			return nil
@@ -286,6 +292,30 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		legacyCents, err := s.repo.LegacyRefundedCentsByProduct(ctx, *in.OriginalSaleID)
 		if err != nil {
 			return err
+		}
+		backByLine = make(map[uuid.UUID]int64, len(returned))
+		for id, qty := range returned {
+			backByLine[id] = int64(qty)
+		}
+		// does this return finish every taxable line of the sale, counting
+		// what the earlier returns already brought back?
+		completesTaxable = false
+		for i := range saleLines {
+			l := &saleLines[i]
+			if !l.Taxable || l.Quantity == nil {
+				continue
+			}
+			completesTaxable = true
+			back := int64(returned[l.ID])
+			for j := range priced {
+				if priced[j].saleLine != nil && priced[j].saleLine.ID == l.ID {
+					back += int64(priced[j].in.Quantity)
+				}
+			}
+			if back < int64(*l.Quantity) {
+				completesTaxable = false
+				break
+			}
 		}
 		for i := range priced {
 			p := &priced[i]
@@ -350,6 +380,15 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			// returns took (the same remainder rule)
 			if remaining := saleTaxCents - taxAlreadyBack; taxCents > remaining {
 				taxCents = remaining
+			}
+			// the return that finishes every taxable line takes the rest of
+			// the tax exactly (sixth review P3-1): the rounded shares of
+			// repeated partial returns cannot leave cents owed to the
+			// customer
+			if completesTaxable {
+				if remaining := saleTaxCents - taxAlreadyBack; remaining > taxCents {
+					taxCents = remaining
+				}
 			}
 		}
 		if freeTaxable > 0 {
@@ -660,13 +699,22 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			// fraction of its quantity, at its own invoice line's cost (the
 			// cost the sale relieved, 8.4).
 			if p.saleLine != nil && p.saleLine.LineType == salesdoc.LineKit && p.saleLine.Quantity != nil {
+				// the component quantity and cost telescope on the kit
+				// line's cumulative returned quantity (sixth review P3-1):
+				// each return restocks the difference between the
+				// cumulative position after it and before it, so repeated
+				// partial returns put exactly the cost the sale relieved
+				// back, never the rounded shares' drift
+				back := backByLine[p.saleLine.ID]
 				for j := range saleLines {
 					comp := &saleLines[j]
 					if comp.ParentLineID == nil || *comp.ParentLineID != p.saleLine.ID ||
 						comp.Quantity == nil || comp.ProductID == nil {
 						continue
 					}
-					qtyBack := httpx.Quantity(divRound(int64(*comp.Quantity)*int64(p.in.Quantity), int64(*p.saleLine.Quantity)))
+					before := divRound(int64(*comp.Quantity)*back, int64(*p.saleLine.Quantity))
+					after := divRound(int64(*comp.Quantity)*(back+int64(p.in.Quantity)), int64(*p.saleLine.Quantity))
+					qtyBack := httpx.Quantity(after - before)
 					if qtyBack <= 0 {
 						continue
 					}
@@ -680,7 +728,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 						}
 					}
 					if cost > 0 {
-						restockCost += int64(salesdoc.CostOf(qtyBack, cost))
+						restockCost += int64(salesdoc.CostOf(httpx.Quantity(after), cost)) -
+							int64(salesdoc.CostOf(httpx.Quantity(before), cost))
 					}
 					restocks = append(restocks, restockAct{productID: *comp.ProductID, qty: qtyBack})
 				}
@@ -688,15 +737,21 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 			if p.in.ProductID != nil {
 				// a free line (no sale) restocks at today's average: it has
-				// no source invoice line to read
+				// no source invoice line to read, and no earlier return to
+				// telescope on; a linked line's cost telescopes on its
+				// cumulative returned quantity
 				cost := restockUnitCost
 				if cost <= 0 {
 					if ref, ok := refs[p.in.ProductID.String()]; ok {
 						cost = ref.AverageCost
 					}
 				}
-				if cost > 0 {
+				if cost > 0 && p.saleLine == nil {
 					restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
+				} else if cost > 0 {
+					back := httpx.Quantity(backByLine[p.saleLine.ID])
+					restockCost += int64(salesdoc.CostOf(back+p.in.Quantity, cost)) -
+						int64(salesdoc.CostOf(back, cost))
 				}
 				restocks = append(restocks, restockAct{productID: *p.in.ProductID, qty: p.in.Quantity})
 			}

@@ -99,9 +99,18 @@ func TestAKitReturnRestocksItsComponentsAtTheirCost(t *testing.T) {
 
 	// the component line's restock is refused: the kit line carries it
 	sale := f.getSale(t, saleID)
-	lines := sale["lines"].([]any)
-	kitLine := lines[0].(map[string]any)
-	compLine := lines[1].(map[string]any)
+	rawLines, ok := sale["lines"].([]any)
+	if !ok || len(rawLines) < 2 {
+		t.Fatalf("the kit sale reads %d lines, want the kit line and its component", len(rawLines))
+	}
+	kitLine, ok := rawLines[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the kit sale's first line is %T, want an object", rawLines[0])
+	}
+	compLine, ok := rawLines[1].(map[string]any)
+	if !ok {
+		t.Fatalf("the kit sale's second line is %T, want an object", rawLines[1])
+	}
 	if str(t, compLine, "line_type") != "component" {
 		t.Fatalf("second line = %s, want the component", str(t, compLine, "line_type"))
 	}
@@ -135,7 +144,10 @@ func TestAKitReturnRestocksItsComponentsAtTheirCost(t *testing.T) {
 		t.Errorf("restock legs = 1030 %+v, 5010 %+v, want 650 each (the components at the cost the sale relieved)", legs["1030"], legs["5010"])
 	}
 	// the kit line's memo line names the kit's own invoice line
-	kitInvLine := f.scalar(`SELECT invoice_line_id::text FROM pos_line_items WHERE id = $1`, str(t, kitLine, "id")).(string)
+	kitInvLine, ok := f.scalar(`SELECT invoice_line_id::text FROM pos_line_items WHERE id = $1`, str(t, kitLine, "id")).(string)
+	if !ok {
+		t.Fatalf("the kit sale line carries no invoice line link (it is %v), so the cost fell back to the average", f.scalar(`SELECT invoice_line_id::text FROM pos_line_items WHERE id = $1`, str(t, kitLine, "id")))
+	}
 	var memoInvLine *string
 	if err := f.db.Pool.QueryRow(context.Background(),
 		`SELECT invoice_line_id::text FROM credit_memo_lines WHERE credit_memo_id = $1`, memoID).Scan(&memoInvLine); err != nil {

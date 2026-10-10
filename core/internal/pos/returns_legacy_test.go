@@ -13,6 +13,7 @@ package pos_test
 // took, and together they sum to it exactly.
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -78,6 +79,57 @@ func TestALegacyReturnBearsOnTheFirstLineOfItsProduct(t *testing.T) {
 		t.Fatalf("return of the first line's remainder = %d: %s", r.status, r.raw)
 	}
 	f.assertARInvariants(t)
+}
+
+// RULE (sixth review P3-1): repeated partial returns of fractional
+// quantities refund the sale exactly: the return that finishes every
+// taxable line takes the rest of the tax (the rounded shares left two
+// cents owed), and each restock costs the difference of the cumulative
+// positions (the rounded shares restocked three cents past what the sale
+// relieved).
+func TestSixHalfReturnsOfALineRefundItExactly(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.openTill(0)
+	// 3 at 5.50: line 1650, tax 146, total 1796
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("3")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, tender("cash", 1796)); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// five shares of 275 line and 24 tax, then the completing half takes the
+	// remainder: 275 of line and 26 of tax
+	for i, want := range []int64{299, 299, 299, 299, 299, 301} {
+		r := f.returnOn(t, saleID, lineID, "0.5")
+		if r.status != http.StatusCreated {
+			t.Fatalf("half return %d = %d: %s", i+1, r.status, r.raw)
+		}
+		if got := num(t, r.body, "total_cents"); got != -want {
+			t.Errorf("half return %d total = %d, want %d", i+1, got, -want)
+		}
+		f.assertARInvariants(t)
+	}
+	if got := f.accountBalance("1010"); got != 0 {
+		t.Errorf("cash balance = %d, want 0 (1796 in, exactly 1796 out)", got)
+	}
+	// the restocks relieved exactly the cost the sale relieved: 3 at 3.25
+	var cogs int64
+	if err := f.db.Pool.QueryRow(context.Background(), `
+		SELECT COALESCE(ROUND(SUM(l.credit) * 100)::bigint, 0) FROM gl_journal_lines l
+		JOIN gl_journal_entries e ON e.id = l.journal_entry_id JOIN gl_accounts a ON a.id = l.account_id
+		WHERE a.code = '5010' AND e.source_ref_id::text IN
+			(SELECT credit_memo_id::text FROM pos_returns WHERE original_transaction_id = $1)`, saleID).Scan(&cogs); err != nil {
+		t.Fatal(err)
+	}
+	if cogs != 975 {
+		t.Errorf("the six restocks relieved %d of cost of goods sold, want exactly the 975 the sale relieved", cogs)
+	}
+	if got := f.stock(); got != "100.0000/0.0000" {
+		t.Errorf("stock = %s, want 100 (the three units back once)", got)
+	}
 }
 
 // RULE (sixth review P2-2, fifth review P2-2): one request naming the same
