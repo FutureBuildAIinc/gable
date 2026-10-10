@@ -98,7 +98,7 @@ export interface TransitionVendorInvoiceRequest {
 
 export interface CreateAPPaymentRequest {
     vendor_id: string;
-    amount: number;         // Dollars (sent as float64, until the payment routes convert)
+    amount_cents: number;   // Cents on the wire, like every other money field
     method: PaymentMethod;
     check_number?: string;
     reference?: string;

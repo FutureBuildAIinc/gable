@@ -279,16 +279,16 @@ func (f *fixture) void(id string, revision int64, reason string) resp {
 }
 
 // pay pays cents against the invoices.
-func (f *fixture) pay(cents float64, invoiceIDs ...string) resp {
+func (f *fixture) pay(cents int64, invoiceIDs ...string) resp {
 	f.t.Helper()
 	return f.payHeaders(nil, cents, invoiceIDs...)
 }
 
 // payHeaders pays cents against the invoices behind extra request headers.
-func (f *fixture) payHeaders(headers []string, cents float64, invoiceIDs ...string) resp {
+func (f *fixture) payHeaders(headers []string, cents int64, invoiceIDs ...string) resp {
 	f.t.Helper()
 	return f.do("POST", "/api/v1/ap/payments", map[string]any{
-		"vendor_id": f.vendor.String(), "amount": cents / 100.0, "method": "CHECK",
+		"vendor_id": f.vendor.String(), "amount_cents": cents, "method": "CHECK",
 		"payment_date": "2026-01-15", "invoice_ids": invoiceIDs,
 	}, headers...)
 }

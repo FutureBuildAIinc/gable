@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/money"
 	"github.com/google/uuid"
 )
 
@@ -216,17 +215,18 @@ func (req *TransitionRequest) Parse() (*TransitionInput, error) {
 	return in, nil
 }
 
-// PayRequest is the body of POST /api/v1/ap/payments. The payment routes keep
-// their request shape until their own conversion (ADR 0008 section 11); only
-// the parsing is held to one pass here.
+// PayRequest is the body of POST /api/v1/ap/payments. The money is integer
+// cents on the wire, like every other money field (a decimal is a validation
+// failure, never a silent rounding); the rest of the shape keeps its today
+// form until the payment routes' own conversion (ADR 0008 section 11).
 type PayRequest struct {
-	VendorID    *string  `json:"vendor_id"`
-	Amount      *float64 `json:"amount"`
-	Method      *string  `json:"method"`
-	CheckNumber *string  `json:"check_number"`
-	Reference   *string  `json:"reference"`
-	PaymentDate *string  `json:"payment_date"`
-	InvoiceIDs  []string `json:"invoice_ids"`
+	VendorID    *string         `json:"vendor_id"`
+	AmountCents json.RawMessage `json:"amount_cents"`
+	Method      *string         `json:"method"`
+	CheckNumber *string         `json:"check_number"`
+	Reference   *string         `json:"reference"`
+	PaymentDate *string         `json:"payment_date"`
+	InvoiceIDs  []string        `json:"invoice_ids"`
 }
 
 // PayInput is a validated payment ready for the service.
@@ -247,11 +247,9 @@ func (req *PayRequest) Parse() (*PayInput, error) {
 	if id, ok := v.UUID("vendor_id", req.VendorID, true); ok {
 		in.VendorID = id
 	}
-	if req.Amount == nil {
-		v.Check(false, "amount", "is required")
-	} else {
-		v.Check(*req.Amount > 0, "amount", "must be more than zero")
-		in.AmountCents = money.DollarsToCents(*req.Amount)
+	if n, ok := v.Int("amount_cents", req.AmountCents, true); ok {
+		v.Check(n > 0, "amount_cents", "must be more than zero")
+		in.AmountCents = n
 	}
 	if req.Method == nil {
 		v.Check(false, "method", "is required")

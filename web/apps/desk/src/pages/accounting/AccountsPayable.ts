@@ -281,7 +281,10 @@ export class AccountsPayable extends LitElement {
 
     private async _handlePayVendorSubmit(e: Event) {
         e.preventDefault();
-        if (!this.payVendorId || this.payAmount <= 0) {
+        // Dollars in the form, cents on the wire: the one exact conversion of
+        // a two decimal input (never a float the server would have to round).
+        const amountCents = Math.round(this.payAmount * 100);
+        if (!this.payVendorId || amountCents <= 0) {
             ToastService.show('Please select a vendor and enter a positive payment amount', 'error');
             return;
         }
@@ -294,7 +297,7 @@ export class AccountsPayable extends LitElement {
         try {
             const req = {
                 vendor_id: this.payVendorId,
-                amount: Number(this.payAmount),
+                amount_cents: amountCents,
                 method: this.payMethod,
                 check_number: this.payMethod === 'CHECK' ? this.payCheckNumber.trim() : undefined,
                 reference: this.payReference.trim() || undefined,

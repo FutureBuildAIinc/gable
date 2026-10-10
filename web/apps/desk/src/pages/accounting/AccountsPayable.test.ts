@@ -7,16 +7,15 @@
  * The vendor invoice routes are on the wire contract (C4-1b, ADR 0008 7.4),
  * so the tests below pin both sides of the money split:
  *
- *   read  — every invoice amount from /api/v1/ap/invoices is int64 CENTS and
- *           every line unit price int64 TEN THOUSANDTHS
- *           (core/internal/ap/model.go), rendered with `formatCents()` and
- *           `formatPrice4()`; the list arrives in the cursor envelope, which
- *           the service walks.
- *   write — POST /api/v1/ap/invoices takes cents, a decimal string quantity
- *           and ten thousandths; the approve goes through
- *           /ap/invoices/{id}/transitions with the revision; POST
- *           /api/v1/ap/payments still takes float dollars until its own
- *           conversion.
+ *   read: every invoice amount from /api/v1/ap/invoices is int64 CENTS and
+ *         every line unit price int64 TEN THOUSANDTHS
+ *         (core/internal/ap/model.go), rendered with `formatCents()` and
+ *         `formatPrice4()`; the list arrives in the cursor envelope, which
+ *         the service walks.
+ *   write: POST /api/v1/ap/invoices takes cents, a decimal string quantity
+ *          and ten thousandths; the approve goes through
+ *          /ap/invoices/{id}/transitions with the revision; POST
+ *          /api/v1/ap/payments takes int64 amount_cents.
  *
  * Getting the scales backwards in either direction is a 100x error on a
  * vendor payment, so the request bodies are asserted, not just the rendering.
@@ -153,7 +152,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('accounts payable — reading cents', () => {
+describe('accounts payable: reading cents', () => {
   it('renders an invoice total in dollars, not cents', async () => {
     serve({ invoices: [invoice()] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
@@ -269,7 +268,7 @@ describe('accounts payable — reading cents', () => {
   })
 })
 
-describe('accounts payable — writing the wire scales', () => {
+describe('accounts payable: writing the wire scales', () => {
   /** Open the bill drawer and fill one line plus tax. */
   async function draftBill(
     el: LitElement,
@@ -336,7 +335,7 @@ describe('accounts payable — writing the wire scales', () => {
 
     const bill = postedBodies(spy).find((b) => 'vendor_invoice_number' in b)
     expect(bill).toBeDefined()
-    // Cents and ten thousandths, NOT dollars — sending dollars here would
+    // Cents and ten thousandths, NOT dollars: sending dollars here would
     // store a bill 100x (and a price 10000x) too small.
     expect(bill!.tax_cents).toBe(1234)
     expect((bill!.lines as { quantity: string; unit_price_ten_thousandths: number }[])[0].quantity).toBe('10')
@@ -344,7 +343,7 @@ describe('accounts payable — writing the wire scales', () => {
     expect(bill!.vendor_invoice_number).toBe('CL-9001')
   })
 
-  it('converts the selected invoices to dollars when prefilling a payment', async () => {
+  it('prefills a payment from the selected invoices and sends cents', async () => {
     const spy = serve({ invoices: [invoice({ amount_open_cents: 1_234_567 })] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
@@ -359,17 +358,20 @@ describe('accounts payable — writing the wire scales', () => {
     checkbox!.click()
     await update(el, {})
 
+    // The form still speaks dollars to the clerk: 1,234,567 cents = $12,345.67.
+    const amountInput = Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]')).pop()!
+    expect(Number(amountInput.value)).toBe(12345.67)
+
     await submitOpenForm(el)
 
     const pmt = postedBodies(spy).find((b) => 'invoice_ids' in b)
     expect(pmt).toBeDefined()
-    // The payment route still takes float dollars until its own conversion:
-    // 1,234,567 cents = $12,345.67.
-    expect(pmt!.amount).toBe(12345.67)
+    // The payment request takes int64 cents on the wire.
+    expect(pmt!.amount_cents).toBe(1234567)
   })
 })
 
-describe('accounts payable — endpoints', () => {
+describe('accounts payable: endpoints', () => {
   it('calls exactly the AP endpoints the public backend serves', async () => {
     const spy = serve({ invoices: [invoice()] })
     await mountAsync<LitElement>('gable-accounts-payable')

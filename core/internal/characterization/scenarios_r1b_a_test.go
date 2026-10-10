@@ -620,7 +620,7 @@ func r1bAAPGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/ap/payments",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "amount": 40.0, "method": "CHECK", "check_number": "GOLD-CHK-1",
+					"vendor_id": "{vendor}", "amount_cents": 4000, "method": "CHECK", "check_number": "GOLD-CHK-1",
 					"reference": "golden partial", "payment_date": "{today}",
 					"invoice_ids": []any{"{a_apinvoice}"},
 				},
@@ -632,7 +632,7 @@ func r1bAAPGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/ap/payments",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "amount": 60.0, "method": "ACH",
+					"vendor_id": "{vendor}", "amount_cents": 6000, "method": "ACH",
 					"reference": "golden settle", "payment_date": "{today}",
 					"invoice_ids": []any{"{a_apinvoice}"},
 				},
@@ -640,7 +640,7 @@ func r1bAAPGroups() []groupDef {
 			{name: "ap.invoice.get.after_settle", method: "GET", path: "/api/v1/ap/invoices/{a_apinvoice}"},
 			{name: "ap.payment.create.paid_invoice", method: "POST", path: "/api/v1/ap/payments",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "amount": 1.0, "method": "CHECK", "payment_date": "{today}",
+					"vendor_id": "{vendor}", "amount_cents": 100, "method": "CHECK", "payment_date": "{today}",
 					"invoice_ids": []any{"{a_apinvoice}"},
 				}},
 			{name: "ap.invoice.void.with_payments", method: "POST", path: "/api/v1/ap/invoices/{a_apinvoice}/transitions",
@@ -648,11 +648,11 @@ func r1bAAPGroups() []groupDef {
 			{name: "ap.payments.list_vendor", method: "GET", path: "/api/v1/ap/payments?vendor_id={vendor}", sortPrimaryArray: true},
 			{name: "ap.payment.create.bad_date", method: "POST", path: "/api/v1/ap/payments",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "amount": 1.0, "method": "CHECK", "payment_date": "31/12/2000",
+					"vendor_id": "{vendor}", "amount_cents": 100, "method": "CHECK", "payment_date": "31/12/2000",
 				}},
 			{name: "ap.payment.create.unknown_invoice", method: "POST", path: "/api/v1/ap/payments",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "amount": 1.0, "method": "CHECK", "payment_date": "{today}",
+					"vendor_id": "{vendor}", "amount_cents": 100, "method": "CHECK", "payment_date": "{today}",
 					"invoice_ids": []any{r1bAMissingID},
 				}},
 			{name: "ap.payment.create.bad_body", method: "POST", path: "/api/v1/ap/payments", body: "not-an-object"},

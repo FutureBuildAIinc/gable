@@ -1317,7 +1317,7 @@ paths:
       tags: [ap]
       summary: Approve or void a vendor invoice
       description: >-
-        Role guard admin, owner or finance, held to the caller's branch wall. Replaces the old /approve route. The body names the target status and carries the revision (or If-Match); a write with neither is 428, a mismatch 409 stale_revision. To approved: only from pending; the entry posts through gl.PostEntry inside the transition's transaction (a debit leg per line on the line's account, the tax spread across the line accounts pro rata, the credit to Accounts Payable), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a line with no account is a 409 blocker line_needs_account). To voided: from pending (nothing posted) or approved (the entry is reversed whole); a reason is required, and a bill with money applied is refused with the has_payments blocker.
+        Role guard admin, owner or finance, held to the caller's branch wall. Replaces the old /approve route. The body names the target status and carries the revision (or If-Match); a write with neither is 428, a mismatch 409 stale_revision. To approved: only from pending; the entry posts through gl.PostEntry inside the transition's transaction (a debit leg per line on the line's account, the tax spread across the line accounts pro rata, the credit to Accounts Payable), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a line with no account is a 409 blocker line_needs_account). To voided: from pending (nothing posted) or approved (the entry is reversed whole); a reason is required, a bill with money applied is refused with the has_payments blocker, and an approved or partial bill with no linked journal entry (a legacy bill whose posting was swallowed) with the entry_not_linked blocker.
       parameters:
         - name: id
           in: path
@@ -1370,7 +1370,7 @@ paths:
       tags: [ap]
       summary: List vendor payments
       description: >-
-        Role guard admin, owner or finance. A bare array until the payment routes' own conversion (ADR 0008 section 11). Optional vendor_id filter (an unparseable value is a 400 naming it); a parameter the route does not declare is refused.
+        Role guard admin, owner or finance, held to the caller's branch wall through the bills a payment applies to (a payment whose every bill is another branch's is not the caller's to read). A bare array until the payment routes' own conversion (ADR 0008 section 11). Optional vendor_id filter (an unparseable value is a 400 naming it); a parameter the route does not declare is refused.
       parameters:
         - name: vendor_id
           in: query
@@ -1400,7 +1400,7 @@ paths:
       tags: [ap]
       summary: Pay a vendor
       description: >-
-        Role guard admin, owner or finance. The request keeps its today shape (float dollars, uppercase methods) until the payment routes' own conversion. The payment locks the named bills in id order and applies only to bills in approved or partial (a pending, paid or voided bill is a 409 blocker invoice_not_approved; a bill of another vendor is a 400 naming invoice_ids[i]); more than the named bills still owe is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside the act's transaction (DR Accounts Payable, CR Cash), and a posting failure fails the act (a closed period is a 409 blocker period_closed).
+        Role guard admin, owner or finance. The request's money is int64 amount_cents (a decimal amount is a 400 naming it; the old float dollars amount is gone); the rest of the shape keeps its today form (uppercase methods) until the payment routes' own conversion. The payment locks the named bills in id order and applies only to bills in approved or partial (a pending, paid or voided bill is a 409 blocker invoice_not_approved; a bill of another vendor is a 400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400 naming its index (appears twice); more than the named bills still owe is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside the act's transaction (DR Accounts Payable, CR Cash), and a posting failure fails the act (a closed period is a 409 blocker period_closed).
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
@@ -1436,7 +1436,7 @@ paths:
       tags: [ap]
       summary: AP aging by vendor
       description: >-
-        Role guard admin, owner or finance. One row per vendor with open balances in int64 cents buckets, from amount_open; a paid or voided bill owes nothing anywhere. A bare array until the aging route's own conversion. No query parameters; one is refused.
+        Role guard admin, owner or finance, held to the caller's branch wall (a bound caller's buckets sum its branch's bills only). One row per vendor with open balances in int64 cents buckets, from amount_open; a paid or voided bill owes nothing anywhere. A bare array until the aging route's own conversion. No query parameters; one is refused.
       responses:
         '200':
           description: The aging rows.
@@ -16257,15 +16257,16 @@ components:
           description: Required to void; at most 500 characters.
     ApCreatePaymentRequest:
       type: object
-      required: [vendor_id, amount, method, payment_date]
-      description: The pay body, in its today shape until the payment routes' own conversion.
+      required: [vendor_id, amount_cents, method, payment_date]
+      description: The pay body. The money is int64 cents like every other money field; the rest keeps its today shape until the payment routes' own conversion.
       properties:
         vendor_id:
           type: string
           format: uuid
-        amount:
-          type: number
-          description: Float dollars today.
+        amount_cents:
+          type: integer
+          format: int64
+          description: Cents; a decimal amount is a 400 naming the field.
         method:
           type: string
           enum: [CHECK, ACH, WIRE]
@@ -16278,7 +16279,7 @@ components:
           format: date
         invoice_ids:
           type: array
-          description: Bills this payment is applied to, in the order the desk pays them.
+          description: Bills this payment is applied to, in the order the desk pays them; a repeated id is a 400.
           items:
             type: string
             format: uuid

@@ -6,12 +6,12 @@
 # own number (AP-, gapped sequence) as number, the vendor's as
 # vendor_invoice_number, money in _cents, the scaled unit price, the cursor
 # envelope, the error envelope, the revision precondition and a transitions
-# route that replaced /approve. The payment and aging routes keep their
-# today shapes until their own conversion (ADR 0008 section 11), with the
-# payment act's new refusals. Every route sits behind
-# scoped("admin","owner","finance") with the branch middleware, registered in
-# internal/app/serve/serve.go; the bills carry a branch, so every read and
-# write is held to the caller's wall.
+# route that replaced /approve. The pay request's money is _cents too (the
+# rest of the payment and aging routes keeps its today shape until their own
+# conversion, ADR 0008 section 11), with the payment act's new refusals.
+# Every route sits behind scoped("admin","owner","finance") with the branch
+# middleware, registered in internal/app/serve/serve.go; the bills carry a
+# branch, so every read and write is held to the caller's wall.
 paths:
   /api/v1/ap/invoices:
     get:
@@ -265,9 +265,11 @@ paths:
       tags: [ap]
       summary: Pay a vendor
       description: >-
-        Role guard admin, owner or finance. The request keeps its today shape
-        (float dollars, uppercase methods) until the payment routes' own
-        conversion. The payment locks the named bills in id order and applies
+        Role guard admin, owner or finance. The request's money is int64
+        amount_cents (a decimal amount is a 400 naming it; the old float
+        dollars amount is gone); the rest of the shape keeps its today form
+        (uppercase methods) until the payment routes' own conversion. The
+        payment locks the named bills in id order and applies
         only to bills in approved or partial (a pending, paid or voided bill
         is a 409 blocker invoice_not_approved; a bill of another vendor is a
         400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400
@@ -685,15 +687,16 @@ components:
           description: Required to void; at most 500 characters.
     ApCreatePaymentRequest:
       type: object
-      required: [vendor_id, amount, method, payment_date]
-      description: The pay body, in its today shape until the payment routes' own conversion.
+      required: [vendor_id, amount_cents, method, payment_date]
+      description: The pay body. The money is int64 cents like every other money field; the rest keeps its today shape until the payment routes' own conversion.
       properties:
         vendor_id:
           type: string
           format: uuid
-        amount:
-          type: number
-          description: Float dollars today.
+        amount_cents:
+          type: integer
+          format: int64
+          description: Cents; a decimal amount is a 400 naming the field.
         method:
           type: string
           enum: [CHECK, ACH, WIRE]
@@ -706,7 +709,7 @@ components:
           format: date
         invoice_ids:
           type: array
-          description: Bills this payment is applied to, in the order the desk pays them.
+          description: Bills this payment is applied to, in the order the desk pays them; a repeated id is a 400.
           items:
             type: string
             format: uuid

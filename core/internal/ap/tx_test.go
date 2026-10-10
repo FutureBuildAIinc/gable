@@ -14,6 +14,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -64,9 +65,8 @@ func ptr[T any](v T) *T { return &v }
 func raw(s string) []byte { return []byte(s) }
 
 func payInput(f *fixture, cents int64, ids ...uuid.UUID) *ap.PayInput {
-	amount := float64(cents) / 100.0
 	req := &ap.PayRequest{
-		VendorID: ptr(f.vendor.String()), Amount: &amount, Method: ptr("CHECK"),
+		VendorID: ptr(f.vendor.String()), AmountCents: raw(strconv.FormatInt(cents, 10)), Method: ptr("CHECK"),
 		PaymentDate: ptr("2026-01-15"), InvoiceIDs: nil,
 	}
 	for _, id := range ids {

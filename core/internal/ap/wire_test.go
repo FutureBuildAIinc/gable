@@ -597,6 +597,61 @@ func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0008 section 11, converted here by the lead's promotion of review
+// r2 P3-4): the payment request takes integer cents on the wire, like every
+// other money field. A decimal amount is a validation failure, never a silent
+// rounding, and the old float dollars field is gone.
+func TestWire_PayAmountIsCents(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id, r1 := f.enter("V-CENTS", "1", 1000)
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Fatalf("after the approve: control %d, open %d", got, want)
+	}
+	body := func(amount any) map[string]any {
+		return map[string]any{"vendor_id": f.vendor.String(), "amount_cents": amount, "method": "CHECK",
+			"payment_date": "2026-01-15", "invoice_ids": []any{id}}
+	}
+	if p := f.do("POST", "/api/v1/ap/payments", body(10)); p.status != http.StatusCreated {
+		t.Fatalf("pay integer cents = %d, want 201: %s", p.status, p.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want || want != 0 {
+		t.Errorf("after the payment: control %d, open %d, want both 0", got, want)
+	}
+	if !f.balanced() {
+		t.Error("the payment entry does not balance")
+	}
+	// A decimal is refused, never silently rounded (10.5 is not a cent amount).
+	id2, r1b := f.enter("V-CENTS-2", "1", 1000)
+	if a := f.approve(id2, r1b); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	body2 := func(amount any) map[string]any {
+		return map[string]any{"vendor_id": f.vendor.String(), "amount_cents": amount, "method": "CHECK",
+			"payment_date": "2026-01-15", "invoice_ids": []any{id2}}
+	}
+	d := f.do("POST", "/api/v1/ap/payments", body2(10.5))
+	if d.status != http.StatusBadRequest {
+		t.Fatalf("pay a decimal = %d, want 400: %s", d.status, d.raw)
+	}
+	if _, _, fields := errorOf(t, d); len(fields) == 0 || fields[0] != "amount_cents" {
+		t.Errorf("pay a decimal names %v, want amount_cents", fields)
+	}
+	// The old float dollars field is not read.
+	old := f.do("POST", "/api/v1/ap/payments", map[string]any{
+		"vendor_id": f.vendor.String(), "amount": 0.10, "method": "CHECK",
+		"payment_date": "2026-01-15", "invoice_ids": []any{id2}})
+	if old.status != http.StatusBadRequest {
+		t.Errorf("pay the old float field = %d, want 400", old.status)
+	}
+	if n := f.count(`SELECT count(*) FROM ap_payments WHERE vendor_id = $1`, f.vendor); n != 1 {
+		t.Errorf("%d payments stand, want the one accepted", n)
+	}
+}
+
 // RULE (ADR 0008 7.4): a bill approved before migration 106 carries its entry
 // but no pointer to it; the migration links the newest posted, unreversed
 // VENDOR_INVOICE entry, and the void reverses exactly that entry, so the tie
