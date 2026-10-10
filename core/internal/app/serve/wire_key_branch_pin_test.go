@@ -273,7 +273,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
 		RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
 	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db), customerSvc, productSvc).
-		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, "admin", "owner"))
+		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 	pricing.NewCategoryHandler(
 		pricing.NewCategoryPricingService(pricing.NewCategoryRepository(db)).WithTxRunner(db).
 			WithOutbox(outbox.NewWriter(db, "")).

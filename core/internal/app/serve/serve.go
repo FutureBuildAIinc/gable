@@ -377,7 +377,7 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, "admin", "owner"))
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {

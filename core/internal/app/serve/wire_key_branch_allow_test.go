@@ -78,9 +78,12 @@ func TestKeyBranchPin_CustomerConfinedReads(t *testing.T) {
 	f.refuseForeign(t, "GET", calc+B+"&quantity=1", "", nil)
 	f.allow(t, "bound", "GET", calc+A+"&quantity=1", "", nil, http.StatusNotFound)
 	f.parity(t, "GET", calc+B+"&quantity=1", "")
+	// The resolve preview answers a bare product with no match rather than a
+	// 404; what matters is that the pin's customer reaches that answer and
+	// the foreign one never reaches the module.
 	resolve := "/api/v1/pricing/resolve?product_id=" + uuid.NewString() + "&customer_id="
 	f.refuseForeign(t, "GET", resolve+B, "", nil)
-	f.allow(t, "bound", "GET", resolve+A, "", nil, http.StatusNotFound)
+	f.allow(t, "bound", "GET", resolve+A, "", nil, http.StatusOK)
 	f.parity(t, "GET", resolve+B, "")
 }
 
@@ -125,19 +128,22 @@ func TestKeyBranchPin_PricingRuleJobConfinement(t *testing.T) {
 	}
 
 	// A rule that names neither a customer nor a job is dealer wide: refused
-	// for the bound key with its audit row, open to everyone else.
-	wide := `{"name":"pin wide","rule_type":"promotional","discount_pct":"50"}`
-	f.refuseForeign(t, "POST", "/api/v1/pricing/rules", wide, nil)
+	// for the bound key with its audit row, open to everyone else (each on
+	// its own name: a rule's name and scope are unique).
+	wide := func(label string) string {
+		return fmt.Sprintf(`{"name":"pin wide %s","rule_type":"promotional","discount_pct":"50"}`, label)
+	}
+	f.refuseForeign(t, "POST", "/api/v1/pricing/rules", wide("refused"), nil)
 	var wideRows int
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT COUNT(*) FROM pricing_rules WHERE name = 'pin wide'`).Scan(&wideRows); err != nil {
+		`SELECT COUNT(*) FROM pricing_rules WHERE name LIKE 'pin wide %'`).Scan(&wideRows); err != nil {
 		t.Fatal(err)
 	}
 	if wideRows != 0 {
 		t.Errorf("refused dealer wide rule wrote %d rows", wideRows)
 	}
 	for _, who := range []string{"unbound", "user"} {
-		f.allow(t, who, "POST", "/api/v1/pricing/rules", wide, nil, http.StatusCreated)
+		f.allow(t, who, "POST", "/api/v1/pricing/rules", wide(who), nil, http.StatusCreated)
 	}
 }
 
@@ -148,11 +154,14 @@ func TestKeyBranchPin_PricingRuleJobConfinement(t *testing.T) {
 func TestKeyBranchPin_CategoryTierRefusals(t *testing.T) {
 	f := newKeyPinFixture(t)
 	// PIN-TIER is not any tier the migrations seed, so the rows this test
-	// creates are exactly its own and the cleanup can name them.
-	tier := fmt.Sprintf(`{"target_type":"tier","tier":"PIN-TIER","category_id":%q,"rule_type":"markup","value_pct":"5"}`,
-		f.freshCategory(t).String())
+	// creates are exactly its own and the cleanup can name them (each on its
+	// own category: a target and category pair is unique).
+	tier := func() string {
+		return fmt.Sprintf(`{"target_type":"tier","tier":"PIN-TIER","category_id":%q,"rule_type":"markup","value_pct":"5"}`,
+			f.freshCategory(t).String())
+	}
 
-	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", tier, nil)
+	f.refuseForeign(t, "POST", "/api/v1/pricing/category-rules", tier(), nil)
 	var tierRows int
 	if err := f.db.Pool.QueryRow(context.Background(),
 		`SELECT COUNT(*) FROM category_pricing_rules WHERE tier = 'PIN-TIER'`).Scan(&tierRows); err != nil {
@@ -162,7 +171,7 @@ func TestKeyBranchPin_CategoryTierRefusals(t *testing.T) {
 		t.Errorf("refused tier rule create wrote %d rows", tierRows)
 	}
 	for _, who := range []string{"unbound", "user"} {
-		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", tier, nil, http.StatusCreated)
+		f.allow(t, who, "POST", "/api/v1/pricing/category-rules", tier(), nil, http.StatusCreated)
 	}
 
 	putBody := `{"rule_type":"markdown","value_pct":"2"}`

@@ -226,7 +226,17 @@ func (w *KeyBranchWall) CustomerBranch(customersOf func(ctx context.Context, r *
 // decoded whole exactly as the handler's own decoder would have to.
 func (w *KeyBranchWall) CustomerBodyBranch() func(http.Handler) http.Handler {
 	return w.CustomerBranch(func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
-		return bodyCustomers(r)
+		return bodyCustomers(r, false)
+	})
+}
+
+// CustomerBodyBranchRequired is CustomerBodyBranch over a body whose every
+// element must name a customer: a write that names none (a tier or account
+// target, a dealer wide rule) is refused for a bound key rather than passed,
+// because what it writes prices or deletes every branch's rows.
+func (w *KeyBranchWall) CustomerBodyBranchRequired() func(http.Handler) http.Handler {
+	return w.CustomerBranch(func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		return bodyCustomers(r, true)
 	})
 }
 
@@ -257,18 +267,23 @@ func (w *KeyBranchWall) CustomerRowBranch(customerOf func(ctx context.Context, i
 
 // bodyCustomers reads the customer_ids a body names, one object or an array
 // of them. An id that does not parse names nothing the wall can hold, and
-// the handler's own validation answers it.
-func bodyCustomers(r *http.Request) ([]uuid.UUID, error) {
+// the handler's own validation answers it. When required is set, an object
+// or an array element that names no customer at all is refused
+// (errRefused): the write it asks for is dealer wide.
+func bodyCustomers(r *http.Request, required bool) ([]uuid.UUID, error) {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nil, fmt.Errorf("key branch wall: read body: %w", err)
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
-	collect := func(id string, out []uuid.UUID) []uuid.UUID {
+	collect := func(id string, out []uuid.UUID) ([]uuid.UUID, error) {
 		if parsed, err := uuid.Parse(id); err == nil {
-			out = append(out, parsed)
+			return append(out, parsed), nil
 		}
-		return out
+		if required && id != "" {
+			return nil, errRefused
+		}
+		return out, nil
 	}
 	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '[' {
 		var many []struct {
@@ -277,9 +292,17 @@ func bodyCustomers(r *http.Request) ([]uuid.UUID, error) {
 		if err := json.Unmarshal(raw, &many); err != nil {
 			return nil, errRefused
 		}
+		if required && len(many) == 0 {
+			return nil, errRefused
+		}
 		out := make([]uuid.UUID, 0, len(many))
 		for _, m := range many {
-			out = collect(m.CustomerID, out)
+			if out, err = collect(m.CustomerID, out); err != nil {
+				return nil, err
+			}
+		}
+		if required && len(out) != len(many) {
+			return nil, errRefused
 		}
 		return out, nil
 	}
@@ -290,9 +313,12 @@ func bodyCustomers(r *http.Request) ([]uuid.UUID, error) {
 		return nil, errRefused
 	}
 	if one.CustomerID == "" {
+		if required {
+			return nil, errRefused
+		}
 		return nil, nil
 	}
-	return collect(one.CustomerID, nil), nil
+	return collect(one.CustomerID, nil)
 }
 
 // customersHoldPin answers whether every customer's branch set

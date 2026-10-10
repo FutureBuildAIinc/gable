@@ -3,18 +3,24 @@
 
 package serve
 
-// The customer branch wall on the routes whose request writes a named
-// customer's data (ADR 0007 section 5.5, the lead's ruling on the sweep): the
-// tax exemption writes and the customer priced rules, plain and category,
-// single and bulk. A branch bound key reaches them only while the customer
-// its request names, or that the row it acts on belongs to, holds the pin
-// among that customer's branches; the reads keep the role guard alone.
+// The customer branch wall on the routes whose request reads or writes a
+// named customer's data (ADR 0007 section 5.5): the tax exemption routes and
+// preview, the customer priced rules (plain and category, single and bulk)
+// and the customer scoped reads that name a customer in a path, a query or a
+// body. A branch bound key reaches them only while every customer the
+// request names, or that the rows it acts on belong to, holds the pin among
+// that customer's branches. A request that names no customer passes, except
+// where the write would then be dealer wide: a pricing rule that names
+// neither a customer nor a job, and a category rule (or a bulk element) that
+// names no customer, price every branch's customers, so the resolver refuses
+// them (ErrBodyRefused). The routes no customer can confine (the unfiltered
+// lists, the matrix) are REFUSED by the route allowlist gate before these
+// walls run.
 
 import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -43,16 +49,130 @@ func exemptionCustomerOf(db *database.DB) func(ctx context.Context, id uuid.UUID
 	}
 }
 
-// categoryRuleCustomerOf resolves the customer a category pricing rule row is
-// scoped to. A row that does not exist, or that targets a tier or an account
-// rather than a customer, names no customer.
-func categoryRuleCustomerOf(db *database.DB) func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
-	return func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+// exemptionCustomerPathOf resolves the customer the exemption read's path
+// names (the {customerID} value): the customer named is the customer read,
+// whoever's rows they are, so it is confined exactly like a write that names
+// one.
+func exemptionCustomerPathOf() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		raw := r.PathValue("customerID")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		return []uuid.UUID{id}, nil
+	}
+}
+
+// previewCustomerOf resolves the customer the tax preview's body names. A
+// preview that names no customer is a plain rate calculation and passes; one
+// that names a customer reads that customer's exemptions and is confined.
+func previewCustomerOf() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		var body struct {
+			CustomerID string `json:"customer_id"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		if id, err := uuid.Parse(body.CustomerID); err == nil {
+			return []uuid.UUID{id}, nil
+		}
+		return nil, nil
+	}
+}
+
+// queryCustomerOf resolves the customer a query parameter names. A value that
+// does not parse names nothing the wall can hold and passes to the handler's
+// own validation; an absent value passes unless required says otherwise (the
+// category rule list with no customer is the dealer wide list).
+func queryCustomerOf(name string, required bool) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		vals := r.URL.Query()[name]
+		if len(vals) == 0 {
+			if required {
+				return nil, middleware.ErrBodyRefused
+			}
+			return nil, nil
+		}
+		if id, err := uuid.Parse(vals[0]); err == nil {
+			return []uuid.UUID{id}, nil
+		}
+		return nil, nil
+	}
+}
+
+// pricingRuleCustomersOf resolves the customers a pricing rule create names:
+// its body customer_id, and the customer of the job its job_id names (a
+// projects row belongs to exactly one customer, and a rule on the job prices
+// that customer whoever else it names, so both are checked). A body that
+// names neither is a dealer wide write and is refused (ErrBodyRefused).
+func pricingRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		if db == nil {
+			return nil, errors.New("pricing rule customer lookup: no database")
+		}
+		var body struct {
+			CustomerID string `json:"customer_id"`
+			JobID      string `json:"job_id"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		var out []uuid.UUID
+		if id, err := uuid.Parse(body.CustomerID); err == nil {
+			out = append(out, id)
+		}
+		if raw := body.JobID; raw != "" {
+			if job, err := uuid.Parse(raw); err == nil {
+				var customer *uuid.UUID
+				err := db.GetExecutor(r.Context()).QueryRow(r.Context(),
+					`SELECT customer_id FROM projects WHERE id = $1`, job).Scan(&customer)
+				if errors.Is(err, pgx.ErrNoRows) {
+					// A job that does not exist names nothing; the handler's
+					// own foreign key answer covers it.
+					if len(out) == 0 {
+						return nil, middleware.ErrBodyRefused
+					}
+					return out, nil
+				}
+				if err != nil {
+					return nil, err
+				}
+				if customer != nil {
+					out = append(out, *customer)
+				}
+			}
+		}
+		if len(out) == 0 {
+			return nil, middleware.ErrBodyRefused
+		}
+		return out, nil
+	}
+}
+
+// categoryRuleRowCustomerOf resolves the customer a category rule row is
+// scoped to. A row that does not exist names nothing (the handler's own 404
+// answers); a row that targets a tier or the whole account names no customer,
+// is dealer wide, and is refused.
+func categoryRuleRowCustomerOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 		if db == nil {
 			return nil, errors.New("category rule customer lookup: no database")
 		}
+		raw := r.PathValue("id")
+		if raw == "" {
+			return nil, nil
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
 		var customer *uuid.UUID
-		err := db.GetExecutor(ctx).QueryRow(ctx,
+		err = db.GetExecutor(r.Context()).QueryRow(r.Context(),
 			`SELECT customer_id FROM category_pricing_rules WHERE id = $1`, id).Scan(&customer)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -60,16 +180,22 @@ func categoryRuleCustomerOf(db *database.DB) func(ctx context.Context, id uuid.U
 		if err != nil {
 			return nil, err
 		}
-		return customer, nil
+		if customer == nil {
+			return nil, middleware.ErrBodyRefused
+		}
+		return []uuid.UUID{*customer}, nil
 	}
 }
 
 // bulkRuleCustomersOf resolves the customers a bulk delete's rule ids belong
-// to. A body that is not exactly one complete JSON value is refused for a
-// bound key (ErrBodyRefused), and an id that does not parse is left to the
-// handler's own 400.
+// to. An id that does not parse is left to the handler's own 400; an id that
+// names a tier or account row (no customer) is a dealer wide delete and
+// refuses the whole request.
 func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		if db == nil {
+			return nil, errors.New("category rule customer lookup: no database")
+		}
 		var body struct {
 			IDs []string `json:"ids"`
 		}
@@ -85,7 +211,16 @@ func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Requ
 		if len(ids) == 0 {
 			return nil, nil
 		}
-		rows, err := db.GetExecutor(ctx).Query(ctx,
+		var dealerWide int
+		if err := db.GetExecutor(r.Context()).QueryRow(r.Context(),
+			`SELECT COUNT(*) FROM category_pricing_rules WHERE id = ANY($1) AND customer_id IS NULL`, ids).
+			Scan(&dealerWide); err != nil {
+			return nil, err
+		}
+		if dealerWide > 0 {
+			return nil, middleware.ErrBodyRefused
+		}
+		rows, err := db.GetExecutor(r.Context()).Query(r.Context(),
 			`SELECT DISTINCT customer_id FROM category_pricing_rules WHERE id = ANY($1) AND customer_id IS NOT NULL`, ids)
 		if err != nil {
 			return nil, err
@@ -103,22 +238,29 @@ func bulkRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.Requ
 	}
 }
 
-// taxCustomerWall composes the tax role guard with the customer branch wall
-// on the exemption writes: the create's body names the customer, the delete's
-// row belongs to one. The preview and the exemption read keep the role guard
-// alone.
+// taxCustomerWall composes the tax role guard with the customer branch wall:
+// the exemption create's body names the customer, the delete's row belongs
+// to one, the read's path names one, and the preview's body names one when
+// it names any.
 func taxCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
 	create := middleware.Compose(role, keyWall.CustomerBodyBranch())
 	remove := middleware.Compose(role, keyWall.CustomerRowBranch(exemptionCustomerOf(db)))
+	read := middleware.Compose(role, keyWall.CustomerBranch(exemptionCustomerPathOf()))
+	preview := middleware.Compose(role, keyWall.CustomerBranch(previewCustomerOf()))
 	return func(next http.Handler) http.Handler {
-		createHandler, removeHandler, roleHandler := create(next), remove(next), role(next)
+		createHandler, removeHandler, readHandler, previewHandler, roleHandler :=
+			create(next), remove(next), read(next), preview(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/tax/exemptions":
+			switch r.Pattern {
+			case "POST /api/v1/tax/exemptions":
 				createHandler.ServeHTTP(w, r)
-			case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/api/v1/tax/exemptions/"):
+			case "DELETE /api/v1/tax/exemptions/{id}":
 				removeHandler.ServeHTTP(w, r)
+			case "GET /api/v1/tax/exemptions/{customerID}":
+				readHandler.ServeHTTP(w, r)
+			case "POST /api/v1/tax/preview":
+				previewHandler.ServeHTTP(w, r)
 			default:
 				roleHandler.ServeHTTP(w, r)
 			}
@@ -127,47 +269,60 @@ func taxCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles .
 }
 
 // pricingRulesCustomerWall composes the pricing role guard with the customer
-// branch wall on the rule create (its body names the customer). The reads and
-// the calculation keep the role guard alone; a rule that names no customer is
-// dealer wide and passes.
-func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, roles ...string) func(http.Handler) http.Handler {
+// branch wall on the rule create (its body names the customer, its job names
+// one, and a body naming neither is dealer wide and refused) and on the
+// calculation (its query names the customer). The unfiltered rule list is
+// REFUSED by the route allowlist gate and never reaches these arms.
+func pricingRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	create := middleware.Compose(role, keyWall.CustomerBodyBranch())
+	create := middleware.Compose(role, keyWall.CustomerBranch(pricingRuleCustomersOf(db)))
+	calculate := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", false)))
 	return func(next http.Handler) http.Handler {
-		createHandler, roleHandler := create(next), role(next)
+		createHandler, calculateHandler, roleHandler := create(next), calculate(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodPost && r.URL.Path == "/api/v1/pricing/rules" {
+			switch r.Pattern {
+			case "POST /api/v1/pricing/rules":
 				createHandler.ServeHTTP(w, r)
-				return
+			case "GET /api/v1/pricing/calculate":
+				calculateHandler.ServeHTTP(w, r)
+			default:
+				roleHandler.ServeHTTP(w, r)
 			}
-			roleHandler.ServeHTTP(w, r)
 		})
 	}
 }
 
 // categoryRulesCustomerWall composes the category pricing role guard with the
-// customer branch wall on the rule writes: the create's body names the
-// customer, the update and the delete act on a row that belongs to one, the
-// bulk upsert names one per element, and the bulk delete's ids belong to
-// theirs. The reads keep the role guard alone.
+// customer branch wall: the list's query names the customer (the unfiltered
+// list is refused by the gate, so the parameter is required here), the create
+// and the bulk upsert name one per element (a tier target names none and is
+// refused), the update, the delete and the audit act on a row that belongs
+// to one, the bulk delete's ids belong to theirs, and the resolve preview
+// names a customer when its query carries one. The matrix is REFUSED by the
+// route allowlist gate; the categories routes are stated limits.
 func categoryRulesCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	wall := middleware.Compose(role, keyWall.CustomerBodyBranch())
-	byRow := middleware.Compose(role, keyWall.CustomerRowBranch(categoryRuleCustomerOf(db)))
+	body := middleware.Compose(role, keyWall.CustomerBodyBranchRequired())
+	byRow := middleware.Compose(role, keyWall.CustomerBranch(categoryRuleRowCustomerOf(db)))
 	byBulkIDs := middleware.Compose(role, keyWall.CustomerBranch(bulkRuleCustomersOf(db)))
+	list := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", true)))
+	resolve := middleware.Compose(role, keyWall.CustomerBranch(queryCustomerOf("customer_id", false)))
 	return func(next http.Handler) http.Handler {
-		wallHandler, rowHandler, bulkHandler, roleHandler := wall(next), byRow(next), byBulkIDs(next), role(next)
+		bodyHandler, rowHandler, bulkHandler, listHandler, resolveHandler, roleHandler :=
+			body(next), byRow(next), byBulkIDs(next), list(next), resolve(next), role(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/pricing/category-rules/bulk":
-				wallHandler.ServeHTTP(w, r) // each element names its customer
-			case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/pricing/category-rules/bulk":
-				bulkHandler.ServeHTTP(w, r) // the rows the ids name belong to theirs
-			case r.Method == http.MethodPost && r.URL.Path == "/api/v1/pricing/category-rules":
-				wallHandler.ServeHTTP(w, r)
-			case (r.Method == http.MethodPut || r.Method == http.MethodDelete) &&
-				strings.HasPrefix(r.URL.Path, "/api/v1/pricing/category-rules/"):
+			switch r.Pattern {
+			case "GET /api/v1/pricing/category-rules":
+				listHandler.ServeHTTP(w, r)
+			case "POST /api/v1/pricing/category-rules", "POST /api/v1/pricing/category-rules/bulk":
+				bodyHandler.ServeHTTP(w, r)
+			case "DELETE /api/v1/pricing/category-rules/bulk":
+				bulkHandler.ServeHTTP(w, r)
+			case "PUT /api/v1/pricing/category-rules/{id}", "DELETE /api/v1/pricing/category-rules/{id}",
+				"GET /api/v1/pricing/category-rules/{id}/audit":
 				rowHandler.ServeHTTP(w, r)
+			case "GET /api/v1/pricing/resolve":
+				resolveHandler.ServeHTTP(w, r)
 			default:
 				roleHandler.ServeHTTP(w, r)
 			}
