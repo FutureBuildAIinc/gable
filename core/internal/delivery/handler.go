@@ -5,6 +5,7 @@ package delivery
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -723,6 +724,16 @@ func (h *Handler) HandleAssignOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	stop, warning, err := h.service.AssignOrderToRoute(r.Context(), draft, actor(r))
 	if err != nil {
+		// The lumber-index pre-ship gate (pricing.ErrUnresolvedExposure) is
+		// returned as is from AssignOrderToRoute: it is not an *httpx.Error,
+		// so httpx.WriteError would answer 500 internal_error. Map it onto the
+		// 409 conflict envelope with the exposure payload as blockers, the
+		// same way the order module does on its own routes (PR 80 review
+		// round 2 P2-3).
+		if payload := exposureGateBlockers(err); payload != nil {
+			writeExposureConflict(w, r, payload)
+			return
+		}
 		httpx.WriteError(w, r, err)
 		return
 	}
@@ -733,6 +744,37 @@ func (h *Handler) HandleAssignOrder(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", "/api/v1/delivery/deliveries/"+stop.ID.String())
 	httpx.WriteRevisionETag(w, stop.Revision)
 	writeJSON(w, http.StatusCreated, response)
+}
+
+// unresolvedExposure is the duck-typed interface pricing.ErrUnresolvedExposure
+// satisfies, so the exposure payload renders as blockers inside the wire's
+// error envelope without the delivery package importing pricing.
+type unresolvedExposure interface {
+	UnresolvedExposurePayload() map[string]any
+}
+
+// exposureGateBlockers maps an unresolved exposure gate error to the wire's 409
+// envelope with its payload as blockers; nil when err is something else.
+func exposureGateBlockers(err error) map[string]any {
+	var ue unresolvedExposure
+	if errors.As(err, &ue) {
+		return ue.UnresolvedExposurePayload()
+	}
+	return nil
+}
+
+// writeExposureConflict writes a 409 with the exposure payload broken into
+// field details (the same shape the order module's HandleExposureGate
+// produces; the code "conflict" and the named blockers are the wire contract
+// both modules share).
+func writeExposureConflict(w http.ResponseWriter, r *http.Request, payload map[string]any) {
+	details := []httpx.FieldError{}
+	for k, val := range payload {
+		details = append(details, httpx.FieldError{Code: "exposure_" + k, Message: fmt.Sprint(val)})
+	}
+	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+		Message: "the order's source quote has unresolved index exposure",
+		Details: details})
 }
 
 func (h *Handler) HandleGetDelivery(w http.ResponseWriter, r *http.Request) {

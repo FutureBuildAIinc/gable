@@ -42,7 +42,10 @@ type fixture struct {
 
 // newFixture builds the module the way serve does (repository, service with
 // the outbox, handler) behind the global idempotency layer, with a customer,
-// a product and a branch tax rate of its own.
+// a product and a branch tax rate of its own. The fixture sets the default
+// branch's default_tax_rate so the order create lands on a configured branch,
+// and restores the value it read in cleanup so the fixture's write does not
+// leak to a neighbouring test in any package.
 func newFixture(t *testing.T, db *database.DB) *fixture {
 	t.Helper()
 	t.Setenv("AUTH_MODE", "dev")
@@ -56,6 +59,10 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price)
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
+	}
+	var oldRate *string
+	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
+		t.Fatalf("read default branch rate: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1
 		WHERE id = `+branch, f.branchRate); err != nil {
@@ -71,6 +78,9 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 
 	t.Cleanup(func() {
 		f.srv.Close()
+		if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate); err != nil {
+			t.Errorf("restore default branch rate to %v: %v", oldRate, err)
+		}
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, f.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, f.customerID)
@@ -958,6 +968,11 @@ func TestOrderTransitionsTable(t *testing.T) {
 // exempt customer pays nothing, and a branch with no configured rate refuses
 // the act.
 func TestOrderTaxResolution(t *testing.T) {
+	// The third case sets the default branch's rate to NULL: it deliberately
+	// tests the default branch fallback, so it owns the default branch's
+	// rate window and holds the cross-package outbox lock so a neighbouring
+	// package's tests do not see a half-set rate.
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	ctx := context.Background()

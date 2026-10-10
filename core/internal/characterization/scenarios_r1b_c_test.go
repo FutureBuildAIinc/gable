@@ -426,6 +426,54 @@ func r1bCMaskedGroups() []groupDef {
 				{name: "delivery.route.dispatch.empty", method: "POST", path: "/api/v1/delivery/routes/{c_route_empty}/transitions", maskMockGeo: true,
 					headers: map[string]string{"If-Match": `"1"`},
 					body:    map[string]any{"to": "in_transit"}},
+				// The empty route is in_transit and holds no stops; the
+				// in_transit completion path keeps the route_empty guard
+				// (PR 80 review round 1 P2-1: the guard was reachable but
+				// pinned by nothing before this step).
+				{name: "delivery.route.complete.empty_in_transit", method: "POST", path: "/api/v1/delivery/routes/{c_route_empty}/transitions",
+					headers: map[string]string{"If-Match": `"2"`},
+					body:    map[string]any{"to": "completed"}},
+			},
+		},
+		// A second completion on an already-completed route: 409
+		// invalid_state_transition (PR 80 review round 1 P2-2: the
+		// to=completed entry claimed a delivery.route.complete.completed
+		// golden that did not exist; the lifecycle never actually reaches
+		// COMPLETED, so the step lives in a self-contained group that drives
+		// its own route through dispatch, deliver and complete).
+		{
+			name: "delivery_route_complete_replay",
+			steps: []stepDef{
+				{
+					name: "delivery.route.create.completed", method: "POST", path: "/api/v1/delivery/routes",
+					body: map[string]any{
+						"vehicle_id": "{c_vehicle}", "driver_id": "{c_driver}", "scheduled_date": "{today+2}",
+						"notes": "r1b c replay route",
+					},
+					extract: map[string]string{"c_route_replay": "/id"},
+				},
+				{
+					name: "delivery.delivery.assign.replay", method: "POST", path: "/api/v1/delivery/deliveries", maskMockGeo: true,
+					body: map[string]any{
+						"route_id": "{c_route_replay}", "order_id": "{myOrder}", "stop_sequence": 1,
+						"delivery_instructions": "r1b c replay stop",
+					},
+					extract: map[string]string{"c_delivery_replay": "/delivery/id"},
+				},
+				{name: "delivery.route.dispatch.replay", method: "POST", path: "/api/v1/delivery/routes/{c_route_replay}/transitions", maskMockGeo: true,
+					headers: map[string]string{"If-Match": `"2"`},
+					body:    map[string]any{"to": "in_transit"}},
+				{name: "delivery.delivery.status.delivered.replay", method: "POST", path: "/api/v1/delivery/deliveries/{c_delivery_replay}/transitions", maskMockGeo: true,
+					body: map[string]any{
+						"to": "delivered", "revision": 1, "pod_proof_url": "/uploads/pod/golden.png", "pod_signed_by": "R1C Receiver",
+						"signature_data_url": "data:image/png;base64,AAAA",
+					}},
+				{name: "delivery.route.complete.replay", method: "POST", path: "/api/v1/delivery/routes/{c_route_replay}/transitions", maskMockGeo: true,
+					headers: map[string]string{"If-Match": `"3"`},
+					body:    map[string]any{"to": "completed"}},
+				{name: "delivery.route.complete.completed", method: "POST", path: "/api/v1/delivery/routes/{c_route_replay}/transitions",
+					headers: map[string]string{"If-Match": `"4"`},
+					body:    map[string]any{"to": "completed"}},
 			},
 		},
 		{

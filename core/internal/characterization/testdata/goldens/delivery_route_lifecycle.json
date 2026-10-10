@@ -533,11 +533,11 @@
           "code": "invalid_state_transition",
           "details": [
             {
-              "code": "stop_not_terminal",
-              "message": "every stop must be delivered, failed or partial before the route completes"
+              "code": "invalid_state",
+              "message": "only an in_transit route can be completed"
             }
           ],
-          "message": "cannot complete a route with 2 stop(s) not yet delivered, failed or partial"
+          "message": "cannot complete a route in status DRAFT"
         },
         "meta": {
           "request_id": "<id-17>"
@@ -565,11 +565,11 @@
           "code": "invalid_state_transition",
           "details": [
             {
-              "code": "route_empty",
-              "message": "the route holds no stops"
+              "code": "invalid_state",
+              "message": "only an in_transit route can be completed"
             }
           ],
-          "message": "a route with no stops cannot be completed"
+          "message": "cannot complete a route in status DRAFT"
         },
         "meta": {
           "request_id": "<id-18>"
@@ -1206,6 +1206,38 @@
         "updated_at": "<ts+0d>",
         "vehicle_id": "<id-8>",
         "vehicle_name": "R1C Truck Renamed"
+      }
+    }
+  },
+  {
+    "name": "delivery.route.complete.empty_in_transit",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/delivery/routes/<id-9>/transitions",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "to": "completed"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "details": [
+            {
+              "code": "route_empty",
+              "message": "the route holds no stops"
+            }
+          ],
+          "message": "a route with no stops cannot be completed"
+        },
+        "meta": {
+          "request_id": "<id-35>"
+        }
       }
     }
   }
