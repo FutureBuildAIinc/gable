@@ -242,38 +242,14 @@ func sanitiseStringChanged(s string) (string, bool) {
 	return out, true
 }
 
-// sanitiseChanges is no longer called: the JSON byte pass (sanitiseNULEscape)
-// catches every NUL in the changes at every depth in one rewrite of the
-// marshalled bytes, so a walk of the map would do the same work twice. Kept
-// here only so the unit test that pins its name keeps compiling if a future
-// reviewer reintroduces the walk; otherwise the function is dead code.
-//
-//nolint:unused
-func sanitiseChanges(in map[string]interface{}) map[string]interface{} {
-	if len(in) == 0 {
-		return in
-	}
-	out := make(map[string]interface{}, len(in))
-	for k, v := range in {
-		if s, ok := v.(string); ok {
-			out[k] = sanitiseString(s)
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
 // nulJSONEscape is the six bytes json.Marshal writes for a NUL byte in a
 // string. The jsonb parser rejects this with SQLSTATE 22P05 ("unsupported
-// Unicode escape sequence"). The replacement is the seven bytes
-// `\u005Cu0000` no, simpler: the brief says "the text `\\u0000`" which is
-// the seven bytes `\`, `\`, `u`, `0`, `0`, `0`, `0`. The jsonb parser
-// reads `\\` as an escaped backslash (one character) and the four
-// characters `u0000` as plain text (no leading backslash, so no escape),
-// producing the six characters `\u0000` with no NUL byte. The marker text
-// itself is NOT a valid JSON escape of NUL (the `\u0000` is preceded by
-// `\\`, so it is no longer a `\u` escape).
+// Unicode escape sequence"). The replacement is the seven bytes `\\u0000`:
+// the jsonb parser reads `\\` as an escaped backslash (one character)
+// and the four characters `u0000` as plain text (no leading backslash, so
+// no escape), producing the six characters `\u0000` with no NUL byte.
+// The marker text itself is NOT a valid JSON escape of NUL (the `\u0000`
+// is preceded by `\\`, so it is no longer a `\u` escape).
 var (
 	nulJSONEscape    = []byte(`\u0000`)
 	nulJSONMarker    = []byte(`\\u0000`)
