@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -359,6 +360,74 @@ func TestMachineKeyFinerAdminScopes(t *testing.T) {
 		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
 		if rec.Code != http.StatusForbidden {
 			t.Errorf("%s: %s %s = %d, want 403; body: %s", tc.name, tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// An admin path with a "." or ".." segment, or any path not equal to
+// path.Clean(path), is refused before the scope check, regardless of the
+// key's scope. The reviewer's P3-B: today those paths answer 307 (the
+// router's clean redirect) and the redirected request is authorised on the
+// clean form, so the ADR 0009 guarantee leans on the router. The hardening
+// refuses the dirty path outright, the most restrictive answer for a path
+// the request did not name cleanly. The clean path stays untouched.
+func TestMachineKeyAdminPathsDotSegmentRefused(t *testing.T) {
+	// Dirty paths: a "." or ".." segment, or a path that path.Clean would
+	// rewrite. The audit row the refusal writes carries the verbatim path
+	// so the trail tells the operator what the request actually asked for.
+	for _, tc := range []struct {
+		name, method, path string
+		scopes             []string
+	}{
+		{"admin:read refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:staff"}},
+		{"admin:read refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:staff"}},
+		{"admin:read refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:staff"}},
+		// Even the area scope that the clean path would satisfy is refused
+		// on the dirty form: the request did not name the clean area, so
+		// "the area scope reaches the area" cannot be the answer.
+		{"admin:settings refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:settings"}},
+		{"admin:settings refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:settings"}},
+		{"admin:staff refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:staff"}},
+	} {
+		aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+		if len(aud.calls) != 1 || aud.calls[0].action != middleware.AuditActionKeyScopeRefused {
+			t.Errorf("%s: audit calls = %+v, want one key.scope_refused", tc.name, aud.calls)
+		}
+		if rec.Code == http.StatusForbidden {
+			body := decodeError(t, rec)
+			if body.Error.Code != "forbidden" {
+				t.Errorf("%s: code = %q, want forbidden", tc.name, body.Error.Code)
+			}
+		}
+	}
+
+	// The clean path is unchanged: admin:settings still reaches the clean
+	// settings route, and admin:read is still refused on it (the area rule
+	// has not moved).
+	cleanCases := []struct {
+		name   string
+		scopes []string
+		method string
+		path   string
+		want   int
+	}{
+		{"clean settings with admin:settings", []string{"admin:settings"}, "GET", "/api/v1/admin/settings/ai", http.StatusOK},
+		{"clean settings refused for admin:read", []string{"admin:read"}, "GET", "/api/v1/admin/settings/ai", http.StatusForbidden},
+	}
+	for _, tc := range cleanCases {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != tc.want {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, tc.want, rec.Body.String())
 		}
 	}
 }
@@ -804,6 +873,61 @@ func TestRealKeyRefusalRowBoundedOnLongPath(t *testing.T) {
 	}
 	if len(stored) > 512 {
 		t.Fatalf("audit row stores a %d byte path, want at most 512", len(stored))
+	}
+}
+
+// The audit row a refused request writes survives a NUL byte in the path:
+// before the sanitiser the request's path reached the audit writer verbatim,
+// json.Marshal escaped the NUL to the JSON escape sequence "\u0000", and
+// Postgres jsonb rejected the row with SQLSTATE 22P05 ("unsupported Unicode
+// escape sequence"), so the refusal verdict stood but no row was recorded.
+// The sanitiser lives in the audit writer (one place, not per caller) and
+// replaces the NUL with a visible marker before the row is marshalled, so
+// the path is recorded and the audit trail is whole on a refused path that
+// holds whatever the URL contained.
+func TestRealKeyRefusalRowSurvivesNULInPath(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	// admin:staff is refused on /api/v1/admin/%00: the path's second segment
+	// is the NUL, not one of the declared finer scopes, so RequiredScopeForPath
+	// answers the coarse admin:read and the staff key does not hold it. The
+	// 403 is the verdict the reviewer saw; the audit row is what gets lost
+	// when the sanitiser is absent.
+	raw, id := createKey(t, db, "admin:staff")
+	h := &okHandler{}
+	chain := newDBAuth(t, db).Handler(h)
+
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/admin/%00", raw))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a refused path with NUL; body: %s", rec.Code, rec.Body.String())
+	}
+	if h.reached {
+		t.Fatal("handler must not be reached on a refused path")
+	}
+
+	// The row is present. Before the fix the INSERT raised SQLSTATE 22P05
+	// inside jsonb and no row was created, so this scan is the assertion
+	// that closes the regression: the trail of a refused request whose path
+	// holds a NUL is not lost.
+	var storedPath string
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'path' FROM audit_log
+		   WHERE actor_kind = 'key' AND actor_id = $1
+		     AND action = 'key.scope_refused'
+		   ORDER BY created_at DESC LIMIT 1`, id,
+	).Scan(&storedPath)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for key %s on a NUL path (the audit write must survive): %v", id, err)
+	}
+	if strings.ContainsRune(storedPath, '\x00') {
+		t.Fatalf("audit row still holds a raw NUL byte in the path: %q", storedPath)
+	}
+	if !strings.Contains(storedPath, "admin") || !strings.Contains(storedPath, `\u0000`) {
+		t.Fatalf("audit row path = %q, want the NUL replaced visibly (e.g. the literal text \\u0000)", storedPath)
+	}
+	if !utf8.ValidString(storedPath) {
+		t.Fatalf("audit row path is not valid UTF-8: %q", storedPath)
 	}
 }
 
