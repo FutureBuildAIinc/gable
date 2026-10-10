@@ -324,3 +324,50 @@ func TestResolveSetWarning(t *testing.T) {
 		t.Errorf("the SF row is stored canonically as (0.375, 1), got (%s, %s)", r.UnitQty.WireString(), r.StockQty.WireString())
 	}
 }
+
+// Rule 4's piece path anchors on a piece row only (review pr61-r5 P2-A): a
+// multi piece COUNT row (a DOZ) or a container (a BOX) listed first must not
+// stand in for the piece, so the board measure pair never depends on row
+// order. One 2x4x8 is 16/3 BF: against PCS stock BF is (1, 0.1875) and MBF
+// (1, 187.5); against LF stock BF is (1, 1.5).
+func TestResolveSetRule4AnchorsOnThePiece(t *testing.T) {
+	cat := seedCatalogue()
+	board := func(stock string) SetFacts {
+		return SetFacts{StockUOM: stock, HasCrossSection: true, ThicknessIn: q("2"), WidthIn: q("4"),
+			HasBoardLength: true, BoardLengthFT: q("8")}
+	}
+	for _, tc := range []struct {
+		name   string
+		stock  string
+		inputs []SetInput
+		uom    string
+		want   [2]httpx.Quantity
+	}{
+		{"DOZ first, stocked in PCS", "PCS", []SetInput{rowIn("DOZ", true, false, false), rowIn("PCS", true, false, true), rowIn("BF", true, false, false)},
+			"BF", [2]httpx.Quantity{q("1"), q("0.1875")}},
+		{"BOX first, stocked in PCS", "PCS", []SetInput{rowPair("BOX", "1", "96", true, false, false), rowIn("PCS", true, false, true), rowIn("MBF", true, false, false)},
+			"MBF", [2]httpx.Quantity{q("1"), q("187.5")}},
+		{"BOX first, stocked in LF", "LF", []SetInput{rowPair("BOX", "1", "768", true, false, false), rowIn("LF", true, false, true), rowIn("BF", true, false, false)},
+			"BF", [2]httpx.Quantity{q("1"), q("1.5")}},
+	} {
+		rows, _, err := ResolveSet(tc.inputs, board(tc.stock), cat)
+		if err != nil {
+			t.Fatalf("%s: resolves: %v", tc.name, err)
+		}
+		r, ok := findRow(rows, tc.uom)
+		if !ok {
+			t.Fatalf("%s: %s is missing", tc.name, tc.uom)
+		}
+		if r.UnitQty != tc.want[0] || r.StockQty != tc.want[1] {
+			t.Errorf("%s: %s row is (%s, %s); want (%s, %s)", tc.name, tc.uom,
+				r.UnitQty.WireString(), r.StockQty.WireString(), tc.want[0].WireString(), tc.want[1].WireString())
+		}
+	}
+
+	// The right BF pair sent beside a DOZ row is accepted, never refused for
+	// disagreeing with a pair derived through the dozen.
+	if _, _, err := ResolveSet([]SetInput{rowIn("DOZ", true, false, false), rowIn("PCS", true, false, true),
+		rowPair("BF", "1", "0.1875", true, false, false)}, board("PCS"), cat); err != nil {
+		t.Errorf("the right BF pair beside a DOZ row is accepted: %v", err)
+	}
+}

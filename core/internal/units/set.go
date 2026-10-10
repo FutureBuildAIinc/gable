@@ -315,6 +315,8 @@ func deriveAll(uom string, inputs []SetInput, facts SetFacts, catalogue map[stri
 	}
 	// Rule 4: a BOARD_MEASURE unit through LF (12 LF is t x w BF), or
 	// through the piece on a fixed length product (12 PCS is t x w x l BF).
+	// As in rule 3, the piece path anchors on a piece row only: a multi
+	// piece COUNT row (a DOZ) or a container (a BOX) is not the piece.
 	if unit.Dimension == DimBoardMeasure && facts.HasCrossSection {
 		tw := new(big.Rat).Mul(ratOf(facts.ThicknessIn), ratOf(facts.WidthIn))
 		for _, k := range knownRows() {
@@ -331,7 +333,7 @@ func deriveAll(uom string, inputs []SetInput, facts SetFacts, catalogue map[stri
 				if p, err := canonicalOfRats(num, den); err == nil {
 					out = append(out, p)
 				}
-			case kd.Dimension == DimCount && facts.HasBoardLength:
+			case kd.Dimension == DimCount && facts.HasBoardLength && isPieceUnit(kd):
 				// (pcs_u x t x w x l) of the unit is (pcs_s x 12 x refU) of stock.
 				num := new(big.Rat).Mul(ratOf(k.UnitQty), tw)
 				num.Mul(num, ratOf(facts.BoardLengthFT))
