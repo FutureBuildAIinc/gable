@@ -255,3 +255,21 @@ func TestBlockerDetailsCarryCodeWithoutField(t *testing.T) {
 		t.Errorf("message = %s", entry["message"])
 	}
 }
+
+// RULE (C2-4): the one 5xx written for the client, a card charge the system
+// could not give back, keeps its message (it names a gateway transaction id and
+// nothing else), under its own code; every other 5xx stays masked.
+func TestWriteErrorOperatorMessageSurvives5xx(t *testing.T) {
+	e := &Error{Status: http.StatusBadGateway, Code: CodeChargeNotReversed, Operator: true,
+		Message: "the card was charged and could not be reversed; reconcile gateway transaction gw-1"}
+	w := httptest.NewRecorder()
+	WriteError(w, writeErrorRequest(), e)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+	code, message, _, id := decodeErrorBody(t, w)
+	if code != "charge_not_reversed" || message != e.Message || id == "" {
+		t.Errorf("code %q message %q request_id %q, want the code, the message verbatim and a request id", code, message, id)
+	}
+}

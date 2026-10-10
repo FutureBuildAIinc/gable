@@ -1,50 +1,1292 @@
 [
   {
-    "name": "payment.create",
+    "name": "payment.create.unapplied",
     "request": {
       "method": "POST",
       "path": "/api/v1/payments",
       "body": {
-        "amount": 1000,
-        "invoice_id": "<id-1>",
-        "method": "CASH",
+        "amount_cents": 5000,
+        "customer_id": "<id-1>",
+        "method": "check",
+        "notes": "golden unapplied cash",
         "reference": "GOLD-PAY-1"
       }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "headers": {
+        "ETag": "\"1\""
+      },
+      "body": {
+        "amount_cents": 5000,
+        "applications": [],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [],
+        "revision": 1,
+        "status": "posted",
+        "unapplied_cents": 5000,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "payment.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments/<id-4>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "amount": 1000,
+        "amount_cents": 5000,
+        "applications": [],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
         "created_at": "<ts+0d>",
-        "id": "<id-2>",
-        "invoice_id": "<id-1>",
-        "method": "CASH",
-        "notes": "",
-        "reference": "GOLD-PAY-1"
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [],
+        "revision": 1,
+        "status": "posted",
+        "unapplied_cents": 5000,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
       }
+    }
+  },
+  {
+    "name": "payment.get.not_found",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments/<id-5>"
+    },
+    "response": {
+      "status": 404,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "not_found",
+          "message": "payment not found"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.list.unapplied",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?unapplied=true&customer_id=<id-1>&include=total"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "amount_cents": 5000,
+            "auth_code": null,
+            "branch_id": "<id-2>",
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "gateway_tx_id": null,
+            "gl_entry_id": "<id-3>",
+            "id": "<id-4>",
+            "job_id": null,
+            "method": "check",
+            "notes": "golden unapplied cash",
+            "number": "PAY-000045",
+            "order_id": null,
+            "received_on": "<day+0>",
+            "reference": "GOLD-PAY-1",
+            "revision": 1,
+            "status": "posted",
+            "unapplied_cents": 5000,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null,
+        "total": 1
+      }
+    }
+  },
+  {
+    "name": "payment.list.method_status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?method=check&status=posted&customer_id=<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "amount_cents": 5000,
+            "auth_code": null,
+            "branch_id": "<id-2>",
+            "card_brand": null,
+            "card_last4": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "customer_name": "Golden Harness Co",
+            "gateway_tx_id": null,
+            "gl_entry_id": "<id-3>",
+            "id": "<id-4>",
+            "job_id": null,
+            "method": "check",
+            "notes": "golden unapplied cash",
+            "number": "PAY-000045",
+            "order_id": null,
+            "received_on": "<day+0>",
+            "reference": "GOLD-PAY-1",
+            "revision": 1,
+            "status": "posted",
+            "unapplied_cents": 5000,
+            "updated_at": "<ts+0d>",
+            "void_reason": null,
+            "voided_at": null,
+            "voided_by": null
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "payment.list.bad_status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?status=POSTED"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be a comma separated list of: posted, voided"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.list.bad_unapplied",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?unapplied=maybe"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "unapplied",
+              "message": "must be true or false"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.list.unsupported_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments?offset=1"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "offset",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.create.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 0,
+        "applications": [
+          {
+            "amount_cents": -1,
+            "invoice_id": "not-a-uuid"
+          }
+        ],
+        "customer_id": "<id-1>",
+        "method": "bitcoin"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "amount_cents",
+              "message": "must be 1 cent or more"
+            },
+            {
+              "field": "applications[0].invoice_id",
+              "message": "must be a UUID in lowercase hyphenated form"
+            },
+            {
+              "field": "applications[0].amount_cents",
+              "message": "must be 1 cent or more"
+            },
+            {
+              "field": "method",
+              "message": "must be one of: cash, check, ach, other"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.create.card_method",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 100,
+        "customer_id": "<id-1>",
+        "method": "card"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "method",
+              "message": "a card payment is taken through POST /api/v1/payments/card"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.create.account_method",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 100,
+        "customer_id": "<id-1>",
+        "method": "account"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "method",
+              "message": "charging to account is not a payment"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.create.unknown_customer",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": {
+        "amount_cents": 100,
+        "customer_id": "<id-5>",
+        "method": "cash"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "customer_id",
+              "message": "no such customer"
+            }
+          ],
+          "message": "a referenced record does not exist"
+        },
+        "meta": {
+          "request_id": "<id-13>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.create.bad_body",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments",
+      "body": "not-an-object"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
+        },
+        "meta": {
+          "request_id": "<id-14>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.apply.missing_precondition",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 2000,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-16>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.apply.stale",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"9\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 2000,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-17>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.apply.partial",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"1\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 2000,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "headers": {
+        "ETag": "\"2\""
+      },
+      "body": {
+        "amount_cents": 5000,
+        "applications": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          }
+        ],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [],
+        "revision": 2,
+        "status": "posted",
+        "unapplied_cents": 3000,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "payment.apply.exceeds_unapplied",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 9000,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "exceeds_unapplied",
+              "message": "the payment has 3000 cents unapplied: 9000 cents were asked"
+            }
+          ],
+          "message": "the payment has 3000 cents unapplied: 9000 cents were asked"
+        },
+        "meta": {
+          "request_id": "<id-21>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.apply.exceeds_open",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 1143,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "exceeds_open_amount",
+              "message": "invoice IN-000051 has 1142 cents open: 1143 cents were asked"
+            }
+          ],
+          "message": "invoice IN-000051 has 1142 cents open: 1143 cents were asked"
+        },
+        "meta": {
+          "request_id": "<id-22>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.apply.discount_not_available",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 100,
+            "discount_cents": 10,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "discount_not_available",
+              "message": "the early pay discount of invoice IN-000051 is not available on this date"
+            }
+          ],
+          "message": "the early pay discount of invoice IN-000051 is not available on this date"
+        },
+        "meta": {
+          "request_id": "<id-23>"
+        }
+      }
+    }
+  },
+  {
+    "name": "invoice.after_partial_payment",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices/<id-15>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
     }
   },
   {
     "name": "payment.history",
     "request": {
       "method": "GET",
-      "path": "/api/v1/invoices/<id-1>/payments"
+      "path": "/api/v1/invoices/<id-15>/payments"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "amount": 1000,
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "invoice_id": "<id-1>",
-          "method": "CASH",
-          "notes": "",
-          "reference": "GOLD-PAY-1"
+      "body": {
+        "items": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          }
+        ],
+        "limit": 1,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "payment.apply.closing",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"2\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 1142,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_cents": 5000,
+        "applications": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          },
+          {
+            "act_id": "<id-24>",
+            "amount_cents": 1142,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-25>",
+            "id": "<id-26>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": null,
+            "reversal_reason": null,
+            "reversed_at": null,
+            "reversed_by": null,
+            "reversed_on": null
+          }
+        ],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [],
+        "revision": 3,
+        "status": "posted",
+        "unapplied_cents": 1858,
+        "updated_at": "<ts+0d>",
+        "void_reason": null,
+        "voided_at": null,
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "invoice.after_closing_payment",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices/<id-15>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "payment.apply.void_invoice_target",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/applications",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "applications": [
+          {
+            "amount_cents": 1,
+            "invoice_id": "<id-15>"
+          }
+        ]
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "exceeds_open_amount",
+              "message": "invoice IN-000051 has 0 cents open: 1 cents were asked"
+            }
+          ],
+          "message": "invoice IN-000051 has 0 cents open: 1 cents were asked"
+        },
+        "meta": {
+          "request_id": "<id-27>"
         }
-      ]
+      }
+    }
+  },
+  {
+    "name": "payment.refund.exceeds_unapplied",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/refunds",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "amount_cents": 3000,
+        "reason": "too much"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "conflict",
+          "details": [
+            {
+              "code": "exceeds_unapplied",
+              "message": "the payment has 1858 cents unapplied: 3000 cents were asked"
+            }
+          ],
+          "message": "the payment has 1858 cents unapplied: 3000 cents were asked"
+        },
+        "meta": {
+          "request_id": "<id-28>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.refund.invalid",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/refunds",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "amount_cents": 0
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "amount_cents",
+              "message": "must be 1 cent or more"
+            },
+            {
+              "field": "reason",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-29>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.refund",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/refunds",
+      "headers": {
+        "If-Match": "\"3\""
+      },
+      "body": {
+        "amount_cents": 500,
+        "reason": "golden refund"
+      }
+    },
+    "response": {
+      "status": 201,
+      "content_type": "application/json",
+      "body": {
+        "amount_cents": 500,
+        "created_at": "<ts+0d>",
+        "credit_memo_id": null,
+        "gateway_refund_id": null,
+        "gl_entry_id": "<id-30>",
+        "id": "<id-31>",
+        "method": "check",
+        "payment_id": "<id-4>",
+        "reason": "golden refund",
+        "refunded_on": "<day+0>",
+        "status": "COMPLETE"
+      }
+    }
+  },
+  {
+    "name": "payment.transition.needs_reason",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/transitions",
+      "headers": {
+        "If-Match": "\"4\""
+      },
+      "body": {
+        "to": "voided"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "reason",
+              "message": "is required to void a payment"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-32>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.transition.posted",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/transitions",
+      "headers": {
+        "If-Match": "\"4\""
+      },
+      "body": {
+        "reason": "no",
+        "to": "posted"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "a payment is voided by a transition; posted is how it starts"
+        },
+        "meta": {
+          "request_id": "<id-33>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.void",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/transitions",
+      "headers": {
+        "If-Match": "\"4\""
+      },
+      "body": {
+        "reason": "golden void",
+        "to": "voided"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_cents": 5000,
+        "applications": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": "<id-34>",
+            "reversal_reason": "golden void",
+            "reversed_at": "<ts+0d>",
+            "reversed_by": null,
+            "reversed_on": "<day+0>"
+          },
+          {
+            "act_id": "<id-24>",
+            "amount_cents": 1142,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-25>",
+            "id": "<id-26>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": "<id-35>",
+            "reversal_reason": "golden void",
+            "reversed_at": "<ts+0d>",
+            "reversed_by": null,
+            "reversed_on": "<day+0>"
+          }
+        ],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [
+          {
+            "amount_cents": 500,
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "gateway_refund_id": null,
+            "gl_entry_id": "<id-30>",
+            "id": "<id-31>",
+            "method": "check",
+            "payment_id": "<id-4>",
+            "reason": "golden refund",
+            "refunded_on": "<day+0>",
+            "status": "COMPLETE"
+          }
+        ],
+        "revision": 5,
+        "status": "voided",
+        "unapplied_cents": 0,
+        "updated_at": "<ts+0d>",
+        "void_reason": "golden void",
+        "voided_at": "<ts+0d>",
+        "voided_by": null
+      }
+    }
+  },
+  {
+    "name": "invoice.after_void",
+    "mask_body": true,
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/invoices/<id-15>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": "<body>"
+    }
+  },
+  {
+    "name": "payment.void.again",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/payments/<id-4>/transitions",
+      "headers": {
+        "If-Match": "\"5\""
+      },
+      "body": {
+        "reason": "twice",
+        "to": "voided"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "invalid_state_transition",
+          "message": "the payment is already voided"
+        },
+        "meta": {
+          "request_id": "<id-36>"
+        }
+      }
+    }
+  },
+  {
+    "name": "payment.get.voided",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/payments/<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_cents": 5000,
+        "applications": [
+          {
+            "act_id": "<id-18>",
+            "amount_cents": 2000,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-19>",
+            "id": "<id-20>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": "<id-34>",
+            "reversal_reason": "golden void",
+            "reversed_at": "<ts+0d>",
+            "reversed_by": null,
+            "reversed_on": "<day+0>"
+          },
+          {
+            "act_id": "<id-24>",
+            "amount_cents": 1142,
+            "applied_by": null,
+            "applied_on": "<day+0>",
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "currency": "USD",
+            "customer_id": "<id-1>",
+            "gl_entry_id": "<id-25>",
+            "id": "<id-26>",
+            "invoice_id": "<id-15>",
+            "kind": "payment",
+            "payment_id": "<id-4>",
+            "reason": null,
+            "reversal_gl_entry_id": "<id-35>",
+            "reversal_reason": "golden void",
+            "reversed_at": "<ts+0d>",
+            "reversed_by": null,
+            "reversed_on": "<day+0>"
+          }
+        ],
+        "auth_code": null,
+        "branch_id": "<id-2>",
+        "card_brand": null,
+        "card_last4": null,
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "customer_id": "<id-1>",
+        "customer_name": "Golden Harness Co",
+        "gateway_tx_id": null,
+        "gl_entry_id": "<id-3>",
+        "id": "<id-4>",
+        "job_id": null,
+        "method": "check",
+        "notes": "golden unapplied cash",
+        "number": "PAY-000045",
+        "order_id": null,
+        "received_on": "<day+0>",
+        "reference": "GOLD-PAY-1",
+        "refunds": [
+          {
+            "amount_cents": 500,
+            "created_at": "<ts+0d>",
+            "credit_memo_id": null,
+            "gateway_refund_id": null,
+            "gl_entry_id": "<id-30>",
+            "id": "<id-31>",
+            "method": "check",
+            "payment_id": "<id-4>",
+            "reason": "golden refund",
+            "refunded_on": "<day+0>",
+            "status": "COMPLETE"
+          }
+        ],
+        "revision": 5,
+        "status": "voided",
+        "unapplied_cents": 0,
+        "updated_at": "<ts+0d>",
+        "void_reason": "golden void",
+        "voided_at": "<ts+0d>",
+        "voided_by": null
+      }
     }
   },
   {
@@ -53,8 +1295,7 @@
       "method": "POST",
       "path": "/api/v1/payments/intent",
       "body": {
-        "amount": 100,
-        "invoice_id": "<id-1>"
+        "amount_cents": 100
       }
     },
     "response": {
@@ -62,12 +1303,247 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "unavailable",
+          "message": "internal error"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-37>"
         }
+      }
+    }
+  },
+  {
+    "name": "payment.events",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=payment.recorded,payment.applied,payment.unapplied,payment.refunded,payment.voided,invoice.partial,invoice.paid,invoice.reopened&limit=20"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 5000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "method": "CHECK",
+              "number": "PAY-000045",
+              "revision": 1,
+              "status": "posted",
+              "unapplied_cents": 5000
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-38>",
+            "org": "default",
+            "type": "payment.recorded"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 2000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "invoice_ids": [
+                "<id-15>"
+              ],
+              "number": "PAY-000045",
+              "revision": 2,
+              "status": "posted",
+              "unapplied_cents": 3000
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-39>",
+            "org": "default",
+            "type": "payment.applied"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "from_status": "unpaid",
+              "number": "IN-000051",
+              "open_cents": 1142,
+              "revision": 2,
+              "status": "partial",
+              "total_cents": 3142
+            },
+            "entity": {
+              "id": "<id-15>",
+              "kind": "invoice"
+            },
+            "event_id": "<id-40>",
+            "org": "default",
+            "type": "invoice.partial"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 1142,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "invoice_ids": [
+                "<id-15>"
+              ],
+              "number": "PAY-000045",
+              "revision": 3,
+              "status": "posted",
+              "unapplied_cents": 1858
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-41>",
+            "org": "default",
+            "type": "payment.applied"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "from_status": "partial",
+              "number": "IN-000051",
+              "open_cents": 0,
+              "revision": 3,
+              "status": "paid",
+              "total_cents": 3142
+            },
+            "entity": {
+              "id": "<id-15>",
+              "kind": "invoice"
+            },
+            "event_id": "<id-42>",
+            "org": "default",
+            "type": "invoice.paid"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 500,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "number": "PAY-000045",
+              "refund_id": "<id-31>",
+              "revision": 4,
+              "status": "posted",
+              "unapplied_cents": 1358
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-43>",
+            "org": "default",
+            "type": "payment.refunded"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 2000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "invoice_ids": [
+                "<id-15>"
+              ],
+              "number": "PAY-000045",
+              "revision": 5,
+              "status": "posted",
+              "unapplied_cents": 0
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-44>",
+            "org": "default",
+            "type": "payment.unapplied"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 1142,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "invoice_ids": [
+                "<id-15>"
+              ],
+              "number": "PAY-000045",
+              "revision": 5,
+              "status": "posted",
+              "unapplied_cents": 0
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-45>",
+            "org": "default",
+            "type": "payment.unapplied"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "from_status": "paid",
+              "number": "IN-000051",
+              "open_cents": 3142,
+              "revision": 4,
+              "status": "unpaid",
+              "total_cents": 3142
+            },
+            "entity": {
+              "id": "<id-15>",
+              "kind": "invoice"
+            },
+            "event_id": "<id-46>",
+            "org": "default",
+            "type": "invoice.reopened"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": "<id-2>",
+            "data": {
+              "amount_cents": 5000,
+              "currency": "USD",
+              "customer_id": "<id-1>",
+              "from_status": "posted",
+              "number": "PAY-000045",
+              "revision": 5,
+              "status": "voided",
+              "unapplied_cents": 0
+            },
+            "entity": {
+              "id": "<id-4>",
+              "kind": "payment"
+            },
+            "event_id": "<id-47>",
+            "org": "default",
+            "type": "payment.voided"
+          }
+        ],
+        "limit": 20,
+        "next_cursor": "<cursor>"
       }
     }
   }
