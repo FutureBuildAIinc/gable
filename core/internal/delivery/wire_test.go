@@ -1231,9 +1231,10 @@ func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
 			status = "PENDING"
 		}
 		if err := f.db.Pool.QueryRow(ctx, `
-			INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status)
-			VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-			uuid.New(), route, orders[i], i+1, status).Scan(&stops[i]); err != nil {
+			INSERT INTO deliveries (id, route_id, order_id, stop_sequence, status, latitude, longitude)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+			uuid.New(), route, orders[i], i+1, status,
+			49.0+float64(i)*0.0001, -119.0+float64(i)*0.0001).Scan(&stops[i]); err != nil {
 			t.Fatalf("stop %d: %v", i, err)
 		}
 	}
@@ -1278,12 +1279,34 @@ func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
 		t.Errorf("reorder with every stop = %d %s, want 200 (read truncated at 200)", res.status, res.raw)
 	}
 
-	// RULE (PR 70 review round 5 P3-2): the optimize gate must read every
-	// stop of the route (the r4 fix used AllDeliveriesByRoute; a mutation
-	// back to ListDeliveriesByRoute with Limit 200 was the surviving
-	// mutant M7). After the reorder the route has 206 stops; the optimize
-	// request returns 200 and the route document it answers with embeds
-	// every one of them.
+	// RULE (PR 70 review round 5 P3-2, sharpened in round 7 P3-1 and PR 79
+	// review round 1 P2-1): the optimize gate must read every stop of the
+	// route (the r4 fix used AllDeliveriesByRoute; a mutation back to
+	// ListDeliveriesByRoute with Limit 200 was the surviving mutant O1/O2).
+	// The route now has 206 stops with coordinates, so optimize actually
+	// runs. The optimize request returns 200, the route document embeds
+	// every stop, and the assertion captures each stop's revision before
+	// and after the optimize call itself (the preceding reorder had
+	// already moved the revisions to N, so the assertion is that every
+	// stop's revision advanced strictly across the optimize POST alone;
+	// a capped read leaves stops 201..206 at their pre-optimize revision
+	// and the assertion below fails for those stops).
+	beforeRevs := map[uuid.UUID]int64{}
+	rows, err := f.db.Pool.Query(ctx,
+		`SELECT id, revision FROM deliveries WHERE route_id = $1`, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var rev int64
+		if err := rows.Scan(&id, &rev); err != nil {
+			t.Fatal(err)
+		}
+		beforeRevs[id] = rev
+	}
+	rows.Close()
+
 	res = f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+route.String(), "", nil)
 	etag = res.header.Get("ETag")
 	rev = strings.TrimSuffix(strings.TrimPrefix(etag, `"`), `"`)
@@ -1295,6 +1318,41 @@ func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
 	stopsBody, _ := res.body["stops"].([]any)
 	if len(stopsBody) != 206 {
 		t.Errorf("optimize stops = %d, want 206 (the optimize read must see every stop, not the first 200)", len(stopsBody))
+	}
+
+	var untouched, notAdvanced int
+	if err := f.db.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM deliveries WHERE route_id = $1 AND revision = 1`, route).Scan(&untouched); err != nil {
+		t.Fatal(err)
+	}
+	if untouched != 0 {
+		t.Errorf("%d stops were not touched by optimize (revision stayed at 1); the optimize read was capped, the route had 206 stops total",
+			untouched)
+	}
+	rows, err = f.db.Pool.Query(ctx,
+		`SELECT id, revision FROM deliveries WHERE route_id = $1`, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id uuid.UUID
+		var after int64
+		if err := rows.Scan(&id, &after); err != nil {
+			t.Fatal(err)
+		}
+		before, ok := beforeRevs[id]
+		if !ok {
+			t.Errorf("stop %s present after optimize but not in the pre-optimize snapshot", id)
+			continue
+		}
+		if after <= before {
+			notAdvanced++
+		}
+	}
+	rows.Close()
+	if notAdvanced != 0 {
+		t.Errorf("%d stops did not advance their revision across the optimize call alone; the optimize read was capped (a LIMIT 200 mutant would touch only 200 stops)",
+			notAdvanced)
 	}
 }
 
