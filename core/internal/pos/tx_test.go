@@ -12,8 +12,10 @@ package pos_test
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
@@ -304,4 +306,83 @@ func (f *fixture) completeSaleOn(register, saleID string, tenders ...map[string]
 	return f.do("POST", "/api/v1/pos/transactions/"+saleID+"/complete",
 		map[string]any{"tenders": tenders, "revision": num(f.t, cur, "revision")},
 		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
+}
+
+// RULE (third review P2-3): the return cap's in-transaction recheck is the
+// guard that holds under a race: three concurrent returns of the one unit a
+// sale sold let exactly one through (the pre-transaction check passes for
+// every contender; the recheck under the sale row lock counts the winner).
+func TestThreeConcurrentReturnsOfOneUnitLetOneThrough(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	f.ensureOpenTill(t)
+	saleID, body := f.saleOf("1", tender("cash", 599))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// Park every contender past its pre-transaction check: hold the sale row
+	// FOR UPDATE, let the three returns run their guards (they read committed
+	// rows and pass), then release. All three reach the in-transaction cap
+	// recheck under the row lock, where only one may pass.
+	ctx := context.Background()
+	park, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := park.Exec(ctx, `SELECT 1 FROM pos_transactions WHERE id = $1 FOR UPDATE`, saleID); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	codes := make([]int, 3)
+	blockersOf := make([]string, 3)
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r := f.returnOn(t, saleID, lineID, "1")
+			mu.Lock()
+			codes[i] = r.status
+			if r.status != http.StatusCreated {
+				_, blockers, _ := errorOf(t, r)
+				if len(blockers) > 0 {
+					blockersOf[i] = blockers[0]
+				}
+				if blockersOf[i] == "" {
+					t.Errorf("loser %d carried no blocker: %s", i, string(r.raw))
+				}
+			}
+			mu.Unlock()
+		}(i)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := park.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	wins := 0
+	for _, st := range codes {
+		if st == http.StatusCreated {
+			wins++
+		}
+	}
+	if wins != 1 || len(codes) != 3 {
+		t.Fatalf("return codes = %v, want exactly one 201 and two 409", codes)
+	}
+	// the refusals are the cap's, named: the recheck under the sale row lock
+	// counted the winner before these were allowed
+	for i, st := range codes {
+		if st == http.StatusCreated {
+			continue
+		}
+		if st != http.StatusConflict || blockersOf[i] != "exceeds_sold" {
+			t.Errorf("loser %d = %d %q, want 409 exceeds_sold (the in-transaction cap recheck)", i, st, blockersOf[i])
+		}
+	}
+	// the drawer paid one refund: the sale's 599 in, one 599 out
+	if got := f.accountBalance("1010"); got != 0 {
+		t.Errorf("cash balance = %d, want 0 (the sale in, exactly one refund out)", got)
+	}
+	if got := f.stock(); got != "100.0000/0.0000" {
+		t.Errorf("stock = %s, want 100 (the one unit back once)", got)
+	}
+	f.assertARInvariants(t)
 }
