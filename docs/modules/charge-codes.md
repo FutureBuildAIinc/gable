@@ -40,7 +40,7 @@ CONFLICT (code) DO NOTHING`); a dealer is free to add codes for
 in state delivery, will call, environmentally adjusted pricing, or
 any other fee, and to set `taxable` per jurisdiction.
 
-The dealer's owner or office manager adds a code through
+The dealer's owner, an admin or the finance team adds a code through
 `POST /charge-codes`; the finance team edits the name, the default
 price and, when needed, the revenue account (a PUT must send
 `revenue_account_code`; only `code` can never change); an in use code is never deleted, it is flipped inactive
@@ -172,8 +172,8 @@ line through the fulfilment's snapshot.
 A quote has no charge lines. Its header freight becomes one `FREIGHT`
 charge line on the order at conversion (`core/internal/order/service.go`
 `buildFromQuote`, the `FreightCents` block; ADR 0005 section 5.8),
-priced from the freight, so conversion needs the `FREIGHT` code to
-exist.
+priced from the freight, so converting a quote that has freight needs
+the `FREIGHT` code to exist.
 
 A credit memo writes a charge line the same way: a free line on a
 credit memo names its own `charge_code` (`core/internal/invoice/input.go`,
