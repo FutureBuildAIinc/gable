@@ -299,6 +299,11 @@ func TestMigration103_DownThenUpLosesNoRow(t *testing.T) {
 		 VALUES ('33333333-3333-3333-3333-333333333333', 'bound', 'x$y', 'sk_live_cc', '{"quotes:read"}', $1)`, branch); err != nil {
 		t.Fatalf("seed bound key: %v", err)
 	}
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes)
+		 VALUES ('44444444-4444-4444-4444-444444444444', 'unbound', 'x$y', 'sk_live_dd', '{"quotes:read"}')`); err != nil {
+		t.Fatalf("seed unbound key: %v", err)
+	}
 	keysBefore := scalar103(t, conn, `SELECT count(*) FROM api_keys`)
 	locationsBefore := scalar103(t, conn, `SELECT count(*) FROM locations`)
 
@@ -313,6 +318,17 @@ func TestMigration103_DownThenUpLosesNoRow(t *testing.T) {
 	if got := scalar103(t, conn,
 		`SELECT count(*) FROM information_schema.columns WHERE table_name='api_keys' AND column_name='branch_id'`); got != int64(0) {
 		t.Fatalf("api_keys.branch_id still exists after the down file: %v", got)
+	}
+	// The base has no notion of a pin, so a bound key the down left active
+	// would reach every branch its scopes allow: the down revokes it. A key
+	// that was never bound keeps its state.
+	if got := scalar103(t, conn,
+		`SELECT count(*) FROM api_keys WHERE id = '33333333-3333-3333-3333-333333333333' AND revoked_at IS NOT NULL`); got != int64(1) {
+		t.Fatalf("the branch bound key is still active after the down file: revoked count %v, want 1", got)
+	}
+	if got := scalar103(t, conn,
+		`SELECT count(*) FROM api_keys WHERE id = '44444444-4444-4444-4444-444444444444' AND revoked_at IS NULL`); got != int64(1) {
+		t.Fatalf("the unbound key was revoked by the down file: active count %v, want 1", got)
 	}
 
 	applySQL103(t, conn, target)
