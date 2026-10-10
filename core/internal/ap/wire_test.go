@@ -162,6 +162,57 @@ func TestWire_CreateValidation(t *testing.T) {
 	}
 }
 
+// A bill's money is bounded by its columns: NUMERIC(12,2) for the line
+// total, the tax and the total, NUMERIC(12,4) for the unit price. Past a
+// bound the create is a 400 naming the field, never a 500 numeric overflow,
+// and nothing is written; at the bound it is created (reviews r5 P3-1 and r6
+// P3-2).
+func TestWire_CreateMoneyCeilings(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	const maxCents, maxPrice = int64(999_999_999_999), int64(999_999_999_999)
+	body := func(number string, tax int64, lines ...map[string]any) map[string]any {
+		b := map[string]any{"vendor_id": f.vendor.String(), "vendor_invoice_number": number,
+			"invoice_date": "2026-01-10", "due_date": "2026-02-10", "tax_cents": tax, "lines": lines}
+		return b
+	}
+	for _, c := range []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"tax past the column", body("V-CAP-1", maxCents+1, f.lineBody("1", 100)), "tax_cents"},
+		{"tax at int64 max", body("V-CAP-2", 9223372036854775807, f.lineBody("1", 100)), "tax_cents"},
+		{"unit price past the column", body("V-CAP-3", 0, f.lineBody("1", maxPrice+1)), "lines[0].unit_price_ten_thousandths"},
+		{"line total past the column", body("V-CAP-4", 0, f.lineBody("100000", 100_000_000_000)), "lines[0].quantity"},
+		// 99 units at the largest price is 990000000000 cents: one line fits,
+		// two do not, and nor does one with 100000000000 cents of tax.
+		{"subtotal past the column", body("V-CAP-5", 0, f.lineBody("99", maxPrice), f.lineBody("99", maxPrice)), "lines"},
+		{"total past the column", body("V-CAP-6", 100_000_000_000, f.lineBody("99", maxPrice)), "tax_cents"},
+	} {
+		r := f.do("POST", "/api/v1/ap/invoices", c.body)
+		if r.status != http.StatusBadRequest {
+			t.Errorf("%s: create = %d, want 400: %s", c.name, r.status, r.raw)
+			continue
+		}
+		if _, _, fields := errorOf(t, r); fmt.Sprint(fields) != fmt.Sprint([]string{c.field}) {
+			t.Errorf("%s: fields = %v, want [%s]", c.name, fields, c.field)
+		}
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE vendor_id = $1`, f.vendor); n != 0 {
+		t.Errorf("%d bills survived a refused create", n)
+	}
+	// Under the bound: the largest price, and a line, tax and total close to
+	// the column's limit, are created.
+	r := f.do("POST", "/api/v1/ap/invoices", body("V-CAP-OK", 9_999_999_999, f.lineBody("99", maxPrice)))
+	if r.status != http.StatusCreated {
+		t.Fatalf("create at the bound = %d, want 201: %s", r.status, r.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Errorf("after the create: control %d, open %d", got, want)
+	}
+}
+
 // RULE (ADR 0001 sections 1, 2 and 5): the list is the cursor envelope,
 // newest first, every row once, with filters that filter and unknown or
 // uppercase values refused; an empty page is [] in the bytes.

@@ -122,6 +122,7 @@ func (req *CreateRequest) Parse() (*Input, error) {
 	in.Currency = currency
 	if n, ok := v.Int("tax_cents", req.TaxCents, false); ok {
 		v.Check(n >= 0, "tax_cents", "must not be negative")
+		v.Check(n <= maxBillCents, "tax_cents", "is more than a bill can hold")
 		in.TaxCents = httpx.Cents(n)
 	}
 	in.Notes = trim(req.Notes)
@@ -142,6 +143,7 @@ func (req *CreateRequest) Parse() (*Input, error) {
 		}
 		if p, ok := v.Int(path+".unit_price_ten_thousandths", l.UnitPriceTenThousand, true); ok {
 			v.Check(p >= 0, path+".unit_price_ten_thousandths", "must not be negative")
+			v.Check(p <= maxUnitPriceTenThousandths, path+".unit_price_ten_thousandths", "is more than a line price can hold")
 			line.UnitPrice = httpx.Price(p)
 		}
 		if l.GLAccountID != nil {
@@ -160,16 +162,27 @@ func (req *CreateRequest) Parse() (*Input, error) {
 				line.ProductID = &id
 			}
 		}
-		if line.GLAccountID != nil && line.Quantity != 0 && line.UnitPrice >= 0 {
+		if line.GLAccountID != nil && line.Quantity != 0 && line.UnitPrice >= 0 && line.UnitPrice <= maxUnitPriceTenThousandths {
 			total, err := httpx.Extend(line.Quantity, 1, 1, line.UnitPrice)
-			if err != nil {
+			switch {
+			case err != nil:
 				v.Check(false, path+".quantity", err.Error())
-			} else {
+			case total > maxBillCents:
+				v.Check(false, path+".quantity", "the line total is more than a bill can hold")
+			default:
 				line.LineTotalCents = total
 				subtotal += total
 			}
 		}
 		in.Lines = append(in.Lines, line)
+	}
+	// The subtotal and the total land in NUMERIC(12,2) columns too. Each is
+	// checked only once its parts are known to fit, so the field named is the
+	// one that tipped it over.
+	if subtotal > maxBillCents {
+		v.Check(false, "lines", "the lines total more than a bill can hold")
+	} else if in.TaxCents <= maxBillCents && subtotal+in.TaxCents > maxBillCents {
+		v.Check(false, "tax_cents", "the lines and the tax total more than a bill can hold")
 	}
 	if err := v.Err(); err != nil {
 		return nil, err
@@ -242,6 +255,14 @@ type PayInput struct {
 
 // maxPaymentCents is the most the payment columns (NUMERIC(12,2)) hold.
 const maxPaymentCents = 999_999_999_999
+
+// maxBillCents is the most a bill's money columns (line total, subtotal, tax
+// and total, all NUMERIC(12,2)) hold; maxUnitPriceTenThousandths is the most
+// the line's unit price (NUMERIC(12,4)) holds.
+const (
+	maxBillCents               = 999_999_999_999
+	maxUnitPriceTenThousandths = 999_999_999_999
+)
 
 // Parse validates a pay request in one pass.
 func (req *PayRequest) Parse() (*PayInput, error) {
