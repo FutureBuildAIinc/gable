@@ -33,7 +33,7 @@ ALTER TABLE vendor_invoices ADD COLUMN IF NOT EXISTS branch_id UUID NULL REFEREN
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns
-               WHERE table_schema = 'current_schema'::text AND table_name = 'purchase_orders' AND column_name = 'branch_id') THEN
+               WHERE table_schema = current_schema() AND table_name = 'purchase_orders' AND column_name = 'branch_id') THEN
         EXECUTE $sql$UPDATE vendor_invoices vi SET branch_id = po.branch_id
         FROM purchase_orders po
         WHERE po.id = vi.po_id AND vi.branch_id IS NULL AND po.branch_id IS NOT NULL$sql$;

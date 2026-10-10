@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,7 +36,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func scratch106(t *testing.T) (*pgx.Conn, *[]string) {
+// scratch106 builds a scratch database and returns its connection, its URL
+// (for the seed command) and the notices the connection has collected.
+func scratch106(t *testing.T) (*pgx.Conn, string, *[]string) {
 	t.Helper()
 	db := testutil.RequireDB(t)
 	base, err := url.Parse(db.Pool.Config().ConnString())
@@ -74,7 +77,7 @@ func scratch106(t *testing.T) (*pgx.Conn, *[]string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close(context.Background()) })
-	return conn, &notices
+	return conn, scratch.String(), &notices
 }
 
 func files106(t *testing.T) (before []string, target, down string) {
@@ -146,7 +149,7 @@ func refuses106(t *testing.T, conn *pgx.Conn, constraint, sql string, args ...an
 }
 
 func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
-	conn, notices := scratch106(t)
+	conn, _, notices := scratch106(t)
 	before, target, down := files106(t)
 	for _, f := range before {
 		apply106(t, conn, f)
@@ -346,5 +349,142 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	apply106(t, conn, target)
 	if got := count106(t, conn, `SELECT count(*) FROM vendor_invoices WHERE number IS NULL OR amount_open IS NULL`); got != 0 {
 		t.Errorf("%d rows incomplete after the down-up cycle", got)
+	}
+}
+
+// TestMigration106_OnTheSeededDatabase applies 106 to a database seeded by
+// the repository's own seed (the recipe's rule: a migration is proved on a
+// seeded database, not only on fixtures), with awkward legacy bills written
+// over the seed. Only this proof reaches the branch backfill's purchase
+// order source: the seed writes purchase orders on the yards, so a bill
+// tied to a real purchase order takes that order's branch, not the default
+// branch every fixture row falls to. Then the down rolls the shape back,
+// the up applies again to the same result, and a second up is a no-op.
+func TestMigration106_OnTheSeededDatabase(t *testing.T) {
+	conn, scratchURL, _ := scratch106(t)
+	before, target, down := files106(t)
+	for _, f := range before {
+		apply106(t, conn, f)
+	}
+	// The seed, as an operator runs it: the same binary, the scratch
+	// database's URL on its own command.
+	cmd := exec.Command("go", "run", "./cmd/seed")
+	cmd.Dir = "../.."
+	cmd.Env = append(os.Environ(), "DEMO_SEED=1", "DATABASE_URL="+scratchURL)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Skipf("the seed did not run here (%v): %s", err, out)
+	}
+
+	ctx := context.Background()
+	// A seeded vendor and a seeded purchase order on a branch other than the
+	// default (the seed rotates the yards; a run that mints none makes this
+	// proof vacuous, so it refuses instead).
+	var vendor, poID, poBranch, def string
+	if err := conn.QueryRow(ctx, `SELECT id::text FROM vendors ORDER BY name LIMIT 1`).Scan(&vendor); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, `
+		SELECT po.id::text, po.branch_id::text FROM purchase_orders po
+		JOIN locations l ON l.id = po.branch_id
+		WHERE po.branch_id::text <> (SELECT value FROM system_settings WHERE key = 'default_branch_id')
+		ORDER BY po.created_at, po.id LIMIT 1`).Scan(&poID, &poBranch); err != nil {
+		t.Fatalf("no seeded purchase order sits on a branch other than the default: %v", err)
+	}
+	def = one106(t, conn, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`)
+	if poBranch == def {
+		t.Fatal("the chosen purchase order sits on the default branch")
+	}
+
+	// The awkward legacy rows over the seed: a bill tied to the real
+	// purchase order (its branch comes from the order), a duplicate pair,
+	// an orphan po_id and a lowercase status.
+	insert := func(id uuid.UUID, number, status, poRef, createdAt string) {
+		t.Helper()
+		var po any
+		if poRef != "" {
+			po = poRef
+		}
+		if _, err := conn.Exec(ctx, `INSERT INTO vendor_invoices (id, vendor_id, invoice_number, invoice_date, due_date, po_id,
+			subtotal, tax_amount, total, amount_paid, status, created_at)
+			VALUES ($1, $2, $3, '2026-01-10', '2026-02-10', $4, '40.00', 0, '40.00', 0, $5, $6)`,
+			id, vendor, number, po, status, createdAt); err != nil {
+			t.Fatalf("seed %s: %v", number, err)
+		}
+		if _, err := conn.Exec(ctx, `INSERT INTO vendor_invoice_lines (id, invoice_id, description, quantity, unit_price, line_total, created_at)
+			VALUES ($1, $2, 'seeded legacy line', 1, '40.00', '40.00', $3)`, uuid.New(), id, createdAt); err != nil {
+			t.Fatalf("seed line %s: %v", number, err)
+		}
+	}
+	at := func(days int) string { return time.Now().AddDate(0, 0, days).Format(time.RFC3339) }
+	poBill, dupA, dupB, orphan, lower := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	insert(poBill, "SEED-PO", "PENDING", poID, at(-6))
+	insert(dupA, "SEED-DUP", "PENDING", "", at(-5))
+	insert(dupB, "SEED-DUP", "pending", "", at(-4))
+	insert(orphan, "SEED-ORPHAN", "PENDING", uuid.New().String(), at(-3))
+	insert(lower, "SEED-LOWER", "partial", "", at(-2))
+	rowsBefore := count106(t, conn, `SELECT count(*) FROM vendor_invoices`)
+
+	apply106(t, conn, target)
+
+	if rowsAfter := count106(t, conn, `SELECT count(*) FROM vendor_invoices`); rowsAfter != rowsBefore {
+		t.Fatalf("%d rows before, %d after", rowsBefore, rowsAfter)
+	}
+	// The bill tied to the purchase order takes the order's branch, not the
+	// default branch.
+	if got := one106(t, conn, `SELECT branch_id::text FROM vendor_invoices WHERE id = $1`, poBill); got != poBranch {
+		t.Errorf("the purchase order bill's branch = %s, want the order's %s", got, poBranch)
+	}
+	// Every other row still holds a branch and a currency.
+	if got := count106(t, conn, `SELECT count(*) FROM vendor_invoices WHERE branch_id IS NULL OR currency IS NULL`); got != 0 {
+		t.Errorf("%d rows hold no branch or currency", got)
+	}
+	// The duplicate pair is suffixed in (created_at, id) order.
+	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dupA); got != "SEED-DUP" {
+		t.Errorf("the older duplicate = %q, want the bare SEED-DUP", got)
+	}
+	if got := one106(t, conn, `SELECT invoice_number FROM vendor_invoices WHERE id = $1`, dupB); got != "SEED-DUP #2" {
+		t.Errorf("the younger duplicate = %q, want SEED-DUP #2", got)
+	}
+	// The orphan po_id is set null.
+	if got := one106(t, conn, `SELECT COALESCE(po_id::text, 'null') FROM vendor_invoices WHERE id = $1`, orphan); got != "null" {
+		t.Errorf("the orphan po_id = %s, want null", got)
+	}
+	// The statuses are normalized to today's vocabulary.
+	if got := one106(t, conn, `SELECT status FROM vendor_invoices WHERE id = $1`, dupB); got != "PENDING" {
+		t.Errorf("the lowercase status = %s, want PENDING", got)
+	}
+	if got := one106(t, conn, `SELECT status FROM vendor_invoices WHERE id = $1`, lower); got != "PARTIAL" {
+		t.Errorf("the lowercase partial = %s, want PARTIAL", got)
+	}
+	// The numbers and the open amounts cover every row.
+	if got := count106(t, conn, `SELECT count(*) FROM vendor_invoices WHERE number IS NULL OR number !~ '^AP-[0-9]+$'`); got != 0 {
+		t.Errorf("%d rows hold no AP- number", got)
+	}
+	if got := count106(t, conn, `SELECT count(DISTINCT number) - count(*) FROM vendor_invoices`); got != 0 {
+		t.Errorf("%d duplicate numbers", got)
+	}
+	if got := count106(t, conn, `SELECT count(*) FROM vendor_invoices WHERE amount_open IS NULL OR amount_open <> total - amount_paid`); got != 0 {
+		t.Errorf("%d rows hold a wrong amount_open", got)
+	}
+
+	// A second up is a no-op.
+	numbersBefore := one106(t, conn, `SELECT string_agg(number, ',' ORDER BY number) FROM vendor_invoices`)
+	apply106(t, conn, target)
+	if numbersAfter := one106(t, conn, `SELECT string_agg(number, ',' ORDER BY number) FROM vendor_invoices`); numbersAfter != numbersBefore {
+		t.Errorf("a second apply changed the numbers: %s -> %s", numbersBefore, numbersAfter)
+	}
+
+	// The down rolls the shape back, and the up applies again to the same
+	// result over the seeded database.
+	apply106(t, conn, down)
+	apply106(t, conn, target)
+	if got := count106(t, conn, `SELECT count(*) FROM vendor_invoices`); got != rowsBefore {
+		t.Fatalf("%d rows after the down-up cycle, want %d", got, rowsBefore)
+	}
+	if got := count106(t, conn, `SELECT count(*) FROM vendor_invoices WHERE number IS NULL OR amount_open IS NULL OR branch_id IS NULL OR currency IS NULL`); got != 0 {
+		t.Errorf("%d rows incomplete after the down-up cycle", got)
+	}
+	if got := one106(t, conn, `SELECT branch_id::text FROM vendor_invoices WHERE id = $1`, poBill); got != poBranch {
+		t.Errorf("the purchase order bill's branch after the cycle = %s, want %s", got, poBranch)
 	}
 }
