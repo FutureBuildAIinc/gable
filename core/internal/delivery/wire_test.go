@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -739,6 +740,13 @@ func TestReorderStops(t *testing.T) {
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM events_outbox WHERE entity_id = $1`, second)
 	})
 
+	// The assign moved the route's revision (PR 70 review round 2 P2-1).
+	routeDoc := f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+route.String(), "", nil)
+	if routeDoc.status != http.StatusOK {
+		t.Fatalf("route = %d %s", routeDoc.status, routeDoc.raw)
+	}
+	routeRev, _ := routeDoc.body["revision"].(float64)
+	wantRev := strconv.Itoa(int(routeRev))
 	list := f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+route.String()+"/deliveries?include=total", "", nil)
 	if list.body["total"] != float64(2) {
 		t.Errorf("total = %v, want 2", list.body["total"])
@@ -749,9 +757,8 @@ func TestReorderStops(t *testing.T) {
 			first = it.(map[string]any)["id"].(string)
 		}
 	}
-
 	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/reorder",
-		`{"ordered_delivery_ids":["`+second+`"]}`, map[string]string{"If-Match": `"1"`}); res.status != http.StatusBadRequest {
+		`{"ordered_delivery_ids":["`+second+`"]}`, map[string]string{"If-Match": `"` + wantRev + `"`}); res.status != http.StatusBadRequest {
 		t.Errorf("a partial list = %d %s, want 400", res.status, res.raw)
 	}
 	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/reorder",
@@ -759,10 +766,11 @@ func TestReorderStops(t *testing.T) {
 		t.Errorf("reorder without a revision = %d, want 428", res.status)
 	}
 	res = f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/reorder",
-		`{"ordered_delivery_ids":["`+second+`","`+first+`"]}`, map[string]string{"If-Match": `"1"`})
-	if res.status != http.StatusOK || res.body["revision"] != float64(2) {
+		`{"ordered_delivery_ids":["`+second+`","`+first+`"]}`, map[string]string{"If-Match": `"` + wantRev + `"`})
+	if res.status != http.StatusOK {
 		t.Fatalf("reorder = %d %s", res.status, res.raw)
 	}
+	wantRev = strconv.Itoa(int(res.body["revision"].(float64)))
 	list = f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+route.String()+"/deliveries", "", nil)
 	items := list.body["items"].([]any)
 	if items[0].(map[string]any)["id"] != second || items[0].(map[string]any)["stop_sequence"] != float64(1) {

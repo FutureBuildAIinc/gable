@@ -610,17 +610,19 @@ func TestGetDelivery_RoutedStopKeepsItsRouteID(t *testing.T) {
 // TestAssignOrderToRoute_SetsTheRoute closes the loop: assigning an order to a
 // route has to produce a stop that names it.
 func TestAssignOrderToRoute_SetsTheRoute(t *testing.T) {
-	routeID, vehicleID := uuid.New(), uuid.New()
+	routeID, vehicleID, orderID := uuid.New(), uuid.New(), uuid.New()
+	branchID := uuid.New()
 	repo := &fakeRepo{
-		routes:  []Route{{ID: routeID, VehicleID: vehicleID, Status: RouteStatusDraft, Revision: 1}},
-		vehicle: &Vehicle{ID: vehicleID},
+		routes:      []Route{{ID: routeID, VehicleID: vehicleID, Status: RouteStatusDraft, Revision: 1}},
+		vehicle:     &Vehicle{ID: vehicleID},
+		orderBranch: map[uuid.UUID]uuid.UUID{orderID: branchID},
 	}
 	svc := NewService(repo)
 
 	seq := 1
 	d, warning, err := svc.AssignOrderToRoute(context.Background(), &AssignStopDraft{
 		RouteID:      routeID,
-		OrderID:      uuid.New(),
+		OrderID:      orderID,
 		StopSequence: &seq,
 	}, "")
 	if err != nil {
