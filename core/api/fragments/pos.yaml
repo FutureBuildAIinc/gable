@@ -1,1416 +1,1180 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The pos module, transcribed from internal/pos/handler.go and model.go as they behave
-# today: money is int64 cents on responses and float dollars on requests, the list
-# wrappers carry nil slices (null when empty), and service failures map to the
-# status the handler picks per route (409 till, 422 complete, 400 return, 500 the rest).
+# The counter module (POS and till) on the wire contract (ADR 0001; ADR 0005
+# sections 2, 4, 9 to 12 and 14.2, item C2-5): a sale is the cart a register
+# builds and then one money moment, everything in integer cents and prices at
+# scale 4, the lines in the shared salesdoc shape (product, charge and text
+# lines, typed override and discount with audit, kits exploding to
+# components), tenders in cents stored net of change, each cash, check or card
+# tender a payment applied to the sale's invoice (origin POS, pickup) posted
+# with tax and COGS inside the sale's own transaction, an ACCOUNT tender left
+# open and subject to the credit check, a void of the completed sale while its
+# till session is open reversing exactly what it posted, and a return a credit
+# memo created, posted, refunded and optionally restocked in one act. The
+# sale's POS- and the return's RTN- numbers are human readable (IN-1.3), the
+# status is one lowercase field (IN-1.1), money never floats (IN-1.2), the
+# day's list is the envelope with an empty page [] in the bytes (IN-1.4), and
+# every refusal is the error envelope (IN-3.7). A machine key is refused on
+# every route that resolves a cashier: a cashier must be a user.
 paths:
   /api/v1/pos/transactions:
     post:
       operationId: posTransactionCreate
-      tags:
-      - pos
-      summary: Start a transaction
-      description: register_id defaults to REG-01 and a missing cashier_id is replaced by a random UUID.
+      tags: [pos]
+      summary: Start a sale
+      description: >-
+        Opens a cart on a register for the resolved cashier, attached to the
+        register's open till session when there is one, at revision 1 with its
+        POS- number (the gapped series; a rolled back create abandons the
+        number). register_id defaults REG-01; the customer names the account
+        the invoice posts to, and its absence means the walk-in customer the
+        counter books to. The cashier is the JWT's subject; a machine key is
+        refused 403 ("a cashier must be a user").
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosTransactionCreate'
+              $ref: "#/components/schemas/PosTransactionCreateRequest"
       responses:
-        '201':
-          description: The new OPEN transaction, attached to the register's open till session when there
-            is one.
+        "201":
+          description: The new open sale, at revision 1.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
+            Location:
+              description: The sale's route.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          description: 'The caller''s roles do not include one the route requires, or the caller authenticated
-            with a machine key: a cashier must be a user.'
-          content:
-            application/json:
-              schema:
-                oneOf:
-                - $ref: '#/components/schemas/Error'
-                - $ref: '#/components/schemas/PosCashierRefusal'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     get:
       operationId: posTransactionList
-      tags:
-      - pos
-      summary: List transaction summaries
+      tags: [pos]
+      summary: List the day's sales
+      description: >-
+        The list envelope over one register's day: register_id filters (absent
+        lists every register's), date is a YYYY-MM-DD that defaults to the
+        branch's today, status takes one lowercase value (open, held,
+        completed, voided; an uppercase or unknown value is a 400 naming
+        status). The page is the whole day newest first, so next_cursor is
+        null and limit echoes the 50 the route serves; cursor, limit and
+        include are accepted query names. An empty day is [] in the bytes.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - name: register_id
-        in: query
-        description: Filter to one register.
-        schema:
-          type: string
-      - name: date
-        in: query
-        description: The day to list; today when omitted or unparseable.
-        schema:
-          type: string
-          format: date
+        - name: register_id
+          in: query
+          required: false
+          schema: {type: string}
+        - name: date
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - name: status
+          in: query
+          required: false
+          schema: {type: string, enum: [open, held, completed, voided]}
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Summaries; an empty array when none.
+        "200":
+          description: The day's page of sales.
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PosTransactionSummary'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTransactionPage"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}:
     get:
       operationId: posTransactionGet
-      tags:
-      - pos
-      summary: Get a transaction with its lines and tenders
+      tags: [pos]
+      summary: Read a sale
+      description: The sale with its lines and tenders, the branch wall applied.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The transaction.
+        "200":
+          description: The sale.
+          headers:
+            ETag:
+              description: The document's revision.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/items:
     post:
       operationId: posTransactionAddItem
-      tags:
-      - pos
-      summary: Add a line item
+      tags: [pos]
+      summary: Add a line to the sale
+      description: >-
+        One line in the shared salesdoc shape, parsed under the same rules as
+        every sales line (quantity a decimal string, the unit from the product
+        when the line names one, the pair when the price unit differs, an
+        override or a discount with its reason, a charge by its code, a text
+        line a note with nothing priced). A kit explodes to its component
+        lines. Only an open sale takes a line (409
+        invalid_state_transition). The sale's revision moves; the response is
+        the whole sale.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosAddItem'
+              $ref: "#/components/schemas/PosAddLineRequest"
       responses:
-        '200':
-          description: The transaction with totals recalculated.
+        "200":
+          description: The sale with the line added.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/items/{itemId}:
     delete:
       operationId: posTransactionRemoveItem
-      tags:
-      - pos
-      summary: Remove a line item
+      tags: [pos]
+      summary: Remove a line from the sale
+      description: >-
+        Removes the line (a kit's component lines go with their parent). Only
+        an open sale loses a line (409 invalid_state_transition). The
+        response is the whole sale.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - name: itemId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: itemId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The transaction with totals recalculated.
+        "200":
+          description: The sale with the line removed.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/complete:
     post:
       operationId: posTransactionComplete
-      tags:
-      - pos
-      summary: Complete a transaction with tenders
-      description: An empty tenders list answers 400. Every service failure (an under-tendered sale, a
-        declined card, a transaction not OPEN) answers 422.
+      tags: [pos]
+      summary: Tender and complete the sale
+      description: >-
+        The money moment, one transaction: stock out through the inventory
+        write path, the invoice (origin POS, pickup) posted through the AR
+        core with its tax and COGS legs, each cash, check or card tender a
+        payment applied to it and stored net (the tendered amount less change,
+        so the payment is the money kept), an ACCOUNT tender left open on the
+        invoice and subject to the credit check, the card charged at the
+        gateway in the sale's currency before the transaction opens, and the
+        pos_transaction.completed event written last: a failing event, audit
+        or ledger write rolls the whole sale back (no invoice, payment, stock
+        move or entry). Tenders must cover the total (change comes only from
+        cash). Refused with 409 and a blocker: insufficient_tender,
+        change_from_cash, walk_in_account (an ACCOUNT tender for the walk-in
+        customer), card_terminal, card_declined, tax_quote_stale,
+        tax_rate_not_configured, credit_limit, insufficient_stock; 503 when
+        the tax provider fails before any row is written. The completion
+        carries the sale's revision (If-Match or the body's revision; 428
+        without one, 409 stale_revision on a stale one).
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosComplete'
+              $ref: "#/components/schemas/PosCompleteRequest"
       responses:
-        '200':
-          description: The COMPLETED transaction.
+        "200":
+          description: The completed sale with its invoice, tenders and change.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          description: >-
-            The completion failed (under-tendered sale, declined card,
-            transaction not OPEN; the standard error envelope), or the
-            Idempotency-Key was reused with a different request (the ADR
-            0001 envelope).
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Error'
-                  - $ref: '#/components/schemas/WireError'
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
-      tags:
-      - pos
-      summary: Void a transaction
+      tags: [pos]
+      summary: Void the completed sale
+      description: >-
+        One transaction in section 11's lock order (the sale, its payments,
+        its invoice): each cash or check payment voided, each card payment's
+        gateway refund made before the transaction and its application
+        reversed with the amount recorded as a refund from its unapplied cash,
+        then the invoice voided, the stock back, the ledger exactly reversed
+        and the pos_transaction.voided event last. Only while the sale's till
+        session is open (409 blocker session_closed: after the session closes
+        it is a return). Refused with 409 and a blocker: session_closed,
+        card_terminal, card_refund, no_invoice. The void carries the sale's
+        revision (428, 409 stale_revision).
       parameters:
-      - name: id
-        in: path
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
         required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosVoidRequest"
       responses:
-        '200':
-          description: The VOIDED transaction.
+        "200":
+          description: The voided sale.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTransaction'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/products/search:
     get:
       operationId: posProductSearch
-      tags:
-      - pos
-      summary: Typeahead product search
+      tags: [pos]
+      summary: The counter's typeahead
+      description: >-
+        Products matching the q text (sku or description prefix), at most 20,
+        with the price and on hand the counter needs. A bare array, never
+        null, the shape this counter's helper surface keeps (the product
+        module owns the data). q empty answers [].
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - name: q
-        in: query
-        description: SKU, description or barcode. An empty or one character query answers an empty array.
-        schema:
-          type: string
+        - name: q
+          in: query
+          required: false
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Up to 20 matches; a bare array.
+        "200":
+          description: The matching products.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/PosSearchResult'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                  $ref: "#/components/schemas/PosSearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/sync:
     post:
-      operationId: posSync
-      tags:
-      - pos
-      summary: Replay offline transactions
-      description: A missing batch_id or an empty items list answers 400.
+      operationId: posSyncOffline
+      tags: [pos]
+      summary: Replay a batch of offline sales
+      description: >-
+        Each sale in the batch is replayed through the same completion path
+        (stock, invoice, payments, ledger, event) keyed by its client_id: a
+        replayed sale is a duplicate, not an error. A sale whose tax provider
+        call fails is never rejected (the one exception to the provider rule,
+        ADR 0005 section 3): it stays pending in the sync log and the sync
+        retries it; errors lists what could not complete and pending what
+        waits.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosSyncRequest'
+              $ref: "#/components/schemas/PosSyncRequest"
       responses:
-        '200':
-          description: The batch result.
+        "200":
+          description: The batch's outcome.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosSyncResponse'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosSyncResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/catalog:
     get:
-      operationId: posCatalog
-      tags:
-      - pos
-      summary: Product catalog for the offline cache
+      operationId: posCatalogGet
+      tags: [pos]
+      summary: The offline catalog cache
+      description: >-
+        Every saleable product with its price and on hand for the offline
+        register cache. A bare array, never null, like the typeahead.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The whole catalog as a bare array.
+        "200":
+          description: The catalog.
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/PosCatalogProduct'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                  $ref: "#/components/schemas/PosCatalogProduct"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/open:
     post:
       operationId: posTillOpen
-      tags:
-      - pos
-      summary: Open a till session
-      description: register_id defaults to REG-01. Every service failure, such as a session already open
-        on the register, answers 409.
+      tags: [pos]
+      summary: Open the drawer
+      description: >-
+        Opens a till session for the resolved cashier on a register with its
+        opening float in cents; register_id defaults REG-01. A register with
+        an open session is refused (409, a session is already open). The
+        cashier is the JWT's subject; a machine key is refused 403. Writes
+        till.opened.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosTillOpen'
+              $ref: "#/components/schemas/PosTillOpenRequest"
       responses:
-        '201':
-          description: The OPEN session.
+        "201":
+          description: The open session.
+          headers:
+            Location:
+              description: The session's report route.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTillSession'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          description: 'The caller''s roles do not include one the route requires, or the caller authenticated
-            with a machine key: a cashier must be a user.'
-          content:
-            application/json:
-              schema:
-                oneOf:
-                - $ref: '#/components/schemas/Error'
-                - $ref: '#/components/schemas/PosCashierRefusal'
-        '409':
-          $ref: '#/components/responses/ConflictEither'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTillSession"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/current:
     get:
       operationId: posTillCurrent
-      tags:
-      - pos
-      summary: The open till session of a register
+      tags: [pos]
+      summary: The register's open session
+      description: >-
+        The register's open till session; register_id defaults REG-01. 404
+        when the register has none.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - name: register_id
-        in: query
-        description: Defaults to REG-01.
-        schema:
-          type: string
+        - name: register_id
+          in: query
+          required: false
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The open session, or null when none.
+        "200":
+          description: The open session.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTillCurrent'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTillSession"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/{id}/report:
     get:
       operationId: posTillReport
-      tags:
-      - pos
-      summary: Live X report of a session
-      description: An unknown session answers 500.
+      tags: [pos]
+      summary: The session's live report
+      description: >-
+        The X report: the session with its sales count, totals, change and
+        the tendered and expected cash by method, expected being the sum of
+        the session's cash payments (already net of change) plus the opening
+        float less cash refunds.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
+        "200":
           description: The report.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTillReport'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosTillReport"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/{id}/close:
     post:
       operationId: posTillClose
-      tags:
-      - pos
-      summary: Close a till session
-      description: Every service failure, such as a session not OPEN, answers 409.
+      tags: [pos]
+      summary: Close the drawer
+      description: >-
+        Closes the session on the counted cash: the over or short (counted
+        less expected, expected being the session's cash payments net of
+        change plus the float less cash refunds) is booked to 5030 inside the
+        close's own transaction, the Z report snapshot is written and
+        till.closed is the last statement. counted_by_method names the
+        counted cents per lowercase method (cash, check, card, account); a
+        refusal rolls everything back.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosTillClose'
+              $ref: "#/components/schemas/PosTillCloseRequest"
       responses:
-        '200':
-          description: The closing Z report.
+        "200":
+          description: The closing report.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosTillReport'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '409':
-          $ref: '#/components/responses/ConflictEither'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+                $ref: "#/components/schemas/PosTillReport"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/till/{id}/zreport:
     get:
       operationId: posTillZReport
-      tags:
-      - pos
-      summary: The Z report of a closed session
+      tags: [pos]
+      summary: The session's frozen Z report
+      description: >-
+        The immutable snapshot written once at the close, its payload the
+        frozen closing report. 404 before the session closed.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: The frozen Z snapshot.
+        "200":
+          description: The Z report.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosZReport'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/PosZReport"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/zreports:
     get:
       operationId: posZReportList
-      tags:
-      - pos
-      summary: List Z reports
+      tags: [pos]
+      summary: The day's Z reports
+      description: >-
+        The Z reports of one register's day (register_id filters, date is a
+        YYYY-MM-DD that defaults to the branch's today), newest first. A bare
+        array, never null.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - name: register_id
-        in: query
-        schema:
-          type: string
-      - name: date
-        in: query
-        description: An unparseable date is ignored.
-        schema:
-          type: string
-          format: date
+        - name: register_id
+          in: query
+          required: false
+          schema: {type: string}
+        - name: date
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Z reports wrapped in an object.
+        "200":
+          description: The day's Z reports.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosZReportList'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosZReport"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/returns:
     post:
       operationId: posReturnCreate
-      tags:
-      - pos
-      summary: Record a return and refund
-      description: register_id defaults to REG-01. Every service failure, including validation, answers
-        400.
+      tags: [pos]
+      summary: Return goods at the counter
+      description: >-
+        A return is a credit memo created and posted in one act with its
+        restock lines: the memo credits the revenue, reverses the tax and,
+        where the lines restock, relieves COGS back and returns the stock,
+        refunded in cash (out of the drawer, counted against the session's
+        expected) or card (the gateway refund before the transaction) or left
+        as account credit (the memo stays open). Lines name the sale line
+        they return (its price and cost follow) or stand alone with product,
+        quantity and price; quantities are positive on the request and
+        negative on the read. The RTN- number and the pos_return.completed
+        event land in the same transaction. Refused with 409 and a blocker:
+        tax_rate_not_configured, card_terminal, card_refund. The cashier is
+        the JWT's subject; a machine key is refused 403.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PosReturnRequest'
+              $ref: "#/components/schemas/PosReturnRequest"
       responses:
-        '201':
-          description: The return with its lines.
+        "201":
+          description: The completed return.
+          headers:
+            Location:
+              description: The return's route.
+              schema: {type: string}
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosReturn'
-        '400':
-          $ref: '#/components/responses/BadRequestEither'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          description: 'The caller''s roles do not include one the route requires, or the caller authenticated
-            with a machine key: a cashier must be a user.'
-          content:
-            application/json:
-              schema:
-                oneOf:
-                - $ref: '#/components/schemas/Error'
-                - $ref: '#/components/schemas/PosCashierRefusal'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '413':
-          $ref: '#/components/responses/PayloadTooLarge'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                $ref: "#/components/schemas/PosReturn"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
     get:
       operationId: posReturnList
-      tags:
-      - pos
-      summary: List returns
+      tags: [pos]
+      summary: List the day's returns
+      description: >-
+        The day's returns (register_id filters, date is a YYYY-MM-DD that
+        defaults to the branch's today), newest first. A bare array, never
+        null.
       parameters:
-      - $ref: '#/components/parameters/XBranchId'
-      - name: register_id
-        in: query
-        schema:
-          type: string
-      - name: date
-        in: query
-        description: An unparseable date is ignored.
-        schema:
-          type: string
-          format: date
+        - name: register_id
+          in: query
+          required: false
+          schema: {type: string}
+        - name: date
+          in: query
+          required: false
+          schema: {type: string, format: date}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
-          description: Returns wrapped in an object.
+        "200":
+          description: The day's returns.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosReturnList'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '500':
-          $ref: '#/components/responses/InternalError'
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosReturn"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/returns/{id}:
     get:
       operationId: posReturnGet
-      tags:
-      - pos
-      summary: Get a return with its lines
+      tags: [pos]
+      summary: Read a return
+      description: The return with its lines and its credit memo link.
       parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - $ref: '#/components/parameters/XBranchId'
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
       responses:
-        '200':
+        "200":
           description: The return.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PosReturn'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/ForbiddenEither'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/PosReturn"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   schemas:
-    PosCashierRefusal:
-      type: object
-      description: The refusal body for a machine key on a cashier route. The code is lower case, unlike
-        the standard envelope.
-      required:
-      - error
-      - meta
-      properties:
-        error:
-          type: object
-          required:
-          - code
-          - message
-          properties:
-            code:
-              type: string
-              enum:
-              - forbidden
-            message:
-              type: string
-        meta:
-          type: object
-          required:
-          - request_id
-          properties:
-            request_id:
-              type: string
-    PosTransactionStatus:
+    PosStatus:
       type: string
-      enum:
-      - OPEN
-      - COMPLETED
-      - VOIDED
-      - RETURNED
-      - HELD
-    PosLineItem:
+      enum: [open, held, completed, voided]
+    PosTenderMethod:
+      type: string
+      enum: [cash, check, card, account]
+    PosRefundMethod:
+      type: string
+      enum: [cash, card, account]
+    PosTillStatus:
+      type: string
+      enum: [open, closed]
+    PosTransactionCreateRequest:
       type: object
-      description: POSLineItem.
-      required:
-      - id
-      - transaction_id
-      - product_id
-      - description
-      - quantity
-      - uom
-      - unit_price
-      - line_total
-      - created_at
       properties:
-        id:
-          type: string
-          format: uuid
-        transaction_id:
-          type: string
-          format: uuid
-        product_id:
-          type: string
-          format: uuid
-        description:
-          type: string
-        quantity:
-          type: number
-        uom:
-          type: string
-        unit_price:
-          type: integer
-          format: int64
-          description: Cents.
-        line_total:
-          type: integer
-          format: int64
-          description: Cents.
-        created_at:
-          type: string
-          format: date-time
-    PosTender:
+        register_id: {type: string, description: "Defaults REG-01."}
+        cashier_id: {type: [string, "null"], format: uuid, description: "Defaults the JWT's subject."}
+        customer_id: {type: [string, "null"], format: uuid, description: "Absent means the walk-in customer."}
+    PosAddLineRequest:
       type: object
-      description: POSTender. The reference and card fields are omitted when empty.
-      required:
-      - id
-      - transaction_id
-      - method
-      - amount
-      - created_at
+      required: [line]
       properties:
-        id:
-          type: string
-          format: uuid
-        transaction_id:
-          type: string
-          format: uuid
-        method:
-          type: string
-          description: CASH, CARD, CHECK or ACCOUNT.
-        amount:
-          type: integer
-          format: int64
-          description: Cents.
-        reference:
-          type: string
-        card_last4:
-          type: string
-        card_brand:
-          type: string
-        gateway_tx_id:
-          type: string
-        auth_code:
-          type: string
-        created_at:
-          type: string
-          format: date-time
-    PosTransaction:
+        line:
+          $ref: "#/components/schemas/PosLineRequest"
+    PosCompleteRequest:
       type: object
-      description: POSTransaction. The customer, till session, completion time, sync fields and the lines
-        and tenders are omitted when empty; only the read and mutation routes after the first line fill
-        the lists.
-      required:
-      - id
-      - branch_id
-      - register_id
-      - cashier_id
-      - subtotal
-      - tax_amount
-      - total
-      - change_due
-      - status
-      - created_at
+      required: [tenders]
       properties:
-        id:
-          type: string
-          format: uuid
-        branch_id:
-          type: string
-          format: uuid
-        register_id:
-          type: string
-        cashier_id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        subtotal:
-          type: integer
-          format: int64
-          description: Cents.
-        tax_amount:
-          type: integer
-          format: int64
-          description: Cents.
-        total:
-          type: integer
-          format: int64
-          description: Cents.
-        change_due:
-          type: integer
-          format: int64
-          description: Cents, set at completion.
-        till_session_id:
-          type: string
-          format: uuid
-        status:
-          $ref: '#/components/schemas/PosTransactionStatus'
-        completed_at:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
-        synced_from:
-          type: string
-          description: Absent for a live sale, offline-v1 for a synced one.
-        client_created_at:
-          type: string
-          format: date-time
-        line_items:
-          type: array
-          items:
-            $ref: '#/components/schemas/PosLineItem'
         tenders:
           type: array
           items:
-            $ref: '#/components/schemas/PosTender'
-    PosTransactionSummary:
+            $ref: "#/components/schemas/PosTenderRequest"
+        picked_up_by: {type: [string, "null"], description: "Who collected the basket, at most 200 characters."}
+        revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+    PosTenderRequest:
       type: object
-      description: TransactionSummary.
-      required:
-      - id
-      - register_id
-      - total
-      - status
-      - item_count
-      - created_at
+      required: [method, amount_cents]
       properties:
-        id:
-          type: string
-          format: uuid
-        register_id:
-          type: string
-        total:
-          type: integer
-          format: int64
-          description: Cents.
-        status:
-          $ref: '#/components/schemas/PosTransactionStatus'
-        item_count:
-          type: integer
-        completed_at:
-          type: string
-          format: date-time
-        created_at:
-          type: string
-          format: date-time
-    PosSearchResult:
+        method: {$ref: "#/components/schemas/PosTenderMethod"}
+        amount_cents: {type: integer, format: int64, minimum: 1}
+        reference: {type: [string, "null"], description: "The check number or reference."}
+        token_id: {type: [string, "null"], description: "The card token a card tender charges."}
+    PosVoidRequest:
       type: object
-      description: QuickSearchResult.
-      required:
-      - product_id
-      - sku
-      - description
-      - unit_price
-      - uom
-      - in_stock
+      required: [reason]
       properties:
-        product_id:
-          type: string
-          format: uuid
-        sku:
-          type: string
-        description:
-          type: string
-        unit_price:
-          type: number
-          description: Float dollars.
-        uom:
-          type: string
-        in_stock:
-          type: number
-    PosCatalogProduct:
+        reason: {type: string}
+        revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+    PosReturnRequest:
       type: object
-      description: CatalogProduct.
-      required:
-      - product_id
-      - sku
-      - description
-      - price
-      - uom
-      - in_stock
+      required: [reason, lines]
       properties:
-        product_id:
-          type: string
-          format: uuid
-        sku:
-          type: string
-        description:
-          type: string
-        price:
-          type: number
-          description: Float dollars.
-        uom:
-          type: string
-        in_stock:
-          type: number
-    PosTillSession:
-      type: object
-      description: TillSession. Everything set at close, and the branch, is omitted when empty.
-      required:
-      - id
-      - register_id
-      - cashier_id
-      - status
-      - opening_float
-      - opened_at
-      - notes
-      properties:
-        id:
-          type: string
-          format: uuid
-        register_id:
-          type: string
-        branch_id:
-          type: string
-          format: uuid
-        cashier_id:
-          type: string
-          format: uuid
-        status:
-          type: string
-          enum:
-          - OPEN
-          - CLOSED
-        opening_float:
-          type: integer
-          format: int64
-          description: Cents.
-        opened_at:
-          type: string
-          format: date-time
-        closed_at:
-          type: string
-          format: date-time
-        expected_by_method:
-          type: object
-          additionalProperties:
-            type: integer
-            format: int64
-          description: Cents keyed by tender method.
-        counted_by_method:
-          type: object
-          additionalProperties:
-            type: integer
-            format: int64
-          description: Cents keyed by tender method.
-        over_short:
-          type: integer
-          format: int64
-          description: Cents; negative means short.
-        gl_entry_id:
-          type: string
-          format: uuid
-        notes:
-          type: string
-    PosTillCurrent:
-      type: object
-      description: The current session wrapper.
-      required:
-      - session
-      properties:
-        session:
-          oneOf:
-          - $ref: '#/components/schemas/PosTillSession'
-          - type: 'null'
-    PosTillReport:
-      type: object
-      description: TillReport.
-      required:
-      - session
-      - sale_count
-      - sales_total
-      - tax_total
-      - change_given
-      - tendered_by_method
-      - expected_by_method
-      properties:
-        session:
-          $ref: '#/components/schemas/PosTillSession'
-        sale_count:
-          type: integer
-        sales_total:
-          type: integer
-          format: int64
-          description: Cents.
-        tax_total:
-          type: integer
-          format: int64
-          description: Cents.
-        change_given:
-          type: integer
-          format: int64
-          description: Cents.
-        tendered_by_method:
-          type: object
-          additionalProperties:
-            type: integer
-            format: int64
-          description: Cents keyed by tender method.
-        expected_by_method:
-          type: object
-          additionalProperties:
-            type: integer
-            format: int64
-          description: Cents keyed by tender method.
-    PosZReport:
-      type: object
-      description: ZReport.
-      required:
-      - id
-      - till_session_id
-      - register_id
-      - over_short
-      - payload
-      - generated_at
-      properties:
-        id:
-          type: string
-          format: uuid
-        till_session_id:
-          type: string
-          format: uuid
-        register_id:
-          type: string
-        branch_id:
-          type: string
-          format: uuid
-        over_short:
-          type: integer
-          format: int64
-          description: Cents.
-        payload:
-          allOf:
-          - $ref: '#/components/schemas/PosTillReport'
-          description: The frozen closing report, a JSON object.
-        generated_at:
-          type: string
-          format: date-time
-    PosZReportList:
-      type: object
-      required:
-      - z_reports
-      properties:
-        z_reports:
-          type:
-          - array
-          - 'null'
-          items:
-            $ref: '#/components/schemas/PosZReport'
-    PosReturnLine:
-      type: object
-      description: POSReturnLine.
-      required:
-      - id
-      - return_id
-      - product_id
-      - description
-      - quantity
-      - uom
-      - unit_price
-      - line_total
-      - restock
-      properties:
-        id:
-          type: string
-          format: uuid
-        return_id:
-          type: string
-          format: uuid
-        product_id:
-          type: string
-          format: uuid
-        description:
-          type: string
-        quantity:
-          type: number
-        uom:
-          type: string
-        unit_price:
-          type: integer
-          format: int64
-          description: Cents.
-        line_total:
-          type: integer
-          format: int64
-          description: Cents.
-        restock:
-          type: boolean
-    PosReturn:
-      type: object
-      description: POSReturn. The till session, original transaction, customer, branch, ledger entry and
-        lines are omitted when empty.
-      required:
-      - id
-      - register_id
-      - cashier_id
-      - subtotal
-      - tax_amount
-      - total
-      - refund_method
-      - reason
-      - status
-      - created_at
-      properties:
-        id:
-          type: string
-          format: uuid
-        register_id:
-          type: string
-        till_session_id:
-          type: string
-          format: uuid
-        original_transaction_id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        branch_id:
-          type: string
-          format: uuid
-        cashier_id:
-          type: string
-          format: uuid
-        subtotal:
-          type: integer
-          format: int64
-          description: Cents.
-        tax_amount:
-          type: integer
-          format: int64
-          description: Cents.
-        total:
-          type: integer
-          format: int64
-          description: Cents.
-        refund_method:
-          type: string
-          description: CASH, CARD or ACCOUNT.
-        reason:
-          type: string
-        status:
-          type: string
-        gl_entry_id:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-          format: date-time
+        register_id: {type: string, description: "Defaults REG-01."}
+        original_sale_id: {type: [string, "null"], format: uuid, description: "The sale the goods came from; absent is a no-receipt return."}
+        customer_id: {type: [string, "null"], format: uuid}
+        refund_method: {$ref: "#/components/schemas/PosRefundMethod"}
+        reason: {type: string}
+        gateway_tx_id: {type: [string, "null"], description: "Refused on a card return: the refund goes to the sale's own card tender, never a transaction the client names."}
         lines:
           type: array
           items:
-            $ref: '#/components/schemas/PosReturnLine'
-    PosReturnList:
+            $ref: "#/components/schemas/PosReturnLineRequest"
+    PosReturnLineRequest:
       type: object
-      required:
-      - returns
+      required: [quantity]
       properties:
-        returns:
-          type:
-          - array
-          - 'null'
+        product_id: {type: [string, "null"], format: uuid, description: "Required when the line names no sale line."}
+        line_id: {type: [string, "null"], format: uuid, description: "The sale line returned; its price and cost follow. Required on every line when original_sale_id is named."}
+        description: {type: [string, "null"]}
+        quantity: {type: string, description: "A positive decimal string with at most 4 fraction digits."}
+        unit_price_ten_thousandths: {type: integer, format: int64, minimum: 0, description: "Required when the line names no sale line."}
+        restock: {type: boolean, description: "Default true; damaged goods stay out of stock."}
+    PosTillOpenRequest:
+      type: object
+      properties:
+        register_id: {type: string, description: "Defaults REG-01."}
+        opening_float_cents: {type: integer, format: int64, minimum: 0}
+    PosTillCloseRequest:
+      type: object
+      required: [counted_by_method]
+      properties:
+        counted_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64, minimum: 0}
+          description: "The counted cents per lowercase method (cash, check, card, account)."
+        notes: {type: [string, "null"]}
+    PosSyncRequest:
+      type: object
+      required: [batch_id, items]
+      properties:
+        batch_id: {type: string}
+        register_id: {type: string, description: "Defaults REG-01."}
+        items:
+          type: array
           items:
-            $ref: '#/components/schemas/PosReturn'
-    PosSyncError:
+            $ref: "#/components/schemas/PosSyncSale"
+    PosSyncSale:
       type: object
-      description: SyncError.
-      required:
-      - client_id
-      - reason
+      required: [client_id, items, tenders]
       properties:
-        client_id:
-          type: string
-        reason:
-          type: string
+        client_id: {type: string, format: uuid, description: "The offline client's id for the sale; a replay is a duplicate, not an error."}
+        cashier_id: {type: [string, "null"], format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosLineRequest"
+        tenders:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosTenderRequest"
+        client_created_at: {type: [string, "null"], format: date-time, description: "When the register made the sale offline."}
+    PosLineRequest:
+      type: object
+      description: >-
+        One sales line in the shared shape of ADR 0005 section 2.2, the same
+        parse everywhere a sales line is written: a product line (quantity and
+        unit from the product when it names one), a charge line (charge_code),
+        or a text line (a note, nothing priced); an override or a discount
+        carries its reason and is audited.
+      properties:
+        id: {type: [string, "null"], format: uuid, description: "The client's id for the line, echoed on created lines."}
+        line_type: {type: [string, "null"], enum: [product, kit, component, charge, text], description: "Defaults product; a kit explodes to its components."}
+        product_id: {type: [string, "null"], format: uuid}
+        charge_code: {type: [string, "null"], description: "The charge code a charge line names."}
+        sku: {type: [string, "null"]}
+        description: {type: [string, "null"]}
+        quantity: {type: [string, "null"], description: "A decimal string with at most 4 fraction digits; null only on a text line."}
+        uom: {type: [string, "null"], description: "Defaults the product's unit."}
+        price_uom: {type: [string, "null"], description: "Defaults uom; a different one requires the pair."}
+        uom_qty: {type: [string, "null"], description: "The pair side in the sale unit; both sides together, both positive."}
+        price_uom_qty: {type: [string, "null"], description: "The pair side in the price unit."}
+        unit_price_ten_thousandths: {type: [integer, "null"], format: int64, minimum: 0, description: "Defaults the product's price."}
+        override_reason: {type: [string, "null"], description: "Required when the price is not the product's."}
+        discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
+        discount_cents: {type: [integer, "null"], format: int64}
+        discount_reason: {type: [string, "null"]}
+    PosTransactionSummary:
+      type: object
+      description: A sale's head, a list item.
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, total_cents, status, invoice_id, completed_at, created_at, item_count]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "POS-000001, human readable."}
+        revision: {type: integer, format: int64}
+        branch_id: {type: string, format: uuid}
+        register_id: {type: string}
+        cashier_id: {type: string, format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
+        currency: {type: string, description: "ISO 4217, the customer's or the dealer default."}
+        total_cents: {type: integer, format: int64}
+        status: {$ref: "#/components/schemas/PosStatus"}
+        invoice_id: {type: [string, "null"], format: uuid, description: "Set by the completion."}
+        completed_at: {type: [string, "null"], format: date-time}
+        created_at: {type: string, format: date-time}
+        item_count: {type: integer}
+    PosTransaction:
+      type: object
+      description: "The full sale: the head with its lines and tenders."
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, lines, tenders]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "POS-000001, human readable."}
+        revision: {type: integer, format: int64}
+        branch_id: {type: string, format: uuid}
+        register_id: {type: string}
+        cashier_id: {type: string, format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
+        currency: {type: string, description: "ISO 4217, the customer's or the dealer default."}
+        subtotal_cents: {type: integer, format: int64}
+        tax_cents: {type: integer, format: int64}
+        total_cents: {type: integer, format: int64}
+        change_cents: {type: integer, format: int64, description: "The change given, never subtracted from the payments a second time."}
+        till_session_id: {type: [string, "null"], format: uuid}
+        status: {$ref: "#/components/schemas/PosStatus"}
+        invoice_id: {type: [string, "null"], format: uuid, description: "The invoice the completion posted."}
+        completed_at: {type: [string, "null"], format: date-time}
+        created_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosLineItem"
+        tenders:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosTender"
+    PosTransactionPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosTransactionSummary"
+        next_cursor: {type: [string, "null"], description: "Null: the page is the whole day."}
+        limit: {type: integer}
+        total: {type: integer, description: "Only under include=total."}
+    PosLineItem:
+      type: object
+      description: >-
+        A sale line in the shared shape of ADR 0005 section 2.2: product, kit
+        (with its component lines), charge and text lines, the priced fields
+        null on a text line, the extension rounded once.
+      required: [id, position, line_type, parent_line_id, product_id, charge_code_id, charge_code, sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price_ten_thousandths, priced_unit_price_ten_thousandths, price_source, override_reason, discount_percent, discount_cents, discount_reason, price_adjusted_by, line_total_cents, taxable, revenue_account_code, is_special_order, vendor_id, special_order_unit_cost_ten_thousandths, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        position: {type: integer}
+        line_type: {type: string, enum: [product, kit, component, charge, text]}
+        parent_line_id: {type: [string, "null"], format: uuid, description: "The kit line a component belongs to."}
+        product_id: {type: [string, "null"], format: uuid}
+        charge_code_id: {type: [string, "null"], format: uuid}
+        charge_code: {type: [string, "null"]}
+        sku: {type: [string, "null"]}
+        description: {type: string}
+        quantity: {type: [string, "null"], description: "A decimal string; null on a text line."}
+        uom: {type: [string, "null"]}
+        price_uom: {type: [string, "null"], description: "The unit the price is per; equals uom unless the pair converts."}
+        uom_qty: {type: [string, "null"], description: "The pair side in the sale unit; 1 and 1 when the units agree."}
+        price_uom_qty: {type: [string, "null"]}
+        unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "Scale 4; null on a text line."}
+        priced_unit_price_ten_thousandths: {type: [integer, "null"], format: int64, description: "The price before an override or discount moved it."}
+        price_source: {type: string, enum: [price_list, quote, override, manual, none]}
+        override_reason: {type: [string, "null"]}
+        discount_percent: {type: [string, "null"], description: "A percent or a cents amount, never both."}
+        discount_cents: {type: [integer, "null"], format: int64}
+        discount_reason: {type: [string, "null"]}
+        price_adjusted_by: {type: [string, "null"], description: "Who moved the price; the audit row carries the rest."}
+        line_total_cents: {type: [integer, "null"], format: int64, description: "The extension, rounded once; null on a text line."}
+        taxable: {type: boolean}
+        revenue_account_code: {type: [string, "null"], description: "The account the line's revenue posts to (a charge line's code)."}
+        is_special_order: {type: boolean}
+        vendor_id: {type: [string, "null"], format: uuid}
+        special_order_unit_cost_ten_thousandths: {type: [integer, "null"], format: int64}
+        created_at: {type: string, format: date-time}
+    PosTender:
+      type: object
+      description: >-
+        One payment taken at the counter, stored net: the tendered amount
+        less any change given from it, so the payment it became is the money
+        kept.
+      required: [id, sale_id, method, amount_cents, payment_id, reference, card_last4, card_brand, gateway_tx_id, auth_code, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        sale_id: {type: string, format: uuid}
+        method: {$ref: "#/components/schemas/PosTenderMethod"}
+        amount_cents: {type: integer, format: int64, description: "Net of change."}
+        payment_id: {type: [string, "null"], format: uuid, description: "The payment the completion recorded."}
+        reference: {type: [string, "null"]}
+        card_last4: {type: [string, "null"]}
+        card_brand: {type: [string, "null"]}
+        gateway_tx_id: {type: [string, "null"]}
+        auth_code: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+    PosReturn:
+      type: object
+      description: >-
+        One counter return: a credit memo created, posted, refunded and
+        optionally restocked in one act.
+      required: [id, number, revision, branch_id, register_id, till_session_id, original_sale_id, customer_id, cashier_id, currency, subtotal_cents, tax_cents, total_cents, refund_method, reason, credit_memo_id, created_at, lines]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string, description: "RTN-000001, human readable."}
+        revision: {type: integer, format: int64}
+        branch_id: {type: [string, "null"], format: uuid}
+        register_id: {type: string}
+        till_session_id: {type: [string, "null"], format: uuid}
+        original_sale_id: {type: [string, "null"], format: uuid}
+        customer_id: {type: [string, "null"], format: uuid}
+        cashier_id: {type: string, format: uuid}
+        currency: {type: string}
+        subtotal_cents: {type: integer, format: int64}
+        tax_cents: {type: integer, format: int64}
+        total_cents: {type: integer, format: int64}
+        refund_method: {$ref: "#/components/schemas/PosRefundMethod"}
+        reason: {type: string}
+        credit_memo_id: {type: [string, "null"], format: uuid, description: "The credit memo the return posted."}
+        created_at: {type: string, format: date-time}
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosReturnLine"
+    PosReturnLine:
+      type: object
+      description: One returned line, its quantity and extension negative.
+      required: [id, position, product_id, description, quantity, uom, unit_price_ten_thousandths, line_total_cents, restock]
+      properties:
+        id: {type: string, format: uuid}
+        position: {type: integer}
+        product_id: {type: [string, "null"], format: uuid}
+        description: {type: string}
+        quantity: {type: [string, "null"], description: "A negative decimal string."}
+        uom: {type: [string, "null"]}
+        unit_price_ten_thousandths: {type: [integer, "null"], format: int64}
+        line_total_cents: {type: [integer, "null"], format: int64}
+        restock: {type: boolean}
+    PosTillSession:
+      type: object
+      description: >-
+        One drawer shift. The expected cash is the sum of the session's cash
+        payments (already net of change) plus the opening float less cash
+        refunds.
+      required: [id, register_id, branch_id, cashier_id, status, opening_float_cents, opened_at, closed_at, expected_by_method, counted_by_method, over_short_cents, gl_entry_id, notes]
+      properties:
+        id: {type: string, format: uuid}
+        register_id: {type: string}
+        branch_id: {type: [string, "null"], format: uuid}
+        cashier_id: {type: string, format: uuid}
+        status: {$ref: "#/components/schemas/PosTillStatus"}
+        opening_float_cents: {type: integer, format: int64}
+        opened_at: {type: string, format: date-time}
+        closed_at: {type: [string, "null"], format: date-time}
+        expected_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+          description: "The expected cents per lowercase method; present once the session has sales."
+        counted_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        over_short_cents: {type: [integer, "null"], format: int64, description: "Set by the close."}
+        gl_entry_id: {type: [string, "null"], format: uuid, description: "The 5030 over/short entry the close booked."}
+        notes: {type: string}
+    PosTillReport:
+      type: object
+      required: [session, sale_count, sales_total_cents, tax_total_cents, change_cents, tendered_by_method, expected_by_method]
+      properties:
+        session:
+          $ref: "#/components/schemas/PosTillSession"
+        sale_count: {type: integer}
+        sales_total_cents: {type: integer, format: int64}
+        tax_total_cents: {type: integer, format: int64}
+        change_cents: {type: integer, format: int64}
+        tendered_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+        expected_by_method:
+          type: object
+          additionalProperties: {type: integer, format: int64}
+    PosZReport:
+      type: object
+      description: The immutable end-of-day snapshot written once when the session closes.
+      required: [id, till_session_id, register_id, branch_id, over_short_cents, payload, generated_at]
+      properties:
+        id: {type: string, format: uuid}
+        till_session_id: {type: string, format: uuid}
+        register_id: {type: string}
+        branch_id: {type: [string, "null"], format: uuid}
+        over_short_cents: {type: integer, format: int64}
+        payload: {type: string, format: byte, description: "The frozen closing report as JSON bytes."}
+        generated_at: {type: string, format: date-time}
+    PosSearchResult:
+      type: object
+      required: [product_id, sku, description, unit_price_cents, uom, in_stock]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        description: {type: string}
+        unit_price_cents: {type: integer, format: int64}
+        uom: {type: string}
+        in_stock: {type: string, description: "A decimal string of the on hand quantity."}
+    PosCatalogProduct:
+      type: object
+      required: [product_id, sku, description, unit_price_cents, uom, in_stock]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        description: {type: string}
+        unit_price_cents: {type: integer, format: int64}
+        uom: {type: string}
+        in_stock: {type: string, description: "A decimal string of the on hand quantity."}
     PosSyncResponse:
       type: object
-      description: OfflineSyncResponse. errors is omitted when empty.
-      required:
-      - batch_id
-      - synced_count
-      - duplicate_count
-      - error_count
+      required: [batch_id, synced_count, duplicate_count, error_count, pending_count, errors, pending]
       properties:
-        batch_id:
-          type: string
-        synced_count:
-          type: integer
-        duplicate_count:
-          type: integer
-        error_count:
-          type: integer
+        batch_id: {type: string}
+        synced_count: {type: integer}
+        duplicate_count: {type: integer, description: "Sales already synced, by client_id."}
+        error_count: {type: integer}
+        pending_count: {type: integer, description: "Sales waiting on the tax provider; the sync retries them."}
         errors:
           type: array
           items:
-            $ref: '#/components/schemas/PosSyncError'
-    PosTransactionCreate:
-      type: object
-      properties:
-        register_id:
-          type: string
-          description: Defaults to REG-01.
-        cashier_id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-    PosAddItem:
-      type: object
-      required:
-      - product_id
-      - quantity
-      properties:
-        product_id:
-          type: string
-          format: uuid
-        quantity:
-          type: number
-        uom:
-          type: string
-    PosTenderInput:
-      type: object
-      description: AddTenderRequest.
-      required:
-      - method
-      - amount
-      properties:
-        method:
-          type: string
-          description: CASH, CARD, CHECK or ACCOUNT.
-        amount:
-          type: number
-          description: Float dollars.
-        reference:
-          type: string
-        token_id:
-          type: string
-          description: Card token from the payment processor.
-    PosComplete:
-      type: object
-      required:
-      - tenders
-      properties:
-        tenders:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/components/schemas/PosTenderInput'
-    PosOfflineTransaction:
-      type: object
-      description: OfflineTransaction.
-      required:
-      - client_id
-      - register_id
-      - cashier_id
-      - items
-      - tenders
-      - client_created_at
-      properties:
-        client_id:
-          type: string
-          format: uuid
-        register_id:
-          type: string
-        cashier_id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        items:
+            $ref: "#/components/schemas/PosSyncItemResult"
+        pending:
           type: array
           items:
-            $ref: '#/components/schemas/PosAddItem'
-        tenders:
-          type: array
-          items:
-            $ref: '#/components/schemas/PosTenderInput'
-        client_created_at:
-          type: string
-          format: date-time
-    PosSyncRequest:
+            $ref: "#/components/schemas/PosSyncItemResult"
+    PosSyncItemResult:
       type: object
-      description: OfflineSyncRequest.
-      required:
-      - batch_id
-      - items
+      required: [client_id, reason]
       properties:
-        batch_id:
-          type: string
-        register_id:
-          type: string
-        items:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/components/schemas/PosOfflineTransaction'
-    PosTillOpen:
-      type: object
-      required:
-      - opening_float
-      properties:
-        register_id:
-          type: string
-          description: Defaults to REG-01.
-        opening_float:
-          type: number
-          description: Float dollars; converted to cents on the server.
-    PosTillClose:
-      type: object
-      required:
-      - counted_by_method
-      properties:
-        counted_by_method:
-          type: object
-          additionalProperties:
-            type: number
-          description: Float dollars keyed by tender method.
-        notes:
-          type: string
-    PosReturnLineRequest:
-      type: object
-      description: ReturnLineRequest.
-      required:
-      - product_id
-      - quantity
-      - unit_price
-      properties:
-        product_id:
-          type: string
-          format: uuid
-        description:
-          type: string
-        quantity:
-          type: number
-          description: Positive units returned.
-        uom:
-          type: string
-        unit_price:
-          type: number
-          description: Float dollars.
-        restock:
-          type: boolean
-          description: Defaults to true; false for damaged goods.
-    PosReturnRequest:
-      type: object
-      description: ReturnRequest.
-      required:
-      - lines
-      properties:
-        register_id:
-          type: string
-          description: Defaults to REG-01.
-        original_transaction_id:
-          type: string
-          format: uuid
-        customer_id:
-          type: string
-          format: uuid
-        refund_method:
-          type: string
-          description: CASH, CARD or ACCOUNT, case insensitive; defaults to CASH.
-        reason:
-          type: string
-        gateway_tx_id:
-          type: string
-          description: The original card transaction to reverse.
-        lines:
-          type: array
-          minItems: 1
-          items:
-            $ref: '#/components/schemas/PosReturnLineRequest'
+        client_id: {type: string, format: uuid}
+        reason: {type: string}

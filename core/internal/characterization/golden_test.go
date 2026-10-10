@@ -390,7 +390,13 @@ func compareGoldens(t *testing.T, group string, steps []capturedStep) {
 	if bytes.Equal(want, actual) {
 		return
 	}
-	t.Errorf("golden %s drifted from recorded behaviour:\n%s", path, diffSnippet(string(want), string(actual)))
+	// The actual transcript lands beside the golden on drift: an order-only
+	// difference has no diff lines to show, and the file is what settles it.
+	dump := path + ".actual"
+	if err := os.WriteFile(dump, actual, 0o644); err != nil {
+		t.Logf("write drift dump %s: %v", dump, err)
+	}
+	t.Errorf("golden %s drifted from recorded behaviour (actual kept at %s):\n%s", path, dump, diffSnippet(string(want), string(actual)))
 }
 
 // TestGoldenFilesMatchCurrentGroups pins the golden directory to the script:

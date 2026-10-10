@@ -98,6 +98,111 @@ type FulfilmentInvoice struct {
 	Effects *account.Effects
 }
 
+// CounterInvoice is the invoice a completed counter sale bills (ADR 0005
+// 14.2 C2-5): origin POS, pickup, no order, everything its entry needs. The
+// number, the terms and their dates are filled by CreateCounterInvoice
+// (the number is minted late, section 11).
+type CounterInvoice struct {
+	ID         uuid.UUID
+	Number     string
+	BranchID   uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+
+	PickedUpBy  *string
+	InvoiceDate time.Time // the branch's local date
+
+	SubtotalCents int64
+	TaxCents      int64
+	TotalCents    int64
+	TaxRate       *string // the decimal rate "0.088750", nil when a provider priced it
+	TaxExempt     bool
+	TaxSource     string // EXEMPT, PROVIDER, BRANCH_RATE
+
+	Lines     []FulfilmentLine
+	Revenue   []RevenueLeg
+	CostCents int64 // the entry's COGS legs
+
+	Actor string
+
+	// Effects is what the AR core did posting the invoice: the caller writes
+	// its events (invoice.created, customer.updated, part balance) last.
+	Effects *account.Effects
+}
+
+// CreateCounterInvoice writes the invoice of a completed counter sale inside
+// the caller's transaction, on the same path a fulfilment's invoice takes:
+// the customer row is locked, THEN the gapless number is minted,
+// immediately before the insert; the balanced entry (DR 1020 the total and
+// 5010 the cost; CR each revenue account, 2020 the tax and 1030 the cost)
+// and the subledger debit go through the AR core. origin POS,
+// delivery_type PICKUP, no order.
+func (s *Service) CreateCounterInvoice(ctx context.Context, in *CounterInvoice) error {
+	if !database.InTx(ctx) {
+		return gl.ErrNoTransaction
+	}
+	store, ok := s.repo.(FulfilmentStore)
+	if !ok {
+		return errors.New("invoice: the repository cannot store a fulfilment invoice")
+	}
+	if in.ID == uuid.Nil {
+		in.ID = uuid.New()
+	}
+	if len(in.Lines) == 0 {
+		return fmt.Errorf("invoice must have lines")
+	}
+	terms, err := store.TermsFor(ctx, in.CustomerID)
+	if err != nil {
+		return err
+	}
+	if err := store.LockCustomer(ctx, in.CustomerID); err != nil {
+		return err
+	}
+	if in.Number, err = store.NextInvoiceNumber(ctx); err != nil {
+		return err
+	}
+	inv := &FulfilmentInvoice{
+		ID: in.ID, Number: in.Number, BranchID: in.BranchID, CustomerID: in.CustomerID, Currency: in.Currency,
+		DeliveryType: "PICKUP", PickedUpBy: in.PickedUpBy, InvoiceDate: in.InvoiceDate,
+		SubtotalCents: in.SubtotalCents, TaxCents: in.TaxCents, TotalCents: in.TotalCents,
+		TaxRate: in.TaxRate, TaxExempt: in.TaxExempt, TaxSource: in.TaxSource,
+		Lines: in.Lines, Revenue: in.Revenue, CostCents: in.CostCents, Actor: in.Actor,
+		PaymentTermsID: terms.ID,
+	}
+	inv.DueDate = terms.Terms.DueDate(in.InvoiceDate)
+	if err := store.InsertCounterInvoice(ctx, inv); err != nil {
+		return err
+	}
+	if s.account != nil {
+		legs := []gl.Leg{{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Debit: in.CostCents}}
+		for _, r := range in.Revenue {
+			legs = append(legs, gl.Leg{AccountCode: r.AccountCode, Description: "Revenue " + r.AccountCode, Credit: r.Cents})
+		}
+		legs = append(legs,
+			gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Credit: in.TaxCents},
+			gl.Leg{AccountCode: gl.AccountCodeInventory, Description: "Inventory", Credit: in.CostCents},
+		)
+		fx, err := s.account.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: in.ID, CustomerID: in.CustomerID,
+			Number: in.Number, Currency: in.Currency, TotalCents: in.TotalCents, On: in.InvoiceDate, Actor: in.Actor, Legs: legs})
+		if err != nil {
+			return mapPostingError(fmt.Errorf("failed to post the invoice: %w", err))
+		}
+		in.Effects = fx
+	}
+	if s.auditLog != nil {
+		if err := s.auditLog.Log(ctx, audit.Entry{
+			Action: "invoice.created", EntityType: "invoice", EntityID: in.ID, UserID: in.Actor,
+			Changes: map[string]interface{}{
+				"number": in.Number, "customer_id": in.CustomerID, "order_id": nil, "total_cents": in.TotalCents,
+				"cost_cents": in.CostCents, "origin": "POS",
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to write the audit row: %w", err)
+		}
+	}
+	return nil
+}
+
 // FulfilmentStore is the repository half the fulfilment invoice needs; the
 // Postgres repository implements it.
 type FulfilmentStore interface {
@@ -105,6 +210,7 @@ type FulfilmentStore interface {
 	LockCustomer(ctx context.Context, customerID uuid.UUID) error
 	NextInvoiceNumber(ctx context.Context) (string, error)
 	InsertFulfilmentInvoice(ctx context.Context, in *FulfilmentInvoice) error
+	InsertCounterInvoice(ctx context.Context, in *FulfilmentInvoice) error
 }
 
 // CreateFulfilmentInvoice writes the invoice of an order fulfilment inside the

@@ -163,20 +163,20 @@ var modelBoundSchemas = []struct {
 	{"ExposureRow", pricing.ExposureRow{}},
 	{"EscalateNowResult", pricing.EscalateNowResult{}},
 	{"EscalateNowLine", pricing.EscalateNowLine{}},
-	// pos
-	{"PosTransaction", pos.POSTransaction{}},
-	{"PosLineItem", pos.POSLineItem{}},
-	{"PosTender", pos.POSTender{}},
-	{"PosTransactionSummary", pos.TransactionSummary{}},
+	// pos (C2-5: the counter on the wire contract)
+	{"PosTransaction", pos.Sale{}},
+	{"PosLineItem", salesdoc.Line{}},
+	{"PosTender", pos.Tender{}},
+	{"PosTransactionSummary", pos.SaleSummary{}},
 	{"PosSearchResult", pos.QuickSearchResult{}},
 	{"PosCatalogProduct", pos.CatalogProduct{}},
 	{"PosTillSession", pos.TillSession{}},
 	{"PosTillReport", pos.TillReport{}},
 	{"PosZReport", pos.ZReport{}},
-	{"PosReturn", pos.POSReturn{}},
-	{"PosReturnLine", pos.POSReturnLine{}},
+	{"PosReturn", pos.Return{}},
+	{"PosReturnLine", pos.ReturnLine{}},
 	{"PosSyncResponse", pos.OfflineSyncResponse{}},
-	{"PosSyncError", pos.SyncError{}},
+	{"PosSyncItemResult", pos.SyncItemResult{}},
 	// portal (R1-7c)
 	// Health schemas (live, ready, metrics) are inline map[string]any in serve.go
 	// with no struct to bind, so they are omitted from this table.

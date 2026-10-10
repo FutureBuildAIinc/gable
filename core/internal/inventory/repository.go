@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -51,13 +52,27 @@ func (r *PostgresRepository) ExecuteInTx(ctx context.Context, fn func(context.Co
 }
 
 func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UUID, locationID *uuid.UUID) (*Inventory, error) {
+	// The write path's read follows the branch wall (C2-5's carried fix from
+	// PR 44's review): a bound caller with no location reads its own
+	// branch's rows, never another branch's; an unbound caller keeps the
+	// legacy behaviour (the named location's row, else the row with no
+	// location).
+	branch := branchctx.IDForQuery(ctx)
 	query := `
-		SELECT id, product_id, location_id, location, quantity, allocated, updated_at
-		FROM inventory
-		WHERE product_id = $1 AND (($2::uuid IS NULL AND location_id IS NULL) OR location_id = $2)
+		SELECT i.id, i.product_id, i.location_id, i.location, i.quantity, i.allocated, i.updated_at
+		FROM inventory i
+		LEFT JOIN locations l ON l.id = i.location_id
+		WHERE i.product_id = $1
+		  AND (
+			($2::uuid IS NOT NULL AND l.branch_id = $2)
+			OR ($2::uuid IS NULL AND $3::uuid IS NULL AND i.location_id IS NULL)
+			OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND i.location_id = $3)
+		  )
+		ORDER BY i.quantity DESC NULLS LAST, i.id
+		LIMIT 1
 	`
 	var inv Inventory
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID, locationID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID, branch, locationID).Scan(
 		&inv.ID,
 		&inv.ProductID,
 		&inv.LocationID,

@@ -614,6 +614,57 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 	return nil
 }
 
+// InsertCounterInvoice writes the invoice of a completed counter sale: the
+// same shape as a fulfilment's invoice with origin POS, no order and the
+// pickup will-call fields (ADR 0005 6.1 and 14.2 C2-5).
+func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *FulfilmentInvoice) error {
+	exec := r.db.GetExecutor(ctx)
+	var discountDue any
+	if in.DiscountDueDate != nil {
+		discountDue = in.DiscountDueDate.Format("2006-01-02")
+	}
+	_, err := exec.Exec(ctx, `
+		INSERT INTO invoices (id, number, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
+			payment_terms_id, due_date, discount_due_date, discount_percent,
+			branch_id, currency, delivery_type, picked_up_by, delivery_id,
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at)
+		VALUES ($1, $2, NULL, $3, CASE WHEN $7::bigint = 0 THEN 'PAID' ELSE 'UNPAID' END,
+			$4::numeric / 100, $5::numeric, $6::numeric / 100, $7::numeric / 100,
+			$8, $9::date, $10::date, $11::numeric / 10000,
+			$12, $13, 'PICKUP', $14, NULL,
+			NULL, NULL, NULL, $15, $16, $17::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW())`,
+		in.ID, in.Number, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
+		in.PaymentTermsID, in.DueDate.Format("2006-01-02"), discountDue, in.DiscountPercent,
+		in.BranchID, in.Currency, in.PickedUpBy, in.TaxExempt, in.TaxSource, in.InvoiceDate)
+	if err != nil {
+		return fmt.Errorf("failed to insert invoice: %w", err)
+	}
+	for i := range in.Lines {
+		l := &in.Lines[i]
+		_, err := exec.Exec(ctx, `
+			INSERT INTO invoice_lines (id, invoice_id, position, line_type, parent_line_id, product_id, charge_code_id,
+				sku, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source,
+				priced_unit_price, override_reason, price_adjusted_by,
+				discount_percent, discount_amount, discount_reason, line_total, taxable, revenue_account_code,
+				order_line_id, unit_cost, cost, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7,
+				$8, $9, $10::numeric / 10000, $11, $12, $13::numeric / 10000, $14::numeric / 10000, $15::numeric / 10000,
+				CASE WHEN $10::numeric > 0 AND $24::numeric IS NOT NULL THEN ROUND(($24::numeric / 100) / ($10::numeric / 10000), 4) ELSE $15::numeric / 10000 END,
+				$16, $26::numeric / 10000, $27, $28,
+				$17::numeric / 10000, $18::numeric / 100, $19, $24::numeric / 100, $20, $21,
+				$22, $23::numeric / 10000, $25::numeric / 100, NOW())`,
+			l.ID, in.ID, l.Position, l.LineType, l.ParentLineID, l.ProductID, l.ChargeCodeID,
+			l.SKU, l.Description, l.Quantity, l.UOM, l.PriceUOM, l.UOMQty, l.PriceUOMQty, l.UnitPrice, l.PriceSource,
+			l.DiscountPercent, l.DiscountCents, l.DiscountReason, l.Taxable, l.RevenueAccountCode,
+			l.OrderLineID, l.UnitCost, l.LineTotalCents, l.CostCents,
+			l.PricedUnitPrice, l.OverrideReason, l.PriceAdjustedBy)
+		if err != nil {
+			return fmt.Errorf("failed to insert invoice line: %w", err)
+		}
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // The void.
 // ---------------------------------------------------------------------------

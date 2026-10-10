@@ -10,11 +10,12 @@
       "content_type": "application/json",
       "body": {
         "by_method": {
-          "CHECK": 313594.85
+          "CASH": 24.35,
+          "CHECK": 313596.85
         },
         "date": "<day+0>",
-        "total_collected": 313594.85,
-        "transaction_count": 42
+        "total_collected": 313621.19999999995,
+        "transaction_count": 46
       }
     }
   },
@@ -90,12 +91,28 @@
             "type": "REVERSAL"
           },
           {
+            "balance": 45.45,
+            "credit": 0,
+            "date": "<day+0>",
+            "debit": 14.03,
+            "description": "Invoice IN-000053",
+            "type": "INVOICE"
+          },
+          {
+            "balance": 31.42,
+            "credit": 14.03,
+            "date": "<day+0>",
+            "debit": 0,
+            "description": "Payment PAY-000048 applied to IN-000053",
+            "type": "PAYMENT"
+          },
+          {
             "balance": 1.42,
             "credit": 30,
             "date": "<day+0>",
             "debit": 0,
-            "description": "POS return credit #<id-2>",
-            "type": "REFUND"
+            "description": "Credit memo CM-000005",
+            "type": "CREDIT_MEMO"
           }
         ],
         "open_balance": 0,
@@ -138,7 +155,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-2>"
         }
       }
     }

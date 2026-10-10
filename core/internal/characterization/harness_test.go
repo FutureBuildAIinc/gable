@@ -704,7 +704,8 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		case []any:
 			sortPrimaryArray(body)
 		case map[string]any:
-			// Paged envelopes: the primary array sits one level down.
+			// Paged envelopes: the primary array sits one level down (the
+			// cursor envelope's items, the legacy offset envelope's data).
 			if data, ok := body["data"].([]any); ok {
 				sortPrimaryArray(data)
 			}
@@ -714,6 +715,20 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		}
 	}
 	t.Logf("step %s: %s %s -> %d (%s)", s.name, s.method, path, resp.StatusCode, resp.Header.Get("Content-Type"))
+	if resp.StatusCode >= 400 {
+		// The refusal's code and blockers beside the status, so a golden
+		// drift investigation reads the run log instead of guessing. The
+		// router's own plain text refusals (404, 405) have no body to read.
+		var e map[string]any
+		if json.Unmarshal(raw, &e) == nil {
+			if eb, ok := e["error"].(map[string]any); ok {
+				t.Logf("step %s: error body: %v", s.name, eb)
+			}
+		}
+		if capturedBody != nil {
+			t.Logf("step %s: request body: %v", s.name, capturedBody)
+		}
+	}
 
 	if s.extract != nil {
 		doc := decodeJSON(t, raw)

@@ -3,35 +3,44 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
-import { posService } from '../../services/POSService';
-import type { POSTransaction, QuickSearchResult, POSLineItem, TillSession, TillReport } from '../../types/pos';
+import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
+import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod } from '../../types/pos';
 import '../../components/BarcodeScanner.ts';
 
 const REGISTER_ID = 'REG-01';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+/** A scale 4 price to dollars, for the display only. */
+const fmtPrice = (tenThousandths: number) => `$${(tenThousandths / 10000).toFixed(2)}`;
+const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
 
 /**
- * POSTerminal -- Full-screen retail counter sales interface.
- *
- * Design Goals:
- * - Seasonal hire can learn in < 10 minutes
- * - Ring up a 5-item sale in under 60 seconds
- * - Support split payments (cash + card + check + account)
+ * POSTerminal -- Full-screen retail counter sales interface on the wire
+ * contract: cents tenders (a sale can split them across methods), a void of
+ * the completed sale while the drawer is open, and a return that posts a
+ * credit memo and refunds out of the drawer.
  */
 @customElement('gable-pos-terminal')
 export class POSTerminal extends LitElement {
   createRenderRoot() { return this; }
 
-  @state() private _transaction: POSTransaction | null = null;
+  @state() private _sale: Sale | null = null;
   @state() private _searchQuery = '';
   @state() private _searchResults: QuickSearchResult[] = [];
   @state() private _showTender = false;
-  @state() private _tenderMethod = '';
+  @state() private _pendingTenders: TenderIn[] = [];
+  @state() private _tenderMethod: TenderMethod = 'cash';
   @state() private _tenderAmount = '';
   @state() private _loading = false;
   @state() private _error: string | null = null;
   @state() private _success: string | null = null;
   @state() private _isScanning = false;
+
+  // The completed sale offered for a return or a void.
+  @state() private _completed: Sale | null = null;
+  @state() private _showReturn = false;
+  @state() private _returnReason = 'wrong material';
+  @state() private _returnMethod: RefundMethod = 'cash';
+  @state() private _returnQty: Record<string, string> = {};
 
   // Till (drawer) state
   @state() private _till: TillSession | null = null;
@@ -52,7 +61,7 @@ export class POSTerminal extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     void this._loadTill();
-    this._startNewTransaction();
+    this._startNewSale();
   }
 
   /* ---- Till (drawer) lifecycle ---- */
@@ -66,20 +75,20 @@ export class POSTerminal extends LitElement {
   }
 
   private async _openTill() {
-    const float = parseFloat(this._openingFloat);
-    if (isNaN(float) || float < 0) {
+    const cents = dollarsToCents(this._openingFloat);
+    if (isNaN(cents) || cents < 0) {
       this._error = 'Enter a valid opening float';
       return;
     }
     try {
       this._tillBusy = true;
-      this._till = await posService.openTill(REGISTER_ID, float);
+      this._till = await posService.openTill(REGISTER_ID, cents);
       this._showTillOpen = false;
       this._openingFloat = '';
-      this._success = `Till opened with ${fmt(this._till.opening_float)} float`;
+      this._success = `Till opened with ${fmt(this._till.opening_float_cents)} float`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
-      // Re-start the transaction so it attaches to the new session.
-      void this._startNewTransaction();
+      // Re-start the sale so it attaches to the new session.
+      void this._startNewSale();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to open till';
     } finally {
@@ -92,8 +101,8 @@ export class POSTerminal extends LitElement {
     try {
       this._tillBusy = true;
       this._tillReport = await posService.tillReport(this._till.id);
-      // Seed blind-count inputs for every method the drawer expects (+ CASH).
-      const methods = new Set<string>(['CASH', ...Object.keys(this._tillReport.expected_by_method || {})]);
+      // Seed blind-count inputs for every method the drawer expects (+ cash).
+      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {})]);
       const seed: Record<string, string> = {};
       methods.forEach((m) => { seed[m] = ''; });
       this._counts = seed;
@@ -110,8 +119,8 @@ export class POSTerminal extends LitElement {
     if (!this._till) return;
     const counted: Record<string, number> = {};
     for (const [method, val] of Object.entries(this._counts)) {
-      const n = parseFloat(val);
-      if (!isNaN(n)) counted[method] = n;
+      const cents = dollarsToCents(val);
+      if (!isNaN(cents)) counted[method] = cents;
     }
     try {
       this._tillBusy = true;
@@ -166,49 +175,42 @@ export class POSTerminal extends LitElement {
 
     this._searchDebounce = setTimeout(async () => {
       try {
-        const results = await posService.searchProducts(this._searchQuery);
-        this._searchResults = results;
+        this._searchResults = await posService.searchProducts(this._searchQuery);
       } catch {
         this._searchResults = [];
       }
     }, 200);
   }
 
-  /* ---- Transaction management ---- */
+  /* ---- Sale management ---- */
 
-  private async _startNewTransaction() {
+  private async _startNewSale() {
     try {
       this._loading = true;
       this._error = null;
       this._success = null;
-      const cashierId = localStorage.getItem('user_id') || '';
-      if (!cashierId) {
-        this._error = 'No cashier ID found. Please log in again.';
-        return;
-      }
-      const tx = await posService.startTransaction('REG-01', cashierId);
-      this._transaction = tx;
+      this._pendingTenders = [];
+      // The last completed sale stays offerable for a void or a return
+      // until the next completion replaces it.
+      const sale = await posService.startSale(REGISTER_ID);
+      this._sale = sale;
       this._showTender = false;
       // Focus the search input after render
       this.updateComplete.then(() => {
         this._searchInput?.focus();
       });
     } catch (err: unknown) {
-      this._error = err instanceof Error ? err.message : 'Failed to start transaction';
+      this._error = err instanceof Error ? err.message : 'Failed to start the sale';
     } finally {
       this._loading = false;
     }
   }
 
   private async _addItem(product: QuickSearchResult) {
-    if (!this._transaction) return;
+    if (!this._sale) return;
     try {
-      const updated = await posService.addItem(this._transaction.id, {
-        product_id: product.product_id,
-        quantity: 1,
-        uom: product.uom,
-      });
-      this._transaction = updated;
+      const updated = await posService.addItem(this._sale.id, product.product_id, '1', product.uom);
+      this._sale = updated;
       this._searchQuery = '';
       this._searchResults = [];
       this._searchInput?.focus();
@@ -218,47 +220,58 @@ export class POSTerminal extends LitElement {
   }
 
   private async _removeItem(itemId: string) {
-    if (!this._transaction) return;
+    if (!this._sale) return;
     try {
-      const updated = await posService.removeItem(this._transaction.id, itemId);
-      this._transaction = updated;
+      this._sale = await posService.removeItem(this._sale.id, itemId);
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to remove item';
     }
   }
 
-  private _handleTender(method: string) {
-    if (!this._transaction) return;
+  /* ---- Tenders (a split tender accumulates before it completes) ---- */
+
+  private get _tenderedSoFar(): number {
+    return this._pendingTenders.reduce((sum, t) => sum + t.amount_cents, 0);
+  }
+
+  private _handleTender(method: TenderMethod) {
+    if (!this._sale) return;
     this._tenderMethod = method;
-    this._tenderAmount = (this._transaction.total / 100).toFixed(2);
+    const remaining = this._sale.total_cents - this._tenderedSoFar;
+    this._tenderAmount = (Math.max(remaining, 0) / 100).toFixed(2);
     this._showTender = true;
   }
 
+  /** Add the entered tender to the pending list; a split names several. */
+  private _addPendingTender() {
+    const cents = dollarsToCents(this._tenderAmount);
+    if (isNaN(cents) || cents <= 0) {
+      this._error = 'Invalid tender amount';
+      return;
+    }
+    this._pendingTenders = [...this._pendingTenders, { method: this._tenderMethod, amount_cents: cents }];
+    this._showTender = false;
+    this._tenderAmount = '';
+  }
+
   private async _completeSale() {
-    if (!this._transaction || !this._tenderMethod) return;
+    if (!this._sale || this._pendingTenders.length === 0) return;
     try {
       this._loading = true;
       this._error = null;
-      const amount = parseFloat(this._tenderAmount);
-      if (isNaN(amount) || amount <= 0) {
-        this._error = 'Invalid tender amount';
-        return;
-      }
-
-      const completed = await posService.completeTransaction(this._transaction.id, [{
-        method: this._tenderMethod,
-        amount,
-      }]);
-      this._transaction = completed;
-      const change = completed.change_due || 0;
+      const completed = await posService.completeSale(this._sale.id, this._sale.revision, this._pendingTenders);
+      this._sale = completed;
+      this._completed = completed;
+      const change = completed.change_cents || 0;
       this._success = change > 0
-        ? `Sale complete — ${fmt(completed.total)} · CHANGE DUE ${fmt(change)}`
-        : `Sale complete — ${fmt(completed.total)}`;
+        ? `Sale ${completed.number} complete - ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
+        : `Sale ${completed.number} complete - ${fmt(completed.total_cents)}`;
+      this._pendingTenders = [];
       this._showTender = false;
 
-      // Auto-start new transaction after 2 seconds
+      // Auto-start the next sale after 2 seconds
       this._newTxTimer = setTimeout(() => {
-        this._startNewTransaction();
+        this._startNewSale();
       }, 2000);
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to complete sale';
@@ -267,18 +280,70 @@ export class POSTerminal extends LitElement {
     }
   }
 
-  private async _voidTransaction() {
-    if (!this._transaction) return;
-    if (!window.confirm('Void this transaction?')) return;
+  private async _voidSale() {
+    const sale = this._completed ?? this._sale;
+    if (!sale || sale.status !== 'completed') {
+      this._error = 'Only a completed sale is voided, while its drawer is open';
+      return;
+    }
+    const reason = window.prompt('Void reason?');
+    if (!reason) return;
     try {
-      await posService.voidTransaction(this._transaction.id);
-      this._startNewTransaction();
+      const voided = await posService.voidSale(sale.id, sale.revision, reason);
+      this._sale = voided;
+      this._completed = null;
+      this._success = `Sale ${voided.number} voided - the ledger and the stock are whole again`;
     } catch (err: unknown) {
-      this._error = err instanceof Error ? err.message : 'Failed to void transaction';
+      this._error = err instanceof Error ? err.message : 'Failed to void the sale';
     }
   }
 
-  /* ---- Till modals ---- */
+  /* ---- Returns ---- */
+
+  private _beginReturn() {
+    const sale = this._completed ?? this._sale;
+    if (!sale || sale.status !== 'completed') {
+      this._error = 'Return needs a completed sale';
+      return;
+    }
+    this._completed = sale;
+    const qty: Record<string, string> = {};
+    sale.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null).forEach(l => { qty[l.id] = '0'; });
+    this._returnQty = qty;
+    this._showReturn = true;
+  }
+
+  private async _confirmReturn() {
+    const sale = this._completed;
+    if (!sale) return;
+    const lines = Object.entries(this._returnQty)
+      .filter(([, q]) => Number(q) > 0)
+      .map(([line_id, q]) => ({ line_id, quantity: q, restock: true }));
+    if (lines.length === 0) {
+      this._error = 'Name at least one line and quantity to return';
+      return;
+    }
+    try {
+      this._loading = true;
+      const ret = await posService.createReturn({
+        register_id: REGISTER_ID,
+        original_sale_id: sale.id,
+        customer_id: sale.customer_id ?? undefined,
+        refund_method: this._returnMethod,
+        reason: this._returnReason,
+        lines,
+      });
+      this._showReturn = false;
+      this._success = `Return ${ret.number} complete - ${fmt(ret.total_cents)} refunded ${ret.refund_method}`;
+      this._errorTimer = setTimeout(() => { this._success = null; }, 4000);
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to take the return';
+    } finally {
+      this._loading = false;
+    }
+  }
+
+  /* ---- Modals ---- */
 
   private _overlay(inner: unknown) {
     return html`
@@ -301,7 +366,7 @@ export class POSTerminal extends LitElement {
         style="width:100%;box-sizing:border-box;padding:14px;background:#0d1117;border:2px solid #8957e5;border-radius:8px;color:#e6edf3;font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="200.00" />
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${() => { this._showTillOpen = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:#8957e5;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening…' : 'Open Till'}</button>
+        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:#8957e5;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
       </div>
     `);
   }
@@ -313,18 +378,18 @@ export class POSTerminal extends LitElement {
     // Result view (Z-report): expected vs counted vs over/short.
     if (this._closeResult) {
       const r = this._closeResult;
-      const os = r.session.over_short ?? 0;
+      const os = r.session.over_short_cents ?? 0;
       const osColor = os === 0 ? '#3fb950' : os < 0 ? '#f85149' : '#d29922';
       const osLabel = os === 0 ? 'BALANCED' : os < 0 ? `SHORT ${fmt(Math.abs(os))}` : `OVER ${fmt(os)}`;
       return this._overlay(html`
-        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report — Till Closed</h2>
+        <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report - Till Closed</h2>
         <div style="text-align:center;padding:16px;background:#0d1117;border:1px solid #30363d;border-radius:10px;margin-bottom:16px">
           <div style="font-size:12px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px">Over / Short</div>
           <div style="font-size:32px;font-weight:800;color:${osColor}">${osLabel}</div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
           <thead><tr style="color:#8b949e;text-align:right">
-            <th style="text-align:left;padding:4px 0">Method</th><th>Expected</th><th>Counted</th><th>Δ</th>
+            <th style="text-align:left;padding:4px 0">Method</th><th>Expected</th><th>Counted</th><th>\u0394</th>
           </tr></thead>
           <tbody>
             ${Object.keys(r.session.expected_by_method || {}).map((m) => {
@@ -339,7 +404,7 @@ export class POSTerminal extends LitElement {
             })}
           </tbody>
         </table>
-        <div style="font-size:12px;color:#8b949e;margin-top:14px">${r.sale_count} sales · ${fmt(r.sales_total)} rung · ${fmt(r.tax_total)} tax · ${fmt(r.change_given)} change given</div>
+        <div style="font-size:12px;color:#8b949e;margin-top:14px">${r.sale_count} sales \u00b7 ${fmt(r.sales_total_cents)} rung \u00b7 ${fmt(r.tax_total_cents)} tax \u00b7 ${fmt(r.change_cents)} change given</div>
         <button @click=${close} style="width:100%;margin-top:18px;padding:12px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">Done</button>
       `);
     }
@@ -348,14 +413,14 @@ export class POSTerminal extends LitElement {
     const rep = this._tillReport;
     const methods = Object.keys(this._counts);
     return this._overlay(html`
-      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Close Till — Blind Count</h2>
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Close Till - Blind Count</h2>
       <p style="margin:0 0 16px;font-size:13px;color:#8b949e">
-        Count the drawer and enter actuals by tender. Expected totals stay hidden until you post — that's the blind count.
+        Count the drawer and enter actuals by tender. Expected totals stay hidden until you post - that's the blind count.
         ${rep ? html`<br>${rep.sale_count} sales rung this session.` : nothing}
       </p>
       ${methods.map((m) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <label style="width:90px;font-size:13px;color:#c9d1d9">${m}</label>
+          <label style="width:90px;font-size:13px;color:#c9d1d9;text-transform:capitalize">${m}</label>
           <input type="number" step="0.01" .value=${this._counts[m]}
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
             style="flex:1;box-sizing:border-box;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;text-align:right;outline:none" placeholder="0.00" />
@@ -363,7 +428,43 @@ export class POSTerminal extends LitElement {
       `)}
       <div style="display:flex;gap:8px;margin-top:20px">
         <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:#8957e5;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting…' : 'Post Count & Close'}</button>
+        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:#8957e5;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
+      </div>
+    `);
+  }
+
+  private _renderReturnModal() {
+    if (!this._showReturn || !this._completed) return nothing;
+    const sale = this._completed;
+    const productLines = sale.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
+    return this._overlay(html`
+      <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Return - ${sale.number}</h2>
+      <p style="margin:0 0 16px;font-size:13px;color:#8b949e">Name the lines coming back. The return posts a credit memo, restocks what returns, and refunds out of the drawer.</p>
+      ${productLines.map((l) => html`
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span style="flex:1;font-size:13px;color:#c9d1d9">${l.description}</span>
+          <span style="font-size:12px;color:#8b949e">of ${l.quantity}</span>
+          <input type="number" min="0" step="0.25" .value=${this._returnQty[l.id] ?? '0'}
+            @input=${(e: Event) => { this._returnQty = { ...this._returnQty, [l.id]: (e.target as HTMLInputElement).value }; }}
+            style="width:80px;padding:8px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;text-align:right;outline:none" />
+        </div>
+      `)}
+      <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
+        <label style="font-size:13px;color:#8b949e">Refund</label>
+        <select .value=${this._returnMethod}
+          @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
+          style="flex:1;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none">
+          <option value="cash">Cash (out of the drawer)</option>
+          <option value="card">Card (back on the card)</option>
+          <option value="account">Account credit</option>
+        </select>
+      </div>
+      <input type="text" .value=${this._returnReason}
+        @input=${(e: Event) => { this._returnReason = (e.target as HTMLInputElement).value; }}
+        style="width:100%;box-sizing:border-box;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none;margin-bottom:16px" placeholder="Reason" />
+      <div style="display:flex;gap:8px">
+        <button @click=${() => { this._showReturn = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => this._confirmReturn()} ?disabled=${this._loading} style="flex:2;padding:12px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Return'}</button>
       </div>
     `);
   }
@@ -371,10 +472,13 @@ export class POSTerminal extends LitElement {
   /* ---- Render ---- */
 
   render() {
-    const totalDollars = this._transaction ? (this._transaction.total / 100).toFixed(2) : '0.00';
-    const subtotalDollars = this._transaction ? (this._transaction.subtotal / 100).toFixed(2) : '0.00';
-    const taxDollars = this._transaction ? (this._transaction.tax_amount / 100).toFixed(2) : '0.00';
-    const lineItems: POSLineItem[] = this._transaction?.line_items || [];
+    const sale = this._sale;
+    const totalDollars = sale ? (sale.total_cents / 100).toFixed(2) : '0.00';
+    const subtotalDollars = sale ? (sale.subtotal_cents / 100).toFixed(2) : '0.00';
+    const taxDollars = sale ? (sale.tax_cents / 100).toFixed(2) : '0.00';
+    const lines: SaleLine[] = sale?.lines ?? [];
+    const productLines = lines.filter(l => l.parent_line_id === null);
+    const remaining = sale ? sale.total_cents - this._tenderedSoFar : 0;
 
     return html`
       <div style="display:flex;flex-direction:column;height:100vh;background:#0d1117;color:#e6edf3;font-family:'Outfit',-apple-system,sans-serif">
@@ -385,30 +489,30 @@ export class POSTerminal extends LitElement {
             <span style="font-size:11px;padding:2px 8px;background:#238636;border-radius:12px;color:#fff;font-weight:600">REG-01</span>
             ${this._till ? html`
               <span title="Drawer open" style="font-size:11px;padding:2px 8px;background:#8957e5;border-radius:12px;color:#fff;font-weight:600">
-                ● TILL OPEN · float ${fmt(this._till.opening_float)}
+                \u25cf TILL OPEN \u00b7 float ${fmt(this._till.opening_float_cents)}
               </span>
             ` : html`
               <span style="font-size:11px;padding:2px 8px;background:#6e2f2f;border-radius:12px;color:#ffb4b4;font-weight:600">
-                ○ NO TILL
+                \u25cb NO TILL
               </span>
             `}
-            ${this._transaction ? html`
+            ${sale ? html`
               <span style="font-size:11px;padding:2px 8px;background:#1f6feb;border-radius:12px;color:#fff;font-family:monospace">
-                TX: ${this._transaction.id.slice(0, 8)}
+                ${sale.number} \u00b7 ${sale.status}
               </span>
             ` : nothing}
           </div>
           <div style="display:flex;gap:8px">
             ${this._till ? html`
               <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy} style="padding:6px 16px;background:#21262d;border:1px solid #8957e5;border-radius:6px;color:#d2a8ff;font-size:13px;cursor:pointer">
-                Close Till · Z-Report
+                Close Till \u00b7 Z-Report
               </button>
             ` : html`
               <button @click=${() => { this._showTillOpen = true; }} style="padding:6px 16px;background:#8957e5;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
                 Open Till
               </button>
             `}
-            <button @click=${() => this._startNewTransaction()} style="padding:6px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;cursor:pointer">
+            <button @click=${() => this._startNewSale()} style="padding:6px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;cursor:pointer">
               New Sale
             </button>
           </div>
@@ -416,6 +520,7 @@ export class POSTerminal extends LitElement {
 
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
+        ${this._renderReturnModal()}
 
         <!-- Alerts -->
         ${this._error ? html`
@@ -468,7 +573,7 @@ export class POSTerminal extends LitElement {
                     >
                       <span style="font-family:monospace;font-size:12px;color:#58a6ff;min-width:100px">${result.sku}</span>
                       <span style="flex:1;color:#c9d1d9">${result.description}</span>
-                      <span style="font-weight:600;color:#3fb950">$${result.unit_price.toFixed(2)}/${result.uom}</span>
+                      <span style="font-weight:600;color:#3fb950">${fmt(result.unit_price_cents)}/${result.uom}</span>
                       <span style="font-size:11px;color:#8b949e">${result.in_stock} avail</span>
                     </button>
                   `)}
@@ -476,9 +581,9 @@ export class POSTerminal extends LitElement {
               ` : nothing}
             </div>
 
-            <!-- Line Items -->
+            <!-- Lines -->
             <div style="flex:1;overflow-y:auto;padding:8px 16px">
-              ${lineItems.length === 0 ? html`
+              ${productLines.length === 0 ? html`
                 <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#484f58">
                   <div style="font-size:48px;margin-bottom:12px">&#x1f6d2;</div>
                   <p>Search and add products to start a sale</p>
@@ -495,17 +600,17 @@ export class POSTerminal extends LitElement {
                     </tr>
                   </thead>
                   <tbody>
-                    ${lineItems.map((item: POSLineItem) => html`
+                    ${productLines.map((item: SaleLine) => html`
                       <tr>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22">${item.description}</td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:center">
                           ${item.quantity} ${item.uom}
                         </td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:right">
-                          $${(item.unit_price / 100).toFixed(2)}
+                          ${item.unit_price_ten_thousandths !== null ? fmtPrice(item.unit_price_ten_thousandths) : '-'}
                         </td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:right;font-weight:600">
-                          $${(item.line_total / 100).toFixed(2)}
+                          ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}
                         </td>
                         <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22">
                           <button
@@ -538,30 +643,34 @@ export class POSTerminal extends LitElement {
                 <span>TOTAL</span>
                 <span style="font-size:28px;font-weight:800;color:#3fb950">$${totalDollars}</span>
               </div>
+              ${this._pendingTenders.length > 0 ? html`
+                <div style="margin-top:8px;padding:8px 0;border-top:1px dashed #30363d">
+                  ${this._pendingTenders.map((t, i) => html`
+                    <div key=${i} style="display:flex;justify-content:space-between;font-size:13px;color:#c9d1d9;padding:3px 0">
+                      <span style="text-transform:capitalize">${t.method}</span>
+                      <span>${fmt(t.amount_cents)}</span>
+                    </div>
+                  `)}
+                  <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:${remaining > 0 ? '#d29922' : '#3fb950'};padding-top:6px">
+                    <span>${remaining > 0 ? 'Still owed' : 'Change'}</span>
+                    <span>${fmt(Math.abs(remaining))}</span>
+                  </div>
+                </div>
+              ` : nothing}
             </div>
 
-            ${!this._showTender ? html`
+            ${!this._showTender && this._pendingTenders.length === 0 ? html`
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1">
-                <button @click=${() => this._handleTender('CASH')} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center" ?disabled=${lineItems.length === 0}>
-                  Cash
-                </button>
-                <button @click=${() => this._handleTender('CARD')} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center" ?disabled=${lineItems.length === 0}>
-                  Card
-                </button>
-                <button @click=${() => this._handleTender('CHECK')} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center" ?disabled=${lineItems.length === 0}>
-                  Check
-                </button>
-                <button @click=${() => this._handleTender('ACCOUNT')} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center" ?disabled=${lineItems.length === 0}>
-                  Account
-                </button>
+                ${METHODS.map(m => html`
+                  <button @click=${() => this._handleTender(m)} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center;text-transform:capitalize" ?disabled=${productLines.length === 0 || sale?.status !== 'open'}>
+                    ${m}
+                  </button>
+                `)}
               </div>
-            ` : html`
+            ` : this._showTender ? html`
               <div style="display:flex;flex-direction:column;gap:12px">
-                <div style="font-size:18px;font-weight:700;text-align:center;padding:8px">
-                  ${this._tenderMethod === 'CASH' ? 'Cash' : ''}
-                  ${this._tenderMethod === 'CARD' ? 'Card' : ''}
-                  ${this._tenderMethod === 'CHECK' ? 'Check' : ''}
-                  ${this._tenderMethod === 'ACCOUNT' ? 'Account' : ''}
+                <div style="font-size:18px;font-weight:700;text-align:center;padding:8px;text-transform:capitalize">
+                  ${this._tenderMethod}
                 </div>
                 <input
                   type="number"
@@ -571,13 +680,12 @@ export class POSTerminal extends LitElement {
                   step="0.01"
                   aria-label="Tender amount"
                 />
-                <button
-                  @click=${() => this._completeSale()}
-                  style="padding:16px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px"
-                  ?disabled=${this._loading}
-                >
-                  ${this._loading ? 'Processing...' : `Complete Sale \u2014 $${totalDollars}`}
-                </button>
+                <div style="display:flex;gap:8px">
+                  <button
+                    @click=${() => this._addPendingTender()}
+                    style="flex:1;padding:14px;background:#1f6feb;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer"
+                  >Add Tender (split)</button>
+                </div>
                 <button
                   @click=${() => { this._showTender = false; }}
                   style="padding:10px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer"
@@ -585,16 +693,45 @@ export class POSTerminal extends LitElement {
                   Cancel
                 </button>
               </div>
+            ` : html`
+              <div style="display:flex;flex-direction:column;gap:12px;flex:1">
+                <div style="font-size:14px;color:#8b949e;text-align:center">Tenders taken against $${totalDollars}</div>
+                ${METHODS.map(m => html`
+                  <button @click=${() => this._handleTender(m)} style="padding:12px;background:#21262d;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;font-weight:600;cursor:pointer;text-transform:capitalize" ?disabled=${remaining <= 0 && m !== 'cash'}>
+                    Add ${m}
+                  </button>
+                `)}
+                <button
+                  @click=${() => this._completeSale()}
+                  style="padding:16px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px"
+                  ?disabled=${this._loading || remaining > 0}
+                >
+                  ${this._loading ? 'Processing...' : remaining > 0 ? `Still owed ${fmt(remaining)}` : `Complete Sale - $${totalDollars}`}
+                </button>
+                <button
+                  @click=${() => { this._pendingTenders = []; }}
+                  style="padding:10px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer"
+                >
+                  Clear tenders
+                </button>
+              </div>
             `}
 
             <!-- Quick Actions -->
             <div style="padding:16px 0;margin-top:auto;display:flex;gap:8px">
               <button
-                @click=${() => this._voidTransaction()}
+                @click=${() => this._voidSale()}
                 style="flex:1;padding:10px;background:transparent;border:1px solid #f8514940;border-radius:8px;color:#f85149;font-size:13px;cursor:pointer"
-                ?disabled=${!this._transaction || lineItems.length === 0}
+                ?disabled=${!this._completed}
               >
                 Void
+              </button>
+              <button
+                @click=${() => this._beginReturn()}
+                style="flex:1;padding:10px;background:transparent;border:1px solid #d2992240;border-radius:8px;color:#d29922;font-size:13px;cursor:pointer"
+                ?disabled=${!this._completed}
+              >
+                Return
               </button>
             </div>
           </div>

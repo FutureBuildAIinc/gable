@@ -650,18 +650,26 @@ func Run() {
 
 	wall.payments(mux, paymentSvc)
 
-	// POS Module (Retail Counter Sales)
+	// POS Module (Retail Counter Sales), on the wire contract (ADR 0005
+	// section 14.2 C2-5): the completed sale one transaction (stock out, the
+	// POS invoice posted with tax and COGS, each tender a payment applied),
+	// the void through the counter's own path, returns as credit memos, and
+	// the till's expected cash from the payments the session's sales became.
 	posRepo := pos.NewRepository(db)
-	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
-	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
-	posSvc.WithAuditLog(auditLog)
-	posSvc.WithTax(taxSvc, invoiceRepo)
-	posSvc.WithTillLedger(glSvc) // post drawer over/short to the GL at close
-	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal /
-	// Run Terminal API), NOT the Run online/keyed-web charge API (rpGateway) —
-	// that rail is the Contractor Portal / invoice online-payment path. Until
-	// the Clover terminal integration lands, counter CARD tenders are recorded
-	// as externally-captured (the device settles); posSvc.WithGateway is where
+	posSvc := pos.NewService(db, posRepo, logger).
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc}).
+		WithTaxProvider(taxSvc).
+		WithInvoices(invoiceSvc).
+		WithAR(accountSvc).
+		WithInventory(inventorySvc).
+		WithLedger(glSvc). // post drawer over/short to the GL inside the close's transaction
+		WithAuditLog(auditLog).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
+	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal),
+	// NOT the Run online/keyed-web charge API: until the Clover terminal
+	// integration lands, counter CARD tenders are recorded as
+	// externally-captured (the device settles); posSvc.WithGateway is where
 	// the Clover terminal gateway wires in.
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
@@ -1287,28 +1295,6 @@ func (a pricingAuditAdapter) Log(ctx context.Context, e pricing.AuditEntry) erro
 	return a.l.Log(ctx, audit.Entry{
 		Action: e.Action, EntityType: e.EntityType, EntityID: id, UserID: e.UserID, Changes: e.Changes,
 	})
-}
-
-// posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.
-type posCalcAdapter struct {
-	pricingSvc  *pricing.Service
-	customerSvc *customer.Service
-}
-
-func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, basePrice float64, quantity float64) (float64, error) {
-	cust, err := a.customerSvc.GetCustomer(ctx, customerID)
-	if err != nil {
-		return basePrice, nil // Fallback to base price if customer lookup fails
-	}
-	// The counter (fenced) turns this float into cents with a +0.5 truncation,
-	// which misrounds a half cent price whose float is just below it (20.025
-	// is 2002.4999 cents). So hand it a price already rounded half away from
-	// zero to whole cents, in integers.
-	sp, err := a.pricingSvc.CalculateScaled(ctx, cust, productID, basePrice, quantity, nil)
-	if err != nil {
-		return basePrice, nil
-	}
-	return float64(pricing.CentsOf(sp.Price)) / 100, nil
 }
 
 // rowOrNone unwraps RowFor's lookup; the table and the registrations sit
