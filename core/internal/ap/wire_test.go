@@ -569,7 +569,7 @@ func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
 	if got, want := f.controlBalance(), f.openSum(); got != want {
 		t.Fatalf("after the approve: control %d, open %d", got, want)
 	}
-	dup := f.pay(1200, id, id)
+	dup := f.pay(12, id, id)
 	if dup.status != http.StatusBadRequest {
 		t.Fatalf("pay a repeated invoice id = %d, want 400: %s", dup.status, dup.raw)
 	}
@@ -589,7 +589,7 @@ func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
 		t.Errorf("after the refused duplicate: control %d, open %d", got, want)
 	}
 	// A payment naming the bill once still applies.
-	if p := f.pay(1000, id); p.status != http.StatusCreated {
+	if p := f.pay(10, id); p.status != http.StatusCreated {
 		t.Errorf("pay after the refusal = %d, want 201: %s", p.status, p.raw)
 	}
 	if got, want := f.controlBalance(), f.openSum(); got != want || want != 0 {
