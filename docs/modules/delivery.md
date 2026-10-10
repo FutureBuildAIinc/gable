@@ -7,8 +7,8 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 The delivery module is the yard's fleet, the day's routes, the stops on
 each route, and the proof of delivery that closes them out. Vehicles and
-drivers are dealer-wide master records; routes and stops live behind the
-branch wall on the branch they are scheduled for. The dispatch board
+drivers are dealer-wide master records; routes and stops are walled by
+the branches of their orders, as the Branch wall section sets out. The dispatch board
 reads routes and their stops in one payload; the mobile app reads the
 driver's run for the day, writes the proof, and closes the stop.
 
@@ -30,7 +30,7 @@ A yard uses the delivery module for four things:
   licence and CDL fields, and the dealer-wide lists.
 - The day's routes: one route per run, on a scheduled date, with a
   vehicle, a driver, the joined names, the stop count, and the
-  totals that the optimizer writes back.
+  stored duration and distance totals.
 - The stops and the proof of delivery: each stop carries an order,
   an address, a sequence number, the geocode, the proof photo, the
   signature, and the status that closes it out.
@@ -65,7 +65,7 @@ line each operationId gives.
 | GET | `/api/v1/delivery/routes/{id}` | Get a route with its stops embedded; behind the branch wall. |
 | POST | `/api/v1/delivery/routes/{id}/transitions` | Dispatch a route (`to: in_transit`) or complete it (`to: completed`); `If-Match` or body `revision` (428 without, 409 stale). |
 | POST | `/api/v1/delivery/routes/{id}/reorder` | Reorder the stops by an explicit `ordered_delivery_ids` array (every stop of the route exactly once); `If-Match` required. |
-| POST | `/api/v1/delivery/routes/{id}/optimize` | Reorder the stops through the configured routing service (a no-op until one is configured); `If-Match` required. |
+| POST | `/api/v1/delivery/routes/{id}/optimize` | Reorder the stops and write each stop's estimated arrival; `If-Match` required. With a routing service configured it routes through it. With none configured it falls back to a deterministic mock: stops keep their order (renumbered from 1), stops with no coordinates get mock coordinates, and arrivals are spaced 15 minutes apart. Either way the route's revision moves and `route.updated` is written; a route with no stops, or with no stop that can be geocoded, returns unchanged with no event. |
 | GET | `/api/v1/delivery/routes/{id}/deliveries` | Cursor list of the stops of a route, in stop order on `(stop_sequence, id)`; behind the branch wall through the route; `include=total` counts. |
 | POST | `/api/v1/delivery/deliveries` | Assign an order to a route (the assign path); body `route_id` and `order_id` required, `stop_sequence` and `delivery_instructions` optional; no precondition; `Location` and `ETag` on the response. |
 | GET | `/api/v1/delivery/deliveries/{id}` | Get a stop, behind the branch wall through the stop's order. |
@@ -74,8 +74,8 @@ line each operationId gives.
 | POST | `/api/v1/delivery/deliveries/{id}/pod-photo` | Attach a proof of delivery photo (`signature`, `site` or `damage`); multipart, jpg/jpeg/png/webp, at most 10 MB; no precondition; moves the revision. |
 | GET | `/api/v1/delivery/deliveries/{id}/pod-photos` | List the proof of delivery photos, oldest first on `(uploaded_at, id)`; behind the branch wall through the stop. |
 
-There is no route update, no route assign and no route cancel. This
-module has no route cancel and no route update: a route reaches
+This module has no route cancel, no route update and no route assign
+(the assign path is `POST /api/v1/delivery/deliveries`): a route reaches
 `in_transit` and `completed` through the transitions route only.
 `scheduled` and `cancelled` are valid stored values (seeded and legacy
 rows) that the module does not write.
@@ -90,7 +90,7 @@ The wire shapes live in `core/api/fragments/delivery.yaml`; the Go
 shapes that the handler and service marshal them into live in
 `core/internal/delivery/model.go` (`Vehicle`, `Driver`, `Route`,
 `Stop`, `PODPhoto`, `QtyAdjustment`, `CapacityWarning`). Every
-resource carries a `revision` int64. Every mutating route that takes
+vehicle, driver, route and stop carries a `revision` int64. Every mutating route that takes
 a precondition refuses without one (428 `precondition_required`) and
 refuses a stale one (409 `stale_revision`); the photo attaches, the
 quantity adjustment, the assign path and the creates take no
@@ -152,8 +152,9 @@ the vehicle's.
 
 ### Routes
 
-Routes are behind the branch wall on the branch they are scheduled
-for. The wire shape is `DeliveryRoute` and the Go struct is `Route`.
+Routes are walled through their stops' orders: a route is visible
+when none of its stops belongs to a branch the caller cannot see, and
+a route with no stops is visible to every branch. The wire shape is `DeliveryRoute` and the Go struct is `Route`.
 The list of routes accepts `date` (YYYY-MM-DD), `driver_id`,
 `status` and `include=stops` or `include=total`; with `include=stops`,
 each route's `stops` array is embedded in the same payload (the
@@ -168,8 +169,8 @@ board read). The list is newest scheduled date first on
 | `scheduled_date` | date | Required, `YYYY-MM-DD`, business date. |
 | `status` | enum | `draft`, `scheduled`, `in_transit`, `completed`, `cancelled`. |
 | `notes` | string, nullable | Optional. |
-| `total_duration_mins` | integer, nullable | The optimizer's total. |
-| `total_distance_miles` | number, nullable | The optimizer's total. |
+| `total_duration_mins` | integer, nullable | Stored value; this module reads it and never writes it (it comes from seed or legacy rows). |
+| `total_distance_miles` | number, nullable | Stored value; this module reads it and never writes it (it comes from seed or legacy rows). |
 | `vehicle_name`, `driver_name` | string | Joined names; empty string when the id is null. |
 | `stop_count` | integer | The number of stops on the route. |
 | `stops` | array of `Delivery`, nullable | Embedded under `include=stops`; null otherwise. |
@@ -185,10 +186,10 @@ every stop of the route exactly once).
 
 ### Stops
 
-Stops are behind the branch wall through their route. The wire
+Stops are walled through their order's branch. The wire
 shape is `Delivery` and the Go struct is `Stop`. A stop that exists
-and is geocoded but is not on a route yet carries `route_id: null`;
-the optimizer's planner writes that state on the seeded route.
+and is geocoded but is not on a route yet carries `route_id: null`. The seed's dispatch day writes such stops;
+this module's assign path always puts a stop on a route.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -198,13 +199,14 @@ the optimizer's planner writes that state on the seeded route.
 | `order_number` | string, nullable | The order's document number. |
 | `stop_sequence` | integer | The position in the route's order. |
 | `status` | enum | `pending`, `out_for_delivery`, `delivered`, `failed`, `partial`. |
-| `pod_proof_url` | string, nullable | Set by the proof attach. |
+| `pod_proof_url` | string, nullable | Set by the stop transition (`delivered` and `partial` require it); the photo attach does not write it. |
 | `pod_signed_by` | string, nullable | Set by the stop transition; required for `delivered` and `partial`. |
 | `pod_timestamp` | RFC 3339 UTC, nullable | Set by the stop transition. |
-| `signature_data_url` | string, nullable | The signature image data URL. |
+| `signature_data_url` | string, nullable | The signature image data URL; optional on the stop transition. |
 | `delivery_instructions` | string, nullable | Free-form instructions. |
 | `latitude`, `longitude` | number, nullable | The geocode. |
-| `estimated_arrival`, `scheduled_start`, `scheduled_end` | RFC 3339 UTC, nullable | The planner and optimizer times. |
+| `estimated_arrival` | RFC 3339 UTC, nullable | Written by the optimize call. |
+| `scheduled_start`, `scheduled_end` | RFC 3339 UTC, nullable | Stored values this module reads and does not write. |
 | `customer_name`, `address` | string, nullable | Joined customer fields. |
 | `revision` | int64 | The precondition token. |
 | `created_at`, `updated_at` | RFC 3339 UTC | Required. |
@@ -235,26 +237,28 @@ The route lifecycle is `draft`, `scheduled`, `in_transit`,
 `completed`, `cancelled`. A route starts in `draft` on create.
 `TransitionRoute` accepts only `in_transit` and `completed`; any
 other target is 409 `invalid_state_transition` with the blocker
-"this module dispatches and completes routes only".
+`invalid_state` ("this module dispatches and completes routes
+only").
 
 | Action | Wire call | Allowed from | Refused from |
 |---|---|---|---|
 | Dispatch | `POST /routes/{id}/transitions {"to": "in_transit"}` | `draft`, `scheduled` | `in_transit`, `completed`, `cancelled` (409 `invalid_state_transition`, blocker `invalid_state`). A route with `vehicle_id` null or `driver_id` null is refused with the blocker `vehicle_id` or `driver_id`. |
 | Complete | `POST /routes/{id}/transitions {"to": "completed"}` | any status except `cancelled`, with at least one stop and every stop terminal (`delivered`, `failed` or `partial`). The route does not have to be `in_transit`, and a route that is already `completed` is accepted again (it writes another `route.completed` event). | A route with no stops (409 `invalid_state_transition`, blocker `route_empty`); a route with any non-terminal stop (blocker `stop_not_terminal`); a `cancelled` route that passes those two checks (blocker `invalid_state`). |
 
-The route lock is `repo.LockRoute` in the repository: every mutation
-under `Service.inTx` takes the row lock first, then reads the
-current row, then checks the revision under the lock, then writes
+The route lock is `repo.LockRoute` in the repository: every precondition
+write (updates, deletes, transitions, reorder) takes the row lock,
+reads the row, then checks the revision under the lock, then writes
 the new status and the event. The completion refusal code path is
 `Service.TransitionRoute`; the same function refuses a route
 transition to any status other than `in_transit` and `completed`
-with the blocker "this module dispatches and completes routes
-only".
+with the blocker `invalid_state`.
 
 ### Stop status
 
 The stop lifecycle is `pending`, `out_for_delivery`, `delivered`,
-`failed`, `partial`. A stop starts in `pending`. `out_for_delivery`
+`failed`, `partial`. A stop starts in `pending`. A stop transition `to` of `pending` or
+`out_for_delivery` parses and is refused 409
+`invalid_state_transition`. `out_for_delivery`
 is a valid status that a stop can be completed from, but this module
 does not set it; it comes from seed or legacy rows. A route dispatch
 does not change its stops.
@@ -269,8 +273,8 @@ and, for a delivered stop, the order's fulfilment request, in one
 transaction. The route completion's "every stop is terminal" check
 is `repo.CountNonTerminalDeliveriesByRoute` under the route's row
 lock (the count holds against the same write state the completion
-is about to commit, so a route past the prior 200-stop page bound
-completes correctly).
+is about to commit, and covers every stop, however many the route
+holds).
 
 ### Assign path
 
@@ -284,10 +288,10 @@ cross branch order is a 404); the order is not a pickup order (a
 will-call order is a 409 with the blocker `pickup_order`, ADR 0005
 section 5.5); the lumber-index exposure gate is clear; and the
 route is visible (a route the caller cannot see is a 404). Inside
-the transaction the route is locked, and a route already `completed`
-or `cancelled` is refused with 409 `invalid_state_transition`. The
-route is locked, its status and the next free sequence are read
-under the lock, the stop is inserted, the route's revision moves,
+the transaction the route is locked, its status and the next free
+sequence are read under the lock (a route already `completed` or
+`cancelled` is refused with 409 `invalid_state_transition`), the stop
+is inserted, the route's revision moves,
 and the audit row and `delivery.created` are written, in one
 transaction. The answer is 201 with `{delivery, capacity_warning}`,
 a `Location` and an `ETag`.
@@ -299,10 +303,6 @@ a `Location` and an `ETag`.
 | The order is a pickup order | 409, blocker `pickup_order` |
 | The route does not exist or is in a branch the caller cannot see | 404 |
 | The route is `completed` or `cancelled` | 409 `invalid_state_transition` |
-
-A stop that exists and is geocoded but is not on a route yet
-carries `route_id: null`; the optimizer's planner writes that state
-on the seeded route.
 
 ## Proof of delivery
 
@@ -353,8 +353,9 @@ mutation.
 | `delivery.adjusted` | `AdjustDeliveryQuantity` | `{lines, revision}` |
 
 The events feed reads all of them on `core/internal/events/handler.go`
-at `GET /api/v1/events`. The events vocabulary and the cursor
-ordering live in [`docs/modules/events.md`](events.md).
+at `GET /api/v1/events`. The feed and the cursor ordering are in
+[`docs/modules/events.md`](events.md); the delivery events are listed
+in the table above.
 
 ## Link to order fulfilment
 
@@ -367,18 +368,22 @@ inserter writes the fulfilment row
 (`order_fulfillment_requests.delivery_id` set to the delivery's id)
 in one transaction with the stop's status write, so a completed
 delivery is never paired with a missing fulfilment request. A
-failed fulfilment at delivery completion is never dropped: the order
-module retries it from
-`POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`, and
-the inserted row is what surfaces the failure in the order's
-fulfilment requests list.
+failed fulfilment at delivery completion is never dropped. The worker
+in the order module retries the queued request on its own; after 10
+failed attempts the request is parked, stays listed at
+`GET /api/v1/orders/fulfillment-requests`, and is retried again only
+through `POST /api/v1/orders/fulfillment-requests/{delivery_id}/retry`.
 
 A pickup (will-call) order is refused before any write: the assign
 service reads the order's delivery type and refuses a pickup with
 409, blocker `pickup_order` (ADR 0005 section 5.5). The lumber-index
-pre-ship gate (`exposureGate`) runs before the route read; a
-clear-for-order refusal at assignment is served in the same error
-envelope.
+pre-ship gate (`exposureGate`) runs after the pickup check and before
+the route read. An order whose source quote has unresolved index
+exposure is stopped by it. On this base the delivery handler does not
+map the gate's error to a refusal of its own, so the answer is not a
+documented contract and an integrator should treat it as a failed
+assign and read the order's exposure at
+`GET /api/v1/orders/{id}/exposure-gate`.
 
 ## Branch wall, roles and scopes
 
@@ -400,16 +405,16 @@ A machine key reaching the delivery routes needs `delivery:read` for
 `machineKeyModules` in `core/pkg/middleware/machinekey.go`. A key is
 a machine principal with no roles: the role guard on the delivery
 mount is skipped for a key, and the branch wall sees no user, so it
-applies no branch limit to a key (ADR 0002 sections 4 and 6). A key
-with `delivery:read` therefore reads every branch's routes, stops and
-proof of delivery photos, and a key with `delivery:write` writes to
-any branch. A user is held to the roles `admin`, `owner`, `warehouse`
+applies no branch limit to an unbound key (ADR 0002 sections 4 and 6).
+An unbound key with `delivery:read` therefore reads every branch's
+routes, stops and proof of delivery photos, and one with
+`delivery:write` writes to any branch. A user is held to the roles `admin`, `owner`, `warehouse`
 and `driver` and to the branches the user is granted.
 
 A branch bound key (ADR 0007 section 5.5) is pinned to its branch:
 the machine key core puts that branch into the request's branch
-context before the module runs, so lists, reads, drafts, the feed
-and links see that branch only, and writes resolve to it. A key
+context before the module runs, so lists, reads and writes on these routes see that
+branch only. A key
 bound to no branch behaves as today's claims-less caller: it reads
 and writes across branches, scoped only by its `delivery:read` or
 `delivery:write` scope.
@@ -437,7 +442,7 @@ of unknown spelling cannot reopen as dispatchable or deliverable,
 and cannot re-queue fulfilment or be billed again. Each row it
 rewrites raises a `NOTICE` naming the table, the id, the old value
 and the new value, so an unattended upgrade of a polluted database
-does not fail and leaves an audit trail.
+does not fail and each rewrite is reported in the migration output.
 
 ## Known limits
 
@@ -469,16 +474,16 @@ the local stack (Postgres, migrate and seed, `core serve`, `core
 worker`, the web front door) on http://127.0.0.1:8080 with
 `AUTH_MODE=dev`; `make down` removes it. To run the core from source
 instead: `make db`, `make migrate`, `DEMO_SEED=1 make seed`, then
-`cd core && AUTH_MODE=dev go run ./cmd/server`. The `make up` and
+`cd core && AUTH_MODE=dev go run ./cmd/server`. `DEMO_SEED=1
+make seed` truncates the transactional tables first. The `make up` and
 `make db` workflows use different compose projects and volumes, so
 the `make db` data is never truncated or removed by `make up` or
-`make down` (`AUTH_MODE=dev` needs no `Authorization` header; the
-examples below show the production header shape). The web port
+`make down` (`AUTH_MODE=dev` needs no `Authorization` header). The web port
 comes from `GABLE_WEB_PORT` (8080 by default).
 
 The delivery routes are reached at
-`http://127.0.0.1:8080/api/v1/delivery/...` under the same machine
-key the rest of the API uses. The cursor list routes take `?limit=`
+`http://127.0.0.1:8080/api/v1/delivery/...` with a machine
+key holding `delivery:read` and `delivery:write` (no header in dev mode). The cursor list routes take `?limit=`
 and `?cursor=`; the route list takes
 `?date=YYYY-MM-DD&driver_id=...&status=...&include=stops` and
 `?include=total`. The proof of delivery photo routes take a
@@ -497,8 +502,8 @@ A minimal end to end run:
    caller can see and must not be a pickup order.
 5. Optimize the route at
    `POST /api/v1/delivery/routes/{id}/optimize`; the call carries
-   `If-Match` with the route's revision and reorders only when a
-   routing service is configured.
+   `If-Match` with the route's revision; with no routing service
+   configured it uses the mock described in the routes table.
 6. Dispatch the route at
    `POST /api/v1/delivery/routes/{id}/transitions` with
    `{"to": "in_transit"}`; the call carries `If-Match` with the
@@ -547,6 +552,6 @@ A minimal end to end run:
 - [`../adr/0007-drafts-links-and-confirm-gated-scopes.md`](../adr/0007-drafts-links-and-confirm-gated-scopes.md)
   section 5.5 (a branch bound key is pinned where the branch
   middleware runs).
-- [`docs/modules/events.md`](events.md) the events feed, the
-  cursor ordering, the module's event vocabulary on
-  `refactor/v1`.
+- [`docs/modules/events.md`](events.md) the events feed and the
+  cursor ordering; the delivery events are listed in the events
+  table above.
