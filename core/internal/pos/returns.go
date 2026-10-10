@@ -274,6 +274,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		tillSessionID = &session.ID
 	}
 	var out *Return
+	var invoiceLines []InvoiceLineCost
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		// The sale row first (section 11, step 1): a void racing this return
 		// serializes here, and the loser sees the sale it priced change under
@@ -301,10 +302,26 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			if err := s.repo.BumpSaleRevision(ctx, sale.ID); err != nil {
 				return err
 			}
+			// The sale's own invoice lines, by position: a linked return's
+			// restocking line takes its source invoice line's unit_cost, the
+			// cost the sale relieved (8.4), never today's average.
+			if sale.InvoiceID != nil {
+				if invoiceLines, err = s.repo.InvoiceLineCosts(ctx, *sale.InvoiceID); err != nil {
+					return err
+				}
+			}
 		}
 		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
 		if err != nil {
 			return err
+		}
+		invoiceLineAt := func(pos int) *InvoiceLineCost {
+			for i := range invoiceLines {
+				if invoiceLines[i].Position == pos {
+					return &invoiceLines[i]
+				}
+			}
+			return nil
 		}
 		// The credit memo: a DRAFT row with its negative lines, then the AR
 		// core's PostCreditMemo mints the gapless number, posts the entry
@@ -319,6 +336,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			qty := p.in.Quantity
 			uom, priceUOM := "EA", "EA"
 			var uomQty, priceUOMQty httpx.Quantity = salesdoc.One, salesdoc.One
+			var invoiceLineID *uuid.UUID
+			restockUnitCost := httpx.Price(0)
 			if p.saleLine != nil {
 				// the memo line mirrors the sale line's own unit and pair
 				if p.saleLine.UOM != nil {
@@ -333,6 +352,11 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				if p.saleLine.PriceUOMQty != nil {
 					priceUOMQty = *p.saleLine.PriceUOMQty
 				}
+				if src := invoiceLineAt(p.saleLine.Position); src != nil {
+					id := src.ID
+					invoiceLineID = &id
+					restockUnitCost = httpx.Price(src.UnitCost)
+				}
 			}
 			unitPrice := p.in.UnitPrice
 			if unitPrice == nil {
@@ -342,11 +366,19 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				ID: uuid.New(), Position: i, ProductID: p.in.ProductID, Description: p.in.Description,
 				Quantity: &qty, UOM: &uom, PriceUOM: &priceUOM, UOMQty: &uomQty, PriceUOMQty: &priceUOMQty,
 				UnitPrice: unitPrice, LineTotal: ptrC(-p.lineTotal), Restock: p.in.Restock,
-				SaleLineID: p.in.SaleLineID,
+				SaleLineID: p.in.SaleLineID, InvoiceLineID: invoiceLineID,
 			})
 			if p.in.Restock && p.in.ProductID != nil {
-				if ref, ok := refs[p.in.ProductID.String()]; ok && ref.AverageCost > 0 {
-					restockCost += int64(salesdoc.CostOf(p.in.Quantity, ref.AverageCost))
+				// a free line (no sale) restocks at today's average: it has
+				// no source invoice line to read
+				cost := restockUnitCost
+				if cost <= 0 {
+					if ref, ok := refs[p.in.ProductID.String()]; ok {
+						cost = ref.AverageCost
+					}
+				}
+				if cost > 0 {
+					restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
 				}
 			}
 		}
@@ -361,12 +393,13 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			l := &lines[i]
 			if _, err := s.db.GetExecutor(ctx).Exec(ctx, `
 				INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, product_id, description, quantity,
-					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock, created_at)
+					uom, price_uom, uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, restock,
+					invoice_line_id, created_at)
 				VALUES ($1, $2, 'PRODUCT', $3, $4, -($5::numeric / 10000), $6, $7, $8::numeric / 10000, $9::numeric / 10000,
-					$10::numeric / 10000, 'MANUAL', $11::numeric / 100, $12, $13, NOW())`,
+					$10::numeric / 10000, 'MANUAL', $11::numeric / 100, $12, $13, $14, NOW())`,
 				memoID, l.Position, l.ProductID, l.Description, qtyArg(l.Quantity), l.UOM, l.PriceUOM,
 				qtyArg(l.UOMQty), qtyArg(l.PriceUOMQty), priceArg(l.UnitPrice),
-				centsArg(l.LineTotal), priced[i].taxable, l.Restock); err != nil {
+				centsArg(l.LineTotal), priced[i].taxable, l.Restock, l.InvoiceLineID); err != nil {
 				return fmt.Errorf("failed to create the credit memo line: %w", mapWriteError(err))
 			}
 		}

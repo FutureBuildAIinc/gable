@@ -53,6 +53,9 @@ type Repository interface {
 	// return of the sale brought back (the return's cap).
 	ReturnedQtyByLine(ctx context.Context, saleID uuid.UUID) (map[uuid.UUID]httpx.Quantity, error)
 	SaleHasReturns(ctx context.Context, saleID uuid.UUID) (bool, error)
+	// InvoiceLineCosts reads an invoice's lines by position with the unit
+	// cost the sale relieved (a linked return's restock cost).
+	InvoiceLineCosts(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceLineCost, error)
 
 	// Till sessions
 	CreateTillSession(ctx context.Context, s *TillSession) error
@@ -546,6 +549,36 @@ func (r *PostgresRepository) SaleHasReturns(ctx context.Context, saleID uuid.UUI
 	err := r.ex(ctx).QueryRow(ctx,
 		`SELECT EXISTS(SELECT 1 FROM pos_returns WHERE original_transaction_id = $1)`, saleID).Scan(&exists)
 	return exists, err
+}
+
+// InvoiceLineCost is one invoice line's position and the unit cost the sale
+// relieved (ten thousandths).
+type InvoiceLineCost struct {
+	ID        uuid.UUID
+	Position  int
+	UnitCost  int64
+}
+
+// InvoiceLineCosts reads an invoice's lines with their unit costs, ordered
+// by position: the completion builds an invoice line per sale line at the
+// same position, so a linked return finds its source line's cost here.
+func (r *PostgresRepository) InvoiceLineCosts(ctx context.Context, invoiceID uuid.UUID) ([]InvoiceLineCost, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT id, position, COALESCE(ROUND(unit_cost * 10000)::bigint, 0)
+		FROM invoice_lines WHERE invoice_id = $1 ORDER BY position`, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the invoice's line costs: %w", err)
+	}
+	defer rows.Close()
+	var out []InvoiceLineCost
+	for rows.Next() {
+		var l InvoiceLineCost
+		if err := rows.Scan(&l.ID, &l.Position, &l.UnitCost); err != nil {
+			return nil, err
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
 }
 
 func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Return, error) {
