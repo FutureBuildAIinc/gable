@@ -41,6 +41,20 @@ func TestTallyArithmetic(t *testing.T) {
 		t.Errorf("display board feet = %s; want 66.6667 (R4.3's one rounding)", d.WireString())
 	}
 
+	// Negative exact values round half away from zero too (R4.3; a credit
+	// memo line carries a negative quantity): -200/3 is -66.6667, not
+	// -66.6666, and -1/20000 is -0.0001, not zero.
+	neg := new(big.Rat).Neg(big.NewRat(200, 3))
+	if d := DisplayBoardFeet(neg); d != -q("66.6667") {
+		t.Errorf("display board feet of -200/3 = %s; want -66.6667 (half away from zero)", d.WireString())
+	}
+	if d := DisplayBoardFeet(big.NewRat(-1, 20000)); d != -q("0.0001") {
+		t.Errorf("display board feet of -1/20000 = %s; want -0.0001 (half away from zero)", d.WireString())
+	}
+	if d := DisplayBoardFeet(big.NewRat(-1, 30000)); d != 0 {
+		t.Errorf("display board feet of -1/30000 = %s; want 0 (below half rounds toward zero)", d.WireString())
+	}
+
 	// A 2x6 tally of 10 at 12 and 6 at 16: 216 linear feet, 216 board feet
 	// (a 2x6 is 1 BF per LF: 2 x 6 / 12).
 	rows = []TallyRow{{Pieces: 10, LengthFT: q("12")}, {Pieces: 6, LengthFT: q("16")}}
