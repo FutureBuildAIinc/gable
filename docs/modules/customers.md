@@ -160,6 +160,7 @@ refused scope.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
 - [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 4.2: currency, the `open_documents` rule; section 7: the customer contract on the wire.
 - [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) section 6: price levels on the customer.
+- The customer's unapplied cash and the open-documents rule (order, invoice, credit memo, deposit unapplied) live in [payments.md](payments.md) (C2-4).
 
 ## How to try it locally
 
