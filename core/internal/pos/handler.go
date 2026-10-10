@@ -174,10 +174,6 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
 		return
 	}
-	cashierID, ok := cashierOf(w, r)
-	if !ok {
-		return
-	}
 	var req addLineRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
@@ -188,7 +184,10 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	sale, err := h.service.AddLine(r.Context(), id, parsed, cashierID.String())
+	// An item change carries no cashier identity of its own (ADR 0002
+	// section 4): a key holding pos scopes works it; the acting subject, if
+	// any, is the audit attribution.
+	sale, err := h.service.AddLine(r.Context(), id, parsed, actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
@@ -437,10 +436,6 @@ func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
 		return
 	}
-	cashierID, ok := cashierOf(w, r)
-	if !ok {
-		return
-	}
 	var req closeTillRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		httpx.WriteError(w, r, err)
@@ -451,7 +446,9 @@ func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	report, err := h.service.CloseTill(r.Context(), id, counted, notes, cashierID.String())
+	// The close carries no cashier identity of its own either (ADR 0002
+	// section 4): the counted drawer is posted by the acting subject.
+	report, err := h.service.CloseTill(r.Context(), id, counted, notes, actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
