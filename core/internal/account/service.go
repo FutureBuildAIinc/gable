@@ -6,6 +6,7 @@ package account
 import (
 	"context"
 	"fmt"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -65,6 +66,34 @@ func FinanceRole(role string) bool {
 		return true
 	}
 	return false
+}
+
+// RoleOf is the role the finance checks judge for a signed in caller: the first
+// finance role among claims.Role and claims.Roles (the route guard honours both),
+// else the first role named, else "none" so a user with no role is refused. A
+// caller with no claims (a machine key, an in process call, dev mode) answers
+// "", which the checks leave to the key's scope.
+func RoleOf(claims *middleware.UserClaims) string {
+	if claims == nil {
+		return ""
+	}
+	all := append([]string{claims.Role}, claims.Roles...)
+	first := ""
+	for _, r := range all {
+		if r == "" {
+			continue
+		}
+		if FinanceRole(r) {
+			return r
+		}
+		if first == "" {
+			first = r
+		}
+	}
+	if first == "" {
+		return "none"
+	}
+	return first
 }
 
 // ReverseRequest is the body of POST /api/v1/ar/applications/{id}/reverse.

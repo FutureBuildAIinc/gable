@@ -5,6 +5,7 @@ package invoice
 
 import (
 	"encoding/json"
+	"github.com/gablelbm/gable/internal/account"
 	"net/http"
 	"strings"
 	"time"
@@ -87,7 +88,7 @@ func actor(r *http.Request) string {
 // in process caller, a machine key).
 func callerRole(r *http.Request) string {
 	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
-		return claims.Role
+		return account.RoleOf(claims)
 	}
 	return ""
 }

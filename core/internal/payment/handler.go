@@ -6,6 +6,7 @@ package payment
 import (
 	"encoding/json"
 	"errors"
+	"github.com/gablelbm/gable/internal/account"
 	"net/http"
 	"strings"
 
@@ -70,7 +71,7 @@ func noQuery(r *http.Request) error {
 
 func caller(r *http.Request) Caller {
 	if claims, ok := r.Context().Value(middleware.UserContextKey).(*middleware.UserClaims); ok && claims != nil {
-		return Caller{Actor: claims.Subject, Role: claims.Role}
+		return Caller{Actor: claims.Subject, Role: account.RoleOf(claims)}
 	}
 	return Caller{}
 }
