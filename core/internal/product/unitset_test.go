@@ -418,6 +418,51 @@ func TestUnitSetStockingUnitRefusals(t *testing.T) {
 	}
 }
 
+// TestUnitSetStockingUnitChangeKeepsTheNamedDefaults proves the PUT names
+// all four unit columns itself: a stocking unit change that keeps selling in
+// the old stocking unit (stock PCS to LF with sale_uom PCS) stores the sale
+// and purchase defaults the body sent, never the dragged new stocking unit,
+// and the GET right after agrees with the PUT's answer. The defaults trigger
+// of migration 099 serves raw writers only; the write marks itself with the
+// transaction local gable.unit_set_write flag.
+func TestUnitSetStockingUnitChangeKeepsTheNamedDefaults(t *testing.T) {
+	f := newSetFixture(t)
+	id, rev := f.createBoard(map[string]any{
+		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
+	})
+	res := f.putUnits(id, unitsBody(rev, "LF", "PCS", "LF", "LF", []any{
+		unitRow("LF", true, true, true),
+		unitRow("PCS", true, false, false, "1", "8"),
+	}))
+	if res.status != http.StatusOK {
+		t.Fatalf("the stocking unit change with a kept sale default = %d: %s", res.status, res.raw)
+	}
+	for field, want := range map[string]string{
+		"stock_uom": "LF", "sale_uom": "PCS", "price_uom": "LF", "purchase_uom": "LF",
+	} {
+		if res.body[field] != want {
+			t.Errorf("the PUT answers %s = %v; want %s", field, res.body[field], want)
+		}
+	}
+	got := f.do("GET", "/api/v1/products/"+id+"/units", nil)
+	if got.status != http.StatusOK {
+		t.Fatalf("GET = %d: %s", got.status, got.raw)
+	}
+	for field, want := range map[string]string{
+		"stock_uom": "LF", "sale_uom": "PCS", "price_uom": "LF", "purchase_uom": "LF",
+	} {
+		if got.body[field] != want {
+			t.Errorf("the stored %s is %v; the PUT answered %s (the GET must agree with the PUT)", field, got.body[field], want)
+		}
+	}
+	// The columns agree with the product read too: a quote line that omits
+	// its uom defaults to the stored sale_uom.
+	detail := f.do("GET", "/api/v1/products/"+id, nil)
+	if detail.status != http.StatusOK || detail.body["sale_uom"] != "PCS" {
+		t.Errorf("the product read carries the stored sale default, got %d %s", detail.status, detail.raw)
+	}
+}
+
 // TestUnitSetStockingUnitComesFromStockUOM proves the stocking unit the PUT
 // stores is the request's stock_uom, never the first (1, 1) row of the set:
 // a set carrying two (1, 1) rows (EA and PCS, the natural fastener set)

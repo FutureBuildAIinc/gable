@@ -681,6 +681,13 @@ func (r *PostgresRepository) ReplaceUnitSet(ctx context.Context, id uuid.UUID, r
 	if basePrice != nil {
 		baseArg = *basePrice
 	}
+	// The write names all four unit columns itself, so the defaults trigger
+	// of migration 099 must not drag them: the transaction local
+	// gable.unit_set_write flag holds the trigger's dragging branch back for
+	// this transaction only (it serves raw writers, which never set it).
+	if _, err := exec.Exec(ctx, `SELECT set_config('gable.unit_set_write', 'on', true)`); err != nil {
+		return 0, fmt.Errorf("failed to mark the unit set write: %w", err)
+	}
 	args := []any{id, stockUOM, saleUOM, priceUOM, purchaseUOM, baseArg}
 	var newRevision int64
 	err := exec.QueryRow(ctx, `

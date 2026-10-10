@@ -239,13 +239,18 @@ END $$;
 -- default unit columns follow the stocking unit, and the stocking row is
 -- created beside the product, exactly what the backfill gave every
 -- existing product. Both are triggers because the value is row dependent.
+-- The unit set write names all four unit columns itself, so it sets the
+-- transaction local gable.unit_set_write flag before its UPDATE: a set
+-- that keeps selling in the old stocking unit keeps its sale_uom (and
+-- purchase_uom). The dragging branch below serves raw writers only.
 CREATE OR REPLACE FUNCTION products_unit_defaults() RETURNS trigger AS $$
 BEGIN
     IF TG_OP = 'INSERT' THEN
         NEW.sale_uom := COALESCE(NEW.sale_uom, NEW.uom_primary);
         NEW.price_uom := COALESCE(NEW.price_uom, NEW.uom_primary);
         NEW.purchase_uom := COALESCE(NEW.purchase_uom, NEW.uom_primary);
-    ELSIF NEW.uom_primary IS DISTINCT FROM OLD.uom_primary THEN
+    ELSIF NEW.uom_primary IS DISTINCT FROM OLD.uom_primary
+          AND current_setting('gable.unit_set_write', true) IS DISTINCT FROM 'on' THEN
         -- A raw change of the stocking unit carries the defaults with it
         -- when the caller did not name new ones.
         IF NEW.sale_uom IS NOT DISTINCT FROM OLD.uom_primary THEN NEW.sale_uom := NEW.uom_primary; END IF;

@@ -266,6 +266,45 @@ func TestMigration099_CatalogueSetsAndTallies(t *testing.T) {
 		t.Errorf("a raw product insert gains its stocking row, got %d", n)
 	}
 
+	// A writer that sets gable.unit_set_write names the defaults itself: the
+	// trigger's dragging branch serves raw writers only, so a flagged change
+	// of the stocking unit keeps the sale and purchase defaults the caller
+	// left at the old stocking unit (the unit set PUT's case), while the same
+	// raw change without the flag drags them along.
+	if _, err := conn.Exec(ctx, `
+		BEGIN;
+		SELECT set_config('gable.unit_set_write', 'on', true);
+		UPDATE products SET uom_primary = 'PCS', price_uom = 'PCS' WHERE sku = 'MIG-RAW';
+		COMMIT`); err != nil {
+		t.Fatalf("a flagged stocking unit change works: %v", err)
+	}
+	var sale, purchase string
+	if err := conn.QueryRow(ctx, `SELECT sale_uom, purchase_uom FROM products WHERE sku = 'MIG-RAW'`).Scan(&sale, &purchase); err != nil {
+		t.Fatal(err)
+	}
+	if sale != "CTN" || purchase != "CTN" {
+		t.Errorf("a flagged write keeps the named defaults, got sale %s purchase %s; want CTN and CTN", sale, purchase)
+	}
+	// Without the flag the same raw change drags the defaults with it: put
+	// the sale default back on the stocking unit first, as the insert left it.
+	if _, err := conn.Exec(ctx, `
+		UPDATE products SET sale_uom = 'PCS' WHERE sku = 'MIG-RAW';
+		UPDATE products SET uom_primary = 'EA', price_uom = 'EA' WHERE sku = 'MIG-RAW'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, `SELECT sale_uom FROM products WHERE sku = 'MIG-RAW'`).Scan(&sale); err != nil {
+		t.Fatal(err)
+	}
+	if sale != "EA" {
+		t.Errorf("an unflagged raw change drags the defaults to the new stocking unit, got %s", sale)
+	}
+	// Leave MIG-RAW holding only its stocking row, as the down section expects.
+	if _, err := conn.Exec(ctx, `
+		UPDATE products SET purchase_uom = 'EA' WHERE sku = 'MIG-RAW';
+		DELETE FROM product_units WHERE product_id = '00000000-0000-0000-0000-0000000000f3' AND uom <> 'EA'`); err != nil {
+		t.Fatal(err)
+	}
+
 	// The stocking row trigger's invariants: a random length product is
 	// stocked in LF, and the stocking row carries price.
 	if _, err := conn.Exec(ctx, `
