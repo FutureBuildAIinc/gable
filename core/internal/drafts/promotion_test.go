@@ -33,60 +33,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// TestPromotionRunsAtDraftsBranchWhateverTheHeader pins section 4.2 step 5:
-// the promoter runs with the draft's branch as the branch context, whatever
-// the committer's X-Branch-Id names (a mismatched header never widens or
-// narrows the promotion).
-func TestPromotionRunsAtDraftsBranchWhateverTheHeader(t *testing.T) {
-	f := newFixture(t, testutil.RequireDB(t))
-	id := f.create()
-
-	// A header naming another branch does not steer the promotion: an
-	// administrator may name any branch (the branch middleware admits it),
-	// and the promoter still runs at the DRAFT's branch, so the quote lands
-	// there, never on the header's.
-	other := f.otherBranch(t)
-	if other != "" {
-		r := f.do("POST", "/api/v1/drafts/quotes/"+id+"/promote", map[string]any{"revision": 1}, "X-Branch-Id", other)
-		if r.status != http.StatusCreated {
-			t.Fatalf("promote with a foreign header = %d: %s", r.status, r.raw)
-		}
-		entity := promotedEntity(t, r)
-		if got := f.quoteBranch(t, entity); got == other || got != f.defaultBranch(t) {
-			t.Errorf("the promoted quote sits on %s (header named %s); the promoter must run at the draft's branch", got, other)
-		}
-	}
-}
-
-func (f *fixture) otherBranch(t *testing.T) string {
-	t.Helper()
-	var id string
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT id::text FROM locations WHERE type='BRANCH' AND id <> (SELECT value::uuid FROM system_settings WHERE key='default_branch_id') LIMIT 1`).Scan(&id); err != nil {
-		return ""
-	}
-	return id
-}
-
-func (f *fixture) defaultBranch(t *testing.T) string {
-	t.Helper()
-	var id string
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT value::text FROM system_settings WHERE key='default_branch_id'`).Scan(&id); err != nil {
-		t.Fatal(err)
-	}
-	return id
-}
-
-func (f *fixture) quoteBranch(t *testing.T, id string) string {
-	t.Helper()
-	var branch string
-	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT branch_id::text FROM quotes WHERE id = $1`, id).Scan(&branch); err != nil {
-		t.Fatal(err)
-	}
-	return branch
-}
+// TestPromotionRunsAtDraftsBranchWhateverTheHeader (the kill switch off
+// form of the branch rule) was removed: with the switch off the branch
+// middleware ignores X-Branch-Id, so the promoter trivially runs at the
+// draft's branch and the test could not fail. The rule's real proof is
+// TestPromotionRunsAtDraftsBranchWithKillSwitchOn in
+// feed_c5_2a_p2_1_test.go, which turns the switch on, creates a second
+// branch and pins the promotion to the draft's branch against a foreign
+// header.
 
 func promotedEntity(t *testing.T, r resp) string {
 	t.Helper()
