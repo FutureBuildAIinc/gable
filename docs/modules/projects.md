@@ -59,18 +59,57 @@ customer's project is a 404.
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
 The `ProjectDashboard` (returned by `GET /api/portal/v1/projects/{id}`)
-embeds the project and three lists: `orders`, `deliveries` and
-`invoices`. Each item is a `ProjectItem`: `id`, `type`, `status`,
-`total_cents`, `created_at`, `reference`. The totals are integer
-cents, never floats.
+is a `ProjectDashboard` object whose keys are the project (a nested
+`Project` object under the `project` key) and three list keys,
+`orders`, `deliveries` and `invoices` (each an array of `ProjectItem`,
+newest first, never null). Each item is a `ProjectItem`: `id`,
+`type`, `status`, `total_cents`, `created_at`, `reference`. Item
+totals are integer cents (ADR 0001 section 7) and `total_cents` is
+null on a delivery, which carries no money.
+
+`ProjectPage` is the list envelope (`core/api/fragments/project.yaml`
+`components.schemas.ProjectPage`):
+
+| Field | Wire form | Note |
+|---|---|---|
+| `items` | array of `Project` | Newest first on `(created_at, id)`. |
+| `next_cursor` | string, nullable | The keyset cursor (ADR 0001 section 2); null on the last page. |
+| `limit` | integer | The page size in effect. |
+| `total` | integer | Present only under `include=total`. |
+
+### Create and update body
+
+`ProjectRequest` is the body of `POST /api/portal/v1/projects` and
+`PUT /api/portal/v1/projects/{id}`. No field is required, but create
+and update differ.
+
+| Field | Wire form | Note |
+|---|---|---|
+| `name` | text | 1 to 255 characters (the column is `varchar(255)` in characters). Required on create; absent on update keeps the stored value. |
+| `status` | lowercase enum | `active` or `completed`. Create ignores any `status` (the project always starts `active`); update applies the value when set. |
+| `revision` | integer | The body form of the precondition on `PUT`; a create carrying one is a 400 naming `revision`. |
+
+Update is partial: absent fields keep their stored values. A request
+that names nothing to change (no `name` and no `status`) is a no-op:
+the row answers with its current revision and the service writes
+no audit row, no event, and the revision does not move
+(`core/internal/project/service.go` `Update`).
 
 ### Money and quantity conventions
 
 The dashboard carries no quantity, only integer cents under
 `total_cents`. Money is integer cents under `_cents`; the project's
-own list cursor is the keyset cursor of ADR 0001 section 2; the
-list envelope is `{items, next_cursor, limit}` with `total` only
-under `include=total`.
+own list cursor is the keyset cursor of ADR 0001 section 2.
+
+### Headers and codes
+
+`Idempotency-Key` is required on every mutating request (create and
+update); `ETag` is returned on every record (GET, POST and PUT); the
+create response carries a `Location` header. A write without
+`If-Match` and without a body `revision` is `428
+precondition_required`; a body or header that disagrees with the
+server revision is `409 stale_revision`; `If-Match: *` or an
+`If-Match` that is a list is `400 validation_failed`.
 
 ## Lifecycle and transitions
 
