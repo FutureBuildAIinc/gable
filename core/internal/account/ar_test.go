@@ -597,9 +597,9 @@ func TestARAgingByJobAndShipTo(t *testing.T) {
 		ship1, w.customerID, ship2)
 
 	// Current (due ahead), 1-30 late on ship 1 with no job, 31-60 late on job 2.
-	w.invoice(5000, daysFromNow(-5), onProject(job1), onShipTo(ship1))            // due +25: current
-	w.invoice(3000, daysFromNow(-35), onShipTo(ship1))                           // due -5: 1-30
-	w.invoice(7000, daysFromNow(-70), onProject(job2), onShipTo(ship2))          // due -40: 31-60
+	w.invoice(5000, daysFromNow(-5), onProject(job1), onShipTo(ship1))  // due +25: current
+	w.invoice(3000, daysFromNow(-35), onShipTo(ship1))                  // due -5: 1-30
+	w.invoice(7000, daysFromNow(-70), onProject(job2), onShipTo(ship2)) // due -40: 31-60
 	// Unapplied cash on job 1.
 	pay := uuid.New()
 	var fx *account.Effects
@@ -797,8 +797,9 @@ func TestARPaymentVoid(t *testing.T) {
 		_, fx, e := w.svc.RefundPayment(ctx, account.RefundPaymentIn{PaymentID: pay2, AmountCents: 11000, Reason: "too much", Actor: "u-finance", On: daysFromNow(0)})
 		return fx, e
 	})
-	if err == nil || !strings.Contains(err.Error(), "unapplied") {
-		t.Errorf("over refund = %v, want the unapplied refusal", err)
+	var overRefund *httpx.Error
+	if !errors.As(err, &overRefund) || overRefund.Status != 409 || len(overRefund.Details) == 0 || overRefund.Details[0].Code != "exceeds_unapplied" {
+		t.Errorf("over refund = %v, want the 409 exceeds_unapplied blocker (not the constraint's message)", err)
 	}
 	w.mustAct("refund 3000", func(ctx context.Context) (*account.Effects, error) {
 		_, fx, e := w.svc.RefundPayment(ctx, account.RefundPaymentIn{PaymentID: pay2, AmountCents: 3000, Reason: "customer asked", Actor: "u-finance", On: daysFromNow(0)})
