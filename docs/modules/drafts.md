@@ -87,9 +87,13 @@ may not attach the file the parse flow puts on a quote. The
 keyed form of the same rule is a key with `propose` but not
 `commit`: a key holding `quotes:propose` may save and read drafts
 and may not promote; a key holding `quotes:commit` may do
-everything. The gate sees the key id the machine-key core set, so
-a keyed request carrying an agent marker still reaches the
-handler (`confirmgate.isAgentSession` in
+everything `propose` may do and may also promote. Neither verb
+admits the entity routes: reading a quote needs `quotes:read`,
+and writing one (including the file attach) needs `quotes:write`.
+A key that must promote and also edit quotes holds `quotes:commit`
+and `quotes:write`. The gate sees the key id the machine-key
+core set, so a keyed request carrying an agent marker still
+reaches the handler (`confirmgate.isAgentSession` in
 `core/pkg/confirmgate/confirmgate.go`, the keyed return).
 
 A machine key may be branch bound (`branch_id` at mint; ADR 0007
@@ -97,12 +101,24 @@ section 5.5). A key minted with `branch_id` is pinned to its
 branch: its lists, by id reads, drafts, the feed and links see
 that branch only; a request naming another branch in
 `X-Branch-Id` is a 403 `forbidden` audited as
-`key.branch_refused`. The pin is set before the branch switch
+`key.branch_refused`. The row carries the bound branch id
+(`branch_id`), the request method, and the request path
+(`AuditKeyBranchRefusal` in `core/pkg/audit/audit.go`); the
+refused `X-Branch-Id` value is not stored. A non UUID
+`X-Branch-Id` value fails `uuid.Parse` and is refused with the
+same 403 and the same `key.branch_refused` row (the bound
+branch id is recorded, not the bad value). An empty
+`X-Branch-Id` is served under the pin: an empty header names
+no branch, so the branch check is skipped. The pin is set before the branch switch
 is read (`pkg/middleware/machinekey.go`, the `principal.BranchID
 != nil` branch in `handle`), and the routes that mount no branch
-middleware (the directory reads on `/api/v1/branches` and
-`/api/v1/users`, the tech admin's keys list and revoke) are not
-narrowed by the pin. An unbound key behaves as before.
+middleware (the user-only prefixes `/api/v1/admin/keys` and
+`/api/v1/me`) are JWT user routes, so a machine key cannot
+reach them, bound or not. The directory routes under
+`/api/v1/branches` and `/api/v1/users` do mount the branch
+middleware: their listing verbs see the pin's branch, and a
+bound key may not grant or revoke users for a branch that
+does not match. An unbound key behaves as before.
 
 ## Routes
 
@@ -139,7 +155,7 @@ the route census (`core/api/ROUTES.txt`) lists each one under
 | GET | `/api/v1/links/drafts/quotes/{id}` | Resolve a quote draft to every frontend's record URL; the `{id}` slot is the draft's UUID (a draft has no number); the link needs the confirm verbs, not the module read scope, because proposals are unfinished work an existing read key must not start reading. |
 | GET | `/api/v1/links/drafts/orders/{id}` | Resolve an order draft to every frontend's record URL; the `{id}` slot is the draft's UUID. |
 | GET | `/api/v1/quotes/{id}/file` | Download a quote's original uploaded file by quote id; the wire form of the id slot is a UUID or the quote's `Q-` number, matching the link and the entity route. |
-| PUT | `/api/v1/quotes/{id}/file` | Attach a quote's original file on the revision precondition, only while the quote is in status `draft`; the 5 MiB bound the create applies; being an entity write on a gated module, an agent marked session is refused it by the confirm gate. |
+| PUT | `/api/v1/quotes/{id}/file` | Attach a quote's original file on the revision precondition, only while the quote is in status `draft`; the 5 MiB bound the create applies; being an entity write on a gated module, an agent marked session is refused it by the confirm gate. The id slot is a UUID only (`pathID` in `core/internal/quote/handler.go`), unlike the read route which accepts a UUID or the quote's `Q-` number (`pathRecord`). |
 
 The same seven shapes (the list, the create, the read, the
 replace, the transitions, the promote and the feed) sit over the
@@ -200,9 +216,13 @@ subject's current revision.
 `Answer`): the record and its links. `entity` (the entity
 name, `quote`, `order`, `invoice`, `customer`, `product`,
 `draft`), `module`, `id`, `number` (null when the entity has
-none), and the five link slots: `desk` (the desk record path;
-absolute when `GABLE_PUBLIC_URL` is configured, otherwise a
-path relative to the deployment's origin), `front_door` (the
+none), and the five link slots: `desk` (the desk record path,
+drawn from the `Table` in `core/internal/links/links.go`:
+`accounts/{segment}` for customers, `inventory/{segment}`
+for products, `quotes/drafts/{segment}` for quote drafts and
+order drafts; absolute when `GABLE_PUBLIC_URL` is configured,
+otherwise a path relative to the deployment's origin),
+`front_door` (the
 front door's `/?open=<record path>` form, which signs a person
 in and then opens the record), `portal` (null until the portal
 has a record screen for the entity), `app` (the `gable://`
@@ -238,28 +258,42 @@ attempt to promote a discarded draft is told
 that fails the module's own check rolls the whole transaction
 back; the drafts service writes one
 `draft.promotion_refused` row, best effort, with the module,
-the revision and the `code` the module returned
-(`auditRefusedPromotion` in `core/internal/drafts/service.go`).
+the revision, the draft's `status` (drawn from the draft the
+service re reads after the rollback), and the `code` the
+module returned (`auditRefusedPromotion` in
+`core/internal/drafts/service.go`).
 The PUT on a non open draft is 409 with the `draft_not_open`
-blocker; an edit is not a transition.
+blocker; an edit is not a transition. The Promote route
+also returns 409 with the `subject_stale` blocker on a stale
+subject, the `already_promoted` blocker on a keyless retry,
+and the `draft_discarded` blocker on a promotion of a
+discarded draft.
 
 A draft is created (`draft.created` audit row,
 `op = "created"` event), saved (`draft.updated` audit row,
 `op = "updated"` event), transitioned (`draft.discarded` or
 `draft.reopened` audit row, matching event), and promoted
 (`draft.promoted` audit row, `op = "promoted"` event). The
-`created_by` and `updated_by` actor quadruples ride every
-read; the `promoted` and `discarded` blocks ride the
-`Document` wire form, the feed item, and the audit row.
+drafts service appends the `draft.promoted` event to the
+list `Promote` returns in step 9 of `service.go`'s `Promote`,
+after `k.Promote` has already written the entity's own outbox
+events (`quote.created`, `quote.updated`, `order.created`,
+`order.updated`); the `promoted` block carries `module`,
+`entity`, `entity_id`, `number`, `revision`, `proposed_by`,
+and `committed_by`. The `created_by` and `updated_by` actor
+quadruples ride every read; the `promoted` and `discarded`
+blocks ride the `Document` wire form, the feed item, and the
+audit row.
 
 ## Events the module writes
 
-The drafts module writes no outbox events of its own (the
-module's own promoter writes the entity's outbox events,
-`quote.created` and `quote.updated` for the quote kind,
-`order.created` and `order.updated` for the order kind; the
-drafts service only adds the `draft.promoted` event to the
-list `Promote` returns and the outbox takes them in order).
+The drafts module writes one outbox event of its own:
+`draft.promoted`, appended to the list `Promote` returns in
+step 9 of `service.go`'s `Promote`, after `k.Promote` has
+already written the entity's own outbox events
+(`quote.created` and `quote.updated` for the quote kind,
+`order.created` and `order.updated` for the order kind); the
+outbox takes them in order.
 The drafts module writes a feed of its own: one row per
 write, in `draft_events`, with a commit ordered position
 from `draft_events_position_seq` under a transaction scoped
@@ -309,7 +343,9 @@ The cursor is a feed minted id, the commit ordered position
 `mintFeedCursor` functions, `httpx.DecodeCursor` /
 `httpx.MintCursor`). A client resumes through `Last-Event-ID`
 (which wins when both are present) or the `cursor` parameter;
-any other parameter is a 400 before the stream opens. The
+`draft_id` and `subject_id` narrow the stream to a single
+draft or subject, and any other parameter is a 400 before
+the stream opens. The
 heartbeat (`FeedSettings.Heartbeat`, the default 15 seconds)
 sends `:keepalive` comments and re-checks the key, and the
 key recheck also runs at the loop top on a `lastCheck` timer
@@ -322,15 +358,16 @@ row read, no hash work (`KeyActive` in
 The stream limits (`feed.go` `FeedSettings`, the
 `MaxStreamsPerPrincipal` and `MaxStreams` fields, default 8
 per principal and 500 total) are answered before the stream
-opens, in the error envelope, with status 429 when the
-principal holds its per principal limit, and the principal is
-the key id for a keyed stream, the user subject for a
-session, or `anonymous` otherwise (`feedPrincipal` in
-`core/internal/drafts/feed.go`). The retention purge
-(`Purge`, in `core/internal/drafts/purge.go`) records the
-highest purged position in `draft_events_purged`, so a
-client resuming from a cursor at or below it can be told
-`event: reset` instead of silently missing changes.
+opens, in the error envelope, with status 503 when this
+process holds its total limit and status 429 when the
+principal holds its per principal limit. The principal is
+the key id for a keyed stream (`key:<id>`), the user subject
+for a session (`user:<sub>`), or `anonymous` otherwise
+(`feedPrincipal` in `core/internal/drafts/feed.go`). The
+retention purge (`Purge`, in `core/internal/drafts/purge.go`)
+records the highest purged position in `draft_events_purged`,
+so a client resuming from a cursor at or below it can be
+told `event: reset` instead of silently missing changes.
 
 ## Scopes, roles and keys
 
@@ -341,17 +378,36 @@ verbs, applied per module (`core/pkg/middleware/machinekey.go`,
 the `ScopeClass` enum and its `AdmittedScopes` switch):
 
 - `<module>:read` admits `GET` and `HEAD` on every route of
-  the module's non drafts and non links namespace. For the
-  drafts and links namespace of a confirm gated module,
-  `<module>:propose` and `<module>:commit` admit the
-  `ScopeDraftRead` and `ScopeDraftLink` classes
-  (`AdmittedScopes` returns both).
+  the module's non drafts and non links namespace. The
+  entity link route (`GET /api/v1/links/{module}/{id}`,
+  `ScopeLink` in `ScopeTarget`'s `links` arm) is also
+  admitted by `read` (`AdmittedScopes` returns
+  `module + scopeReadSuffix` for `ScopeLink`). The drafts
+  and links namespace of a confirm gated module names
+  `ScopeDraftRead` (the list, the read, the feed) and
+  `ScopeDraftLink` (the resolve for a draft) as draft
+  classes; both are admitted by `<module>:propose` and
+  `<module>:commit`, never by `read`.
 - `<module>:write` admits every other method on the module's
   non drafts and non links namespace. The drafts and links
-  namespace does not admit by `write`: the verbs are
-  `propose` and `commit`, and a write outside those routes
-  is `ScopeEntityWrite`, which the confirm gate refuses for
-  an agent marked session on a confirm gated module.
+  namespace is closed: every shape under `/api/v1/drafts/`
+  and `/api/v1/links/` is one of the seven draft routes per
+  confirm gated module, registered by the census test in
+  `core/pkg/middleware/machinekey_census_test.go`, and
+  `ScopeTarget` returns `ok = true` only on those routes.
+  Any other shape (a doubled slash, a dot segment, a path the
+  policy table does not name) gets `ScopeTarget`'s
+  `ok = false`, so the auth core refuses it as
+  `key.path_refused` before the confirm gate runs. A request
+  to a path that names the drafts or links prefix but a shape
+  the census test never registers (e.g. a non confirm gated
+  module's drafts path) reaches the same close, with the
+  refused path's `ScopeEntityWrite` only as the inheritance
+  the policy table would return if the shape were allowed.
+  `ScopeEntityWrite` is the catch-all for entity writes that
+  are not drafts and not links, and `AdmittedScopes` for it
+  returns the module's `write` scope (or the module's finer
+  override from `writeScopeOverrides` where one is set).
 - `<module>:propose` admits the draft list, the draft read,
   the feed, the create, the PUT, the transitions, the link
   resolution for a draft, and the resolve for a draft
@@ -390,22 +446,27 @@ verbs are a wider reach than `read` and `write`).
 
 The confirm gated module set is `quotes` and `orders`
 (`confirmGatedModules` in `core/pkg/middleware/machinekey.go`,
-`IsConfirmGated`); a test in `core/internal/drafts/` holds
-the set against the kind registry's `Registry.Modules()`.
-The auth core, the confirm gate and the audit log all read
-the same set: a key with `quotes:read` may read a quote
-(`GET /api/v1/quotes/{id}`) but may not list the quote
-drafts or resolve a quote draft link (the drafts and links
-admit by `propose` and `commit`); a key with
+`IsConfirmGated`); the census test
+`TestDraftRoutesResolveThroughScopeTarget` in
+`core/pkg/middleware/machinekey_census_test.go` holds the set
+against the kind registry's `Registry.Modules()`, by iterating
+every draft route under `/api/v1/drafts/` and `/api/v1/links/`
+in the census and asserting each one returns `ok = true`
+from `ScopeTarget`. The auth core and the confirm gate read
+the same set; a key with `quotes:read` may read a quote
+(`GET /api/v1/quotes/{id}`) but may not list the
+quote drafts or resolve a quote draft link (the drafts and
+links admit by `propose` and `commit`); a key with
 `quotes:propose` may list, read, save and transition quote
 drafts and may resolve a quote draft link, but may not
 promote, may not write the entity, and may not attach a
 file. A key with `quotes:commit` may do everything the
-propose key may do, plus the promotion and the file attach
-and the entity writes; the promotion's route is
-`ScopePromotion` and is admitted by `quotes:commit` alone
-(`AdmittedScopes` returns just `quotes:commit` for
-`ScopePromotion`).
+`propose` key may do, plus the promotion. The promotion
+route is `ScopePromotion` and is admitted by `quotes:commit`
+alone (`AdmittedScopes` returns just `quotes:commit` for
+`ScopePromotion`). The entity routes are not reached through
+`propose` or `commit`: the entity reads need `quotes:read`,
+the entity writes and the file attach need `quotes:write`.
 
 The audit rows the machine-key auth core writes
 (`core/pkg/middleware/machinekey.go`, the
@@ -415,9 +476,22 @@ consts, the `auditRefusal` calls inside `handle`):
 | Refusal action | When |
 |---|---|
 | `key.scope_refused` | The key is valid but holds neither the module's read nor its write scope for this method, or neither `propose` nor `commit` for a draft route, or `propose` but not `commit` for the promotion. The row's `scope` is the first admitted scope (the one the policy table records as refused). |
-| `key.user_required` | The route is in the user only prefix list (`/api/v1/admin/keys`, `/api/v1/me`; `machineKeyUserOnlyRoutes` in `machinekey.go`): key management and the user's own grants, both of which no scope would admit. |
+| `key.user_required` | The route is in the user only prefix list (the prefixes `underUserOnlyPrefix` tests in `core/pkg/middleware/machinekey.go` `machineKeyUserOnlyRoutes`: `/api/v1/admin/keys` and `/api/v1/me`). A request whose path falls under one is a 403 with the `key.user_required` audit row; a machine key cannot reach any of these routes under any scope, and no scope check would admit them. |
 | `key.path_refused` | The path is not a `/api/v1` module route the key system knows, or not a shape the drafts and links policy table names (a later draft route cannot quietly fall into the draft write class: `ScopeTarget` fails closed). |
-| `key.branch_refused` | A branch bound key named another branch in `X-Branch-Id` (the `principal.BranchID != nil` branch in `handle`; `AuditKeyBranchRefusal` in `core/pkg/audit/audit.go`). |
+| `key.branch_refused` | A branch bound key named another branch in `X-Branch-Id` (the `principal.BranchID != nil` branch in `handle`; `AuditKeyBranchRefusal` in `core/pkg/audit/audit.go`). The row carries the bound branch id, the request method, and the request path; the refused `X-Branch-Id` value is not stored. A non UUID `X-Branch-Id` value (`uuid.Parse` fails) is refused the same way. An empty `X-Branch-Id` is served under the pin: an empty header names no branch, so the branch check is skipped. |
+
+Before the refusal table the auth core runs the credential
+check (`core/pkg/middleware/machinekey.go`, the `handle`
+function's first `errors.Is(err, ErrInvalidMachineKey)`
+branch). An unknown, malformed, or revoked key is
+`ErrInvalidMachineKey`: the response is 401 with code
+`unauthorized` and message `invalid machine key`, and no
+audit row is written (the key id is unknown or stale, so an
+attribution row would name nothing). A validation
+infrastructure fault (the database cannot serve the key
+lookup) is 503 with code `unavailable` and message
+`machine key validation is unavailable`, again with no
+audit row.
 
 A branch bound key is minted with `branch_id` in the body
 of `POST /api/v1/admin/keys` (`core/internal/techadmin/service.go`
@@ -430,15 +504,26 @@ is `NULL` for unbound keys and never edited after mint
 (`GenerateKey`'s comment, "it is stored at mint and never
 edited"). The auth core's `handle` reads `principal.BranchID`
 and refuses any other branch in `X-Branch-Id` with status
-403 and the `key.branch_refused` audit row; the request's
-branch context is the pin for every other request, so a
-bound key's lists, by id reads, drafts, the feed and links
-see that branch only and a payload `branch_id` is held to
-it by the same `branchctx` rule the unbound case uses. The
-routes that mount no branch middleware (the directory reads
-on `/api/v1/branches`, `/api/v1/users`, the tech admin's
-keys list and revoke) are not narrowed by the pin; an
-unbound key behaves as before.
+403 and the `key.branch_refused` audit row. The row carries
+the bound branch id, the request method, and the request
+path; the refused `X-Branch-Id` value is not stored. A
+non UUID `X-Branch-Id` value fails `uuid.Parse` and is
+refused with the same 403 and the same `key.branch_refused`
+row. An empty `X-Branch-Id` is served under the pin (an
+empty header names no branch, so the branch check is
+skipped). The request's branch context is the pin for every
+other request, so a bound key's lists, by id reads, drafts,
+the feed and links see that branch only and a payload
+`branch_id` is held to it by the same `branchctx` rule the
+unbound case uses. The
+routes that mount no branch middleware (the user-only
+prefixes `/api/v1/admin/keys` and `/api/v1/me`) are JWT user
+routes, so a machine key cannot reach them, bound or not.
+The directory routes under `/api/v1/branches` and
+`/api/v1/users` do mount the branch middleware: their
+listing verbs see the pin's branch, and a bound key may
+not grant or revoke users for a branch that does not
+match. An unbound key behaves as before.
 
 The confirm gate sits inside auth and outside idempotency
 in the serve chain (`core/internal/app/serve/chain.go`,
@@ -525,14 +610,22 @@ is the work in five idempotent steps:
    (prefix %) gains reach through a propose or commit
    scope: %; review whether a propose key (cannot commit)
    fits the operator role`). The grammar the report
-   enumerates is the same one `ValidScopeGrammar` builds:
-   the module read and write scopes, with the finer names
-   in place of the coarse ones they replace, and the
-   `propose` and `commit` verbs of the confirm gated
-   modules. The report changes nothing: the operator
-   revokes and re mints such a key, which keeps exactly
-   the reach it had, because the scope check matches
-   exact strings (`scopeHeld` in `core/pkg/middleware/machinekey.go`).
+   enumerates is hard coded in the migration's `DO $$`
+   block (`core/migrations/103_drafts_links_scopes.sql`,
+   the `IF s IN (...)`, `ELSIF s ~ ...`, `ELSE bad_reach`
+   chain): the module list is a literal set of names
+   mirroring `ValidScopeGrammar`'s vocabulary, and a later
+   module joining the vocabulary must change the SQL to
+   match. The two `RAISE NOTICE`s live behind the same
+   `IF bad_reach ... ELSIF gaining_reach ... END IF`, so a
+   key that holds BOTH an off grammar scope AND a
+   `propose` or `commit` scope gets only the off grammar
+   notice; the `gains reach` branch is hidden by the first
+   `IF` when `bad_reach` is true. The report changes
+   nothing: the operator revokes and re mints such a key,
+   which keeps exactly the reach it had, because the scope
+   check matches exact strings (`scopeHeld` in
+   `core/pkg/middleware/machinekey.go`).
 
 The migration's report test
 (`TestMigration103_AppliesOnASeededDatabaseAndReportsOffGrammarKeys`
@@ -572,19 +665,20 @@ the table and the sequence in order.
 The feed cursor is the global position
 (`draft_events.position`, drawn from
 `draft_events_position_seq` under the `drev` advisory lock),
-not a per branch or per key position. A branch bound key's
-stream can therefore count other branches' draft writes
-through the cursor's progress: a bound key on branch A
-listening to the feed after a draft write on branch B sees
-the write's row in the `draft` event, even though its
-draft routes see branch A only. The branch wall is on the
-draft routes (`feed.go`'s `filter.BranchID =
+not a per branch or per key position. The branch wall is on
+the feed too (`feed.go`'s `filter.BranchID =
 middleware.BranchIDForQuery(r.Context())` and the
-`GrantsSub` follow), so a bound key cannot open a draft
-event's draft id and read its body; the feed is the one
-place the global position is visible. A consumer that needs
-to bound its position by branch must filter the events
-client side on `branch_id`.
+`GrantsSub` follow, applied in `ReadEvents`'s SQL), so a
+bound key's stream never sees another branch's draft event.
+A bound key's stream can therefore only count writes to its
+own branch, even though the cursor is global; the global
+position leaks through the `cursor` and `ready` payloads the
+loop returns (the loop keeps a wire batch open while
+`ready > 0`, even when the SQL read returns no rows), so a
+consumer that holds the cursor across a write to another
+branch can still infer that some write happened at that
+position. A consumer that needs to bound its view by branch
+must filter the events client side on `branch_id`.
 
 A revoke of a key that the feed's recheck has not yet seen
 is read on for at most one heartbeat: the recheck runs at
@@ -598,10 +692,18 @@ a revoked key from reading on for the lifetime close
 (`feed.go`'s `recheckKey`, the `slog.Warn`).
 
 The confirm gate's marker is `X-Acting-As`, an `actor`
-seam that records any non empty value as an agent, so the
-gate keys on `actor.FromContext(ctx).Kind ==
-actor.KindAgent` with the keyed short circuit
-(`confirmgate.isAgentSession`). An agent holding a person's
+seam that records the trim of the header as an agent: a
+non empty trim sets `actor.Kind == actor.KindAgent` and
+lowercases the value before storing (`pkg/actor/actor.go`,
+the `TrimSpace` then `validateHeaderValue` then `ToLower`
+chain inside `FromHeaders`). A value past 128 bytes OR
+with a byte outside printable ASCII (0x20 through 0x7E)
+is refused with a header rejection, so a whitespace only
+marker is an empty trim and the actor is not marked as
+agent (the marker must be a real string, not a header
+present only for its presence). The gate keys on
+`actor.FromContext(ctx).Kind == actor.KindAgent` with the
+keyed short circuit (`confirmgate.isAgentSession`). An agent holding a person's
 token that leaves the marker off is, to the server, that
 person: the gate stops an honest agent and every agent
 framework that sets the marker by construction; the
@@ -623,18 +725,29 @@ bytes (`maxRefusalPathBytes` in
 The down of migration 103 only rolls back the artifacts
 the up created: drafts, draft events, the api_keys
 branch_id column, the index, the trigger, the function and
-the sequence. The outbox events the drafts module's
-promoter added (`quote.created`, `quote.updated`,
-`order.created`, `order.updated`) stay in
-`events_outbox`; the drafts service does not add
-`draft.promoted` to the outbox, so the drafts module's
-contribution to the outbox is the entity's events, the
-same as a direct write. A roll back of 103 does not retract
-an entity a draft promoted.
+the sequence. The drafts and `draft_events` tables are
+dropped with their rows (`core/migrations/down/
+103_drafts_links_scopes_down.sql` drops the tables, so
+every draft row and every draft event row is gone after
+the rollback); the `api_keys` rows stay intact, including
+the `branch_id` of any key pinned to a branch that the
+rollback just orphaned the column on. The outbox events
+the drafts module's promoter added (`quote.created`,
+`quote.updated`, `order.created`, `order.updated`, and
+`draft.promoted`) stay in `events_outbox`: the drafts
+service does add `draft.promoted` to the outbox in step 9
+of `Promote`. A roll back of 103 does not retract an
+entity a draft promoted, and does not retract the
+`draft.promoted` event the same promotion wrote. The down
+then up test (`TestMigration103_DownThenUpLosesNoRow` in
+`core/internal/drafts/migration_test.go`) only counts
+`locations` and `api_keys` rows; it does not check the
+`drafts` or `draft_events` row counts, because the down
+drops those tables and the row loss is by design.
 
 ## ADRs that govern this module
 
-- [`docs/adr/0007-drafts-links-and-confirm-gated-scopes.md`](../adr/0007-drafts-links-and-confirm-gated-scopes.md): the design. Sections 1 and 2 set the resource and the lifecycle; section 3 is the change feed (cursor, heartbeat, the key recheck, the hub, the stream limits, the retention); section 4 is the kind registry, the `Kind` interface and the promoter; section 5 is the scope grammar (read, write, propose, commit; the finer names; the policy table; the `ScopeTarget` resolution; the user only routes; the branch bound key); section 6 is the actor quadruple; section 7 is the feed's wire shape; section 8 is the links surface; section 9 is the migration; section 10 is the quote and order kinds and the file attach.
+- [`docs/adr/0007-drafts-links-and-confirm-gated-scopes.md`](../adr/0007-drafts-links-and-confirm-gated-scopes.md): the design. Sections 1 and 2 set the resource and the lifecycle; section 3 is the change feed (cursor, heartbeat, the key recheck, the hub, the stream limits, the retention); section 4 is promotion and the kind registry (the `Kind` interface and the promoter); section 5 is the scope grammar (read, write, propose, commit; the finer names; the policy table; the `ScopeTarget` resolution; the user only routes; the branch bound key); section 6 is the actor quadruple; section 7 is document numbers in record URLs; section 8 is the links surface; section 9 is the migration order; section 10 is the quote and order kinds and the file attach.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md): the machine key itself (the segment scope rule; a key as a principal; roles; refusals and the audit row; ADR 0007 section 5.5 supersedes its first known limit with the branch bound key).
 - [`docs/adr/0009-finer-admin-scopes.md`](../adr/0009-finer-admin-scopes.md): the `users` write scope narrowed to `users:grants`, the admin areas' finer scopes (`admin:settings`, `admin:staff`, `admin:modules`). `ValidScopeGrammar` lists them in place of the coarse ones they replace.
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md): sections 1 and 2 (the list envelope and its cursor), section 5 (strict query parameters; `include=total` on the list), section 6 (enums lowercase on the wire; `QuotesDraftStatus` and `OrdersDraftStatus` are such enums, the database keeps the uppercase CHECK vocabulary), section 9 (idempotency keys on the creates, the PUT, the transitions and the promote), section 11 (revision and `If-Match`; the in place rule on the PUT and the transitions; the promote's revision precondition), section 12 (timestamps RFC 3339 UTC, every optional field present as null; `promoted` and `discarded` are null until set; `subject_id` and `subject_revision` are null on a create draft).
