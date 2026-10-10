@@ -160,6 +160,15 @@ in `core/internal/app/serve/serve.go` at the
 `pimHandler.RegisterRoutes` line. A key without the scope is `403
 forbidden`; the audit row carries the refused scope.
 
+The catalogue is dealer wide: `products` and the PIM tables carry no
+`branch_id` (only the stock totals narrow by branch). For a branch bound key
+(ADR 0007 section 5.5) the catalogue and PIM reads are stated limits of the
+allowlist and every catalogue or PIM write is refused outright, whatever
+scope the key holds: a margin target, a dimension, a lead time, a kit
+definition or a unit set written by one branch's integration changes every
+branch's catalogue, and the PIM generate routes spend the dealer's AI
+credit.
+
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 7a, 8, 9, 11, 12.

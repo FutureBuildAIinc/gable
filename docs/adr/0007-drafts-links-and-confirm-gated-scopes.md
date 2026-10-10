@@ -704,6 +704,14 @@ machine key reachable census route is unclassified or a table entry is
 stale, so a new route cannot appear without a class decision. Users and
 unbound keys keep exactly their reach on every route.
 
+A WALLED entry is a tested claim, not a label: its note names the column or
+join its module filters on (`quotes.branch_id`, a customer through
+`customer_branches`, a delivery through its order's branch, the dashboard
+and inventory through `locations.branch_id`), and a sweep drives every WALLED
+route that takes an id or a list with the other branch's twin row as a bound
+key's target: the foreign row answers exactly what a missing row answers (or
+a 403), never names the row, and nothing is written.
+
 The confinement contract the CONFINED routes hold: a body is read whole (a
 body that is not exactly one complete JSON value is refused, so the wall and
 the handler can never disagree about what a body names); a location row that
@@ -715,36 +723,64 @@ exemption read by its path customer, the category rule list by its
 `customer_id`, the rule audit by its row's customer, and resolve and
 calculate by their `customer_id`). A pricing rule names a customer through
 its `customer_id` or its `job_id` (a projects row belongs to exactly one
-customer, and a rule on the job prices that customer), and both are checked.
-A pricing rule that names neither a customer nor a job, and a category rule
-or bulk element that targets a tier, price every branch's customers and are
-refused. The unfiltered lists (`GET /pricing/rules`, the category rule list
-with no `customer_id`, `GET /pricing/matrix`) cannot be confined to one
-branch and are REFUSED.
+customer, and a rule on the job prices that customer), and both are checked,
+on the write and on the calculation alike (the calculation resolves its
+`job_id` the same way). A tax preview that names a `ship_to_id` is confined
+through that ship to's customer. The account summary, the customer subledger
+and the AR statement name a customer in the path and are confined the same
+way; the AR reconciliation reads every branch's books and is REFUSED. A
+pricing rule that names neither a customer nor a job, and a category rule or
+bulk element whose target is not an account rule or that carries a tier,
+price every branch's customers and are refused; the handler keeps the same
+invariant on its own side, and migration 107 puts it on the table (an account
+rule carries no tier, a tier rule no customer, existing rows checked first
+and reported by a NOTICE, never rewritten, the constraint validated on add
+when none breaks it and NOT VALID when one does). A category rule that also
+names a customer while targeting a tier is refused however many branches of
+that customer hold the pin: it prices every branch's customers of the tier.
 
-The stated limits, each with its one line reason in the table: the branch
-directory reads (`GET /api/v1/branches`, `GET /api/v1/branches/{id}`,
-reference data by the PR 39 decision); the dealer wide reference data that
-carries no branch fact (the unit catalogue, vendors, EDI partners and their
-catalogs, millwork and configurator options, governance rfcs, the vision
-scan, the parsing upload, the product pricing categories, the rebate
-programs and their claims, the price level vocabulary, the market index
-metadata list edit and history, the price escalation calculator, the match
-tolerances); the delivery fleet (drivers and vehicles carry no branch
-column); and the dealer wide switches (admin settings, the admin module kill
-switches, app enablement). An operator should not mint on a bound key the
-scopes that buy only these limits: `admin:settings`, `admin:modules`,
-`apps:write`, `units:write`, `vendors:write`, `configurator:write`,
-`millwork:write`, `vision:write`, `edi:write`, `governance:write` and
-`parsing:write`; `market-indices:write` and `pricing:write` reach stated
-limit writes (the index metadata; the categories and rebates) beside their
-confined uses, and `delivery:write` reaches the fleet, so mint them on a
-bound key only for those confined uses. REFUSED outright, whatever scope a
-key holds: the GL, AP and bank reconciliation surfaces (reads and writes
-alike), every report and builder route, the events feed, the sales team
-roster, the staff roster and its module grants, the known users list, the
-exposure lists and the scan, the market index refresh and its preview, the
-branch directory create, and the unfiltered pricing lists above.
+The stricter line on shared customers: a bound key may READ a customer its
+branch shares with another, but may not add or change a customer scoped
+pricing rule or tax exemption for it, because the write prices the other
+branch's sales to that customer too. Those writes are held to the customers
+the pin holds alone; the refusal names the other branch. A branch
+integration that must price shared customers holds an unbound key an operator
+keeps. A shared user's grant, revoke and home branch for the pin branch is
+accepted as confined and audited: the writes record their audit rows
+(`user.branch.granted`, `user.branch.revoked`, `user.home_branch.set`) with
+the machine key named as the actor.
+
+The stated limit is a read, never a write: a bound key exists for a branch
+scoped integration and no dealer wide write is branch scoped, so every
+stated limit write is REFUSED and the reads stay stated limits, each with its
+one line reason in the table. The reads: the branch directory (`GET
+/api/v1/branches`, `GET /api/v1/branches/{id}`, reference data by the PR 39
+decision), the dealer wide reference data that carries no branch fact (the
+product catalogue and its PIM content, the unit catalogue, vendors, EDI
+partners and their catalogs, millwork and configurator options, governance
+rfcs, the product pricing categories, the rebate programs and their claims,
+the price level vocabulary, the market index history, the price escalation
+calculator, the match tolerances, the charge codes, the payment terms), the
+delivery fleet's vehicles, the AI settings and routing reads, the module and
+app switches' reads, and the two calculators that spend the dealer's AI
+credit (the parsing upload and the vision scan; each call is audited with
+the key that spent it, `ai.parsing.upload` and `ai.vision.scan`). The
+writes refused with them: the AI and routing settings (a bound key must not
+rewrite the provider key or the base URL every branch's AI traffic rides
+on), the module kill switches and app enablement, the match tolerances (a
+financial control), vendors, EDI partners and their catalog import, units,
+pricing categories, rebate programs, millwork options, governance rfcs and
+their transitions, the market index metadata, the product catalogue writes
+and the PIM writes (products, PIM content, margins, dimensions, lead time,
+kit components, unit sets; the PIM generate routes spend the dealer's AI
+credit), the charge codes and payment terms, and the reorder target refresh.
+The drivers are refused reads included: driver rows carry personal data and
+no branch column. REFUSED outright, whatever scope a key holds: the GL, AP
+and bank reconciliation surfaces (reads and writes alike), the AR
+reconciliation, every report and builder route, the events feed, the sales
+team roster, the staff roster and its module grants, the known users list,
+the exposure lists and the scan, the market index refresh and its preview,
+the branch directory create, and the unfiltered pricing lists above.
 
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A

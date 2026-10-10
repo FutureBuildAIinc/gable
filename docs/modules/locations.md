@@ -400,7 +400,10 @@ gate. The branch directory reads (`GET /api/v1/branches`, `GET
 /api/v1/branches/{id}`) stay reference data, unwalled by the PR 39
 decision, a stated limit. A bound key that sets a user's home to its own
 branch clears `is_home` on that user's other grant rows: a side effect
-inside the user's own grant set, not a cross branch grant. An unbound key
+inside the user's own grant set, not a cross branch grant, and the grant,
+revoke and home branch writes for the pin branch each record their audit row
+(`user.branch.granted`, `user.branch.revoked`, `user.home_branch.set`) with
+the machine key named as the actor (ADR 0007 section 5.5). An unbound key
 behaves as before.
 
 ## ADRs that govern this module
