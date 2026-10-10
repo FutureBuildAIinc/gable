@@ -494,6 +494,38 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 		}
 	}
 
+	// The key recheck, run wherever the stream is about to read. A drain of
+	// a full backlog never reaches the select's heartbeat case: the full
+	// page jumps straight back to the read, so a revoked key's stream would
+	// read on for the whole drain (review pr66-r4 P2-2). The recheck
+	// therefore also runs at the loop top on a lastCheck timer, and before
+	// every re-read of a full page; lastCheck keeps the three sites from
+	// doubling up within one heartbeat. It answers false when the stream
+	// must close, having written the reauth event itself.
+	lastCheck := time.Now()
+	recheckKey := func() bool {
+		if keyID == uuid.Nil || h.keyCheck == nil {
+			return true
+		}
+		valid, err := h.keyCheck(ctx, keyID)
+		if err != nil {
+			// The recheck errored (the DB is gone, the row vanished under
+			// a partition move, etc). We fail closed for this recheck: a
+			// forced reauth prevents a revoked key from reading on for the
+			// lifetime close. The error is logged so an operator can spot
+			// it in the feed's own log stream. (Review pr66-r2 P3-2: the
+			// prior code ignored the error and failed open.)
+			slog.Warn("drafts feed: keyCheck returned an error; failing closed for this recheck",
+				"key_id", keyID.String(), "error", err.Error(),
+				"request_id", middleware.GetRequestID(ctx))
+		} else if valid {
+			return true
+		}
+		_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
+		flusher()
+		return false
+	}
+
 	heartbeat := time.NewTicker(h.settings.Heartbeat)
 	defer heartbeat.Stop()
 	lastSent := position
@@ -505,6 +537,15 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 			_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
 			flusher()
 			return
+		}
+		// The timer side of the recheck: whatever else wakes the loop (the
+		// hub's signal, a filter's cursor advance), a keyed stream rechecks
+		// its key at least every heartbeat.
+		if time.Since(lastCheck) >= h.settings.Heartbeat {
+			lastCheck = time.Now()
+			if !recheckKey() {
+				return
+			}
 		}
 		// One batch of rows past the position; the same statement reads the
 		// head, one snapshot.
@@ -540,6 +581,19 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 				// `position` (the last sent row) and catches the rows
 				// that landed in the gap. The hub wake will have fired,
 				// so the next read runs at once.
+				//
+				// The drain yields here: a client that went away ends the
+				// stream at the context, not at its next write, and the
+				// key is rechecked before the next page is read, so a
+				// revoked key's stream ends within one page of the revoke
+				// instead of one heartbeat of drain.
+				if ctx.Err() != nil {
+					return
+				}
+				lastCheck = time.Now()
+				if !recheckKey() {
+					return
+				}
 				continue
 			}
 			if page.Head > position {
@@ -562,28 +616,9 @@ func (h *FeedHandler) stream(w http.ResponseWriter, r *http.Request, filter Even
 			// A keyed stream rechecks its key at every heartbeat by id; a
 			// revoked key's stream gets reauth and closes, so it reads for
 			// at most one heartbeat after revocation.
-			if keyID != uuid.Nil && h.keyCheck != nil {
-				valid, err := h.keyCheck(ctx, keyID)
-				if err != nil {
-					// The recheck errored (the DB is gone, the row vanished
-					// under a partition move, etc). We fail closed for this
-					// heartbeat: a forced reauth prevents a revoked key from
-					// reading on for the lifetime close. The error is logged
-					// so an operator can spot it in the feed's own log
-					// stream. (Review pr66-r2 P3-2: the prior code ignored
-					// the error and failed open.)
-					slog.Warn("drafts feed: keyCheck returned an error; failing closed for this heartbeat",
-						"key_id", keyID.String(), "error", err.Error(),
-						"request_id", middleware.GetRequestID(ctx))
-					_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
-					flusher()
-					return
-				}
-				if !valid {
-					_ = sse.write(ctx, "reauth", mintFeedCursor(position), nil)
-					flusher()
-					return
-				}
+			lastCheck = time.Now()
+			if !recheckKey() {
+				return
 			}
 			if position > lastSent {
 				// Progress without matches: a cursor event, so a

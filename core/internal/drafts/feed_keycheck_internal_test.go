@@ -181,6 +181,118 @@ func TestFeedKeyCheckErrorsAreLogged(t *testing.T) {
 	}
 }
 
+// TestFeedKeyCheckRevokeDuringBacklogDrain pins review pr66-r4 P2-2: a full
+// page jumps straight back to the read and never reaches the select's
+// heartbeat case, so a revoked key's stream used to drain the whole backlog
+// before its reauth (the reviewer measured 7844 rows past a revoke). The
+// recheck now runs before every re-read of a full page, so a key revoked mid
+// drain ends its stream within a page or two, well inside one heartbeat.
+//
+// To make this test bite: drop the recheck before the full page continue;
+// the stream then reads the whole backlog past the revoke and the reauth
+// lands only when the drain ends (rows after the revoke in the hundreds).
+func TestFeedKeyCheckRevokeDuringBacklogDrain(t *testing.T) {
+	db := testutil.RequireDB(t)
+	repo := NewRepository(db)
+	hub := NewHub(repo, 30*time.Millisecond, nil)
+	t.Cleanup(hub.Stop)
+
+	s := DefaultFeedSettings()
+	s.Batch = 2
+	s.Heartbeat = 40 * time.Millisecond
+	s.Poll = 30 * time.Millisecond
+	s.WriteTimeout = 750 * time.Millisecond
+	s.MaxLifetime = 20 * time.Second // only the revocation can fire the close
+
+	keyCheck := newRunningKeyCheck()
+	keyID := uuid.New()
+	handler := NewFeedHandler(nil, repo, hub, s, KeyRevocationCheck(keyCheck.Lookup))
+
+	// The backlog is this test's own rows: the drain starts at the table's
+	// current head, so no other test's events join it.
+	var drainFrom int64
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT COALESCE(MAX(position), 0) FROM draft_events`).Scan(&drainFrom); err != nil {
+		t.Fatalf("read head: %v", err)
+	}
+	var branchID uuid.UUID
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT value::uuid FROM system_settings WHERE key='default_branch_id'`).Scan(&branchID); err != nil {
+		t.Fatalf("default branch: %v", err)
+	}
+	const backlog = 300
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO draft_events (position, draft_id, module, branch_id, op, revision, status, actor_kind, at)
+		 SELECT nextval('draft_events_position_seq'),
+		        gen_random_uuid(), 'quotes', $1, 'created', 1, 'OPEN', 'user', NOW()
+		 FROM generate_series(1, $2)`,
+		branchID, backlog); err != nil {
+		t.Fatalf("seed backlog: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(),
+			`DELETE FROM draft_events WHERE position > $1 AND module = 'quotes'`, drainFrom)
+	})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/feed", func(w http.ResponseWriter, r *http.Request) {
+		r = r.WithContext(middleware.WithKeyID(context.Background(), keyID.String()))
+		handler.stream(w, r, EventFilter{Module: "quotes"}, drainFrom)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	streamCtx, cancelStream := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelStream()
+	req, _ := http.NewRequestWithContext(streamCtx, "GET", srv.URL+"/feed", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("stream = %d", res.StatusCode)
+	}
+
+	// Revoke mid drain, once the first few pages have gone out, and count
+	// what arrives after: with the recheck the stream stops reading within a
+	// page of the revoke, so only the in flight page can follow; without it
+	// the drain runs to the end of the backlog.
+	rowsSeen := 0
+	rowsAfterRevoke := 0
+	revokedAt := time.Time{}
+	reauthAt := time.Time{}
+	scanner := bufio.NewScanner(res.Body)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "event: reauth") {
+			reauthAt = time.Now()
+			break
+		}
+		if strings.HasPrefix(line, "data: ") && strings.Contains(line, `"op"`) {
+			rowsSeen++
+			if revokedAt.IsZero() {
+				if rowsSeen >= 20 {
+					keyCheck.Revoke(keyID)
+					revokedAt = time.Now()
+				}
+			} else {
+				rowsAfterRevoke++
+			}
+		}
+	}
+	if reauthAt.IsZero() {
+		t.Fatalf("the revoked key's stream never reauthed; rows after the revoke = %d of a %d row backlog", rowsAfterRevoke, backlog)
+	}
+	if rowsAfterRevoke > 2*s.Batch+2 {
+		t.Fatalf("rows delivered after the revoke = %d, want a handful (the in flight page plus one, at most %d), not a drain", rowsAfterRevoke, 2*s.Batch+2)
+	}
+	if elapsed := reauthAt.Sub(revokedAt); elapsed > 3*s.Heartbeat {
+		t.Fatalf("reauth came %v after the revoke, want within one heartbeat (%v) plus grace", elapsed, s.Heartbeat)
+	}
+}
+
 // syncBuffer is a thread-safe bytes.Buffer for log capture.
 type syncBuffer struct {
 	mu  sync.Mutex
