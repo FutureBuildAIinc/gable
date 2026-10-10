@@ -995,8 +995,21 @@ func (s *Service) GetDelivery(ctx context.Context, id uuid.UUID) (*Stop, error) 
 // revision moves on a successful assign.
 func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, actor string) (*Stop, *CapacityWarning, error) {
 	// The order's branch is checked through the wall up front (PR 70 review
-// round 1 P3-4): a cross-branch caller must see the same 404 as reading a
-// cross-branch route, not a 500 from the post-insert walled read.
+	// round 1 P3-4): a cross-branch caller must see the same 404 as reading a
+	// cross-branch route, not a 500 from the post-insert walled read.
+	// The existence check runs first with no wall so a truly missing order is
+	// a 400 naming `order_id`, not a 404 (PR 70 review round 3 P2-N1: the up
+	// front check turned a missing order from 400 to 404; restoring the
+	// existence check keeps the 400 path, while the branch wall still answers
+	// 404 for a cross-branch order).
+	exists, err := s.repo.OrderExists(ctx, d.OrderID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !exists {
+		return nil, nil, httpx.BadRequest("a missing order is refused",
+			httpx.FieldError{Field: "order_id", Message: "no such record"})
+	}
 	if _, err := s.repo.GetOrderBranchID(ctx, d.OrderID); err != nil {
 		return nil, nil, notFound(err)
 	}

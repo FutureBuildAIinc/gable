@@ -1028,11 +1028,12 @@ func TestBranchWall(t *testing.T) {
 	if created != 0 {
 		t.Errorf("%d deliveries were created despite a cross-branch assign", created)
 	}
-	// Cross-branch POD photo upload.
-	if res := f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+stop.String()+"/pod-photo",
-		`--boundary\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"a.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n--boundary--`,
-		hdr); res.status != http.StatusNotFound && res.status != http.StatusBadRequest {
-		t.Errorf("cross branch POD photo = %d, want 404 or 400", res.status)
+	// Cross-branch POD photo upload: a real multipart body (a small JPG
+// header) and the request must answer 404 (PR 70 review round 3 P2-N1).
+	podBody, podCT := buildMultipartPhoto(t, "a.jpg", []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10})
+	hdrP := map[string]string{"X-Test-Branch": other.String(), "Content-Type": podCT}
+	if res := f.do(t, http.MethodPost, "/api/v1/delivery/deliveries/"+stop.String()+"/pod-photo", podBody, hdrP); res.status != http.StatusNotFound {
+		t.Errorf("cross branch POD photo = %d, want 404", res.status)
 	}
 	// Cross-branch reorder: the route is not visible, so 404.
 	if res := f.do(t, http.MethodPost, "/api/v1/delivery/routes/"+route.String()+"/reorder",

@@ -129,6 +129,12 @@ type Repository interface {
 	// assign from a caller held to a branch can refuse a cross-branch
 	// order the same way it refuses a cross-branch route.
 	GetOrderBranchID(ctx context.Context, orderID uuid.UUID) (uuid.UUID, error)
+
+	// OrderExists answers the "does this order exist" question without any
+	// wall: the assign uses it to distinguish a missing order (a 400 naming
+	// `order_id`) from an order the caller's branches do not see (a 404
+	// through the wall, PR 70 review round 3 P2-N1).
+	OrderExists(ctx context.Context, orderID uuid.UUID) (bool, error)
 }
 
 // TouchDelivery moves a stop's revision without changing its content: the
@@ -1089,6 +1095,19 @@ func (r *PostgresRepository) GetOrderBranchID(ctx context.Context, orderID uuid.
 		return uuid.Nil, fmt.Errorf("failed to load order branch: %w", err)
 	}
 	return branchID, nil
+}
+
+// OrderExists returns whether an order row exists in the database, with no
+// wall applied (the assign uses it to separate "the order is missing" from
+// "the order is outside the caller's branches", PR 70 review round 3 P2-N1).
+func (r *PostgresRepository) OrderExists(ctx context.Context, orderID uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1)`, orderID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to test order existence: %w", err)
+	}
+	return exists, nil
 }
 
 // GetRouteBranchID resolves the branch a route belongs to via its orders

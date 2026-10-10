@@ -30,6 +30,7 @@ type fakeRepo struct {
 	branchOrg   *BranchOrigin
 	orderAddrs  map[uuid.UUID]string
 	orderBranch map[uuid.UUID]uuid.UUID
+	callerBranch *uuid.UUID
 	routeStops  map[uuid.UUID][]Stop
 	fetchedStop *Stop
 
@@ -213,10 +214,26 @@ func (m *fakeRepo) GetOrderDeliveryAddress(ctx context.Context, orderID uuid.UUI
 	return m.orderAddrs[orderID], nil
 }
 func (m *fakeRepo) GetOrderBranchID(ctx context.Context, orderID uuid.UUID) (uuid.UUID, error) {
+	if m.callerBranch != nil {
+		if b, ok := m.orderBranch[orderID]; ok {
+			if b != *m.callerBranch {
+				return uuid.Nil, ErrNotFound
+			}
+			return b, nil
+		}
+		return uuid.Nil, ErrNotFound
+	}
 	if b, ok := m.orderBranch[orderID]; ok {
 		return b, nil
 	}
 	return uuid.Nil, ErrNotFound
+}
+func (m *fakeRepo) OrderExists(ctx context.Context, orderID uuid.UUID) (bool, error) {
+	if m.orderBranch == nil {
+		return false, nil
+	}
+	_, ok := m.orderBranch[orderID]
+	return ok, nil
 }
 func (m *fakeRepo) SetDeliveryLatLng(ctx context.Context, deliveryID uuid.UUID, lat, lng float64) error {
 	if m.setLatLng == nil {
@@ -662,5 +679,64 @@ func TestAssignOrderToRoute_SetsTheRoute(t *testing.T) {
 	}
 	if repo.createdStop == nil || repo.createdStop.RouteID == nil || *repo.createdStop.RouteID != routeID {
 		t.Errorf("the row handed to the repository does not carry the route: %+v", repo.createdStop)
+	}
+}
+
+// TestAssignOrderToRoute_MissingOrderIs400WithOrderID proves the assign path
+// answers a missing order with a 400 carrying `order_id`, the row CONTRACT-
+// CHANGES calls out (PR 70 review round 3 P2-N1: the assign's up front check
+// turned a missing order from 400 to 404; restoring the existence check
+// keeps this 400 path, while the branch wall still answers 404).
+func TestAssignOrderToRoute_MissingOrderIs400WithOrderID(t *testing.T) {
+	routeID, vehicleID := uuid.New(), uuid.New()
+	repo := &fakeRepo{
+		routes:      []Route{{ID: routeID, VehicleID: &vehicleID, Status: RouteStatusDraft, Revision: 1}},
+		vehicle:     &Vehicle{ID: vehicleID},
+		orderBranch: map[uuid.UUID]uuid.UUID{},
+	}
+	svc := NewService(repo)
+	_, _, err := svc.AssignOrderToRoute(context.Background(), &AssignStopDraft{
+		RouteID: routeID,
+		OrderID: uuid.New(),
+	}, "")
+	if err == nil {
+		t.Fatal("a missing order succeeded; want a 400")
+	}
+	var he *httpx.Error
+	if !errors.As(err, &he) || he.Status != http.StatusBadRequest {
+		t.Fatalf("missing order = %v, want a 400 httpx.Error", err)
+	}
+	if len(he.Details) == 0 || he.Details[0].Field != "order_id" {
+		t.Errorf("missing order details = %+v, want order_id first", he.Details)
+	}
+}
+
+// TestAssignOrderToRoute_CrossBranchOrderIs404 proves the branch wall on
+// the order still answers 404 for an order the caller's branches do not see
+// (the other half of PR 70 review round 3 P2-N1: a cross-branch order is the
+// wall's 404, not the missing order's 400). The fake repo records the
+// caller's branch under `callerBranch` and removes orders whose branch
+// differs, mirroring the wall's behaviour from GetOrderBranchID.
+func TestAssignOrderToRoute_CrossBranchOrderIs404(t *testing.T) {
+	routeID, vehicleID, orderID := uuid.New(), uuid.New(), uuid.New()
+	callerBranch := uuid.New()
+	otherBranch := uuid.New()
+	repo := &fakeRepo{
+		routes:      []Route{{ID: routeID, VehicleID: &vehicleID, Status: RouteStatusDraft, Revision: 1}},
+		vehicle:     &Vehicle{ID: vehicleID},
+		callerBranch: &callerBranch,
+		orderBranch:  map[uuid.UUID]uuid.UUID{orderID: otherBranch},
+	}
+	svc := NewService(repo)
+	_, _, err := svc.AssignOrderToRoute(context.Background(), &AssignStopDraft{
+		RouteID: routeID,
+		OrderID: orderID,
+	}, "")
+	if err == nil {
+		t.Fatal("a cross-branch order succeeded; want a 404")
+	}
+	var he *httpx.Error
+	if !errors.As(err, &he) || he.Status != http.StatusNotFound {
+		t.Fatalf("cross-branch order = %v, want a 404 httpx.Error", err)
 	}
 }
