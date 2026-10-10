@@ -102,7 +102,7 @@ func TestACardReturnAfterACommittedVoidNeverReachesTheTerminal(t *testing.T) {
 			WHERE t.id = $2 AND d.method = 'CARD'`, uuid.New(), saleID)
 		return err
 	})
-	r := <-done
+	r := awaitResp(t, done)
 	if r.status != http.StatusConflict {
 		t.Fatalf("the card return after a committed void = %d, want 409: %s", r.status, r.raw)
 	}
@@ -164,7 +164,7 @@ func TestAVoidAfterACommittedCardReturnNeverReachesTheTerminal(t *testing.T) {
 			WHERE t.id = $2 AND d.method = 'CARD'`, uuid.New(), saleID)
 		return err
 	})
-	r := <-done
+	r := awaitResp(t, done)
 	if r.status != http.StatusConflict {
 		t.Fatalf("the void after a committed card return = %d, want 409: %s", r.status, r.raw)
 	}

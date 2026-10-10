@@ -110,22 +110,18 @@ func TestThreeConcurrentCardReturnsMakeOneGatewayRefund(t *testing.T) {
 func TestAVoidRacingACardReturnMakesOneGatewayRefund(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
-	parked := make(chan struct{})
-	release := make(chan struct{})
-	gw.onRefund = func() {
-		parked <- struct{}{}
-		<-release
-	}
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
 	})
+	// after the fixture, so the release runs before the server's close
+	parked, release := parkRefund(t, gw)
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
 	returnDone := make(chan resp, 1)
 	go func() {
 		returnDone <- f.cardReturnOn(t, saleID, lineID, "1")
 	}()
-	<-parked
+	awaitParked(t, parked)
 	// the return's refund is in flight with its intent committed: the void
 	// of the same sale is refused before the terminal
 	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
@@ -138,8 +134,8 @@ func TestAVoidRacingACardReturnMakesOneGatewayRefund(t *testing.T) {
 	if len(blockers) == 0 || blockers[0] != "refund_in_flight" {
 		t.Errorf("blockers = %v, want refund_in_flight (the return's intent refused the void)", blockers)
 	}
-	close(release)
-	if rr := <-returnDone; rr.status != http.StatusCreated {
+	release()
+	if rr := awaitResp(t, returnDone); rr.status != http.StatusCreated {
 		t.Fatalf("the parked card return = %d: %s", rr.status, rr.raw)
 	}
 	gw.mu.Lock()

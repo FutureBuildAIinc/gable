@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
@@ -254,6 +255,9 @@ type resp struct {
 	raw    []byte
 }
 
+// requestDeadline bounds one request a test sends.
+const requestDeadline = 30 * time.Second
+
 func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	f.t.Helper()
 	var rdr io.Reader
@@ -268,7 +272,12 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 		}
 		rdr = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequest(method, f.srv.URL+path, rdr)
+	// every request carries a deadline: a contender stuck behind a lock
+	// fails its test at the deadline instead of hanging the package to the
+	// test timeout (seventh review P3-5)
+	ctx, cancel := context.WithTimeout(context.Background(), requestDeadline)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, method, f.srv.URL+path, rdr)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -281,7 +290,9 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		f.t.Fatal(err)
+		// Errorf, not Fatal: contenders call this from their own goroutines
+		f.t.Errorf("%s %s did not answer within %s: %v", method, path, requestDeadline, err)
+		return resp{raw: []byte(err.Error())}
 	}
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(res.Body)

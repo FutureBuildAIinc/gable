@@ -42,7 +42,7 @@ func TestTheCloseRefusesWhileAVoidIsParkedAtTheGateway(t *testing.T) {
 			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	}()
 	t.Cleanup(func() { release(); <-fin })
-	<-parked
+	awaitParked(t, parked)
 	// the close fires while the void's refund is on the wire
 	r := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close",
 		map[string]any{"counted_by_method": map[string]any{"cash": 0, "card": 599}},

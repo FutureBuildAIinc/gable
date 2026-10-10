@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -26,7 +27,9 @@ import (
 // handler holding the test server's close.
 func parkRefund(t *testing.T, gw *fakeGateway) (parked <-chan struct{}, release func()) {
 	t.Helper()
-	p := make(chan struct{})
+	// buffered: a second refund that reaches the terminal (the very defect a
+	// claim test hunts) must not block on the announce and hang the package
+	p := make(chan struct{}, 16)
 	r := make(chan struct{})
 	gw.onRefund = func() {
 		p <- struct{}{}
@@ -38,6 +41,29 @@ func parkRefund(t *testing.T, gw *fakeGateway) (parked <-chan struct{}, release 
 	}
 	t.Cleanup(release)
 	return p, release
+}
+
+// awaitParked waits for a refund to reach the terminal, failing at the
+// deadline instead of hanging the package (seventh review P3-5).
+func awaitParked(t *testing.T, parked <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-parked:
+	case <-time.After(requestDeadline):
+		t.Fatalf("no refund reached the terminal within %s", requestDeadline)
+	}
+}
+
+// awaitResp waits for a contender's answer, failing at the deadline.
+func awaitResp(t *testing.T, ch <-chan resp) resp {
+	t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(requestDeadline):
+		t.Fatalf("a contender did not answer within %s", requestDeadline)
+		return resp{}
+	}
 }
 
 // RULE (eighth review P2-1): a cash return of a sale is refused with 409
@@ -59,7 +85,7 @@ func TestACashReturnWhileACardReturnIsParkedRefuses(t *testing.T) {
 	fin := make(chan struct{})
 	go func() { defer close(fin); returnDone <- f.cardReturnOn(t, saleID, lineID, "1") }()
 	t.Cleanup(func() { release(); <-fin })
-	<-parked
+	awaitParked(t, parked)
 	// the card claim stands: the drawer must not pay the same unit again
 	r := f.returnOn(t, saleID, lineID, "1")
 	if r.status != http.StatusConflict {
@@ -71,7 +97,7 @@ func TestACashReturnWhileACardReturnIsParkedRefuses(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 	release()
-	if rr := <-returnDone; rr.status != http.StatusCreated {
+	if rr := awaitResp(t, returnDone); rr.status != http.StatusCreated {
 		t.Fatalf("the parked card return = %d: %s", rr.status, rr.raw)
 	}
 	gw.mu.Lock()
@@ -110,7 +136,7 @@ func TestACashReturnWhileAVoidIsParkedRefuses(t *testing.T) {
 			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	}()
 	t.Cleanup(func() { release(); <-fin })
-	<-parked
+	awaitParked(t, parked)
 	r := f.returnOn(t, saleID, lineID, "1")
 	if r.status != http.StatusConflict {
 		t.Fatalf("the cash return under a parked void = %d, want 409: %s", r.status, r.raw)
@@ -198,7 +224,7 @@ func TestTheCardReturnBooksWhatTheGatewayTook(t *testing.T) {
 	fin := make(chan struct{})
 	go func() { defer close(fin); returnDone <- f.cardReturnOn(t, saleID, lineID, "3") }()
 	t.Cleanup(func() { release(); <-fin })
-	<-parked
+	awaitParked(t, parked)
 	if err := f.db.Pool.QueryRow(context.Background(),
 		`SELECT ROUND(amount * 100)::bigint FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING'`, saleID).
 		Scan(&refundTook); err != nil {
@@ -212,7 +238,7 @@ func TestTheCardReturnBooksWhatTheGatewayTook(t *testing.T) {
 		t.Fatalf("the cash return under the parked claim = %d, want 409: %s", r.status, r.raw)
 	}
 	release()
-	rr := <-returnDone
+	rr := awaitResp(t, returnDone)
 	if rr.status != http.StatusCreated {
 		t.Fatalf("the parked card return = %d: %s", rr.status, rr.raw)
 	}
