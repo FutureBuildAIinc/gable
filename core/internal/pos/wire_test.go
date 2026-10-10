@@ -684,12 +684,15 @@ func (f *fixture) paymentsOf(saleID string) []paymentOf {
 // customer the fixture touched (its own and the walk-in that carries most
 // of the sales) with all three legs: balance_due = the sum of its
 // customer_transactions = the sum of amount_open over its live invoices and
-// posted credit memos. The control accounts tie globally, each in one
-// statement so the snapshot is consistent: GL 1020 = the sum of every
-// customer's balance_due, GL 2200 = the sum of unapplied cash.
+// posted credit memos. The control account legs are scoped the same way,
+// each read in one statement so the snapshot is consistent even while other
+// packages' tests run against the shared database: the 1020 legs of exactly
+// those customers' documents equal the sum of their balances, and the 2200
+// legs of their payments and applications equal their unapplied cash.
 func (f *fixture) assertARInvariants(t *testing.T) {
 	t.Helper()
 	walkIn := f.scalar(`SELECT id::text FROM customers WHERE account_number = 'WALK-IN'`).(string)
+	customers := []string{f.customerID.String(), walkIn}
 	rows, err := f.db.Pool.Query(context.Background(), `
 		SELECT c.id, COALESCE(ROUND(c.balance_due * 100)::bigint, 0),
 			COALESCE((SELECT SUM(ROUND(ct.amount)::bigint) FROM customer_transactions ct WHERE ct.customer_id = c.id), 0),
@@ -697,7 +700,7 @@ func (f *fixture) assertARInvariants(t *testing.T) {
 				WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')), 0)
 			+ COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
 				WHERE m.customer_id = c.id AND m.status IN ('OPEN', 'PARTIAL')), 0)
-		FROM customers c WHERE c.id = ANY($1::uuid[])`, []string{f.customerID.String(), walkIn})
+		FROM customers c WHERE c.id = ANY($1::uuid[])`, customers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -718,27 +721,47 @@ func (f *fixture) assertARInvariants(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	// GL 1020 ties to the sum of every customer's balance, GL 2200 to the
-	// unapplied cash; each in one statement, so the two sides of a tie are
-	// read from one consistent snapshot even while other tests run.
+	// The control accounts, over the documents of the same two customers:
+	// every entry the counter's acts post names its document, so the 1020
+	// legs of these customers' invoices, memos, payments, applications and
+	// refunds tie to the sum of their balances, and the 2200 legs to their
+	// unapplied cash.
+	docSQL := `(SELECT id::text FROM invoices WHERE customer_id = ANY($1::uuid[]))
+		UNION (SELECT id::text FROM credit_memos WHERE customer_id = ANY($1::uuid[]))
+		UNION (SELECT id::text FROM payments WHERE customer_id = ANY($1::uuid[]))
+		UNION (SELECT ap.id::text FROM ar_applications ap JOIN invoices i ON i.id = ap.invoice_id
+			WHERE i.customer_id = ANY($1::uuid[]))
+		UNION (SELECT rf.id::text FROM payment_refunds rf
+			LEFT JOIN payments p ON p.id = rf.payment_id
+			LEFT JOIN credit_memos m ON m.id = rf.credit_memo_id
+			WHERE p.customer_id = ANY($1::uuid[]) OR m.customer_id = ANY($1::uuid[]))`
 	var ties bool
 	if err := f.db.Pool.QueryRow(context.Background(), `
-		SELECT (SELECT COALESCE(ROUND(SUM(c.balance_due) * 100)::bigint, 0) FROM customers c)
+		SELECT (SELECT COALESCE(ROUND(SUM(c.balance_due) * 100)::bigint, 0) FROM customers c WHERE c.id = ANY($1::uuid[]))
 			= (SELECT COALESCE(ROUND((SUM(l.debit) - SUM(l.credit)) * 100)::bigint, 0)
-				FROM gl_journal_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE a.code = '1020')`).Scan(&ties); err != nil {
+				FROM gl_journal_lines l
+				JOIN gl_accounts a ON a.id = l.account_id
+				JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+				WHERE a.code = '1020' AND (e.source_ref_id::text IN (`+docSQL+`)
+					OR e.reverses_entry_id::text IN (SELECT o2.id::text FROM gl_journal_entries o2 WHERE o2.source_ref_id::text IN (`+docSQL+`))))`, customers).Scan(&ties); err != nil {
 		t.Fatal(err)
 	}
 	if !ties {
-		t.Error("GL 1020 does not tie to the sum of the customers' balances")
+		t.Error("GL 1020 does not tie to the sum of the touched customers' balances")
 	}
 	if err := f.db.Pool.QueryRow(context.Background(), `
-		SELECT (SELECT COALESCE(SUM(ROUND(p.amount_unapplied * 100)::bigint), 0) FROM payments p WHERE p.status = 'POSTED')
+		SELECT (SELECT COALESCE(SUM(ROUND(p.amount_unapplied * 100)::bigint), 0) FROM payments p
+				WHERE p.status = 'POSTED' AND p.customer_id = ANY($1::uuid[]))
 			= (SELECT COALESCE(ROUND((SUM(l.credit) - SUM(l.debit)) * 100)::bigint, 0)
-				FROM gl_journal_lines l JOIN gl_accounts a ON a.id = l.account_id WHERE a.code = '2200')`).Scan(&ties); err != nil {
+				FROM gl_journal_lines l
+				JOIN gl_accounts a ON a.id = l.account_id
+				JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+				WHERE a.code = '2200' AND (e.source_ref_id::text IN (`+docSQL+`)
+					OR e.reverses_entry_id::text IN (SELECT o2.id::text FROM gl_journal_entries o2 WHERE o2.source_ref_id::text IN (`+docSQL+`))))`, customers).Scan(&ties); err != nil {
 		t.Fatal(err)
 	}
 	if !ties {
-		t.Error("GL 2200 does not tie to the sum of the unapplied cash (2200 carries it as a credit)")
+		t.Error("GL 2200 does not tie to the touched customers' unapplied cash (2200 carries it as a credit)")
 	}
 }
 
