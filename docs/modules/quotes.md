@@ -168,7 +168,8 @@ segment of the scope so the audit row carries it.
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 7a, 8, 9, 11, 12: the list envelope, the cursor, the error envelope, the enum casing, the money and quantity rules, the document number, the idempotency key, the revision precondition, the timestamps.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2: the path segment rule for scope.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5: the table, the ordering guarantee, the writer, the read API.
-- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 5.8: the convert route, the unit refusal that lifts in cycle 3.
+- [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) section 5.8: the convert route and the convert route's pair refusal.
+- [`docs/adr/0006-units-and-pricing.md`](../adr/0006-units-and-pricing.md) section 1: the pair arithmetic (R1 to R5). Sections 2, 3, 4 cover the unit set, the inexact refusal (section 3.4) and the tally (section 4.3).
 
 ## How to try it locally
 

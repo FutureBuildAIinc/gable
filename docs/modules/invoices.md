@@ -244,6 +244,7 @@ refused scope.
 - [`docs/adr/0002-machine-keys.md`](../adr/0002-machine-keys.md) section 2.
 - [`docs/adr/0003-events-outbox.md`](../adr/0003-events-outbox.md) sections 1, 2, 3, 5.
 - [`docs/adr/0005-sales-and-money-core.md`](../adr/0005-sales-and-money-core.md) sections 2, 3, 4.1, 4.2, 6, 8: the shared line shape, totals and tax, gapless numbers, currency, the invoice and credit memo lifecycles, the cost basis.
+- The AR subledger, the aging, the statement and the reconciliation, the deposit application and the credit memo refund live in [payments.md](payments.md) (C2-4).
 
 ## How to try it locally
 
