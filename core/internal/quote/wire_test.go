@@ -1103,11 +1103,34 @@ func TestWire_ConvertExactCentsOnOneToOneLines(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 
+	// Owns its branch and its tax rate: the convert lands on the quote's
+	// branch and reads its default_tax_rate (ADR 0005 section 5.8's table),
+	// and another package's tests run in parallel against the same database,
+	// leaving the deployment default branch's row shared. The fix here is the
+	// one the other fixed flakes in this repository use: seed a branch with
+	// its own rate, name it as the quote's branch, and remove it in cleanup.
+	branchID := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO locations (id, type, code, default_tax_rate) VALUES ($1, 'BRANCH', $2, 0.05)`,
+		branchID, "WIRE-TX-"+branchID.String()[:8]); err != nil {
+		t.Fatalf("seed branch: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, branchID)
+	})
+
 	odd := f.line("3")
 	odd["unit_price_ten_thousandths"] = 13725 // 1.3725 rounds to 137 cents
 	half := f.line("1")
 	half["unit_price_ten_thousandths"] = 12350 // 1.2350 rounds half up to 124
-	id := str(t, f.create(odd, half).body, "id")
+
+	body := f.createBody(odd, half)
+	body["branch_id"] = branchID.String()
+	created := f.do("POST", "/api/v1/quotes", body)
+	if created.status != http.StatusCreated {
+		t.Fatalf("create = %d: %s", created.status, created.raw)
+	}
+	id := str(t, created.body, "id")
 
 	c := f.do("POST", "/api/v1/quotes/"+id+"/convert", nil, "If-Match", `"1"`)
 	if c.status != 201 {
