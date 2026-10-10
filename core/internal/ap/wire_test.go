@@ -555,6 +555,48 @@ func TestWire_PaymentAppliesAndTies(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0001 section 4): a client mistake is a 400 naming the field, never
+// a 500. A payment naming one bill twice would apply it twice (the second pass
+// reuses the stale locked summary) and only the amount_open CHECK stops it, so
+// Parse refuses the repeated id up front.
+func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id, r1 := f.enter("V-DUP-ID", "1", 1000)
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Fatalf("after the approve: control %d, open %d", got, want)
+	}
+	dup := f.pay(1200, id, id)
+	if dup.status != http.StatusBadRequest {
+		t.Fatalf("pay a repeated invoice id = %d, want 400: %s", dup.status, dup.raw)
+	}
+	if _, _, fields := errorOf(t, dup); len(fields) == 0 || fields[0] != "invoice_ids[1]" {
+		t.Errorf("pay a repeated invoice id names %v, want invoice_ids[1]", fields)
+	}
+	if n := f.count(`SELECT count(*) FROM ap_payments WHERE vendor_id = $1`, f.vendor); n != 0 {
+		t.Errorf("%d payments written for a refused duplicate", n)
+	}
+	if n := f.count(`SELECT count(*) FROM ap_payment_applications a JOIN vendor_invoices i ON i.id = a.invoice_id WHERE i.vendor_id = $1`, f.vendor); n != 0 {
+		t.Errorf("%d applications written for a refused duplicate", n)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Errorf("after the refused duplicate: control %d, open %d", got, want)
+	}
+	// A payment naming the bill once still applies.
+	if p := f.pay(1000, id); p.status != http.StatusCreated {
+		t.Errorf("pay after the refusal = %d, want 201: %s", p.status, p.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want || want != 0 {
+		t.Errorf("after the payment: control %d, open %d, want both 0", got, want)
+	}
+}
+
 // RULE (ADR 0008 7.4): a bill approved before migration 106 carries its entry
 // but no pointer to it; the migration links the newest posted, unreversed
 // VENDOR_INVOICE entry, and the void reverses exactly that entry, so the tie

@@ -270,8 +270,9 @@ paths:
         conversion. The payment locks the named bills in id order and applies
         only to bills in approved or partial (a pending, paid or voided bill
         is a 409 blocker invoice_not_approved; a bill of another vendor is a
-        400 naming invoice_ids[i]); more than the named bills still owe is a
-        409 blocker exceeds_open. The entry posts through gl.PostEntry inside
+        400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400
+        naming its index (appears twice); more than the named bills still owe
+        is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside
         the act's transaction (DR Accounts Payable, CR Cash), and a posting
         failure fails the act (a closed period is a 409 blocker
         period_closed).

@@ -274,6 +274,16 @@ func (req *PayRequest) Parse() (*PayInput, error) {
 			in.InvoiceIDs = append(in.InvoiceIDs, id)
 		}
 	}
+	// A repeated id would apply the bill twice off one locked snapshot (only
+	// the amount_open CHECK would stop it, as a 500), so it is refused here.
+	seen := make(map[uuid.UUID]bool, len(in.InvoiceIDs))
+	for i, id := range in.InvoiceIDs {
+		if seen[id] {
+			v.Check(false, fmt.Sprintf("invoice_ids[%d]", i), "appears twice")
+			continue
+		}
+		seen[id] = true
+	}
 	if err := v.Err(); err != nil {
 		return nil, err
 	}
