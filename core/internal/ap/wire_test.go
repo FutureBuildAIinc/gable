@@ -703,11 +703,13 @@ func TestWire_PayAmountIsCents(t *testing.T) {
 }
 
 // RULE (ADR 0008 7.4): a bill approved before migration 106 carries its entry
-// but no pointer to it; the migration links the newest posted, unreversed
-// VENDOR_INVOICE entry, and the void reverses exactly that entry, so the tie
-// (every entry balanced, 2010 equal to what the open bills owe) holds for a
-// legacy bill as for a new one. A legacy approved bill whose entry is missing
-// is refused rather than voided silently with the credit stranded in 2010.
+// but no pointer to it; the migration links the newest posted, unreversed,
+// balanced VENDOR_INVOICE entry, and the void reverses exactly that entry, so
+// the tie (every entry balanced, 2010 equal to what the open bills owe) holds
+// for a legacy bill as for a new one. A legacy approved bill whose entry is
+// missing is refused rather than voided silently with the credit stranded in
+// 2010, and so is one whose linked entry is the base's one leg shape: a void
+// would mirror it into another unbalanced entry.
 func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
@@ -778,6 +780,61 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	}
 	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
 		t.Errorf("%d entries were written for a refused void", after-before)
+	}
+
+	// The base's real legacy shape: the entry the base's approve posted has
+	// one leg, the Accounts Payable credit for the whole total with no debit
+	// (the base loaded no lines). An operator may link such an entry by hand,
+	// or an older link may already point at it; the void must not mirror it
+	// into a second unbalanced entry: it is refused with the
+	// entry_unbalanced blocker and nothing is written (review r4 P2-1).
+	id3, r1c := f.enter("V-LEG-3", "1", 3000) // 30.00
+	if a := f.approve(id3, r1c); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	// Rewrite the approve entry into the base's one leg shape: only the
+	// Accounts Payable credit stays.
+	mustExec(t, f.db, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN
+		(SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)
+		AND account_id <> (SELECT id FROM gl_accounts WHERE code = '2010')`, id3)
+	if f.balanced() {
+		t.Fatal("the seeded one leg entry balances; the seed did not take")
+	}
+	controlBefore, openBefore := f.controlBalance(), f.openSum()
+	before3 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	bv := f.void(id3, 2, "legacy bill voided")
+	if bv.status != http.StatusConflict {
+		t.Fatalf("void a bill whose linked entry has one leg = %d, want 409: %s", bv.status, bv.raw)
+	}
+	if code, blockers, _ := errorOf(t, bv); code != "invalid_state_transition" || blockers[0] != "entry_unbalanced" {
+		t.Errorf("void a bill whose linked entry has one leg = %q %v, want entry_unbalanced", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id3); n != 1 {
+		t.Error("a refused one leg void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before3 {
+		t.Errorf("%d entries were written for a refused one leg void", after-before3)
+	}
+	// The tie after the refused act: the only unbalanced entry in the fixture
+	// is the seeded legacy one (no act of the fixture wrote an unbalanced
+	// entry), and the refusal moved no money: the control account and the
+	// open sum stand where the seed left them (the earlier unlinked bill's
+	// deleted entry is the legacy gap, its credit absent from 2010).
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
+		JOIN (SELECT journal_entry_id, SUM(debit) d, SUM(credit) c FROM gl_journal_lines GROUP BY journal_entry_id) s
+		  ON s.journal_entry_id = e.id
+		WHERE e.id IN (SELECT id FROM gl_journal_entries
+		               WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
+		                  OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
+		                  OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))
+		  AND s.d <> s.c`, f.vendor); n != 1 {
+		t.Errorf("%d unbalanced entries stand, want only the seeded legacy one", n)
+	}
+	if got, want := f.controlBalance(), controlBefore; got != want {
+		t.Errorf("after the refused one leg void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), openBefore; got != want {
+		t.Errorf("after the refused one leg void: open %d, want the untouched %d", got, want)
 	}
 }
 

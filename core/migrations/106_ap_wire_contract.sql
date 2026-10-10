@@ -14,9 +14,10 @@
 --      #3 in (created_at, id) order (with a notice), amount_open (the insert
 --      trigger's rule: zero on a voided or paid bill, the total less paid
 --      otherwise, with notices for short-paid PAID and overpaid PARTIAL
---      rows), and gl_entry_id linked to the newest posted, unreversed
---      VENDOR_INVOICE entry of every approved or partial bill (the bills
---      left without one counted by a notice).
+--      rows), and gl_entry_id linked to the newest posted, unreversed,
+--      balanced VENDOR_INVOICE entry of every approved or partial bill (a one
+--      leg entry, the base's approve shape, is never linked and is counted by
+--      its own notice; so are the bills left without one).
 --   2  vendor_invoice_lines: position, purchase_order_line_id, product_id,
 --      unit_price widened to NUMERIC(12,4), po_freight_charge_id (the
 --      carrier freight line link of 7.3, written from package C's freight
@@ -204,12 +205,15 @@ ALTER TABLE vendor_invoices ADD COLUMN IF NOT EXISTS gl_entry_id UUID NULL REFER
 
 -- A bill the base approved holds its entry (the removed sync posted it with
 -- source VENDOR_INVOICE and source_ref_id the bill) but no pointer to it.
--- Every approved or partial bill is linked to its newest posted, unreversed
--- VENDOR_INVOICE entry (one already reversed has been undone by hand and is
--- not the void's to reverse again); the bills left without one are counted by
--- a notice, and the void transition refuses them until an entry is linked.
+-- Every approved or partial bill is linked to its newest posted, unreversed,
+-- balanced VENDOR_INVOICE entry (one already reversed has been undone by hand
+-- and is not the void's to reverse again; one whose legs do not balance, the
+-- base's one leg approve shape, would let the void mirror it into another
+-- unbalanced entry, so it is never linked and its own notice names it); the
+-- bills left without one are counted by a notice, and the void transition
+-- refuses them until an entry is linked.
 DO $$
-DECLARE missing BIGINT;
+DECLARE oneleg BIGINT; missing BIGINT;
 BEGIN
     UPDATE vendor_invoices vi
     SET gl_entry_id = e.id
@@ -217,14 +221,35 @@ BEGIN
     WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
       AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
       AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id)
+      AND (SELECT SUM(l.debit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id)
+          = (SELECT SUM(l.credit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id)
       AND vi.status IN ('APPROVED', 'PARTIAL') AND vi.gl_entry_id IS NULL
       AND e.id = (SELECT e2.id FROM gl_journal_entries e2
                   WHERE e2.source = 'VENDOR_INVOICE' AND e2.source_ref_id = vi.id
                     AND e2.status = 'POSTED' AND e2.reverses_entry_id IS NULL
                     AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r2 WHERE r2.reverses_entry_id = e2.id)
+                    AND (SELECT SUM(l2.debit) FROM gl_journal_lines l2 WHERE l2.journal_entry_id = e2.id)
+                        = (SELECT SUM(l2.credit) FROM gl_journal_lines l2 WHERE l2.journal_entry_id = e2.id)
                   ORDER BY e2.created_at DESC, e2.id DESC LIMIT 1);
-    SELECT count(*) INTO missing FROM vendor_invoices
-    WHERE status IN ('APPROVED', 'PARTIAL') AND gl_entry_id IS NULL;
+    SELECT count(*) INTO oneleg FROM vendor_invoices vi
+    WHERE vi.status IN ('APPROVED', 'PARTIAL') AND vi.gl_entry_id IS NULL
+      AND EXISTS (SELECT 1 FROM gl_journal_entries e
+                  WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
+                    AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id)
+                    AND (SELECT SUM(l.debit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id)
+                        <> (SELECT SUM(l.credit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id));
+    IF oneleg > 0 THEN
+        RAISE NOTICE 'migration 106: % approved or partial vendor invoice(s) hold a one leg entry from the removed sync; post the missing debit legs, then link', oneleg;
+    END IF;
+    SELECT count(*) INTO missing FROM vendor_invoices vi
+    WHERE vi.status IN ('APPROVED', 'PARTIAL') AND vi.gl_entry_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM gl_journal_entries e
+                      WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
+                        AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id)
+                        AND (SELECT SUM(l.debit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id)
+                            <> (SELECT SUM(l.credit) FROM gl_journal_lines l WHERE l.journal_entry_id = e.id));
     IF missing > 0 THEN
         RAISE NOTICE 'migration 106: % approved or partial vendor invoice(s) have no journal entry to link; their void is refused until one is linked', missing;
     END IF;

@@ -381,7 +381,11 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 // VENDOR_INVOICE, source_ref_id the bill), and 106 links the newest posted,
 // unreversed of those entries to every approved or partial bill. A bill whose
 // only entry is a reversal, or that has none, stays unlinked and is counted by
-// the notice, and a pending bill is never linked (nothing was approved).
+// the notice, and a pending bill is never linked (nothing was approved). A
+// bill whose entry is the base's real one leg shape (the Accounts Payable
+// credit with no debit: the base loaded no lines) is never linked either, and
+// its own notice names it, for the void would mirror the one leg entry into
+// another unbalanced one.
 func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
 	conn, _, notices := scratch106(t)
 	before, target, _ := files106(t)
@@ -425,6 +429,25 @@ func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
 		}
 		return id
 	}
+	// oneLegEntry writes the base's real approve entry: one leg, the Accounts
+	// Payable credit for the total and no debit (the base read the bill without
+	// its lines, so the removed sync posted a single credit leg, and nothing
+	// stopped it: chk_debit_or_credit accepts one leg). This, not a balanced
+	// two leg entry, is the shape every base approved bill holds.
+	oneLegEntry := func(bill uuid.UUID, at string) uuid.UUID {
+		t.Helper()
+		id := uuid.New()
+		if _, err := conn.Exec(ctx, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, created_at, updated_at, currency)
+			VALUES ($1, '2026-01-10', 'legacy approve', 'VENDOR_INVOICE', $2, 'POSTED', 'legacy', $3, $3, 'USD')`,
+			id, bill, at); err != nil {
+			t.Fatalf("seed one leg entry: %v", err)
+		}
+		if _, err := conn.Exec(ctx, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+			VALUES ($1, $2, $3::uuid, 'legacy leg', 0, '10.00')`, uuid.New(), id, payable); err != nil {
+			t.Fatalf("seed one leg entry line: %v", err)
+		}
+		return id
+	}
 	insert := func(id uuid.UUID, number, status string) {
 		t.Helper()
 		if _, err := conn.Exec(ctx, `INSERT INTO vendor_invoices (id, vendor_id, invoice_number, invoice_date, due_date,
@@ -451,6 +474,13 @@ func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
 	// A pending bill with a posted entry: never linked, and not counted.
 	insert(pending, "LEG-PENDING", "PENDING")
 	entry(pending, newTime, nil)
+	// The base's real approved bill: a one leg entry, the Accounts Payable
+	// credit with no debit. Linking it would let the void mirror it into
+	// another unbalanced entry, so it stays unlinked and its own notice
+	// names it, apart from the bills with nothing to link.
+	onelegged := uuid.New()
+	insert(onelegged, "LEG-ONELEG", "APPROVED")
+	oneLegEntry(onelegged, newTime)
 
 	apply106(t, conn, target)
 
@@ -466,9 +496,15 @@ func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
 	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, pending); got != "null" {
 		t.Errorf("the pending bill links %s, want none", got)
 	}
+	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, onelegged); got != "null" {
+		t.Errorf("the bill whose entry has one leg links %s, want none: a one leg entry must not be linked", got)
+	}
 	joined := strings.Join(*notices, " | ")
 	if !strings.Contains(joined, "no journal entry to link") {
 		t.Errorf("the notices (%s) do not name the unlinked approved bills", joined)
+	}
+	if !strings.Contains(joined, "one leg entry") {
+		t.Errorf("the notices (%s) do not name the one leg entry bills", joined)
 	}
 	// A second apply changes nothing.
 	apply106(t, conn, target)

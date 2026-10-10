@@ -472,7 +472,9 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 // posted and simply dies; an approved one's entry is reversed whole. A bill
 // with money applied is refused: the payments have to be undone first. A bill
 // that owes (approved or partial) but never linked its entry is refused too:
-// there is nothing to reverse, and a silent void would strand the credit.
+// there is nothing to reverse, and a silent void would strand the credit. So
+// is a linked entry that does not balance (the base's one leg approve shape):
+// its reversal would not balance either.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
@@ -511,6 +513,10 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 			if err != nil {
 				if errors.Is(err, gl.ErrPeriodClosed) {
 					return conflictBlocker("period_closed", "the reversal would be dated into a closed fiscal period")
+				}
+				if errors.Is(err, gl.ErrUnbalanced) {
+					return httpx.InvalidStateTransition("the linked entry does not balance and a void would mirror it into another unbalanced entry",
+						httpx.Blocker("entry_unbalanced", "the bill's linked journal entry has one leg only (the removed sync's shape); post the missing legs, then void"))
 				}
 				return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
 			}

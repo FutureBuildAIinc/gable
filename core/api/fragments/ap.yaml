@@ -177,9 +177,12 @@ paths:
         is a 409 blocker account_missing naming it). To voided: from pending
         (nothing posted) or
         approved (the entry is reversed whole); a reason is required, a bill
-        with money applied is refused with the has_payments blocker, and an
+        with money applied is refused with the has_payments blocker, an
         approved or partial bill with no linked journal entry (a legacy bill
-        whose posting was swallowed) with the entry_not_linked blocker.
+        whose posting was swallowed) with the entry_not_linked blocker, and a
+        bill whose linked entry does not balance (the base's one leg approve
+        shape) with the entry_unbalanced blocker; nothing is written on
+        either refusal.
       parameters:
         - name: id
           in: path
