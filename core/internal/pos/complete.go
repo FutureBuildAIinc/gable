@@ -164,8 +164,22 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if len(preLines) == 0 {
 		return nil, invalid("lines", "the sale has no lines to complete")
 	}
+	// The credit check an ACCOUNT tender owes, read before the card is
+	// charged (a refusal must never move money at the terminal); the
+	// transaction repeats it under the customer's credit lock.
+	if accountPortion > 0 {
+		if err := s.checkAccountCredit(ctx, realCustomerID, accountPortion); err != nil {
+			return nil, err
+		}
+	}
 	// Card charges: outside the transaction, with the sale's own currency
-	// (the hard coded USD of the base commit is the bug this fixes).
+	// (the hard coded USD of the base commit is the bug this fixes). Every
+	// charge the transaction then refuses is reversed (gateway.go).
+	type chargeMade struct {
+		result      *chargeResult
+		amountCents int64
+	}
+	var chargesMade []chargeMade
 	charges := make([]*chargeResult, len(tenders))
 	for i := range tenders {
 		t := &tenders[i]
@@ -184,13 +198,72 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 			return nil, conflict("card_declined", fmt.Sprintf("the card was declined (%s)", res.Status))
 		}
 		charges[i] = &chargeResult{GatewayTxID: res.TransactionID, AuthCode: res.AuthCode, Last4: res.CardLast4, Brand: res.CardBrand}
+		chargesMade = append(chargesMade, chargeMade{result: charges[i], amountCents: int64(t.AmountCents)})
 	}
 	priced, err := s.prepareSaleTax(ctx, pre, preLines, realCustomerID)
+	var out *Sale
+	if err == nil {
+		out, err = s.completeSaleTx(ctx, saleID, ifMatch, bodyRevision, tenders, pickedUpBy, actor, pre, realCustomerID, charges, priced)
+	}
 	if err != nil {
+		// The transaction refused after the gateway approved a charge: the
+		// charge is put back before the refusal returns, so no card is left
+		// charged behind a sale that never was; a reversal that fails too
+		// answers 502 charge_not_reversed instead of the refusal.
+		for _, c := range chargesMade {
+			if rerr := s.reverseCharge(ctx, c.result.GatewayTxID, c.amountCents, saleID, actor, err); rerr != nil {
+				return nil, rerr
+			}
+		}
 		return nil, err
 	}
+	return out, nil
+}
+
+// checkAccountCredit refuses an ACCOUNT portion that would take the customer
+// over its credit limit (ADR 0005 14.2 C2-5). Caller-side lock-free read; the
+// authoritative check runs inside the transaction under the customer's
+// credit lock.
+func (s *Service) checkAccountCredit(ctx context.Context, customerID uuid.UUID, accountPortion int64) error {
+	facts, err := s.repo.CustomerFacts(ctx, customerID)
+	if err != nil {
+		return err
+	}
+	if facts.CreditLimitCents != nil {
+		open, err := s.repo.OpenReceivableCents(ctx, customerID)
+		if err != nil {
+			return err
+		}
+		if open+accountPortion > int64(*facts.CreditLimitCents) {
+			return conflict("credit_limit",
+				fmt.Sprintf("the customer's open receivable plus the %d cents on account is over the credit limit", accountPortion))
+		}
+	}
+	return nil
+}
+
+// completeSaleTx runs the completion's one transaction (ADR 0005 14.2 C2-5):
+// the sale row, the session it lives in, the live tender check, the credit
+// check under the customer's credit lock, the stock out, the invoice with its
+// tax and COGS, the payments, the audit row and the events, last. The tenders
+// and charges the caller resolved (the gateway charges made before it opened)
+// come with it.
+func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
+	tenders []TenderIn, pickedUpBy, actor string, pre *Sale, realCustomerID uuid.UUID,
+	charges []*chargeResult, priced *providerTax) (*Sale, error) {
+	var totalTendered, cashTendered, accountPortion int64
+	for i := range tenders {
+		t := &tenders[i]
+		totalTendered += int64(t.AmountCents)
+		if t.Method == TenderCash {
+			cashTendered += int64(t.AmountCents)
+		}
+		if t.Method == TenderAccount {
+			accountPortion += int64(t.AmountCents)
+		}
+	}
 	var out *Sale
-	err = s.inTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
 		// Section 11, step 1: the counter sale row.
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
 			return err

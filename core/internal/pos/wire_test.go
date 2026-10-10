@@ -756,9 +756,11 @@ func int64Of(v any) int64 {
 
 // fakeGateway is the card terminal in tests.
 type fakeGateway struct {
-	charges  []*payment.GatewayResult
-	refunds  []string
-	currency []string
+	charges     []*payment.GatewayResult
+	refunds     []string
+	voids       []string
+	chargeCalls int
+	currency    []string
 }
 
 func approvedCharge() *payment.GatewayResult {
@@ -767,6 +769,7 @@ func approvedCharge() *payment.GatewayResult {
 }
 
 func (g *fakeGateway) Charge(ctx context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
+	g.chargeCalls++
 	g.currency = append(g.currency, req.Currency)
 	if len(g.charges) == 0 {
 		return nil, fmt.Errorf("no charge scripted")
@@ -781,6 +784,7 @@ func (g *fakeGateway) Capture(ctx context.Context, id string, cents int64) (*pay
 }
 
 func (g *fakeGateway) Void(ctx context.Context, id string) (*payment.GatewayResult, error) {
+	g.voids = append(g.voids, id)
 	return &payment.GatewayResult{Status: payment.GatewayStatusVoided}, nil
 }
 

@@ -69,6 +69,13 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		if original, err = s.repo.GetSale(ctx, *in.OriginalSaleID); err != nil {
 			return nil, err
 		}
+		// The status refusal runs before the gateway is asked for money (a
+		// refusal must never move money at the terminal); the transaction
+		// rechecks it under the sale row lock.
+		if original.Status != StatusCompleted {
+			return nil, httpx.InvalidStateTransition(
+				fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", original.Status.Status()))
+		}
 		if customerID == nil {
 			customerID = original.CustomerID
 		}
@@ -240,7 +247,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	}
 	total := -(subtotal + taxCents)
 	// A card refund goes through the gateway before the transaction, so a
-	// decline aborts with nothing persisted.
+	// decline aborts with nothing persisted. Every guard that needs no lock
+	// (the sale's status, the caps) has run by now; a refund the transaction
+	// then refuses is recorded in a committed row of its own (gateway.go).
+	var refundTaken *gatewayRefund
 	if in.RefundMethod == RefundCard && in.GatewayTxID != "" {
 		if s.gateway == nil {
 			return nil, conflict("card_terminal", "this register has no card terminal gateway to refund the card")
@@ -252,6 +262,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
+		entity := uuid.Nil
+		if in.OriginalSaleID != nil {
+			entity = *in.OriginalSaleID
+		}
+		refundTaken = &gatewayRefund{gatewayTxID: in.GatewayTxID, refundTxID: res.TransactionID,
+			amountCents: -total, act: "return", entity: entity, actor: actor}
 	}
 	var tillSessionID *uuid.UUID
 	if session, err := s.repo.GetOpenTillSession(ctx, in.RegisterID); err == nil && session != nil {
@@ -453,6 +469,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		return nil
 	})
 	if err != nil {
+		// The gateway already refunded and the transaction refused: the
+		// money is accounted for in a committed row of its own carrying the
+		// gateway ids.
+		if refundTaken != nil {
+			s.recordOrphanRefund(ctx, *refundTaken, err)
+		}
 		return nil, err
 	}
 	return out, nil

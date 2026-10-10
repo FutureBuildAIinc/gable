@@ -32,6 +32,11 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	if pre.Status != StatusCompleted {
 		return nil, httpx.InvalidStateTransition(fmt.Sprintf("cannot void a %s sale: only a completed sale is voided", pre.Status.Status()))
 	}
+	// Every guard that needs no lock runs BEFORE the gateway is asked for
+	// money (first review P1-2): a refusal must never move money at the
+	// terminal. The guards are rechecked under the sale row lock inside the
+	// transaction; the residual race is closed by recording what the gateway
+	// did when the transaction then refuses.
 	// After any return of the sale the way back is another return: the
 	// return already paid part of the money out and put its goods back, so a
 	// void would pay the whole sale a second time.
@@ -53,12 +58,16 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 				"the till session this sale was made in is closed: return the goods through POST /pos/returns instead")
 		}
 	}
+	if err := httpx.CheckRevision(pre.Revision, ifMatch, bodyRevision); err != nil {
+		return nil, err
+	}
 	tenders, err := s.repo.GetTenders(ctx, saleID)
 	if err != nil {
 		return nil, err
 	}
 	// Card refunds go through the gateway before the transaction, so a
 	// decline aborts with nothing persisted (as every gateway call is).
+	var refunds []gatewayRefund
 	for i := range tenders {
 		t := &tenders[i]
 		if t.Method != TenderCard || t.PaymentID == nil {
@@ -81,6 +90,8 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		if res.Status != payment.GatewayStatusRefunded && res.Status != payment.GatewayStatusApproved {
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
+		refunds = append(refunds, gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
+			amountCents: int64(t.AmountCents), act: "void", entity: saleID, actor: actor})
 	}
 	var out *Sale
 	err = s.inTx(ctx, func(ctx context.Context) error {
@@ -201,6 +212,12 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		return err
 	})
 	if err != nil {
+		// The gateway already refunded and the transaction refused: the
+		// money is accounted for in committed rows of its own, one per
+		// refund, carrying the gateway ids.
+		for _, r := range refunds {
+			s.recordOrphanRefund(ctx, r, err)
+		}
 		return nil, err
 	}
 	return out, nil
