@@ -5,7 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { formatCents } from '../../lib/utils.ts';
+import { formatCents, formatDay } from '../../lib/utils.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { keyed } from 'lit/directives/keyed.js';
@@ -33,6 +33,8 @@ export class GableAccountDetail extends LitElement {
     @state() private customer: Customer | null = null;
     @state() private summary: AccountSummary | null = null;
     @state() private transactions: CustomerTransaction[] = [];
+    @state() private txnCursor: string | null = null;
+    @state() private txnLoadingMore = false;
     @state() private unappliedPayments: Payment[] = [];
     @state() private openInvoices: { id: string; number: string; open_cents: number }[] = [];
     @state() private paymentsLoading = false;
@@ -78,9 +80,10 @@ export class GableAccountDetail extends LitElement {
             ]);
             this.customer = cust;
             this.summary = summ;
-            // The ledger's list envelope; the cursor walks it (a "Load more"
+            // The ledger's list envelope; the cursor walks it ("Load more"
             // follows when the account outgrows one page).
             this.transactions = txnPage.items;
+            this.txnCursor = txnPage.next_cursor;
             if (cust.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(cust.salesperson_id);
@@ -92,6 +95,22 @@ export class GableAccountDetail extends LitElement {
             ToastService.show('Failed to load account data', 'error');
         } finally {
             this.loading = false;
+        }
+    }
+
+    /** The next page of the ledger, appended below the rows already shown. */
+    private async loadMoreTransactions() {
+        if (!this.customer || !this.txnCursor || this.txnLoadingMore) return;
+        this.txnLoadingMore = true;
+        try {
+            const page = await AccountService.getTransactions(this.customer.id, this.txnCursor);
+            this.transactions = [...this.transactions, ...page.items];
+            this.txnCursor = page.next_cursor;
+        } catch (error) {
+            console.error('Failed to load more transactions:', error);
+            ToastService.show('Failed to load more transactions', 'error');
+        } finally {
+            this.txnLoadingMore = false;
         }
     }
 
@@ -291,9 +310,9 @@ export class GableAccountDetail extends LitElement {
                                 @change=${(e: Event) => this.applyInvoiceId = (e.target as HTMLSelectElement).value}
                                 class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100"
                             >
-                                ${this.openInvoices.map(i => html`<option value=${i.id}>${i.number} (${(i.open_cents / 100).toFixed(2)} open)</option>`)}
+                                ${this.openInvoices.map(i => html`<option value=${i.id}>${i.number} (${formatCents(i.open_cents)} open)</option>`)}
                             </select>
-                            ${invoice ? html`<p class="mt-1 text-xs text-zinc-500">${invoice.number} has ${(invoice.open_cents / 100).toFixed(2)} open</p>` : nothing}
+                            ${invoice ? html`<p class="mt-1 text-xs text-zinc-500">${invoice.number} has ${formatCents(invoice.open_cents)} open</p>` : nothing}
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-zinc-400 mb-1">Amount to apply</label>
@@ -577,16 +596,24 @@ export class GableAccountDetail extends LitElement {
                                                 </td>
                                                 <td class="px-4 py-3 text-white">${txn.description}</td>
                                                 <td class="px-4 py-3 text-right font-mono font-medium ${txn.amount_cents > 0 ? 'text-white' : 'text-emerald-400'}">
-                                                    ${txn.amount_cents > 0 ? '+' : ''}${(txn.amount_cents / 100).toFixed(2)}
+                                                    ${txn.amount_cents > 0 ? '+' : ''}${formatCents(txn.amount_cents)}
                                                 </td>
                                                 <td class="px-4 py-3 text-right font-mono text-zinc-300">
-                                                    ${(txn.balance_after_cents / 100).toFixed(2)}
+                                                    ${formatCents(txn.balance_after_cents)}
                                                 </td>
                                             </tr>
                                         `)}
                                     </tbody>
                                 </table>
                             </div>
+                            ${this.txnCursor ? html`
+                                <div class="mt-3 flex justify-center">
+                                    <button type="button" data-testid="ledger-load-more" ?disabled=${this.txnLoadingMore}
+                                        @click=${() => this.loadMoreTransactions()}
+                                        class="px-4 py-2 text-sm rounded border border-zinc-700 text-zinc-300 hover:bg-white/5 disabled:opacity-50">
+                                        ${this.txnLoadingMore ? 'Loading...' : 'Load more'}
+                                    </button>
+                                </div>` : nothing}
                         ` : nothing}
 
                         ${this.activeTab === 'payments' ? html`
@@ -619,7 +646,7 @@ export class GableAccountDetail extends LitElement {
                                                 ${this.unappliedPayments.map(pay => html`
                                                     <tr class="hover:bg-white/5 transition-colors" data-testid="unapplied-payment">
                                                         <td class="px-4 py-3 font-mono text-white">${pay.number}</td>
-                                                        <td class="px-4 py-3 text-zinc-400">${pay.received_on}</td>
+                                                        <td class="px-4 py-3 text-zinc-400">${formatDay(pay.received_on)}</td>
                                                         <td class="px-4 py-3 text-zinc-300">${pay.method}</td>
                                                         <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${pay.reference || '-'}</td>
                                                         <td class="px-4 py-3 text-right font-mono text-zinc-300">${formatCents(pay.amount_cents)}</td>
