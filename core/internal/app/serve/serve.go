@@ -67,11 +67,9 @@ import (
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
-	"github.com/gablelbm/gable/pkg/actor"
 	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
-	"github.com/gablelbm/gable/pkg/confirmgate"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -1047,65 +1045,19 @@ func Run() {
 	// Prometheus metrics endpoint (public — scrape target)
 	mux.Handle("GET /metrics", promhttp.Handler())
 
-	// 6. Wrap Middleware (outermost first)
-	var finalHandler http.Handler = mux
-
-	// Cache-Control headers (innermost — runs after auth, before response)
-	finalHandler = middleware.CacheControl(finalHandler)
-
-	// Idempotency keys (POST/PUT with Idempotency-Key), one layer per surface
-	// where the principal that scopes a claim is established. The global
-	// layer here covers the ERP API only: it runs inside auth (the JWT
-	// subject is the principal) and inside the request size limit (the
-	// fingerprint read honours it), and it skips /api/portal/v1/ and
-	// /api/integration/ because those surfaces carry their own layer inside
-	// their auth chains (see the portal and integration wiring below), so
-	// nothing runs twice. Claims live in Postgres (migration 087), so a
-	// replay survives a restart.
-	finalHandler = middleware.Idempotency(db)(finalHandler)
-
-	// Request size limit (10MB default)
-	finalHandler = middleware.MaxRequestSize(10 << 20)(finalHandler)
-
-	// Auth (JWT verification; a Bearer machine key dispatches to the
-	// machine-key core inside it). In AUTH_MODE=dev the JWT layer is off but
-	// machine keys still authenticate and scope check exactly as behind it.
-	if authMw != nil {
-		finalHandler = authMw.Handler(finalHandler)
-	} else {
-		finalHandler = machineKeyAuth.Handler(finalHandler)
-	}
-
-	// The confirm gate (ADR 0007 section 5.4): after auth, so it sees the
-	// claims and the key, and before the idempotency layer, so a refused
-	// request never claims a key. An agent marked session is refused the
-	// promotion route and every entity write of a confirm gated module;
-	// keyed requests are governed by their scopes alone.
-	finalHandler = confirmgate.Middleware(auditLog)(finalHandler)
-
-	// Actor identity (agent headers → context for audit attribution).
-	// Outside auth on purpose: this middleware wraps auth, so it runs before
-	// it and the context it builds flows through auth to the handler; it
-	// records who acted, it never grants anything.
-	finalHandler = actor.Middleware(finalHandler)
-
-	// CORS — must be outside auth so OPTIONS preflight is handled before auth
-	finalHandler = middleware.CORSMiddleware(finalHandler)
-
-	// Rate limiting (RATE_LIMIT_PER_MINUTE requests per IP, default 120)
-	finalHandler = middleware.RateLimit(cfg.RateLimitPerMinute, cfg.TrustedProxies)(finalHandler)
-
-	// Panic recovery
-	finalHandler = middleware.Recovery(logger)(finalHandler)
-
-	// Request ID generation
-	finalHandler = middleware.RequestID(finalHandler)
-
-	// Prometheus HTTP metrics
-	finalHandler = metrics.HTTPMetrics(finalHandler)
-
-	// Access logging (outermost — captures full request lifecycle)
-	finalHandler = RequestLogger(logger, cfg.TrustedProxies, finalHandler)
+	// 6. Wrap Middleware (outermost first). The chain order is a single
+	// function (ChainDeps) so tests for any layer can build the real order
+	// without starting the server.
+	finalHandler := buildChain(ChainDeps{
+		Mux:            mux,
+		DB:             db,
+		Logger:         logger,
+		AuditLog:       auditLog,
+		AuthMw:         authMw,
+		MachineKeyAuth: machineKeyAuth,
+		RateLimitRPM:   cfg.RateLimitPerMinute,
+		TrustedProxies: cfg.TrustedProxies,
+	})
 
 	// 7. Start Server with Graceful Shutdown
 	srv := &http.Server{
