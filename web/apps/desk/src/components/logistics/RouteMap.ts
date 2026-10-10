@@ -7,9 +7,13 @@ import type { Delivery } from '../../types/delivery';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-function makeStopIcon(index: number, status: string): L.DivIcon {
-  const isDelivered = status === 'DELIVERED';
-  const isFailed = status === 'FAILED' || status === 'PARTIAL';
+export function makeStopIcon(index: number, status: string): L.DivIcon {
+  // The wire carries the lowercase vocabulary: 'delivered', 'failed' or
+  // 'partial' for terminal, anything else (notably 'pending' and
+  // 'out_for_delivery') is the open stop colour. The legacy code matched
+  // the storage spelling and every stop rendered as the default colour.
+  const isDelivered = status === 'delivered';
+  const isFailed = status === 'failed' || status === 'partial';
   const bg = isDelivered ? '#10b981' : isFailed ? '#ef4444' : '#00FFA3';
   const text = isDelivered || isFailed ? '#fff' : '#000';
   const shadow = isDelivered ? 'rgba(16,185,129,0.5)' : isFailed ? 'rgba(239,68,68,0.4)' : 'rgba(0,255,163,0.5)';

@@ -15,6 +15,23 @@ const VEHICLE_TYPES: VehicleType[] = ['box_truck', 'flatbed', 'pickup', 'van', '
 const DRIVER_STATUSES: DriverStatus[] = ['active', 'inactive', 'on_leave'];
 const CDL_CLASSES = ['', 'A', 'B', 'C'];
 
+// driverStatusColors is keyed by the lowercase wire vocabulary
+// (active/inactive/on_leave) the desk reads back. An unknown status falls
+// back to the active colour so the cell is never blank (the live failure:
+// every status rendered blank because the keys were the storage spelling).
+export const driverStatusColors: Record<string, string> = {
+  active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  inactive: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
+  on_leave: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+};
+
+// driverStatusClass answers the Tailwind class for a status read off the
+// wire, falling back to the active class for any value the table does
+// not know (an uppercase legacy value or a future wire value).
+export function driverStatusClass(status: string): string {
+  return driverStatusColors[status] || driverStatusColors.active;
+}
+
 function isDateWarning(dateStr?: string | null, daysThreshold = 30): 'expired' | 'warning' | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
@@ -242,11 +259,8 @@ export class FleetManagement extends LitElement {
   }
 
   render() {
-    const statusColors: Record<string, string> = {
-      ACTIVE: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-      INACTIVE: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
-      ON_LEAVE: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    };
+    const statusColors = driverStatusColors;
+    const activeClass = driverStatusColors.active;
 
     return html`
       <div class="space-y-6">
@@ -288,11 +302,11 @@ export class FleetManagement extends LitElement {
           <div class="space-y-3">
             ${[1,2,3].map(() => html`<div class="h-16 bg-white/5 rounded-xl animate-pulse"></div>`)}
           </div>
-        ` : this._tab === 'vehicles' ? this._renderVehiclesTab() : this._renderDriversTab(statusColors)}
+        ` : this._tab === 'vehicles' ? this._renderVehiclesTab() : this._renderDriversTab(statusColors, activeClass)}
       </div>
 
       ${this._vehicleModalOpen ? this._renderVehicleModal() : nothing}
-      ${this._driverModalOpen ? this._renderDriverModal(statusColors) : nothing}
+      ${this._driverModalOpen ? this._renderDriverModal(statusColors, activeClass) : nothing}
     `;
   }
 
@@ -368,7 +382,7 @@ export class FleetManagement extends LitElement {
   }
 
   /* ---- Drivers Tab ---- */
-  private _renderDriversTab(statusColors: Record<string, string>) {
+  private _renderDriversTab(statusColors: Record<string, string>, activeClass: string) {
     return html`
       <div class="rounded-2xl bg-white/[0.03] border border-white/5 backdrop-blur-md">
         <div class="p-0">
@@ -417,7 +431,7 @@ export class FleetManagement extends LitElement {
                       </td>
                       <td class="px-4 py-3 font-mono text-xs text-zinc-300">${formatDate(d.hire_date)}</td>
                       <td class="px-4 py-3">
-                        <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${statusColors[d.status] || statusColors.ACTIVE}">
+                        <span class="px-2 py-0.5 rounded text-[10px] uppercase tracking-wider font-semibold border ${statusColors[d.status] || activeClass}">
                           ${d.status.replace(/_/g, ' ')}
                         </span>
                       </td>
@@ -539,7 +553,7 @@ export class FleetManagement extends LitElement {
   }
 
   /* ---- Driver Modal ---- */
-  private _renderDriverModal(_statusColors: Record<string, string>) {
+  private _renderDriverModal(_statusColors: Record<string, string>, _activeClass: string) {
     const isEdit = !!this._driverModalDriver;
 
     return html`
