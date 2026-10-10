@@ -30,7 +30,7 @@ func TestCreateInvoiceAuditRollsBackWithFailedMutation(t *testing.T) {
 	logger := slog.Default()
 
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), logger)
-	accountSvc := account.NewService(account.NewRepository(db), db, logger)
+	accountSvc := account.NewService(db, glSvc, logger)
 	svc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).
 		WithAuditLog(audit.NewLogger(db))
 

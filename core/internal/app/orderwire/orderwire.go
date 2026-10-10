@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"math"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/inventory"
@@ -45,6 +46,9 @@ type Deps struct {
 	Inventory *inventory.Service
 	// Invoices is the invoice writer the fulfilment bills through (required).
 	Invoices *invoice.Service
+	// Accounts is the AR core the fulfilment applies the order's deposits
+	// through (ADR 0005 5.6 step 7); nil leaves deposits unapplied.
+	Accounts *account.Service
 	// Pricing and Customers back the price engine adapter (ADR 0005 section 1).
 	Pricing   *pricing.Service
 	Customers *customer.Service
@@ -90,6 +94,9 @@ func New(d Deps) *order.Service {
 	// its stock and status): the invoice module cannot import this one, so the
 	// seam is wired here, in the one constructor both roles use.
 	d.Invoices.WithOrders(svc).WithStock(d.Inventory)
+	if d.Accounts != nil {
+		svc.WithDeposits(d.Accounts)
+	}
 	return svc
 }
 

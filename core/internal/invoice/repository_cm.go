@@ -23,7 +23,7 @@ const creditColumns = `
 	cm.id, cm.number, cm.branch_id, cm.customer_id, COALESCE(c.name, ''), cm.invoice_id, cm.pos_return_id, cm.project_id,
 	cm.ship_to_id, cm.status, cm.revision, cm.currency, cm.reason_code, cm.reason,
 	ROUND(cm.subtotal * 100)::bigint, ROUND(cm.tax_amount * 100)::bigint, cm.tax_rate::text, ROUND(cm.total_amount * 100)::bigint,
-	CASE WHEN cm.status IN ('OPEN', 'PARTIAL') THEN ROUND(cm.total_amount * 100)::bigint ELSE 0 END,
+	ROUND(cm.amount_open * 100)::bigint,
 	cm.gl_entry_id, to_char(cm.memo_date, 'YYYY-MM-DD'), cm.voided_at, cm.voided_by, cm.void_reason, cm.created_at, cm.updated_at`
 
 const creditFrom = `
@@ -312,42 +312,9 @@ func (r *PostgresRepository) ReplaceCreditLines(ctx context.Context, memoID uuid
 
 func i64p(v int64) *int64 { return &v }
 
-// PostCredit records the post: the number, OPEN, the entry, the date and the
-// totals as recomputed at post, with the revision moved.
-func (r *PostgresRepository) PostCredit(ctx context.Context, h *CreditHeader, number string, glEntryID *uuid.UUID) error {
-	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		UPDATE credit_memos SET number = $2, status = 'OPEN', gl_entry_id = $3, memo_date = $4::date,
-			amount = -($5::numeric / 100), subtotal = $6::numeric / 100, tax_amount = $7::numeric / 100,
-			total_amount = $5::numeric / 100, tax_rate = $8::numeric, updated_at = NOW(), revision = revision + 1
-		WHERE id = $1`,
-		h.ID, number, glEntryID, h.MemoDate.Format("2006-01-02"), h.TotalCents, h.SubtotalCents, h.TaxCents, h.TaxRate)
-	if err != nil {
-		return fmt.Errorf("failed to post the credit memo: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return errCreditNotFound
-	}
-	return nil
-}
-
 // UpdateCreditLines rewrites the cost and extension the post recomputed.
 func (r *PostgresRepository) UpdateCreditLines(ctx context.Context, memoID uuid.UUID, lines []CreditLine) error {
 	return r.ReplaceCreditLines(ctx, memoID, lines)
-}
-
-// MarkCreditVoid ends the credit memo: status VOID, the void columns, the revision.
-func (r *PostgresRepository) MarkCreditVoid(ctx context.Context, id uuid.UUID, actor, reason string, voidedOn time.Time) error {
-	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		UPDATE credit_memos SET status = 'VOID', voided_at = NOW(), voided_by = NULLIF($2, ''), void_reason = $3,
-			voided_on = $4::date, updated_at = NOW(), revision = revision + 1
-		WHERE id = $1`, id, actor, reason, voidedOn.Format("2006-01-02"))
-	if err != nil {
-		return fmt.Errorf("failed to void the credit memo: %w", err)
-	}
-	if ct.RowsAffected() == 0 {
-		return errCreditNotFound
-	}
-	return nil
 }
 
 // Credited is what earlier credit memos returned of one invoice line, as

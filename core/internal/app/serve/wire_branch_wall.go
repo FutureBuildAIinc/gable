@@ -6,6 +6,7 @@ package serve
 import (
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
 	"github.com/gablelbm/gable/internal/document"
@@ -14,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -87,6 +89,21 @@ func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
 // 2.3) beside the wall every read already carries.
 func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
 	invoice.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+}
+
+// accounts mounts the account and AR routes: the reads (summary, subledger,
+// aging, statement) behind the role guard and the branch middleware, the
+// reconciliation and the application reversal behind the finance guard.
+func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
+	account.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"), w.scoped("admin", "owner", "finance"))
+}
+
+// payments mounts the payment routes: the create takes branch_id from its body
+// and the writes address a payment by path id, so the service holds both to the
+// caller's branch context (ADR 0007 section 2.3) beside the wall every read
+// carries.
+func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
+	payment.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance", "cashier"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {
