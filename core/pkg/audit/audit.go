@@ -80,25 +80,12 @@ func (l *Logger) Log(ctx context.Context, entry Entry) error {
 	// Extract request ID from context
 	requestID := sanitiseString(middleware.GetRequestID(ctx))
 
-	// Marshal changes to JSON, then rewrite the marshalled bytes so a NUL
-	// byte ANYWHERE in the changes (a top level string, a nested map, a
-	// slice value, a map key, a struct field, or any future shape the
-	// jsonb column accepts) never reaches the jsonb parser. json.Marshal
-	// escapes every NUL byte in the input as the six byte sequence
-	// `\u0000`, and the jsonb parser then rejects that sequence with
-	// SQLSTATE 22P05 ("unsupported Unicode escape sequence"). Replacing
-	// those six bytes with the seven byte sequence `\\u0000` in the
-	// marshalled text turns the escape into `\\` (an escaped backslash,
-	// a valid JSON escape for backslash) followed by the literal text
-	// `u0000`; the jsonb parser reads the six characters `\u0000` and
-	// the NUL byte is gone. The marker text `\\u0000` is itself NOT a
-	// valid JSON escape of NUL (the `\u0000` is preceded by `\\`, so it
-	// is no longer a `\u` escape; without the leading backslash `u0000`
-	// is plain text). json.Marshal also coerces any invalid UTF-8 byte
-	// in the input to U+FFFD, so a second pass over the bytes is enough.
-	// This is the one place that prepares the changes jsonb for Postgres,
-	// and the writer never mutates the caller's map: json.Marshal only
-	// reads, and the rewrite is on the resulting bytes.
+	// Marshal changes, then rewrite the marshalled bytes so a NUL byte
+	// anywhere in the changes (any depth, any key, any value shape) is
+	// never handed to the jsonb parser. sanitiseNULEscape owns the
+	// rewrite rules (see its doc comment). The writer does not mutate
+	// the caller's map: json.Marshal only reads, and the rewrite is on
+	// the resulting bytes.
 	var changesJSON []byte
 	if entry.Changes != nil {
 		var err error
