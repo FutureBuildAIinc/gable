@@ -111,6 +111,14 @@ type Repository interface {
 	RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error)
 	SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error)
 	SessionHasPendingRefundIntent(ctx context.Context, sessionID uuid.UUID) (bool, error)
+	// MarkRefundIntentRefunded writes the gateway's own refund id onto the
+	// standing claim in its own committed write, the moment the terminal
+	// answers; GetRefundIntent reads one claim whole, and
+	// FailRefundIntentByID releases one claim by its id (the operator
+	// resolution's no refund leg).
+	MarkRefundIntentRefunded(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error
+	GetRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error)
+	FailRefundIntentByID(ctx context.Context, id uuid.UUID) error
 	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
@@ -713,6 +721,8 @@ func (r *PostgresRepository) LegacyRefundedCentsByProduct(ctx context.Context, s
 // row that serializes the card refunds of a tender (sale id, tender id,
 // amount, state pending) because the gateway is called before the money
 // transaction (ADR 0005 section 11) and no row lock can span the call.
+// Request carries a return claim's own request shape (JSON), so the operator
+// resolution can replay the money transaction the lost act never ran.
 type RefundIntent struct {
 	ID          uuid.UUID
 	SaleID      uuid.UUID
@@ -721,6 +731,8 @@ type RefundIntent struct {
 	AmountCents int64
 	// Act names the act behind the refund ("void" or "return").
 	Act string
+	// Request is the stored return request of a return claim, nil on a void.
+	Request []byte
 }
 
 // InsertRefundIntent writes one PENDING refund intent through the caller's
@@ -735,9 +747,9 @@ func (r *PostgresRepository) InsertRefundIntent(ctx context.Context, intent Refu
 		intent.ID = uuid.New()
 	}
 	_, err := r.ex(ctx).Exec(ctx, `
-		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', NOW(), NOW())`,
-		intent.ID, intent.SaleID, intent.TenderID, intent.GatewayTxID, intent.AmountCents, intent.Act)
+		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, request, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', $7, NOW(), NOW())`,
+		intent.ID, intent.SaleID, intent.TenderID, intent.GatewayTxID, intent.AmountCents, intent.Act, intent.Request)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -772,6 +784,67 @@ func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tende
 		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID)
 	if err != nil {
 		return fmt.Errorf("failed to release the refund intent: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// MarkRefundIntentRefunded writes the gateway's own refund id onto the
+// tender's standing claim. Its own committed write, made the moment the
+// terminal answers and before the money transaction opens: a PENDING intent
+// carrying a refund id is a refund the terminal moved, one without it is a
+// refund that may not have moved, so a claim that outlives its act can be
+// told apart and resolved (seventh review P2-3).
+func (r *PostgresRepository) MarkRefundIntentRefunded(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET refund_tx_id = NULLIF($3, ''), updated_at = NOW()
+		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID, refundTxID)
+	if err != nil {
+		return fmt.Errorf("failed to record the refund id on the intent: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// RefundIntentRecord is one claim row read whole, for the operator resolving
+// it: what it claimed, where it stands, and whether the terminal answered.
+type RefundIntentRecord struct {
+	RefundIntent
+	State      string
+	RefundTxID string
+	ResolvedAt *time.Time
+	CreatedAt  time.Time
+}
+
+// GetRefundIntent reads one claim whole.
+func (r *PostgresRepository) GetRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error) {
+	var rec RefundIntentRecord
+	var request []byte
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT id, sale_id, tender_id, gateway_tx_id, ROUND(amount * 100)::bigint, act, state,
+			COALESCE(refund_tx_id, ''), request, created_at, updated_at
+		FROM pos_refund_intents WHERE id = $1`, id).
+		Scan(&rec.ID, &rec.SaleID, &rec.TenderID, &rec.GatewayTxID, &rec.AmountCents, &rec.Act, &rec.State,
+			&rec.RefundTxID, &request, &rec.CreatedAt, &rec.ResolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("refund claim not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the refund intent: %w", err)
+	}
+	rec.Request = request
+	return &rec, nil
+}
+
+// FailRefundIntentByID releases one claim by its id: the operator
+// resolution's no refund leg, which moves nothing.
+func (r *PostgresRepository) FailRefundIntentByID(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET state = 'FAILED', updated_at = NOW()
+		WHERE id = $1 AND state = 'PENDING'`, id)
+	if err != nil {
+		return fmt.Errorf("failed to release the refund intent: %w", mapWriteError(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return conflict("intent_not_pending", "the refund claim was settled by another resolution first")
 	}
 	return nil
 }

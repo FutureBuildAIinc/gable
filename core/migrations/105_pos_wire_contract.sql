@@ -29,7 +29,10 @@
 --      refund of a tender (one live intent per sale and tender), because the
 --      gateway is called before the transaction (ADR 0005 section 11) and
 --      the claim is what refuses a second void or card return before it
---      reaches the terminal.
+--      reaches the terminal. The row carries the gateway's own refund id the
+--      moment the terminal answers, and a return claim carries its request
+--      shape, so an operator can resolve a claim that outlives its act at
+--      the guarded admin route; the (state, created_at) index is the finder.
 --
 -- No migration writes a journal entry or a subledger row: history moves as
 -- data, and GET /api/v1/ar/reconciliation shows where it never agreed.
@@ -220,6 +223,7 @@ CREATE TABLE IF NOT EXISTS pos_refund_intents (
     act TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'PENDING',
     refund_tx_id TEXT,
+    request JSONB NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT pos_refund_intents_state_check CHECK (state IN ('PENDING', 'DONE', 'FAILED')),
@@ -227,6 +231,14 @@ CREATE TABLE IF NOT EXISTS pos_refund_intents (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pos_refund_intents_pending
     ON pos_refund_intents (sale_id, tender_id) WHERE state = 'PENDING';
+-- The finder of the reconciliation: the PENDING claims by age (a claim that
+-- outlives its act), whatever wrote them. The request column carries a
+-- return claim's own request shape, so the operator resolution can replay
+-- the money transaction the lost act never ran. Both idempotent: a second
+-- apply changes nothing.
+ALTER TABLE pos_refund_intents ADD COLUMN IF NOT EXISTS request JSONB NULL;
+CREATE INDEX IF NOT EXISTS idx_pos_refund_intents_state_created
+    ON pos_refund_intents (state, created_at);
 
 -- The invoice line completion built from each sale line: a linked return
 -- reads its cost link from the stored id, never from a position (a removed

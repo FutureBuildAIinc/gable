@@ -381,3 +381,48 @@ func (r *offlineSyncRequest) parse() (*OfflineSync, error) {
 	}
 	return out, nil
 }
+
+// resolveIntentRequest is POST /pos/refund-intents/{id}/resolve: the
+// operator's record of the terminal's actual outcome for a stranded claim.
+// outcome is "refund" (the gateway's own refund id, the money moved) or
+// "no_refund" (an explicit no at the terminal, with the reconciliation
+// reference finance filed). A bare resolve is refused naming the field.
+type resolveIntentRequest struct {
+	Outcome                 *string `json:"outcome"`
+	RefundTxID              *string `json:"refund_tx_id"`
+	ReconciliationReference *string `json:"reconciliation_reference"`
+	Reason                  *string `json:"reason"`
+}
+
+func (r *resolveIntentRequest) parse() (*ResolveIntentIn, error) {
+	v := &httpx.Validator{}
+	out := ResolveIntentIn{}
+	switch {
+	case r.Outcome != nil:
+		out.Outcome = *r.Outcome
+	}
+	switch out.Outcome {
+	case "refund":
+		if r.RefundTxID != nil {
+			out.RefundTxID = *r.RefundTxID
+		}
+		v.Required("refund_tx_id", out.RefundTxID)
+	case "no_refund":
+		if r.ReconciliationReference != nil {
+			out.ReconciliationReference = *r.ReconciliationReference
+		}
+		v.Required("reconciliation_reference", out.ReconciliationReference)
+	case "":
+		v.Check(false, "outcome", "records the terminal's outcome: refund with its refund id, or no_refund with a reconciliation reference")
+	default:
+		v.Check(false, "outcome", "must be refund or no_refund")
+	}
+	if r.Reason != nil {
+		out.Reason = *r.Reason
+	}
+	v.Required("reason", out.Reason)
+	if err := v.Err(); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

@@ -64,6 +64,19 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/pos/returns", guard(h.CreateReturn))
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
 	mux.HandleFunc("GET /api/v1/pos/returns/{id}", guard(h.GetReturn))
+
+	// The operator resolution of a stranded refund claim (FROM-PRINCIPAL 41):
+	// finance and owner only, and never a machine key, bound or not, refused
+	// in the route itself. It carries no cashier identity and no client
+	// revision: the operator's record is its own authority, so it takes its
+	// own role guard, not the counter's.
+	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveGuard(h.ResolveRefundIntent))
+}
+
+// resolveGuard wraps the resolution route: the finance and owner roles only
+// (a machine key has no role and is refused before it).
+func resolveGuard(handler http.HandlerFunc) http.HandlerFunc {
+	return middleware.RequireRole("finance", "owner")(handler).ServeHTTP
 }
 
 // cashierRefusalBody is the wire error envelope for the one refusal this
@@ -78,10 +91,11 @@ type cashierRefusalBody struct {
 	} `json:"meta"`
 }
 
-// refuseMachineKeyCashier answers the request with 403 when the caller
-// authenticated with a machine key, reporting whether it answered. The
-// cashier on a counter mutation is a human user whose JWT names them.
-func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
+// refuseMachineKey answers the request with 403 when the caller
+// authenticated with a machine key, reporting whether it answered: the key,
+// bound or not, whatever scopes it holds, is refused on routes whose act
+// belongs to a person.
+func refuseMachineKey(w http.ResponseWriter, r *http.Request, message string) bool {
 	keyID, isKey := middleware.KeyIDFromContext(r.Context())
 	if !isKey {
 		return false
@@ -92,14 +106,21 @@ func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
 	}
 	var body cashierRefusalBody
 	body.Error.Code = "forbidden"
-	body.Error.Message = "a cashier must be a user"
+	body.Error.Message = message
 	body.Meta.RequestID = reqID
-	slog.Warn("machine key refused on a POS cashier route",
+	slog.Warn("machine key refused on a POS person-only route",
 		"key_id", keyID, "status", http.StatusForbidden, "method", r.Method, "path", r.URL.Path, "request_id", reqID)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 	_ = json.NewEncoder(w).Encode(body)
 	return true
+}
+
+// refuseMachineKeyCashier answers the request with 403 when the caller
+// authenticated with a machine key, reporting whether it answered. The
+// cashier on a counter mutation is a human user whose JWT names them.
+func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
+	return refuseMachineKey(w, r, "a cashier must be a user")
 }
 
 // cashierOf resolves the acting cashier from the JWT, refusing a machine
@@ -556,6 +577,37 @@ func (h *Handler) ListReturns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// ResolveRefundIntent is POST /pos/refund-intents/{id}/resolve: the guarded
+// admin route that records a stranded claim's actual outcome at the terminal
+// and settles it. Finance and owner roles only; a machine key is refused
+// here, bound or not, whatever scopes it holds.
+func (h *Handler) ResolveRefundIntent(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "a refund claim is resolved by a person, never a machine key") {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	var req resolveIntentRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	in, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	resolved, err := h.service.ResolveRefundIntent(r.Context(), id, *in, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, resolved)
 }
 
 // actorFrom reads the acting user's subject for audit rows.

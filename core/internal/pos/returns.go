@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -54,18 +55,52 @@ type returnLinePriced struct {
 	lineType     string
 }
 
-// ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
-// credit memo created and posted in ONE act with its restock lines,
-// refunded in cash or card or left as account credit. The card refund goes
-// through the gateway before the transaction (section 11, as every gateway
-// call does), claimed first by a committed refund intent unique per sale
-// and tender so a concurrent card return or a void of the same tender never
-// reaches the terminal twice; the memo's entry, subledger row, the stock
-// return and the refund commit together.
-func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *ReturnIn, actor string) (*Return, error) {
-	if s.ar == nil || s.inventory == nil {
-		return nil, errNotConfigured
-	}
+// returnState is a priced, guarded return ready for its money transaction:
+// every figure the transaction restates under the sale row lock lives here,
+// so the operator resolution replays a stranded claim's booking through the
+// same state and the same rules.
+type returnState struct {
+	in           *ReturnIn
+	cashierID    uuid.UUID
+	customerID   *uuid.UUID
+	branchID     *uuid.UUID
+	currency     string
+	actor        string
+	saleLines    []salesdoc.Line
+	byID         map[uuid.UUID]salesdoc.Line
+	legacyBearer map[uuid.UUID]uuid.UUID
+	refs         map[string]salesdoc.ProductRef
+	priced       []returnLinePriced
+	saleTaxCents int64
+	saleTaxable  int64
+	// the restated figures: read before the transaction, restated under the
+	// sale row lock inside it, and written from
+	taxAlreadyBack   int64
+	backByLine       map[uuid.UUID]int64
+	completesTaxable bool
+	subtotal         int64
+	taxCents         int64
+	total            int64
+	taxRate          *string
+}
+
+// refundClaim is the committed intent a card refund stands on: what it
+// claimed, what the tender kept, and the gateway's own refund id once the
+// terminal answered. resolveAudit, when set, is written inside the money
+// transaction: the operator resolution's own record, rolling back with the
+// booking it names.
+type refundClaim struct {
+	intent       RefundIntent
+	tenderCap    int64
+	refundTxID   string
+	resolveAudit *audit.Entry
+}
+
+// priceReturn resolves the return's customer, prices and guards its lines and
+// reads the sale's tax facts: everything the money transaction restates under
+// the sale row lock, gathered once. The guards that need no lock run here so
+// a refusal never moves money at the terminal.
+func (s *Service) priceReturn(ctx context.Context, in *ReturnIn) (*returnState, error) {
 	branchID, err := s.repo.GetRegisterBranch(ctx, in.RegisterID)
 	if err != nil {
 		return nil, err
@@ -260,179 +295,184 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 		}
 	}
-	// applyRemainders restates each linked line's refund against what earlier
-	// returns already took (fourth review P2-1): the return that completes a
-	// line takes the line's whole total less every cent already refunded, so
-	// the rounded per unit shares of repeated partial returns never sum past
-	// what the sale was paid; the tax is capped the same way. Read before the
-	// transaction (the guards) and again under the sale row lock (the
-	// authority the memo is written from).
-	var taxAlreadyBack int64
-	// backByLine carries, per sale line, what every earlier return brought
-	// back (the restock cost telescopes on it); completesTaxable says this
-	// return finishes every taxable line of the sale (the tax then completes
-	// too, sixth review P3-1).
-	var backByLine map[uuid.UUID]int64
-	var completesTaxable bool
-	applyRemainders := func(ctx context.Context) error {
-		if in.OriginalSaleID == nil {
-			return nil
-		}
-		returned, err := s.repo.ReturnedQtyByLine(ctx, *in.OriginalSaleID)
-		if err != nil {
-			return err
-		}
-		refunded, err := s.repo.RefundedCentsByLine(ctx, *in.OriginalSaleID)
-		if err != nil {
-			return err
-		}
-		if taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *in.OriginalSaleID); err != nil {
-			return err
-		}
-		legacyCents, err := s.repo.LegacyRefundedCentsByProduct(ctx, *in.OriginalSaleID)
-		if err != nil {
-			return err
-		}
-		backByLine = make(map[uuid.UUID]int64, len(returned))
-		for id, qty := range returned {
-			backByLine[id] = int64(qty)
-		}
-		// does this return finish every taxable line of the sale, counting
-		// what the earlier returns already brought back?
-		completesTaxable = false
-		for i := range saleLines {
-			l := &saleLines[i]
-			if !l.Taxable || l.Quantity == nil {
-				continue
-			}
-			completesTaxable = true
-			back := int64(returned[l.ID])
-			for j := range priced {
-				if priced[j].saleLine != nil && priced[j].saleLine.ID == l.ID {
-					back += int64(priced[j].in.Quantity)
-				}
-			}
-			if back < int64(*l.Quantity) {
-				completesTaxable = false
-				break
-			}
-		}
-		for i := range priced {
-			p := &priced[i]
-			if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
-				continue
-			}
-			sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
-			remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
-			// the legacy refund of the product lowers the bearer line's
-			// remaining money, so the rounded shares of later linked
-			// returns cannot pass what the sale took
-			if p.saleLine.ProductID != nil && legacyBearer[*p.saleLine.ProductID] == p.saleLine.ID {
-				remaining -= legacyCents[*p.saleLine.ProductID]
-			}
-			if back+int64(p.in.Quantity) >= sold {
-				p.lineTotal = remaining
-			} else if p.lineTotal > remaining {
-				p.lineTotal = remaining
-			}
-			if p.lineTotal < 0 {
-				p.lineTotal = 0
-			}
-		}
-		return nil
-	}
-	if err := applyRemainders(ctx); err != nil {
+	st := &returnState{in: in, branchID: branchID, customerID: customerID, currency: facts.Currency,
+		saleLines: saleLines, byID: byID, legacyBearer: legacyBearer, refs: refs, priced: priced,
+		saleTaxCents: saleTaxCents, saleTaxable: saleTaxable}
+	if err := s.applyReturnRemainders(ctx, st); err != nil {
 		return nil, err
 	}
-	// resolveMoney restates the memo's totals from the lines' money; the
-	// transaction runs it again under the sale row lock after the caps
-	// recheck, and the memo, the legs, the refund and the return row are all
-	// written from its latest answer.
-	var subtotal, taxCents, total int64
-	var taxRate *string
-	resolveMoney := func(ctx context.Context) error {
-		var linkedTaxable int64
-		for i := range priced {
-			if priced[i].saleLine != nil && priced[i].taxable {
-				linkedTaxable += priced[i].lineTotal
+	if err := s.resolveReturnMoney(ctx, st); err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+// applyReturnRemainders restates each linked line's refund against what
+// earlier returns already took (fourth review P2-1): the return that
+// completes a line takes the line's whole total less every cent already
+// refunded, so the rounded per unit shares of repeated partial returns never
+// sum past what the sale was paid; the tax is capped the same way. Read
+// before the transaction (the guards) and again under the sale row lock (the
+// authority the memo is written from).
+func (s *Service) applyReturnRemainders(ctx context.Context, st *returnState) error {
+	if st.in.OriginalSaleID == nil {
+		return nil
+	}
+	returned, err := s.repo.ReturnedQtyByLine(ctx, *st.in.OriginalSaleID)
+	if err != nil {
+		return err
+	}
+	refunded, err := s.repo.RefundedCentsByLine(ctx, *st.in.OriginalSaleID)
+	if err != nil {
+		return err
+	}
+	if st.taxAlreadyBack, err = s.repo.RefundedTaxCents(ctx, *st.in.OriginalSaleID); err != nil {
+		return err
+	}
+	legacyCents, err := s.repo.LegacyRefundedCentsByProduct(ctx, *st.in.OriginalSaleID)
+	if err != nil {
+		return err
+	}
+	st.backByLine = make(map[uuid.UUID]int64, len(returned))
+	for id, qty := range returned {
+		st.backByLine[id] = int64(qty)
+	}
+	// does this return finish every taxable line of the sale, counting
+	// what the earlier returns already brought back?
+	st.completesTaxable = false
+	for i := range st.saleLines {
+		l := &st.saleLines[i]
+		if !l.Taxable || l.Quantity == nil {
+			continue
+		}
+		st.completesTaxable = true
+		back := int64(returned[l.ID])
+		for j := range st.priced {
+			if st.priced[j].saleLine != nil && st.priced[j].saleLine.ID == l.ID {
+				back += int64(st.priced[j].in.Quantity)
 			}
 		}
-		subtotal = linkedTaxable
-		var freeTaxable int64
-		var freeNontaxable int64
-		for i := range priced {
-			if priced[i].saleLine == nil {
-				if priced[i].taxable {
-					freeTaxable += priced[i].lineTotal
-				} else {
-					freeNontaxable += priced[i].lineTotal
-				}
-			} else if !priced[i].taxable {
-				subtotal += priced[i].lineTotal
+		if back < int64(*l.Quantity) {
+			st.completesTaxable = false
+			break
+		}
+	}
+	for i := range st.priced {
+		p := &st.priced[i]
+		if p.saleLine == nil || p.saleLine.Quantity == nil || p.saleLine.LineTotal == nil {
+			continue
+		}
+		sold, back := int64(*p.saleLine.Quantity), int64(returned[p.saleLine.ID])
+		remaining := int64(*p.saleLine.LineTotal) - refunded[p.saleLine.ID]
+		// the legacy refund of the product lowers the bearer line's
+		// remaining money, so the rounded shares of later linked
+		// returns cannot pass what the sale took
+		if p.saleLine.ProductID != nil && st.legacyBearer[*p.saleLine.ProductID] == p.saleLine.ID {
+			remaining -= legacyCents[*p.saleLine.ProductID]
+		}
+		if back+int64(p.in.Quantity) >= sold {
+			p.lineTotal = remaining
+		} else if p.lineTotal > remaining {
+			p.lineTotal = remaining
+		}
+		if p.lineTotal < 0 {
+			p.lineTotal = 0
+		}
+	}
+	return nil
+}
+
+// resolveReturnMoney restates the memo's totals from the lines' money; the
+// transaction runs it again under the sale row lock after the caps recheck,
+// and the memo, the legs, the refund and the return row are all written from
+// its latest answer.
+func (s *Service) resolveReturnMoney(ctx context.Context, st *returnState) error {
+	var linkedTaxable int64
+	for i := range st.priced {
+		if st.priced[i].saleLine != nil && st.priced[i].taxable {
+			linkedTaxable += st.priced[i].lineTotal
+		}
+	}
+	st.subtotal = linkedTaxable
+	var freeTaxable int64
+	var freeNontaxable int64
+	for i := range st.priced {
+		if st.priced[i].saleLine == nil {
+			if st.priced[i].taxable {
+				freeTaxable += st.priced[i].lineTotal
+			} else {
+				freeNontaxable += st.priced[i].lineTotal
+			}
+		} else if !st.priced[i].taxable {
+			st.subtotal += st.priced[i].lineTotal
+		}
+	}
+	st.subtotal += freeTaxable + freeNontaxable
+	st.taxCents = 0
+	st.taxRate = nil
+	if linkedTaxable > 0 && st.saleTaxable > 0 && st.saleTaxCents > 0 {
+		st.taxCents += divRound(linkedTaxable*st.saleTaxCents, st.saleTaxable)
+		// never more tax back than the sale collected less what earlier
+		// returns took (the same remainder rule)
+		if remaining := st.saleTaxCents - st.taxAlreadyBack; st.taxCents > remaining {
+			st.taxCents = remaining
+		}
+		// the return that finishes every taxable line takes the rest of
+		// the tax exactly (sixth review P3-1): the rounded shares of
+		// repeated partial returns cannot leave cents owed to the
+		// customer
+		if st.completesTaxable {
+			if remaining := st.saleTaxCents - st.taxAlreadyBack; remaining > st.taxCents {
+				st.taxCents = remaining
 			}
 		}
-		subtotal += freeTaxable + freeNontaxable
-		taxCents = 0
-		taxRate = nil
-		if linkedTaxable > 0 && saleTaxable > 0 && saleTaxCents > 0 {
-			taxCents += divRound(linkedTaxable*saleTaxCents, saleTaxable)
-			// never more tax back than the sale collected less what earlier
-			// returns took (the same remainder rule)
-			if remaining := saleTaxCents - taxAlreadyBack; taxCents > remaining {
-				taxCents = remaining
-			}
-			// the return that finishes every taxable line takes the rest of
-			// the tax exactly (sixth review P3-1): the rounded shares of
-			// repeated partial returns cannot leave cents owed to the
-			// customer
-			if completesTaxable {
-				if remaining := saleTaxCents - taxAlreadyBack; remaining > taxCents {
-					taxCents = remaining
-				}
-			}
+	}
+	if freeTaxable > 0 {
+		exempt, err := s.repo.CustomerExempt(ctx, *st.customerID)
+		if err != nil {
+			return err
 		}
-		if freeTaxable > 0 {
-			exempt, err := s.repo.CustomerExempt(ctx, *customerID)
+		if exempt {
+			zero := "0"
+			st.taxRate = &zero
+		} else {
+			rate, ok, err := s.repo.BranchTaxRate(ctx, st.branchID)
 			if err != nil {
 				return err
 			}
-			if exempt {
-				zero := "0"
-				taxRate = &zero
-			} else {
-				rate, ok, err := s.repo.BranchTaxRate(ctx, branchID)
-				if err != nil {
-					return err
-				}
-				if !ok {
-					return conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
-				}
-				scaled, _, err := salesdoc.ParseTaxRate(rate)
-				if err != nil {
-					return err
-				}
-				taxCents += int64(salesdoc.TaxAt(httpx.Cents(freeTaxable), scaled))
-				taxRate = &rate
+			if !ok {
+				return conflict("tax_rate_not_configured", "set the branch's default tax rate before returning goods")
 			}
+			scaled, _, err := salesdoc.ParseTaxRate(rate)
+			if err != nil {
+				return err
+			}
+			st.taxCents += int64(salesdoc.TaxAt(httpx.Cents(freeTaxable), scaled))
+			st.taxRate = &rate
 		}
-		total = -(subtotal + taxCents)
-		return nil
 	}
-	if err := resolveMoney(ctx); err != nil {
+	st.total = -(st.subtotal + st.taxCents)
+	return nil
+}
+
+// ReturnSale records a counter return (ADR 0005 section 14.2 C2-5): a
+// credit memo created and posted in ONE act with its restock lines,
+// refunded in cash or card or left as account credit. The card refund goes
+// through the gateway before the transaction (section 11, as every gateway
+// call does), claimed first by a committed refund intent unique per sale
+// and tender so a concurrent card return or a void of the same tender never
+// reaches the terminal twice; the memo's entry, subledger row, the stock
+// return and the refund commit together.
+func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *ReturnIn, actor string) (*Return, error) {
+	if s.ar == nil || s.inventory == nil {
+		return nil, errNotConfigured
+	}
+	st, err := s.priceReturn(ctx, in)
+	if err != nil {
 		return nil, err
 	}
-	// A card refund goes through the gateway before the transaction, so a
-	// decline aborts with nothing persisted. Every guard that needs no lock
-	// (the sale's status, the caps) has run by now; a refund the transaction
-	// then refuses is recorded in a committed row of its own (gateway.go).
-	// The refund targets the sale's own card tender's gateway transaction,
-	// never a transaction the client names, and never more than that tender
-	// kept net of change and of earlier card refunds (third review P2-1,
-	// fourth review P2-4): a return with no sale behind it has no card of
-	// the business to refund.
-	var refundTaken *gatewayRefund
-	var cardIntent *RefundIntent
-	var cardTenderCap int64
+	st.cashierID, st.actor = cashierID, actor
+	var claim *refundClaim
 	if in.RefundMethod == RefundCard {
 		if in.GatewayTxID != "" {
 			return nil, invalid("gateway_tx_id",
@@ -468,17 +508,17 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The claim, in one short transaction of its own (ADR 0005 section
 		// 11 and 14.2 C2-5: "The card gateway is called before the
 		// transaction and its result written inside it"): the sale row is
-		// locked, the status and the caps are rechecked under it (a contender
-		// whose earlier check read stale must not refund a sale the lock now
-		// sees voided, or past what it now counts), the intent table's rules
-		// refuse a tender a committed void already refunded whole, and the
+		// locked, the status and the caps are rechecked under it, and the
 		// committed refund intent, unique per sale and tender while pending,
 		// refuses a concurrent card return of the same tender, or a void of
 		// the sale, with 409 before it reaches the terminal. No lock of the
-		// money transaction is held across the network call.
-		cardIntent = &RefundIntent{ID: uuid.New(), SaleID: *in.OriginalSaleID, TenderID: target.ID, GatewayTxID: *target.GatewayTxID,
-			AmountCents: -total, Act: "return"}
-		cardTenderCap = int64(target.AmountCents)
+		// money transaction is held across the network call. The claim carries
+		// its own request shape, so an operator can resolve a claim that
+		// outlives its act by replaying this booking.
+		intent := RefundIntent{ID: uuid.New(), SaleID: *in.OriginalSaleID, TenderID: target.ID,
+			GatewayTxID: *target.GatewayTxID, AmountCents: -st.total, Act: "return",
+			Request: storeReturnRequest(in)}
+		claim = &refundClaim{intent: intent, tenderCap: int64(target.AmountCents)}
 		if err := s.inTx(ctx, func(ctx context.Context) error {
 			if err := s.repo.LockSale(ctx, *in.OriginalSaleID); err != nil {
 				return err
@@ -494,52 +534,74 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				return httpx.InvalidStateTransition(
 					fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", held.Status.Status()))
 			}
-			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
+			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, st.priced, st.byID); err != nil {
 				return err
 			}
 			// The remainders and the totals, restated under the claim's lock
 			// (seventh review P2-1): the terminal is asked for the figure the
 			// lock sees, and the money transaction compares its own restated
-			// total with that claim below.
-			if err := applyRemainders(ctx); err != nil {
+			// total with that claim.
+			if err := s.applyReturnRemainders(ctx, st); err != nil {
 				return err
 			}
-			if err := resolveMoney(ctx); err != nil {
+			if err := s.resolveReturnMoney(ctx, st); err != nil {
 				return err
 			}
-			if err := s.checkCardClaim(ctx, held.ID, target.ID, -total, cardTenderCap); err != nil {
+			if err := s.checkCardClaim(ctx, held.ID, target.ID, -st.total, claim.tenderCap); err != nil {
 				return err
 			}
-			cardIntent.AmountCents = -total
-			return s.repo.InsertRefundIntent(ctx, *cardIntent)
+			claim.intent.AmountCents = -st.total
+			return s.repo.InsertRefundIntent(ctx, claim.intent)
 		}); err != nil {
 			return nil, err
 		}
-		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, cardIntent.AmountCents)
+		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, claim.intent.AmountCents)
 		if err != nil {
 			// no verdict came back (a timeout, a cancel): the terminal may
 			// have moved the money, so the claim stands and the unknown
 			// outcome is recorded for reconciliation (seventh review P2-2)
-			s.unknownRefundOutcome(ctx, *cardIntent, err)
+			s.unknownRefundOutcome(ctx, claim.intent, err)
 			return nil, fmt.Errorf("card refund failed: %w", err)
 		}
 		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
 			// a definite refusal: the terminal's own no proves nothing moved
-			s.failRefundIntent(ctx, *cardIntent)
+			s.failRefundIntent(ctx, claim.intent)
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
-		gatewayTxID := *target.GatewayTxID
-		refundTaken = &gatewayRefund{gatewayTxID: gatewayTxID, refundTxID: res.TransactionID,
-			amountCents: cardIntent.AmountCents, tenderID: target.ID, act: "return", entity: *in.OriginalSaleID, actor: actor}
+		// the gateway's own refund id, on the standing claim the moment the
+		// terminal answers and in its own committed write (seventh review
+		// P2-3): a PENDING claim carrying a refund id is a refund that moved,
+		// one without it is a refund that may not have
+		if err := s.repo.MarkRefundIntentRefunded(ctx, claim.intent.SaleID, claim.intent.TenderID, res.TransactionID); err != nil {
+			s.logger.Error("CRITICAL: the gateway's refund id was not written to the claim",
+				"intent_id", claim.intent.ID, "sale_id", claim.intent.SaleID, "error", err)
+		}
+		claim.refundTxID = res.TransactionID
 		// the refund row names the tender's own gateway transaction, so the
 		// money is reconcilable against the charge it came from
-		in.GatewayTxID = gatewayTxID
+		in.GatewayTxID = *target.GatewayTxID
 	}
+	return s.postReturn(ctx, st, claim)
+}
+
+// postReturn runs the return's money transaction: the sale row lock, the
+// guards restated under it, the credit memo posted with its entry and its
+// subledger row, the stock returns, the refund and the events, all one
+// transaction. The claim, when the refund is a card's, completes with the
+// posting; a refusing transaction rolls it back to PENDING and the refund
+// the terminal already made is recorded in a committed row of its own.
+func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refundClaim) (*Return, error) {
+	in := st.in
+	customerID := st.customerID
+	branchID := st.branchID
+	priced := st.priced
+	saleLines := st.saleLines
+	refs := st.refs
 	var tillSessionID *uuid.UUID
 	var out *Return
 	var invoiceLines []InvoiceLineCost
 	var invoiceLineIDs map[uuid.UUID]uuid.UUID
-	err = s.inTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
 		// The sale row first (section 11, step 1): a void racing this return
 		// serializes here, and the loser sees the sale it priced change under
 		// it. Only a completed sale's goods come back; a voided sale's came
@@ -571,7 +633,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			}
 			// The cap, rechecked under the lock: a return that raced this one
 			// for the same line is counted before this one is allowed.
-			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, priced, byID); err != nil {
+			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, st.priced, st.byID); err != nil {
 				return err
 			}
 			// The remainder rule and the totals, restated under the lock: the
@@ -579,10 +641,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			// transaction read (a card refund already taken keeps the amount
 			// it took; the race window is the cents a concurrent return's
 			// rounding moves).
-			if err := applyRemainders(ctx); err != nil {
+			if err := s.applyReturnRemainders(ctx, st); err != nil {
 				return err
 			}
-			if err := resolveMoney(ctx); err != nil {
+			if err := s.resolveReturnMoney(ctx, st); err != nil {
 				return err
 			}
 			// The return touches the sale: its revision moves, in process, so
@@ -639,35 +701,40 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// differs from the claimed amount refuses, the intent stays PENDING
 		// beside the orphan row that records the gateway's figure, and the
 		// books never record a cent less than the terminal moved.
-		if in.RefundMethod == RefundCard && cardIntent != nil && refundTaken != nil {
-			facts, err := s.repo.RefundIntentFacts(ctx, cardIntent.SaleID, cardIntent.TenderID)
+		if claim != nil {
+			cf, err := s.repo.RefundIntentFacts(ctx, claim.intent.SaleID, claim.intent.TenderID)
 			if err != nil {
 				return err
 			}
-			if facts.DoneVoid {
+			if cf.DoneVoid {
 				return conflict("tender_refunded",
 					"the card tender was already refunded whole by this sale's void: no second refund of it can be made")
 			}
-			if held := facts.PendingCents - cardIntent.AmountCents; held != 0 {
+			if held := cf.PendingCents - claim.intent.AmountCents; held != 0 {
 				return conflict("refund_in_flight",
 					"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
 			}
-			if -total != refundTaken.amountCents {
+			if -st.total != claim.intent.AmountCents {
 				return conflict("refund_amount_changed",
 					fmt.Sprintf("the terminal refunded %d cents but the return restates to %d under the lock: the intent stands beside the orphan row until it is reconciled",
-						refundTaken.amountCents, -total))
+						claim.intent.AmountCents, -st.total))
 			}
-			already, err := s.repo.CardRefundedCents(ctx, cardIntent.SaleID)
+			already, err := s.repo.CardRefundedCents(ctx, claim.intent.SaleID)
 			if err != nil {
 				return err
 			}
-			if -total > int64(cardTenderCap)-already {
+			if -st.total > claim.tenderCap-already {
 				return conflict("exceeds_card_tender",
 					fmt.Sprintf("the card tender kept %d cents less the %d already refunded to the card: refund the rest from the drawer",
-						cardTenderCap, already))
+						claim.tenderCap, already))
 			}
-			if err := s.repo.CompleteRefundIntent(ctx, cardIntent.SaleID, cardIntent.TenderID, refundTaken.refundTxID); err != nil {
+			if err := s.repo.CompleteRefundIntent(ctx, claim.intent.SaleID, claim.intent.TenderID, claim.refundTxID); err != nil {
 				return err
+			}
+			if claim.resolveAudit != nil && s.auditLog != nil {
+				if err := s.auditLog.Log(ctx, *claim.resolveAudit); err != nil {
+					return fmt.Errorf("failed to write the resolution audit row: %w", err)
+				}
 			}
 		}
 		date, err := s.repo.BranchLocalDate(ctx, *branchID, s.now())
@@ -758,7 +825,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				// cumulative position after it and before it, so repeated
 				// partial returns put exactly the cost the sale relieved
 				// back, never the rounded shares' drift
-				back := backByLine[p.saleLine.ID]
+				back := st.backByLine[p.saleLine.ID]
 				for j := range saleLines {
 					comp := &saleLines[j]
 					if comp.ParentLineID == nil || *comp.ParentLineID != p.saleLine.ID ||
@@ -802,7 +869,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				if cost > 0 && p.saleLine == nil {
 					restockCost += int64(salesdoc.CostOf(p.in.Quantity, cost))
 				} else if cost > 0 {
-					back := httpx.Quantity(backByLine[p.saleLine.ID])
+					back := httpx.Quantity(st.backByLine[p.saleLine.ID])
 					restockCost += int64(salesdoc.CostOf(back+p.in.Quantity, cost)) -
 						int64(salesdoc.CostOf(back, cost))
 				}
@@ -813,7 +880,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, status, amount,
 				subtotal, tax_amount, total_amount, amount_open, memo_date, created_at, updated_at, revision)
 			VALUES ($1, $2, $3, $4, 'RETURN', $5, 'DRAFT', 0, 0, 0, 0, 0, $6::date, NOW(), NOW(), 1)`,
-			memoID, customerID, branchID, facts.Currency, in.Reason, date.Format("2006-01-02")); err != nil {
+			memoID, customerID, branchID, st.currency, in.Reason, date.Format("2006-01-02")); err != nil {
 			return fmt.Errorf("failed to create the credit memo: %w", mapWriteError(err))
 		}
 		for i := range lines {
@@ -858,8 +925,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		for _, g := range salesdoc.RevenueGroups(revenueLines) {
 			legs = append(legs, gl.Leg{AccountCode: g.AccountCode, Description: "Sales Revenue", Debit: int64(g.Cents)})
 		}
-		if taxCents > 0 {
-			legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Debit: taxCents})
+		if st.taxCents > 0 {
+			legs = append(legs, gl.Leg{AccountCode: gl.AccountCodeSalesTax, Description: "Sales Tax Payable", Debit: st.taxCents})
 		}
 		if restockCost > 0 {
 			legs = append(legs,
@@ -867,8 +934,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 				gl.Leg{AccountCode: gl.AccountCodeCOGS, Description: "Cost of Goods Sold", Credit: restockCost})
 		}
 		fxPost, err := s.ar.PostCreditMemo(ctx, account.PostCreditMemoIn{
-			MemoID: memoID, CustomerID: *customerID, Number: memoNumber, Currency: facts.Currency, MemoDate: date,
-			SubtotalCents: -subtotal, TaxCents: -taxCents, TotalCents: total, TaxRate: taxRate, Actor: actor, Legs: legs})
+			MemoID: memoID, CustomerID: *customerID, Number: memoNumber, Currency: st.currency, MemoDate: date,
+			SubtotalCents: -st.subtotal, TaxCents: -st.taxCents, TotalCents: st.total, TaxRate: st.taxRate, Actor: st.actor, Legs: legs})
 		if err != nil {
 			return err
 		}
@@ -885,8 +952,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// account leaves the credit open.
 		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {
 			_, rfx, err := s.ar.RefundCreditMemo(ctx, account.RefundCreditMemoIn{
-				MemoID: memoID, AmountCents: -total, Reason: in.Reason, Method: string(in.RefundMethod),
-				GatewayRefundID: in.GatewayTxID, Actor: actor, On: date})
+				MemoID: memoID, AmountCents: -st.total, Reason: in.Reason, Method: string(in.RefundMethod),
+				GatewayRefundID: in.GatewayTxID, Actor: st.actor, On: date})
 			if err != nil {
 				return err
 			}
@@ -895,8 +962,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The return row, linked to its memo.
 		ret := &Return{
 			RegisterID: in.RegisterID, TillSessionID: tillSessionID, OriginalSaleID: in.OriginalSaleID,
-			CustomerID: customerID, BranchID: branchID, CashierID: cashierID, Currency: facts.Currency,
-			SubtotalCents: httpx.Cents(-subtotal), TaxCents: httpx.Cents(-taxCents), TotalCents: httpx.Cents(total),
+			CustomerID: customerID, BranchID: branchID, CashierID: st.cashierID, Currency: st.currency,
+			SubtotalCents: httpx.Cents(-st.subtotal), TaxCents: httpx.Cents(-st.taxCents), TotalCents: httpx.Cents(st.total),
 			RefundMethod: in.RefundMethod, Reason: in.Reason, CreditMemoID: &memoID, Lines: lines,
 		}
 		if err := s.repo.CreateReturn(ctx, ret, lines); err != nil {
@@ -906,9 +973,9 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// leaves no row.
 		if s.auditLog != nil {
 			if err := s.auditLog.Log(ctx, audit.Entry{
-				Action: "pos.return.completed", EntityType: "pos_return", EntityID: ret.ID, UserID: actor,
+				Action: "pos.return.completed", EntityType: "pos_return", EntityID: ret.ID, UserID: st.actor,
 				Changes: map[string]any{
-					"number": ret.Number, "total_cents": total, "refund_method": in.RefundMethod.Status(),
+					"number": ret.Number, "total_cents": st.total, "refund_method": in.RefundMethod.Status(),
 					"register_id": in.RegisterID, "customer_id": customerID, "credit_memo_id": memoID,
 					"original_sale_id": in.OriginalSaleID,
 				}}); err != nil {
@@ -921,7 +988,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		number := memoNumber
 		if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.created", EntityType: "credit_memo", EntityID: memoID,
 			BranchID: &branch, Data: eventJSON(map[string]any{
-				"number": nil, "customer_id": customerID, "status": "draft", "currency": facts.Currency,
+				"number": nil, "customer_id": customerID, "status": "draft", "currency": st.currency,
 				"pos_return_id": ret.ID,
 			})}); err != nil {
 			return err
@@ -929,15 +996,15 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.posted", EntityType: "credit_memo", EntityID: memoID,
 			BranchID: &branch, Data: eventJSON(map[string]any{
 				"number": number, "customer_id": customerID, "status": "open", "from_status": "draft",
-				"currency": facts.Currency, "total_cents": total,
+				"currency": st.currency, "total_cents": st.total,
 			})}); err != nil {
 			return err
 		}
 		if in.RefundMethod == RefundCash || in.RefundMethod == RefundCard {
 			if err := s.recordEvent(ctx, outbox.Event{Type: "credit_memo.refunded", EntityType: "credit_memo", EntityID: memoID,
 				BranchID: &branch, Data: eventJSON(map[string]any{
-					"customer_id": customerID, "status": "applied", "currency": facts.Currency,
-					"amount_cents": -total, "method": in.RefundMethod.Status(),
+					"customer_id": customerID, "status": "applied", "currency": st.currency,
+					"amount_cents": -st.total, "method": in.RefundMethod.Status(),
 				})}); err != nil {
 				return err
 			}
@@ -951,8 +1018,8 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		if err := s.recordEvent(ctx, outbox.Event{Type: EventReturnCompleted, EntityType: "pos_return", EntityID: ret.ID,
 			BranchID: &branch, Data: eventJSON(map[string]any{
-				"number": ret.Number, "customer_id": customerID, "status": "completed", "currency": facts.Currency,
-				"total_cents": total, "refund_method": in.RefundMethod.Status(), "credit_memo_id": memoID,
+				"number": ret.Number, "customer_id": customerID, "status": "completed", "currency": st.currency,
+				"total_cents": st.total, "refund_method": in.RefundMethod.Status(), "credit_memo_id": memoID,
 			})}); err != nil {
 			return err
 		}
@@ -963,12 +1030,62 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		// The gateway already refunded and the transaction refused: the
 		// money is accounted for in a committed row of its own carrying the
 		// gateway ids.
-		if refundTaken != nil {
-			s.recordOrphanRefund(ctx, *refundTaken, err)
+		if claim != nil && claim.refundTxID != "" {
+			s.recordOrphanRefund(ctx, gatewayRefund{gatewayTxID: claim.intent.GatewayTxID, refundTxID: claim.refundTxID,
+				amountCents: claim.intent.AmountCents, tenderID: claim.intent.TenderID, act: claim.intent.Act,
+				entity: claim.intent.SaleID, actor: st.actor}, err)
 		}
 		return nil, err
 	}
 	return out, nil
+}
+
+// storedReturnLine is one line of a return claim's stored request shape.
+type storedReturnLine struct {
+	SaleLineID  *uuid.UUID `json:"sale_line_id,omitempty"`
+	ProductID   *uuid.UUID `json:"product_id,omitempty"`
+	Description string     `json:"description"`
+	Quantity    int64      `json:"quantity"`
+	Restock     bool       `json:"restock"`
+}
+
+// storedReturnRequest is a return claim's own request, carried on the intent
+// so the operator resolution can replay the money transaction the lost act
+// never ran. Quantities ride at their wire scale of four.
+type storedReturnRequest struct {
+	RegisterID     string             `json:"register_id"`
+	CustomerID     *uuid.UUID         `json:"customer_id,omitempty"`
+	OriginalSaleID *uuid.UUID         `json:"original_sale_id,omitempty"`
+	Reason         string             `json:"reason"`
+	Lines          []storedReturnLine `json:"lines"`
+}
+
+func storeReturnRequest(in *ReturnIn) []byte {
+	out := storedReturnRequest{RegisterID: in.RegisterID, CustomerID: in.CustomerID,
+		OriginalSaleID: in.OriginalSaleID, Reason: in.Reason}
+	for i := range in.Lines {
+		l := in.Lines[i]
+		out.Lines = append(out.Lines, storedReturnLine{SaleLineID: l.SaleLineID, ProductID: l.ProductID,
+			Description: l.Description, Quantity: int64(l.Quantity), Restock: l.Restock})
+	}
+	raw, err := json.Marshal(out)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+// toReturnIn rebuilds the return request the claim stored. The refund method
+// is card by construction: a claim exists only for a card refund.
+func (r *storedReturnRequest) toReturnIn() *ReturnIn {
+	in := &ReturnIn{RegisterID: r.RegisterID, CustomerID: r.CustomerID, OriginalSaleID: r.OriginalSaleID,
+		RefundMethod: RefundCard, Reason: r.Reason}
+	for i := range r.Lines {
+		l := r.Lines[i]
+		in.Lines = append(in.Lines, ReturnLineIn{ProductID: l.ProductID, SaleLineID: l.SaleLineID,
+			Description: l.Description, Quantity: httpx.Quantity(l.Quantity), Restock: l.Restock})
+	}
+	return in
 }
 
 func ptrC(v int64) *httpx.Cents {

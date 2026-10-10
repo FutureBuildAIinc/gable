@@ -291,6 +291,7 @@ POST	/api/v1/payments/{id}/refunds	internal/payment	h.HandleRefund
 POST	/api/v1/payments/{id}/transitions	internal/payment	h.HandleTransition
 GET	/api/v1/pos/catalog	internal/pos	h.GetCatalog
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
+POST	/api/v1/pos/refund-intents/{id}/resolve	internal/pos	h.ResolveRefundIntent
 GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn

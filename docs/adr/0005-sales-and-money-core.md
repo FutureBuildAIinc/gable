@@ -1332,6 +1332,24 @@ The card gateway is called before the transaction and its result written
 inside it, as today; a database failure after a successful charge is
 logged as critical for reconciliation, as today.
 
+Every card refund (a void's, a card return's) is claimed first in a committed
+refund intent, and the intent table is the one authority on what a card
+tender has refunded or may be refunding: a claim is refused when a void intent
+of the tender is done, when the tender's done and pending amounts plus the
+claim pass the tender, or when the sale is no longer completed, and a cash
+return and the till close are refused while an intent of the sale or session
+is pending. A gateway error with no verdict leaves the intent pending (the
+terminal may have moved the money) with an audit row, and only the terminal's
+own refusal releases it. The gateway's refund id is written onto the intent the
+moment the terminal answers, in its own committed write, so a pending intent
+that carries one is a refund that moved and one without it may not have. A
+pending intent is resolved by one guarded admin route, for the finance and
+owner roles and never a machine key: the operator records the terminal's actual
+outcome, either its refund id (the act's own money transaction then books it
+with every cap and lock) or an explicit "no refund" with a reconciliation
+reference (the intent is released and nothing moves), and one audit row names
+the person, the intent, the outcome and the reason.
+
 ### 12. Events
 
 Every event is written through the outbox in the act's transaction, last,

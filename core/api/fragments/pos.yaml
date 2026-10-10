@@ -784,6 +784,57 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/refund-intents/{id}/resolve:
+    post:
+      operationId: posRefundIntentResolve
+      tags: [pos]
+      summary: Resolve a stranded card refund claim
+      description: >-
+        The guarded operator route for a refund claim that outlived its act
+        (a lost terminal verdict, a crashed process, a transaction that
+        refused after the terminal answered): finance reads the terminal and
+        records its actual outcome. outcome refund carries the gateway's own
+        refund id (the money moved) and books it through the refund's own
+        money transaction with every cap and lock, completing the claim DONE;
+        outcome no_refund carries the reconciliation reference finance filed,
+        marks the claim FAILED and moves nothing. Both write one audit row
+        naming the person, the intent, the outcome and the reason. Only the
+        finance and owner roles; a machine key is refused in the route
+        itself, bound or not. A bare resolve, a refund without its refund id
+        and a no refund without its reference are 400s naming the field; a
+        claim that is not PENDING is 409 intent_not_pending.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosResolveIntentRequest"
+      responses:
+        "200":
+          description: The settled claim.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRefundIntentResolved"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   schemas:
     PosStatus:
@@ -834,6 +885,33 @@ components:
       properties:
         reason: {type: string}
         revision: {type: integer, format: int64, minimum: 1, description: "The sale's revision; or send If-Match."}
+    PosResolveIntentRequest:
+      type: object
+      required: [outcome, reason]
+      properties:
+        outcome:
+          type: string
+          enum: [refund, no_refund]
+          description: "The terminal's actual outcome: refund (the gateway's own refund id, the money moved) or no_refund (an explicit no at the terminal)."
+        refund_tx_id:
+          type: string
+          description: "Required when the outcome is refund: the gateway's own refund id for the claim."
+        reconciliation_reference:
+          type: string
+          description: "Required when the outcome is no_refund: the reference finance filed for the reconciliation."
+        reason: {type: string, description: Why the record was made, 1 to 500 characters.}
+    PosRefundIntentResolved:
+      type: object
+      required: [id, sale_id, tender_id, act, state, outcome]
+      properties:
+        id: {type: string, format: uuid}
+        sale_id: {type: string, format: uuid}
+        tender_id: {type: string, format: uuid}
+        act: {type: string, enum: [void, return]}
+        state: {type: string, enum: [DONE, FAILED], description: DONE when a recorded refund booked, FAILED when a no refund released the claim.}
+        outcome: {type: string, enum: [refund, no_refund]}
+        refund_tx_id: {type: [string, "null"], description: The gateway refund id the operator recorded.}
+        reconciliation_reference: {type: [string, "null"], description: The reference the operator filed.}
     PosReturnRequest:
       type: object
       required: [reason, lines]

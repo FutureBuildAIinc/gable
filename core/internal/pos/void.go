@@ -186,11 +186,40 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			}
 			return nil, refundErr
 		}
+		// the gateway's own refund id, on the standing claim the moment the
+		// terminal answers and in its own committed write (seventh review
+		// P2-3): a PENDING claim carrying a refund id is a refund that moved
+		if err := s.repo.MarkRefundIntentRefunded(ctx, saleID, intents[i].TenderID, res.TransactionID); err != nil {
+			s.logger.Error("CRITICAL: the gateway's refund id was not written to the claim",
+				"intent_id", intents[i].ID, "sale_id", saleID, "error", err)
+		}
 		refunds = append(refunds, gatewayRefund{gatewayTxID: intents[i].GatewayTxID, refundTxID: res.TransactionID,
 			amountCents: intents[i].AmountCents, tenderID: intents[i].TenderID, act: "void", entity: saleID, actor: actor})
 	}
+	out, err := s.runVoidTx(ctx, saleID, ifMatch, bodyRevision, reason, actor, refunds, nil)
+	if err != nil {
+		// The gateway already refunded and the transaction refused: the
+		// money is accounted for in committed rows of its own, one per
+		// refund, carrying the gateway ids.
+		for _, r := range refunds {
+			s.recordOrphanRefund(ctx, r, err)
+		}
+		return nil, err
+	}
+	return out, nil
+}
+
+// runVoidTx runs the void's money transaction: the sale row lock, every guard
+// restated under it, the payments reversed, the invoice voided, the stock
+// back, the events last, all one transaction. The claims complete with the
+// posting; a refusing transaction rolls them back to PENDING with everything
+// else and the caller records the refunds that moved. operatorReplay, when
+// set, lifts the client revision precondition (the operator's resolution is
+// its own authority) and writes resolveAudit inside the transaction.
+func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch string, bodyRevision *int64,
+	reason, actor string, refunds []gatewayRefund, resolveAudit *audit.Entry) (*Sale, error) {
 	var out *Sale
-	err = s.inTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
 		// Step 1: the sale row.
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
 			return err
@@ -199,8 +228,10 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		if err != nil {
 			return err
 		}
-		if err := httpx.CheckRevision(sale.Revision, ifMatch, bodyRevision); err != nil {
-			return err
+		if resolveAudit == nil {
+			if err := httpx.CheckRevision(sale.Revision, ifMatch, bodyRevision); err != nil {
+				return err
+			}
 		}
 		if sale.Status != StatusCompleted {
 			return httpx.InvalidStateTransition("only a completed sale is voided")
@@ -248,6 +279,11 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		for i := range refunds {
 			if err := s.repo.CompleteRefundIntent(ctx, saleID, refunds[i].tenderID, refunds[i].refundTxID); err != nil {
 				return err
+			}
+		}
+		if resolveAudit != nil && s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, *resolveAudit); err != nil {
+				return fmt.Errorf("failed to write the resolution audit row: %w", err)
 			}
 		}
 		date, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
@@ -350,12 +386,6 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		return err
 	})
 	if err != nil {
-		// The gateway already refunded and the transaction refused: the
-		// money is accounted for in committed rows of its own, one per
-		// refund, carrying the gateway ids.
-		for _, r := range refunds {
-			s.recordOrphanRefund(ctx, r, err)
-		}
 		return nil, err
 	}
 	return out, nil
