@@ -36,6 +36,7 @@ import (
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
@@ -332,8 +333,42 @@ func Run() {
 	// last statement.
 	quoteSvc := quote.NewService(quoteRepo).
 		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
-		WithTxRunner(db)
+		WithTxRunner(db).
+		WithAudit(auditLog)
 	wall.quotes(mux, quoteSvc)
+
+	// The drafts core (ADR 0007): the quotes kind registers its seven routes
+	// behind its own roles; the feed hub is the per process wake signal its
+	// streams wait on, stopped with the server (RegisterOnShutdown below).
+	quoteKind := quote.NewDraftKind(quoteSvc)
+	draftsRepo := drafts.NewRepository(db)
+	draftsRegistry, derr := drafts.NewRegistry(quoteKind)
+	if derr != nil {
+		logger.Error("draft kind registration failed", "error", derr)
+		os.Exit(1)
+	}
+	draftHub := drafts.NewHub(draftsRepo, cfg.DraftFeedPoll, logger)
+	draftsSvc := drafts.NewService(draftsRepo, draftsRegistry).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAudit(auditLog).
+		WithBranchGuard(wall.guard).
+		WithFeed(draftHub)
+	feedSettings := drafts.FeedSettings{
+		Heartbeat: cfg.DraftFeedHeartbeat, Poll: cfg.DraftFeedPoll,
+		Batch: cfg.DraftFeedBatch, WriteTimeout: cfg.DraftFeedWriteTimeout,
+		MaxLifetime: cfg.DraftFeedMaxLifetime, Retention: cfg.DraftEventsRetention,
+		MaxStreamsPerPrincipal: cfg.DraftFeedMaxStreamsPerPrincipal, MaxStreams: cfg.DraftFeedMaxStreams,
+	}
+	draftsHandler := drafts.NewHandler(draftsSvc).WithFeedHandler(
+		drafts.NewFeedHandler(draftsSvc, draftsRepo, draftHub, feedSettings,
+			func(ctx context.Context, keyID uuid.UUID) (bool, error) {
+				return techAdminSvc.KeyActive(ctx, keyID)
+			}))
+	// The kind registers its seven literal routes behind its own roles
+	// (admin/owner/sales), composed with the branch middleware exactly as
+	// the module's entity routes.
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
 
 	// GL Module (Full General Ledger)
 	glAdapter := glint.NewMockGLAdapter()
@@ -1015,6 +1050,13 @@ func Run() {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+
+	// The feed hub ends with the server: Shutdown is not held by
+	// connections that are never idle (ADR 0007 section 3.4).
+	srv.RegisterOnShutdown(func() {
+		draftHub.Stop()
+		draftHub.Nudge()
+	})
 
 	// Run server in goroutine
 	go func() {

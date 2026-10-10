@@ -185,6 +185,13 @@ GET	/api/v1/deposits/{id}	internal/deposit	h.GetDeposit
 POST	/api/v1/deposits/{id}/apply	internal/deposit	h.ApplyDeposit
 GET	/api/v1/documents/print/invoice/{id}	internal/document	h.HandlePrintInvoice
 GET	/api/v1/documents/print/pickticket/{id}	internal/document	h.HandlePrintPickTicket
+GET	/api/v1/drafts/quotes	internal/quote	k
+POST	/api/v1/drafts/quotes	internal/quote	k
+GET	/api/v1/drafts/quotes/feed	internal/quote	k
+GET	/api/v1/drafts/quotes/{id}	internal/quote	k
+PUT	/api/v1/drafts/quotes/{id}	internal/quote	k
+POST	/api/v1/drafts/quotes/{id}/promote	internal/quote	k
+POST	/api/v1/drafts/quotes/{id}/transitions	internal/quote	k
 GET	/api/v1/edi/partners	internal/edi	h.ListPartners
 POST	/api/v1/edi/partners	internal/edi	h.CreatePartner
 DELETE	/api/v1/edi/partners/{id}	internal/edi	h.DeletePartner
@@ -348,6 +355,7 @@ POST	/api/v1/quotes/{id}/exposure/escalate-now	internal/pricing	h.HandleEscalate
 POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
+PUT	/api/v1/quotes/{id}/file	internal/quote	h.HandleAttachFile
 POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport
 POST	/api/v1/reporting/builder/preview	internal/reporting	h.HandleBuilderPreview
