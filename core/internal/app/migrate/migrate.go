@@ -11,7 +11,9 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -22,15 +24,52 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-// Run applies every pending migration and returns. Behaviour is unchanged
-// from the old entry point, including the log.Fatalf exits on failure.
-// `migrate -report units` runs the read only units pre flight report of
-// ADR 0006 section 8 instead (see units_report.go).
-func Run() {
-	if len(os.Args) >= 3 && os.Args[1] == "-report" && os.Args[2] == "units" {
+// Options are the flags migrate takes.
+type Options struct {
+	// Report names a read only pre flight report to run instead of the
+	// migrations; "units" (ADR 0006 section 8) is the one there is.
+	Report string
+}
+
+// ParseArgs parses migrate's flags: `-report units`, or nothing. Any other
+// flag, a report other than units, or a stray argument is refused.
+func ParseArgs(args []string) (Options, error) {
+	var opts Options
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&opts.Report, "report", "", "run the named read only pre flight report (units) instead of migrating")
+	if err := fs.Parse(args); err != nil {
+		return Options{}, err
+	}
+	if fs.NArg() > 0 {
+		return Options{}, fmt.Errorf("migrate takes no arguments, got %q", fs.Args())
+	}
+	if opts.Report != "" && opts.Report != "units" {
+		return Options{}, fmt.Errorf("migrate -report: unknown report %q (the one report is units)", opts.Report)
+	}
+	return opts, nil
+}
+
+// RunArgs parses args with ParseArgs and runs: the units pre flight report
+// when -report units is given, otherwise every pending migration. A refused
+// flag exits 2, like the one binary's other usage errors.
+func RunArgs(args []string) {
+	opts, err := ParseArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "migrate: %v\nusage: migrate [-report units]\n", err)
+		os.Exit(2)
+	}
+	if opts.Report == "units" {
 		RunUnitsReport()
 		return
 	}
+	Run()
+}
+
+// Run applies every pending migration and returns. Behaviour is unchanged
+// from the old entry point, including the log.Fatalf exits on failure.
+// RunArgs is the entry that also takes `-report units`.
+func Run() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)
