@@ -80,7 +80,7 @@ func newFixture(t *testing.T, db *database.DB, settings links.Settings) *fixture
 	customerSvc := customer.NewService(customer.NewRepository(db))
 	productSvc := product.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
-	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(account.NewRepository(db), db, slog.Default()), db)
+	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(db, glSvc, slog.Default()), db)
 	quoteKind := quote.NewDraftKind(quoteSvc)
 	orderKind := order.NewDraftKind(orderSvc)
 	draftsRepo := drafts.NewRepository(db)
