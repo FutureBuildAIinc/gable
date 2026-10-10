@@ -137,23 +137,34 @@ func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...
 	h.RegisterRoutes(mux, w.scoped(roles...))
 }
 
+// quotes mounts the quote routes: the create and the update take customer_id
+// from their body, so a branch bound key reaches them only while the pin holds
+// that customer (round 9 P1-1).
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
-	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
+		w.bodyCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/quotes", "PUT /api/v1/quotes/{id}"))
 }
 
 // orders mounts the order routes: the create takes branch_id from its body,
-// so it is held to the caller's branch context (ADR 0007 section 2.3).
+// so it is held to the caller's branch context (ADR 0007 section 2.3), and the
+// create and the update take customer_id from it, so a branch bound key
+// reaches them only while the pin holds that customer (round 9 P1-1: the
+// order would otherwise take another branch's tax exemption).
 func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
-	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"),
+	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
+		w.bodyCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/orders", "PUT /api/v1/orders/{id}"),
 		w.scoped("admin", "owner", "finance", "warehouse"))
 }
 
 // invoices mounts the invoice and credit memo routes: the credit memo create
 // takes branch_id from its body and the writes address a document by path id,
 // so the service holds both to the caller's branch context (ADR 0007 section
-// 2.3) beside the wall every read already carries.
+// 2.3) beside the wall every read already carries. The credit memo create and
+// update take customer_id from their body, so a branch bound key reaches them
+// only while the pin holds that customer (round 9 P1-1).
 func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
-	invoice.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+	invoice.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
+		w.bodyCustomer(w.scoped("admin", "owner", "sales", "finance"), "POST /api/v1/credit-memos", "PUT /api/v1/credit-memos/{id}"))
 }
 
 // accounts mounts the account and AR routes: the reads (summary, subledger,
@@ -177,9 +188,48 @@ func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
 // payments mounts the payment routes: the create takes branch_id from its body
 // and the writes address a payment by path id, so the service holds both to the
 // caller's branch context (ADR 0007 section 2.3) beside the wall every read
-// carries.
+// carries. The cash, card and intent creates take customer_id from their body,
+// so a branch bound key reaches them only while the pin holds that customer
+// (round 9 P1-1: a posted payment and its GL entry land on that customer).
 func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
-	payment.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance", "cashier"))
+	payment.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
+		w.bodyCustomer(w.scoped("admin", "owner", "sales", "finance", "cashier"),
+			"POST /api/v1/payments", "POST /api/v1/payments/card", "POST /api/v1/payments/intent"))
+}
+
+// bodyCustomer composes a route group's guard with the key branch wall's hold
+// on the customer_id the request body names, for the listed patterns only: the
+// other routes of the group keep the guard alone.
+func (w *branchWall) bodyCustomer(base func(http.Handler) http.Handler, patterns ...string) func(http.Handler) http.Handler {
+	return w.patternWall(base, w.keyWall.CustomerBodyBranch(), patterns...)
+}
+
+// patternWall runs hold after base on the listed route patterns and base alone
+// on every other route of the group.
+func (w *branchWall) patternWall(base, hold func(http.Handler) http.Handler, patterns ...string) func(http.Handler) http.Handler {
+	held := make(map[string]bool, len(patterns))
+	for _, p := range patterns {
+		held[p] = true
+	}
+	return func(next http.Handler) http.Handler {
+		plain, walled := base(next), middleware.Compose(base, hold)(next)
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			if held[r.Pattern] {
+				walled.ServeHTTP(rw, r)
+				return
+			}
+			plain.ServeHTTP(rw, r)
+		})
+	}
+}
+
+// draftGuard is the guard of a draft kind's routes: the role and branch guard,
+// and on the promotion the hold on the customer the draft's stored payload
+// names (round 9 P1-1: a draft written by a user, or by the key before the
+// customer was checked, is checked again where it becomes a document).
+func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) func(http.Handler) http.Handler {
+	return w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(draftPayloadCustomerOf(db)),
+		"POST /api/v1/drafts/"+kind+"/{id}/promote")
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

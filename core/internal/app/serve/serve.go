@@ -515,8 +515,8 @@ func Run() {
 			func(ctx context.Context, keyID uuid.UUID) (bool, error) {
 				return techAdminSvc.KeyActive(ctx, keyID)
 			}))
-	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
-	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, scoped(orderKind.Roles()...))
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, wall.draftGuard(db, "quotes", quoteKind.Roles()...))
+	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, wall.draftGuard(db, "orders", orderKind.Roles()...))
 
 	// The link resolver (ADR 0007 section 8): one literal route per entity
 	// and per draft kind, each behind the module's own read roles composed

@@ -198,10 +198,44 @@ func pricingRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.R
 	}
 }
 
+// draftPayloadCustomerOf resolves the customer the stored payload of the draft
+// the path names carries. A draft that does not exist, or whose payload names
+// no customer, names nothing the wall can hold and the promotion's own answer
+// covers it.
+func draftPayloadCustomerOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		if db == nil {
+			return nil, errors.New("draft customer lookup: no database")
+		}
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		var raw *string
+		err = db.GetExecutor(ctx).QueryRow(ctx, `SELECT payload->>'customer_id' FROM drafts WHERE id = $1`, id).Scan(&raw)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if raw == nil {
+			return nil, nil
+		}
+		customer, err := uuid.Parse(*raw)
+		if err != nil {
+			return nil, nil
+		}
+		return []uuid.UUID{customer}, nil
+	}
+}
+
 // categoryRuleRowCustomerOf resolves the customer a category rule row is
 // scoped to. A row that does not exist names nothing (the handler's own 404
-// answers); a row that targets a tier or the whole account names no customer,
-// is dealer wide, and is refused.
+// answers); a row that is not an account rule is dealer wide and is refused,
+// whether or not it also names a customer (the legacy tier row migration 107
+// leaves behind prices every branch's customers of its tier), as is a row
+// that names no customer.
 func categoryRuleRowCustomerOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
 		if db == nil {

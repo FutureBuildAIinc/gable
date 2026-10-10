@@ -134,7 +134,7 @@ var pinDocumentScopes = []string{
 	"customers:read", "customers:write", "contacts:read", "contacts:write",
 	"ship-tos:read", "ship-tos:write", "invoices:read", "invoices:write",
 	"payments:read", "payments:write", "credit-memos:read", "credit-memos:write",
-	"orders:read", "orders:write", "orders:propose", "quotes:propose", "quotes:commit",
+	"orders:read", "orders:write", "orders:propose", "orders:commit", "quotes:propose", "quotes:commit",
 	"dashboard:read", "inventory:read", "inventory:write", "locations:read", "locations:write",
 	"products:read", "branches:read",
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
@@ -498,8 +498,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)).
 		WithBranchGuard(wall.guard)
 	draftsHandler := drafts.NewHandler(draftsSvc)
-	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, wall.scoped(quoteKind.Roles()...))
-	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, wall.scoped(orderKind.Roles()...))
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, wall.draftGuard(db, "quotes", quoteKind.Roles()...))
+	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, wall.draftGuard(db, "orders", orderKind.Roles()...))
 	linksHandler := links.NewHandler(links.Settings{},
 		links.Entity{Row: rowOrNone(links.RowFor("quotes", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
 			q, err := quoteSvc.GetQuoteByIDOrNumber(ctx, raw)
