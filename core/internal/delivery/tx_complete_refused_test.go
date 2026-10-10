@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
 // PR 80 review round 1 P3-1: a service-level test over the four
 // statuses that must refuse completion (DRAFT, SCHEDULED, COMPLETED
 // and CANCELLED). Each is seeded by SQL into the named status, then

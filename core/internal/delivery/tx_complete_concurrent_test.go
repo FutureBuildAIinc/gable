@@ -1,13 +1,15 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
 // PR 80 review round 2 P3-1: a pool-4, three-contender concurrent
 // completion test. An IN_TRANSIT route whose only stop is terminal
 // (the allowed path through the state machine) is completed by
 // three goroutines at once. Exactly one must answer 200 and write
-// one route.completed event; the other two must answer 409 (the
-// status check refuses a second complete, the row is locked under
-// FOR UPDATE so they serialize and the second arrival reads the
-// already-completed status). The FOR UPDATE lock + the status
-// check together are what pin the once-only behaviour; the test
-// fails the mutant that drops either.
+// one route.completed event; the other two must answer 409. All
+// three send the same revision, so the losers are refused by the
+// revision precondition once the winner has moved it; this test pins
+// once only under contention, and the status check itself is pinned
+// by the service table in tx_complete_refused_test.go.
 package delivery_test
 
 import (
