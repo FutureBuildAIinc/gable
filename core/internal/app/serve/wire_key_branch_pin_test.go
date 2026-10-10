@@ -14,6 +14,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -28,8 +29,12 @@ import (
 	"github.com/gablelbm/gable/internal/bankrecon"
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/config"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
+	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
@@ -37,9 +42,12 @@ import (
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
+	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
+	"github.com/gablelbm/gable/internal/notification"
+	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/pos"
@@ -61,6 +69,7 @@ import (
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // keyPinFixture is two branches, one yard per branch for the location rows,
@@ -105,11 +114,29 @@ type keyPinFixture struct {
 	posProd   uuid.UUID // the product the POS lines carry
 	bound     string    // the key pinned to branch A
 	unbound   string    // the same scopes, no pin
+	bound2    string    // a second bound key holding the document family scopes the mint cap keeps off the first
+	unbound2  string    // the same scopes, no pin
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
 // directory, the user grants, the exposure surface, the dealer wide routes,
 // the staff roster and the customer scoped pricing and tax surface.
+// pinDocumentScopes is the second mint's scope list: the document families
+// (customers, contacts, ship-tos, invoices, payments, credit memos, orders,
+// drafts, dashboard, inventory, locations), kept off the first mint only
+// because the mint caps a key at 64 scopes and the two lists together exceed
+// it.
+var pinDocumentScopes = []string{
+	"customers:read", "customers:write", "contacts:read", "contacts:write",
+	"ship-tos:read", "ship-tos:write", "invoices:read", "invoices:write",
+	"payments:read", "payments:write", "credit-memos:read", "credit-memos:write",
+	"orders:read", "orders:write", "orders:propose", "quotes:propose", "quotes:commit",
+	"dashboard:read", "inventory:read", "inventory:write", "locations:read", "locations:write",
+	"products:read", "branches:read",
+	"matching:read", "matching:write", "delivery:read", "delivery:write",
+	"purchase-orders:read", "purchase-orders:write", "quotes:read", "quotes:write",
+}
+
 var pinKeyScopes = []string{
 	"locations:write", "branches:read", "branches:write",
 	"users:read", "users:grants", "quotes:read", "quotes:write", "admin:write",
@@ -422,7 +449,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	wall.delivery(mux, delivery.NewHandler(delivery.NewService(delivery.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithAudit(audit.NewLogger(db))),
 		"admin", "owner", "warehouse", "driver")
-	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), nil, nil, slog.Default()))
+	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), pinPOSource{db: db}, pinAPSource{}, slog.Default()))
 	apps.NewHandler(apps.NewRegistry(db, slog.Default()).WithAudit(audit.NewLogger(db))).
 		RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	poProductSvc := product.NewService(product.NewRepository(db))
@@ -434,11 +461,105 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 
+	// The branch walled document families exactly as serve registers them:
+	// quotes, orders, invoices, payments, crm, documents, drafts, dashboard,
+	// inventory and the link resolver, each through its module's wall.
+	quoteSvc := quote.NewService(quote.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	wall.quotes(mux, quoteSvc)
+	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
+	wall.orders(mux, orderSvc)
+	wall.invoices(mux, invoiceSvc.WithOrders(orderSvc).WithStock(inventory.NewService(inventory.NewRepository(db))))
+	wall.payments(mux, paymentSvc.WithBranchGuard(wall.guard))
+	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)))
+	wall.documents(mux, document.NewHandler(document.NewService(product.NewRepository(db)),
+		orderSvc, invoiceSvc, customerSvc, notification.NewLogEmailService(slog.Default())))
+	quoteKind := quote.NewDraftKind(quoteSvc)
+	orderKind := order.NewDraftKind(orderSvc)
+	draftsRegistry, derr := drafts.NewRegistry(quoteKind, orderKind)
+	if derr != nil {
+		t.Fatalf("draft kind registration: %v", derr)
+	}
+	draftsSvc := drafts.NewService(drafts.NewRepository(db), draftsRegistry).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)).
+		WithBranchGuard(wall.guard)
+	draftsHandler := drafts.NewHandler(draftsSvc)
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, wall.scoped(quoteKind.Roles()...))
+	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, wall.scoped(orderKind.Roles()...))
+	linksHandler := links.NewHandler(links.Settings{},
+		links.Entity{Row: rowOrNone(links.RowFor("quotes", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			q, err := quoteSvc.GetQuoteByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return q.ID, q.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("orders", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			o, err := orderSvc.GetOrderByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return o.ID, o.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("invoices", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			inv, err := invoiceSvc.GetInvoiceByIDOrNumber(ctx, raw)
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return inv.ID, inv.Number, nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("customers", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			c, err := customerSvc.Get(ctx, uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return c.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("products", false)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			pc, err := productSvc.GetProduct(ctx, uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return pc.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("quotes", true)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			d, err := draftsSvc.Get(ctx, "quotes", uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return d.ID, "", nil
+		}},
+		links.Entity{Row: rowOrNone(links.RowFor("orders", true)), Resolve: func(ctx context.Context, raw string) (uuid.UUID, string, error) {
+			d, err := draftsSvc.Get(ctx, "orders", uuid.MustParse(raw))
+			if err != nil {
+				return uuid.Nil, "", err
+			}
+			return d.ID, "", nil
+		}},
+	)
+	links.RegisterAll(mux, linksHandler, links.Guards{
+		Quotes:      wall.scoped("admin", "owner", "sales"),
+		Orders:      wall.scoped("admin", "owner", "sales", "finance"),
+		Invoices:    wall.scoped("admin", "owner", "sales", "finance"),
+		Customers:   wall.scoped("admin", "owner", "sales"),
+		Products:    wall.scoped("admin", "owner", "sales", "warehouse"),
+		DraftQuotes: wall.scoped(quoteKind.Roles()...),
+		DraftOrders: wall.scoped(orderKind.Roles()...),
+	})
+	dashboard.NewHandler(dashboard.NewService(dashboard.NewRepository(db))).
+		RegisterRoutes(mux, wall.scoped("admin", "owner", "finance"))
+	wall.inventory(mux, inventory.NewService(inventory.NewRepository(db)))
+
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	techadmin.NewHandler(keys).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	mint := func(name string, branch *uuid.UUID) string {
 		t.Helper()
-		raw, _, err := keys.GenerateKey(ctx, name, pinKeyScopes, branch)
+		scopes := pinKeyScopes
+		if strings.Contains(name, "documents") {
+			scopes = pinDocumentScopes
+		}
+		raw, _, err := keys.GenerateKey(ctx, name, scopes, branch)
 		if err != nil {
 			t.Fatalf("mint %s: %v", name, err)
 		}
@@ -446,6 +567,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	}
 	f.bound = mint("pin bound to A", &f.branchA)
 	f.unbound = mint("pin unbound", nil)
+	f.bound2 = mint("pin bound to A, documents", &f.branchA)
+	f.unbound2 = mint("pin unbound, documents", nil)
 	mkAuth := middleware.NewMachineKeyAuth(pinKeyValidator{svc: keys}, audit.NewLogger(db), []string{"/api/integration/"}, nil)
 	// The production chain, built by the same builder Run uses, so every test
 	// here drives the wiring serve serves: the machine key core, the request
@@ -479,6 +602,48 @@ func pinClaims(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// pinPOSource answers the matching module's purchase order seam from the
+// table: the branch wall reads the branch, the service reads the record.
+type pinPOSource struct {
+	db *database.DB
+}
+
+func (s pinPOSource) GetPO(ctx context.Context, id uuid.UUID) (*purchase_order.PurchaseOrder, error) {
+	var exists bool
+	if err := s.db.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM purchase_orders WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, fmt.Errorf("no such purchase order")
+	}
+	return &purchase_order.PurchaseOrder{ID: id}, nil
+}
+
+func (s pinPOSource) GetPOBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	var branch *uuid.UUID
+	err := s.db.Pool.QueryRow(ctx, `SELECT branch_id FROM purchase_orders WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return branch, err
+}
+
+// pinAPSource is an empty accounts payable: the cases that pass the wall
+// answer before any invoice is needed.
+type pinAPSource struct{}
+
+func (pinAPSource) ListVendorInvoices(context.Context, *uuid.UUID, string) ([]ap.VendorInvoice, error) {
+	return nil, nil
+}
+
+func (pinAPSource) GetVendorInvoice(context.Context, uuid.UUID) (*ap.VendorInvoice, error) {
+	return nil, nil
+}
+
+func (pinAPSource) ApproveInvoice(context.Context, uuid.UUID, uuid.UUID) (*ap.VendorInvoice, error) {
+	return nil, nil
 }
 
 // pinKeyValidator adapts the techadmin service to the machine key core, the
