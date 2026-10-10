@@ -12,14 +12,17 @@ package pos_test
 // own carrying the gateway id.
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 // RULE: a stale revision void makes zero gateway refunds and leaves the sale
@@ -445,6 +448,93 @@ func TestAReturnTheTransactionRefusesRecordsItsGatewayRefund(t *testing.T) {
 	}
 	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
 		t.Errorf("sale status = %q, want completed (the return rolled back)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (third review P3-B): a card sale that has been returned against is
+// never voided, and the refusal moves no gateway money: the returns guard
+// runs inside the transaction before the refund call, so a double refund
+// (the return's and the void's) can never happen.
+func TestAVoidAfterAReturnOfACardSaleMakesNoGatewayRefunds(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+	saleID, body := f.saleOf("4", withToken(tender("card", 2395)))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	if r := f.cardReturnOn(t, saleID, lineID, "1"); r.status != http.StatusCreated {
+		t.Fatalf("card return = %d: %s", r.status, r.raw)
+	}
+	// the card was refunded once by the return; the void must add nothing
+	if len(gw.refunds) != 1 {
+		t.Fatalf("%d gateway refunds after the return, want 1", len(gw.refunds))
+	}
+	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "after a return", "revision": num(t, f.getSale(t, saleID), "revision")},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("void after a return = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "has_returns" {
+		t.Errorf("blockers = %v, want has_returns", blockers)
+	}
+	if len(gw.refunds) != 1 {
+		t.Errorf("%d gateway refunds after the refused void, want still 1 (the refusal moved no money)", len(gw.refunds))
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 0 {
+		t.Errorf("%d orphaned refund rows, want 0", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
+		t.Errorf("sale status = %q, want completed", got)
+	}
+	f.assertARInvariants(t)
+
+	// The in-transaction guard is the one that holds under a race: a return
+	// committing after the void's pre-transaction check still refuses the
+	// void under the sale row lock, before any refund. The sale row is held
+	// so the void parks past its pre-checks, a return lands, then the row
+	// releases.
+	saleID2, body2 := f.saleOf("2", withToken(tender("card", 1198)))
+	racing := uuid.New()
+	ctx := context.Background()
+	park, err := f.db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := park.Exec(ctx, `SELECT 1 FROM pos_transactions WHERE id = $1 FOR UPDATE`, saleID2); err != nil {
+		t.Fatal(err)
+	}
+	voidDone := make(chan int, 1)
+	go func() {
+		voidDone <- f.do("POST", "/api/v1/pos/transactions/"+saleID2+"/void",
+			map[string]any{"reason": "racing a return", "revision": rev(t, body2)},
+			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
+	}()
+	time.Sleep(400 * time.Millisecond)
+	// the return that wins the race, written inside the holding transaction:
+	// the commit releases the sale row and publishes the return in one step
+	// (an insert from outside would wait on the row lock the hold takes)
+	if _, err := park.Exec(ctx, `INSERT INTO pos_returns (id, register_id, cashier_id, original_transaction_id,
+		subtotal, tax_amount, total, refund_method, reason, currency) VALUES ($1, $2, $3, $4, -5.50, -0.49, -5.99,
+		'CASH', 'racing return', 'USD')`, racing, f.register, mustUUID(t), saleID2); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM pos_return_lines WHERE return_id = $1`, racing)
+		mustExec(t, f.db, `DELETE FROM pos_returns WHERE id = $1`, racing)
+	})
+	if err := park.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st := <-voidDone; st != http.StatusConflict {
+		t.Fatalf("void racing a committed return = %d, want 409 (the in-transaction guard)", st)
+	}
+	if len(gw.refunds) != 1 {
+		t.Errorf("%d gateway refunds, want 1 (the first sale's return only; the racing void refunded nothing)", len(gw.refunds))
 	}
 	f.assertARInvariants(t)
 }
