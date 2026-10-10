@@ -1497,11 +1497,12 @@ components:
       description: >-
         A run for one date. The joined vehicle and driver names are always
         present; stops is null unless the list was asked for with
-        include=stops (the board read).
+        include=stops (the board read). vehicle_id and driver_id are
+        nullable: a legacy row with no vehicle or no driver carries null,
+        never the all-zero UUID, so a client cannot reach for the zero
+        identifier.
       required:
         - id
-        - vehicle_id
-        - driver_id
         - scheduled_date
         - status
         - notes
@@ -1519,10 +1520,14 @@ components:
           type: string
           format: uuid
         vehicle_id:
-          type: string
+          type:
+            - string
+            - "null"
           format: uuid
         driver_id:
-          type: string
+          type:
+            - string
+            - "null"
           format: uuid
         scheduled_date:
           type: string

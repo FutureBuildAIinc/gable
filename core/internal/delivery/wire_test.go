@@ -596,6 +596,129 @@ func TestRouteList_BoardReadAndFilters(t *testing.T) {
 	}
 }
 
+// RULE (PR 70 review round 3 P2-N2 and round 4 P3-3): a route whose
+// vehicle_id or driver_id is NULL is visible through the wire: the list
+// shows it, the single read shows it, and the missing ids are JSON null
+// rather than the all-zero UUID. The repository's routeFrom LEFT JOINs
+// vehicles and drivers so neither inner join drops the row; the model
+// declares the ids as *uuid.UUID so a NULL scans to nil and marshals as
+// null. The test inserts three rows by id (no vehicle, no driver, neither),
+// each with a real referenced FK when it names one, then reads them
+// through the list and the single read, asserting each `vehicle_id` and
+// `driver_id` field carries the wire's null shape.
+func TestRoute_NullVehicleAndDriverServeNull(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	driverID := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO drivers (id, name, license_number) VALUES ($1, $2, $3)`,
+		driverID, "Null route driver", "NULLDRV-"+driverID.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM drivers WHERE id = $1`, driverID) })
+	vehicleID := uuid.New()
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO vehicles (id, name, vehicle_type, license_plate) VALUES ($1, $2, 'VAN', $3)`,
+		vehicleID, "Null route truck", "NULLVEH-"+vehicleID.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM vehicles WHERE id = $1`, vehicleID) })
+
+	mkRoute := func(label string) uuid.UUID {
+		t.Helper()
+		var id uuid.UUID
+		sql := ""
+		switch label {
+		case "no_vehicle":
+			sql = `INSERT INTO delivery_routes (id, driver_id, scheduled_date, status)
+				   VALUES ($1, $2, $3::date, $4) RETURNING id`
+		case "no_driver":
+			sql = `INSERT INTO delivery_routes (id, vehicle_id, scheduled_date, status)
+				   VALUES ($1, $2, $3::date, $4) RETURNING id`
+		default:
+			sql = `INSERT INTO delivery_routes (id, scheduled_date, status)
+				   VALUES ($1, $2::date, $3) RETURNING id`
+		}
+		var err error
+		switch label {
+		case "no_vehicle":
+			err = f.db.Pool.QueryRow(ctx, sql, uuid.New(), driverID, "2030-09-01", "DRAFT").Scan(&id)
+		case "no_driver":
+			err = f.db.Pool.QueryRow(ctx, sql, uuid.New(), vehicleID, "2030-09-01", "DRAFT").Scan(&id)
+		default:
+			err = f.db.Pool.QueryRow(ctx, sql, uuid.New(), "2030-09-01", "DRAFT").Scan(&id)
+		}
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM delivery_routes WHERE id = $1`, id) })
+		return id
+	}
+	noVehicle := mkRoute("no_vehicle")
+	noDriver := mkRoute("no_driver")
+	bare := mkRoute("none")
+
+	list := f.do(t, http.MethodGet, "/api/v1/delivery/routes?date=2030-09-01", "", nil)
+	if list.status != http.StatusOK {
+		t.Fatalf("list = %d %s", list.status, list.raw)
+	}
+	seen := map[string]bool{}
+	for _, it := range list.body["items"].([]any) {
+		r := it.(map[string]any)
+		switch r["id"].(string) {
+		case noVehicle.String():
+			seen["no_vehicle"] = true
+			if r["vehicle_id"] != nil {
+				t.Errorf("no-vehicle route vehicle_id = %v, want null", r["vehicle_id"])
+			}
+			if r["driver_id"] == nil {
+				t.Errorf("no-vehicle route driver_id = null, want the seeded UUID")
+			}
+		case noDriver.String():
+			seen["no_driver"] = true
+			if r["driver_id"] != nil {
+				t.Errorf("no-driver route driver_id = %v, want null", r["driver_id"])
+			}
+			if r["vehicle_id"] == nil {
+				t.Errorf("no-driver route vehicle_id = null, want the seeded UUID")
+			}
+		case bare.String():
+			seen["bare"] = true
+			if r["vehicle_id"] != nil {
+				t.Errorf("bare route vehicle_id = %v, want null", r["vehicle_id"])
+			}
+			if r["driver_id"] != nil {
+				t.Errorf("bare route driver_id = %v, want null", r["driver_id"])
+			}
+		}
+	}
+	for _, k := range []string{"no_vehicle", "no_driver", "bare"} {
+		if !seen[k] {
+			t.Errorf("the list lost the %s route (routeFrom likely JOINs)", k)
+		}
+	}
+
+	for _, c := range []struct {
+		id   uuid.UUID
+		want map[string]any
+	}{
+		{noVehicle, map[string]any{"vehicle_id": nil}},
+		{noDriver, map[string]any{"driver_id": nil}},
+		{bare, map[string]any{"vehicle_id": nil, "driver_id": nil}},
+	} {
+		res := f.do(t, http.MethodGet, "/api/v1/delivery/routes/"+c.id.String(), "", nil)
+		if res.status != http.StatusOK {
+			t.Errorf("get %s = %d %s", c.id, res.status, res.raw)
+			continue
+		}
+		for k, want := range c.want {
+			if got := res.body[k]; got != want {
+				t.Errorf("get %s %s = %v, want %v", c.id, k, got, want)
+			}
+		}
+	}
+}
+
 // The route lifecycle through the transitions route (the dispatch and
 // complete action routes are gone): 428 without a revision, the wrong edge
 // a 409 invalid_state_transition with its blocker, and the events in order.

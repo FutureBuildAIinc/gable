@@ -519,25 +519,17 @@ const routeFrom = ` FROM delivery_routes r
 func scanRoute(row pgx.Row) (*Route, error) {
 	var (
 		route            Route
-		vehicleID        *uuid.UUID
-		driverID         *uuid.UUID
 		vehicleName      *string
 		driverName       *string
 		scheduled        time.Time
 		created, updated time.Time
 	)
-	err := row.Scan(&route.ID, &vehicleID, &driverID, &scheduled, &route.Status, &route.Notes,
+	err := row.Scan(&route.ID, &route.VehicleID, &route.DriverID, &scheduled, &route.Status, &route.Notes,
 		&route.TotalDurationMins, &route.TotalDistanceMiles,
 		&vehicleName, &driverName, &route.StopCount,
 		&route.Revision, &created, &updated)
 	if err != nil {
 		return nil, err
-	}
-	if vehicleID != nil {
-		route.VehicleID = *vehicleID
-	}
-	if driverID != nil {
-		route.DriverID = *driverID
 	}
 	if vehicleName != nil {
 		route.VehicleName = *vehicleName

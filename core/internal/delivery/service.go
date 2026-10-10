@@ -534,8 +534,10 @@ func (s *Service) GetRoute(ctx context.Context, id uuid.UUID) (*Route, error) {
 func (s *Service) CreateRoute(ctx context.Context, d *RouteDraft, actor string) (*Route, error) {
 	var out *Route
 	err := s.inTx(ctx, func(ctx context.Context) error {
+		vehicleID := d.VehicleID
+		driverID := d.DriverID
 		route := &Route{
-			VehicleID: d.VehicleID, DriverID: d.DriverID,
+			VehicleID: &vehicleID, DriverID: &driverID,
 			ScheduledDate: d.ScheduledDate, Status: RouteStatusDraft, Notes: d.Notes,
 		}
 		if err := s.repo.CreateRoute(ctx, route); err != nil {
@@ -938,6 +940,17 @@ func (s *Service) geocodeDeliveryOnDemand(ctx context.Context, d *Stop) *LatLng 
 
 // Stops
 
+// routeVehicle returns the vehicle a route points at, or nil when the
+// route has no vehicle assigned (a legacy row, or a fresh row awaiting
+// dispatch). The assign's capacity warning treats a vehicle-less route
+// as not eligible for the warning rather than as an error.
+func (s *Service) routeVehicle(ctx context.Context, route *Route) (*Vehicle, error) {
+	if route.VehicleID == nil {
+		return nil, nil
+	}
+	return s.repo.GetVehicle(ctx, *route.VehicleID)
+}
+
 // ListDeliveries lists a route's stops: the route itself is read behind the
 // wall first, so a caller held to another branch gets the same 404 reading
 // the route's stops as reading the route.
@@ -1002,8 +1015,8 @@ func (s *Service) AssignOrderToRoute(ctx context.Context, d *AssignStopDraft, ac
 
 	// The capacity warning is soft: the assignment still happens.
 	var warning *CapacityWarning
-	vehicle, err := s.repo.GetVehicle(ctx, route.VehicleID)
-	if err == nil && vehicle.CapacityWeightLbs != nil && *vehicle.CapacityWeightLbs > 0 {
+	vehicle, err := s.routeVehicle(ctx, route)
+	if err == nil && vehicle != nil && vehicle.CapacityWeightLbs != nil && *vehicle.CapacityWeightLbs > 0 {
 		currentLoad, _ := s.repo.GetRouteLoadWeight(ctx, d.RouteID)
 		orderWeight, _ := s.repo.GetOrderEstimatedWeight(ctx, d.OrderID)
 		totalAfter := currentLoad + orderWeight

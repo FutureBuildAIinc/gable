@@ -613,7 +613,7 @@ func TestAssignOrderToRoute_SetsTheRoute(t *testing.T) {
 	routeID, vehicleID, orderID := uuid.New(), uuid.New(), uuid.New()
 	branchID := uuid.New()
 	repo := &fakeRepo{
-		routes:      []Route{{ID: routeID, VehicleID: vehicleID, Status: RouteStatusDraft, Revision: 1}},
+		routes:      []Route{{ID: routeID, VehicleID: &vehicleID, Status: RouteStatusDraft, Revision: 1}},
 		vehicle:     &Vehicle{ID: vehicleID},
 		orderBranch: map[uuid.UUID]uuid.UUID{orderID: branchID},
 	}

@@ -39,6 +39,36 @@ ALTER TABLE delivery_routes ALTER COLUMN status SET NOT NULL;
 UPDATE deliveries SET status = 'PENDING' WHERE status IS NULL;
 ALTER TABLE deliveries ALTER COLUMN status SET NOT NULL;
 
+-- 1b. Normalise a legacy lowercase or mixed-case status to the storage
+--     spelling the model and the scans carry. Without this rewrite a stored
+--     lowercase or foreign value (a `delivered` stop, an `in_progress`
+--     route) walks through ModelText's map lookup, hits no key, and the
+--     reader emits the start-state name instead of the row's own status:
+--     the read and the write then disagree about the same row and a
+--     dispatch against `in_progress` answers 409 while the read still
+--     prints `draft`. The legacy vocabulary comes from the start-state
+--     fill (a NULL was filled with `'DRAFT'` for routes and `'PENDING'`
+--     for stops) and the storage spelling; the model's map keys are all
+--     UPPERCASE, so uppercasing the known lowercase values brings them
+--     into the same vocabulary. Any value outside the known list is a
+--     legacy artefact: route rows map to `'DRAFT'`, stop rows to
+--     `'PENDING'` (a tracked started value, the row visible but stalled
+--     until an operator rewrites it). CONTRACT-CHANGES rows for this
+--     behaviour cover the up migration.
+UPDATE delivery_routes
+   SET status = UPPER(status)
+ WHERE LOWER(status) IN ('draft', 'scheduled', 'in_transit', 'completed', 'cancelled');
+UPDATE delivery_routes
+   SET status = 'DRAFT'
+ WHERE status NOT IN ('DRAFT', 'SCHEDULED', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED');
+
+UPDATE deliveries
+   SET status = UPPER(status)
+ WHERE LOWER(status) IN ('pending', 'out_for_delivery', 'delivered', 'failed', 'partial');
+UPDATE deliveries
+   SET status = 'PENDING'
+ WHERE status NOT IN ('PENDING', 'OUT_FOR_DELIVERY', 'DELIVERED', 'FAILED', 'PARTIAL');
+
 -- 2. The revision every mutable document carries (ADR 0001 section 11).
 --    Existing rows start at 1; the DEFAULT serves raw writers (the seed, the
 --    frozen integration seam) so their rows carry one too.

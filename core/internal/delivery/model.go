@@ -213,10 +213,13 @@ type Driver struct {
 
 // Route is one run's wire shape. Stops is null unless the list was asked for
 // with include=stops (the board read: routes and stops in one payload).
+// VehicleID and DriverID are nullable: a legacy row with no vehicle or no
+// driver reads back as JSON null, never the zero UUID, so a client cannot
+// reach for the all-zero id (PR 70 review round 4 P3-3).
 type Route struct {
 	ID                 uuid.UUID       `json:"id"`
-	VehicleID          uuid.UUID       `json:"vehicle_id"`
-	DriverID           uuid.UUID       `json:"driver_id"`
+	VehicleID          *uuid.UUID      `json:"vehicle_id"`
+	DriverID           *uuid.UUID      `json:"driver_id"`
 	ScheduledDate      string          `json:"scheduled_date"`
 	Status             RouteStatus     `json:"status"`
 	Notes              *string         `json:"notes"`
