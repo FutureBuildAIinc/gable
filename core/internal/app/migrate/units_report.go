@@ -19,7 +19,7 @@ import (
 // enter the catalogue (ADR 0006 section 2.1).
 var unitCodeRule = regexp.MustCompile(`^[A-Z]{1,6}$`)
 
-// unitsReportColumns are the columns A1 (migration 098) and B0 (C3-2B)
+// unitsReportColumns are the columns A1 (migration 099) and B0 (C3-2B)
 // collect: each table and column whose stored unit values the catalogue
 // migration normalises, inserts as dealer units or refuses on. The counter
 // and document line tables are listed here ahead of B0 so an operator sees
@@ -82,9 +82,9 @@ func RunUnitsReport() {
 }
 
 func unitsReport(db *sql.DB) int {
-	fmt.Println("Units pre flight report (A1 of migration 098; C3-2B extends it to the counter and document lines)")
+	fmt.Println("Units pre flight report (A1 of migration 099; C3-2B extends it to the counter and document lines)")
 	fmt.Println()
-	// The catalogue as it stands; before 098 there is none, and every
+	// The catalogue as it stands; before 099 there is none, and every
 	// valid code is new.
 	catalogued := map[string]bool{}
 	rows, err := db.Query(`SELECT code FROM units`)

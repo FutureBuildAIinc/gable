@@ -26,10 +26,10 @@ import (
 // enter the catalogue as a new dealer unit is listed with its row count,
 // and a value that would abort the migration is named, with a non zero
 // exit so an operator's script sees it. The report answers the database as
-// it stands before 098, so the fixture runs in a scratch database built to
+// it stands before 099, so the fixture runs in a scratch database built to
 // 097.
 func TestUnitsReportNamesWhatTheMigrationWouldRefuse(t *testing.T) {
-	scratch := pre098DB(t)
+	scratch := pre099DB(t)
 	ctx := context.Background()
 	if _, err := scratch.ExecContext(ctx, `
 		INSERT INTO quotes (id, number, branch_id, customer_id, state)
@@ -60,9 +60,9 @@ func TestUnitsReportNamesWhatTheMigrationWouldRefuse(t *testing.T) {
 	}
 }
 
-// pre098DB builds a scratch database with every migration before 098
+// pre099DB builds a scratch database with every migration before 099
 // applied and the fixture rows the report reads.
-func pre098DB(t *testing.T) *sql.DB {
+func pre099DB(t *testing.T) *sql.DB {
 	t.Helper()
 	base, err := url.Parse(testutil.RequireDB(t).Pool.Config().ConnString())
 	if err != nil {
@@ -101,7 +101,7 @@ func pre098DB(t *testing.T) *sql.DB {
 	}
 	sort.Strings(files)
 	for _, f := range files {
-		if strings.Compare(filepath.Base(f), "098_") >= 0 {
+		if strings.Compare(filepath.Base(f), "099_") >= 0 {
 			break
 		}
 		sqlText, err := os.ReadFile(f)

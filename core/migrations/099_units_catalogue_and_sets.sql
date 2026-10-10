@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- 098: units_catalogue_and_sets (item C3-2A-units, ADR 0006 sections 2, 3
+-- 099: units_catalogue_and_sets (item C3-2A-units, ADR 0006 sections 2, 3
 -- and 4 and its migration steps A1, A2 and A3).
 --
 --   A1  the catalogue. `units` replaces the closed `uom_type` enum: one row

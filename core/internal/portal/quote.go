@@ -158,7 +158,7 @@ type QuoteRequestLine struct {
 const maxQuoteRequestLines = 200
 
 // validUOMs is the sixteen code closed vocabulary the uom column held until
-// the unit catalogue of migration 098 replaced the enum. A UOM outside it
+// the unit catalogue of migration 099 replaced the enum. A UOM outside it
 // fails at
 // the database with an opaque enum error, so it is rejected here where the
 // message can name the field.

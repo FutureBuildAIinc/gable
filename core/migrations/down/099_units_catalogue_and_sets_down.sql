@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- Down of 098_units_catalogue_and_sets (item C3-2A-units). Each step
+-- Down of 099_units_catalogue_and_sets (item C3-2A-units). Each step
 -- reverses its own, and refuses, naming the first row it cannot map back,
 -- wherever data written in the new shape has no place in the old one (a
 -- down never discards a dealer's data):
