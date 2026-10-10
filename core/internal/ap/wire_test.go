@@ -555,6 +555,85 @@ func TestWire_PaymentAppliesAndTies(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0008 7.4): a bill approved before migration 106 carries its entry
+// but no pointer to it; the migration links the newest posted, unreversed
+// VENDOR_INVOICE entry, and the void reverses exactly that entry, so the tie
+// (every entry balanced, 2010 equal to what the open bills owe) holds for a
+// legacy bill as for a new one. A legacy approved bill whose entry is missing
+// is refused rather than voided silently with the credit stranded in 2010.
+func TestWire_VoidLegacyApprovedBill(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// The linked legacy bill: approved with its entry, the pointer absent (the
+	// state every pre-106 approved bill holds after the migration).
+	id, r1 := f.enter("V-LEG-1", "1", 1000) // 10.00
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Fatalf("after the approve: control %d, open %d", got, want)
+	}
+	mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
+	// The migration's link: the entry the old sync posted is the bill's
+	// newest posted, unreversed VENDOR_INVOICE entry.
+	mustExec(t, f.db, `UPDATE vendor_invoices vi SET gl_entry_id = e.id
+		FROM gl_journal_entries e
+		WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
+		  AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL AND vi.id = $1`, id)
+	v := f.void(id, 2, "legacy bill voided")
+	if v.status != http.StatusOK {
+		t.Fatalf("void the linked legacy bill = %d, want 200: %s", v.status, v.raw)
+	}
+	if str(t, v.body, "status") != "voided" {
+		t.Errorf("the legacy bill = %s, want voided", v.raw)
+	}
+	reversals := f.count(`SELECT count(*) FROM gl_journal_entries r JOIN gl_journal_entries o ON o.id = r.reverses_entry_id WHERE o.source_ref_id = $1`, id)
+	if reversals != 1 {
+		t.Errorf("%d reversals of the legacy entry, want exactly 1", reversals)
+	}
+	_, legs := f.entryLegsWhere(t, f.db, `e.source_ref_id = $1
+		OR e.reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, id)
+	if legs["5020"] != (leg{debit: 10, credit: 10}) || legs["2010"] != (leg{debit: 10, credit: 10}) {
+		t.Errorf("the reversal is not the exact mirror: %v", legs)
+	}
+	if !f.balanced() {
+		t.Error("an entry of the legacy void does not balance")
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want || want != 0 {
+		t.Errorf("after the legacy void: control %d, open %d, want both 0", got, want)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND gl_entry_id IS NOT NULL`, id); n != 1 {
+		t.Error("the void lost the legacy entry link")
+	}
+
+	// The unlinked legacy bill: its entry never posted (the base swallowed the
+	// journal error). The void is refused with a blocker, and nothing is
+	// written: no reversal, no status change, the tie untouched.
+	id2, r1b := f.enter("V-LEG-2", "1", 2000) // 20.00
+	if a := f.approve(id2, r1b); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id2)
+	mustExec(t, f.db, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN
+		(SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, id2)
+	mustExec(t, f.db, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, id2)
+	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	rv := f.void(id2, 2, "legacy bill voided")
+	if rv.status != http.StatusConflict {
+		t.Fatalf("void the unlinked legacy bill = %d, want 409: %s", rv.status, rv.raw)
+	}
+	if code, blockers, _ := errorOf(t, rv); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
+		t.Errorf("void the unlinked legacy bill = %q %v, want entry_not_linked", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id2); n != 1 {
+		t.Error("a refused legacy void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+		t.Errorf("%d entries were written for a refused void", after-before)
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is

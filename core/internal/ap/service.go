@@ -465,7 +465,9 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 
 // void is the transition that reverses the entry: a pending bill has nothing
 // posted and simply dies; an approved one's entry is reversed whole. A bill
-// with money applied is refused: the payments have to be undone first.
+// with money applied is refused: the payments have to be undone first. A bill
+// that owes (approved or partial) but never linked its entry is refused too:
+// there is nothing to reverse, and a silent void would strand the credit.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
@@ -487,6 +489,13 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 		}
 		if !from.allows(StatusVoided) {
 			return httpx.InvalidStateTransition("a " + from.Status() + " bill cannot be voided")
+		}
+		// An approved or partial bill that never linked its entry (a legacy
+		// bill whose posting was swallowed) must not void silently: the credit
+		// would stay in the control account with nothing to reverse.
+		if (from == StatusApproved || from == StatusPartial) && locked.GLEntryID == nil {
+			return httpx.InvalidStateTransition("the bill carries a posted balance but no linked journal entry",
+				httpx.Blocker("entry_not_linked", "the bill was approved without a linked journal entry; link one before it is voided"))
 		}
 		var reversal *uuid.UUID
 		if locked.GLEntryID != nil {

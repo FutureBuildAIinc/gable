@@ -10,7 +10,10 @@
 --      values (unknown values become PENDING, with a notice), po_id as a
 --      real foreign key (orphans are set null, with a notice), UNIQUE
 --      (vendor_id, invoice_number) after duplicates are suffixed #2, #3 in
---      (created_at, id) order (with a notice), and amount_open.
+--      (created_at, id) order (with a notice), amount_open, and gl_entry_id
+--      linked to the newest posted, unreversed VENDOR_INVOICE entry of every
+--      approved or partial bill (the bills left without one counted by a
+--      notice).
 --   2  vendor_invoice_lines: position, purchase_order_line_id, product_id,
 --      unit_price widened to NUMERIC(12,4), po_freight_charge_id (the
 --      carrier freight line link of 7.3, written from package C's freight
@@ -178,6 +181,34 @@ END $$;
 
 -- The entry the approval posts, which the void transition reverses.
 ALTER TABLE vendor_invoices ADD COLUMN IF NOT EXISTS gl_entry_id UUID NULL REFERENCES gl_journal_entries (id);
+
+-- A bill the base approved holds its entry (the removed sync posted it with
+-- source VENDOR_INVOICE and source_ref_id the bill) but no pointer to it.
+-- Every approved or partial bill is linked to its newest posted, unreversed
+-- VENDOR_INVOICE entry (one already reversed has been undone by hand and is
+-- not the void's to reverse again); the bills left without one are counted by
+-- a notice, and the void transition refuses them until an entry is linked.
+DO $$
+DECLARE missing BIGINT;
+BEGIN
+    UPDATE vendor_invoices vi
+    SET gl_entry_id = e.id
+    FROM gl_journal_entries e
+    WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = vi.id
+      AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id)
+      AND vi.status IN ('APPROVED', 'PARTIAL') AND vi.gl_entry_id IS NULL
+      AND e.id = (SELECT e2.id FROM gl_journal_entries e2
+                  WHERE e2.source = 'VENDOR_INVOICE' AND e2.source_ref_id = vi.id
+                    AND e2.status = 'POSTED' AND e2.reverses_entry_id IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r2 WHERE r2.reverses_entry_id = e2.id)
+                  ORDER BY e2.created_at DESC, e2.id DESC LIMIT 1);
+    SELECT count(*) INTO missing FROM vendor_invoices
+    WHERE status IN ('APPROVED', 'PARTIAL') AND gl_entry_id IS NULL;
+    IF missing > 0 THEN
+        RAISE NOTICE 'migration 106: % approved or partial vendor invoice(s) have no journal entry to link; their void is refused until one is linked', missing;
+    END IF;
+END $$;
 
 -- amount_open: what the vendor is still owed, zero on a voided bill.
 ALTER TABLE vendor_invoices ADD COLUMN IF NOT EXISTS amount_open NUMERIC(12, 2) NULL;

@@ -352,6 +352,107 @@ func TestMigration106_OnAwkwardLegacyRows(t *testing.T) {
 	}
 }
 
+// TestMigration106_LinksLegacyApprovedEntries proves the gl_entry_id backfill:
+// a bill the base approved posted its entry through the removed sync (source
+// VENDOR_INVOICE, source_ref_id the bill), and 106 links the newest posted,
+// unreversed of those entries to every approved or partial bill. A bill whose
+// only entry is a reversal, or that has none, stays unlinked and is counted by
+// the notice, and a pending bill is never linked (nothing was approved).
+func TestMigration106_LinksLegacyApprovedEntries(t *testing.T) {
+	conn, _, notices := scratch106(t)
+	before, target, _ := files106(t)
+	for _, f := range before {
+		apply106(t, conn, f)
+	}
+
+	ctx := context.Background()
+	var vendor uuid.UUID
+	if err := conn.QueryRow(ctx, `INSERT INTO vendors (id, name) VALUES ($1, 'Mig 106 Legacy Vendor') RETURNING id`, uuid.New()).Scan(&vendor); err != nil {
+		t.Fatal(err)
+	}
+	var expense, payable string
+	if err := conn.QueryRow(ctx, `SELECT id::text FROM gl_accounts WHERE code = '5020'`).Scan(&expense); err != nil {
+		t.Fatalf("expense account: %v", err)
+	}
+	if err := conn.QueryRow(ctx, `SELECT id::text FROM gl_accounts WHERE code = '2010'`).Scan(&payable); err != nil {
+		t.Fatalf("payable account: %v", err)
+	}
+	// entry writes a posted VENDOR_INVOICE entry of a flat 10.00 for the bill,
+	// the shape the base's removed sync left, at the given time.
+	entry := func(bill uuid.UUID, at string, reverses *uuid.UUID) uuid.UUID {
+		t.Helper()
+		id := uuid.New()
+		var rev any
+		if reverses != nil {
+			rev = *reverses
+		}
+		if _, err := conn.Exec(ctx, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
+			VALUES ($1, '2026-01-10', 'legacy approve', 'VENDOR_INVOICE', $2, 'POSTED', 'legacy', $3, $4, $4, 'USD')`,
+			id, bill, rev, at); err != nil {
+			t.Fatalf("seed entry: %v", err)
+		}
+		for _, l := range []struct {
+			account, debit, credit string
+		}{{expense, "10.00", "0"}, {payable, "0", "10.00"}} {
+			if _, err := conn.Exec(ctx, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+				VALUES ($1, $2, $3::uuid, 'legacy leg', $4, $5)`, uuid.New(), id, l.account, l.debit, l.credit); err != nil {
+				t.Fatalf("seed entry line: %v", err)
+			}
+		}
+		return id
+	}
+	insert := func(id uuid.UUID, number, status string) {
+		t.Helper()
+		if _, err := conn.Exec(ctx, `INSERT INTO vendor_invoices (id, vendor_id, invoice_number, invoice_date, due_date,
+			subtotal, tax_amount, total, amount_paid, status, created_at)
+			VALUES ($1, $2, $3, '2026-01-10', '2026-02-10', '10.00', 0, '10.00', '4.00', $4, NOW())`,
+			id, vendor, number, status); err != nil {
+			t.Fatalf("seed %s: %v", number, err)
+		}
+	}
+	oldTime := time.Now().AddDate(0, 0, -10).Format(time.RFC3339)
+	newTime := time.Now().AddDate(0, 0, -2).Format(time.RFC3339)
+
+	// An approved bill with two posted entries: the newest is linked.
+	linked, unlinked, pending := uuid.New(), uuid.New(), uuid.New()
+	insert(linked, "LEG-LINKED", "APPROVED")
+	older := entry(linked, oldTime, nil)
+	newest := entry(linked, newTime, nil)
+	// A partial bill whose only entry is a reversal of another bill's entry:
+	// not linkable, so it stays unlinked and is counted.
+	insert(unlinked, "LEG-UNLINKED", "PARTIAL")
+	elsewhere := uuid.New()
+	stranger := entry(elsewhere, oldTime, nil)
+	entry(unlinked, newTime, &stranger)
+	// A pending bill with a posted entry: never linked, and not counted.
+	insert(pending, "LEG-PENDING", "PENDING")
+	entry(pending, newTime, nil)
+
+	apply106(t, conn, target)
+
+	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, linked); got != newest.String() {
+		t.Errorf("the approved bill links %s, want the newest entry %s", got, newest)
+	}
+	if older == newest {
+		t.Fatal("the two entries share an id")
+	}
+	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, unlinked); got != "null" {
+		t.Errorf("the bill whose only entry is a reversal links %s, want none", got)
+	}
+	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, pending); got != "null" {
+		t.Errorf("the pending bill links %s, want none", got)
+	}
+	joined := strings.Join(*notices, " | ")
+	if !strings.Contains(joined, "no journal entry to link") {
+		t.Errorf("the notices (%s) do not name the unlinked approved bills", joined)
+	}
+	// A second apply changes nothing.
+	apply106(t, conn, target)
+	if got := one106(t, conn, `SELECT COALESCE(gl_entry_id::text, 'null') FROM vendor_invoices WHERE id = $1`, linked); got != newest.String() {
+		t.Errorf("a second apply moved the link to %s", got)
+	}
+}
+
 // TestMigration106_OnTheSeededDatabase applies 106 to a database seeded by
 // the repository's own seed (the recipe's rule: a migration is proved on a
 // seeded database, not only on fixtures), with awkward legacy bills written

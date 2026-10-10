@@ -174,8 +174,10 @@ paths:
         posting failure fails the act (a closed period is a 409 blocker
         period_closed; a line with no account is a 409 blocker
         line_needs_account). To voided: from pending (nothing posted) or
-        approved (the entry is reversed whole); a reason is required, and a
-        bill with money applied is refused with the has_payments blocker.
+        approved (the entry is reversed whole); a reason is required, a bill
+        with money applied is refused with the has_payments blocker, and an
+        approved or partial bill with no linked journal entry (a legacy bill
+        whose posting was swallowed) with the entry_not_linked blocker.
       parameters:
         - name: id
           in: path
