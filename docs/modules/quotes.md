@@ -11,8 +11,8 @@ expiration, and it is the first priced document. The customer accepts
 or rejects the offer through the portal or the integration seam; an
 accepted quote becomes an order through
 `POST /api/v1/quotes/{id}/convert`. The lifecycle spans draft, sent,
-accepted, rejected, expired and reopened, every transition writing one
-outbox event.
+accepted, rejected and expired; rejected and expired reopen to draft, every
+transition writing one outbox event.
 
 This module is the wire template. The recipe in
 [`docs/refactor/MODULE-RECIPE.md`](../refactor/MODULE-RECIPE.md) was
@@ -39,19 +39,32 @@ package.
 
 | Method | Path | One line |
 |---|---|---|
-| GET | `/api/v1/quotes` | Cursor list of quotes, newest first; status and customer_id filter. |
+| GET | `/api/v1/quotes` | Cursor list of `QuoteSummary` items, newest first; status and customer_id filter; the response is `QuotePage` (no `lines`, no file fields, no exposure fields); `total` only under `include=total`. |
 | POST | `/api/v1/quotes` | Create a draft quote, priced through the platform rule, writes `quote.created`. |
-| GET | `/api/v1/quotes/analytics` | Aggregated quote analytics; money in cents. |
+| GET | `/api/v1/quotes/analytics` | Aggregated quote analytics; counts and rates (`total_quotes`, `draft_count`, `sent_count`, `accepted_count`, `rejected_count`, `expired_count`, `conversion_rate`, `ai_sourced_count`, `ai_conversion_rate`, `manual_conversion_rate`, `avg_days_to_close`) and money in cents (`avg_margin_accepted_cents`, `avg_margin_rejected_cents`, `total_quote_value_cents`, `total_accepted_value_cents`); `trend_data` rows carry `total_value_cents` and `accepted_value_cents`. |
 | GET | `/api/v1/quotes/{id}` | One quote with its lines and revision as ETag. |
 | PUT | `/api/v1/quotes/{id}` | Replace a draft quote's header and lines, on the client's revision. |
 | POST | `/api/v1/quotes/{id}/transitions` | Move a quote along its lifecycle, on the client's revision. |
-| POST | `/api/v1/quotes/{id}/convert` | Accept and create the order in one transaction. |
+| POST | `/api/v1/quotes/{id}/convert` | Accept the quote (the `quote.accepted` transition) and create the order in one transaction, answering 201 with the order (ETag and Location); the quote's `freight_cents` becomes one `FREIGHT` charge line on the order; a stocked line sold in a unit other than its product's stocking unit is 409 with the `unit_not_stock_unit` blocker until cycle 3; a quote that already has an order not cancelled is 409 with the `already_converted` blocker; events `quote.accepted` then `order.created`. |
 | GET | `/api/v1/quotes/{id}/file` | Download the original parsed file. |
+| PUT | `/api/v1/quotes/{id}/file` | Attach the AI parse's original file after promotion; `application/octet-stream` body, 5 MiB bound (413 above it); the route takes no query parameter (any is a 400 `unsupported_query_parameter`); the revision precondition is the `If-Match` header, required (428 without); only while the quote is in status `draft`, else 409 with the `quote_not_draft` blocker; the quote is returned with its new ETag and revision plus one; the audit row `quote.file_attached` is written and no outbox event; the route is gated by `quotes:write`. |
 
 The exposure routes at `/api/v1/quotes/exposure` and
 `/api/v1/quotes/{id}/exposure/...` belong to the pricing module and
 register under `internal/pricing` in the route census, even though
-their paths sit under `quotes`.
+their paths sit under `quotes`. The draft routes at
+`/api/v1/drafts/quotes` and `/api/v1/drafts/quotes/{id}[/...]` belong
+to the drafts module and register under `internal/quote` (the
+promotion route turns a quote draft into a quote in one transaction);
+the draft routes are gated by `quotes:propose` and `quotes:commit`
+(the propose and commit scopes of ADR 0007 section 5.1: draft read,
+draft write and the draft link resolver admit both scopes, while
+`promote` is reserved to `quotes:commit`), the entity routes above
+keep the `<module>:read` / `<module>:write` pair and the rule "`quotes:write`
+is the first path segment, anything but GET and HEAD" applies to the
+entity routes only. The draft routes are documented in
+[`docs/modules/drafts.md`](drafts.md) and are listed here only so the
+route census and this page agree on the package that owns the paths.
 
 ## The main resource
 
@@ -67,9 +80,9 @@ their paths sit under `quotes`.
 | `customer_id` | UUID | The customer the quote is for. |
 | `customer_name` | text | Snapshot of the customer name. |
 | `job_id` | UUID, nullable | The project (job) this quote is for. |
-| `total_cents` | integer | The customer's total, in minor units of the customer's currency. |
-| `freight_cents` | integer | The freight amount. |
-| `margin_total_cents` | integer | The computed margin across all lines. |
+| `total_cents` | integer | The customer's total, in minor units. |
+| `freight_cents` | integer | The freight amount, cleared for a pickup. |
+| `margin_total_cents` | integer | The margin total the client sent on create (default 0); create-only, a PUT refuses it, and it is not recomputed from the lines. |
 | `delivery_type` | lowercase enum | `pickup`, `delivery`. |
 | `vehicle_id` | UUID, nullable | The vehicle that will deliver, when known. |
 | `vehicle_name` | text, nullable | The vehicle display name. |
@@ -83,7 +96,7 @@ their paths sit under `quotes`.
 | `original_content_type` | text, nullable | The MIME type of the original parsed file. |
 | `parse_map` | array, nullable | The AI parse mapping data. |
 | `exposure_state` | lowercase enum | The pricing module's worst exposure rollup (`ok`, `flagged`, `escalated`, `ack_required`, `acknowledged`, `blocked`, `overridden`). |
-| `exposure_cents` | integer | The exposure dollar value at the rollup. |
+| `exposure_cents` | integer | The exposure value at the rollup, in integer cents. |
 | `exposure_last_checked_at` | timestamp, nullable | When the exposure scanner last looked at this quote. |
 | `lines` | array of `QuoteLine` | The priced lines, in position order. |
 
@@ -98,17 +111,76 @@ A `QuoteLine` carries:
 | `description` | text | Snapshot of the description. |
 | `customer_note` | text, nullable | The customer's free text note on the line. |
 | `quantity` | decimal string | Scale 4. |
-| `uom` | uppercase enum | The sale unit (`PCS`, `EA`, `LF`, `SF`, `BF`, `MBF`, `SQ`, `BOX`, `CTN`, `RL`, `GAL`, `LBS`, `BAG`, `BUNDLE`, `PAIR`, `SET`). |
+| `uom` | uppercase pattern | The sale unit, regex `^[A-Z]{1,6}$`, a code from the units catalogue (ADR 0006 section 2.1: the seed inserts 23 codes including `EA`, `PCS`, `PAIR`, `DOZ`, `C`, `M`, `SET`, `BOX`, `CTN`, `BAG`, `BUNDLE`, `RL`, `LF`, `SF`, `SQ`, `CF`, `CY`, `GAL`, `LBS`, `CWT`, `TON`, `BF`, `MBF`; dealers add their own). On a product line the value must be one of the product's own sale units (ADR 0006 sections 3.2 and 3.3). |
 | `price_uom` | text | The price unit. |
 | `uom_qty` | decimal string | Scale 4. |
 | `price_uom_qty` | decimal string | Scale 4. |
 | `unit_price_ten_thousandths` | integer | The price per `price_uom`. |
 | `line_total_cents` | integer | The extension, rounded once. |
 | `unit_cost_ten_thousandths` | integer | The cost per stocking unit. |
+| `stock_uom` | text, nullable | The product's stocking unit at the line's create (ADR 0006 section 3.4); null on a line without a product. |
+| `stock_quantity` | decimal string, nullable | The line's quantity converted into the stocking unit, exact at scale 4 (R5); null on a line without a product. |
+| `tally` | object, nullable | The pieces by length a random length line carries (ADR 0006 section 4): `thickness_in`, `width_in`, `rows` (pieces and length_ft), `linear_feet`, `board_feet`. Null on every other line. |
 | `created_at` | timestamp | RFC 3339 UTC. |
 
 The conversion pair (`uom_qty`, `price_uom_qty`) is mandatory; when
 the units agree, the pair is 1 and 1.
+
+### Create and update body
+
+`QuoteRequest` is the body of `POST /api/v1/quotes` and
+`PUT /api/v1/quotes/{id}` (`core/api/fragments/quote.yaml`
+`components.schemas.QuoteRequest`). Required: `customer_id`, `lines`.
+
+| Field | Wire form | Note |
+|---|---|---|
+| `branch_id` | UUID | Create-only. |
+| `customer_id` | UUID | The customer the quote is for. |
+| `job_id` | UUID, nullable | The project (job), if any. |
+| `expires_at` | timestamp, nullable | When the quote stops being valid, RFC 3339 UTC. |
+| `delivery_type` | lowercase enum | `pickup` clears `freight_cents` and `vehicle_id`. |
+| `freight_cents` | integer | Non negative; cleared when `delivery_type` is `pickup`. |
+| `vehicle_id` | UUID, nullable | The vehicle that will deliver; null on a pickup. |
+| `source` | enum | `manual` or `ai`; create-only. |
+| `margin_total_cents` | integer | The margin total the client sends on create (default 0); create-only, never recomputed. |
+| `original_file` | base64 string | The original upload, up to 5 MB; create-only. |
+| `original_filename` | text | Create-only. |
+| `original_content_type` | text | Create-only. |
+| `parse_map` | array, nullable | The AI parse mapping; create-only. |
+| `revision` | integer | The PUT precondition beside `If-Match`; a create carrying one is a 400. |
+| `lines` | array of `QuoteLineRequest` | The quote's lines; see the line request below. |
+
+A PUT refuses the create-only fields
+(`branch_id`, `source`, `margin_total_cents`, `original_file`,
+`original_filename`, `original_content_type`, `parse_map`) with a 400
+naming each one it carries. A create carrying `revision` is refused
+with a 400 naming `revision`.
+
+### Line request
+
+`QuoteLineRequest` is one line of `QuoteRequest` (`core/api/fragments/quote.yaml`
+`components.schemas.QuoteLineRequest`). The only required field is
+`unit_price_ten_thousandths` (scale 4, min 0). The remaining fields
+default as the schema lays out.
+
+| Field | Wire form | Note |
+|---|---|---|
+| `id` | UUID | The line id, kept on a PUT to address an existing line. |
+| `product_id` | UUID, nullable | The product; `sku` and `description` default from it (required when absent). |
+| `sku` | text | Defaulted from `product_id`. |
+| `description` | text | Defaulted from `product_id`. |
+| `customer_note` | text, nullable | A portal user's free text note on the line. |
+| `quantity` | decimal string | Scale 4; required unless the line carries a `tally`. |
+| `uom` | uppercase pattern | Defaulted to the product's sale unit on a product line; a line with neither `uom` nor `product_id` is a 400 naming `lines[i].uom`. |
+| `price_uom` | uppercase pattern | Defaulted to the product's price unit on a product line, to `uom` on the others. |
+| `uom_qty`, `price_uom_qty` | decimal string, decimal string | The conversion pair; the server resolves the pair from the product's unit set on a product line (ADR 0006 section 3.3), a sent pair must equal the resolved one as a ratio, and a line without a product carries the client's pair, required when the two units differ unless the standard sizes derive it. |
+| `unit_price_ten_thousandths` | integer | Scale 4, min 0; the line's only required field. |
+| `tally` | `TallyRequest` object | The pieces by length; rows only. |
+
+`TallyRequest` (`core/api/fragments/quote.yaml`
+`components.schemas.TallyRequest`): `rows` is required (maxItems 100);
+`thickness_in`, `width_in`, `linear_feet` and `board_feet` are read only,
+and one in a request is a 400 naming the field.
 
 ### Money and quantity conventions
 
