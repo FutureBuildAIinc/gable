@@ -9833,7 +9833,7 @@ export interface components {
             is_home?: boolean;
             timezone?: string;
         };
-        BranchSummaryList: components["schemas"]["BranchSummary"][] | null;
+        BranchSummaryList: components["schemas"]["BranchSummary"][];
         UserLocation: {
             user_sub: string;
             /** Format: uuid */
@@ -9843,7 +9843,7 @@ export interface components {
             granted_at: string;
             granted_by?: string;
         };
-        UserLocationList: components["schemas"]["UserLocation"][] | null;
+        UserLocationList: components["schemas"]["UserLocation"][];
         UserBranchGrant: {
             /** Format: uuid */
             branch_id: string;
@@ -9853,7 +9853,7 @@ export interface components {
             /** Format: uuid */
             branch_id: string;
         };
-        StringList: string[] | null;
+        StringList: string[];
         /** @enum {string} */
         MatchingStatus: "PENDING" | "MATCHED" | "PARTIAL" | "EXCEPTION";
         MatchingResult: {
@@ -20727,7 +20727,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The grants, a bare array that is null when none exist. */
+            /** @description The grants, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20751,7 +20751,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The branch summaries, a bare array that is null when none exist. */
+            /** @description The branch summaries, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -20774,7 +20774,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The subject strings, a bare array that is null when none exist. */
+            /** @description The subject strings, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
