@@ -36,24 +36,24 @@ handles are in `core/internal/invoice/handler.go`. The route census
 (`core/api/ROUTES.txt`) lists each one under the `internal/invoice`
 module (the route census has a `module` column whose value is the
 registering package's directory relative to the Go module root).
-Three of the routes below are registered under other
-modules: the email and print routes are `internal/document`, the
-invoice's payment list is `internal/invoice`.
+Two of the routes below are registered under other modules: the
+email route is `internal/document` and the credit memo refund route
+is `internal/payment`. The print routes (below) are `internal/document`.
 
 | Method | Path | One line |
 |---|---|---|
 | GET | `/api/v1/invoices` | Cursor list of invoices, newest first; status, customer_id, job_id, ship_to_id, order_id, overdue filter. |
 | GET | `/api/v1/invoices/{id}` | One invoice with its lines and revision as ETag. |
 | POST | `/api/v1/invoices/{id}/transitions` | Void an invoice. |
-| POST | `/api/v1/invoices/{id}/write-offs` | Write off part or all of an open invoice as bad debt (`internal/invoice`); roles `admin`, `owner`, `finance`; body `{amount_cents, reason}` (1 to 500 chars) and revision; a write off that takes the open amount to zero closes the invoice as `written_off`, else it stays `partial`. |
+| POST | `/api/v1/invoices/{id}/write-offs` | Write off part or all of an open invoice as bad debt (`internal/invoice`); roles `admin`, `owner`, `finance`; body `{amount_cents, reason}` (1 to 500 chars) and revision; posts DR `5040` / CR `1020` and a `WRITE_OFF` subledger row; a write off that takes the open amount to zero closes the invoice as `written_off`, else it stays `partial`. |
 | POST | `/api/v1/invoices/{id}/email` | Email invoice to customer (queued, answers 202, notification is log only; owned by `internal/document`). |
-| GET | `/api/v1/invoices/{id}/payments` | List an invoice's payments (the payment module's read). |
+| GET | `/api/v1/invoices/{id}/payments` | List an invoice's applications (payments, credit memos, early pay discounts and write offs, oldest first, reversals included). |
 | GET | `/api/v1/credit-memos` | Cursor list of credit memos, newest first; status, customer_id, invoice_id, job_id filter. |
 | POST | `/api/v1/credit-memos` | Create a draft credit memo. |
 | GET | `/api/v1/credit-memos/{id}` | One credit memo with its lines and revision as ETag. |
 | PUT | `/api/v1/credit-memos/{id}` | Replace a draft credit memo's header and lines, on the client's revision. |
 | POST | `/api/v1/credit-memos/{id}/applications` | Apply a credit memo's open credit to invoices of the same customer and currency (`internal/invoice`); body `{applications: [{invoice_id, amount_cents}], revision}`; no ledger entry (both sides are in `1020`) and no subledger row. |
-| POST | `/api/v1/credit-memos/{id}/refunds` | Pay a credit memo's open credit out (`internal/payment`); roles `admin`, `owner`, `finance`; body `{amount_cents, reason, method: card\|check\|ach\|other, payment_id?}`; a card refund names the card payment it goes back to and goes through the gateway before the transaction. |
+| POST | `/api/v1/credit-memos/{id}/refunds` | Pay a credit memo's open credit out (`internal/payment`); roles `admin`, `owner`, `finance`; body `{amount_cents, reason, method: card\|check\|ach\|other, payment_id?}`; a card refund names the card payment it goes back to and goes through the gateway before the transaction; posts DR `1020` / CR `1010` and a `REFUND` subledger row. |
 | POST | `/api/v1/credit-memos/{id}/transitions` | Post or void a credit memo. |
 
 The print routes at `/api/v1/documents/print/invoice/{id}` and
@@ -167,14 +167,14 @@ The wire vocabulary is lowercase. The transitions are:
 | Entity | From | To | Event |
 |---|---|---|---|
 | Invoice | `unpaid` with no payments and no applied memos and no live memos and not a counter sale | `void` | `invoice.voided` (reason required) |
-| Invoice | `unpaid`, `partial` | `written_off` | `invoice.written_off` (reason required) when the write off takes the open amount to zero; `invoice.partial` when it leaves the invoice still open |
-| Invoice | `unpaid`, `partial` | `paid` | `invoice.paid` when an application (payment or credit memo) takes the open amount to zero; `invoice.partial` when it leaves the invoice still open |
+| Invoice | `unpaid`, `partial` | `written_off` | `invoice.written_off` (reason required) when the write off takes the open amount to zero, or when an application takes the open amount to zero on an invoice with a live write off; `invoice.partial` when it leaves the invoice still open |
+| Invoice | `unpaid`, `partial` | `paid` | `invoice.paid` when an application (payment or credit memo) takes the open amount to zero and the invoice has no live write off (with one, it closes as `written_off` and writes `invoice.written_off`); `invoice.partial` when it leaves the invoice still open |
 | Invoice | `partial`, `paid`, `written_off` | `unpaid` or `partial` | `invoice.reopened` when an application is reversed |
 | Credit memo | `draft` | `open` | `credit_memo.posted` (mints the number) |
 | Credit memo | `draft` | `void` | `credit_memo.voided` (reason required) |
 | Credit memo | `open` | `void` | `credit_memo.voided` (reason required) |
-| Credit memo | `open`, `partial` | `partial` | `credit_memo.partial` when an application or refund leaves credit open |
-| Credit memo | `open`, `partial` | `applied` | `credit_memo.applied` when an application takes the credit to zero; preceded by `credit_memo.refunded` on a refund that closes the memo |
+| Credit memo | `open`, `partial` | `partial` | `credit_memo.partial` when an application or refund leaves credit open; a refund writes `credit_memo.refunded` first, then the status event |
+| Credit memo | `open`, `partial` | `applied` | `credit_memo.applied` when an application takes the credit to zero; a refund that closes the memo writes `credit_memo.refunded` first, then the status event |
 
 `invoice.voided` is refused with `409 has_applications` when the
 invoice has any payment or any applied credit memo, with
@@ -193,25 +193,26 @@ request.
 
 `invoice.written_off` (ADR 0005 section 9.4) is refused with
 `409 exceeds_open_amount` when the write off is larger than the
-invoice's open amount, with `409 invalid_state_transition` carrying
-`invoice_not_open` when the invoice is not `unpaid` or `partial`,
-and with `409 period_closed` when the branch's accounting period
-is closed; the service enforces the finance role
-(`requireFinance` at `core/internal/invoice/service_ar.go` line 89).
+invoice's open amount, with `409 invalid_state_transition` when the
+invoice is not `unpaid` or `partial`, and with `409 period_closed`
+when the branch's accounting period is closed; the service enforces
+the finance role (`requireFinance` at
+`core/internal/invoice/service_ar.go` line 89).
 `credit_memo.applied` and `credit_memo.partial` (the credit memo's
-application call) are refused with `409 exceeds_open_credit` when
-the credit memo has no open credit left, `409 exceeds_open_amount`
-when an invoice is asked for more than its open amount,
-`409 invoice_void` when an invoice is void, `409 customer_mismatch`
-when an invoice belongs to another customer, and `409 currency_mismatch`
-when the invoice's currency differs. `credit_memo.refunded` (the
-credit memo's refund call, `core/internal/payment/service_card.go`
-`RefundCredit`) is refused with `409 invalid_state_transition` when
-the memo is not `open` or `partial`, with `409 exceeds_open_credit`
-when the refund is larger than the open credit, and with
-`409 customer_mismatch` or `409 currency_mismatch` on a card refund
-when the card payment and the credit memo disagree; the service
-enforces the finance role (`who.finance` at
+application call) are refused with `409 exceeds_open_credit` when the
+lines together ask for more than the memo's open credit, and with
+`409 invalid_state_transition` when the memo is not `open` or `partial`,
+`409 exceeds_open_amount` when an invoice is asked for more than its
+open amount, `409 invoice_void` when an invoice is void,
+`409 customer_mismatch` when an invoice belongs to another customer,
+and `409 currency_mismatch` when the invoice's currency differs.
+`credit_memo.refunded` (the credit memo's refund call,
+`core/internal/payment/service_card.go` `RefundCredit`) is refused with
+`409 invalid_state_transition` when the memo is not `open` or `partial`,
+with `409 exceeds_open_credit` when the refund is larger than the open
+credit, and with `409 customer_mismatch` or `409 currency_mismatch` on a
+card refund when the card payment and the credit memo disagree; the
+service enforces the finance role (`who.finance` at
 `core/internal/payment/service_card.go` line 192).
 
 A credit memo names an invoice, and the credit memo credits tax at
