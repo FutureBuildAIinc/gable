@@ -228,6 +228,59 @@ func (r *Repository) Count(ctx context.Context, f ListFilter) (int64, error) {
 	return n, nil
 }
 
+// ListFull reads one page of bills with their lines in two queries: the page
+// of summaries, then every listed bill's lines at once. The in-process
+// callers (matching) need the whole document per bill, and a Get per row
+// would be a read per bill on every match run.
+func (r *Repository) ListFull(ctx context.Context, f ListFilter) ([]Invoice, error) {
+	summaries, err := r.List(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Invoice, 0, len(summaries))
+	if len(summaries) == 0 {
+		return out, nil
+	}
+	ids := make([]uuid.UUID, len(summaries))
+	byID := make(map[uuid.UUID]int, len(summaries))
+	for i, s := range summaries {
+		ids[i] = s.ID
+		byID[s.ID] = i
+		out = append(out, Invoice{Summary: s})
+	}
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `SELECT l.invoice_id, `+lineColumns+`
+		FROM vendor_invoice_lines l WHERE l.invoice_id = ANY($1)
+		ORDER BY l.invoice_id, l.position, l.created_at, l.id`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read vendor invoice lines: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			invoiceID uuid.UUID
+			l         InvoiceLine
+			qty       string
+			price     int64
+			total     int64
+			created   time.Time
+		)
+		if err := rows.Scan(&invoiceID, &l.ID, &l.Position, &l.Description, &qty, &price, &total,
+			&l.GLAccountID, &l.PurchaseOrderLineID, &l.ProductID, &l.POFreightChargeID, &created); err != nil {
+			return nil, fmt.Errorf("failed to scan vendor invoice line: %w", err)
+		}
+		q, err := httpx.ParseQuantity(qty)
+		if err != nil {
+			return nil, fmt.Errorf("vendor invoice line quantity %q: %w", qty, err)
+		}
+		l.Quantity, l.UnitPriceTenThousandths, l.LineTotalCents = q, httpx.Price(price), httpx.Cents(total)
+		l.CreatedAt = httpx.TimestampOf(created)
+		if i, ok := byID[invoiceID]; ok {
+			out[i].Lines = append(out[i].Lines, l)
+		}
+	}
+	return out, rows.Err()
+}
+
 // LockedInvoice is a bill read under its row lock: what a transition or a
 // payment checks before it writes.
 type LockedInvoice struct {

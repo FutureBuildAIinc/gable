@@ -559,22 +559,19 @@ func (s *Service) GetVendorInvoice(ctx context.Context, id uuid.UUID) (*Invoice,
 }
 
 // ListVendorInvoices is the in-process listing matching reads: every bill of
-// the vendor (or every vendor), optionally by storage status.
+// the vendor (or every vendor), optionally by storage status, with each
+// bill's lines, read in two queries rather than a Get per bill.
 func (s *Service) ListVendorInvoices(ctx context.Context, vendorID *uuid.UUID, status string) ([]Invoice, error) {
-	ids, err := s.repo.List(ctx, ListFilter{VendorID: vendorID, Limit: 100000})
+	invoices, err := s.repo.ListFull(ctx, ListFilter{VendorID: vendorID, Limit: 100000})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Invoice, 0, len(ids))
-	for _, h := range ids {
-		if status != "" && storageStatus(h.Status) != status && h.Status.Status() != status {
+	out := make([]Invoice, 0, len(invoices))
+	for _, inv := range invoices {
+		if status != "" && storageStatus(inv.Status) != status && inv.Status.Status() != status {
 			continue
 		}
-		full, err := s.repo.Get(ctx, h.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *full)
+		out = append(out, inv)
 	}
 	return out, nil
 }
