@@ -40,14 +40,14 @@ func TestScopeTargetClassTable(t *testing.T) {
 		{"PUT", "/api/v1/drafts/quotes/{id}", "quotes", middleware.ScopeDraftWrite, []string{"quotes:propose", "quotes:commit"}},
 		{"POST", "/api/v1/drafts/quotes/{id}/transitions", "quotes", middleware.ScopeDraftWrite, []string{"quotes:propose", "quotes:commit"}},
 		{"POST", "/api/v1/drafts/quotes/{id}/promote", "quotes", middleware.ScopePromotion, []string{"quotes:commit"}},
-	// the orders kind, the same seven shapes (ADR 0007 section 10)
-	{"GET", "/api/v1/drafts/orders", "orders", middleware.ScopeDraftRead, []string{"orders:propose", "orders:commit"}},
-	{"GET", "/api/v1/drafts/orders/{id}", "orders", middleware.ScopeDraftRead, []string{"orders:propose", "orders:commit"}},
-	{"GET", "/api/v1/drafts/orders/feed", "orders", middleware.ScopeDraftRead, []string{"orders:propose", "orders:commit"}},
-	{"POST", "/api/v1/drafts/orders", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
-	{"PUT", "/api/v1/drafts/orders/{id}", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
-	{"POST", "/api/v1/drafts/orders/{id}/transitions", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
-	{"POST", "/api/v1/drafts/orders/{id}/promote", "orders", middleware.ScopePromotion, []string{"orders:commit"}},
+		// the orders kind, the same seven shapes (ADR 0007 section 10)
+		{"GET", "/api/v1/drafts/orders", "orders", middleware.ScopeDraftRead, []string{"orders:propose", "orders:commit"}},
+		{"GET", "/api/v1/drafts/orders/{id}", "orders", middleware.ScopeDraftRead, []string{"orders:propose", "orders:commit"}},
+		{"GET", "/api/v1/drafts/orders/feed", "orders", middleware.ScopeDraftRead, []string{"orders:propose", "orders:commit"}},
+		{"POST", "/api/v1/drafts/orders", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
+		{"PUT", "/api/v1/drafts/orders/{id}", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
+		{"POST", "/api/v1/drafts/orders/{id}/transitions", "orders", middleware.ScopeDraftWrite, []string{"orders:propose", "orders:commit"}},
+		{"POST", "/api/v1/drafts/orders/{id}/promote", "orders", middleware.ScopePromotion, []string{"orders:commit"}},
 		// the two link shapes
 		{"GET", "/api/v1/links/quotes/{id}", "quotes", middleware.ScopeLink, []string{"quotes:read"}},
 		{"GET", "/api/v1/links/drafts/quotes/{id}", "quotes", middleware.ScopeDraftLink, []string{"quotes:propose", "quotes:commit"}},
