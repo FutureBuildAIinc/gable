@@ -343,6 +343,16 @@ describe('accounts payable: writing the wire scales', () => {
     expect(bill!.vendor_invoice_number).toBe('CL-9001')
   })
 
+  it('refuses a price finer than four decimals instead of filing it truncated', async () => {
+    const spy = serve()
+    const el = await mountAsync<LitElement>('gable-accounts-payable')
+    await draftBill(el, { qty: '3', unitPrice: '1.00005', tax: '0' })
+    await submitOpenForm(el)
+
+    const bill = postedBodies(spy).find((b) => 'vendor_invoice_number' in b)
+    expect(bill, 'a price finer than four decimals must not be filed as a silently truncated ten thousandths value').toBeUndefined()
+  })
+
   it('prefills a payment from the selected invoices and sends cents', async () => {
     const spy = serve({ invoices: [invoice({ amount_open_cents: 1_234_567 })] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')

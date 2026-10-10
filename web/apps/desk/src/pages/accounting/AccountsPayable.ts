@@ -24,17 +24,7 @@ import {
  * and a float preview can disagree with the exact bill that is filed.
  */
 function exactLineCents(qty: string, price: string): number {
-    const scaled = (raw: string): bigint => {
-        const t = raw.trim();
-        if (t === '') return 0n;
-        const neg = t.startsWith('-');
-        const body = neg ? t.slice(1) : t;
-        const [int = '0', frac = ''] = body.split('.');
-        const frac4 = (frac + '0000').slice(0, 4);
-        const v = BigInt(int || '0') * 10000n + BigInt(frac4 || '0');
-        return neg ? -v : v;
-    };
-    const product = scaled(qty) * scaled(price); // scale 8
+    const product = scaledTenThousandths(qty) * scaledTenThousandths(price); // scale 8
     const neg = product < 0n;
     const abs = neg ? -product : product;
     const cents = (abs + 500_000n) / 1_000_000n; // one rounding, half away from zero
@@ -208,6 +198,13 @@ export class AccountsPayable extends LitElement {
             }
             if (line.quantity <= 0 || line.unit_price < 0) {
                 ToastService.show('Quantity and unit price must be positive values', 'error');
+                return;
+            }
+            // The wire carries each at scale 4; a finer value would be filed
+            // silently truncated, so the form refuses it instead.
+            if (Math.round(line.quantity * 10_000) / 10_000 !== line.quantity ||
+                Math.round(line.unit_price * 10_000) / 10_000 !== line.unit_price) {
+                ToastService.show('Quantity and unit price carry at most four decimals', 'error');
                 return;
             }
         }
