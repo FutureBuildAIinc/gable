@@ -21,9 +21,9 @@ var ErrNotFound = errors.New("not found")
 
 // ListFilter is the key list's query: the keyset page plus the opt in total.
 type ListFilter struct {
-	Limit    int
-	AfterAt  *time.Time
-	AfterID  uuid.UUID
+	Limit   int
+	AfterAt *time.Time
+	AfterID uuid.UUID
 }
 
 // Repository is the store the service reads and writes through. Every
@@ -38,6 +38,8 @@ type Repository interface {
 	RevokeKey(ctx context.Context, id uuid.UUID) error
 	UpdateLastUsed(ctx context.Context, id uuid.UUID) error
 	GetKeysByPrefix(ctx context.Context, prefix string) ([]*APIKey, error)
+
+	BranchExists(ctx context.Context, id uuid.UUID) (bool, error)
 
 	ReadSetting(ctx context.Context, key string) (string, bool, error)
 	WriteSetting(ctx context.Context, key, value string) error
@@ -56,10 +58,10 @@ func NewRepository(db *database.DB) *PostgresRepository {
 }
 
 func (r *PostgresRepository) CreateKey(ctx context.Context, key *APIKey) error {
-	const q = `INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`
+	const q = `INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes, branch_id, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, q,
-		key.ID, key.Name, key.KeyHash, key.KeyPrefix, key.Scopes, key.CreatedAt.Time)
+		key.ID, key.Name, key.KeyHash, key.KeyPrefix, key.Scopes, key.BranchID, key.CreatedAt.Time)
 	return err
 }
 
@@ -77,7 +79,7 @@ func scanKey(scan func(dest ...any) error) (*APIKey, error) {
 	var k APIKey
 	var created time.Time
 	var lastUsed, revoked *time.Time
-	if err := scan(&k.ID, &k.Name, &k.KeyPrefix, &k.Scopes, &created, &lastUsed, &revoked); err != nil {
+	if err := scan(&k.ID, &k.Name, &k.KeyPrefix, &k.Scopes, &k.BranchID, &created, &lastUsed, &revoked); err != nil {
 		return nil, err
 	}
 	k.CreatedAt = httpx.TimestampOf(created)
@@ -87,7 +89,7 @@ func scanKey(scan func(dest ...any) error) (*APIKey, error) {
 }
 
 func (r *PostgresRepository) GetKey(ctx context.Context, id uuid.UUID) (*APIKey, error) {
-	const q = `SELECT id, name, key_prefix, COALESCE(scopes, '{}'), created_at, last_used_at, revoked_at
+	const q = `SELECT id, name, key_prefix, COALESCE(scopes, '{}'), branch_id, created_at, last_used_at, revoked_at
 		FROM api_keys WHERE id = $1`
 	k, err := scanKey(func(dest ...any) error {
 		return r.db.GetExecutor(ctx).QueryRow(ctx, q, id).Scan(dest...)
@@ -102,7 +104,7 @@ func (r *PostgresRepository) GetKey(ctx context.Context, id uuid.UUID) (*APIKey,
 }
 
 func (r *PostgresRepository) ListKeys(ctx context.Context, f ListFilter) ([]APIKey, error) {
-	q := `SELECT id, name, key_prefix, COALESCE(scopes, '{}'), created_at, last_used_at, revoked_at
+	q := `SELECT id, name, key_prefix, COALESCE(scopes, '{}'), branch_id, created_at, last_used_at, revoked_at
 		FROM api_keys`
 	args := []any{}
 	if f.AfterAt != nil {
@@ -151,7 +153,7 @@ func (r *PostgresRepository) UpdateLastUsed(ctx context.Context, id uuid.UUID) e
 }
 
 func (r *PostgresRepository) GetKeysByPrefix(ctx context.Context, prefix string) ([]*APIKey, error) {
-	const q = `SELECT id, name, key_hash, key_prefix, COALESCE(scopes, '{}'), created_at, last_used_at, revoked_at
+	const q = `SELECT id, name, key_hash, key_prefix, COALESCE(scopes, '{}'), branch_id, created_at, last_used_at, revoked_at
 		FROM api_keys WHERE key_prefix = $1 AND revoked_at IS NULL`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, q, prefix)
 	if err != nil {
@@ -163,7 +165,7 @@ func (r *PostgresRepository) GetKeysByPrefix(ctx context.Context, prefix string)
 		k := &APIKey{}
 		var created time.Time
 		var lastUsed, revoked *time.Time
-		if err := rows.Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.Scopes, &created, &lastUsed, &revoked); err != nil {
+		if err := rows.Scan(&k.ID, &k.Name, &k.KeyHash, &k.KeyPrefix, &k.Scopes, &k.BranchID, &created, &lastUsed, &revoked); err != nil {
 			return nil, err
 		}
 		k.CreatedAt = httpx.TimestampOf(created)
@@ -172,6 +174,16 @@ func (r *PostgresRepository) GetKeysByPrefix(ctx context.Context, prefix string)
 		keys = append(keys, k)
 	}
 	return keys, rows.Err()
+}
+
+// BranchExists reports whether the id names a branch location, so the mint
+// can refuse an unknown branch as a 400 naming branch_id rather than a
+// foreign key fault.
+func (r *PostgresRepository) BranchExists(ctx context.Context, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM locations WHERE id = $1 AND type = 'BRANCH')`, id).Scan(&exists)
+	return exists, err
 }
 
 func (r *PostgresRepository) ReadSetting(ctx context.Context, key string) (string, bool, error) {

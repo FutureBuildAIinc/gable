@@ -87,12 +87,12 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	name, scopes, err := req.Parse()
+	name, scopes, branch, err := req.Parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	raw, key, err := h.service.GenerateKey(r.Context(), name, scopes)
+	raw, key, err := h.service.GenerateKey(r.Context(), name, scopes, branch)
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

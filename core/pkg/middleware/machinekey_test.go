@@ -667,7 +667,7 @@ func newDBAuth(t *testing.T, db *database.DB) *middleware.MachineKeyAuth {
 func createKey(t *testing.T, db *database.DB, scopes ...string) (raw string, id string) {
 	t.Helper()
 	svc := techadmin.NewService(techadmin.NewRepository(db))
-	raw, key, err := svc.GenerateKey(context.Background(), "r1-13 test", scopes)
+	raw, key, err := svc.GenerateKey(context.Background(), "r1-13 test", scopes, nil)
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}

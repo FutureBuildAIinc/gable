@@ -69,6 +69,7 @@ import (
 	"github.com/gablelbm/gable/pkg/apps"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/clientip"
+	"github.com/gablelbm/gable/pkg/confirmgate"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/metrics"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -110,7 +111,7 @@ func (v machineKeyValidator) ValidateKey(ctx context.Context, rawKey string) (mi
 		}
 		return middleware.KeyPrincipal{}, err
 	}
-	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
+	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes, BranchID: k.BranchID}, nil
 }
 
 // Run starts the HTTP API server and blocks until SIGINT or SIGTERM, then
@@ -972,6 +973,13 @@ func Run() {
 	} else {
 		finalHandler = machineKeyAuth.Handler(finalHandler)
 	}
+
+	// The confirm gate (ADR 0007 section 5.4): after auth, so it sees the
+	// claims and the key, and before the idempotency layer, so a refused
+	// request never claims a key. An agent marked session is refused the
+	// promotion route and every entity write of a confirm gated module;
+	// keyed requests are governed by their scopes alone.
+	finalHandler = confirmgate.Middleware(auditLog)(finalHandler)
 
 	// Actor identity (agent headers → context for audit attribution).
 	// Outside auth on purpose: this middleware wraps auth, so it runs before
