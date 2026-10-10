@@ -46,7 +46,7 @@ func TestASaleCannotCompleteIntoAClosedSession(t *testing.T) {
 		t.Errorf("blockers = %v, want session_closed", blockers)
 	}
 	// nothing moved: no invoice, no payment, the stock whole, the sale open
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 0 {
+	if got := f.counterInvoices(t); got != 0 {
 		t.Errorf("%d invoices, want 0", got)
 	}
 	if got := f.stock(); got != "100.0000/0.0000" {

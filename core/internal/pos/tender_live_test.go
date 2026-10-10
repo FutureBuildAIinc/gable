@@ -41,7 +41,7 @@ func TestProviderTaxAboveTheEstimateRefusesTheUnderTender(t *testing.T) {
 	if r := f.addLine(saleID, f.productLine("4")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
 	}
-	invoicesBefore := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`)
+	invoicesBefore := f.counterInvoices(t)
 	paymentsBefore := countOf(t, f.db, `SELECT count(*) FROM payments`)
 	r := f.completeSale(saleID, tender("cash", 2395)) // total 2600 at the provider's tax
 	if r.status != http.StatusConflict {
@@ -51,7 +51,7 @@ func TestProviderTaxAboveTheEstimateRefusesTheUnderTender(t *testing.T) {
 	if len(blockers) == 0 || blockers[0] != "insufficient_tender" {
 		t.Errorf("blockers = %v, want insufficient_tender", blockers)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != invoicesBefore {
+	if got := f.counterInvoices(t); got != invoicesBefore {
 		t.Errorf("%d invoices after the refusal, want %d", got, invoicesBefore)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM payments`); got != paymentsBefore {

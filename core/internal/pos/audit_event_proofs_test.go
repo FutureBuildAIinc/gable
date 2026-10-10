@@ -41,7 +41,7 @@ func TestAFailingAuditWriteRollsTheActBack(t *testing.T) {
 	// The completion.
 	f := newFixture(t, testutil.RequireDB(t))
 	failAuditRows(t, f, "pos.transaction.completed")
-	invoicesBefore := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`)
+	invoicesBefore := f.counterInvoices(t)
 	saleID := f.startSale(nil)
 	if r := f.addLine(saleID, f.productLine("3")); r.status != http.StatusOK {
 		t.Fatalf("add line = %d: %s", r.status, r.raw)
@@ -49,7 +49,7 @@ func TestAFailingAuditWriteRollsTheActBack(t *testing.T) {
 	if r := f.completeSale(saleID, tender("cash", 3266)); r.status == http.StatusOK {
 		t.Fatal("the completion committed under a failing audit write")
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != invoicesBefore {
+	if got := f.counterInvoices(t); got != invoicesBefore {
 		t.Errorf("%d invoices after the refused completion, want %d", got, invoicesBefore)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`, saleID); got != 0 {
@@ -86,14 +86,14 @@ func TestAFailingAuditWriteRollsTheActBack(t *testing.T) {
 	failAuditRows(t, f3, "pos.return.completed")
 	saleID3, body3 := f3.saleOf("2", tender("cash", 1198))
 	lineID := body3.body["lines"].([]any)[0].(map[string]any)["id"].(string)
-	memosBefore := countOf(t, f3.db, `SELECT count(*) FROM credit_memos`)
+	memosBefore := f3.counterMemos(t)
 	if r := f3.returnOn(t, saleID3, lineID, "1"); r.status == http.StatusCreated {
 		t.Fatal("the return committed under a failing audit write")
 	}
-	if got := countOf(t, f3.db, `SELECT count(*) FROM credit_memos`); got != memosBefore {
+	if got := f3.counterMemos(t); got != memosBefore {
 		t.Errorf("%d memos after the refused return, want %d", got, memosBefore)
 	}
-	if got := countOf(t, f3.db, `SELECT count(*) FROM pos_returns`); got != 0 {
+	if got := f3.counterReturns(t); got != 0 {
 		t.Errorf("%d return rows after the refused return, want 0", got)
 	}
 	if got := f3.stock(); got != "98.0000/0.0000" {
@@ -114,24 +114,23 @@ func TestFailingEventWriteRollsTheReturnBack(t *testing.T) {
 	})
 	saleID, body := f.saleOf("2", tender("cash", 1198))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
-	memosBefore := countOf(t, f.db, `SELECT count(*) FROM credit_memos`)
+	memosBefore := f.counterMemos(t)
 	if r := f.returnOn(t, saleID, lineID, "1"); r.status == http.StatusCreated {
 		t.Fatal("the return committed under a failing event write")
 	}
+	// the walk-in sale's row is not this customer's: the return's credit never landed here
 	for _, c := range []struct {
 		what string
-		sql  string
-		args []any
+		got  int64
 		want int64
 	}{
-		{"memos", `SELECT count(*) FROM credit_memos`, nil, memosBefore},
-		{"return rows", `SELECT count(*) FROM pos_returns`, nil, 0},
-		{"refund entries", `SELECT count(*) FROM payment_refunds`, nil, 0},
-		// the walk-in sale's row is not this customer's: the return's credit never landed here
-		{"subledger rows", `SELECT count(*) FROM customer_transactions WHERE customer_id = $1`, []any{f.customerID}, 0},
+		{"memos", f.counterMemos(t), memosBefore},
+		{"return rows", f.counterReturns(t), 0},
+		{"refund entries", f.counterRefunds(t), 0},
+		{"subledger rows", countOf(t, f.db, `SELECT count(*) FROM customer_transactions WHERE customer_id = $1`, f.customerID), 0},
 	} {
-		if got := countOf(t, f.db, c.sql, c.args...); got != c.want {
-			t.Errorf("%s = %d, want %d", c.what, got, c.want)
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.what, c.got, c.want)
 		}
 	}
 	if got := f.stock(); got != "98.0000/0.0000" {

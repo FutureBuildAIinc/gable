@@ -929,7 +929,7 @@ func TestOfflineSyncPendingOnTaxFailureCompletesOnRetry(t *testing.T) {
 	if got := num(t, r.body, "error_count"); got != 0 {
 		t.Errorf("error_count = %d, want 0: a provider failure is never a rejection", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 0 {
+	if got := f.counterInvoices(t); got != 0 {
 		t.Errorf("%d invoices after the pending sync, want 0", got)
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM payments`); got != 0 {
@@ -945,7 +945,7 @@ func TestOfflineSyncPendingOnTaxFailureCompletesOnRetry(t *testing.T) {
 	if got := num(t, r.body, "synced_count"); got != 1 {
 		t.Errorf("synced_count = %d, want 1 (the body: %s)", got, r.raw)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 1 {
+	if got := f.counterInvoices(t); got != 1 {
 		t.Errorf("%d invoices after the retry, want 1", got)
 	}
 	r = f.do("POST", "/api/v1/pos/sync", batch(clientID), "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))

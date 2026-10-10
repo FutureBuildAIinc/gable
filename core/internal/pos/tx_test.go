@@ -33,28 +33,29 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	f.addLine(saleID, f.productLine("3"))
 	// the table wide counts before the attempt: the seeded database shares
 	// these tables, so the proof is that the failed act moves none of them.
-	invoicesBefore := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`)
-	paymentsBefore := countOf(t, f.db, `SELECT count(*) FROM payments`)
-	entriesBefore := countOf(t, f.db, `SELECT count(*) FROM gl_journal_entries`)
+	invoicesBefore := f.counterInvoices(t)
+	paymentsBefore := f.counterPayments(t)
+	entriesBefore := f.counterEntries(t)
 	r := f.completeSale(saleID, tender("cash", 3266))
 	if r.status == httpOK {
 		t.Fatal("the sale completed with a failing event write")
 	}
 	// nothing stayed: no invoice, no payment, no tender, the stock unmoved,
-	// the sale still open.
+	// the sale still open. Every count is this fixture's own (the database
+	// is shared with whatever runs beside it).
 	for _, c := range []struct {
-		sql  string
+		what string
+		got  int64
 		want int64
-		args []any
 	}{
-		{`SELECT count(*) FROM invoices WHERE order_id IS NULL`, invoicesBefore, nil},
-		{`SELECT count(*) FROM payments`, paymentsBefore, nil},
-		{`SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`, 0, []any{saleID}},
-		{`SELECT count(*) FROM gl_journal_entries`, entriesBefore, nil},
-		{`SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction'`, 0, nil},
+		{"invoices", f.counterInvoices(t), invoicesBefore},
+		{"payments", f.counterPayments(t), paymentsBefore},
+		{"tenders", countOf(t, f.db, `SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`, saleID), 0},
+		{"entries", f.counterEntries(t), entriesBefore},
+		{"events", countOf(t, f.db, `SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction'`), 0},
 	} {
-		if got := countOf(t, f.db, c.sql, c.args...); got != c.want {
-			t.Errorf("%s = %d, want %d", c.sql, got, c.want)
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.what, c.got, c.want)
 		}
 	}
 	if got := f.stock(); got != "100.0000/0.0000" {
@@ -67,7 +68,7 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 	// number the rolled back sale would have taken.
 	f.events.fail = ""
 	saleID2, _ := f.saleOf("1", tender("cash", 599))
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != invoicesBefore+1 {
+	if got := f.counterInvoices(t); got != invoicesBefore+1 {
 		t.Errorf("%d invoices after the retry, want %d", got, invoicesBefore+1)
 	}
 	_ = saleID2
@@ -128,7 +129,7 @@ func TestTwoSalesOfTheLastUnit(t *testing.T) {
 	if got := f.stock(); got != "0.0000/0.0000" {
 		t.Errorf("stock = %s, want 0 (the last unit went out once)", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 1 {
+	if got := f.counterInvoices(t); got != 1 {
 		t.Errorf("%d invoices, want 1", got)
 	}
 }
@@ -202,7 +203,8 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 	// consecutive numbers, no gap
 	var numbers []int
 	rows, err := f.db.Pool.Query(context.Background(), `
-		SELECT substring(i.number FROM 4)::bigint FROM invoices i WHERE i.order_id IS NULL ORDER BY 1`)
+		SELECT substring(i.number FROM 4)::bigint FROM invoices i
+			WHERE i.id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL) ORDER BY 1`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,6 +385,44 @@ func TestThreeConcurrentReturnsOfOneUnitLetOneThrough(t *testing.T) {
 	}
 	if got := f.stock(); got != "100.0000/0.0000" {
 		t.Errorf("stock = %s, want 100 (the one unit back once)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (fourth review P2-5): the fixture's balance and count reads scope to
+// the fixture's own documents, so the pos suite passes beside the other
+// packages writing the same tables in one database (the way CI runs it): a
+// foreign package's invoice, memo, payment or entry never enters this
+// fixture's account balance.
+func TestTheFixturesBalanceReadsOnlyItsOwnDocuments(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	f.ensureOpenTill(t)
+	f.saleOf("1", tender("cash", 599))
+	if got := f.accountBalance("1010"); got != 599 {
+		t.Fatalf("cash balance = %d, want 599", got)
+	}
+	// another package's shape, written beside the fixture: a posted invoice
+	// of another customer with its own 1010 entry
+	foreignCustomer := uuid.New()
+	foreignInvoice := uuid.New()
+	mustExec(t, f.db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Elsewhere Co', $2, $3)`,
+		foreignCustomer, "WOTHER-"+uuid.NewString()[:8], f.branchID)
+	mustExec(t, f.db, `INSERT INTO invoices (id, customer_id, branch_id, number, status, invoice_date, currency, subtotal, tax_amount, total_amount, amount_open, created_at, updated_at)
+		VALUES ($1, $2, $3, 'INV-OTHER-1', 'PAID', CURRENT_DATE, 'USD', 4000, 0, 4000, 0, NOW(), NOW())`, foreignInvoice, foreignCustomer, f.branchID)
+	entry := uuid.New()
+	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, memo, source, source_ref_id, status, currency)
+		VALUES ($1, 'another package''s entry', 'INVOICE', $2, 'POSTED', 'USD')`, entry, foreignInvoice)
+	mustExec(t, f.db, `INSERT INTO gl_journal_lines (journal_entry_id, account_id, debit, credit, description)
+		SELECT $1, a.id, 0.40, 0, 'foreign cash' FROM gl_accounts a WHERE a.code = '1010'`, entry)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM gl_journal_lines WHERE journal_entry_id = $1`, entry)
+		mustExec(t, f.db, `DELETE FROM gl_journal_entries WHERE id = $1`, entry)
+		mustExec(t, f.db, `DELETE FROM invoices WHERE id = $1`, foreignInvoice)
+		mustExec(t, f.db, `DELETE FROM customers WHERE id = $1`, foreignCustomer)
+	})
+	if got := f.accountBalance("1010"); got != 599 {
+		t.Errorf("cash balance = %d with a foreign entry beside it, want 599 (only the fixture's documents count)", got)
 	}
 	f.assertARInvariants(t)
 }

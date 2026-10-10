@@ -462,19 +462,85 @@ func (f *fixture) legsFor(ids ...string) (entries int, legs map[string]leg) {
 }
 
 // accountBalance is an account's balance over the entries this fixture's
-// acts wrote (the ones the fixture found on entry are excluded).
+// own documents sourced: its customers' (and the walk-in's) invoices, credit
+// memos, payments, applications and refunds, the counter's own acts and this
+// register's till sessions, and every reversal of one of those. A package
+// running beside this one against the same database never enters the count
+// (fourth review P2-5).
 func (f *fixture) accountBalance(code string) int64 {
 	f.t.Helper()
+	walkIn := `(SELECT id FROM customers WHERE account_number = 'WALK-IN')`
+	invs := `(SELECT id FROM invoices WHERE customer_id IN ($2, ` + walkIn + `) OR id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL))`
+	cms := `(SELECT id FROM credit_memos WHERE customer_id IN ($2, ` + walkIn + `) OR id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL))`
+	pays := `(SELECT id FROM payments WHERE customer_id IN ($2, ` + walkIn + `))`
+	docs := `((SELECT id::text FROM invoices WHERE id IN ` + invs + `)
+		UNION (SELECT id::text FROM credit_memos WHERE id IN ` + cms + `)
+		UNION (SELECT id::text FROM payments WHERE id IN ` + pays + `)
+		UNION (SELECT id::text FROM ar_applications WHERE invoice_id IN ` + invs + ` OR payment_id IN ` + pays + ` OR credit_memo_id IN ` + cms + `)
+		UNION (SELECT id::text FROM payment_refunds WHERE payment_id IN ` + pays + ` OR credit_memo_id IN ` + cms + `)
+		UNION (SELECT id::text FROM pos_transactions)
+		UNION (SELECT id::text FROM pos_returns)
+		UNION (SELECT id::text FROM till_sessions WHERE register_id = $3))`
 	var n int64
 	if err := f.db.Pool.QueryRow(context.Background(), `
 		SELECT COALESCE(ROUND((SUM(l.debit) - SUM(l.credit)) * 100)::bigint, 0)
 		FROM gl_journal_lines l
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		JOIN gl_accounts a ON a.id = l.account_id
-		WHERE a.code = $1 AND NOT (e.id::text = ANY($2::text[]))`, code, f.entryExclusions()).Scan(&n); err != nil {
+		WHERE a.code = $1 AND NOT (e.id::text = ANY($4::text[]))
+			AND (e.source_ref_id::text IN `+docs+`
+				OR e.reverses_entry_id IN (SELECT o.id FROM gl_journal_entries o WHERE o.source_ref_id::text IN `+docs+`))`,
+		code, f.customerID, f.register, f.entryExclusions()).Scan(&n); err != nil {
 		f.t.Fatal(err)
 	}
 	return n
+}
+
+// The fixture's own document counts (fourth review P2-5): every count a
+// test asserts is scoped to what this fixture's acts wrote, so the pos
+// suite passes beside the other packages writing the same tables in one
+// database (the way CI runs it): the counter's invoices, the memos of its
+// customers and its returns, its register's returns, and its customers'
+// payment refunds.
+
+func (f *fixture) counterInvoices(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM invoices WHERE id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL)`)
+}
+
+func (f *fixture) counterMemos(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id IN ($1,
+		(SELECT id FROM customers WHERE account_number = 'WALK-IN'))
+		OR id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL)`, f.customerID)
+}
+
+func (f *fixture) counterReturns(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM pos_returns WHERE register_id = $1`, f.register)
+}
+
+func (f *fixture) counterPayments(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM payments WHERE customer_id IN ($1,
+		(SELECT id FROM customers WHERE account_number = 'WALK-IN'))`, f.customerID)
+}
+
+func (f *fixture) counterEntries(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM gl_journal_entries e WHERE e.source_ref_id::text IN
+		((SELECT id::text FROM invoices WHERE id IN (SELECT invoice_id FROM pos_transactions WHERE invoice_id IS NOT NULL))
+		UNION (SELECT id::text FROM payments WHERE customer_id IN ($1, (SELECT id FROM customers WHERE account_number = 'WALK-IN')))
+		UNION (SELECT id::text FROM pos_transactions)
+		UNION (SELECT id::text FROM pos_returns)
+		UNION (SELECT id::text FROM till_sessions WHERE register_id = $2))`, f.customerID, f.register)
+}
+
+func (f *fixture) counterRefunds(t *testing.T) int64 {
+	t.Helper()
+	return countOf(t, f.db, `SELECT count(*) FROM payment_refunds WHERE payment_id IN
+		(SELECT id FROM payments WHERE customer_id IN ($1, (SELECT id FROM customers WHERE account_number = 'WALK-IN')))
+		OR credit_memo_id IN (SELECT credit_memo_id FROM pos_returns WHERE credit_memo_id IS NOT NULL)`, f.customerID)
 }
 
 // entryExclusions lists the prior entry ids, with a sentinel that is never

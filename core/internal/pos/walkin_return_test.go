@@ -25,7 +25,7 @@ func TestAWalkInReturnRefusesAccount(t *testing.T) {
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "original_sale_id": saleID, "refund_method": "account",
 		"reason": "store credit for a stranger",
-		"lines": []map[string]any{{"line_id": lineID, "quantity": "1", "restock": true}},
+		"lines":  []map[string]any{{"line_id": lineID, "quantity": "1", "restock": true}},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 	if r.status != http.StatusConflict {
 		t.Fatalf("walk-in account return = %d, want 409: %s", r.status, r.raw)
@@ -38,7 +38,7 @@ func TestAWalkInReturnRefusesAccount(t *testing.T) {
 	if got := countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id = (SELECT id FROM customers WHERE account_number = 'WALK-IN')`); got != 0 {
 		t.Errorf("%d memos on the walk-in customer, want 0", got)
 	}
-	if got := countOf(t, f.db, `SELECT count(*) FROM pos_returns`); got != 0 {
+	if got := f.counterReturns(t); got != 0 {
 		t.Errorf("%d return rows, want 0", got)
 	}
 	if got := f.stock(); got != "99.0000/0.0000" {

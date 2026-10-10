@@ -370,7 +370,6 @@ func TestMigration105_POSWireContract(t *testing.T) {
 	}
 }
 
-
 // RULE (second review P3-2): the up refuses to migrate a legacy ACCOUNT
 // return with no customer, naming the rows, instead of dying on the memo's
 // NOT NULL halfway.
