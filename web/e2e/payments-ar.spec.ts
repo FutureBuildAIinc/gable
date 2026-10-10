@@ -160,7 +160,10 @@ test.describe('Payments, unapplied cash and AR', () => {
     // with room under its credit limit: the seed parks one customer over its
     // limit for the credit hold demo, and an order for it goes on hold rather
     // than confirm. Quote dates are random, so without this check that
-    // customer is sometimes the first one found.
+    // customer is sometimes the first one found. The room is counted as the
+    // order's credit check counts it (ADR 0005 5.3): the receivable plus the
+    // customer's live orders, here their whole totals, which is never less
+    // than their unbilled remainder.
     const quotes = ((await (await request.get('/api/v1/quotes?limit=200')).json()) as { items: { customer_id: string; customer_name?: string; job_id: string | null }[] }).items;
     const jobsByCustomer = new Map<string, Set<string>>();
     for (const q of quotes) {
@@ -172,7 +175,13 @@ test.describe('Payments, unapplied cash and AR', () => {
     for (const [customer, jobs] of jobsByCustomer) {
         if (jobs.size < 2) continue;
         const c = (await (await request.get(`/api/v1/customers/${customer}`)).json()) as { credit_limit_cents: number | null; balance_cents: number };
-        if (c.credit_limit_cents === null || c.credit_limit_cents - c.balance_cents >= 2_000_000) { kelbrook = customer; break; }
+        if (c.credit_limit_cents === null) { kelbrook = customer; break; }
+        let live = 0;
+        for (const status of ['confirmed', 'backordered', 'on_hold']) {
+          const page = (await (await request.get(`/api/v1/orders?customer_id=${customer}&status=${status}&limit=200`)).json()) as { items: { total_cents: number }[] };
+          live += page.items.reduce((n, o) => n + o.total_cents, 0);
+        }
+        if (c.credit_limit_cents - c.balance_cents - live >= 2_000_000) { kelbrook = customer; break; }
     }
     if (!kelbrook) {
         test.skip(true, 'the seed holds no customer with two jobs and credit room to age by');
