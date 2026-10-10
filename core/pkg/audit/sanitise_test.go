@@ -13,10 +13,11 @@ import (
 // going into an audit_log row for Postgres text and jsonb. A caller
 // controlled value (the refused path, the scope) can carry a NUL byte or
 // invalid UTF-8; the jsonb parser rejects \u0000 with SQLSTATE 22P05, and
-// a NUL in a text column is also rejected, so the writer strips both before
-// the marshalled row reaches the database. The unit test exercises the
-// three input shapes the audit trail meets: ordinary text, a NUL byte, and
-// invalid UTF-8.
+// a NUL in a text column is also rejected, so the writer replaces both
+// before the marshalled row reaches the database (a NUL with the visible
+// marker `\u0000` and an invalid byte with U+FFFD). The unit test
+// exercises the three input shapes the audit trail meets: ordinary text,
+// a NUL byte, and invalid UTF-8.
 
 func TestSanitiseString_OrdinaryTextIsUnchanged(t *testing.T) {
 	cases := []string{
