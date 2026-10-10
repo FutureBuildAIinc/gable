@@ -64,8 +64,8 @@ import (
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/internal/salesteam"
 	"github.com/gablelbm/gable/internal/tax"
-	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
@@ -666,11 +666,17 @@ func Run() {
 	posHandler := pos.NewHandler(posSvc)
 	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
 
-	// Accounts Payable Module
+	// Accounts Payable Module: the vendor invoice routes on the wire contract
+	// (C4-1b, ADR 0008 7.4). The bills carry a branch, so every route runs
+	// behind the branch middleware and the create holds its payload branch to
+	// the caller's context (ADR 0008 section 11).
 	apRepo := ap.NewRepository(db)
-	apSvc := ap.NewService(db, apRepo, glSvc, logger)
-	apHandler := ap.NewHandler(apSvc)
-	apHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	apSvc := ap.NewService(db, apRepo, glSvc, logger).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db).
+		WithAuditLog(auditLog).
+		WithBranchGuard(wall.guard)
+	ap.NewHandler(apSvc).RegisterRoutes(mux, scoped("admin", "owner", "finance"))
 
 	// 3-Way PO Matching Module
 	matchingRepo := matching.NewRepository(db)

@@ -19,6 +19,7 @@ import (
 const (
 	AccountCodeInventory      = "1030"
 	AccountCodeSalesTax       = "2020"
+	AccountCodeAP             = "2010" // Accounts Payable: what vendors are owed (C4-1b, ADR 0008 7.4)
 	AccountCodeCOGS           = "5010"
 	AccountCodeDeliveryRev    = "4020"
 	AccountCodeSalesDiscounts = "4050"

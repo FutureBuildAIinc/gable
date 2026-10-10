@@ -592,18 +592,28 @@ func r1bAAPGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/ap/invoices",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "invoice_number": "GOLD-AP-A01",
-					"invoice_date": "{today}", "due_date": "{today+30}", "tax_amount": 0,
+					"vendor_id": "{vendor}", "vendor_invoice_number": "GOLD-AP-A01",
+					"invoice_date": "{today}", "due_date": "{today+30}", "tax_cents": 0,
 					"lines": []map[string]any{
-						{"description": "golden ap payable line", "quantity": 2, "unit_price": 50.0},
+						{"description": "golden ap payable line", "quantity": "2",
+							"unit_price_ten_thousandths": 500000, "gl_account_id": "{expenseAccount}"},
 					},
 				},
 				extract: map[string]string{"a_apinvoice": "/id"},
 			},
-			// AUTH_MODE=dev attaches no claims, and the approve handler
-			// requires an authenticated approver: 401 on every dev call.
-			{name: "ap.invoice.approve.no_claims", method: "POST", path: "/api/v1/ap/invoices/{a_apinvoice}/approve"},
-			{name: "ap.invoice.approve.bad_id", method: "POST", path: "/api/v1/ap/invoices/not-a-uuid/approve"},
+			{name: "ap.invoice.approve.no_precondition", method: "POST", path: "/api/v1/ap/invoices/{a_apinvoice}/transitions",
+				body: map[string]any{"to": "approved"}},
+			{name: "ap.invoice.approve", method: "POST", path: "/api/v1/ap/invoices/{a_apinvoice}/transitions",
+				body: map[string]any{"to": "approved", "revision": 1}},
+			{name: "ap.invoice.approve.again", method: "POST", path: "/api/v1/ap/invoices/{a_apinvoice}/transitions",
+				body: map[string]any{"to": "approved", "revision": 2}},
+			{name: "ap.invoice.transition.bad_id", method: "POST", path: "/api/v1/ap/invoices/not-a-uuid/transitions",
+				body: map[string]any{"to": "approved", "revision": 1}},
+			// The live failure the C4-1b fixes pin in the golden: a paid bill
+			// takes no further payment, and one with money applied does not
+			// void.
+			{name: "ap.invoice.events", method: "GET",
+				path: "/api/v1/events?types=vendor_invoice.created,vendor_invoice.approved&limit=10"},
 			{name: "ap.payments.list_empty_for_vendor", method: "GET", path: "/api/v1/ap/payments?vendor_id={vendor}"},
 			{
 				name:   "ap.payment.create",
@@ -628,6 +638,13 @@ func r1bAAPGroups() []groupDef {
 				},
 			},
 			{name: "ap.invoice.get.after_settle", method: "GET", path: "/api/v1/ap/invoices/{a_apinvoice}"},
+			{name: "ap.payment.create.paid_invoice", method: "POST", path: "/api/v1/ap/payments",
+				body: map[string]any{
+					"vendor_id": "{vendor}", "amount": 1.0, "method": "CHECK", "payment_date": "{today}",
+					"invoice_ids": []any{"{a_apinvoice}"},
+				}},
+			{name: "ap.invoice.void.with_payments", method: "POST", path: "/api/v1/ap/invoices/{a_apinvoice}/transitions",
+				body: map[string]any{"to": "voided", "revision": 4, "reason": "golden void refused"}},
 			{name: "ap.payments.list_vendor", method: "GET", path: "/api/v1/ap/payments?vendor_id={vendor}", sortPrimaryArray: true},
 			{name: "ap.payment.create.bad_date", method: "POST", path: "/api/v1/ap/payments",
 				body: map[string]any{

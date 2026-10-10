@@ -7,33 +7,99 @@
       "body": {
         "due_date": "<day+0>",
         "invoice_date": "<day+0>",
-        "invoice_number": "GOLD-AP-001",
         "lines": [
           {
             "description": "golden ap line",
-            "quantity": 1,
-            "unit_price": 100
+            "gl_account_id": "<id-1>",
+            "quantity": "1",
+            "unit_price_ten_thousandths": 1000000
           }
         ],
-        "tax_amount": 0,
-        "vendor_id": "<id-1>"
+        "tax_cents": 0,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-001"
       }
     },
     "response": {
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "amount_paid": 0,
+        "amount_open_cents": 10000,
+        "amount_paid_cents": 0,
+        "approved_at": null,
+        "approved_by": null,
+        "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
-        "due_date": "<ts+0d>",
-        "id": "<id-2>",
-        "invoice_date": "<ts+0d>",
-        "invoice_number": "GOLD-AP-001",
-        "status": "PENDING",
-        "subtotal": 10000,
-        "tax_amount": 0,
-        "total": 10000,
-        "vendor_id": "<id-1>"
+        "currency": "USD",
+        "due_date": "<day+0>",
+        "gl_entry_id": null,
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap line",
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "1",
+            "unit_price_ten_thousandths": 1000000
+          }
+        ],
+        "notes": "",
+        "number": "AP-000005",
+        "po_id": null,
+        "revision": 1,
+        "status": "pending",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-001",
+        "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.create.validation",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices",
+      "body": {
+        "due_date": "<day+0>",
+        "invoice_date": "<day+0>",
+        "lines": [
+          {
+            "description": "no account",
+            "quantity": "1",
+            "unit_price_ten_thousandths": 100
+          }
+        ],
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-002"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "lines[0].gl_account_id",
+              "message": "is required: the approve entry debits each line's account"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
       }
     }
   },
@@ -41,34 +107,48 @@
     "name": "ap.invoice.get",
     "request": {
       "method": "GET",
-      "path": "/api/v1/ap/invoices/<id-2>"
+      "path": "/api/v1/ap/invoices/<id-4>"
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "amount_paid": 0,
+        "amount_open_cents": 10000,
+        "amount_paid_cents": 0,
+        "approved_at": null,
+        "approved_by": null,
+        "branch_id": "<id-3>",
         "created_at": "<ts+0d>",
-        "due_date": "<ts+0d>",
-        "id": "<id-2>",
-        "invoice_date": "<ts+0d>",
-        "invoice_number": "GOLD-AP-001",
+        "currency": "USD",
+        "due_date": "<day+0>",
+        "gl_entry_id": null,
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
         "lines": [
           {
             "created_at": "<ts+0d>",
             "description": "golden ap line",
-            "id": "<id-3>",
-            "invoice_id": "<id-2>",
-            "line_total": 10000,
-            "quantity": 1,
-            "unit_price": 10000
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "1",
+            "unit_price_ten_thousandths": 1000000
           }
         ],
-        "status": "PENDING",
-        "subtotal": 10000,
-        "tax_amount": 0,
-        "total": 10000,
-        "vendor_id": "<id-1>",
+        "notes": "",
+        "number": "AP-000005",
+        "po_id": null,
+        "revision": 1,
+        "status": "pending",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-001",
         "vendor_name": "BC Roofing Wholesale"
       }
     }
@@ -82,78 +162,304 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "amount_paid": 0,
-          "created_at": "<ts-91d>",
-          "due_date": "<ts-91d>",
-          "id": "<id-4>",
-          "invoice_date": "<ts-91d>",
-          "invoice_number": "GOLD-WIN-B91",
-          "status": "PENDING",
-          "subtotal": 91091,
-          "tax_amount": 0,
-          "total": 91091,
-          "vendor_id": "<id-1>",
-          "vendor_name": "BC Roofing Wholesale"
+      "body": {
+        "items": [
+          {
+            "amount_open_cents": 10000,
+            "amount_paid_cents": 0,
+            "approved_at": null,
+            "approved_by": null,
+            "branch_id": "<id-3>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "due_date": "<day+0>",
+            "gl_entry_id": null,
+            "id": "<id-4>",
+            "invoice_date": "<day+0>",
+            "notes": "",
+            "number": "AP-000005",
+            "po_id": null,
+            "revision": 1,
+            "status": "pending",
+            "subtotal_cents": 10000,
+            "tax_cents": 0,
+            "total_cents": 10000,
+            "vendor_id": "<id-2>",
+            "vendor_invoice_number": "GOLD-AP-001",
+            "vendor_name": "BC Roofing Wholesale"
+          },
+          {
+            "amount_open_cents": 29029,
+            "amount_paid_cents": 0,
+            "approved_at": null,
+            "approved_by": null,
+            "branch_id": "<id-3>",
+            "created_at": "<ts-29d>",
+            "currency": "USD",
+            "due_date": "<day-29>",
+            "gl_entry_id": null,
+            "id": "<id-7>",
+            "invoice_date": "<day-29>",
+            "notes": "golden clock window fixture",
+            "number": "AP-000001",
+            "po_id": null,
+            "revision": 1,
+            "status": "pending",
+            "subtotal_cents": 29029,
+            "tax_cents": 0,
+            "total_cents": 29029,
+            "vendor_id": "<id-2>",
+            "vendor_invoice_number": "GOLD-WIN-B29",
+            "vendor_name": "BC Roofing Wholesale"
+          },
+          {
+            "amount_open_cents": 31031,
+            "amount_paid_cents": 0,
+            "approved_at": null,
+            "approved_by": null,
+            "branch_id": "<id-3>",
+            "created_at": "<ts-31d>",
+            "currency": "USD",
+            "due_date": "<day-31>",
+            "gl_entry_id": null,
+            "id": "<id-8>",
+            "invoice_date": "<day-31>",
+            "notes": "golden clock window fixture",
+            "number": "AP-000002",
+            "po_id": null,
+            "revision": 1,
+            "status": "pending",
+            "subtotal_cents": 31031,
+            "tax_cents": 0,
+            "total_cents": 31031,
+            "vendor_id": "<id-2>",
+            "vendor_invoice_number": "GOLD-WIN-B31",
+            "vendor_name": "BC Roofing Wholesale"
+          }
+        ],
+        "limit": 3,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.list.status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices?limit=3&status=pending"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "amount_open_cents": 10000,
+            "amount_paid_cents": 0,
+            "approved_at": null,
+            "approved_by": null,
+            "branch_id": "<id-3>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "due_date": "<day+0>",
+            "gl_entry_id": null,
+            "id": "<id-4>",
+            "invoice_date": "<day+0>",
+            "notes": "",
+            "number": "AP-000005",
+            "po_id": null,
+            "revision": 1,
+            "status": "pending",
+            "subtotal_cents": 10000,
+            "tax_cents": 0,
+            "total_cents": 10000,
+            "vendor_id": "<id-2>",
+            "vendor_invoice_number": "GOLD-AP-001",
+            "vendor_name": "BC Roofing Wholesale"
+          },
+          {
+            "amount_open_cents": 29029,
+            "amount_paid_cents": 0,
+            "approved_at": null,
+            "approved_by": null,
+            "branch_id": "<id-3>",
+            "created_at": "<ts-29d>",
+            "currency": "USD",
+            "due_date": "<day-29>",
+            "gl_entry_id": null,
+            "id": "<id-7>",
+            "invoice_date": "<day-29>",
+            "notes": "golden clock window fixture",
+            "number": "AP-000001",
+            "po_id": null,
+            "revision": 1,
+            "status": "pending",
+            "subtotal_cents": 29029,
+            "tax_cents": 0,
+            "total_cents": 29029,
+            "vendor_id": "<id-2>",
+            "vendor_invoice_number": "GOLD-WIN-B29",
+            "vendor_name": "BC Roofing Wholesale"
+          },
+          {
+            "amount_open_cents": 31031,
+            "amount_paid_cents": 0,
+            "approved_at": null,
+            "approved_by": null,
+            "branch_id": "<id-3>",
+            "created_at": "<ts-31d>",
+            "currency": "USD",
+            "due_date": "<day-31>",
+            "gl_entry_id": null,
+            "id": "<id-8>",
+            "invoice_date": "<day-31>",
+            "notes": "golden clock window fixture",
+            "number": "AP-000002",
+            "po_id": null,
+            "revision": 1,
+            "status": "pending",
+            "subtotal_cents": 31031,
+            "tax_cents": 0,
+            "total_cents": 31031,
+            "vendor_id": "<id-2>",
+            "vendor_invoice_number": "GOLD-WIN-B31",
+            "vendor_name": "BC Roofing Wholesale"
+          }
+        ],
+        "limit": 3,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.list.bad_status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices?status=PENDING"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be a comma separated list of: pending, approved, partial, paid, voided"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
-        {
-          "amount_paid": 0,
-          "created_at": "<ts-61d>",
-          "due_date": "<ts-61d>",
-          "id": "<id-5>",
-          "invoice_date": "<ts-61d>",
-          "invoice_number": "GOLD-WIN-B61",
-          "status": "PENDING",
-          "subtotal": 61061,
-          "tax_amount": 0,
-          "total": 61061,
-          "vendor_id": "<id-1>",
-          "vendor_name": "BC Roofing Wholesale"
-        },
-        {
-          "amount_paid": 0,
-          "created_at": "<ts-31d>",
-          "due_date": "<ts-31d>",
-          "id": "<id-6>",
-          "invoice_date": "<ts-31d>",
-          "invoice_number": "GOLD-WIN-B31",
-          "status": "PENDING",
-          "subtotal": 31031,
-          "tax_amount": 0,
-          "total": 31031,
-          "vendor_id": "<id-1>",
-          "vendor_name": "BC Roofing Wholesale"
-        },
-        {
-          "amount_paid": 0,
-          "created_at": "<ts-29d>",
-          "due_date": "<ts-29d>",
-          "id": "<id-7>",
-          "invoice_date": "<ts-29d>",
-          "invoice_number": "GOLD-WIN-B29",
-          "status": "PENDING",
-          "subtotal": 29029,
-          "tax_amount": 0,
-          "total": 29029,
-          "vendor_id": "<id-1>",
-          "vendor_name": "BC Roofing Wholesale"
-        },
-        {
-          "amount_paid": 0,
-          "created_at": "<ts+0d>",
-          "due_date": "<ts+0d>",
-          "id": "<id-2>",
-          "invoice_date": "<ts+0d>",
-          "invoice_number": "GOLD-AP-001",
-          "status": "PENDING",
-          "subtotal": 10000,
-          "tax_amount": 0,
-          "total": 10000,
-          "vendor_id": "<id-1>",
-          "vendor_name": "BC Roofing Wholesale"
+        "meta": {
+          "request_id": "<id-9>"
         }
-      ]
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.void.pending",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/ap/invoices/<id-4>/transitions",
+      "body": {
+        "reason": "golden void",
+        "revision": 1,
+        "to": "voided"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_open_cents": 0,
+        "amount_paid_cents": 0,
+        "approved_at": null,
+        "approved_by": null,
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "due_date": "<day+0>",
+        "gl_entry_id": null,
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap line",
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "1",
+            "unit_price_ten_thousandths": 1000000
+          }
+        ],
+        "notes": "",
+        "number": "AP-000005",
+        "po_id": null,
+        "revision": 2,
+        "status": "voided",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-001",
+        "vendor_name": "BC Roofing Wholesale"
+      }
+    }
+  },
+  {
+    "name": "ap.invoice.voided.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/ap/invoices/<id-4>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "amount_open_cents": 0,
+        "amount_paid_cents": 0,
+        "approved_at": null,
+        "approved_by": null,
+        "branch_id": "<id-3>",
+        "created_at": "<ts+0d>",
+        "currency": "USD",
+        "due_date": "<day+0>",
+        "gl_entry_id": null,
+        "id": "<id-4>",
+        "invoice_date": "<day+0>",
+        "lines": [
+          {
+            "created_at": "<ts+0d>",
+            "description": "golden ap line",
+            "gl_account_id": "<id-1>",
+            "id": "<id-5>",
+            "line_total_cents": 10000,
+            "po_freight_charge_id": null,
+            "position": 0,
+            "product_id": null,
+            "purchase_order_line_id": null,
+            "quantity": "1",
+            "unit_price_ten_thousandths": 1000000
+          }
+        ],
+        "notes": "",
+        "number": "AP-000005",
+        "po_id": null,
+        "revision": 2,
+        "status": "voided",
+        "subtotal_cents": 10000,
+        "tax_cents": 0,
+        "total_cents": 10000,
+        "vendor_id": "<id-2>",
+        "vendor_invoice_number": "GOLD-AP-001",
+        "vendor_name": "BC Roofing Wholesale"
+      }
     }
   }
 ]

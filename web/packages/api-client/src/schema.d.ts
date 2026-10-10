@@ -473,13 +473,13 @@ export interface paths {
         };
         /**
          * List vendor invoices
-         * @description Role guard admin, owner or finance. Optional filters vendor_id (an unparseable value is ignored, not refused) and status (free text, compared as given). No paging parameters exist; limit and offset are silently ignored. Never null. Lines are not included.
+         * @description Role guard admin, owner or finance, behind the branch middleware: a bound caller sees its branch's bills only. The cursor envelope, newest first by (created_at, id). vendor_id and po_id filter on their document and status on the lowercase lifecycle vocabulary (a comma separated list); a parameter the route does not declare, a status outside the vocabulary or an uppercase one, a malformed cursor or an out of range limit is a 400. total appears only under include=total.
          */
         get: operations["apInvoiceList"];
         put?: never;
         /**
          * Enter a vendor invoice
-         * @description Role guard admin, owner or finance. The request carries float dollars; subtotal, tax and line amounts are converted to int64 cents. The invoice starts PENDING with nothing paid. Only an undecodable body is a 400; a malformed invoice_date or due_date or any database refusal (unknown vendor, duplicate number) is a 500. The echo omits vendor_name and lines.
+         * @description Role guard admin, owner or finance. The bill starts pending, owing its whole total, with Gable's own number. Money is _cents, the line unit price is _ten_thousandths and the quantity a decimal string; the server prices each line and never accepts a status. Every line names its gl_account_id (the approve entry debits each line's account). The branch defaults from the body branch, the caller's context branch or the default branch, and is held to the caller's wall (403 naming branch_id). Validation failures are one 400 naming every field with its full path; a duplicate vendor number for the vendor is a 409; an unknown vendor, purchase order or account is a 400 naming the field.
          */
         post: operations["apInvoiceCreate"];
         delete?: never;
@@ -497,7 +497,7 @@ export interface paths {
         };
         /**
          * Get one vendor invoice with lines
-         * @description Role guard admin, owner or finance. Any service failure, not only a missing row, is a 404. lines is omitted when the invoice has none.
+         * @description Role guard admin, owner or finance, held to the caller's branch wall: another branch's bill is a 404. Carries the revision's ETag.
          */
         get: operations["apInvoiceGet"];
         put?: never;
@@ -508,7 +508,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ap/invoices/{id}/approve": {
+    "/api/v1/ap/invoices/{id}/transitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -518,10 +518,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Approve a pending vendor invoice
-         * @description Role guard admin, owner or finance. No body. The approver is the subject of the caller's JWT claims; with no claims, or a subject that is not a UUID, the handler answers 401 itself (so in AUTH_MODE=dev, which carries no claims, this route is always 401). Only a PENDING invoice can be approved. Every service failure, including an unknown id, a non pending status or a failed GL sync, is a 422. The response carries vendor_name, approved_by and approved_at but not lines.
+         * Approve or void a vendor invoice
+         * @description Role guard admin, owner or finance, held to the caller's branch wall. Replaces the old /approve route. The body names the target status and carries the revision (or If-Match); a write with neither is 428, a mismatch 409 stale_revision. To approved: only from pending; the entry posts through gl.PostEntry inside the transition's transaction (a debit leg per line on the line's account, the tax spread across the line accounts pro rata, the credit to Accounts Payable), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a line with no account is a 409 blocker line_needs_account). To voided: from pending (nothing posted) or approved (the entry is reversed whole); a reason is required, and a bill with money applied is refused with the has_payments blocker.
          */
-        post: operations["apInvoiceApprove"];
+        post: operations["apInvoiceTransition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -537,13 +537,13 @@ export interface paths {
         };
         /**
          * List vendor payments
-         * @description Role guard admin, owner or finance. Optional vendor_id filter (an unparseable value is ignored). No paging. Never null.
+         * @description Role guard admin, owner or finance. A bare array until the payment routes' own conversion (ADR 0008 section 11). Optional vendor_id filter (an unparseable value is a 400 naming it); a parameter the route does not declare is refused.
          */
         get: operations["apPaymentList"];
         put?: never;
         /**
          * Pay a vendor
-         * @description Role guard admin, owner or finance. The amount is float dollars, converted to int64 cents. The payment is created COMPLETE and applied in order to the listed invoices up to each one's outstanding balance, then synced to the GL. Only an undecodable body is a 400; a malformed payment_date, an unknown invoice or any GL failure is a 500.
+         * @description Role guard admin, owner or finance. The request keeps its today shape (float dollars, uppercase methods) until the payment routes' own conversion. The payment locks the named bills in id order and applies only to bills in approved or partial (a pending, paid or voided bill is a 409 blocker invoice_not_approved; a bill of another vendor is a 400 naming invoice_ids[i]); more than the named bills still owe is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside the act's transaction (DR Accounts Payable, CR Cash), and a posting failure fails the act (a closed period is a 409 blocker period_closed).
          */
         post: operations["apPaymentCreate"];
         delete?: never;
@@ -561,7 +561,7 @@ export interface paths {
         };
         /**
          * AP aging by vendor
-         * @description Role guard admin, owner or finance. One row per vendor with open balances in int64 cents buckets. Never null.
+         * @description Role guard admin, owner or finance. One row per vendor with open balances in int64 cents buckets, from amount_open; a paid or voided bill owes nothing anywhere. A bare array until the aging route's own conversion. No query parameters; one is refused.
          */
         get: operations["apAging"];
         put?: never;
@@ -7122,77 +7122,125 @@ export interface components {
         AdminExposureScanResult: {
             ok: boolean;
         };
-        /** @description A vendor bill (ap.VendorInvoice). Every money field is int64 cents. */
+        ApInvoicePage: {
+            items: components["schemas"]["ApVendorInvoiceSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        /** @description A vendor bill (ap.Invoice): Gable's own number as number, the vendor's as vendor_invoice_number, money in _cents, a lowercase status, the revision, and the entry the approval posted. Optional fields are present as null. */
         ApVendorInvoice: {
             /** Format: uuid */
             id: string;
+            /** @description Gable's own number, AP- and six or more digits. */
+            number: string;
             /** Format: uuid */
             vendor_id: string;
-            /** @description Joined from the vendor on reads and approve; omitted on the create echo. */
-            vendor_name?: string;
-            invoice_number: string;
-            /** Format: date-time */
+            vendor_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** @description The vendor's own number for the bill. */
+            vendor_invoice_number: string;
+            /** @description ISO 4217. */
+            currency: string;
+            /** Format: date */
             invoice_date: string;
-            /** Format: date-time */
+            /** Format: date */
             due_date: string;
             /** Format: uuid */
-            po_id?: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            subtotal: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            tax_amount: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            total: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount_paid: number;
+            po_id: string | null;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            amount_paid_cents: number;
+            /** Format: int64 */
+            amount_open_cents: number;
             /** @enum {string} */
-            status: "PENDING" | "APPROVED" | "PARTIAL" | "PAID" | "VOIDED";
+            status: "pending" | "approved" | "partial" | "paid" | "voided";
             /** Format: uuid */
-            approved_by?: string;
+            approved_by: string | null;
             /** Format: date-time */
-            approved_at?: string;
-            notes?: string;
+            approved_at: string | null;
+            notes: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            gl_entry_id: string | null;
             /** Format: date-time */
             created_at: string;
-            /** @description Present on the single read only. */
-            lines?: components["schemas"]["ApVendorInvoiceLine"][];
+            lines: components["schemas"]["ApVendorInvoiceLine"][];
         };
-        /** @description A vendor invoice line (ap.VendorInvoiceLine). unit_price and line_total are int64 cents. */
+        /** @description A vendor bill header (ap.Summary), the list item and the shape the full document embeds. */
+        ApVendorInvoiceSummary: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: uuid */
+            vendor_id: string;
+            vendor_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            vendor_invoice_number: string;
+            currency: string;
+            /** Format: date */
+            invoice_date: string;
+            /** Format: date */
+            due_date: string;
+            /** Format: uuid */
+            po_id: string | null;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            amount_paid_cents: number;
+            /** Format: int64 */
+            amount_open_cents: number;
+            /** @enum {string} */
+            status: "pending" | "approved" | "partial" | "paid" | "voided";
+            /** Format: uuid */
+            approved_by: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            notes: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A vendor invoice line (ap.InvoiceLine). The quantity is a decimal string, the unit price is _ten_thousandths, and the extension is the server's one rounding. The purchase order line and freight charge links arrive with migration 106 and are written from package C's freight rule on (ADR 0008 7.3): today's lines are not linked. */
         ApVendorInvoiceLine: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            invoice_id: string;
+            position: number;
             description: string;
-            quantity: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            unit_price: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            line_total: number;
+            /** @description A plain decimal with at most 4 fraction digits. */
+            quantity: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            line_total_cents: number;
             /** Format: uuid */
-            gl_account_id?: string;
+            gl_account_id: string | null;
+            /** Format: uuid */
+            purchase_order_line_id: string | null;
+            /** Format: uuid */
+            product_id: string | null;
+            /** Format: uuid */
+            po_freight_charge_id: string | null;
             /** Format: date-time */
             created_at: string;
         };
-        /** @description A payment to a vendor (ap.APPayment). amount is int64 cents. */
+        /** @description A payment to a vendor (ap.APPayment), in its today shape. amount is int64 cents. */
         ApPayment: {
             /** Format: uuid */
             id: string;
@@ -7210,7 +7258,7 @@ export interface components {
             method: "CHECK" | "ACH" | "WIRE";
             check_number?: string;
             reference?: string;
-            /** Format: date-time */
+            /** Format: date */
             payment_date: string;
             /** @description PENDING, COMPLETE or VOIDED. */
             status: string;
@@ -7248,43 +7296,72 @@ export interface components {
              */
             total: number;
         };
-        /** @description The create body. Dates are YYYY-MM-DD; tax_amount and line unit_price are float dollars today. */
+        /** @description The create body. Dates are YYYY-MM-DD; money is _cents and the line unit price is _ten_thousandths; the quantity is a decimal string; the server prices each line and never accepts a status. */
         ApCreateVendorInvoiceRequest: {
             /** Format: uuid */
-            vendor_id?: string;
-            invoice_number?: string;
+            vendor_id: string;
+            /**
+             * Format: uuid
+             * @description Defaults from the caller's context branch or the default branch.
+             */
+            branch_id?: string;
+            /** @description 1 to 64 characters, unique per vendor. */
+            vendor_invoice_number: string;
             /** Format: date */
-            invoice_date?: string;
+            invoice_date: string;
             /** Format: date */
-            due_date?: string;
+            due_date: string;
             /** Format: uuid */
             po_id?: string;
-            /** @description Float dollars today. */
-            tax_amount?: number;
+            /** @description An ISO 4217 code of three capital letters; defaults from the setting. */
+            currency?: string;
+            /** Format: int64 */
+            tax_cents?: number;
             notes?: string;
-            lines?: components["schemas"]["ApCreateVendorInvoiceLineRequest"][];
+            lines: components["schemas"]["ApCreateVendorInvoiceLineRequest"][];
         };
         ApCreateVendorInvoiceLineRequest: {
-            description?: string;
-            quantity?: number;
-            /** @description Float dollars today. */
-            unit_price?: number;
+            /** @description 1 to 256 characters. */
+            description: string;
+            /** @description A plain decimal with at most 4 fraction digits, more than zero. */
+            quantity: string;
+            /**
+             * Format: int64
+             * @description Never negative.
+             */
+            unit_price_ten_thousandths: number;
+            /**
+             * Format: uuid
+             * @description The account the approve entry debits for the line.
+             */
+            gl_account_id: string;
             /** Format: uuid */
-            gl_account_id?: string;
+            purchase_order_line_id?: string;
+            /** Format: uuid */
+            product_id?: string;
         };
-        /** @description The pay body. payment_date is YYYY-MM-DD; amount is float dollars today. */
+        /** @description The transition body. The revision, or If-Match, is required (ADR 0001 section 11). */
+        ApInvoiceTransitionRequest: {
+            /** @enum {string} */
+            to: "approved" | "voided";
+            /** Format: int64 */
+            revision?: number;
+            /** @description Required to void; at most 500 characters. */
+            reason?: string;
+        };
+        /** @description The pay body, in its today shape until the payment routes' own conversion. */
         ApCreatePaymentRequest: {
             /** Format: uuid */
-            vendor_id?: string;
+            vendor_id: string;
             /** @description Float dollars today. */
-            amount?: number;
+            amount: number;
             /** @enum {string} */
-            method?: "CHECK" | "ACH" | "WIRE";
+            method: "CHECK" | "ACH" | "WIRE";
             check_number?: string;
             reference?: string;
             /** Format: date */
-            payment_date?: string;
-            /** @description Invoices this payment is applied to, in order. */
+            payment_date: string;
+            /** @description Bills this payment is applied to, in the order the desk pays them. */
             invoice_ids?: string[];
         };
         /** @description One catalog entry (Go type apps.Status, which embeds apps.Manifest). orphaned is present, and true, only for registry rows with no compiled in manifest; it is omitted otherwise. */
@@ -15084,27 +15161,40 @@ export interface operations {
     apInvoiceList: {
         parameters: {
             query?: {
+                /** @description Filter on the vendor. */
                 vendor_id?: string;
-                /** @description Invoice status filter, for example PENDING, APPROVED, PARTIAL, PAID or VOIDED. */
+                /** @description Filter on the purchase order. */
+                po_id?: string;
+                /** @description Comma separated lowercase statuses (pending, approved, partial, paid, voided). */
                 status?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
-            header?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The vendor invoices, ordered by due_date ascending (earliest due first). */
+            /** @description The page of vendor invoice summaries. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApVendorInvoice"][];
+                    "application/json": components["schemas"]["ApInvoicePage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15114,6 +15204,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
             };
             path?: never;
             cookie?: never;
@@ -15124,9 +15216,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created invoice. */
+            /** @description The created bill, with its lines. */
             201: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The bill's own route. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15135,8 +15231,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -15145,7 +15241,10 @@ export interface operations {
     apInvoiceGet: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
             path: {
                 id: string;
             };
@@ -15153,9 +15252,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The invoice with vendor_name and lines. */
+            /** @description The bill with its lines. */
             200: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15164,27 +15265,38 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
         };
     };
-    apInvoiceApprove: {
+    apInvoiceTransition: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
             };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApInvoiceTransitionRequest"];
+            };
+        };
         responses: {
-            /** @description The approved invoice. */
+            /** @description The bill after the transition, with its lines. */
             200: {
                 headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15192,11 +15304,14 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["HandlerUnauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntityEither"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
         };
     };
     apPaymentList: {
@@ -15219,8 +15334,9 @@ export interface operations {
                     "application/json": components["schemas"]["ApPayment"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -15251,8 +15367,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -15276,8 +15392,9 @@ export interface operations {
                     "application/json": components["schemas"]["ApAgingSummary"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };

@@ -4,18 +4,22 @@
 /**
  * Accounts Payable UI.
  *
- * This page straddles the ERP's money split, so the tests below pin both
- * sides of it:
+ * The vendor invoice routes are on the wire contract (C4-1b, ADR 0008 7.4),
+ * so the tests below pin both sides of the money split:
  *
- *   read  — every amount from /api/v1/ap/* is int64 CENTS
- *           (core/internal/ap/model.go), rendered with the shared
- *           `formatCents()`.
- *   write — POST /api/v1/ap/invoices and /api/v1/ap/payments take float64
- *           DOLLARS (ap/model.go:100,109,116), which the service multiplies
- *           by 100 on the way in (ap/service.go:53,56,81,167).
+ *   read  — every invoice amount from /api/v1/ap/invoices is int64 CENTS and
+ *           every line unit price int64 TEN THOUSANDTHS
+ *           (core/internal/ap/model.go), rendered with `formatCents()` and
+ *           `formatPrice4()`; the list arrives in the cursor envelope, which
+ *           the service walks.
+ *   write — POST /api/v1/ap/invoices takes cents, a decimal string quantity
+ *           and ten thousandths; the approve goes through
+ *           /ap/invoices/{id}/transitions with the revision; POST
+ *           /api/v1/ap/payments still takes float dollars until its own
+ *           conversion.
  *
- * Getting that backwards in either direction is a 100x error on a vendor
- * payment, so the request bodies are asserted, not just the rendering.
+ * Getting the scales backwards in either direction is a 100x error on a
+ * vendor payment, so the request bodies are asserted, not just the rendering.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './AccountsPayable'
@@ -25,20 +29,31 @@ import type { Vendor } from '../../types/vendor'
 import { mountAsync, text, jsonResponse, clickByText, update, flush, q } from '../../test/dom'
 
 const VENDOR_ID = '11111111-1111-1111-1111-111111111111'
+const BRANCH_ID = '22222222-2222-4222-8222-222222222222'
 
 function invoice(overrides: Partial<VendorInvoice> = {}): VendorInvoice {
   return {
     id: 'inv-1',
+    number: 'AP-000001',
     vendor_id: VENDOR_ID,
     vendor_name: 'Cascade Lumber Co',
-    invoice_number: 'CL-4471',
+    branch_id: BRANCH_ID,
+    vendor_invoice_number: 'CL-4471',
+    currency: 'USD',
     invoice_date: '2026-08-01',
     due_date: '2026-08-31',
-    subtotal: 1_200_000,
-    tax_amount: 34_567,
-    total: 1_234_567, // $12,345.67
-    amount_paid: 0,
-    status: 'APPROVED',
+    po_id: null,
+    subtotal_cents: 1_200_000,
+    tax_cents: 34_567,
+    total_cents: 1_234_567, // $12,345.67
+    amount_paid_cents: 0,
+    amount_open_cents: 1_234_567,
+    status: 'approved',
+    approved_by: null,
+    approved_at: null,
+    notes: '',
+    revision: 1,
+    gl_entry_id: null,
     created_at: '2026-08-01T10:00:00Z',
     ...overrides,
   }
@@ -92,7 +107,11 @@ interface Fixture {
 /** Serve the five endpoints the page loads on connect. Returns the fetch spy. */
 function serve(f: Fixture = {}) {
   const spy = vi.fn((url: string, _init?: RequestInit) => {
-    if (url.includes('/ap/invoices')) return Promise.resolve(jsonResponse(f.invoices ?? []))
+    // The invoice list is the envelope; one invoice's own route serves the
+    // document itself.
+    const byId = f.invoices?.find((inv) => url.endsWith(`/ap/invoices/${inv.id}`))
+    if (byId) return Promise.resolve(jsonResponse(byId))
+    if (url.includes('/ap/invoices')) return Promise.resolve(jsonResponse({ items: f.invoices ?? [], next_cursor: null, limit: 100 }))
     if (url.includes('/ap/payments')) return Promise.resolve(jsonResponse(f.payments ?? []))
     if (url.includes('/ap/aging')) return Promise.resolve(jsonResponse(f.agingSummary ?? []))
     if (url.includes('/vendors')) return Promise.resolve(jsonResponse([vendor]))
@@ -143,32 +162,39 @@ describe('accounts payable — reading cents', () => {
     expect(text(el)).not.toContain('$1,234,567.00')
   })
 
+  it('shows the vendor own number and Gable number beside each other', async () => {
+    serve({ invoices: [invoice()] })
+    const el = await mountAsync<LitElement>('gable-accounts-payable')
+
+    expect(text(el)).toContain('CL-4471')
+  })
+
   it('groups thousands on a large outstanding balance', async () => {
-    serve({ invoices: [invoice({ total: 987_654_321_00, subtotal: 987_654_321_00, tax_amount: 0 })] })
+    serve({ invoices: [invoice({ total_cents: 987_654_321_00, subtotal_cents: 987_654_321_00, tax_cents: 0, amount_open_cents: 987_654_321_00 })] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
     expect(text(el)).toContain('$987,654,321.00')
   })
 
   it('renders a zero amount paid as $0.00', async () => {
-    serve({ invoices: [invoice({ amount_paid: 0 })] })
+    serve({ invoices: [invoice({ amount_paid_cents: 0 })] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
     expect(text(el)).toContain('$0.00')
   })
 
-  it('totals outstanding AP as invoice total less amount already paid', async () => {
+  it('totals outstanding AP from the open amounts', async () => {
     serve({
       invoices: [
-        invoice({ id: 'a', total: 1_000_000, amount_paid: 250_000, status: 'PARTIAL' }),
-        invoice({ id: 'b', total: 500_000, amount_paid: 0, status: 'APPROVED' }),
-        // PENDING is not yet an obligation; it must not count as outstanding.
-        invoice({ id: 'c', total: 900_000, amount_paid: 0, status: 'PENDING' }),
+        invoice({ id: 'a', total_cents: 1_000_000, amount_paid_cents: 250_000, amount_open_cents: 750_000, status: 'partial' }),
+        invoice({ id: 'b', total_cents: 500_000, amount_paid_cents: 0, amount_open_cents: 500_000, status: 'approved' }),
+        // pending is not yet an obligation; it must not count as outstanding.
+        invoice({ id: 'c', total_cents: 900_000, amount_paid_cents: 0, amount_open_cents: 900_000, status: 'pending' }),
       ],
     })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
-    // (1,000,000 - 250,000) + 500,000 = 1,250,000 cents.
+    // 750,000 + 500,000 = 1,250,000 cents.
     expect(text(el)).toContain('$12,500.00')
     // ...and the pending bill is reported separately, at its full value.
     expect(text(el)).toContain('$9,000.00')
@@ -226,9 +252,24 @@ describe('accounts payable — reading cents', () => {
     expect(text(el)).toContain('$7,388.07')
     expect(text(el)).toContain('10432')
   })
+
+  it('renders a line unit price at four decimals in the bill details', async () => {
+    serve({ invoices: [invoice({ lines: [
+      // 10 at $73.8813: the server's one rounding makes the line $7.39
+      { id: 'l1', position: 0, description: '2x4 SPF', quantity: '10', unit_price_ten_thousandths: 738813, line_total_cents: 739,
+        gl_account_id: null, purchase_order_line_id: null, product_id: null, po_freight_charge_id: null, created_at: '2026-08-01T10:00:00Z' },
+    ] })] })
+    const el = await mountAsync<LitElement>('gable-accounts-payable')
+
+    await (el as unknown as { _viewInvoiceDetails: (id: string) => Promise<void> })._viewInvoiceDetails('inv-1')
+    await update(el, {})
+
+    expect(text(el)).toContain('$73.8813')
+    expect(text(el)).toContain('$7.39')
+  })
 })
 
-describe('accounts payable — writing dollars', () => {
+describe('accounts payable — writing the wire scales', () => {
   /** Open the bill drawer and fill one line plus tax. */
   async function draftBill(
     el: LitElement,
@@ -247,9 +288,10 @@ describe('accounts payable — writing dollars', () => {
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    // Two text inputs in this drawer: the invoice number, then the single
-    // line item's description. Both are `required` and the submit handler
-    // rejects a blank description, so the draft is not submittable without it.
+    // Two text inputs in this drawer: the vendor invoice number, then the
+    // single line item's description. Both are `required` and the submit
+    // handler rejects a blank description, so the draft is not submittable
+    // without it.
     const textInputs = Array.from(el.querySelectorAll<HTMLInputElement>('input[type="text"]'))
     setText(textInputs[0], 'CL-9001')
     setText(textInputs[1], opts.description ?? '2x4 SPF #2')
@@ -275,41 +317,35 @@ describe('accounts payable — writing dollars', () => {
   it('keeps the preview to two decimal places when the arithmetic does not divide evenly', async () => {
     serve()
     const el = await mountAsync<LitElement>('gable-accounts-payable')
-    // 3 x $1.005. Before the preview was computed in cents it rendered
-    // "$3.015" — three decimal places on a money field, because
-    // `toLocaleString` defaults `maximumFractionDigits` to 3.
+    // 3 x $1.005 = $3.015, which rounds once, half away from zero, to $3.02:
+    // the preview and the server's exact decimal arithmetic agree, where a
+    // float preview (3 * 1.005 = 3.014999...) would show $3.01 and drift a
+    // cent from the bill that is filed.
     await draftBill(el, { qty: '3', unitPrice: '1.005', tax: '0' })
 
     const body = text(el)
     expect(body).not.toMatch(/\$\d+\.\d{3}/)
-
-    // $3.01, not the $3.02 exact decimal arithmetic would give: 1.005 is not
-    // representable in binary floating point and lands just below, so
-    // 3 * 1.005 * 100 = 301.49999999999994 and rounds down. The backend
-    // computes the stored figure the same way — `int64(UnitPrice*Quantity*100
-    // + 0.5)` at ap/service.go:53 gives int64(301.99999999999994) = 301 — so
-    // the preview and the saved invoice agree. Pinned because they must keep
-    // agreeing: whichever side is "fixed" alone would introduce a drift
-    // between what the user is shown and what is filed.
-    expect(body).toContain('$3.01')
+    expect(body).toContain('$3.02')
   })
 
-  it('sends unit price and tax as dollars, the units the endpoint documents', async () => {
+  it('sends cents, a decimal string quantity and ten thousandths, the units the endpoint documents', async () => {
     const spy = serve()
     const el = await mountAsync<LitElement>('gable-accounts-payable')
     await draftBill(el, { qty: '10', unitPrice: '73.88', tax: '12.34' })
     await submitOpenForm(el)
 
-    const bill = postedBodies(spy).find((b) => 'invoice_number' in b)
+    const bill = postedBodies(spy).find((b) => 'vendor_invoice_number' in b)
     expect(bill).toBeDefined()
-    // Dollars, NOT 7388 / 1234 cents — ap/service.go multiplies by 100 itself,
-    // so sending cents here would store a bill 100x too large.
-    expect(bill!.tax_amount).toBe(12.34)
-    expect((bill!.lines as { unit_price: number }[])[0].unit_price).toBe(73.88)
+    // Cents and ten thousandths, NOT dollars — sending dollars here would
+    // store a bill 100x (and a price 10000x) too small.
+    expect(bill!.tax_cents).toBe(1234)
+    expect((bill!.lines as { quantity: string; unit_price_ten_thousandths: number }[])[0].quantity).toBe('10')
+    expect((bill!.lines as { quantity: string; unit_price_ten_thousandths: number }[])[0].unit_price_ten_thousandths).toBe(738800)
+    expect(bill!.vendor_invoice_number).toBe('CL-9001')
   })
 
   it('converts the selected invoices to dollars when prefilling a payment', async () => {
-    const spy = serve({ invoices: [invoice({ total: 1_234_567, amount_paid: 0 })] })
+    const spy = serve({ invoices: [invoice({ amount_open_cents: 1_234_567 })] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
     await clickByText(el, 'button', 'Record Payment')
@@ -327,7 +363,8 @@ describe('accounts payable — writing dollars', () => {
 
     const pmt = postedBodies(spy).find((b) => 'invoice_ids' in b)
     expect(pmt).toBeDefined()
-    // 1,234,567 cents = $12,345.67 — dollars on the wire.
+    // The payment route still takes float dollars until its own conversion:
+    // 1,234,567 cents = $12,345.67.
     expect(pmt!.amount).toBe(12345.67)
   })
 })
@@ -343,15 +380,41 @@ describe('accounts payable — endpoints', () => {
     expect(urls.some((u) => u.includes('/api/v1/ap/aging'))).toBe(true)
   })
 
-  it('approves an invoice through the approve endpoint', async () => {
-    const spy = serve({ invoices: [invoice({ status: 'PENDING' })] })
+  it('walks the invoice list cursor to the last page', async () => {
+    const page1 = { items: [invoice({ id: 'inv-1' })], next_cursor: 'next', limit: 100 }
+    const page2 = { items: [invoice({ id: 'inv-2', number: 'AP-000002' })], next_cursor: null, limit: 100 }
+    let calls = 0
+    const spy = vi.fn((url: string) => {
+      if (url.includes('/ap/invoices')) {
+        calls += 1
+        return Promise.resolve(jsonResponse(calls === 1 ? page1 : page2))
+      }
+      if (url.includes('/ap/payments')) return Promise.resolve(jsonResponse([]))
+      if (url.includes('/ap/aging')) return Promise.resolve(jsonResponse([]))
+      if (url.includes('/vendors')) return Promise.resolve(jsonResponse([vendor]))
+      if (url.includes('/gl/accounts')) return Promise.resolve(jsonResponse([]))
+      return Promise.resolve(jsonResponse([]))
+    })
+    vi.stubGlobal('fetch', spy)
+
+    const el = await mountAsync<LitElement>('gable-accounts-payable')
+
+    const listUrl = spy.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/ap/invoices') && u.includes('cursor=next'))
+    expect(listUrl, 'the second page is fetched with the first cursor').toHaveLength(1)
+    expect(text(el)).toContain('CL-4471') // both pages' vendor numbers render
+    vi.unstubAllGlobals()
+  })
+
+  it('approves an invoice through the transitions route with its revision', async () => {
+    const spy = serve({ invoices: [invoice({ status: 'pending' })] })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
 
     await clickByText(el, 'button', 'Approve')
 
-    const approved = spy.mock.calls.find((c) => String(c[0]).includes('/approve'))
-    expect(approved, 'expected a POST to /api/v1/ap/invoices/{id}/approve').toBeDefined()
-    expect(String(approved![0])).toContain('/api/v1/ap/invoices/inv-1/approve')
-    expect(approved![1]?.method).toBe('POST')
+    const approve = spy.mock.calls.find((c) => String(c[0]).includes('/transitions'))
+    expect(approve, 'expected a POST to /api/v1/ap/invoices/{id}/transitions').toBeDefined()
+    expect(String(approve![0])).toContain('/api/v1/ap/invoices/inv-1/transitions')
+    expect(approve![1]?.method).toBe('POST')
+    expect(JSON.parse(approve![1]!.body as string)).toEqual({ to: 'approved', revision: 1 })
   })
 })
