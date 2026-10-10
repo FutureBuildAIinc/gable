@@ -1,0 +1,261 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+package pos_test
+
+// The transaction proofs of ADR 0005 section 14.2 C2-5: a failing event
+// write rolls the whole sale back (no invoice, payment, stock move or
+// entry), and the contention tests at pool size 4 (two sales of the last
+// unit, a void racing a return, three registers completing sales with no
+// gap in the invoice series against a payment for the walk-in customer).
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+
+	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
+)
+
+// RULE: a sale whose event write fails leaves no invoice, payment, stock
+// move or entry (the recipe's failing event proof, for each kind of write:
+// the completion and the void).
+func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.events.fail = "pos_transaction.completed"
+	})
+	saleID := f.startSale(nil)
+	f.addLine(saleID, f.productLine("3"))
+	r := f.completeSale(saleID, tender("cash", 3266))
+	if r.status == httpOK {
+		t.Fatal("the sale completed with a failing event write")
+	}
+	// nothing stayed: no invoice, no payment, no tender, the stock unmoved,
+	// the sale still open.
+	for sql, want := range map[string]int64{
+		`SELECT count(*) FROM invoices WHERE order_id IS NULL`:                     0,
+		`SELECT count(*) FROM payments`:                                            0,
+		`SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`:               0,
+		`SELECT count(*) FROM gl_journal_entries`:                                  0,
+		`SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction'`: 0,
+	} {
+		if got := countOf(t, f.db, sql, saleID); got != want {
+			t.Errorf("%s = %d, want %d", sql, got, want)
+		}
+	}
+	if got := f.stock(); got != "100.0000/0.0000" {
+		t.Errorf("stock = %s, want the 100 untouched", got)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "open" {
+		t.Errorf("sale status = %q, want open", got)
+	}
+	// The gapless invoice series spent nothing: the next invoice takes the
+	// number the rolled back sale would have taken.
+	f.events.fail = ""
+	saleID2, _ := f.saleOf("1", tender("cash", 599))
+	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 1 {
+		t.Errorf("%d invoices after the retry, want 1", got)
+	}
+	_ = saleID2
+
+	// The same proof for the void.
+	f.events.fail = "pos_transaction.voided"
+	f2 := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.events.fail = "pos_transaction.voided"
+	})
+	saleID3, body := f2.saleOf("2", tender("cash", 1198))
+	r = f2.do("POST", "/api/v1/pos/transactions/"+saleID3+"/void",
+		map[string]any{"reason": "nope", "revision": rev(t, body)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status == httpOK {
+		t.Fatal("the void committed with a failing event write")
+	}
+	if got := str(t, f2.getSale(t, saleID3), "status"); got != "completed" {
+		t.Errorf("sale status = %q, want completed (the void rolled back)", got)
+	}
+	if got := f2.stock(); got != "98.0000/0.0000" {
+		t.Errorf("stock = %s, want 98 (the goods still gone)", got)
+	}
+	if got := f2.accountBalance("1010"); got != 1198 {
+		t.Errorf("cash balance = %d, want the 1198 still booked", got)
+	}
+}
+
+// RULE: two sales of the last unit of stock at one till: one completes,
+// the other is refused with insufficient_stock and moves nothing.
+func TestTwoSalesOfTheLastUnit(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	mustExec(t, f.db, `UPDATE inventory SET quantity = 2 WHERE product_id = $1`, f.productID)
+	var wg sync.WaitGroup
+	results := make([]int, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			saleID := f.startSale(nil)
+			if r := f.addLine(saleID, f.productLine("2")); r.status != httpOK {
+				results[i] = r.status
+				return
+			}
+			results[i] = f.completeSale(saleID, tender("cash", 4390)).status
+		}(i)
+	}
+	wg.Wait()
+	wins := 0
+	for _, st := range results {
+		if st == httpOK {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Errorf("results = %v, want exactly one winner", results)
+	}
+	if got := f.stock(); got != "0.0000/0.0000" {
+		t.Errorf("stock = %s, want 0 (the last unit went out once)", got)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM invoices WHERE order_id IS NULL`); got != 1 {
+		t.Errorf("%d invoices, want 1", got)
+	}
+}
+
+// RULE: three registers completing sales at pool size 4 get consecutive
+// invoice numbers with no gap and no deadlock against a payment for the
+// walk-in customer (the counter's hot rows: the gapless series and the
+// walk-in customer row, ADR 0005 4.1).
+func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	registers := []string{f.register, "REG-" + uuid.NewString()[:8], "REG-" + uuid.NewString()[:8]}
+	for _, reg := range registers[1:] {
+		mustExec(t, f.db, `INSERT INTO pos_registers (id, location_id, name, branch_id) VALUES ($1, $2, 'r', $3)`,
+			reg, f.yardID, f.branchID)
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, 3)
+	for i, reg := range registers {
+		wg.Add(1)
+		go func(i int, reg string) {
+			defer wg.Done()
+			saleID := f.startSaleOn(reg)
+			if _, err := f.addLineOn(saleID, f.productLine("1")); err != nil {
+				errs[i] = err
+				return
+			}
+			if r := f.completeSaleOn(reg, saleID, tender("cash", 599)); r.status != httpOK {
+				errs[i] = fmt.Errorf("register %s: %d %s", reg, r.status, r.raw)
+			}
+		}(i, reg)
+	}
+	// a payment for the walk-in customer racing the sales
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		walkIn := f.scalar(`SELECT id FROM customers WHERE account_number = 'WALK-IN'`).(uuid.UUID)
+		for i := 0; i < 3; i++ {
+			_ = f.do("POST", "/api/v1/payments", map[string]any{
+				"customer_id": walkIn.String(), "method": "cash", "amount_cents": 100,
+				"received_on": "2030-01-01",
+			}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
+		}
+	}()
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("register %d: %v", i, err)
+		}
+	}
+	// consecutive numbers, no gap
+	var numbers []int
+	rows, err := f.db.Pool.Query(context.Background(), `
+		SELECT substring(i.number FROM 4)::bigint FROM invoices i WHERE i.order_id IS NULL ORDER BY 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		numbers = append(numbers, n)
+	}
+	rows.Close()
+	if len(numbers) != 3 {
+		t.Fatalf("%d invoices, want 3", len(numbers))
+	}
+	for i := 1; i < len(numbers); i++ {
+		if numbers[i] != numbers[i-1]+1 {
+			t.Errorf("numbers = %v, want consecutive with no gap", numbers)
+			break
+		}
+	}
+}
+
+// RULE: a void racing a return of the same sale: one wins, the other is
+// refused, and the books stay consistent.
+func TestVoidRacingAReturn(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	saleID, body := f.saleOf("6", tender("cash", 3593))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	var wg sync.WaitGroup
+	var voidStatus, returnStatus int
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		voidStatus = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+			map[string]any{"reason": "racing", "revision": rev(t, body)},
+			"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
+	}()
+	go func() {
+		defer wg.Done()
+		returnStatus = f.do("POST", "/api/v1/pos/returns", map[string]any{
+			"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+			"refund_method": "cash", "reason": "racing",
+			"lines": []map[string]any{{"line_id": lineID, "quantity": "1", "restock": true}},
+		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status
+	}()
+	wg.Wait()
+	if voidStatus == httpOK && returnStatus == httpOK {
+		t.Fatal("both the void and the return won")
+	}
+	f.assertARInvariants(t)
+	// the stock is whole either way: voided returns all 6, a return returns
+	// what it named; both winning is the only corruption
+	if got := f.stock(); got != "94.0000/0.0000" && got != "100.0000/0.0000" && got != "95.0000/0.0000" {
+		t.Errorf("stock = %s after the race", got)
+	}
+}
+
+const httpOK = 200
+
+// startSaleOn opens a cart on a named register.
+func (f *fixture) startSaleOn(register string) string {
+	f.t.Helper()
+	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": register},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
+	if r.status != 201 {
+		f.t.Fatalf("start sale on %s = %d: %s", register, r.status, r.raw)
+	}
+	return str(f.t, r.body, "id")
+}
+
+func (f *fixture) addLineOn(saleID string, line map[string]any) (string, error) {
+	f.t.Helper()
+	r := f.addLine(saleID, line)
+	if r.status != httpOK {
+		return "", fmt.Errorf("add line = %d: %s", r.status, r.raw)
+	}
+	return str(f.t, r.body, "revision"), nil
+}
+
+func (f *fixture) completeSaleOn(register, saleID string, tenders ...map[string]any) resp {
+	f.t.Helper()
+	cur := f.getSale(f.t, saleID)
+	return f.do("POST", "/api/v1/pos/transactions/"+saleID+"/complete",
+		map[string]any{"tenders": tenders, "revision": num(f.t, cur, "revision")},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(f.t))
+}
