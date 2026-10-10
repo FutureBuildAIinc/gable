@@ -91,8 +91,11 @@ var modelBoundSchemas = []struct {
 	{"OrderLine", order.OrderLine{}},
 	// invoice
 	{"Invoice", invoice.Invoice{}},
+	{"InvoiceSummary", invoice.InvoiceSummary{}},
 	{"InvoiceLine", invoice.InvoiceLine{}},
 	{"CreditMemo", invoice.CreditMemo{}},
+	{"CreditMemoSummary", invoice.CreditMemoSummary{}},
+	{"CreditMemoLine", invoice.CreditLine{}},
 	// payment
 	{"Payment", payment.Payment{}},
 	{"Refund", payment.Refund{}},

@@ -107,6 +107,7 @@ type Repository interface {
 	// Fulfilment (ADR 0005 5.6).
 	LockCustomerCredit(ctx context.Context, customerID uuid.UUID) error
 	UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error)
+	LiveBilledByLine(ctx context.Context, orderID uuid.UUID) (map[uuid.UUID]LiveBilled, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	DeliveryOrderID(ctx context.Context, deliveryID uuid.UUID) (uuid.UUID, bool, error)
 	NonStockReceiptsFor(ctx context.Context, orderLineID uuid.UUID) (NonStockReceipts, bool, error)
@@ -233,22 +234,7 @@ func (r *PostgresRepository) scanSummary(row pgx.Row, s *OrderSummary, extra ...
 // RateToPercent widens a stored rate ("0.088750") to the wire's percent
 // string ("8.875"): the rate is scale 6, the percent at most 4 fraction
 // digits, the shift exact.
-func RateToPercent(rate string) (string, error) {
-	scaled, _, err := salesdoc.ParseTaxRate(rate)
-	if err != nil {
-		return "", err
-	}
-	// percent = rate x 100, so the percent's scale 4 integer IS the rate's
-	// scale 6 integer: 0.088750 is 88750 at both (8.8750 percent).
-	out := trimFixed(fmt.Sprintf("%d.%04d", scaled/10000, abs64(scaled)%10000))
-	if out == "" {
-		out = "0"
-	}
-	if scaled < 0 && out != "0" {
-		out = "-" + out
-	}
-	return out, nil
-}
+func RateToPercent(rate string) (string, error) { return salesdoc.RateToPercent(rate) }
 
 // PercentToRate narrows a wire percent ("8.875") to the stored rate string
 // ("8.875000" percent = 0.08875). The percent carries at most 4 fraction
@@ -966,13 +952,13 @@ func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID
 	var open int64
 	// The open receivable: each open invoice's total less the payments
 	// recorded against it (in C2-2 and C2-3 the sum over the customer's
-	// invoices in UNPAID, PARTIAL or OVERDUE).
+	// invoices in UNPAID or PARTIAL; OVERDUE is no longer a status).
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT COALESCE(SUM(ROUND(i.total_amount * 100)::bigint
 		                   - COALESCE((SELECT SUM(ROUND(p.amount * 100)::bigint)
 		                               FROM payments p WHERE p.invoice_id = i.id), 0)), 0)
 		FROM invoices i
-		WHERE i.customer_id = $1 AND i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')`, customerID).Scan(&open)
+		WHERE i.customer_id = $1 AND i.status IN ('UNPAID', 'PARTIAL')`, customerID).Scan(&open)
 	if err != nil {
 		return 0, fmt.Errorf("failed to sum the open receivable: %w", err)
 	}
@@ -1092,6 +1078,36 @@ func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID 
 	return nil
 }
 
+// LiveBilled is what an order line's invoices not in void already carry: the
+// line totals and the discounts, in cents.
+type LiveBilled struct {
+	TotalCents    httpx.Cents
+	DiscountCents httpx.Cents
+}
+
+// LiveBilledByLine reads it for every line of the order that has been billed.
+func (r *PostgresRepository) LiveBilledByLine(ctx context.Context, orderID uuid.UUID) (map[uuid.UUID]LiveBilled, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT il.order_line_id, COALESCE(SUM(ROUND(il.line_total * 100)), 0)::bigint, COALESCE(SUM(ROUND(COALESCE(il.discount_amount, 0) * 100)), 0)::bigint
+		FROM invoice_lines il JOIN invoices i ON i.id = il.invoice_id
+		WHERE i.order_id = $1 AND i.status <> 'VOID' AND il.order_line_id IS NOT NULL AND il.line_total IS NOT NULL
+		GROUP BY il.order_line_id`, orderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read what the order's live invoices carry: %w", err)
+	}
+	defer rows.Close()
+	out := map[uuid.UUID]LiveBilled{}
+	for rows.Next() {
+		var id uuid.UUID
+		var t, d int64
+		if err := rows.Scan(&id, &t, &d); err != nil {
+			return nil, fmt.Errorf("failed to scan a live billed line: %w", err)
+		}
+		out[id] = LiveBilled{httpx.Cents(t), httpx.Cents(d)}
+	}
+	return out, rows.Err()
+}
+
 // UnbilledRemainderCents is the order's total less the totals of its invoices
 // not in void, clamped at zero (ADR 0005 5.3).
 func (r *PostgresRepository) UnbilledRemainderCents(ctx context.Context, orderID uuid.UUID) (int64, error) {
@@ -1151,7 +1167,8 @@ func (r *PostgresRepository) NonStockReceiptsFor(ctx context.Context, orderLineI
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT COALESCE(SUM(ROUND(qty_received * cost, 2) * 100), 0)::bigint,
 		       COALESCE(SUM(ROUND(qty_received * 10000)), 0)::bigint,
-		       (SELECT COALESCE(SUM(ROUND(il.cost * 100)), 0)::bigint FROM invoice_lines il WHERE il.order_line_id = $1)
+		       (SELECT COALESCE(SUM(ROUND(il.cost * 100)), 0)::bigint FROM invoice_lines il
+		        JOIN invoices iv ON iv.id = il.invoice_id AND iv.status <> 'VOID' WHERE il.order_line_id = $1)
 		FROM purchase_order_lines
 		WHERE linked_so_line_id = $1 AND COALESCE(qty_received, 0) > 0`, orderLineID).Scan(&posted, &received, &relieved)
 	if err != nil {

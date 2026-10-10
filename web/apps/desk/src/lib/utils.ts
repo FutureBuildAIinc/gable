@@ -46,3 +46,13 @@ export function formatPrice4(tenThousandths: number | null | undefined): string 
     const wholeText = new Intl.NumberFormat('en-US').format(whole);
     return `${negative && abs !== 0 ? '-' : ''}$${wholeText}.${frac}`;
 }
+
+// A business date (YYYY-MM-DD, no time zone) rendered in the user's locale. Built
+// from its parts so a west-of-UTC machine never shows the day before; anything
+// that is not a plain date is returned as it came.
+export function formatDay(day: string | null | undefined): string {
+    if (!day) return '—';
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+    if (!m) return day;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
+}
