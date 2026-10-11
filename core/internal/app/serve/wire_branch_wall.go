@@ -135,9 +135,14 @@ func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 // crm mounts the activity routes behind the branch middleware: every route
 // addresses a customer (by path) or an activity of one, and the repositories
 // hold each read and write to the customer's branches, so a caller held to
-// branch A finds branch B's activity a 404.
+// branch A finds branch B's activity a 404. An activity carries no branch tag,
+// so on a customer another branch also holds a branch bound key adds but never
+// changes or deletes one (the contact rule, principal item 54); the routes note
+// their method and path for the refusal's key.branch_refused row.
 func (w *branchWall) crm(mux *http.ServeMux, svc *crm.Service) {
-	crm.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+	svc.WithSharedGuard(customerguard.NewShared(w.keyWall))
+	crm.NewHandler(svc).RegisterRoutes(mux,
+		middleware.Compose(w.scoped("admin", "owner", "sales"), w.keyWall.RecordRequest()))
 }
 
 // delivery mounts the delivery routes behind the branch middleware: a stop

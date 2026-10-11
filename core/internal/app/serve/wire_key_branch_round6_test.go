@@ -218,3 +218,84 @@ func TestKeyBranchPin_FinanceReachesOnlyTheRestrictedRoutes(t *testing.T) {
 		t.Errorf("finance setting the escalation policy: %d %s, want 200", status, buf)
 	}
 }
+
+// Fix round 6 (item 54 question 2): activities follow the contact rule. An
+// activity carries no branch tag, so on a customer another branch also holds
+// every existing one is shared: a bound key adds one and never changes or
+// deletes one, refused in the contact rule's words with a refusal row and the
+// activity untouched. On a customer the pin holds alone, and for an unbound
+// key and a user, nothing changes.
+func TestKeyBranchPin_ActivityFollowsTheContactRule(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	ctx := context.Background()
+	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
+	shared := "/api/v1/customers/" + s.id.String() + "/activities"
+	create := `{"activity_type":"call","description":"logged by a user"}`
+
+	// A bound key may add one on the shared customer (the A control).
+	added := f.made(t, "bound", "crm_activities", "POST", shared, create, http.StatusCreated)
+	// An activity the user logged at the other branch's request.
+	logged := f.made(t, "user", "crm_activities", "POST", shared, create, http.StatusCreated)
+	path := "/api/v1/activities/" + logged.String()
+	state := func(id uuid.UUID) (desc string, rev int64, n int) {
+		t.Helper()
+		if err := f.db.Pool.QueryRow(ctx,
+			`SELECT COALESCE((SELECT description FROM crm_activities WHERE id = $1), ''),
+			        COALESCE((SELECT revision FROM crm_activities WHERE id = $1), 0),
+			        (SELECT COUNT(*) FROM crm_activities WHERE id = $1)`, id).Scan(&desc, &rev, &n); err != nil {
+			t.Fatal(err)
+		}
+		return desc, rev, n
+	}
+	_, rev, _ := state(logged)
+	ifMatch := map[string]string{"If-Match": fmt.Sprintf(`"%d"`, rev)}
+	words := "a branch bound key may act only on its own branch"
+
+	rows := f.auditRows(t)
+	status, buf := f.key(t, f.bound, "PUT", path,
+		fmt.Sprintf(`{"activity_type":"call","description":"rewritten by A","revision":%d}`, rev), nil)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), words) || !strings.Contains(string(buf), "activity") {
+		t.Errorf("bound key changing an activity on a shared customer: %d %s, want the 403 in the contact rule's words", status, buf)
+	}
+	if after := f.auditRows(t); after != rows+1 {
+		t.Errorf("activity change refusal: key.branch_refused rows %d then %d, want one new row", rows, after)
+	}
+	rows = f.auditRows(t)
+	status, buf = f.key(t, f.bound, "DELETE", path, "", ifMatch)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), words) {
+		t.Errorf("bound key deleting an activity on a shared customer: %d %s, want the 403", status, buf)
+	}
+	if after := f.auditRows(t); after != rows+1 {
+		t.Errorf("activity delete refusal: key.branch_refused rows %d then %d, want one new row", rows, after)
+	}
+	if desc, r, n := state(logged); n != 1 || desc != "logged by a user" || r != rev {
+		t.Errorf("the refused writes changed the activity: %d rows, %q, revision %d (was %d)", n, desc, r, rev)
+	}
+	// A bound key also cannot change or delete the one it added: no tag says
+	// it was logged at its branch.
+	if status, _ := f.key(t, f.bound, "DELETE", "/api/v1/activities/"+added.String(), "",
+		map[string]string{"If-Match": `"1"`}); status != http.StatusForbidden {
+		t.Errorf("bound key deleting the activity it added: %d, want 403 (an activity has no branch tag)", status)
+	}
+
+	// The unbound key and the user keep the reach.
+	if status, buf := f.send(t, "unbound", "PUT", path,
+		fmt.Sprintf(`{"activity_type":"call","description":"changed by a dealer wide key","revision":%d}`, rev), nil); status != http.StatusOK {
+		t.Errorf("unbound key changing the activity: %d %s, want 200", status, buf)
+	}
+	if status, buf := f.userAs(t, "sales", "DELETE", "/api/v1/activities/"+added.String(), "",
+		map[string]string{"If-Match": `"1"`}); status != http.StatusNoContent {
+		t.Errorf("sales user deleting an activity: %d %s, want 204", status, buf)
+	}
+
+	// The A control: a customer the pin holds alone.
+	own := f.made(t, "bound", "crm_activities", "POST", "/api/v1/customers/"+f.custID.String()+"/activities", create, http.StatusCreated)
+	if status, buf := f.key(t, f.bound, "PUT", "/api/v1/activities/"+own.String(),
+		`{"activity_type":"call","description":"own change","revision":1}`, nil); status != http.StatusOK {
+		t.Errorf("bound key changing an activity on its own customer: %d %s, want 200", status, buf)
+	}
+	if status, buf := f.key(t, f.bound, "DELETE", "/api/v1/activities/"+own.String(), "",
+		map[string]string{"If-Match": `"2"`}); status != http.StatusNoContent {
+		t.Errorf("bound key deleting an activity on its own customer: %d %s, want 204", status, buf)
+	}
+}

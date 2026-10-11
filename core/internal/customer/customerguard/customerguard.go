@@ -49,6 +49,20 @@ func (a *Shared) Shared(ctx context.Context, customerID uuid.UUID) (customer.Sha
 // RecordRefusal writes the refusal's key.branch_refused row.
 func (a *Shared) RecordRefusal(ctx context.Context) { a.w.RecordSharedRefusal(ctx) }
 
+// CheckChild answers the shared customer rule for a child record of a customer
+// that another module owns: the bound key's 403 on a shared customer, nil
+// otherwise. A caller that is not a branch bound key is never refused.
+func (a *Shared) CheckChild(ctx context.Context, customerID uuid.UUID, field string) error {
+	v, err := a.w.SharedCustomer(ctx, customerID)
+	if err != nil {
+		return err
+	}
+	if !v.Refuse {
+		return nil
+	}
+	return customer.RefusedOnChild(v.Branch, field)
+}
+
 // RecordCallerRefusal writes the refusal row of a user or an unbound key.
 func (a *Shared) RecordCallerRefusal(ctx context.Context, customerID, branch uuid.UUID, fields []string) {
 	a.w.RecordSharedCallerRefusal(ctx, customerID, branch, fields)

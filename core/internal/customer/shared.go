@@ -168,6 +168,12 @@ func (s *Service) checkRestricted(ctx context.Context, id uuid.UUID, changes map
 	return nil
 }
 
+// RefusedOnChild is the bound key's 403 on a shared customer's child record,
+// for a module outside this package that serves the refusal itself.
+func RefusedOnChild(branch uuid.UUID, field string) error {
+	return refusedOn(branch, field).err
+}
+
 // checkSharedChild applies the ship-to and contact rule: a bound key may not
 // change or delete one on a shared customer. No audit row for anyone else.
 func (s *Service) checkSharedChild(ctx context.Context, customerID uuid.UUID, field string) error {
