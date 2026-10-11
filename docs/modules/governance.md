@@ -128,7 +128,7 @@ in the source column.
 | 404 | A write route addressed at a missing RFC id (`PUT` and the transitions route). | `governance.yaml` `WireNotFound` (PUT, transitions) |
 | 409 | `409 stale_revision`, `409 invalid_state_transition`, `409 conflict` (the update guard against an approved or rejected RFC), `409 idempotency_in_progress`. | `governance.yaml` `WireConflict`; `httpx/errors.go` `StaleRevision`, `InvalidStateTransition`; service update guard; idempotency middleware |
 | 413 | The body exceeded the platform's request size limit. | `_shared.yaml` `PayloadTooLarge` |
-| 422 | The outbox layer or the idempotency layer rejected the write (`idempotency_key_reused` for a key replayed with a different body fingerprint). | `_shared.yaml` `UnprocessableEntity`; idempotency middleware |
+| 422 | The idempotency layer refused an `Idempotency-Key` reused with a different request (`idempotency_key_reused`). | `_shared.yaml` `UnprocessableEntity`; idempotency middleware |
 | 428 | The write carried neither `If-Match` nor a body `revision`. | `governance.yaml` `WirePreconditionRequired`; `httpx/revision.go` `CheckRevision` |
 | 503 | The create answered (the other writes do not declare it). The generator seam can answer 503; the shipped template provider cannot fail. | `governance.yaml` `WireUnavailable` on `POST /api/v1/governance/rfcs` |
 

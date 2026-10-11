@@ -48,7 +48,7 @@ Every route registers under the millwork app (a 404
 `app_disabled` when the millwork app is off) and the `admin`,
 `owner` or `sales` guard. The `GET` routes take a strict set of
 query parameters; a parameter the route does not declare is a 400
-`unsupported_query_parameter` (`core/pkg/platform/httpx`).
+`unsupported_query_parameter` (`core/internal/platform/httpx`).
 
 | Method | Path | Query parameters |
 |---|---|---|
@@ -98,9 +98,11 @@ validates first, answers 400 `validation_failed` with one
 
 The two `POST` routes take a JSON body parsed in
 `core/internal/configurator/handler.go` `parseSelectionsBody`. The
-body is capped at 64 KiB; an oversized or malformed body, or an
-empty `selections` map, is a 400 naming the field. Every problem
-collected by the parse is answered in a single 400.
+body is bounded by the platform request size limit (10 MiB,
+`core/internal/app/serve/chain.go`); a larger body is a 413. A body
+that is not valid JSON, or is empty, is a 400 that names no field;
+an empty `selections` map is a 400 naming `selections`. Every
+problem collected by the parse is answered in a single 400.
 
 ### Validate (`POST /api/v1/configurator/validate`)
 
