@@ -115,15 +115,15 @@ type keyPinFixture struct {
 	retB        uuid.UUID
 	zrA         uuid.UUID // a frozen Z report per branch's session
 	zrB         uuid.UUID
-	posProd     uuid.UUID // the product the POS lines carry
-	bound       string    // the key pinned to branch A
-	unbound     string    // the same scopes, no pin
-	bound2      string    // a second bound key holding the document family scopes the mint cap keeps off the first
-	unbound2    string    // the same scopes, no pin
-	boundKeyID  string    // the bound key's id, the actor its refusal audit rows name
-	bound2KeyID string    // the second bound key's id
-	boundFirst  string    // the first mint's bound key, kept when a test swaps in the second
-	recording   bool      // mark every bound key call for the walled route coverage test
+	posProd     uuid.UUID          // the product the POS lines carry
+	bound       string             // the key pinned to branch A
+	unbound     string             // the same scopes, no pin
+	bound2      string             // a second bound key holding the document family scopes the mint cap keeps off the first
+	unbound2    string             // the same scopes, no pin
+	boundKeyID  string             // the bound key's id, the actor its refusal audit rows name
+	bound2KeyID string             // the second bound key's id
+	boundFirst  string             // the first mint's bound key, kept when a test swaps in the second
+	recording   bool               // mark every bound key call for the walled route coverage test
 	keys        *techadmin.Service // the mint the fixture's keys validate against
 }
 

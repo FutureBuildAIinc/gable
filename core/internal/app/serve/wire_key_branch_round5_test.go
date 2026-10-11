@@ -383,7 +383,9 @@ func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
 	if err := json.Unmarshal(buf, &plainKey); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id::text = $1`, plainKey.Key.ID) })
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id::text = $1`, plainKey.Key.ID)
+	})
 	if len(plainKey.Key.Scopes) != 0 {
 		t.Errorf("a mint naming no scopes granted %v, want none", plainKey.Key.Scopes)
 	}
