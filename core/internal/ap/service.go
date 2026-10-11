@@ -383,6 +383,20 @@ func (s *Service) approve(ctx context.Context, id uuid.UUID, pre Precondition, w
 			return httpx.InvalidStateTransition("a pending bill cannot carry a paid amount; mend amount_paid by hand",
 				httpx.Blocker("has_paid_amount", fmt.Sprintf("%d cents are paid against this bill", int64(locked.AmountPaidCents))))
 		}
+		// The approve decides on the ledger like every AP act (review r4
+		// P3-2): a legacy PENDING bill whose posting ran before the status
+		// moved (the base's sync could post first; migration 106 links only
+		// APPROVED or PARTIAL, so such a row carries its entry linked by
+		// hand or not at all) already holds its credit in 2010, and an
+		// approve would post a second one no bill owes. The refusal names
+		// the live entry, whatever depth its reversal chain has reached
+		// (P1-1's chain lens); nothing is written.
+		if number, other, found, err := s.repo.LiveInvoiceEntryOtherThan(ctx, id, uuid.Nil); err != nil {
+			return err
+		} else if found {
+			return httpx.InvalidStateTransition("the bill already holds a live journal entry, so an approve would post a second credit in accounts payable",
+				httpx.Blocker("entry_not_linked", fmt.Sprintf("journal entry #%d (%s) still holds this bill's credit; mend the bill's ledger by hand before approving", number, other)))
+		}
 		lines, err := s.repo.LinesWithCodes(ctx, id)
 		if err != nil {
 			return err
