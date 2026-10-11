@@ -66,7 +66,7 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 - **Pattern:** Modular monolith — single Go binary, ~40 modules under `core/internal/<module>/`
 - **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `core/internal/app/serve/serve.go`
 - **Apps platform (Phase 0):** modules are becoming installable *apps* — manifest + DB registry (`apps` table, migration 074) + per-instance enable/disable via `pkg/apps`, managed at **Tech Admin → Apps** (`/admin/apps`). Converted so far: `millwork`, `governance`. Conversion recipe + phases: `docs/modularization-blueprint.md`
-- **Cross-module:** Synchronous Go interfaces. The one exception is notification side-effects for price exposure, delivered through the transactional outbox (`core/pkg/outbox`); no cross-module *write* goes through an event
+- **Cross-module:** Synchronous Go interfaces. Two side effects are asynchronous, both delivered by the worker through the transactional outbox (`core/pkg/outbox`): price exposure notifications (`quote.exposure.*`), and the order module queueing allocation requests in its own table when a purchase order is received (`purchase_order.received`); no cross-module *write* goes through an event
 - **API surface:** REST JSON at `/api/v1/*` (ERP), `/api/portal/v1/*` (B2B portal, partially public), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS)
 - **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `core/internal/app/serve/serve.go`
 
