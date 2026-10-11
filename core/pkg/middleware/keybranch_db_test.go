@@ -11,6 +11,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -48,5 +49,70 @@ func TestKeyBranchWall_LocationRowQueryErrorFailsClosed(t *testing.T) {
 	}
 	if ran {
 		t.Error("the handler ran under a failed branch lookup; the wall failed open")
+	}
+}
+
+// TestKeyBranchWall_ExclusiveNamesAnotherBranchDeterministically holds the
+// refusal's "also held by" branch (round 7 P3): it is never the pin itself, and
+// among several other branches it is the lowest numbered one every time, so a
+// reviewer comparing two answers sees the same branch.
+func TestKeyBranchWall_ExclusiveNamesAnotherBranchDeterministically(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	pin, c, d := uuid.New(), uuid.New(), uuid.New()
+	own, shared, nobody := uuid.New(), uuid.New(), uuid.New()
+	for _, b := range []uuid.UUID{pin, c, d} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'wall order')`,
+			b, "wall-ord-"+b.String()[:8]); err != nil {
+			t.Fatalf("seed branch: %v", err)
+		}
+	}
+	for _, cu := range []uuid.UUID{own, shared, nobody} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'wall order', $2, $3)`,
+			cu, "WALLORD-"+cu.String()[:8], pin); err != nil {
+			t.Fatalf("seed customer: %v", err)
+		}
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2), ($3, $4), ($3, $5)`,
+		own, pin, shared, c, d); err != nil {
+		t.Fatalf("seed customer branches: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2, $3)`, own, shared, nobody)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2, $3)`, own, shared, nobody)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2, $3)`, pin, c, d)
+	})
+
+	lower := c
+	if d.String() < c.String() {
+		lower = d
+	}
+	w := NewKeyBranchWall(db, nil)
+	refusal := func(customers ...uuid.UUID) string {
+		t.Helper()
+		handler := w.CustomerBranchExclusive(func(context.Context, *http.Request) ([]uuid.UUID, error) {
+			return customers, nil
+		})(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Error("the handler ran for a refused customer") }))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/tax/exemptions", nil).WithContext(branchctx.WithKeyBranch(ctx, pin))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("answer %d, want 403: %s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	for i := 0; i < 5; i++ {
+		got := refusal(own, shared)
+		if !strings.Contains(got, "also held by branch "+lower.String()) {
+			t.Errorf("run %d: %s, want it to name the lowest numbered other branch %s", i, got, lower)
+		}
+		if strings.Contains(got, pin.String()) {
+			t.Errorf("run %d: the refusal names the pin itself: %s", i, got)
+		}
+	}
+	// A customer held by nobody next to one the pin holds: refused, and the
+	// message names no branch (the pin must not be offered as the other one).
+	if got := refusal(own, nobody); strings.Contains(got, "also held by branch") {
+		t.Errorf("a customer held by nobody: %s, want no branch named", got)
 	}
 }
