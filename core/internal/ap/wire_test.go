@@ -657,10 +657,6 @@ func TestWire_ApproveAccountMissing(t *testing.T) {
 	}
 }
 
-// RULE (ADR 0001 section 4): a client mistake is a 400 naming the field, never
-// a 500. A payment naming one bill twice would apply it twice (the second pass
-// reuses the stale locked summary) and only the amount_open CHECK stops it, so
-// Parse refuses the repeated id up front.
 // RULE (review r8 P3-1): a pending bill cannot carry a paid amount. A payment
 // applies only to an approved or partial bill, so amount_paid on a pending
 // bill is a legacy or hand edited row; migration 106 clamped its amount_open
@@ -765,6 +761,10 @@ func TestWire_CreateCurrencyFromSetting(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0001 section 4): a client mistake is a 400 naming the field, never
+// a 500. A payment naming one bill twice would apply it twice (the second pass
+// reuses the stale locked summary) and only the amount_open CHECK stops it, so
+// Parse refuses the repeated id up front.
 func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
@@ -927,7 +927,10 @@ func TestWire_VoidZeroBill(t *testing.T) {
 // silently with the credit stranded in 2010, and so is one whose linked entry
 // is the base's one leg shape: a void would mirror it into another unbalanced
 // entry. A legacy bill whose entry never posted holds no credit in 2010 and
-// voids with nothing to reverse.
+// voids with nothing to reverse. So does a pending bill that holds a live
+// entry it is not linked to (the removed sync could post before the status
+// moved): its void is refused the same way, whatever its total says (review
+// r1 P3-2).
 func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
@@ -1060,6 +1063,51 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	}
 	if got, want := f.openSum(), openBefore; got != want {
 		t.Errorf("after the refused one leg void: open %d, want the untouched %d", got, want)
+	}
+
+	// The pending shape: a bill whose entry posted while the status never
+	// moved off pending (the removed sync could post before the status did),
+	// holding a live, balanced entry it is not linked to. A plain void would
+	// strand the credit under a VOIDED bill, so it is refused the same way as
+	// an approved one (review r1 P3-2).
+	id4, r1d := f.enter("V-LEG-4", "1", 120000) // 12.00
+	if a := f.approve(id4, r1d); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	mustExec(t, f.db, `UPDATE vendor_invoices SET status = 'PENDING', gl_entry_id = NULL,
+		approved_by = NULL, approved_at = NULL WHERE id = $1`, id4)
+	control4, open4 := f.controlBalance(), f.openSum()
+	before4 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	pv := f.void(id4, 2, "pending bill voided")
+	if pv.status != http.StatusConflict {
+		t.Fatalf("void a pending bill holding a live entry = %d, want 409: %s", pv.status, pv.raw)
+	}
+	if code, blockers, _ := errorOf(t, pv); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
+		t.Errorf("void a pending bill holding a live entry = %q %v, want entry_not_linked", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'PENDING' AND revision = 2`, id4); n != 1 {
+		t.Error("a refused void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before4 {
+		t.Errorf("%d entries were written for a refused void", after-before4)
+	}
+	// The only unbalanced entry in the fixture stays the seeded legacy one
+	// (the refusal moved no money).
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
+		JOIN (SELECT journal_entry_id, SUM(debit) d, SUM(credit) c FROM gl_journal_lines GROUP BY journal_entry_id) s
+		  ON s.journal_entry_id = e.id
+		WHERE e.id IN (SELECT id FROM gl_journal_entries
+		               WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
+		                  OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
+		                  OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))
+		  AND s.d <> s.c`, f.vendor); n != 1 {
+		t.Errorf("%d unbalanced entries stand, want only the seeded legacy one", n)
+	}
+	if got, want := f.controlBalance(), control4; got != want {
+		t.Errorf("after the refused pending void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open4; got != want {
+		t.Errorf("after the refused pending void: open %d, want the untouched %d", got, want)
 	}
 }
 
