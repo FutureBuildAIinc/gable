@@ -8,21 +8,48 @@ package product_test
 // readers at pool size 4, each paging through the whole catalogue, finish.
 // A list that ran a statement per row while its rows were open would leave
 // four holders each waiting for a fifth connection.
+//
+// The catalogue is shared: parallel packages' tests create and delete their
+// own products while this one runs, and the list orders by created_at DESC,
+// so those rows sit at the top of the first page one moment and are gone the
+// next. Each reader therefore walks the pages but reads back only the probe
+// rows this test seeds and deletes itself; a probe that vanishes between the
+// list and the get is a real failure, not another test's cleanup.
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestProductListHoldsOneConnection(t *testing.T) {
 	db := testutil.RequireDBMaxConns(t, 4)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	const probes = 5
+	marker := "PL4-" + uuid.NewString()[:8]
+	probeIDs := make(map[uuid.UUID]bool, probes)
+	for i := 0; i < probes; i++ {
+		var id uuid.UUID
+		if err := db.Pool.QueryRow(ctx,
+			`INSERT INTO products (sku, description, uom_primary, base_price)
+			 VALUES ($1, 'pool probe', 'PCS', 1) RETURNING id`,
+			fmt.Sprintf("%s-%02d", marker, i)).Scan(&id); err != nil {
+			t.Fatalf("seed probe product: %v", err)
+		}
+		probeIDs[id] = true
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM products WHERE sku LIKE $1`, marker+"%")
+	})
+
 	svc := product.NewService(product.NewRepository(db))
 
 	var wg sync.WaitGroup
@@ -32,16 +59,34 @@ func TestProductListHoldsOneConnection(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for pass := 0; pass < 5; pass++ {
-				rows, _, err := svc.ListProductsPage(ctx, nil, nil, 200)
-				if err != nil {
-					errs <- err
-					return
-				}
-				for _, p := range rows[:min(len(rows), 3)] {
-					if _, err := svc.GetProduct(ctx, p.ID); err != nil {
+				seen := make(map[uuid.UUID]bool, probes)
+				var after *time.Time
+				var afterID *uuid.UUID
+				for {
+					rows, more, err := svc.ListProductsPage(ctx, after, afterID, 200)
+					if err != nil {
 						errs <- err
 						return
 					}
+					for _, p := range rows {
+						if !probeIDs[p.ID] {
+							continue
+						}
+						seen[p.ID] = true
+						if _, err := svc.GetProduct(ctx, p.ID); err != nil {
+							errs <- err
+							return
+						}
+					}
+					if !more || len(rows) == 0 {
+						break
+					}
+					last := rows[len(rows)-1]
+					after, afterID = &last.CreatedAt.Time, &last.ID
+				}
+				if len(seen) != probes {
+					errs <- fmt.Errorf("pass walked the catalogue and found %d of the %d probe products", len(seen), probes)
+					return
 				}
 			}
 		}()

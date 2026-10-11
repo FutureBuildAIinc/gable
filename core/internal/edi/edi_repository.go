@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // ErrPartnerNotFound reports that a write named a trading partner that is not
@@ -115,7 +116,14 @@ func (r *PostgresEDIRepository) GetPartner(ctx context.Context, id uuid.UUID) (*
 		&p.SupportedDocuments, &p.IsActive, &p.Notes, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("trading partner not found: %w", err)
+		// Only a missing row is a not-found. Wrapping every failure the old
+		// way turned a dropped connection or a pool timeout into "trading
+		// partner not found", which the handler answered with a 404 for a
+		// partner that exists.
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPartnerNotFound
+		}
+		return nil, fmt.Errorf("failed to get trading partner: %w", err)
 	}
 	return &p, nil
 }

@@ -70,7 +70,7 @@ func (f *fakeEDIRepo) GetPartner(_ context.Context, id uuid.UUID) (*TradingPartn
 	}
 	p, ok := f.partners[id]
 	if !ok {
-		return nil, errors.New("trading partner not found")
+		return nil, ErrPartnerNotFound
 	}
 	return &p, nil
 }
@@ -355,6 +355,30 @@ func TestGetPartner_UnknownIs404(t *testing.T) {
 	rec := doEDI(t, ediMux(newFakeEDIRepo()), http.MethodGet, "/api/v1/edi/partners/"+uuid.NewString(), "")
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// CORRECTNESS: a read failure that is not the not-found sentinel is a 500.
+// The route used to answer any GetPartner error with a 404, so a dropped
+// connection or a pool timeout told the caller a partner that exists is gone
+// (and, through the repository's old catch-all wrap, printed as "trading
+// partner not found" in test output, reading like a data bug).
+func TestGetPartner_ReadFailureIs500Not404(t *testing.T) {
+	repo := newFakeEDIRepo()
+	repo.getErr = errors.New("failed to connect: `sorry, too many clients already`")
+
+	rec := doEDI(t, ediMux(repo), http.MethodGet, "/api/v1/edi/partners/"+uuid.NewString(), "")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 — a connection failure must not answer 404 for an existing partner: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "Partner not found") {
+		t.Errorf("body = %s, want the internal error shape, not the not-found one", rec.Body)
+	}
+
+	repo.getErr = ErrPartnerNotFound
+	rec = doEDI(t, ediMux(repo), http.MethodGet, "/api/v1/edi/partners/"+uuid.NewString(), "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("sentinel: status = %d, want 404", rec.Code)
 	}
 }
 

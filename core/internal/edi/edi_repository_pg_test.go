@@ -191,6 +191,22 @@ func TestPostgresEDIRepository_ListCatalogEntriesDefaultsTheLimit(t *testing.T) 
 	}
 }
 
+// CORRECTNESS: a missing row is the ErrPartnerNotFound sentinel (which the
+// handler maps to 404 with errors.Is), and only that: the old wrap turned
+// every failure — a dropped connection included — into "trading partner not
+// found", so a transient error read like missing data.
+func TestPostgresEDIRepository_GetMissingPartnerIsTheNotFoundSentinel(t *testing.T) {
+	repo := NewEDIRepository(testutil.RequireDB(t))
+
+	_, err := repo.GetPartner(context.Background(), uuid.New())
+	if err == nil {
+		t.Fatal("GetPartner on a nonexistent partner succeeded, want the not-found sentinel")
+	}
+	if !errors.Is(err, ErrPartnerNotFound) {
+		t.Errorf("GetPartner error = %v, want ErrPartnerNotFound", err)
+	}
+}
+
 // CORRECTNESS: updating a partner that does not exist is a not-found, not a
 // silent success. Every other module in this tree checks it — crm's Update
 // (activity.go:150), project's UpdateProject (repository.go:94) and portal's
