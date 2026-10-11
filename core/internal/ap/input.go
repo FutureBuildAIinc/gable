@@ -163,7 +163,7 @@ func (req *CreateRequest) Parse() (*Input, error) {
 				line.ProductID = &id
 			}
 		}
-		if line.GLAccountID != nil && line.Quantity != 0 && line.UnitPrice >= 0 && line.UnitPrice <= maxUnitPriceTenThousandths {
+		if line.GLAccountID != nil && line.Quantity != 0 && line.UnitPrice >= 0 {
 			total, err := httpx.Extend(line.Quantity, 1, 1, line.UnitPrice)
 			switch {
 			case err != nil:

@@ -868,16 +868,6 @@ func TestWire_PayAmountIsCents(t *testing.T) {
 	}
 }
 
-// RULE (ADR 0008 7.4): a bill approved before migration 106 carries its entry
-// but no pointer to it; the migration links the newest posted, unreversed,
-// balanced VENDOR_INVOICE entry, and the void reverses exactly that entry, so
-// the tie (every entry balanced, 2010 equal to what the open bills owe) holds
-// for a legacy bill as for a new one. A legacy approved bill that holds a
-// posted, unreversed entry it is not linked to is refused rather than voided
-// silently with the credit stranded in 2010, and so is one whose linked entry
-// is the base's one leg shape: a void would mirror it into another unbalanced
-// entry. A legacy bill whose entry never posted holds no credit in 2010 and
-// voids with nothing to reverse.
 // A bill that prices to zero (a zero price, or a positive price that rounds
 // to 0 cents at the line) approves with no entry, because there is nothing to
 // post. It owes nothing, so its void has nothing to reverse and goes through:
@@ -924,6 +914,16 @@ func TestWire_VoidZeroBill(t *testing.T) {
 	}
 }
 
+// RULE (ADR 0008 7.4): a bill approved before migration 106 carries its entry
+// but no pointer to it; the migration links the newest posted, unreversed,
+// balanced VENDOR_INVOICE entry, and the void reverses exactly that entry, so
+// the tie (every entry balanced, 2010 equal to what the open bills owe) holds
+// for a legacy bill as for a new one. A legacy approved bill that holds a
+// posted, unreversed entry it is not linked to is refused rather than voided
+// silently with the credit stranded in 2010, and so is one whose linked entry
+// is the base's one leg shape: a void would mirror it into another unbalanced
+// entry. A legacy bill whose entry never posted holds no credit in 2010 and
+// voids with nothing to reverse.
 func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
