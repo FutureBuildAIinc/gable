@@ -14,7 +14,7 @@ back so every dealer benefits.
 
 ## What's here
 
-- **Modular monolith backend** — a single Go binary with ~40 domain modules,
+- **Modular monolith backend** — a single Go binary with 47 domain modules,
   moving toward an installable-*apps* model so third parties can plug in at a
   stable connector seam.
 - **Web app** — a fast, dark-themed operations UI (ERP desktop, B2B portal,
