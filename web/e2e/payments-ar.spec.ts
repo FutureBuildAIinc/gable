@@ -32,18 +32,50 @@ async function signIn(page: Page, name: string) {
 async function freshCustomer(request: APIRequestContext) {
   const res = await request.post('/api/v1/customers', { data: { account_number: `E2E-PAY-${RUN}-${++counter}`, name: `E2E Payments ${RUN} ${counter}` } });
   expect(res.status(), await res.text()).toBe(201);
-  return (await res.json()) as { id: string; name: string };
+  return (await res.json()) as { id: string; name: string; primary_branch_id: string };
 }
 
-// Products with plenty on hand; the caller tries each until one confirms
-// (the same walk the invoices spec does).
-async function stockedProducts(request: APIRequestContext) {
+// One page of the locations list: the envelope of ADR 0001 section 1.
+type LocationPage = { items: { id: string; parent_id: string | null }[]; next_cursor: string | null };
+
+// Every location of one branch: the branch location itself and anything
+// whose parent chain leads to it. Stock the order can draw on lives at
+// these locations only. The list endpoint caps its page size at 200, so the
+// walk pages within the cap and follows the cursor; one oversized request
+// is answered with an error envelope that has no items array.
+async function branchStockLocations(request: APIRequestContext, branch: string): Promise<Set<string>> {
+  const items: { id: string; parent_id: string | null }[] = [];
+  let cursor: string | null = null;
+  do {
+    const url = `/api/v1/locations?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const page = (await (await request.get(url)).json()) as LocationPage;
+    items.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor !== null);
+  const parentOf = new Map(items.map((l) => [l.id, l.parent_id]));
+  const out = new Set<string>([branch]);
+  for (const l of items) {
+    let cur: string | null = l.id;
+    while (cur !== null && !out.has(cur)) cur = parentOf.get(cur) ?? null;
+    if (cur !== null) out.add(l.id);
+  }
+  return out;
+}
+
+// Products with plenty on hand at the branch the order will live at; the
+// caller tries each until one confirms (the same walk the invoices spec
+// does). Availability is summed over that branch's locations only: stock
+// at another branch never allocates this order, so counting it left the
+// pick asserting a full allocation that could not happen.
+async function stockedProducts(request: APIRequestContext, branch: string) {
+  const at = await branchStockLocations(request, branch);
   const products = (await (await request.get('/api/v1/products?limit=200')).json()) as { items: { id: string; sku: string }[] };
   const list = products.items.filter((p) => !p.sku.startsWith('E2E-')).reverse();
   const out: { id: string; sku: string }[] = [];
   for (const p of list) {
-    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { items: { available: string }[] };
-    if (page.items.reduce((n, r) => n + (Number(r.available) || 0), 0) >= 50) out.push(p);
+    const page = (await (await request.get(`/api/v1/inventory?product_id=${p.id}`)).json()) as { items: { available: string; location_id: string | null }[] };
+    const here = page.items.reduce((n, r) => n + (r.location_id !== null && at.has(r.location_id) ? Number(r.available) || 0 : 0), 0);
+    if (here >= 50) out.push(p);
   }
   return out;
 }
@@ -51,11 +83,11 @@ async function stockedProducts(request: APIRequestContext) {
 /** One billed, unpaid invoice of the customer, on the job and ship-to given. */
 async function billedInvoice(
   request: APIRequestContext,
-  customer: { id: string; name: string },
+  customer: { id: string; name: string; primary_branch_id: string },
   extras: { job_id?: string; ship_to_id?: string } = {},
 ): Promise<{ id: string; number: string; total_cents: number }> {
   const tried: string[] = [];
-  for (const product of await stockedProducts(request)) {
+  for (const product of await stockedProducts(request, customer.primary_branch_id)) {
     const created = await request.post('/api/v1/orders', {
       data: {
         customer_id: customer.id, delivery_type: 'delivery',
@@ -188,7 +220,7 @@ test.describe('Payments, unapplied cash and AR', () => {
         return;
     }
     const jobIds = [...jobsByCustomer.get(kelbrook)!];
-    const customerName = ((await (await request.get(`/api/v1/customers/${kelbrook}`)).json()) as { name: string }).name;
+    const kelbrookCustomer = (await (await request.get(`/api/v1/customers/${kelbrook}`)).json()) as { name: string; primary_branch_id: string };
     const shipTos = ((await (await request.get(`/api/v1/customers/${kelbrook}/ship-tos`)).json()) as { items: { id: string; code: string }[] }).items;
     expect(shipTos.length).toBeGreaterThanOrEqual(1);
     if (shipTos.length < 2) {
@@ -198,8 +230,8 @@ test.describe('Payments, unapplied cash and AR', () => {
       expect(second.status(), await second.text()).toBe(201);
       shipTos.push(await second.json());
     }
-    await billedInvoice(request, { id: kelbrook, name: customerName }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
-    await billedInvoice(request, { id: kelbrook, name: customerName }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
+    await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
+    await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
 
     // By customer first, then by job and by ship-to: the toggle re-reads the
     // aging and the group rows split.

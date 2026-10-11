@@ -58,6 +58,13 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 		VALUES ($1, $2, '2x4x8 SPF', 'PCS', 5.5)`, f.productID, f.sku); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
+	// The default branch's rate is shared state: read the prior value and
+	// restore it in cleanup, so this fixture's write does not leak a rate
+	// onto a neighbouring test in any package.
+	var oldRate *string
+	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
+		t.Fatalf("read default branch rate: %v", err)
+	}
 	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
 		WHERE id = `+branch); err != nil {
 		t.Fatalf("seed branch rate: %v", err)
@@ -89,6 +96,7 @@ func newKindFixture(t *testing.T, db *database.DB) *kindFixture {
 
 	t.Cleanup(func() {
 		f.srv.Close()
+		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate)
 		// Scoped to this fixture's own drafts (by the payload's customer),
 		// never by module: the drafts package's tests run in parallel and
 		// hold their own.
@@ -162,6 +170,7 @@ func (f *kindFixture) payload(qty string) map[string]any {
 // its SO- number, and the outbox carries order.created before
 // draft.promoted.
 func TestOrderKind_CreateDraftPromotesToDraftOrder(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newKindFixture(t, testutil.RequireDB(t))
 	r := f.do("POST", "/api/v1/drafts/orders", map[string]any{"payload": f.payload("10")})
 	if r.status != http.StatusCreated {
@@ -213,6 +222,7 @@ func TestOrderKind_CreateDraftPromotesToDraftOrder(t *testing.T) {
 // that moved is stale (subject_stale); a subject that left draft refuses
 // (order_not_draft).
 func TestOrderKind_EditDraftPromotesThroughUpdateCore(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newKindFixture(t, testutil.RequireDB(t))
 	r := f.do("POST", "/api/v1/orders", f.payload("10"))
 	if r.status != http.StatusCreated {

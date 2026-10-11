@@ -38,6 +38,10 @@ func callerMiddleware(next http.Handler) http.Handler {
 }
 
 func TestCreate_PayloadBranchRule(t *testing.T) {
+	// The route under test writes quote events into events_outbox, which the
+	// events and outbox packages' tests truncate under this lock; take it so
+	// this test's writes and their truncates serialise across packages.
+	testutil.LockOutboxTables(t)
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	ctx := context.Background()

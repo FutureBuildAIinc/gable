@@ -1296,13 +1296,24 @@ func TestBranchWall_QuoteAnalytics(t *testing.T) {
 	}
 }
 
+// poRefreshProposal is the part of one ReorderTargetProposal the test reads.
+type poRefreshProposal struct {
+	ProductID string  `json:"product_id"`
+	SKU       string  `json:"sku"`
+	NewPoint  float64 `json:"new_point"`
+	NewQty    float64 `json:"new_qty"`
+	AvgDaily  float64 `json:"avg_daily"`
+}
+
 // poRefreshSummary is the part of the refresh-reorder-targets response the
 // test reads. The full set the service returns lives in service.go's
-// RefreshResult; the test pins the count and the proposal product set.
+// RefreshResult; the test pins the fixture product's own proposal, never
+// whole table counts.
 type poRefreshSummary struct {
-	DryRun          bool `json:"dry_run"`
-	ProductsUpdated int  `json:"products_updated"`
-	ProductsSkipped int  `json:"products_skipped"`
+	DryRun          bool                `json:"dry_run"`
+	ProductsUpdated int                 `json:"products_updated"`
+	ProductsSkipped int                 `json:"products_skipped"`
+	Proposals       []poRefreshProposal `json:"proposals"`
 }
 
 // The purchase order refresh-reorder-targets route runs behind the branch
@@ -1316,12 +1327,14 @@ type poRefreshSummary struct {
 // bound user's refresh writes the same targets an administrator's would.
 // The cron path is identical: Scheduler.runRefresh calls the same service
 // with context.Background, which is arm 3. The test pins both: as
-// purchasing with header A and as admin with no header, the same proposal
-// set is returned (the fixture's seed sets branch A to 90 units and branch
-// B to 900 in the lookback window, so the fixture product is in the
-// proposal set on both arms; the proposal counts match exactly); the
-// write mode lands the recomputed target on the products row, and an
-// admin's write equals a bound user's write.
+// purchasing with header A and as admin with no header, the fixture
+// product carries the same proposal (the fixture's seed sets branch A to
+// 90 units and branch B to 900 in the lookback window, so the fixture
+// product is in the proposal set on both arms; the catalogue is shared
+// with parallel packages whose tests create and delete their own products
+// mid run, so only the fixture product's own entry is compared, never
+// whole table counts); the write mode lands the recomputed target on the
+// products row, and an admin's write equals a bound user's write.
 func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
 	testutil.LockOutboxTables(t) // the refresh writes product.updated events
 	db := testutil.RequireDB(t)
@@ -1338,6 +1351,17 @@ func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `UPDATE products SET reorder_point = 0, reorder_qty = 0 WHERE id = $1`, f.productID)
 	})
+
+	// The recompute walks the whole shared catalogue and the dry run answers
+	// a preview list capped by the service; the walk is ordered by sku, so
+	// the fixture product's sku is renamed to sort ahead of every letter
+	// prefixed sku a parallel package may hold: its proposal is always the
+	// first entry of the preview, present on every arm. The fixture's cleanup
+	// deletes the row, so the rename needs no restore.
+	firstSKU := "0000WL-" + f.productID.String()[:8]
+	if _, err := db.Pool.Exec(ctx, `UPDATE products SET sku = $2 WHERE id = $1`, f.productID, firstSKU); err != nil {
+		t.Fatalf("rename fixture product sku: %v", err)
+	}
 
 	// Demand in the 90 day lookback: 90 units sold at branch A (1 a day),
 	// 900 at branch B (10 a day). The fixture's cleanup deletes this
@@ -1375,6 +1399,19 @@ func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
 		}
 		return s
 	}
+	// proposalFor reads the fixture product's own entry out of a dry run's
+	// preview: the assertion set of this test, immune to the shared
+	// catalogue's comings and goings around it.
+	proposalFor := func(t *testing.T, s poRefreshSummary) poRefreshProposal {
+		t.Helper()
+		for _, p := range s.Proposals {
+			if p.ProductID == f.productID.String() {
+				return p
+			}
+		}
+		t.Fatalf("dry run preview carries no proposal for the fixture product (%d proposals)", len(s.Proposals))
+		return poRefreshProposal{}
+	}
 	readProduct := func(t *testing.T) (reorderPoint, reorderQty float64) {
 		t.Helper()
 		if err := db.Pool.QueryRow(ctx,
@@ -1400,33 +1437,35 @@ func TestBranchWall_PORefreshReorderTargets(t *testing.T) {
 	if dryRunPurchasing.DryRun != true {
 		t.Errorf("refresh dry-run, purchasing header A: dry_run = %v, want true", dryRunPurchasing.DryRun)
 	}
-	if dryRunPurchasing.ProductsUpdated < 1 {
-		t.Errorf("refresh dry-run, purchasing header A: products_updated = %d, want at least 1 (the fixture product)",
-			dryRunPurchasing.ProductsUpdated)
-	}
+	propPurchasing := proposalFor(t, dryRunPurchasing)
 
 	// Dry run must not have written the products row.
 	if pp, pq := readProduct(t); pp != 0 || pq != 0 {
 		t.Errorf("refresh dry-run wrote the products row: point = %v, qty = %v, want both 0", pp, pq)
 	}
 
-	// Administrator with no header: dry-run proposal set and count must
-	// match the bound purchasing user's proposal set and count exactly
-	// (the recompute sees every branch's data on both arms now, so both
-	// produce the same proposal).
+	// Administrator with no header: the fixture product's own proposal must
+	// match the bound purchasing user's exactly (the recompute sees every
+	// branch's data on both arms now, so both produce the same proposal for
+	// it). Whole table counts are not compared: parallel packages' tests
+	// create and delete their own products between the two calls.
 	status, body = f.callBody(t, "POST", "/api/v1/purchase-orders/refresh-reorder-targets",
 		`{"dry_run":true,"lookback_days":90}`, "admin", "boss", "")
 	if status != http.StatusOK {
 		t.Fatalf("refresh dry-run, admin no header: %d, want 200: %s", status, body)
 	}
 	dryRunAdmin := readSummary(t, body)
-	if dryRunAdmin.ProductsUpdated != dryRunPurchasing.ProductsUpdated {
-		t.Errorf("refresh dry-run: admin products_updated = %d, want %d (matches the bound purchasing arm)",
-			dryRunAdmin.ProductsUpdated, dryRunPurchasing.ProductsUpdated)
+	propAdmin := proposalFor(t, dryRunAdmin)
+	if propAdmin != propPurchasing {
+		t.Errorf("refresh dry-run: admin proposal %+v, want %+v (the bound purchasing arm's proposal for the same product)",
+			propAdmin, propPurchasing)
 	}
-	if dryRunAdmin.ProductsSkipped != dryRunPurchasing.ProductsSkipped {
-		t.Errorf("refresh dry-run: admin products_skipped = %d, want %d (matches the bound purchasing arm)",
-			dryRunAdmin.ProductsSkipped, dryRunPurchasing.ProductsSkipped)
+	// Pin the numbers on one arm: any future change to the lead time default
+	// or the safety factor surfaces here. The dry-run counts are not pinned:
+	// only the fixture product's own entry is this test's to assert.
+	if want := (poRefreshProposal{ProductID: f.productID.String(), SKU: firstSKU, NewPoint: 116, NewQty: 330, AvgDaily: 11}); propPurchasing != want {
+		t.Errorf("refresh dry-run, purchasing header A: proposal %+v, want %+v (every branch's sales: 90 + 900 = 990 over the lookback)",
+			propPurchasing, want)
 	}
 
 	// The bound write: a bound purchasing user with header A must write

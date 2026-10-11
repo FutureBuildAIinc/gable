@@ -120,6 +120,7 @@ func awaitFor(t *testing.T, events chan sseEvent, what string, bound time.Durati
 // subject-filtered stream receives only that subject's drafts, and a PUT
 // made on ANOTHER connection arrives with the right by actor.
 func TestFeedSubjectFilterAndCrossConnectionUpdate(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	subject := f.createQuote(t)
 	f.create() // noise: another draft on no subject
@@ -333,6 +334,7 @@ func TestFeedCommitOrderServesBoth(t *testing.T) {
 // next heartbeat is a cursor event (not a keepalive), so a reconnecting
 // client does not rescan the excluded rows.
 func TestFeedFilteredStreamAdvancesCursor(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	subject := f.createQuote(t)
 

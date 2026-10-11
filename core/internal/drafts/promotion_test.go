@@ -56,6 +56,7 @@ func promotedEntity(t *testing.T, r resp) string {
 // a stale_revision WITH the subject_stale blocker; a stale DRAFT revision
 // carries no blocker.
 func TestPromotionSubjectStaleAddedAndAbsent(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 
 	// An edit draft legitimately built on the quote's revision 1, then the
@@ -171,6 +172,7 @@ func promoteFixture(t *testing.T, db *database.DB, recorder drafts.EventRecorder
 // was (still open at the same revision), with one draft.promotion_refused
 // audit row after the rollback.
 func TestPromotionFailingEventRollsEverythingBack(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f, _ := promoteFixture(t, db, failingRecorder{})
 	id := f.create()
@@ -247,6 +249,7 @@ func maxQuoteNumber(t *testing.T, db *database.DB) int64 {
 // meets already_promoted whatever revision it sends (the status is checked
 // before the revision), and a keyed retry replays the stored response.
 func TestPromotionAlreadyPromotedAndReplay(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	id := f.create()
 	key := "promote-" + f.sku
@@ -333,6 +336,7 @@ func TestPromotionPayloadPathsOnA400(t *testing.T) {
 // proposed_by and committed_by, and the response body is the draft with
 // its promoted block.
 func TestPromotionEventsInOrderAndProvenance(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	// The proposer is the agent who creates the draft (the brief:
 	// "use two distinct actors and assert both").
@@ -424,6 +428,7 @@ func TestPromotionEventsInOrderAndProvenance(t *testing.T) {
 // racing one draft produce one 201 and one 409, and a PUT racing a
 // promotion has exactly one winner.
 func TestPromotionRaces(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 
 	// Two promoters on one draft.
@@ -502,6 +507,7 @@ func TestPromotionRaces(t *testing.T) {
 // rewritten. The test pins the wire shape: a 409
 // invalid_state_transition naming both states.
 func TestPromotedIsTerminal(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 
 	// Build a draft, promote it.

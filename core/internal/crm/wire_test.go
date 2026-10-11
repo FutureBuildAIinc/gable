@@ -154,6 +154,7 @@ func (f *fixture) createActivity(t *testing.T, desc string, hdr map[string]strin
 // The create shape: lowercase status vocabulary, optional fields present as
 // null, revision and the ETag, Location, timestamps at microsecond precision.
 func TestCreate_Shape(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	res := f.createActivity(t, "first contact", nil)
 	if res.status != http.StatusCreated {
@@ -191,6 +192,7 @@ func TestCreate_Shape(t *testing.T) {
 // One 400 with every offending field, full paths, and a body the route
 // cannot consume is bad_request; an unknown body field is refused.
 func TestCreate_FieldValidation(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	res := f.do(t, http.MethodPost, "/api/v1/customers/"+f.customer.String()+"/activities",
 		`{"activity_type":"CALL","description":"  ","contact_id":"not-a-uuid","customer_id":"00000000-0000-0000-0000-000000000001"}`, nil)
@@ -237,6 +239,7 @@ func TestCreate_FieldValidation(t *testing.T) {
 // refused, an uppercase filter value refused, the cursor walks every row
 // once, limit validated, include=total, an empty page is [].
 func TestList_EnvelopeFiltersCursor(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	f.createActivity(t, "one", nil)
 	f.createActivity(t, "two", nil)
@@ -315,6 +318,7 @@ func TestList_EnvelopeFiltersCursor(t *testing.T) {
 // and weak, header and body disagreeing, the new revision and ETag on
 // success.
 func TestUpdate_Revision(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	created := f.createActivity(t, "to edit", nil)
 	id := created.body["id"].(string)
@@ -371,6 +375,7 @@ func TestUpdate_Revision(t *testing.T) {
 // request for the first branch's activity is a 404, and a create on an
 // invisible customer is a 404.
 func TestBranchWall_OnEveryRoute(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	created := f.createActivity(t, "walled", nil)
 	id := created.body["id"].(string)
@@ -403,6 +408,7 @@ func TestBranchWall_OnEveryRoute(t *testing.T) {
 
 // The mutation writes its audit row and its event, in one transaction.
 func TestMutation_AuditRowAndEvent(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	ctx := context.Background()
 	created := f.createActivity(t, "audited", nil)
@@ -444,6 +450,7 @@ func TestMutation_AuditRowAndEvent(t *testing.T) {
 // one key returns the first response and makes one row and one event; the
 // same key with another body is 422.
 func TestCreate_IdempotentReplay(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	key := map[string]string{"Idempotency-Key": "crm-wire-" + uuid.NewString()}
 	first := f.do(t, http.MethodPost, "/api/v1/customers/"+f.customer.String()+"/activities",

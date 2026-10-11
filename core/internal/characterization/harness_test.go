@@ -73,6 +73,13 @@ var (
 	// offset from this day, and the end-of-run guard fails the run if UTC
 	// midnight was crossed between seed and script.
 	seedDay string
+
+	// seedInstant is the instant that capture was taken at, the one moment
+	// every timestamp in a transcript counts its day offset from: a value the
+	// run wrote seconds or minutes later counts as the same day (+0d) even
+	// when those minutes cross UTC midnight, because the offset is a duration
+	// from this instant, not a calendar-day comparison against seedDay.
+	seedInstant time.Time
 )
 
 const dayLayout = "2006-01-02"
@@ -140,7 +147,8 @@ func setupGoldensDatabase() func() {
 	}
 	goldensDBURL = freshURL
 	goldensDBName = dbName
-	seedDay = time.Now().UTC().Format(dayLayout)
+	seedInstant = time.Now().UTC()
+	seedDay = seedInstant.Format(dayLayout)
 
 	var dropped bool
 	return func() {
