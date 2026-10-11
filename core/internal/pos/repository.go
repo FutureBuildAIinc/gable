@@ -773,25 +773,37 @@ func (r *PostgresRepository) InsertRefundIntent(ctx context.Context, intent Refu
 // transaction that posts the refund, carrying the gateway's own refund id.
 // A refund the transaction then refuses rolls this back with everything
 // else: the intent stays PENDING beside its orphaned refund row, recording
-// the money that moved.
+// the money that moved. A call that settles no row (the claim left PENDING
+// underneath, a concurrent resolution winning it) refuses 409
+// intent_not_pending, so no booking ever stands beside a settled claim
+// (ninth review P2-2, tenth review P2-1).
 func (r *PostgresRepository) CompleteRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error {
-	_, err := r.ex(ctx).Exec(ctx, `
+	tag, err := r.ex(ctx).Exec(ctx, `
 		UPDATE pos_refund_intents SET state = 'DONE', refund_tx_id = NULLIF($3, ''), updated_at = NOW()
 		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID, refundTxID)
 	if err != nil {
 		return fmt.Errorf("failed to complete the refund intent: %w", mapWriteError(err))
 	}
+	if tag.RowsAffected() == 0 {
+		return conflict("intent_not_pending", "the refund claim was settled by another resolution first")
+	}
 	return nil
 }
 
 // FailRefundIntent releases the tender's live intent after its gateway call
-// failed: no money moved for it, so the tender may be refunded again.
+// failed: no money moved for it, so the tender may be refunded again. A call
+// that settles no row answers the same intent_not_pending refusal; the
+// decline path's caller treats it as settled by another hand, never as a
+// failure of its own release.
 func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error {
-	_, err := r.ex(ctx).Exec(ctx, `
+	tag, err := r.ex(ctx).Exec(ctx, `
 		UPDATE pos_refund_intents SET state = 'FAILED', updated_at = NOW()
 		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID)
 	if err != nil {
 		return fmt.Errorf("failed to release the refund intent: %w", mapWriteError(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return conflict("intent_not_pending", "the refund claim was settled by another resolution first")
 	}
 	return nil
 }

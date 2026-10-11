@@ -100,6 +100,17 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			if err := s.repo.LockSale(ctx, rec.SaleID); err != nil {
 				return err
 			}
+			// the claim row, locked under the sale: a contender resolution
+			// of the same claim loses here with the race named, never beside
+			// this release (ninth review P2-2)
+			held, err := s.repo.LockRefundIntent(ctx, intentID)
+			if err != nil {
+				return err
+			}
+			if held.State != "PENDING" {
+				return conflict("intent_not_pending",
+					fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", held.State))
+			}
 			if err := s.repo.FailRefundIntentByID(ctx, intentID); err != nil {
 				return err
 			}

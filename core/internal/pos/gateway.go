@@ -15,6 +15,7 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -48,9 +49,17 @@ type gatewayRefund struct {
 // its own committed write: no money moved for it, so the tender may be
 // refunded again. A failing write is logged and left alone: the intent
 // stays PENDING, which refuses future refunds of the tender until it is
-// reconciled (the safe side).
+// reconciled (the safe side). A release that settles no row means another
+// hand (a concurrent resolution) settled the claim first: nothing of this
+// call's own refusal is lost by that, so it is noted and not alarmed.
 func (s *Service) failRefundIntent(ctx context.Context, intent RefundIntent) {
 	if err := s.repo.FailRefundIntent(ctx, intent.SaleID, intent.TenderID); err != nil {
+		var hx *httpx.Error
+		if errors.As(err, &hx) && hx.Code == httpx.CodeConflict {
+			s.logger.Info("the declined refund claim was settled by another hand",
+				"act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID)
+			return
+		}
 		s.logger.Error("CRITICAL: the failed refund intent was not released",
 			"act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID, "error", err)
 	}

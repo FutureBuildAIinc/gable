@@ -751,6 +751,13 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return conflict("tender_refunded",
 					"the card tender was already refunded whole by this sale's void: no second refund of it can be made")
 			}
+			if cf.PendingCents == 0 {
+				// this return's own claim left PENDING underneath it (a
+				// concurrent resolution won the claim): the race is lost, not
+				// in flight (ninth review P2-2, tenth review P3-3)
+				return conflict("intent_not_pending",
+					"the refund claim was settled by another resolution first")
+			}
 			if held := cf.PendingCents - claim.intent.AmountCents; held != 0 {
 				return conflict("refund_in_flight",
 					"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
