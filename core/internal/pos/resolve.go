@@ -161,6 +161,14 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			}
 			st, err := s.priceReturn(ctx, stored.toReturnIn())
 			if err != nil {
+				// the replay prices outside the transaction, and a contender
+				// may settle the claim and book while it does: the race is
+				// the answer then, never the caps the winner's own booking
+				// trips (the money transaction rechecks under the sale lock)
+				if fresh, rerr := s.repo.GetRefundIntent(ctx, intentID); rerr == nil && fresh.State != "PENDING" {
+					return nil, conflict("intent_not_pending",
+						"the refund claim was settled by another resolution first")
+				}
 				return nil, err
 			}
 			st.actor = actor

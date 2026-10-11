@@ -684,6 +684,24 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 						"this sale's void already refunded a card tender at the terminal: reconcile the void before returning goods against this sale")
 				}
 			}
+			// The claim's own state, under the sale row lock and before the
+			// caps: a replay whose claim was settled by a concurrent
+			// resolution answers the race (tenth review P3-3), never the
+			// caps the winner's own booking trips.
+			if claim != nil {
+				cf, err := s.repo.RefundIntentFacts(ctx, claim.intent.SaleID, claim.intent.TenderID)
+				if err != nil {
+					return err
+				}
+				if cf.DoneVoid {
+					return conflict("tender_refunded",
+						"the card tender was already refunded whole by this sale's void: no second refund of it can be made")
+				}
+				if cf.PendingCents == 0 {
+					return conflict("intent_not_pending",
+						"the refund claim was settled by another resolution first")
+				}
+			}
 			// The cap, rechecked under the lock: a return that raced this one
 			// for the same line is counted before this one is allowed.
 			if err := s.checkReturnCaps(ctx, in.OriginalSaleID, st.priced, st.byID); err != nil {
