@@ -4647,7 +4647,7 @@ export interface paths {
         };
         /**
          * Live X report of a session
-         * @description An unknown session answers 500.
+         * @description An unknown session, or a session the caller's branch context hides, answers 404 like the Z report read.
          */
         get: operations["posTillReport"];
         put?: never;
@@ -23875,6 +23875,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };

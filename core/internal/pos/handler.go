@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // Handler handles POS HTTP endpoints.
@@ -281,6 +282,13 @@ func (h *Handler) TillReportHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := h.service.TillReport(r.Context(), id)
 	if err != nil {
+		// A session the caller's branch context hides reads as missing, the
+		// same 404 the Z report and return reads answer (r17 P3-1), not a
+		// 500.
+		if errors.Is(err, pgx.ErrNoRows) {
+			httputil.RespondError(w, r, err.Error(), http.StatusNotFound, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to build till report", http.StatusInternalServerError, err)
 		return
 	}

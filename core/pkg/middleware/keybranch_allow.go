@@ -337,7 +337,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/pos/returns":                                      {KeyBranchClassWalled, "pos_returns.branch_id; TestKeyBranchPin_PosAndAccountRows"},
 	"GET /api/v1/pos/returns/{id}":                                 {KeyBranchClassWalled, "pos_returns.branch_id; TestKeyBranchPin_PosAndAccountRows"},
 	"GET /api/v1/pos/till/current":                                 {KeyBranchClassWalled, "till_sessions.branch_id (the register's open session); TestKeyBranchPin_PosAndAccountRows"},
-	"GET /api/v1/pos/till/{id}/report":                             {KeyBranchClassWalled, "till_sessions.branch_id; TestKeyBranchPin_PosAndAccountRows"},
+	"GET /api/v1/pos/till/{id}/report":                             {KeyBranchClassWalled, "till_sessions.branch_id (a session the caller's branch context hides reads as missing, the 404 the Z report read answers, round 8); TestKeyBranchPin_PosAndAccountRows, TestKeyBranchPin_HiddenTillReportAnswers404"},
 	"GET /api/v1/pos/till/{id}/zreport":                            {KeyBranchClassWalled, "till_z_reports.branch_id; TestKeyBranchPin_PosAndAccountRows"},
 	"GET /api/v1/pos/transactions":                                 {KeyBranchClassWalled, "pos_transactions.branch_id"},
 	"GET /api/v1/pos/transactions/{id}":                            {KeyBranchClassWalled, "pos_transactions.branch_id"},
