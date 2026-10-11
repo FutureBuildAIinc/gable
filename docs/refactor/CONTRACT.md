@@ -270,8 +270,9 @@ Fragments done (the pattern the rest copy):
 | events (R1-12b) | `events.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
-The deposit operations live on `admin.yaml`'s deposits sub-list (the harness
-does not have a `deposits.yaml` fragment). Routes beyond these tables
+There is no deposits fragment: C2-4 removed the deposits module and its
+routes (migration 101), and a deposit is now a payment of the customer with
+`unapplied_cents` (`CONTRACT-CHANGES.md`, C2-4). Routes beyond these tables
 (ap, bankrecon, edi, gl, matching, pricing, purchase_order, tax; chargecode,
 drafts_orders, drafts_quotes, links and units) sit in their own fragments
 listed above the module status block - their route counts are 7, 9, 7, 15,
