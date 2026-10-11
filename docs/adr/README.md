@@ -10,16 +10,16 @@ ADR-011, which lives in the FutureBuild infra repository, not here.
 
 | ADR | Title | Item |
 |---|---|---|
-| [0001](0001-wire-contract.md) | The wire contract for every route | R1-6 |
-| [0002](0002-machine-keys.md) | Scoped machine keys | R1-13 |
-| [0003](0003-events-outbox.md) | The transactional outbox and the events read API | R1-12 |
-| 0004 | Web session custody | R1-8 |
-| [0005](0005-sales-and-money-core.md) | The sales and money core | C2-0 |
-| [0006](0006-units-and-pricing.md) | Units and pricing | C3-0 |
-| [0007](0007-drafts-links-and-confirm-gated-scopes.md) | Drafts, links and confirm gated scopes | C5-0 |
-| [0008](0008-inventory-identity-and-vendor-intake.md) | Inventory identity and vendor intake | C4-0 |
-| [0009](0009-finer-admin-scopes.md) | Finer admin and users scopes | C5-1a |
-| [0010](0010-multi-company.md) | Multi company within one database | C5-3 |
+| [0001](0001-wire-contract.md) | the wire contract for every route | R1-6 |
+| [0002](0002-machine-keys.md) | scoped machine keys | R1-13 |
+| [0003](0003-events-outbox.md) | the transactional outbox and the events read API | R1-12 |
+| [0004](0004-web-session-custody.md) | web session custody | R1-8 |
+| [0005](0005-sales-and-money-core.md) | the sales and money core | C2-0 |
+| [0006](0006-units-and-pricing.md) | units and pricing | C3-0 |
+| [0007](0007-drafts-links-and-confirm-gated-scopes.md) | drafts, links and confirm gated scopes | C5-0 |
+| [0008](0008-inventory-identity-and-vendor-intake.md) | inventory identity and vendor intake | C4-0 |
+| [0009](0009-finer-admin-scopes.md) | finer admin and users scopes | C5-1a |
+| [0010](0010-multi-company.md) | multi company within one database | C5-3 |
 
 ## Writing one
 
