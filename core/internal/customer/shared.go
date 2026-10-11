@@ -48,7 +48,11 @@ func restrictedFields(changed []string) []string {
 type SharedVerdict struct {
 	Refuse bool      // a branch bound key, and another branch holds the customer
 	Branch uuid.UUID // the other branch the refusal names
-	Audit  bool      // a dealer wide key, and several branches hold the customer
+	// RefuseCaller: a user without the finance or owner role, or an unbound
+	// key without the customers:restricted scope, and the customer is shared
+	// (principal ruling item 48).
+	RefuseCaller bool
+	Audit        bool // a scoped dealer wide key, and several branches hold the customer
 }
 
 // SharedGuard decides how the caller stands to a shared customer. The
@@ -78,13 +82,25 @@ type sharedRefusal struct{ err *httpx.Error }
 func (e *sharedRefusal) Error() string { return e.err.Message }
 
 func refusedOn(branch uuid.UUID, fields ...string) *sharedRefusal {
+	return refusedSharing("a branch bound key may act only on its own branch", branch, fields...)
+}
+
+// refusedCallerOn is the refusal a caller without the finance or owner role
+// (a user) or without the customers:restricted scope (an unbound key) gets on
+// a shared customer's restricted fields: the same words, naming a branch that
+// holds the customer (principal ruling item 48).
+func refusedCallerOn(branch uuid.UUID, fields ...string) *sharedRefusal {
+	return refusedSharing("a shared customer's restricted fields change only with the finance or owner role, or an unbound key carrying customers:restricted", branch, fields...)
+}
+
+func refusedSharing(rule string, branch uuid.UUID, fields ...string) *sharedRefusal {
 	sort.Strings(fields)
 	details := make([]httpx.FieldError, 0, len(fields))
 	for _, f := range fields {
 		details = append(details, httpx.FieldError{Field: f, Code: httpx.CodeForbidden, Message: "shared with another branch"})
 	}
 	return &sharedRefusal{err: &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
-		Message: "a branch bound key may act only on its own branch: the customer is also held by branch " + branch.String(),
+		Message: rule + ": the customer is also held by branch " + branch.String(),
 		Details: details}}
 }
 
@@ -113,12 +129,15 @@ func (s *Service) checkRestricted(ctx context.Context, id uuid.UUID, changes map
 	if err != nil {
 		return err
 	}
+	fields := make([]string, 0, len(changes))
+	for f := range changes {
+		fields = append(fields, f)
+	}
 	if verdict.Refuse {
-		fields := make([]string, 0, len(changes))
-		for f := range changes {
-			fields = append(fields, f)
-		}
 		return refusedOn(verdict.Branch, fields...)
+	}
+	if verdict.RefuseCaller {
+		return refusedCallerOn(verdict.Branch, fields...)
 	}
 	if verdict.Audit {
 		return s.shared.RecordChange(ctx, id, changes)

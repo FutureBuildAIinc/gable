@@ -72,6 +72,10 @@ func (f *keyPinFixture) send(t *testing.T, who, method, path, body string, hdr m
 		return f.key(t, f.bound, method, path, body, hdr)
 	case "unbound":
 		return f.key(t, f.unbound, method, path, body, hdr)
+	case "finance":
+		return f.userAs(t, "finance", method, path, body, hdr)
+	case "sales":
+		return f.userAs(t, "sales", method, path, body, hdr)
 	}
 	return f.user(t, method, path, body, hdr)
 }

@@ -124,6 +124,25 @@ type keyPinFixture struct {
 	bound2KeyID string    // the second bound key's id
 	boundFirst  string    // the first mint's bound key, kept when a test swaps in the second
 	recording   bool      // mark every bound key call for the walled route coverage test
+	keys        *techadmin.Service // the mint the fixture's keys validate against
+}
+
+// mintWithScopes mints a key with the scopes given, through the same service
+// the fixture's machine key core validates against, and removes it when the
+// test ends.
+func (f *keyPinFixture) mintWithScopes(t *testing.T, name string, scopes []string, branch *uuid.UUID) string {
+	t.Helper()
+	raw, key, err := f.keys.GenerateKey(context.Background(), name, scopes, branch)
+	if err != nil {
+		t.Fatalf("mint %s: %v", name, err)
+	}
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'api_key' AND entity_id = $1::text`, key.ID)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE action = 'key.created' AND entity_id = $1`, key.ID)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, key.ID)
+	})
+	return raw
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
@@ -508,7 +527,9 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	if derr != nil {
 		t.Fatalf("draft kind registration: %v", derr)
 	}
-	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
+	keys := techadmin.NewService(techadmin.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAuditLog(audit.NewLogger(db))
+	f.keys = keys
 	draftsRepo := drafts.NewRepository(db)
 	draftHub := drafts.NewHub(draftsRepo, 100*time.Millisecond, slog.Default())
 	t.Cleanup(draftHub.Stop)
@@ -599,8 +620,11 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 			t.Fatalf("mint %s: %v", name, err)
 		}
 		// A bound key references its branch, so the fixture's branch rows can
-		// only be removed once the keys it minted are gone.
+		// only be removed once the keys it minted are gone, with the mint's
+		// audit row and outbox event.
 		t.Cleanup(func() {
+			_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'api_key' AND entity_id = $1::text`, key.ID)
+			_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE action = 'key.created' AND entity_id = $1`, key.ID)
 			_, _ = db.Pool.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, key.ID)
 		})
 		return raw, key.ID.String()
@@ -725,6 +749,32 @@ func (f *keyPinFixture) key(t *testing.T, raw, method, path, body string, hdr ma
 		t.Fatal(err)
 	}
 	f.mark(raw, method, path)
+	return res.StatusCode, buf
+}
+
+// userAs sends one request as the claims a JWT would carry, with the role
+// given (the role decides the shared customer restricted field rule).
+func (f *keyPinFixture) userAs(t *testing.T, role, method, path, body string, hdr map[string]string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(method, f.srv.URL+path, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Test-Role", role)
+	req.Header.Set("X-Test-Sub", "pin-"+role)
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	buf, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return res.StatusCode, buf
 }
 

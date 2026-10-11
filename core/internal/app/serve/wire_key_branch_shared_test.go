@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -128,15 +129,23 @@ func (f *keyPinFixture) sharedChangeRows(t *testing.T, customer uuid.UUID) []map
 	return out
 }
 
-// TestKeyBranchPin_SharedCustomerRecord holds principal rulings 43 to 45: on
-// a customer held by the pin and another branch, a key bound to the pin reads
-// everything and changes only the branch local fields (email, phone), every
-// other field of the record being restricted by default; it may add a ship-to
-// or a contact but change or delete none. A customer the pin holds alone
-// allows all of it. The unbound key changes the restricted fields, each change
-// audited with the actor and the before and after values; a user is unchanged.
+// TestKeyBranchPin_SharedCustomerRecord holds principal rulings 43 to 45 and
+// item 48: on a customer held by the pin and another branch, a key bound to
+// the pin reads everything and changes only the branch local fields (email,
+// phone), every other field of the record being restricted by default; it may
+// add a ship-to or a contact but change or delete none (a default add is a
+// change). A customer the pin holds alone allows all of it. An unbound key
+// carrying the customers:restricted scope changes the restricted fields, each
+// change audited with the actor and the before and after values; a finance
+// user changes them with no audit row (the sales and admin refusals and the
+// scope legs are TestKeyBranchPin_SharedRestrictedScope).
 func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	f, _ := round4Fixture(t)
+	// The item 48 ruling: the dealer wide key that changes a shared
+	// customer's restricted fields carries the dedicated scope; the unbound
+	// key without it is refused (TestKeyBranchPin_SharedRestrictedScope).
+	f.unbound = f.mintWithScopes(t, "pin scoped restricted", []string{"customers:read", "customers:write",
+		"ship-tos:read", "ship-tos:write", "contacts:read", "contacts:write", middleware.CustomerRestrictedScope}, nil)
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
 	own := seedSharedCustomer(t, f, f.branchA)
 	sh := "/api/v1/customers/" + s.id.String()
@@ -273,9 +282,9 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 		}
 	}
 
-	// The dealer wide key and the user change the shared customer's
-	// restricted fields; only the key leaves the audit row, naming itself
-	// and the before and after value.
+	// The scoped dealer wide key and the finance user change the shared
+	// customer's restricted fields; only the key leaves the audit row, naming
+	// itself and the before and after value.
 	for _, fld := range fields {
 		before := len(f.sharedChangeRows(t, s.id))
 		if status, buf := fld.do("unbound", sh); status != http.StatusOK {
@@ -300,14 +309,16 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 			t.Errorf("unbound key changing %s: the audit row has no after value: %v", fld.name, change)
 		}
 	}
+	// A finance user changes the fields with no audit row (item 48); the
+	// sales and admin refusals are the scope test's legs.
 	rowsBefore := len(f.sharedChangeRows(t, s.id))
 	for _, fld := range fields {
-		if status, buf := fld.do("user", sh); status != http.StatusOK {
-			t.Errorf("user changing %s of the shared customer: %d %s, want 200", fld.name, status, buf)
+		if status, buf := fld.do("finance", sh); status != http.StatusOK {
+			t.Errorf("finance user changing %s of the shared customer: %d %s, want 200", fld.name, status, buf)
 		}
 	}
 	if rows := len(f.sharedChangeRows(t, s.id)); rows != rowsBefore {
-		t.Errorf("the user's changes left %d shared customer audit rows, want none", rows-rowsBefore)
+		t.Errorf("the finance user's changes left %d shared customer audit rows, want none", rows-rowsBefore)
 	}
 
 	// Ship-tos and contacts: every existing one of a shared customer is

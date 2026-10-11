@@ -40,12 +40,18 @@ func (w *KeyBranchWall) RecordRequest() func(http.Handler) http.Handler {
 // SharedVerdict is the wall's answer for one customer and one caller.
 type SharedVerdict struct {
 	// Refuse is set for a branch bound key when another branch holds the
-	// customer too; Branch is the lowest numbered such branch.
+	// customer too; Branch is the lowest numbered such branch. The pin rule
+	// comes first: a bound key is refused even when it carries the dedicated
+	// scope.
 	Refuse bool
 	Branch uuid.UUID
-	// Audit is set for an unbound key when two or more branches hold the
-	// customer: its change goes through, audited with the actor and the
-	// before and after values.
+	// RefuseCaller is set for a user without the finance or owner role and
+	// for an unbound key without the customers:restricted scope, on a
+	// customer another branch also holds (principal ruling item 48).
+	RefuseCaller bool
+	// Audit is set for an unbound key carrying the dedicated scope when two
+	// or more branches hold the customer: its change goes through, audited
+	// with the actor and the before and after values.
 	Audit bool
 }
 
@@ -55,13 +61,47 @@ type SharedAuditor interface {
 	AuditSharedCustomerChange(ctx context.Context, keyID string, customer uuid.UUID, changes map[string]any) error
 }
 
+// callerHasRole reports whether the user claims hold one of the roles.
+func callerHasRole(claims *UserClaims, roles ...string) bool {
+	if claims == nil {
+		return false
+	}
+	for _, role := range roles {
+		if claims.Role == role {
+			return true
+		}
+		for _, r := range claims.Roles {
+			if r == role {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // SharedCustomer answers how the caller stands to a customer's restricted
-// fields. A user passes unchanged (the zero verdict); a branch bound key is
-// refused when any branch besides the pin holds the customer; an unbound key
-// is audited when more than one branch holds it.
+// fields (principal rulings 43 to 45 and item 48). A user passes with the
+// finance or owner role and is refused without it, fail closed when no
+// claims at all arrive; an unshared customer stays open to every caller. A
+// branch bound key is refused when any branch besides the pin holds the
+// customer, whatever its scopes. An unbound key is admitted only while it
+// carries the customers:restricted scope, and its change of a shared
+// customer is audited. The caller refusals name the lowest numbered branch
+// holding the customer; the bound key's names the lowest numbered branch
+// that is not the pin.
 func (w *KeyBranchWall) SharedCustomer(ctx context.Context, customer uuid.UUID) (SharedVerdict, error) {
 	if _, isKey := KeyIDFromContext(ctx); !isKey {
-		return SharedVerdict{}, nil
+		if callerHasRole(ClaimsFromContext(ctx), "finance", "owner") {
+			return SharedVerdict{}, nil
+		}
+		other, holders, err := w.sharedHolders(ctx, customer)
+		if err != nil {
+			return SharedVerdict{}, err
+		}
+		if holders < 2 {
+			return SharedVerdict{}, nil
+		}
+		return SharedVerdict{RefuseCaller: true, Branch: other}, nil
 	}
 	if w.db == nil {
 		return SharedVerdict{}, errors.New("key branch wall: no database for the shared customer lookup")
@@ -80,12 +120,38 @@ func (w *KeyBranchWall) SharedCustomer(ctx context.Context, customer uuid.UUID) 
 		}
 		return SharedVerdict{Refuse: true, Branch: other}, nil
 	}
-	var branches int
-	if err := w.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT COUNT(*) FROM customer_branches WHERE customer_id = $1`, customer).Scan(&branches); err != nil {
-		return SharedVerdict{}, fmt.Errorf("key branch wall: shared customer lookup: %w", err)
+	other, holders, err := w.sharedHolders(ctx, customer)
+	if err != nil {
+		return SharedVerdict{}, err
 	}
-	return SharedVerdict{Audit: branches > 1}, nil
+	if holders < 2 {
+		return SharedVerdict{}, nil
+	}
+	scopes, _ := KeyScopesFromContext(ctx)
+	if !scopeHeld(scopes, CustomerRestrictedScope) {
+		return SharedVerdict{RefuseCaller: true, Branch: other}, nil
+	}
+	return SharedVerdict{Audit: true, Branch: other}, nil
+}
+
+// sharedHolders answers the lowest numbered branch holding the customer and
+// how many branches hold it at all.
+func (w *KeyBranchWall) sharedHolders(ctx context.Context, customer uuid.UUID) (uuid.UUID, int, error) {
+	if w.db == nil {
+		return uuid.Nil, 0, errors.New("key branch wall: no database for the shared customer lookup")
+	}
+	var other *uuid.UUID
+	var holders int
+	err := w.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT (SELECT branch_id FROM customer_branches WHERE customer_id = $1 ORDER BY branch_id LIMIT 1), COUNT(*)
+		   FROM customer_branches WHERE customer_id = $1`, customer).Scan(&other, &holders)
+	if err != nil {
+		return uuid.Nil, 0, fmt.Errorf("key branch wall: shared customer lookup: %w", err)
+	}
+	if other != nil {
+		return *other, holders, nil
+	}
+	return uuid.Nil, holders, nil
 }
 
 // RecordSharedRefusal writes the key.branch_refused row of a refusal the

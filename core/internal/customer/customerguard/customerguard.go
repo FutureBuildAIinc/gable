@@ -43,7 +43,7 @@ func (a *Shared) Shared(ctx context.Context, customerID uuid.UUID) (customer.Sha
 	if err != nil {
 		return customer.SharedVerdict{}, err
 	}
-	return customer.SharedVerdict{Refuse: v.Refuse, Branch: v.Branch, Audit: v.Audit}, nil
+	return customer.SharedVerdict{Refuse: v.Refuse, Branch: v.Branch, RefuseCaller: v.RefuseCaller, Audit: v.Audit}, nil
 }
 
 // RecordRefusal writes the refusal's key.branch_refused row.

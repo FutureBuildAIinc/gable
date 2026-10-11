@@ -485,13 +485,23 @@ func AdmittedScopes(module string, class ScopeClass) []string {
 	return nil
 }
 
+// CustomerRestrictedScope is the customers module's capability scope
+// (principal ruling item 48): no route requires it, so holding the module's
+// read and write scopes never grants it and no default grant carries it; it
+// is minted on purpose, by an owner only, and the shared customer rule reads
+// it to admit an unbound key's change of a shared customer's restricted
+// fields.
+const CustomerRestrictedScope = "customers:restricted"
+
 // ValidScopeGrammar returns every scope a registered /api/v1 route can
 // require: the module read and write scopes, with the finer names (admin
 // areas, users:grants) in place of the coarse ones they replace, and the
 // propose and commit verbs of the confirm gated modules (ADR 0007 section
-// 5.1). The mint's validation (section 5.3) checks granted scopes against
-// this set; it is the one source, so the mint and the auth core cannot
-// disagree.
+// 5.1). The capability scope CustomerRestrictedScope rides with them: it is
+// grantable on purpose though no route requires it, so the mint and the
+// shared customer rule share the one source. The mint's validation (section
+// 5.3) checks granted scopes against this set; it is the one source, so the
+// mint and the auth core cannot disagree.
 func ValidScopeGrammar() []string {
 	var out []string
 	for module := range machineKeyModules {
@@ -506,6 +516,7 @@ func ValidScopeGrammar() []string {
 		out = append(out, module+scopeProposeSuffix, module+scopeCommitSuffix)
 	}
 	out = append(out, FinerAdminScopes()...)
+	out = append(out, CustomerRestrictedScope)
 	sort.Strings(out)
 	return out
 }

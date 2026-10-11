@@ -274,6 +274,121 @@ func TestKeyBranchPin_ActivityContactOwnership(t *testing.T) {
 	}
 }
 
+// TestKeyBranchPin_SharedRestrictedScope is the principal's item 48 ruling: a
+// shared customer's restricted fields change only with the finance or owner
+// role (a user) or an unbound machine key carrying the dedicated
+// customers:restricted scope, minted only by an owner and audited when it is
+// minted. A sales user, an admin user and every unbound key without the scope
+// are refused in the same words naming the other branch; a branch bound key is
+// refused even with the scope; the allowed key's change keeps its
+// customer.shared_restricted_changed audit row.
+func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
+	sh := "/api/v1/customers/" + s.id.String()
+	change := func() string {
+		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 777000 + int(time.Now().UnixNano()%1000)})
+	}
+
+	// The mint: only an owner may grant the scope, and the mint is audited.
+	mintBody := `{"name":"pin restricted","scopes":["customers:write","customers:restricted"]}`
+	if status, buf := f.userAs(t, "admin", "POST", "/api/v1/admin/keys", mintBody, nil); status != http.StatusForbidden {
+		t.Errorf("admin user minting the restricted scope: %d %s, want 403 (only an owner may grant it)", status, buf)
+	}
+	var minted struct {
+		APIKey string `json:"api_key"`
+		Key    struct {
+			ID string `json:"id"`
+		} `json:"key"`
+	}
+	status, buf := f.userAs(t, "owner", "POST", "/api/v1/admin/keys", mintBody, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("owner minting the restricted scope: %d %s, want 201", status, buf)
+	}
+	if err := json.Unmarshal(buf, &minted); err != nil || minted.APIKey == "" {
+		t.Fatalf("the mint answer carries no raw key: %s", buf)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM audit_log WHERE entity_id::text = $1`, minted.Key.ID)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id::text = $1`, minted.Key.ID)
+	})
+	var mintAudit int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'key.created' AND entity_id::text = $1 AND changes->'scopes' ? 'customers:restricted'`,
+		minted.Key.ID).Scan(&mintAudit); err != nil {
+		t.Fatal(err)
+	}
+	if mintAudit != 1 {
+		t.Errorf("the restricted scope mint left %d key.created audit rows naming it, want one", mintAudit)
+	}
+
+	// The bound key with the scope is still refused (the pin rule comes first).
+	if status, buf := f.key(t, f.bound, "PUT", sh, change(), nil); status != http.StatusForbidden ||
+		!strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
+		t.Errorf("bound key changing a restricted field: %d %s, want the pin's 403", status, buf)
+	}
+
+	// An unbound key without the scope is refused in the caller words; with
+	// the scope it changes the field and the change is audited.
+	// The caller refusals name the lowest numbered branch holding the
+	// customer (a caller without a pin has no "other" to exclude).
+	lowest := f.branchA
+	if f.branchB.String() < f.branchA.String() {
+		lowest = f.branchB
+	}
+	callerRefusal := "the customer is also held by branch " + lowest.String()
+	if status, buf := f.key(t, f.unbound, "PUT", sh, change(), nil); status != http.StatusForbidden ||
+		!strings.Contains(string(buf), callerRefusal) {
+		t.Errorf("unbound key without the scope changing a restricted field: %d %s, want the 403 naming branch B", status, buf)
+	}
+	before := len(f.sharedChangeRows(t, s.id))
+	if status, buf := f.key(t, minted.APIKey, "PUT", sh, change(), nil); status != http.StatusOK {
+		t.Errorf("unbound key with the scope changing a restricted field: %d %s, want 200", status, buf)
+	}
+	if rows := f.sharedChangeRows(t, s.id); len(rows) != before+1 {
+		t.Errorf("the scoped key's change left %d audit rows, want one new row", len(rows)-before)
+	}
+
+	// The user legs: sales and admin are refused in the same words, finance
+	// and owner change the field (no audit row for a user).
+	for _, role := range []string{"sales", "admin"} {
+		if status, buf := f.userAs(t, role, "PUT", sh, change(), nil); status != http.StatusForbidden ||
+			!strings.Contains(string(buf), callerRefusal) {
+			t.Errorf("%s user changing a restricted field: %d %s, want the 403 naming branch B", role, status, buf)
+		}
+	}
+	rowsBefore := len(f.sharedChangeRows(t, s.id))
+	for _, role := range []string{"finance", "owner"} {
+		if status, buf := f.userAs(t, role, "PUT", sh, change(), nil); status != http.StatusOK {
+			t.Errorf("%s user changing a restricted field: %d %s, want 200", role, status, buf)
+		}
+	}
+	if rows := len(f.sharedChangeRows(t, s.id)); rows != rowsBefore {
+		t.Errorf("the users' changes left %d shared customer audit rows, want none", rows-rowsBefore)
+	}
+
+	// The scope is never a default grant: a mint that names no scopes mints a
+	// key with none, and no route requires the scope.
+	plain := `{"name":"pin plain"}`
+	status, buf = f.userAs(t, "owner", "POST", "/api/v1/admin/keys", plain, nil)
+	if status != http.StatusCreated {
+		t.Fatalf("owner minting a plain key: %d %s, want 201", status, buf)
+	}
+	var plainKey struct {
+		Key struct {
+			ID     string   `json:"id"`
+			Scopes []string `json:"scopes"`
+		} `json:"key"`
+	}
+	if err := json.Unmarshal(buf, &plainKey); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM api_keys WHERE id::text = $1`, plainKey.Key.ID) })
+	if len(plainKey.Key.Scopes) != 0 {
+		t.Errorf("a mint naming no scopes granted %v, want none", plainKey.Key.Scopes)
+	}
+}
+
 // TestKeyBranchPin_PosSyncCustomerWall is round 10 P1-1: the offline sync
 // replays whole sales whose bodies name a customer, so a key pinned to A
 // posting a sale on a customer held only by B (its ACCOUNT tender invoicing
