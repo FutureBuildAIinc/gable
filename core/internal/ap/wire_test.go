@@ -1948,12 +1948,37 @@ func TestWire_VoidRefusesReinstatedEntry(t *testing.T) {
 		if got := live(); got != 1600 {
 			t.Fatalf("the reinstated credit = %d, want 1600", got)
 		}
+		// The ties after the acts that built the shape: every entry balanced,
+		// and the control account holding exactly what the open bills owe
+		// (both arms share the fixture, so the tie is control against open).
+		if !f.balanced() {
+			t.Fatalf("unlinked=%v: an entry does not balance before the void", unlink)
+		}
+		control, open := f.controlBalance(), f.openSum()
+		if control != open || open == 0 {
+			t.Fatalf("unlinked=%v: the control %d against the open %d before the void, want the tie over a nonzero amount", unlink, control, open)
+		}
 		v := f.void(id, 2, "wrong bill")
 		if v.status != http.StatusConflict {
 			t.Errorf("unlinked=%v: void a bill whose credit was reinstated = %d, want 409: %s", unlink, v.status, v.raw)
 		}
 		if got := live(); got != 0 && f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id) == 1 {
 			t.Errorf("unlinked=%v: the bill is VOIDED with %d cents of its credit live in 2010", unlink, got)
+		}
+		// The ties after the refused void: nothing moved (the review's r5
+		// P3-2: the test asserted the status and the chain net, never the
+		// ledger sums).
+		if !f.balanced() {
+			t.Errorf("unlinked=%v: an entry does not balance after the refused void", unlink)
+		}
+		if got := f.controlBalance(); got != control {
+			t.Errorf("unlinked=%v: the control = %d after the refused void, want the untouched %d", unlink, got, control)
+		}
+		if got := f.openSum(); got != open {
+			t.Errorf("unlinked=%v: the open = %d after the refused void, want the untouched %d", unlink, got, open)
+		}
+		if got := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED'`, id); got != 1 {
+			t.Errorf("unlinked=%v: %d APPROVED rows after the refused void, want the bill kept", unlink, got)
 		}
 	}
 }
