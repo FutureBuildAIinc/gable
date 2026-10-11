@@ -179,18 +179,23 @@ paths:
         of its own could write, is a 409 blocker has_paid_amount naming the
         cents, and the row is left for the operator to mend by hand). To
         voided: from pending or
-        approved; a bill with no posted, unreversed entry of its own (one
-        that prices to zero, or a legacy bill whose posting was swallowed or
-        whose entry was already reversed) holds no credit and voids with
-        nothing to reverse, and an entry that is linked is reversed whole; a
+        approved; a bill whose entry is not live (one that prices to zero,
+        a legacy bill whose posting was swallowed, or an entry already
+        reversed or voided, linked or not, a reversal counting only while it
+        is posted) holds no credit and voids with nothing to reverse, and a
+        linked live entry is reversed whole; a
         reason is
         required, a bill with money applied is refused with the has_payments
-        blocker, a bill that holds a posted, unreversed journal entry it is
-        not linked to (a legacy bill whose posting was swallowed, one holding
-        the removed sync's one leg credit, or one whose total was hand edited
-        after its approve) with the entry_not_linked
-        blocker, and a bill whose linked entry does not balance with the
-        entry_unbalanced blocker; nothing is written on either refusal. No
+        blocker, a bill that holds a live journal entry it is not linked to
+        (a legacy bill whose posting was swallowed, one holding the removed
+        sync's one leg credit, one whose total was hand edited after its
+        approve, or one posted twice, the duplicate named) with the
+        entry_not_linked
+        blocker, a bill whose linked entry does not balance with the
+        entry_unbalanced blocker, and a bill whose linked entry holds a
+        reversal that is not posted (its credit stands while the one reversal
+        an entry may hold is taken) with the reversal_not_posted blocker;
+        nothing is written on any refusal. No
         route links an entry to a bill yet: such a bill keeps its status
         until a later repair item (a stated limit).
       parameters:
@@ -289,8 +294,11 @@ paths:
         is a 409 blocker invoice_not_approved; a bill of another vendor is a
         400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400
         naming its index (appears twice); more than the named bills still owe
-        is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside
-        the act's transaction (DR Accounts Payable, CR Cash), and a posting
+        is a 409 blocker exceeds_open. The named bills must share one
+        currency: a payment spanning two is a 409 blocker currency_mismatch
+        naming the bills that differ. The entry posts through gl.PostEntry
+        inside the act's transaction in the bills' currency
+        (DR Accounts Payable, CR Cash), and a posting
         failure fails the act (a closed period is a 409 blocker period_closed;
         a missing chart of accounts code is a 409 blocker account_missing
         naming it).

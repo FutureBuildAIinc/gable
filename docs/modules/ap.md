@@ -16,9 +16,11 @@ deadlock or both spend the same open amount (a repeated bill id in one
 payment's `invoice_ids` is refused as `invoice_ids[i] (appears twice)`
 by `PayRequest.Parse`, and over-payment as `exceeds_open` by
 `PayVendor`; a repeated payment, the same request sent twice, is a
-replay caught by the `Idempotency-Key`, not by these checks). Both acts
-post one journal entry
-inside one transaction: a payment that posts `DR 2010 / CR 1010`, and an
+replay caught by the `Idempotency-Key`, not by these checks; a payment
+naming bills of two currencies is refused as `currency_mismatch`). Both
+acts post one journal entry
+inside one transaction: a payment that posts `DR 2010 / CR 1010` in the
+bills' currency, and an
 approve that builds the entry from the lines and credits the whole
 total to `2010`.
 
@@ -52,16 +54,21 @@ blocker; a chart of accounts code that is missing is the
 
 When the bill is wrong, the desk voids it through the same route with
 `to: "voided"` and a reason. A pending bill voids with nothing posted;
-an approved bill's entry is reversed whole through `gl.PostReversal`;
-the bill's `amount_open` drops to zero; a bill that prices to zero
-posted nothing and voids with nothing to reverse. A bill with money
+an approved bill's live linked entry is reversed whole through
+`gl.PostReversal`; the bill's `amount_open` drops to zero; a bill whose
+entry is not live (one that prices to zero, or one the GL routes have
+already reversed or voided, a reversal counting only while it is posted)
+voids with nothing to reverse. A bill with money
 applied is refused with `has_payments` (the payments have to be undone
 first); a partial bill is refused there before the void reaches the
-linked-entry checks. An approved bill with a nonzero total and no
-linked entry is refused with `entry_not_linked`, and one whose linked
-entry does not balance with `entry_unbalanced`: both stay approved and
-payable until a later repair item (no route today links an entry to a
-bill). Both refusals write nothing.
+linked-entry checks. A bill holding a live entry it is not linked to is
+refused with `entry_not_linked` (the duplicate is named when the bill was
+posted twice), one whose linked entry does not balance with
+`entry_unbalanced`, and one whose linked entry holds a reversal that is
+not posted with `reversal_not_posted` (its credit stands while the one
+reversal an entry may hold is taken): all stay approved and payable until
+a later repair item (no route today links
+an entry to a bill). Every refusal writes nothing.
 
 Payments land as the desk cuts the checks. `POST /ap/payments` takes
 the vendor, the amount in cents, the method (`CHECK`, `ACH` or
@@ -71,8 +78,11 @@ on the same bill) and applies only to bills in `approved` or `partial`
 (a `pending`, `paid` or `voided` bill is the `invoice_not_approved`
 blocker). A bill of another vendor is a 400 naming `invoice_ids[i]`, a
 repeated id a 400 naming its index. More than the named bills still
-owe is the `exceeds_open` blocker and writes nothing. The applied sum
-posts `DR 2010 / CR 1010` inside the act's transaction. Each settled
+owe is the `exceeds_open` blocker and writes nothing. The named bills
+must share one currency: a payment spanning two is the
+`currency_mismatch` blocker naming the bills that differ, and writes
+nothing. The applied sum posts `DR 2010 / CR 1010` in the bills'
+currency inside the act's transaction. Each settled
 bill writes `vendor_invoice.partial` (when more is still owed) or
 `vendor_invoice.paid` (when this payment closes it).
 
