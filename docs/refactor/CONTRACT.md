@@ -236,31 +236,30 @@ Fragments done (the pattern the rest copy):
 
 | Module | Fragment | Routes |
 |---|---|---|
-| quote | `quote.yaml` | 14 (converted onto ADR 0001 by R1-15, see MODULE-RECIPE.md) |
-| customer | `customer.yaml` | 14 |
-| order | `order.yaml` | 8 |
-| invoice | `invoice.yaml` | 5 |
-| payment | `payment.yaml` | 5 |
-| product, pim | `product.yaml` | 19 |
+| quote | `quote.yaml` | 15 (converted onto ADR 0001 by R1-15, see MODULE-RECIPE.md) |
+| customer | `customer.yaml` | 21 |
+| order | `order.yaml` | 11 |
+| invoice | `invoice.yaml` | 12 |
+| payment | `payment.yaml` | 9 |
+| product, pim | `product.yaml` | 23 |
 | location | `location.yaml` | 18 |
 | integration (AI_LM) | `integration.yaml` | 10 |
 | delivery | `delivery.yaml` | 25 |
 | pos | `pos.yaml` | 19 |
 | inventory | `inventory.yaml` | 3 |
-| deposit | `deposits.yaml` | 4 |
-| account | `accounts.yaml` | 2 |
+| account | `accounts.yaml` | 7 |
 | vendor | `vendors.yaml` | 3 |
 | salesteam | `salesteam.yaml` | 2 |
-| crm activities | `activities.yaml` | 3 |
+| crm activities | `activities.yaml` | 5 |
 | portal | `portal.yaml` | 34 |
 | project | `project.yaml` | 4 |
 | partner | `partner.yaml` | 3 |
 | health and metrics | `health.yaml` | 4 |
 | uploads | `uploads.yaml` | 1 |
-| admin (tech admin, staff, exposure scan) | `admin.yaml` | 17 |
+| admin (tech admin, staff, exposure scan) | `admin.yaml` | 18 |
 | apps registry | `apps.yaml` | 3 |
-| governance | `governance.yaml` | 4 |
-| millwork | `millwork.yaml` | 2 |
+| governance | `governance.yaml` | 5 |
+| millwork | `millwork.yaml` | 3 |
 | configurator | `configurator.yaml` | 5 |
 | reporting and reports | `reporting.yaml` | 17 |
 | dashboard | `dashboard.yaml` | 5 |
@@ -271,7 +270,15 @@ Fragments done (the pattern the rest copy):
 | events (R1-12b) | `events.yaml` | 1 |
 | shared components | `_shared.yaml` | 0 |
 
-346 of 346 census routes covered. `contract-pending.txt` is empty.
+There is no deposits fragment: C2-4 removed the deposits module and its
+routes (migration 101), and a deposit is now a payment of the customer with
+`unapplied_cents` (`CONTRACT-CHANGES.md`, C2-4). Routes beyond these tables
+(ap, bankrecon, edi, gl, matching, pricing, purchase_order, tax; chargecode,
+drafts_orders, drafts_quotes, links and units) sit in their own fragments
+listed above the module status block - their route counts are 7, 9, 7, 15,
+5, 26, 13, 4, 4, 7, 7, 7 and 4 respectively. 406 of 406 census routes
+covered (every operation in the assembled document backs a census route).
+`contract-pending.txt` is empty.
 
 Nullability is spelled the 3.1 way, `type: [T, "null"]`; the 3.0
 `nullable` keyword does not exist in 3.1 and the generated types would

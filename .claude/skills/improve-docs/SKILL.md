@@ -96,10 +96,9 @@ These are real inconsistencies that a docs contributor can legitimately fix:
 - **Money conventions.** `AGENTS.md` says money-as-cents is *the target, not current reality*
   — ERP orders/invoices and `account` use `int64` cents while portal, quotes, and DailyTill
   use `float64` dollars. Any doc that states "money is cents" flatly is overstating it.
-- **Branch target.** `CONTRIBUTING.md`, the PR template, and `README.md` all say contributions
-  target **`staging`**. `AGENTS.md`'s branch table still says "Community PRs target
-  [`community`]". That's stale — but `AGENTS.md` is a high-traffic file, so fix it in its own
-  small PR with the evidence, don't bundle it.
+- **Branch target.** `CONTRIBUTING.md`, the PR template, `README.md` and `AGENTS.md` all say
+  contributions target **`staging`** (with `main` as the fast-forward target). Older notes
+  referred to `community`; that branch model is retired.
 - **Coverage claims.** Check them against reality rather than repeating them:
   `find web/apps/desk/src -name '*.test.ts' | wc -l` and, for the backend,
   `for d in core/internal/*/; do [ -z "$(ls $d*_test.go 2>/dev/null)" ] && echo "$d"; done`.

@@ -170,7 +170,7 @@ Describe how BisTrack, Spruce, or Agility behave from memory if it's useful. Do 
 their documentation, schemas, screenshots, or API specifications into this repository.
 
 **6 · Run the pre-flight before you push.**
-`/preflight` runs the same gates CI runs. Failing locally is much faster than failing in CI.
+`/preflight` runs the pre-flight gates CI enforces in its main jobs. Failing locally is much faster than failing in CI.
 
 **7 · Contributions are licensed under the component licence you touched, via a CLA.**
 You'll be asked to agree before your first merge. See

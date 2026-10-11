@@ -40,8 +40,10 @@ already covered it:
 1. **`invoice`** — tax resolution and rounding. `invoice.CreateInvoice` resolves the rate from
    the branch (`locations.default_tax_rate`) and falls back to `invoice.DefaultTaxRate =
    0.0825`. Both paths, plus rounding, are worth pinning down.
-2. **`account`** — `PostTransaction` is the *single writer* to the AR subledger and
-   `customers.balance_due`. It should be the best-tested function in the repo.
+2. **`account`**: the package is the *single writer* to the AR subledger and
+   `customers.balance_due`, through its posting methods (`PostInvoice`, `PostCreditMemo`,
+   `RecordPayment`, `Apply`, `WriteOff`, and the voids, refunds and reversals). They should be
+   among the best-tested code in the repo.
 3. **`customer`** — the credit-limit gate feeds order blocking.
 4. **`quote`** — line totals, discounts, expiry.
 5. **`portal`** — the dollars-vs-cents boundary with the ERP side (see the money table in
@@ -63,7 +65,7 @@ Then study a module that already tests well — copy its idiom rather than inven
 
 ```bash
 sed -n '1,80p' core/internal/tax/service_test.go        # mock repo + table-driven
-ls core/internal/purchase_order/*_test.go               # 6 test files, good examples
+ls core/internal/purchase_order/*_test.go               # 8 test files, good examples
 ls core/internal/pricing/*_test.go core/internal/gl/*_test.go
 ```
 

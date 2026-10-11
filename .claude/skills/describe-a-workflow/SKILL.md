@@ -25,7 +25,7 @@ Before the interview, spend a few minutes finding out what Gable does today, so 
 "what's different about yours?" instead of "how does quoting work?".
 
 ```bash
-ls core/internal/                      # 41 domain modules — find the closest one
+ls core/internal/                      # 47 domain modules: find the closest one
 ls web/apps/desk/src/pages/                          # the screens that exist today
 grep -rn "status" core/internal/order/model.go | head -30
 ```
@@ -41,7 +41,8 @@ Useful orientation reads:
 Two known facts worth having in hand:
 
 - Orders today flow `DRAFT → CONFIRMED → FULFILLED`, plus `ON_HOLD` (a valid `orders.status`
-  as of migration 071). There is **no** pickup/will-call path and **no** `PICKED` step.
+  as of migration 071), `BACKORDERED` and `CANCELLED`. A will-call order is `delivery_type` `pickup`, fulfilled
+  with `picked_up_by` (ADR 0005 section 5.5); there is **no** `PICKED` step.
 - Fulfilling an order posts one tax-inclusive invoice plus a balanced
   `DR Accounts Receivable / CR Sales Revenue` GL entry and an AR subledger debit, in one
   transaction. Anything that creates or cancels a sale has to respect that.
@@ -178,7 +179,7 @@ What number tells the owner this is working.
 - [ ] **Money/data integrity** — single writer, one transaction, no partial writes
 - [ ] **Migrations additive + reversible** — forward and down; idempotent
 - [ ] **No secrets committed**
-- [ ] **Boot wiring** — registered via `RegisterRoutes` in `core/cmd/server/main.go`
+- [ ] **Boot wiring**: registered via `RegisterRoutes` in `core/internal/app/serve/serve.go`
 - [ ] **Rollback plan**
 - [ ] **Observability** — what gets logged/measured; CI actually runs the new tests
 
