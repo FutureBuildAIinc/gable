@@ -3676,7 +3676,7 @@ export interface paths {
         put?: never;
         /**
          * Record a payment
-         * @description Records a posted payment for a customer (cash, check, ach or other; a card is taken through POST /payments/card, and account is not a payment). The whole amount is posted to 2200 (DR 1010 / CR 2200). Without applications the payment is unapplied cash. With applications each invoice takes its cash (and an early pay discount, on or before the invoice's discount date, up to what its terms allow) in the same transaction, each application its own entry (DR 2200 / CR 1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied, exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch, discount_not_available, period_closed. Writes payment.recorded, then payment.applied and invoice.partial or invoice.paid per invoice, then customer.updated (part balance).
+         * @description Records a posted payment for a customer (cash, check, ach or other; a card is taken through POST /payments/card, and account is not a payment). The whole amount is posted to 2200 (DR 1010 / CR 2200). Without applications the payment is unapplied cash. With applications each invoice takes its cash (and an early pay discount, on or before the invoice's discount date, up to what its terms allow) in the same transaction, each application its own entry (DR 2200 / CR 1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied, exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch, discount_not_available, period_closed, and void_claim_pending when the invoice's sale has a void whose refund claims still stand (the counter's interim; the refusal names the claims). Writes payment.recorded, then payment.applied and invoice.partial or invoice.paid per invoice, then customer.updated (part balance).
          */
         post: operations["paymentCreate"];
         delete?: never;
@@ -3713,7 +3713,7 @@ export interface paths {
         put?: never;
         /**
          * Apply a payment's unapplied cash to invoices
-         * @description Applies unapplied cash later, partly, across many invoices; each application posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The precondition is the payment's revision. Refused with 409 exceeds_unapplied, exceeds_open_amount, invoice_void, payment_voided, customer_mismatch, currency_mismatch, discount_not_available or period_closed. Writes payment.applied, invoice.partial or invoice.paid per invoice, and customer.updated.
+         * @description Applies unapplied cash later, partly, across many invoices; each application posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The precondition is the payment's revision. Refused with 409 exceeds_unapplied, exceeds_open_amount, invoice_void, payment_voided, customer_mismatch, currency_mismatch, discount_not_available, period_closed, or void_claim_pending when the invoice's sale has a void whose refund claims still stand (the counter's interim; the refusal names the claims). Writes payment.applied, invoice.partial or invoice.paid per invoice, and customer.updated.
          */
         post: operations["paymentApply"];
         delete?: never;
@@ -4797,7 +4797,7 @@ export interface paths {
         put?: never;
         /**
          * Resolve a stranded card refund claim
-         * @description The guarded operator route for a refund claim that outlived its act (a lost terminal verdict, a crashed process, a transaction that refused after the terminal answered): finance reads the terminal and records its actual outcome. outcome refund carries the gateway's own refund id (the money moved) and books it through the refund's own money transaction with every cap and lock, completing the claim DONE; outcome no_refund carries the reconciliation reference finance filed, marks the claim FAILED and moves nothing. Both write one audit row naming the person, the intent, the outcome and the reason. Only the finance and owner roles; a machine key is refused in the route itself, bound or not. A bare resolve, a refund without its refund id and a no refund without its reference are 400s naming the field; a claim that is not PENDING is 409 intent_not_pending, a no refund over a claim carrying the terminal's refund id and a refund id that differs from it are 409s naming the conflict, and the claim's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404). In a configured deployment the actor is the JWT's subject; with authentication off (dev mode) the route runs with no subject and the audit row names nobody, which no configured deployment allows.
+         * @description The guarded operator route for a refund claim that outlived its act (a lost terminal verdict, a crashed process, a transaction that refused after the terminal answered): finance reads the terminal and records its actual outcome. outcome refund carries the gateway's own refund id (the money moved) and books it through the refund's own money transaction with every cap and lock, completing the claim DONE; outcome no_refund carries the reconciliation reference finance filed, marks the claim FAILED and moves nothing. Both write one audit row naming the person, the intent, the outcome and the reason. A claim whose own terminal call has not answered is live, not stranded: while its in flight lease runs the resolve answers 409 refund_in_flight, and once the lease expires with no answer at all the claim is marked UNKNOWN and settles as recorded. Only the finance and owner roles; a machine key is refused in the route itself, bound or not. A bare resolve, a refund without its refund id and a no refund without its reference are 400s naming the field; a claim that is not PENDING is 409 intent_not_pending, a no refund over a claim carrying the terminal's refund id and a refund id that differs from it are 409s naming the conflict, and the claim's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404). In a configured deployment the actor is the JWT's subject; with authentication off (dev mode) the route runs with no subject and the audit row names nobody, which no configured deployment allows.
          */
         post: operations["posRefundIntentResolve"];
         delete?: never;
@@ -11979,11 +11979,8 @@ export interface components {
             branch_id: string | null;
             /** Format: int64 */
             over_short_cents: number;
-            /**
-             * Format: byte
-             * @description The frozen closing report as JSON bytes.
-             */
-            payload: string;
+            /** @description The frozen closing report, a JSON object. */
+            payload: components["schemas"]["PosTillReport"];
             /** Format: date-time */
             generated_at: string;
         };
