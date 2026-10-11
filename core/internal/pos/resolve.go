@@ -146,8 +146,13 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 				return err
 			}
 			// A void's release can complete the sale's void (r12 P1-1), so
-			// the drawer's session is held the same way the refund leg holds
-			// it, in the same order (the sale, the session, the claim): the
+			// the drawer's session is held here too: this leg takes the sale,
+			// then the session, then the claim, while the refund leg
+			// (runVoidResolutionTx) takes the sale, the claim, then the
+			// session. Both hold the sale row first, so the two legs
+			// serialize against each other and against every other act on the
+			// sale before they ever reach the session or the claim, and the
+			// close's FOR UPDATE waits for this leg's FOR SHARE: the
 			// completion and the close serialize whichever leg finishes the
 			// void.
 			if rec.Act == "void" && sale.TillSessionID != nil {
