@@ -58,8 +58,8 @@ run:
    runs in its own process group, stopped by that group number even when the
    test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
    process takes the server with it.
-4. **Script.** It replays a fixed, ordered script of 991 steps across 100
-   groups (one golden file per group; 202 steps in the first 44 groups, the
+4. **Script.** It replays a fixed, ordered script of 1301 steps across 103
+   groups (one golden file per group; 389 steps in the first 44 groups, the
    rest added by R1-1b). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
    same way every run. Later steps reference values extracted from earlier
@@ -229,10 +229,12 @@ without a recorded step" at the end of this document, each with its reason.
 
 ## R1-1b: depth additions
 
-R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but one
-(56 new groups, 789 new steps). The new groups all run after the clock group,
-so none of their writes can move an earlier golden: the first 44 golden files
-are byte-identical to their R1-1 recording. The harness gained the following,
+R1-1b added 59 new groups and 912 new steps; 34 routes in `core/api/ROUTES.txt`
+remain unrecorded alongside `GET /metrics` (new modules and methods whose
+goldens are still pending, named under "Routes without a recorded step" at the
+end of this document). The new groups all run after the clock group, so none
+of their writes can move an earlier golden: the first 44 golden files are
+byte-identical to their R1-1 recording. The harness gained the following,
 each used only where a route needed it.
 
 - **Order and ownership.** The new groups run in this order after
@@ -471,13 +473,30 @@ modules that wire them.
 
 ## Routes without a recorded step
 
-Every route in `core/api/ROUTES.txt` has a recorded step except one, for a
-stated reason:
+35 routes in `core/api/ROUTES.txt` have no recorded step yet, for stated
+reasons:
 
 - `GET /metrics`: the body is the Prometheus exposition of Go runtime and
   process series (`go_build_info`, memory statistics, goroutines, start time)
-  that differ on every run; the normaliser has no rule for them and R1-1b adds
-  none.
+  that differ on every run; the normaliser has no rule for them and the new
+  recorder adds none.
+- The charge-codes module: `GET /api/v1/charge-codes`, `POST /api/v1/charge-codes`,
+  `GET /api/v1/charge-codes/{id}`, `PUT /api/v1/charge-codes/{id}`. Module
+  registered by R1-3c; the goldens wait until a contract fragment and a driver
+  fixture are in place.
+- The drafts routes (`/api/v1/drafts/orders`, `/api/v1/drafts/quotes`, with
+  `{id}`, `/feed`, `/transitions` and `/promote`): R1-3c drafts feature, no
+  goldens yet.
+- `POST /api/v1/credit-memos/{id}/applications` and
+  `POST /api/v1/invoices/{id}/write-offs`: AR/AP follow-on writes that share
+  their parent's golden at this base.
+- The links module (`/api/v1/links/{customers,drafts/orders,drafts/quotes,invoices,orders,products,quotes}/{id}`):
+  R1-3c preview URL generator, no goldens yet.
+- `/api/v1/products/{id}/kit-components` and `/api/v1/products/{id}/units`
+  (GET, PUT), plus `/api/v1/units` (GET) and `/api/v1/units/{code}` (PUT):
+  units module new in R1-3c; only the units-shaped reads are goldened.
+- `PUT /api/v1/quotes/{id}/file`: no golden (the file upload shape is not
+  covered by the multipart parser yet).
 
 Three portal reads have a step that pins less than the rest:
 `GET /api/portal/v1/dashboard`, `GET /api/portal/v1/invoices` and
