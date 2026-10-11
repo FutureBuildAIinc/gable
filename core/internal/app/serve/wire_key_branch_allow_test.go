@@ -669,6 +669,11 @@ func TestKeyBranchPin_SharedCustomerWrites(t *testing.T) {
 	refusedNaming("PUT", "/api/v1/pricing/category-rules/"+catShared.String(),
 		`{"rule_type":"markdown","value_pct":"2"}`)
 	refusedNaming("DELETE", "/api/v1/pricing/category-rules/"+catShared.String(), "")
+	refusedNaming("DELETE", "/api/v1/pricing/category-rules/bulk", fmt.Sprintf(`{"ids":[%q]}`, catShared.String()))
+	refusedNaming("POST", "/api/v1/pricing/category-rules/bulk", "["+categoryRuleBody(shared, f.freshCategory(t))+"]")
+	// The read of the shared customer's rule audit passes (PD-4 allows shared
+	// reads): only the writes above are held to the pin alone.
+	f.allow(t, "bound", "GET", "/api/v1/pricing/category-rules/"+catShared.String()+"/audit", "", nil, http.StatusOK)
 	r, c, e := counts()
 	if r != before.rules || c != before.catRules || e != before.exemptions {
 		t.Errorf("refused shared customer writes changed rows: rules %d->%d, category %d->%d, exemptions %d->%d",
@@ -699,7 +704,8 @@ func TestKeyBranchPin_GrantWritesAreAudited(t *testing.T) {
 	A := f.branchA.String()
 	grantRows := func(action string) (n int) {
 		if err := f.db.Pool.QueryRow(context.Background(),
-			`SELECT COUNT(*) FROM audit_log WHERE action = $1 AND actor_kind = 'key'`, action).Scan(&n); err != nil {
+			`SELECT COUNT(*) FROM audit_log WHERE action = $1 AND actor_kind = 'key' AND actor_id = $2`,
+			action, f.boundKeyID).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -726,9 +732,11 @@ func TestKeyBranchPin_GrantWritesAreAudited(t *testing.T) {
 // with the key that spent the dealer's AI credit.
 func TestKeyBranchPin_AISpendsWithItsKey(t *testing.T) {
 	f := newKeyPinFixture(t)
-	spendRows := func() (n int) {
+	spendRows := func(action string) (n int) {
+		t.Helper()
 		if err := f.db.Pool.QueryRow(context.Background(),
-			`SELECT COUNT(*) FROM audit_log WHERE action IN ('ai.parsing.upload', 'ai.vision.scan') AND actor_kind = 'key'`).Scan(&n); err != nil {
+			`SELECT COUNT(*) FROM audit_log WHERE action = $1 AND actor_kind = 'key' AND actor_id = $2`,
+			action, f.boundKeyID).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -748,6 +756,7 @@ func TestKeyBranchPin_AISpendsWithItsKey(t *testing.T) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
+	beforeUpload := spendRows("ai.parsing.upload")
 	req, err := http.NewRequest("POST", f.srv.URL+"/api/v1/parsing/upload", body)
 	if err != nil {
 		t.Fatal(err)
@@ -766,16 +775,16 @@ func TestKeyBranchPin_AISpendsWithItsKey(t *testing.T) {
 	if res.StatusCode == http.StatusForbidden {
 		t.Errorf("bound key parsing upload refused: %s", uploadBody)
 	}
-	if n := spendRows(); n < 1 {
-		t.Errorf("parsing upload audit rows naming the key: %d, want at least one", n)
+	if after := spendRows("ai.parsing.upload"); after != beforeUpload+1 {
+		t.Errorf("parsing upload audit rows naming the key: %d then %d, want one new row", beforeUpload, after)
 	}
 
-	before := spendRows()
+	before := spendRows("ai.vision.scan")
 	status, buf := f.key(t, f.bound, "POST", "/api/v1/vision/scan", `{"blueprint_text":"pin wall probe"}`, nil)
 	if status == http.StatusForbidden {
 		t.Errorf("bound key vision scan refused: %s", buf)
 	}
-	if after := spendRows(); after != before+1 {
+	if after := spendRows("ai.vision.scan"); after != before+1 {
 		t.Errorf("vision scan audit rows naming the key: %d then %d, want one new row", before, after)
 	}
 }

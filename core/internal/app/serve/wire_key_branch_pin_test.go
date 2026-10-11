@@ -1192,7 +1192,7 @@ func TestKeyBranchPin_DealerWideReads(t *testing.T) {
 		{"GET", "/api/v1/ap/aging", ""},
 		{"POST", "/api/v1/ap/invoices", `{"vendor_id":"` + uuid.NewString() + `"}`},
 		{"POST", "/api/v1/ap/payments", `{"invoice_id":"` + uuid.NewString() + `"}`},
-		{"POST", "/api/v1/ap/invoices/" + uuid.NewString() + "/approve", ""},
+		{"POST", "/api/v1/ap/invoices/" + uuid.NewString() + "/transitions", ""},
 		{"GET", "/api/v1/bankrecon/accounts", ""},
 		{"GET", "/api/v1/bankrecon/sessions", ""},
 		{"POST", "/api/v1/bankrecon/import", ""},

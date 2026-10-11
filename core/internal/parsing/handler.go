@@ -42,7 +42,7 @@ func (h *Handler) WithAuditLog(l *audit.Logger) *Handler {
 }
 
 // recordUpload audits one upload; a missing logger or a failed row never
-// blocks the answer (the spend already happened when the service answered).
+// blocks the answer.
 func (h *Handler) recordUpload(ctx context.Context, filename string) {
 	if h.auditLog == nil {
 		return
@@ -129,6 +129,11 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		aiContentType = "text/plain"
 	}
 
+	// The spend is audited before the extractor runs, so a failure after the
+	// AI call (the product match, the response) still leaves the row that
+	// names who spent the credit.
+	h.recordUpload(r.Context(), header.Filename)
+
 	// Extract items. synthetic==true means the AI extractor was unavailable
 	// and `extracted` is the canned demo list rather than anything read out
 	// of the upload — it must reach the client labelled as such.
@@ -167,7 +172,6 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			"filename", header.Filename, "item_count", len(items))
 	}
 
-	h.recordUpload(r.Context(), header.Filename)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(resp)

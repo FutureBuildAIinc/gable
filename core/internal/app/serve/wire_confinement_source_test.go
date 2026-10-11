@@ -38,6 +38,9 @@ func TestServeWiringMountsTheConfinements(t *testing.T) {
 		{string(serveSrc), "pricingRulesCustomerWall(wall.keyWall", "the pricing rule create and calculate confinement"},
 		{string(serveSrc), "categoryRulesCustomerWall(wall.keyWall", "the category rule confinement"},
 		{string(chainSrc), "middleware.KeyBranchRouteGate(d.Mux", "the route allowlist gate in the chain"},
+		{string(serveSrc), "\t\tmiddleware.RequireRole(\"admin\", \"owner\"),\n\t).WithAuditLog(auditLog)", "the location handler's audit log (the PD-5 grant, revoke and home branch rows)"},
+		{string(serveSrc), "parsing.NewHandler(parsingSvc).WithAuditLog(auditLog)", "the parsing handler's audit log (the PD-6 upload row)"},
+		{string(serveSrc), "vision.NewHandler(visionSvc).WithAuditLog(auditLog)", "the vision handler's audit log (the PD-6 scan row)"},
 	} {
 		if !strings.Contains(pin.file, pin.call) {
 			t.Errorf("serve's wiring no longer calls %s (%s); the confinement it mounts is gone from production", pin.call, pin.what)
