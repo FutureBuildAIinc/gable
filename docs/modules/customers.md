@@ -171,7 +171,10 @@ segment is the first path segment under `/api/v1/`). Ship-tos need
 `finance` added on exactly the three routes that change a customer's
 restricted fields (`PUT /customers/{id}`, `PATCH /customers/{id}/salesperson`
 and `PUT /customers/{id}/escalation-policy`; the shared customer rule below
-hears its role there) and on no other customer route; the exact guard is composed in
+hears its role there) and on the two reads those writes need
+(`GET /customers/{id}` and `GET /customers/{id}/escalation-policy`: a caller
+that must send the revision as `If-Match` has to be able to read it; reads
+only), and on no other customer route; the exact guard is composed in
 `core/internal/app/serve/wire_branch_wall.go` at `wall.customers`.
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
@@ -181,17 +184,20 @@ branch shares with another, and changes a shared customer's record only on
 the branch local fields. The rule is deny by default: any header field not
 listed as branch local is restricted, so a field added later is restricted
 until it is listed in `branchLocalFields` (`core/internal/customer/shared.go`).
-A restricted write is `403 forbidden` in the words "a branch bound key may act
+A restricted write is `403 forbidden` in the words "this key may act
 only on its own branch: the customer is also held by branch <id>" (the lowest
 numbered other branch), with the `key.branch_refused` row, and the record is
 untouched. A customer the key's branch holds alone and an unshared customer
 are unchanged for every caller. Who else may change a shared customer's
 restricted fields: a user only with the `finance` or `owner` role (a sales
-or admin user is refused in the bound key's words naming the lowest
+or admin user is refused with the lead in "this role may not change a shared
+customer's restricted fields" naming the lowest
 numbered branch that holds the customer, and a caller with no claims at all
 is refused fail closed), and a dealer wide key only while it carries the
 dedicated `customers:restricted` scope; every other unbound key is refused
-in the same words. A refusal of a user or an unbound key writes a
+with the lead in "this key may not change a shared customer's restricted
+fields" over the same clause (the lead in names the caller, so the words are
+true for whoever reads them). A refusal of a user or an unbound key writes a
 `customer.shared_restricted_refused` audit row for the customer naming the
 actor, the refused fields, that branch and the method and path. A branch
 bound key is refused even with the scope. The scope is in the grant grammar
@@ -216,7 +222,7 @@ user's change writes none.
 Ship-tos and contacts carry no branch column, so on a shared customer every
 existing one is shared: a bound key reads them and may add a new one with
 `POST`, and is refused `PUT /ship-tos/{id}`, `PUT /contacts/{id}` and
-`DELETE /contacts/{id}` in the same words. A ship-to add that names
+`DELETE /contacts/{id}` in the bound key's words. A ship-to add that names
 `is_default: true` is refused the same way, because naming a default
 clears the customer's existing default, which on a shared customer is a
 shared ship to every branch's delivery orders default to; an add that
