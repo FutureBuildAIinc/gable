@@ -2102,7 +2102,7 @@ paths:
       tags: [configurator]
       summary: Validate a set of selections against the rules
       description: >-
-        The body is capped at 64 KiB; an oversized or malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
+        The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. A malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -2131,7 +2131,7 @@ paths:
       tags: [configurator]
       summary: Build a non stock SKU from selections
       description: >-
-        The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+        The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -8028,7 +8028,14 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/AppDisabled"
+          description: >-
+            The millwork app is disabled on this instance (app_disabled, written by the registry gate), or no option has this id (not_found).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsDisabledError"
+                  - $ref: "#/components/schemas/WireError"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
   /api/v1/orders:
@@ -26804,9 +26811,9 @@ components:
           format: date-time
     UnitCreate:
       type: object
-      required: [code, name]
+      required: [code, name, dimension]
       description: >-
-        The create body. The dimension defaults to count; the standard size is both halves or neither. is_system and revision are never accepted.
+        The create body. The dimension is required; the standard size is both halves or neither. is_system and revision are never accepted.
       properties:
         code:
           type: string

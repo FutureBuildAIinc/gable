@@ -116,8 +116,9 @@ paths:
       tags: [configurator]
       summary: Validate a set of selections against the rules
       description: >-
-        The body is capped at 64 KiB; an oversized or malformed body, or an
-        empty selections map, is a 400 naming the field. A rule conflict is
+        The body is bounded by the platform request size limit (10 MiB); a
+        larger body is a 413. A malformed body, or an empty selections map,
+        is a 400 naming the field. A rule conflict is
         a 200 with valid false and the conflicts listed (conflicts is always
         an array, never omitted). The verdict is deterministic: the same
         selections always answer the same conflicts in the same order.
@@ -149,7 +150,8 @@ paths:
       tags: [configurator]
       summary: Build a non stock SKU from selections
       description: >-
-        The body is capped at 64 KiB. Product type and selections are both
+        The body is bounded by the platform request size limit (10 MiB); a
+        larger body is a 413. Product type and selections are both
         required. The selections are validated first; a conflict is a 400
         validation_failed whose details carry one config_conflict blocker per
         violated rule (the base answered one fixed message and never said
