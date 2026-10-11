@@ -140,9 +140,10 @@ func (r *PostgresRepository) CloseTillSession(ctx context.Context, s *TillSessio
 
 // AggregateTillSession sums a session's completed sales from the payments
 // their tenders became (a voided sale's payments are VOIDED, so they drop
-// out), and the cash refunds of the session's returns through their credit
-// memos. The amounts are already net of change: a cash payment is the money
-// kept (ADR 0005 section 14.2 C2-5).
+// out), the cash refunds of the session's returns through their credit
+// memos, and the card refunds booked against the still completed sales' card
+// tenders (the void refunds resolutions book). The amounts are already net
+// of change: a cash payment is the money kept (ADR 0005 section 14.2 C2-5).
 func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID uuid.UUID) (*TillAggregate, error) {
 	agg := &TillAggregate{TenderedByMethod: map[string]int64{}}
 	err := r.ex(ctx).QueryRow(ctx, `
@@ -186,6 +187,22 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 		JOIN pos_returns pr ON pr.credit_memo_id = cm.id
 		WHERE pr.till_session_id = $1 AND rf.method = 'CASH'`, sessionID).Scan(&agg.CashRefundsCents); err != nil {
 		return nil, fmt.Errorf("failed to aggregate the session's cash refunds: %w", err)
+	}
+	// The card refunds booked against the session's still completed sales'
+	// card tenders (r12 P3-2): a void refund a resolution booked is written
+	// straight against the tender's payment (a return's refund goes through
+	// its credit memo and never joins here), and the figure drops with the
+	// tender when the void completes, the same completed sale filter the
+	// tendered sum carries.
+	if err := r.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(ROUND(rf.amount * 100)::bigint), 0)
+		FROM payment_refunds rf
+		JOIN payments p ON p.id = rf.payment_id
+		JOIN pos_tenders pt ON pt.payment_id = p.id
+		JOIN pos_transactions t ON t.id = pt.transaction_id
+		WHERE t.till_session_id = $1 AND t.status = 'COMPLETED' AND p.status = 'POSTED' AND rf.method = 'CARD'`, sessionID).
+		Scan(&agg.CardRefundsCents); err != nil {
+		return nil, fmt.Errorf("failed to aggregate the session's card refunds: %w", err)
 	}
 	return agg, nil
 }

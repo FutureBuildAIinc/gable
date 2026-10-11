@@ -165,6 +165,7 @@ type TillAggregate struct {
 	ChangeCents      int64
 	TenderedByMethod map[string]int64
 	CashRefundsCents int64
+	CardRefundsCents int64
 }
 
 // SaleFilter is the sale list's filters. Date is a YYYY-MM-DD string, so

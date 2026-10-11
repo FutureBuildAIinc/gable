@@ -18,15 +18,19 @@ import (
 // expectedFromPayments computes what the drawer should hold per method: the
 // CASH expectation is the opening float plus the session's cash payments
 // (already net of change; change is never subtracted a second time) less
-// cash refunds; the other methods are the pass-through of what the session's
-// sales collected (ADR 0005 section 14.2 C2-5). Pure function for
-// testability.
-func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds int64) map[string]int64 {
+// cash refunds; the CARD figure, informational (cards are not counted into
+// the drawer), names what the session net collected on cards, its still
+// completed sales' card tenders less the void refunds a resolution booked
+// (r12 P3-2), the same net the CASH figure carries for returns; the other
+// methods are the pass-through of what the session's sales collected (ADR
+// 0005 section 14.2 C2-5). Pure function for testability.
+func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds, cardRefunds int64) map[string]int64 {
 	expected := make(map[string]int64, len(tendered)+1)
 	for m, v := range tendered {
 		expected[m] = v
 	}
 	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds
+	expected["CARD"] = tendered["CARD"] - cardRefunds
 	return expected
 }
 
@@ -106,7 +110,7 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 		TaxTotalCents:    httpx.Cents(agg.TaxTotalCents),
 		ChangeCents:      httpx.Cents(agg.ChangeCents),
 		TenderedByMethod: agg.TenderedByMethod,
-		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents),
+		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents),
 	}, nil
 }
 
