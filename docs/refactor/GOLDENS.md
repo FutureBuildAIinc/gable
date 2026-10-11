@@ -442,7 +442,7 @@ last).
 | documents | `document_invoice` | GET /api/v1/documents/print/invoice/{id} (PDF text hash); POST /api/v1/invoices/{id}/email (202, async) |
 | quote file | `quote_file` | GET /api/v1/quotes/{id}/file |
 | inventory transfer | `inventory_transfer` | POST /api/v1/inventory/transfer |
-| ap payments | `ap_payments` | POST /api/v1/ap/invoices/{id}/transitions (approve via {"to":"approved"}, and a 409 wrong target, 428 no revision); GET /api/v1/ap/payments?vendor_id=; POST /api/v1/ap/payments (201, two refused 400, 409 already-paid) |
+| ap payments | `ap_payments` | POST /api/v1/ap/invoices (201); POST /api/v1/ap/invoices/{id}/transitions (428 no revision, 200 approve via {"to":"approved"}, 409 approve again, 400 bad id, 409 void with payments); GET /api/v1/events (the vendor invoice events); GET /api/v1/ap/invoices/{id} (after a partial and a settling payment); GET /api/v1/ap/payments?vendor_id=; POST /api/v1/ap/payments (201 partial, 201 settle, 409 paid invoice, three refused 400) |
 | gl | `gl_accounts_entries`, `gl_fiscal_periods` | POST /api/v1/gl/accounts; PUT /api/v1/gl/accounts/{id}; GET /api/v1/gl/journal-entries and /{id}; POST .../{id}/reverse and /void; GET /api/v1/gl/fiscal-periods; POST .../{id}/close and /reopen |
 | matching | `matching_runs` | GET /api/v1/matching/exceptions; GET /api/v1/matching/results/{po_id}; POST /api/v1/matching/run/{po_id} |
 | bankrecon | `bankrecon_sessions` | POST /api/v1/bankrecon/import, /match, /unmatch; GET/POST /api/v1/bankrecon/sessions; GET /api/v1/bankrecon/sessions/{id}; POST .../{id}/complete |
