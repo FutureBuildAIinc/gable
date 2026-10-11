@@ -223,7 +223,7 @@ landed yet and their writers are not in the tree.
 | `order.closed_short` | order | `EventClosedShort` in `core/internal/order/service.go` | `core/internal/order/service.go`, `Service.applyTransition` |
 | `order.partially_fulfilled` | order | `EventPartiallyFulfilled` in `core/internal/order/fulfil.go` | `core/internal/order/fulfil.go`, `Service.fulfil` |
 | `order.fulfilled` | order | `EventFulfilled` in `core/internal/order/fulfil.go` | `core/internal/order/fulfil.go`, `Service.fulfil` |
-| `order.fulfillment_parked` | order | `EventFulfillmentParked` in `core/internal/order/fulfil_queue.go` | `core/internal/order/fulfil_queue.go`, the parked-row package function |
+| `order.fulfillment_parked` | order | `EventFulfillmentParked` in `core/internal/order/fulfil_queue.go` | `core/internal/order/fulfil_queue.go`, `Service.ServeFulfilmentRequest` |
 | `invoice.created` | invoice, order | `EventInvoiceCreated` in `core/internal/order/fulfil.go` | `core/internal/order/fulfil.go`, `Service.recordInvoice` |
 | `invoice.paid` | order | inline string `"invoice.paid"` | `core/internal/order/fulfil.go`, `Service.recordInvoice` (zero total, payment inside fulfilment) |
 | `invoice.partial` | account | `EventInvoicePartial` in `core/internal/account/model.go` | `core/internal/account/effects.go`, `Effects.Events` |
