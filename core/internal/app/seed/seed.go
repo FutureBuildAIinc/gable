@@ -1314,10 +1314,12 @@ func Run() {
 	// =========================================================================
 	// POSTerminal.ts hardcodes the register id "REG-01"; without a row in
 	// pos_registers, /api/v1/pos/transactions fails with "failed to resolve
-	// register branch".
+	// register branch". Migration 027 seeds REG-01 on a location that does not
+	// exist and migration 066 gives it the migration-time default branch, so
+	// the row is moved to Kelowna, the branch the seed makes the default.
 	db.Exec(`INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
 		VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
-		ON CONFLICT (id) DO NOTHING`, kelMainID.String())
+		ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1, name = 'Main Counter - Kelowna'`, kelMainID.String())
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
 		VALUES ('sync-batch-001', 'REG-01', 42, 0, 0, NOW() - interval '2 hours')`)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)

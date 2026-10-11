@@ -13,8 +13,9 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "cashier_id": "<id-1>",
-        "id": "<id-2>",
+        "branch_id": "<id-1>",
+        "cashier_id": "<id-2>",
+        "id": "<id-3>",
         "notes": "",
         "opened_at": "<ts+0d>",
         "opening_float": 10000,
@@ -34,8 +35,9 @@
       "content_type": "application/json",
       "body": {
         "session": {
-          "cashier_id": "<id-1>",
-          "id": "<id-2>",
+          "branch_id": "<id-1>",
+          "cashier_id": "<id-2>",
+          "id": "<id-3>",
           "notes": "",
           "opened_at": "<ts+0d>",
           "opening_float": 10000,
@@ -51,7 +53,7 @@
       "method": "POST",
       "path": "/api/v1/pos/transactions",
       "body": {
-        "customer_id": "<id-3>",
+        "customer_id": "<id-4>",
         "register_id": "REG-01"
       }
     },
@@ -59,17 +61,17 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "branch_id": "<id-4>",
+        "branch_id": "<id-1>",
         "cashier_id": "<id-5>",
         "change_due": 0,
         "created_at": "<ts+0d>",
-        "customer_id": "<id-3>",
+        "customer_id": "<id-4>",
         "id": "<id-6>",
         "register_id": "REG-01",
         "status": "OPEN",
         "subtotal": 0,
         "tax_amount": 0,
-        "till_session_id": "<id-2>",
+        "till_session_id": "<id-3>",
         "total": 0
       }
     }
