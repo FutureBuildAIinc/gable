@@ -62,7 +62,9 @@ cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
 cd web/apps/desk && npm install && npm run dev              # SPA on :5173
 
 # 5. Run the background jobs in a third terminal (the idempotency retention
-#    purge; the server does not start it)
+#    purge, the outbox drain, the outbox retention purge, the draft events
+#    purge, and the order allocation and order fulfilment queues; the server
+#    does not start them)
 cd core && go run ./cmd/core worker
 ```
 
