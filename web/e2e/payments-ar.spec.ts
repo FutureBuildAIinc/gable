@@ -35,14 +35,26 @@ async function freshCustomer(request: APIRequestContext) {
   return (await res.json()) as { id: string; name: string; primary_branch_id: string };
 }
 
+// One page of the locations list: the envelope of ADR 0001 section 1.
+type LocationPage = { items: { id: string; parent_id: string | null }[]; next_cursor: string | null };
+
 // Every location of one branch: the branch location itself and anything
 // whose parent chain leads to it. Stock the order can draw on lives at
-// these locations only.
+// these locations only. The list endpoint caps its page size at 200, so the
+// walk pages within the cap and follows the cursor; one oversized request
+// is answered with an error envelope that has no items array.
 async function branchStockLocations(request: APIRequestContext, branch: string): Promise<Set<string>> {
-  const res = (await (await request.get('/api/v1/locations?limit=500')).json()) as { items: { id: string; parent_id: string | null }[] };
-  const parentOf = new Map(res.items.map((l) => [l.id, l.parent_id]));
+  const items: { id: string; parent_id: string | null }[] = [];
+  let cursor: string | null = null;
+  do {
+    const url = `/api/v1/locations?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const page = (await (await request.get(url)).json()) as LocationPage;
+    items.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor !== null);
+  const parentOf = new Map(items.map((l) => [l.id, l.parent_id]));
   const out = new Set<string>([branch]);
-  for (const l of res.items) {
+  for (const l of items) {
     let cur: string | null = l.id;
     while (cur !== null && !out.has(cur)) cur = parentOf.get(cur) ?? null;
     if (cur !== null) out.add(l.id);
