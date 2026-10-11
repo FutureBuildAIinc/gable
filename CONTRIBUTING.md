@@ -69,14 +69,16 @@ fast-forward `staging → main`. Do not target `main` directly.
 
 ### Pre-flight checklist
 
-These are **exactly** the gates CI enforces — see
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml). Run them locally
-before pushing; failing fast locally saves a round trip.
+These are the gates the `backend`, `frontend`, `license` and `docker` jobs in
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml) enforce. CI also runs
+the API contract gates (`make contract`), App Shape, Tauri shell, Playwright and
+Local stack jobs, which `make preflight` does not cover. Run what you can
+locally before pushing; failing fast locally saves a round trip.
 
 The short version:
 
 ```bash
-make preflight     # backend + frontend + licensing, everything the merge gate checks
+make preflight     # backend + frontend + licensing, the core of what the merge gate checks
 ```
 
 The long version, if you'd rather run the pieces yourself:
@@ -88,13 +90,14 @@ go vet ./...
 go build ./...
 go run ./cmd/migrate                                  # needs Postgres
 go test -race ./...                                   # needs Postgres
+make -C .. contract                                   # API contract drift gates (the backend and frontend jobs run these)
 
 # ---- Frontend (the `frontend` job) ---------------------------------------
-cd web/apps/desk
+cd web
 npm ci
-npx tsc --noEmit
+npm run typecheck
 npm run lint
-npm run test:coverage                                 # or: npm run test -- --run
+npm run test:coverage                                 # or: npm run test
 npm run build
 
 # ---- Licensing (the `license` job) ---------------------------------------
