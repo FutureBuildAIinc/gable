@@ -68,12 +68,21 @@ func seedForTx(t *testing.T, db *dbHandle) (customerID, productID uuid.UUID) {
 		t.Fatalf("seed product: %v", err)
 	}
 	// A migrated, unseeded database has no branch tax rate; the resolver
-	// refuses an order without one, so the fixtures set it.
+	// refuses an order without one, so the fixtures set it. The prior value
+	// is read first and restored in cleanup, so this write does not leak a
+	// rate onto the default branch for a neighbouring test in any package.
+	var oldRate *string
+	if err := db.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations
+		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`).Scan(&oldRate); err != nil {
+		t.Fatalf("read default branch rate: %v", err)
+	}
 	if _, err := db.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.088750
 		WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`); err != nil {
 		t.Fatalf("seed branch rate: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = db.Exec(ctx, `UPDATE locations SET default_tax_rate = $1
+			WHERE id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`, oldRate)
 		_, _ = db.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'order' AND entity_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
 		_, _ = db.Exec(ctx, `DELETE FROM order_lines WHERE order_id IN (SELECT id FROM orders WHERE customer_id = $1)`, customerID)
 		_, _ = db.Exec(ctx, `DELETE FROM orders WHERE customer_id = $1`, customerID)
