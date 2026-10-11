@@ -1378,7 +1378,17 @@ carries them as owed, until the last claim resolves and the void completes,
 and the till close is refused while any claim of the session is pending, so
 the interim never slips into a counted drawer. The tenders whose refunds
 were declined keep their charge as unapplied credit owed to the customer,
-
+payable back to the card through the payment's own refund route (capped at
+the unapplied cents): that route is the way back. The payment apply route
+is deliberately not refused for that credit, a stated limit: unapplied
+cash on one payment is fungible (a genuine overpayment and a void's
+reversal mix on the same row, so no refusal can be drawn at the cent level,
+and refusing the row would refuse the overpayment too), and the apply rule
+is the account core's own, per customer, with no origin to read. On the
+shared walk-in customer the limit shows: a later walk-in invoice could
+absorb an earlier walk-in's declined tender credit through that route, so
+the dealer's duty is to refund the card, and the counter's own routes
+never apply the credit.
 
 ### 12. Events
 

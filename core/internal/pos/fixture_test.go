@@ -49,6 +49,9 @@ type fixture struct {
 	yardID       uuid.UUID
 	events       *recordingWriter
 	priorEntries map[string]bool
+	// paymentGateway, when an opt sets it, wires the payment route's card
+	// refunds at a terminal too, the way serve wires Run Payments.
+	paymentGateway payment.PaymentGateway
 }
 
 const defaultBranch = `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
@@ -131,8 +134,12 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	pos.NewHandler(f.service).WithBranchGuard(middleware.NewBranchGuard(db)).RegisterRoutes(mux)
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
 	// the payment route, as serve mounts it: the contention tests race real
-	// walk-in payments against the sales
+	// walk-in payments against the sales, and a paymentGateway opt wires its
+	// card refunds at a terminal the way serve wires Run Payments
 	payments := payment.NewService(db, payment.NewRepository(db), acct)
+	if f.paymentGateway != nil {
+		payments = payments.WithGateway(f.paymentGateway, "")
+	}
 	payment.NewHandler(payments).RegisterRoutes(mux)
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(roleClaims(middleware.NewBranchMiddleware(db).Handler(mux))))
 	t.Cleanup(func() {
