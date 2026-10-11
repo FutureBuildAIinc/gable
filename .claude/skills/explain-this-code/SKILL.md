@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 name: explain-this-code
-description: Orient a newcomer in the Gable codebase — the modular-monolith layout, the 41 domain modules under core/internal, the core/pkg/apps connector seam, and the Lit web-component frontend — and teach them how to find things themselves. Use when the user says "where do I start", "how does this codebase work", "give me a tour", "I'm new here", "explain the architecture", "where does the order code live", "how does the frontend work", "what is core/pkg/apps", "how do I find the code for the delivery screen", "/newcomer-tour", or asks what any module or file does.
+description: Orient a newcomer in the Gable codebase. Covers the modular-monolith layout, the 47 domain modules under core/internal, the core/pkg/apps connector seam, and the Lit web-component frontend. Teaches them how to find things themselves. Use when the user says "where do I start", "how does this codebase work", "give me a tour", "I'm new here", "explain the architecture", "where does the order code live", "how does the frontend work", "what is core/pkg/apps", "how do I find the code for the delivery screen", "/newcomer-tour", or asks what any module or file does.
 ---
 
 # explain-this-code — teach the map, not just the answer
@@ -23,12 +23,12 @@ Give this once, at the start, tailored to what they care about.
 
 ```
 gable/
-  core/          Go 1.26 — one binary, ~41 domain modules (the "modular monolith")
+  core/          Go 1.26: one binary, 47 domain modules (the "modular monolith")
     cmd/core/       the one binary: `core serve` (wires every module
                     repo→service→handler→routes), `core worker` (background
                     jobs), `core migrate` (applies core/migrations/*.sql in
                     order), `core seed` (the demo dataset)
-    internal/       the 41 modules. THIS is where business logic lives.
+    internal/       the 47 modules. THIS is where business logic lives.
     pkg/            shared plumbing (database, middleware, audit, httputil, metrics…)
     pkg/apps/       the connector seam — the stable surface third parties plug into
     migrations/     plain numbered SQL: 001_…, 002_…
@@ -82,7 +82,7 @@ If a route isn't in `routes.ts`, it belongs to a **converted app** and is declar
 ### A backend behaviour
 
 ```bash
-ls core/internal/                          # the 41 modules
+ls core/internal/                          # the 47 domain modules and seven support directories
 grep -rn "func (s \*Service)" core/internal/order/service.go | head -20
 ```
 
@@ -167,8 +167,9 @@ Conversion recipe and phases: [`docs/modularization-blueprint.md`](../../../docs
   `@property({ attribute: 'route-id' })`.
 - **State:** `@state()` for internal, `@property()` for external. Cross-component state lives
   in framework-agnostic singleton services under `web/apps/desk/src/services/`.
-- **Never hardcode a colour.** Tokens are in `web/apps/desk/tailwind.config.js`. JetBrains Mono for all
-  numbers, SKUs, prices, and dimensions; Inter for body text.
+- **Never hardcode a colour.** Tokens are in `web/apps/desk/tailwind.config.js` (theme defined
+  in `web/packages/design-system/tailwind/theme.js`). JetBrains Mono for all numbers, SKUs,
+  prices, and dimensions; Outfit for body text.
 - **Money:** `formatCents()` in `web/apps/desk/src/lib/utils.ts` for ERP surfaces. Portal surfaces get
   dollars from the API and format directly. Mixing them renders `$738.87` as `$73,887.00`.
 
@@ -178,10 +179,10 @@ Conversion recipe and phases: [`docs/modularization-blueprint.md`](../../../docs
 
 - **Router is stdlib `net/http.ServeMux`** (Go 1.22+ pattern matching), not Chi or gorilla.
 - **Default Postgres port is 5434**, matching `docker-compose.yml` — not 5432.
-- **Money conventions are not uniform.** ERP orders/invoices and the `account` module use
-  `int64` cents; portal, quotes, and DailyTill use `float64` dollars — on some of the same
-  columns. `AGENTS.md` § "Money convention is not uniform across modules" has the table. Read
-  it before touching anything financial.
+- **Money conventions are not uniform.** ERP orders/invoices, the `account` module, quotes,
+  and customers wire fields as `int64` cents; portal and DailyTill use `float64` dollars on
+  some of the same columns. `AGENTS.md` § "Money convention is not uniform across modules"
+  has the table. Read it before touching anything financial.
 - **AR balance is derived, not read.** Compute from open invoices
   (`invoice.OpenInvoiceStatuses`), not from `customers.balance_due` — that column is a
   secondary subledger figure and can drift.
