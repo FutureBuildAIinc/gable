@@ -285,8 +285,9 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 // are per product, not per product and branch) and are shared across every
 // branch. The recompute's velocity read therefore must see every branch's
 // sales, the way the cron path does (Scheduler.runRefresh calls the same
-// service with context.Background and no branch context: the velocity read's
-// predicate arm 3 fires, every branch's data flows). The HTTP route is
+// service on the system caller's context, branchctx.WithSystem over
+// context.Background: the velocity read's predicate arm 3 fires, every
+// branch's data flows). The HTTP route is
 // mounted behind the branch middleware, which would otherwise populate a
 // BranchContext that scopes the velocity read to the caller (a bound
 // purchasing user with header A reads arm 1, branch A's sales only; an
