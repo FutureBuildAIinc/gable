@@ -11,6 +11,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -158,6 +159,75 @@ func TestKeyBranchPin_JobOfAnotherCustomer(t *testing.T) {
 		if n != 0 {
 			t.Errorf("%s naming the foreign job: %d rows, want none", table, n)
 		}
+	}
+}
+
+// TestKeyBranchPin_QuoteConvertCustomerWall is round 11 P2-1: a key pinned
+// to A converted a quote at branch A whose customer was held only by B, and
+// the order took B's tax exemption. The conversion now rechecks the quote's
+// stored customer under the customer wall, as the draft promotion rechecks
+// its payload: a quote a caller moved onto a foreign customer is refused
+// where it would become an order. The A control converts and is taxed at the
+// branch rate.
+func TestKeyBranchPin_QuoteConvertCustomerWall(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	ctx := context.Background()
+	ordersOn := func(customer uuid.UUID) (n int) {
+		t.Helper()
+		if err := f.db.Pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM orders WHERE customer_id = $1`, customer).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	quoteFor := func(customer uuid.UUID) uuid.UUID {
+		t.Helper()
+		body := fmt.Sprintf(`{"customer_id":%q,"branch_id":%q,"lines":[%s]}`,
+			customer.String(), f.branchA.String(), f.quoteLine())
+		return f.made(t, "user", "quotes", "POST", "/api/v1/quotes", body, http.StatusCreated)
+	}
+	convert := func(id uuid.UUID) (int, []byte) {
+		t.Helper()
+		rev := f.readJSON(t, "/api/v1/quotes/"+id.String())["revision"]
+		return f.key(t, f.bound, "POST", "/api/v1/quotes/"+id.String()+"/convert", "",
+			map[string]string{"If-Match": fmt.Sprintf(`"%v"`, rev)})
+	}
+
+	foreign := quoteFor(f.custB)
+	before := ordersOn(f.custB)
+	rows := f.auditRows(t)
+	status, buf := convert(foreign)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
+		t.Errorf("bound key converting the quote moved onto the foreign customer: %d %s, want the pin's 403", status, buf)
+	}
+	if !strings.Contains(string(buf), "customer_id") {
+		t.Errorf("the convert refusal does not name customer_id: %s", buf)
+	}
+	if after := f.auditRows(t); after != rows+1 {
+		t.Errorf("convert refusal: key.branch_refused rows %d then %d, want one new row", rows, after)
+	}
+	if after := ordersOn(f.custB); after != before {
+		t.Errorf("the refused convert still wrote %d orders on the foreign customer", after-before)
+	}
+
+	// The A control: the same quote shape on the pin's own customer converts,
+	// and its tax is the branch rate, not an exemption.
+	own := quoteFor(f.custID)
+	status, buf = convert(own)
+	if status != http.StatusCreated {
+		t.Fatalf("bound key converting its own customer's quote: %d %s, want 201", status, buf)
+	}
+	var order struct {
+		ID        uuid.UUID `json:"id"`
+		TaxSource string    `json:"tax_source"`
+		TaxCents  int64     `json:"tax_cents"`
+	}
+	if err := json.Unmarshal(buf, &order); err != nil {
+		t.Fatal(err)
+	}
+	f.madeRow(t, "orders", order.ID)
+	if order.TaxSource != "branch_rate" || order.TaxCents != 5 {
+		t.Errorf("the control convert's tax is %s %d, want the branch rate and 5 cents", order.TaxSource, order.TaxCents)
 	}
 }
 

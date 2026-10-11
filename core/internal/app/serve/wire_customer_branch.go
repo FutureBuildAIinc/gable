@@ -261,6 +261,35 @@ func pricingRuleCustomersOf(db *database.DB) func(ctx context.Context, r *http.R
 	}
 }
 
+// quoteRowCustomerOf resolves the customer of the quote the path names, so
+// the conversion is held to the quote's own customer, rechecked where the
+// quote becomes an order (round 11 P2-1: a quote a caller moved onto another
+// branch's customer must not convert at the pin's branch). A quote that does
+// not exist names no customer and the handler's own 404 answers.
+func quoteRowCustomerOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		if db == nil {
+			return nil, errors.New("quote customer lookup: no database")
+		}
+		id, err := uuid.Parse(r.PathValue("id"))
+		if err != nil {
+			return nil, nil // the handler answers the malformed id
+		}
+		var customer *uuid.UUID
+		err = db.GetExecutor(ctx).QueryRow(ctx, `SELECT customer_id FROM quotes WHERE id = $1`, id).Scan(&customer)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if customer == nil {
+			return nil, nil
+		}
+		return []uuid.UUID{*customer}, nil
+	}
+}
+
 // draftPayloadCustomerOf resolves the customer the stored payload of the draft
 // the path names carries. A draft that does not exist, or whose payload names
 // no customer, names nothing the wall can hold and the promotion's own answer

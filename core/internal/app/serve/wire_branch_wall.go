@@ -155,7 +155,10 @@ func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...
 // branch.
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
-		w.bodyDocumentCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/quotes", "PUT /api/v1/quotes/{id}"))
+		w.patternWall(
+			w.bodyDocumentCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/quotes", "PUT /api/v1/quotes/{id}"),
+			w.keyWall.CustomerBranch(quoteRowCustomerOf(w.db)),
+			"POST /api/v1/quotes/{id}/convert"))
 }
 
 // orders mounts the order routes: the create takes branch_id from its body,
