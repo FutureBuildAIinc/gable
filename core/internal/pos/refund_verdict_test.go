@@ -107,3 +107,210 @@ func TestADeclinedCardRefundReleasesItsClaim(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (tenth review P2-3): a status that is neither a success nor the
+// terminal's own no (PENDING, the refund under way; ERROR, the terminal's
+// retry answer) proves nothing about the money: the claim stands PENDING
+// with its unknown outcome row, the next refund of the tender is refused
+// before the terminal, and nothing is booked. Only the explicit decline
+// releases.
+func TestANonVerdictStatusLeavesTheCardReturnClaimStanding(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	for _, tc := range []struct {
+		name   string
+		status payment.GatewayStatus
+	}{
+		{"a pending status", payment.GatewayStatusPending},
+		{"an error status", payment.GatewayStatusError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()},
+				refundStatuses: []payment.GatewayStatus{tc.status}}
+			f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+				f.service = f.service.WithGateway(gw)
+			})
+			saleID, body := f.saleOf("1", withToken(tender("card", 599)))
+			lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+			r := f.cardReturnOn(t, saleID, lineID, "1")
+			if r.status != http.StatusConflict {
+				t.Fatalf("the %s card return = %d, want 409: %s", tc.name, r.status, r.raw)
+			}
+			_, blockers, _ := errorOf(t, r)
+			if len(blockers) == 0 || blockers[0] != "card_refund" {
+				t.Errorf("blockers = %v, want card_refund naming the status", blockers)
+			}
+			if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING'`, saleID); got != 1 {
+				t.Fatalf("%d PENDING refund intents after the %s answer, want 1 (no verdict came back)", got, tc.name)
+			}
+			if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.refund_outcome_unknown' AND entity_id = $1`, saleID); got != 1 {
+				t.Errorf("%d unknown outcome rows after the %s answer, want 1", got, tc.name)
+			}
+			// the standing claim refuses the next refund before the terminal
+			r = f.cardReturnOn(t, saleID, lineID, "1")
+			if r.status != http.StatusConflict {
+				t.Fatalf("the next card return after the %s answer = %d, want 409: %s", tc.name, r.status, r.raw)
+			}
+			_, blockers, _ = errorOf(t, r)
+			if len(blockers) == 0 || blockers[0] != "refund_in_flight" {
+				t.Errorf("blockers = %v, want refund_in_flight", blockers)
+			}
+			gw.mu.Lock()
+			refunds := len(gw.refunds)
+			gw.mu.Unlock()
+			if refunds != 1 {
+				t.Fatalf("%d gateway refund calls, want 1 (the refusal never reached the terminal)", refunds)
+			}
+			if got := f.accountBalance("1010"); got != 599 {
+				t.Errorf("card balance = %d, want 599 (nothing booked on a non verdict)", got)
+			}
+			f.assertARInvariants(t)
+		})
+	}
+}
+
+// RULE (tenth review P2-3, ninth review P2-3): the void's refund reads its
+// verdict by the same rule: a status that is neither a success nor the
+// terminal's own no leaves the claim PENDING with its unknown outcome row
+// and refuses the next void before the terminal.
+func TestANonVerdictStatusLeavesTheVoidClaimStanding(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	for _, tc := range []struct {
+		name   string
+		status payment.GatewayStatus
+	}{
+		{"a pending status", payment.GatewayStatusPending},
+		{"an error status", payment.GatewayStatusError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()},
+				refundStatuses: []payment.GatewayStatus{tc.status}}
+			f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+				f.service = f.service.WithGateway(gw)
+			})
+			f.openTill(0)
+			saleID, body := f.saleOf("1", withToken(tender("card", 599)))
+			r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+				map[string]any{"reason": "no verdict", "revision": rev(t, body)},
+				"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+			if r.status != http.StatusConflict {
+				t.Fatalf("the %s void = %d, want 409: %s", tc.name, r.status, r.raw)
+			}
+			_, blockers, _ := errorOf(t, r)
+			if len(blockers) == 0 || blockers[0] != "card_refund" {
+				t.Errorf("blockers = %v, want card_refund naming the status", blockers)
+			}
+			if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING'`, saleID); got != 1 {
+				t.Fatalf("%d PENDING refund intents after the %s answer, want 1", got, tc.name)
+			}
+			if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.refund_outcome_unknown' AND entity_id = $1`, saleID); got != 1 {
+				t.Errorf("%d unknown outcome rows after the %s answer, want 1", got, tc.name)
+			}
+			// the next void is refused before the terminal
+			r = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+				map[string]any{"reason": "again", "revision": num(t, f.getSale(t, saleID), "revision")},
+				"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+			if r.status != http.StatusConflict {
+				t.Fatalf("the next void after the %s answer = %d, want 409: %s", tc.name, r.status, r.raw)
+			}
+			_, blockers, _ = errorOf(t, r)
+			if len(blockers) == 0 || blockers[0] != "refund_in_flight" {
+				t.Errorf("blockers = %v, want refund_in_flight", blockers)
+			}
+			gw.mu.Lock()
+			refunds := len(gw.refunds)
+			gw.mu.Unlock()
+			if refunds != 1 {
+				t.Fatalf("%d gateway refund calls, want 1", refunds)
+			}
+			if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
+				t.Errorf("sale status = %q, want completed (nothing booked on a non verdict)", got)
+			}
+			f.assertARInvariants(t)
+		})
+	}
+}
+
+// RULE (ninth review P2-3): the void's timeout keeps its claim the same way
+// the return's does.
+func TestATimedOutVoidRefundLeavesItsClaimStanding(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()},
+		refundErrs: []error{context.DeadlineExceeded}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
+	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "timed out", "revision": rev(t, body)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusInternalServerError {
+		t.Fatalf("the timed out void = %d, want 500: %s", r.status, r.raw)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING'`, saleID); got != 1 {
+		t.Fatalf("%d PENDING refund intents after the timed out void, want 1 (the terminal may have moved the money)", got)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.refund_outcome_unknown' AND entity_id = $1`, saleID); got != 1 {
+		t.Errorf("%d unknown outcome rows, want 1", got)
+	}
+	// the next void is refused before the terminal
+	r = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "again", "revision": num(t, f.getSale(t, saleID), "revision")},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("the next void = %d, want 409: %s", r.status, r.raw)
+	}
+	_, blockers, _ := errorOf(t, r)
+	if len(blockers) == 0 || blockers[0] != "refund_in_flight" {
+		t.Errorf("blockers = %v, want refund_in_flight", blockers)
+	}
+	gw.mu.Lock()
+	refunds := len(gw.refunds)
+	gw.mu.Unlock()
+	if refunds != 1 {
+		t.Fatalf("%d gateway refund calls, want 1", refunds)
+	}
+	if got := f.accountBalance("1010"); got != 599 {
+		t.Errorf("card balance = %d, want 599 (nothing booked)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (ninth review P2-3): the terminal's own no releases the void's claim:
+// the retry goes through.
+func TestADeclinedVoidRefundReleasesItsClaim(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()},
+		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusDeclined, payment.GatewayStatusRefunded}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
+	r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "declined", "revision": rev(t, body)},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusConflict {
+		t.Fatalf("the declined void = %d, want 409: %s", r.status, r.raw)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE sale_id = $1 AND state = 'FAILED'`, saleID); got != 1 {
+		t.Fatalf("%d FAILED refund intents after the declined void, want 1 (the terminal's own no moved nothing)", got)
+	}
+	// the retry goes through
+	r = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/void",
+		map[string]any{"reason": "again", "revision": num(t, f.getSale(t, saleID), "revision")},
+		"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("the retried void = %d: %s", r.status, r.raw)
+	}
+	if got := str(t, f.getSale(t, saleID), "status"); got != "voided" {
+		t.Errorf("sale status = %q, want voided", got)
+	}
+	gw.mu.Lock()
+	refunds := len(gw.refunds)
+	gw.mu.Unlock()
+	if refunds != 2 {
+		t.Fatalf("%d gateway refund calls, want 2 (the declined one and the retry's)", refunds)
+	}
+	f.assertARInvariants(t)
+}

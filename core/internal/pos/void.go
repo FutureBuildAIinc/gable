@@ -10,7 +10,6 @@ import (
 	"sort"
 
 	"github.com/gablelbm/gable/internal/account"
-	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -164,21 +163,28 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	for i := range intents {
 		res, err := s.gateway.Refund(ctx, intents[i].GatewayTxID, intents[i].AmountCents)
 		refundErr := err
-		if refundErr == nil && res.Status != payment.GatewayStatusRefunded && res.Status != payment.GatewayStatusApproved {
-			refundErr = conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
+		verdict := refundAccepted
+		if err == nil {
+			verdict = refundVerdictOf(res)
+			if verdict != refundAccepted {
+				refundErr = conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
+			}
 		}
 		if refundErr != nil {
-			// this tender's refund did not go through: an error carries no
+			// this tender's refund did not go through: an error, or a status
+			// that is neither a success nor the terminal's own no, carries no
 			// verdict (the terminal may have moved the money: the claim
-			// stands and the unknown outcome is recorded, seventh review
-			// P2-2), a definite refusal status proves nothing moved (the
-			// claim is released). The refunds already taken are recorded in
-			// committed rows with their claims left standing, because the
-			// money transaction never opens now.
+			// stands and the unknown outcome is recorded, seventh review P2-2
+			// and tenth review P2-3), while a definite refusal status proves
+			// nothing moved (the claim is released). The refunds already
+			// taken are recorded in committed rows with their claims left
+			// standing, because the money transaction never opens now.
 			if err != nil {
 				s.unknownRefundOutcome(ctx, intents[i], err)
-			} else {
+			} else if verdict == refundDeclined {
 				s.failRefundIntent(ctx, intents[i])
+			} else {
+				s.unknownRefundOutcome(ctx, intents[i], noVerdictOf(res))
 			}
 			for _, r := range refunds {
 				s.recordOrphanRefund(ctx, r, refundErr)
@@ -392,8 +398,6 @@ func (s *Service) runVoidTx(ctx context.Context, saleID uuid.UUID, ifMatch strin
 	}
 	return out, nil
 }
-
-const refundApproved = "REFUNDED"
 
 // tendersInIDOrder answers the tenders that became payments, sorted by
 // their payment ids (section 11, step 2: payments in id order). A tender

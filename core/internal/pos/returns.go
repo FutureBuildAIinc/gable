@@ -597,9 +597,17 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 			s.unknownRefundOutcome(ctx, claim.intent, err)
 			return nil, fmt.Errorf("card refund failed: %w", err)
 		}
-		if res.Status != "REFUNDED" && res.Status != "APPROVED" {
+		switch refundVerdictOf(res) {
+		case refundAccepted:
+		case refundDeclined:
 			// a definite refusal: the terminal's own no proves nothing moved
 			s.failRefundIntent(ctx, claim.intent)
+			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
+		default:
+			// a status that is neither a success nor the terminal's own no
+			// proves nothing about the money (tenth review P2-3): the claim
+			// stands as an error leaves it, with the unknown outcome row
+			s.unknownRefundOutcome(ctx, claim.intent, noVerdictOf(res))
 			return nil, conflict("card_refund", fmt.Sprintf("the card refund was not accepted (%s)", res.Status))
 		}
 		// the gateway's own refund id, on the standing claim the moment the

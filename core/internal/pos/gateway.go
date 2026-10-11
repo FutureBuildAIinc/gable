@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
@@ -63,6 +64,38 @@ func (s *Service) failRefundIntent(ctx context.Context, intent RefundIntent) {
 		s.logger.Error("CRITICAL: the failed refund intent was not released",
 			"act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID, "error", err)
 	}
+}
+
+// refundVerdict is how a refund call's answer reads: accepted (the money
+// moved), declined (the terminal's own no: nothing moved), or unknown (every
+// other answer proves nothing either way; tenth review P2-3).
+type refundVerdict int
+
+const (
+	refundAccepted refundVerdict = iota
+	refundDeclined
+	refundUnknown
+)
+
+// refundVerdictOf reads the terminal's answer to a refund call. Only the
+// explicit decline releases a claim: a PENDING answer means the refund is
+// under way and an ERROR is the terminal's own retry mapping, and neither
+// proves the money did not move.
+func refundVerdictOf(res *payment.GatewayResult) refundVerdict {
+	switch res.Status {
+	case payment.GatewayStatusRefunded, payment.GatewayStatusApproved:
+		return refundAccepted
+	case payment.GatewayStatusDeclined:
+		return refundDeclined
+	default:
+		return refundUnknown
+	}
+}
+
+// noVerdictOf builds the record for an answer that carries no verdict, so
+// the unknown outcome audit row names what the terminal said.
+func noVerdictOf(res *payment.GatewayResult) error {
+	return fmt.Errorf("the terminal answered %s", res.Status)
 }
 
 // checkCardClaim refuses a claim the intent table already contradicts
