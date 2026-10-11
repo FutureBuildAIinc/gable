@@ -393,7 +393,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/orders/{id}/transitions":                         {KeyBranchClassWalled, "orders.branch_id"},
 	"POST /api/v1/payments":                                        {KeyBranchClassWalled, "payments.branch_id (the create takes branch_id from the caller context)"},
 	"POST /api/v1/payments/card":                                   {KeyBranchClassWalled, "payments.branch_id (the card charge writes its payment under the caller context)"},
-	"POST /api/v1/payments/intent":                                 {KeyBranchClassWalled, "payments.branch_id (the intent writes under the caller context)"},
+	"POST /api/v1/payments/intent":                                 {KeyBranchClassWalled, "payments.branch_id (the intent writes under the caller context); the route takes no customer, so its own 400 answers a body naming one (round 11 P3-2)"},
 	"POST /api/v1/payments/{id}/applications":                      {KeyBranchClassWalled, "payments.branch_id beside InvoiceVisible"},
 	"POST /api/v1/payments/{id}/refunds":                           {KeyBranchClassWalled, "payments.branch_id (MemoFactsFor and the refund wall)"},
 	"POST /api/v1/payments/{id}/transitions":                       {KeyBranchClassWalled, "payments.branch_id (the payment repository wall)"},

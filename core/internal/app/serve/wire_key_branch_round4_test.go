@@ -148,6 +148,7 @@ func (f *keyPinFixture) refusedPin(t *testing.T, label, method, path, body strin
 	before := f.heldBy(t, twin)
 	rows := f.auditRows(t)
 	status, buf := f.key(t, f.bound, method, path, body, nil)
+	f.twinLeg(method, path)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
 		t.Errorf("%s: bound key %s %s naming the foreign customer: %d %s, want the pin's 403", label, method, path, status, buf)
 	}
@@ -201,17 +202,41 @@ func TestKeyBranchPin_BodyCustomerWall(t *testing.T) {
 		}
 	}
 
-	// The card and intent creates name the customer the same way. No gateway
-	// is configured here, so the A control answers 503 or 400 and never 403.
-	for _, path := range []string{"/api/v1/payments/card", "/api/v1/payments/intent"} {
-		body := func(c string) string {
-			return fmt.Sprintf(`{"customer_id":%q,"amount_cents":100,"token_id":"teststub"}`, c)
+	// The card create names the customer the same way. No gateway is
+	// configured here, so the A control answers 503 and never 403. The intent
+	// route takes no customer at all: its own 400 unknown field answer is what
+	// every caller gets (round 11 P3-2; the wall used to read the body before
+	// the route's field check and refuse a bound key for a field the route
+	// ignores).
+	cardBody := func(c string) string {
+		return fmt.Sprintf(`{"customer_id":%q,"amount_cents":100,"token_id":"teststub"}`, c)
+	}
+	f.refusedPin(t, "/api/v1/payments/card", "POST", "/api/v1/payments/card", cardBody(B), f.custB)
+	if status, buf := f.key(t, f.bound, "POST", "/api/v1/payments/card", cardBody(A), nil); status == http.StatusForbidden {
+		t.Errorf("bound key card charge for the pin's own customer: %d %s, want past the wall", status, buf)
+	}
+	intentBody := fmt.Sprintf(`{"customer_id":%q,"amount_cents":100}`, B)
+	for _, who := range []string{"bound", "unbound", "user"} {
+		status, buf := f.send(t, who, "POST", "/api/v1/payments/intent", intentBody, nil)
+		if who == "bound" {
+			f.twinLeg("POST", "/api/v1/payments/intent")
 		}
-		f.refusedPin(t, path, "POST", path, body(B), f.custB)
-		if status, buf := f.key(t, f.bound, "POST", path, body(A), nil); status == http.StatusForbidden {
-			t.Errorf("bound key %s for the pin's own customer: %d %s, want past the wall", path, status, buf)
+		if status != http.StatusBadRequest || !strings.Contains(string(buf), "customer_id") {
+			t.Errorf("%s payment intent naming a customer: %d %s, want the route's own 400 naming customer_id", who, status, buf)
 		}
 	}
+
+	// A credit memo moved onto another customer by the PUT: the wall holds
+	// the body's customer there too (round 10 P3-1 put this leg in; without
+	// it the PUT pattern in the invoices mount had no test).
+	memoLine := `{"description":"pin adjustment","quantity":"-1","uom":"EA","unit_price_ten_thousandths":10000}`
+	memoPost := fmt.Sprintf(`{"customer_id":%q,"reason_code":"other","reason":"pin","lines":[%s]}`, A, memoLine)
+	memo := f.made(t, "bound", "credit_memos", "POST", "/api/v1/credit-memos", memoPost, http.StatusCreated)
+	memoPut := func(c string) string {
+		return fmt.Sprintf(`{"customer_id":%q,"reason_code":"other","reason":"pin","revision":1,"lines":[%s]}`, c, memoLine)
+	}
+	f.refusedPin(t, "credit memo move", "PUT", "/api/v1/credit-memos/"+memo.String(), memoPut(B), f.custB)
+	f.allow(t, "bound", "PUT", "/api/v1/credit-memos/"+memo.String(), memoPut(A), nil, http.StatusOK)
 
 	// A document moved onto another customer: the quote update and the draft
 	// order update that change customer_id. The foreign leg runs before its
@@ -238,6 +263,7 @@ func TestKeyBranchPin_BodyCustomerWall(t *testing.T) {
 		{"orders", "orders", `{"payload":{"customer_id":%q,"delivery_type":"pickup","lines":[` + line + `]}}`},
 	} {
 		foreign := f.made(t, "bound", "drafts", "POST", "/api/v1/drafts/"+kind.module, fmt.Sprintf(kind.body, B), http.StatusCreated)
+		f.twinLeg("POST", "/api/v1/drafts/"+kind.module)
 		own := f.made(t, "bound", "drafts", "POST", "/api/v1/drafts/"+kind.module, fmt.Sprintf(kind.body, A), http.StatusCreated)
 		f.refusedPin(t, "promote "+kind.module, "POST", "/api/v1/drafts/"+kind.module+"/"+foreign.String()+"/promote", `{"revision":1}`, f.custB)
 		f.made(t, "bound", kind.table, "POST", "/api/v1/drafts/"+kind.module+"/"+own.String()+"/promote", `{"revision":1}`, http.StatusCreated)

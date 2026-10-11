@@ -208,13 +208,16 @@ func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
 // payments mounts the payment routes: the create takes branch_id from its body
 // and the writes address a payment by path id, so the service holds both to the
 // caller's branch context (ADR 0007 section 2.3) beside the wall every read
-// carries. The cash, card and intent creates take customer_id from their body,
-// so a branch bound key reaches them only while the pin holds that customer
-// (round 9 P1-1: a posted payment and its GL entry land on that customer).
+// carries. The cash and card creates take customer_id from their body, so a
+// branch bound key reaches them only while the pin holds that customer
+// (round 9 P1-1: a posted payment and its GL entry land on that customer). The
+// intent create takes no customer at all, so it keeps the guard alone and its
+// own 400 answers a body that names one, for every caller alike (round 11
+// P3-2).
 func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
 	payment.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
 		w.bodyCustomer(w.scoped("admin", "owner", "sales", "finance", "cashier"),
-			"POST /api/v1/payments", "POST /api/v1/payments/card", "POST /api/v1/payments/intent"))
+			"POST /api/v1/payments", "POST /api/v1/payments/card"))
 }
 
 // bodyCustomer composes a route group's guard with the key branch wall's hold
