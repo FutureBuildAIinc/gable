@@ -146,12 +146,12 @@ named in the source column.
 
 | Status | Meaning | Source |
 |---|---|---|
-| 400 | A missing required field, an unknown field on the route (`product_type` on validate), a cap exceeded, an empty `selections` map, or a `validation_failed` whose details carry one `config_conflict` blocker per violated rule on build-sku. | `configurator.yaml` `BadRequestEither`; `handler.go` `parseSelectionsBody`; `service.go` `BuildSKU` (`httpx.CodeValidationFailed`, `httpx.Blocker("config_conflict", ...)`) |
+| 400 | A missing required field, an unknown field on the route (`product_type` on validate), invalid or empty JSON, an empty `selections` map, or a `validation_failed` whose details carry one `config_conflict` blocker per violated rule on build-sku. | `configurator.yaml` `BadRequestEither`; `handler.go` `parseSelectionsBody`; `service.go` `BuildSKU` (`httpx.CodeValidationFailed`, `httpx.Blocker("config_conflict", ...)`) |
 | 401 | The auth layer answers every route with the ADR 0001 envelope, code `unauthorized`. | `_shared.yaml` `Unauthorized`; `pkg/middleware` auth |
 | 403 | The role guard or the machine-key scope check refuses the caller, code `forbidden`. | `_shared.yaml` `Forbidden`; `pkg/middleware` machinekey |
 | 404 | The millwork app is disabled and the route's gated router answers `app_disabled`. | `configurator.yaml` `AppDisabled`; apps registry gate |
 | 413 | The body exceeded the platform's request size limit. | `_shared.yaml` `PayloadTooLarge` |
-| 422 | The idempotency layer rejected the write (`idempotency_key_reused` for a key replayed with a different body fingerprint). | `_shared.yaml` `UnprocessableEntity`; idempotency middleware |
+| 422 | The idempotency layer rejected the write (`idempotency_key_reused` for a key replayed with a different request: method, path, query or body). | `_shared.yaml` `UnprocessableEntity`; idempotency middleware |
 | 500 | A handler or database error. | `configurator.yaml` `InternalErrorEither` |
 
 ## Lifecycle and transitions
