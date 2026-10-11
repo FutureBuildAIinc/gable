@@ -1,7 +1,7 @@
 ---
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Docs-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
-description: Get oriented in the Gable codebase — the layout, the 41 backend modules, the connector seam, and the Lit frontend.
+description: Get oriented in the Gable codebase. Covers the layout, the 47 backend modules, the connector seam, and the Lit frontend.
 argument-hint: [optional: a module, screen, or area you care about]
 ---
 

@@ -13,7 +13,7 @@ ADR-011, which lives in the FutureBuild infra repository, not here.
 | [0001](0001-wire-contract.md) | The wire contract for every route | R1-6 |
 | [0002](0002-machine-keys.md) | Scoped machine keys | R1-13 |
 | [0003](0003-events-outbox.md) | The transactional outbox and the events read API | R1-12 |
-| 0004 | Web session custody | R1-8 |
+| [0004](0004-web-session-custody.md) | Web session custody | R1-8 |
 | [0005](0005-sales-and-money-core.md) | The sales and money core | C2-0 |
 | [0006](0006-units-and-pricing.md) | Units and pricing | C3-0 |
 | [0007](0007-drafts-links-and-confirm-gated-scopes.md) | Drafts, links and confirm gated scopes | C5-0 |

@@ -259,8 +259,11 @@ paths:
         dated today and linked by reverses_entry_id. The optional body reason
         is appended to the memo; an undecodable or absent body is ignored.
         Only a POSTED entry that has not already been reversed and has at
-        least 2 lines can be reversed. Every refusal, including an unknown
-        id, is a 400.
+        least 2 lines can be reversed. The reversal posts in the original
+        entry's own currency (the entry priced its legs into that currency,
+        so a reversal in the currency.default setting's code would leave the
+        control account holding both halves of one undo in different
+        currencies). Every refusal, including an unknown id, is a 400.
       parameters:
         - name: id
           in: path
