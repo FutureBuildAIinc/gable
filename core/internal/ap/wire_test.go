@@ -1915,6 +1915,51 @@ func TestWire_VoidRefusesReinstatedEntry(t *testing.T) {
 	}
 }
 
+// RULE (review r4 P3-3): a void's reversal posts in the original entry's own
+// currency, never in the bill's current one. The entry priced the credit
+// into its currency when it posted, so undoing it in another currency leaves
+// 2010 holding both halves in different currencies (the trial balance never
+// sums across two). The shape is legacy only (no route changes a bill's
+// currency), built here by hand like the review's probe.
+func TestWire_VoidReversalKeepsTheEntryCurrency(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id, r1 := f.enter("V-CUR-ENTRY", "1", 250000) // 25.00
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry := f.glEntryOf(id)
+	if got := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id = $1 AND currency = 'USD'`, entry); got != 1 {
+		t.Fatalf("the entry's currency = %d USD rows, want the setting's USD", got)
+	}
+	// The hand edit no route allows: the bill now says CAD over a USD entry.
+	mustExec(t, f.db, `UPDATE vendor_invoices SET currency = 'CAD' WHERE id = $1`, id)
+	if got, want := f.controlBalanceIn("USD"), int64(2500); got != want {
+		t.Fatalf("the USD control = %d, want %d", got, want)
+	}
+	if got, want := f.openSumIn("CAD"), int64(2500); got != want {
+		t.Fatalf("the CAD open = %d, want %d", got, want)
+	}
+	v := f.void(id, 2, "wrong currency")
+	if v.status != http.StatusOK {
+		t.Fatalf("void the hand edited bill = %d: %s", v.status, v.raw)
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries WHERE reverses_entry_id = $1 AND currency = 'USD'`, entry); n != 1 {
+		t.Errorf("the void's reversal is not in the entry's USD: %d USD reversals, want 1", n)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	for _, currency := range []string{"USD", "CAD"} {
+		if got, want := f.controlBalanceIn(currency), int64(0); got != want {
+			t.Errorf("the %s control = %d, want %d after the void", currency, got, want)
+		}
+		if got, want := f.openSumIn(currency), int64(0); got != want {
+			t.Errorf("the %s open = %d, want %d after the void", currency, got, want)
+		}
+	}
+}
+
 // RULE (review r4 P3-1, the race r3 P3-1 read): an AP void racing a GL
 // reverse of the linked entry must never answer 500. Whichever side loses
 // the insert meets the one reversal index (ux_gl_entry_single_reversal), and

@@ -136,9 +136,13 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 	return entry, nil
 }
 
-// ReversalInput names the entry to reverse and the business date and currency
-// of the reversal (ADR 0005 section 8.2: a void reverses the document's whole
-// entry, dated the void date, in the document's currency).
+// ReversalInput names the entry to reverse and the business date of the
+// reversal (ADR 0005 section 8.2: a void reverses the document's whole entry,
+// dated the void date). The reversal posts in the entry's own currency (the
+// entry priced its credit into that currency when it posted, so undoing it
+// in another would leave the control account holding both halves in
+// different currencies, review r4 P3-3); the input's currency is only the
+// fallback for an entry that carries none.
 type ReversalInput struct {
 	EntryID   uuid.UUID
 	EntryDate time.Time
@@ -182,8 +186,12 @@ func (s *Service) PostReversal(ctx context.Context, in ReversalInput) (*JournalE
 			Debit: l.Credit, Credit: l.Debit})
 	}
 	origID := orig.ID
+	currency := orig.Currency
+	if currency == "" {
+		currency = in.Currency
+	}
 	return s.PostEntry(ctx, PostingInput{
 		EntryDate: in.EntryDate, Memo: memo, Source: SourceReversal, SourceRefID: &origID,
-		ReversesEntryID: &origID, Currency: in.Currency, PostedBy: in.PostedBy, Legs: legs,
+		ReversesEntryID: &origID, Currency: currency, PostedBy: in.PostedBy, Legs: legs,
 	})
 }
