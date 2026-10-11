@@ -486,11 +486,12 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 // swallowed, or an entry the GL routes have already reversed or voided,
 // linked or not) holds no credit in the control account and voids with
 // nothing to reverse. A bill with money applied is refused: the payments
-// have to be undone first. A bill that holds a posted, unreversed entry it
+// have to be undone first. A bill that holds a live VENDOR_INVOICE entry it
 // is not linked to is refused too: no route links an entry to a bill, and a
 // legacy bill of that shape may hold the removed sync's one leg credit (a
-// hand edit may even have zeroed its total after the approve), which a
-// plain void would strand. So is a linked entry that does not balance (that
+// hand edit may even have zeroed its total after the approve), or it was
+// posted twice and only the newest entry is linked, the duplicate named by
+// the refusal: a plain void would strand that credit. So is a linked entry that does not balance (that
 // one leg shape, linked by hand): its reversal would not balance either,
 // and so is a linked entry whose reversal row is not posted: its credit
 // stands live while the one reversal an entry may hold is already taken.
@@ -536,6 +537,16 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 		}
 		var reversal *uuid.UUID
 		if locked.GLEntryID != nil {
+			// A second live entry beside the linked one (the double posted
+			// shape: the base read the status outside its transaction, so a
+			// double click could post it twice) must not be stranded under a
+			// VOIDED bill: no route could reach it again (review r2 P3-1).
+			if number, other, found, err := s.repo.LiveInvoiceEntryOtherThan(ctx, id, *locked.GLEntryID); err != nil {
+				return err
+			} else if found {
+				return httpx.InvalidStateTransition("the bill holds a second live journal entry beside its linked one, so a void would strand that entry's credit in accounts payable",
+					httpx.Blocker("entry_not_linked", fmt.Sprintf("journal entry #%d (%s) is also live for this bill; reverse it before voiding", number, other)))
+			}
 			// The linked arm is keyed on the ledger too, never on the pointer
 			// alone (review r2 P2-1): an entry the GL routes have already
 			// reversed or voided holds no live credit, so the void has

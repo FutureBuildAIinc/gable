@@ -1436,6 +1436,63 @@ func TestWire_PaymentCurrencyFollowsTheBills(t *testing.T) {
 	}
 }
 
+// RULE (review r2 P3-1): a double posted bill does not void with its
+// duplicate credit live. A live VENDOR_INVOICE entry beside the linked one
+// holds a second credit in 2010 that no route could reach under a VOIDED
+// bill, so the void is refused entry_not_linked naming the other entry, and
+// nothing is written.
+func TestWire_VoidRefusesDoublePostedBill(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id, r1 := f.enter("V-DUP-ENT", "1", 200000) // 20.00
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	// The double posted shape: a second POSTED, balanced VENDOR_INVOICE entry
+	// for the bill, beside the linked one.
+	entry := f.glEntryOf(id)
+	dup := uuid.New()
+	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, currency)
+		SELECT $2, entry_date, memo || ' (duplicate)', source, source_ref_id, status, posted_by, currency
+		FROM gl_journal_entries WHERE id = $1`, entry, dup)
+	mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+		SELECT gen_random_uuid(), $2, account_id, description, debit, credit
+		FROM gl_journal_lines WHERE journal_entry_id = $1`, entry, dup)
+	control, open := f.controlBalance(), f.openSum()
+	if control != 4000 || open != 2000 {
+		t.Fatalf("control %d, open %d, want 4000 and 2000", control, open)
+	}
+	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v := f.void(id, 2, "wrong bill")
+	if v.status != http.StatusConflict {
+		t.Fatalf("void a double posted bill = %d, want 409: %s", v.status, v.raw)
+	}
+	if code, blockers, _ := errorOf(t, v); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
+		t.Errorf("void a double posted bill = %q %v, want entry_not_linked", code, blockers)
+	}
+	if !strings.Contains(string(v.raw), dup.String()) {
+		t.Errorf("the refusal does not name the duplicate entry: %s", v.raw)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
+		t.Error("a refused void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+		t.Errorf("%d entries were written for a refused void", after-before)
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries r JOIN gl_journal_entries o ON o.id = r.reverses_entry_id WHERE o.source_ref_id = $1`, id); n != 0 {
+		t.Errorf("%d reversals were written for a refused void", n)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), control; got != want {
+		t.Errorf("after the refused void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open; got != want {
+		t.Errorf("after the refused void: open %d, want the untouched %d", got, want)
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is

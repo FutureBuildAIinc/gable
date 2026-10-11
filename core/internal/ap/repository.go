@@ -342,6 +342,26 @@ func (r *Repository) LinkedEntryLedger(ctx context.Context, id uuid.UUID) (live,
 	return isPosted && !postedReversal, reversalTaken, nil
 }
 
+// LiveInvoiceEntryOtherThan names the bill's newest live VENDOR_INVOICE entry
+// other than the one excluded (found is false when the excluded entry is the
+// only live one): the double posted shape, whose duplicate credit a void
+// would strand under a VOIDED bill (review r2 P3-1).
+func (r *Repository) LiveInvoiceEntryOtherThan(ctx context.Context, invoiceID, exclude uuid.UUID) (entryNumber int64, entryID uuid.UUID, found bool, err error) {
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT e.entry_number, e.id FROM gl_journal_entries e
+		WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1
+		  AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL AND e.id <> $2
+		  AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id AND r.status = 'POSTED')
+		ORDER BY e.created_at DESC, e.id DESC LIMIT 1`, invoiceID, exclude).Scan(&entryNumber, &entryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, uuid.Nil, false, nil
+	}
+	if err != nil {
+		return 0, uuid.Nil, false, fmt.Errorf("failed to read the bill's journal entries: %w", err)
+	}
+	return entryNumber, entryID, true, nil
+}
+
 // LockForPayment takes one invoice of the named vendor FOR UPDATE, in the
 // caller's id order (ADR 0008 section 9 step 5a). No row means no such
 // invoice for this vendor.
