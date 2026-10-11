@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // Package worker is the worker role of the core binary: the background
-// jobs that do not belong to the HTTP server. Today that is the
-// idempotency retention purge, which R1-4 moved out of serve, the
-// outbox drain (R1-12), which delivers committed events to their
-// subscribers, and the outbox retention purge (R1-12b); the cron schedulers that serve mounts beside its own HTTP
-// surface (auto-reorder and scheduled report delivery) stay in serve.
+// jobs that do not belong to the HTTP server. Today those are six: the
+// idempotency retention purge, which R1-4 moved out of serve; the outbox
+// drain (R1-12), which delivers committed events to their subscribers; the
+// outbox retention purge (R1-12b); the draft events purge; and the order
+// module's allocation and fulfilment queue jobs. The cron schedulers that
+// serve mounts beside its own HTTP surface (auto-reorder and scheduled
+// report delivery) stay in serve.
 package worker
 
 import (

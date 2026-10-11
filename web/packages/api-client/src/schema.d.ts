@@ -896,7 +896,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a set of selections against the rules
-         * @description The body is capped at 64 KiB; an oversized or malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. A malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
          */
         post: operations["configuratorValidate"];
         delete?: never;
@@ -916,7 +916,7 @@ export interface paths {
         put?: never;
         /**
          * Build a non stock SKU from selections
-         * @description The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
          */
         post: operations["configuratorBuildSku"];
         delete?: never;
@@ -13603,12 +13603,12 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The create body. The dimension defaults to count; the standard size is both halves or neither. is_system and revision are never accepted. */
+        /** @description The create body. The dimension is required; the standard size is both halves or neither. is_system and revision are never accepted. */
         UnitCreate: {
             code: string;
             name: string;
             /** @enum {string} */
-            dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            dimension: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
             std_unit_qty?: components["schemas"]["Quantity"];
             std_ref_qty?: components["schemas"]["Quantity"];
         };
@@ -21476,7 +21476,15 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
+            /** @description The millwork app is disabled on this instance (app_disabled, written by the registry gate), or no option has this id (not_found). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsDisabledError"] | components["schemas"]["WireError"];
+                };
+            };
             500: components["responses"]["InternalErrorEither"];
         };
     };
