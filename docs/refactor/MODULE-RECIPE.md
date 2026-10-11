@@ -262,14 +262,14 @@ them. For every column the migration adds or reinterprets, grep every reader
 the new meaning there with a test (an MBF line priced per 187.5 pieces is the
 check) or make it refuse what it cannot carry.
 
-A helper route that feeds an unconverted neighbour (quotes' convert hands the
-order payload to the orders route, which takes whole cents per sale unit and no
-pair) REFUSES what the neighbour cannot carry rather than rounding it: a quote
-with a stocked line sold in a unit other than its product's stocking unit is
-a 409 `conflict` with a `unit_not_stock_unit` blocker naming `lines[i]`. The
-payload is built inside the transition's transaction, before the status
-changes, so a refusal leaves the document as it was. The neighbour's own
-converting module lifts the refusal (here R2-1). The same rule binds the
+A helper route that feeds a neighbour module (quotes' convert creates the
+order through the orders service, in the transition's own transaction)
+REFUSES what the neighbour cannot carry rather than rounding it: a quote with
+a stocked line sold in a unit other than its product's stocking unit is a 409
+`conflict` with a `unit_not_stock_unit` blocker naming `lines[i]`. The
+neighbour's document is created in the same transaction as the status change,
+so a refusal rolls both back and leaves the document as it was. The
+neighbour's conversions (cycle 3) lift the refusal. The same rule binds the
 frozen integration seam that does the same job.
 
 ## 10. The contract
@@ -370,7 +370,7 @@ Then commit per step when green, push, and open the pull request into
 | The router's own 404 and 405 | Not converted here; they keep net/http's plain text |
 | `ETag` and the generated client | The client does not surface response headers; the body carries `revision` for clients that need it, and a convert body carries it too |
 | The idempotent replay's `ETag` | A replayed create returns the stored body and status but not the `ETag` header; the body's `revision` is the source (hardening list) |
-| A convert-style helper route | Takes the same revision precondition as any transition, builds its payload inside the transition's transaction, and returns the document's revision (body and `ETag`) |
+| A convert-style helper route | Takes the same revision precondition as any transition, creates the neighbour's document in the transition's transaction, and answers with that document (its body and `ETag`) |
 | A helper route whose neighbour cannot carry a line | 409 `conflict` with a `unit_not_stock_unit` blocker naming `lines[i]`, until the neighbour's conversions land (a stocked line sold in a unit other than its product's stocking unit) |
 | A client sending a revision on create | 400 naming `revision`: a create has no revision to precondition on |
 | A PUT carrying a field it does not apply | 400 naming the field (`source`, `margin_total_cents`, `original_file`, `original_filename`, `original_content_type`, `parse_map`, `branch_id`), never a silent drop |
