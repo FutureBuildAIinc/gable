@@ -7,7 +7,7 @@
 ## 1. System Principles
 - **Modular Monolith:** Single deployment binary; 54 directories under `core/internal/` (47 domain modules plus `app`, `apicontract`, `characterization`, `events`, `platform`, `routecensus`, `testutil`), wired in `core/internal/app/serve/serve.go`.
 - **Zero-Trust Modules:** Modules never access another module's database tables directly — cross-module needs go through the other module's service or repository types.
-- **Synchronous Interop:** Every inter-module *write* is a synchronous Go call. The one asynchronous path is notification side-effects for price exposure, fanned out over the in-process `pkg/eventbus` (§4.2). There is no message broker and no NATS client in the codebase.
+- **Synchronous Interop:** Every inter-module *write* is a synchronous Go call. The one asynchronous path is the transactional outbox, drained by the worker (§4.2). There is no message broker and no NATS client in the codebase.
 - **Interface Seams Where They Earn Their Keep:** Most coupling is concrete `*Service` injection; consumer-defined interfaces + adapters in `core/internal/app/serve/serve.go` exist where cycles had to be broken (`quote.AutoPOService`, `delivery.DeliveryNotifierInterface`, `pos.PriceCalculator`, `gl` → `integrations.GLAdapter`).
 - **Apps Platform (Phase 0 landed):** Modules are becoming *apps* — declared manifests, a DB-backed registry (`apps` table), per-instance enable/disable, and an Apps admin page. See the blueprint for the full model.
 
@@ -79,49 +79,51 @@ subledger debit in one transaction (`order.Fulfil` →
 the GL entry and the subledger debit). A payment is a separate path
 (`payment.Service` → `account.RecordPayment`).
 
-### 4.2. Asynchronous events: in-process bus + transactional outbox
-`core/pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam.
-It is used by exactly one feature: the lumber price-exposure scanner publishes
-`quote.exposure.*` events, and `notification.ExposureNotifier` subscribes on
-`quote.exposure.>` to send salesperson and customer email. Subjects follow NATS
-token syntax (`*` = one token, `>` = one or more trailing tokens) so a future
-broker can bind the same strings.
+### 4.2. Asynchronous events: the transactional outbox
+`core/pkg/eventbus` defines the event vocabulary (`Event`, `Handler`, the
+subject constants and NATS style subject matching, where `*` is one token and
+`>` is one or more trailing tokens) and an in-process, in-memory `Bus`. No
+production code constructs that bus; it is a tested seam kept for a possible
+broker. All production events travel over the transactional outbox.
 
 There is still **no broker**: nothing is added to `go.mod`, `docker-compose.yml`
 or the deploy specs, and Gable remains a single Go binary.
 
-The bus only carries the in-process fan-out. The durable transport is the
-**transactional outbox** (`core/pkg/outbox`, plus the read API at
-`core/internal/events` serving `GET /api/v1/events`): a mutation writes its
-domain event into the `events_outbox` table inside its own transaction
-(ADR 0003), and the worker role (`core/internal/app/worker/worker.go`) runs
-the `outbox.DrainRunner` to deliver committed rows to subscribers past each
-subscriber's cursor. Subscribers include the `notification.ExposureNotifier`
-and the order module's `HandlePurchaseOrderReceived` for the
-`purchase_order.received` subject. The drain and its retention purge run
-only in the worker, so serve replicas never contend for the cursors.
+The transport is the **transactional outbox** (`core/pkg/outbox`, plus the
+read API at `core/internal/events` serving `GET /api/v1/events`): a mutation
+writes its domain event into the `events_outbox` table inside its own
+transaction (ADR 0003), and the worker role
+(`core/internal/app/worker/worker.go`) runs the `outbox.DrainRunner` to
+deliver committed rows to subscribers past each subscriber's cursor. Both
+subscribers attach through the drain (`drain.Subscribe` in `worker.go`), each
+under its durable name, and handlers receive an `eventbus.Event`:
 
-What the bus does **not** provide, versus a real broker:
+| Subject pattern | Durable name | Handler |
+|---|---|---|
+| `quote.exposure.>` | `exposure-notifier` | `notification.ExposureNotifier` (salesperson and customer email) |
+| `purchase_order.received` | `order-allocation-requests` | `order.Service.HandlePurchaseOrderReceived` |
 
-| Property | In-process bus |
+The price exposure service and scanner write their `quote.exposure.*` events
+as outbox rows (`outbox.Event`, through each one's `EventRecorder`). The drain and its retention purge run only in the worker, so
+serve replicas never contend for the cursors.
+
+What the outbox drain provides:
+
+| Property | Outbox drain |
 |---|---|
-| Durability | None — events live in a bounded in-memory channel and are lost on restart |
-| Cross-process delivery | None — only subscribers inside the same process see an event |
-| Redelivery / ack | None — a handler error is logged and the event dropped (at-most-once) |
-| Backpressure | None — `Publish` never blocks; a full subscriber queue drops |
-| Replay | None — a subscriber registered after a publish never sees it |
+| Durability | Rows are committed with the mutation and survive a restart |
+| Cross-process delivery | Rows written by any serve replica are delivered by the worker |
+| Redelivery | A handler error leaves the cursor before the row and retries it; after `DefaultDrainMaxAttempts` (10) consecutive failures the row is parked in `event_subscriber_parked` and the cursor moves on |
+| Ordering | Each subscriber receives rows in position order |
+| Delivery | At least once: a crash between a handler's success and the cursor advance redelivers the row, so a handler that must not repeat an effect deduplicates on the event id |
 
-Consequences for design: **do not put a write on the bus.** Every durable fact
-in the exposure subsystem lives in Postgres (`quote_exposure_events`,
-`price_escalators.current_state`, the `quotes` rollup columns), and the nightly
-safety-net scan (`quote.ExposureScheduler`) recomputes state from Postgres, so
-a dropped event costs notification latency, not correctness. Do not design
-features that assume eventual consistency between modules.
-
-Swapping in a durable broker (Phase 2+ of the blueprint) is an implementation
-change behind `eventbus.Bus`: producers and consumers only see `Publisher`,
-`Subscriber`, `Handler` and `Event`, and `Subscribe` already carries a
-`durable` consumer name for that purpose.
+Consequences for design: **every inter-module write stays a synchronous Go
+call**, and an event carries a side effect, never the write itself. Every
+durable fact in the exposure subsystem lives in Postgres
+(`quote_exposure_events`, `price_escalators.current_state`, the `quotes`
+rollup columns), and the nightly safety-net scan (`quote.ExposureScheduler`)
+recomputes state from Postgres. Do not design features that assume eventual
+consistency between modules.
 
 ## 5. API Strategy
 - **Style:** RESTful JSON.
