@@ -79,13 +79,13 @@ unknown field is refused.
 | `contact_id` | UUID, nullable | Optional. |
 | `logged_by` | UUID, nullable | Optional. |
 | `activity_date` | timestamp | Optional; defaults to now on create. |
-| `revision` | integer | On update only, 1 or more; a create carrying one is a 400. |
+| `revision` | integer | On update only, 1 or more; a create carrying a non-null one is a 400 (null is treated as absent). |
 
-The customer is named by the path on both routes: a body
-`customer_id` is a 400. A `PUT` replaces `activity_type`,
-`description`, `contact_id` and `logged_by`, so one it leaves out is
-cleared; only `activity_date` keeps its stored value when the body
-leaves it out.
+The customer is named by the path on both routes: a body non-null
+`customer_id` is a 400 (null is treated as absent). A `PUT` replaces
+`activity_type`, `description`, `contact_id` and `logged_by`, so an
+omitted `contact_id` or `logged_by` is cleared; only `activity_date`
+keeps its stored value when the body leaves it out.
 
 ### Money and quantity conventions
 
