@@ -634,12 +634,20 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, req OfflineSyncRe
 	// and the log row names it: hold it to the caller's branch context the
 	// way each replayed create is held, before any item runs and before the
 	// batch is logged, so neither the log nor a replay names another branch's
-	// register for a caller held to one branch.
+	// register for a caller held to one branch. A batch register that does
+	// not resolve is refused the same way (r17 P3-3): a log row under a
+	// register nobody made is never written, and a lookup failure answers an
+	// error rather than skipping the hold.
 	if req.RegisterID != "" {
-		if branch, err := s.repo.GetRegisterBranch(ctx, req.RegisterID); err == nil && branch != nil {
-			if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
-				return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
-			}
+		branch, err := s.repo.GetRegisterBranch(ctx, req.RegisterID)
+		if err != nil {
+			return nil, fmt.Errorf("sync: register branch lookup: %w", err)
+		}
+		if branch == nil {
+			return nil, &UnknownRegisterError{RegisterID: req.RegisterID}
+		}
+		if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
+			return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
 		}
 	}
 

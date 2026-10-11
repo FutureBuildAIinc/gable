@@ -26,6 +26,20 @@ func (e *RegisterBranchRefusedError) Error() string {
 	return fmt.Sprintf("register %s belongs to a different branch than the request", e.RegisterID)
 }
 
+// UnknownRegisterError is the refusal a write answers when the register it
+// names does not exist. It is a typed error so the HTTP layer can answer it
+// 400 instead of the 500 a plain service error maps to; the offline sync
+// refuses a batch whose register does not resolve before any item runs and
+// before the log row, so the log never names a register nobody made (r17
+// P3-3).
+type UnknownRegisterError struct {
+	RegisterID string
+}
+
+func (e *UnknownRegisterError) Error() string {
+	return fmt.Sprintf("register %s does not exist", e.RegisterID)
+}
+
 // Repository handles POS data persistence.
 type Repository interface {
 	CreateTransaction(ctx context.Context, tx *POSTransaction) error

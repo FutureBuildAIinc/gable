@@ -312,7 +312,7 @@ paths:
       tags:
       - pos
       summary: Replay offline transactions
-      description: A missing batch_id or an empty items list answers 400.
+      description: A missing batch_id, an empty items list or a register_id that names no register answers 400.
       parameters:
       - $ref: '#/components/parameters/XBranchId'
       - $ref: '#/components/parameters/IdempotencyKey'

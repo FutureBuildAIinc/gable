@@ -4575,7 +4575,7 @@ export interface paths {
         put?: never;
         /**
          * Replay offline transactions
-         * @description A missing batch_id or an empty items list answers 400.
+         * @description A missing batch_id, an empty items list or a register_id that names no register answers 400.
          */
         post: operations["posSync"];
         delete?: never;

@@ -550,6 +550,13 @@ func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
 			writePosRefusal(w, r, refused.Error(), "register", refused.RegisterID, "reason", "register of another branch")
 			return
 		}
+		// A batch register that does not exist is a bad request, refused
+		// before any item runs and before the batch is logged.
+		var unknown *UnknownRegisterError
+		if errors.As(err, &unknown) {
+			httputil.RespondError(w, r, unknown.Error(), http.StatusBadRequest, err)
+			return
+		}
 		httputil.RespondError(w, r, "offline sync failed", http.StatusInternalServerError, err)
 		return
 	}
