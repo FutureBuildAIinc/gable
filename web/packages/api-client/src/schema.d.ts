@@ -2852,7 +2852,7 @@ export interface paths {
         put?: never;
         /**
          * Write off part or all of an invoice's open amount
-         * @description Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice's revision. Refused with 409 exceeds_open_amount, invoice_not_open (invalid_state_transition) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.
+         * @description Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice's revision. Refused with 409 exceeds_open_amount, invalid_state_transition (the invoice is neither unpaid nor partial) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.
          */
         post: operations["invoiceWriteOff"];
         delete?: never;
