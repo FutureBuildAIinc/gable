@@ -93,7 +93,7 @@ go test -race ./...                                   # needs Postgres
 make -C .. contract                                   # API contract drift gates (the backend and frontend jobs run these)
 
 # ---- Frontend (the `frontend` job) ---------------------------------------
-cd web
+cd ../web
 npm ci
 npm run typecheck
 npm run lint
