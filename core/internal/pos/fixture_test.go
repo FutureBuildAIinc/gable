@@ -110,6 +110,9 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	f.service = pos.NewService(db, pos.NewRepository(db), logger).
 		WithInvoices(invoices).WithAR(acct).WithInventory(stock).WithLedger(glSvc).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db)
+	// the counter guards the AR core's applications as serve wires it (C2-5):
+	// an invoice whose sale's void has standing claims takes no application
+	acct.WithInvoiceApplyGuard(f.service)
 	for _, o := range opts {
 		o(f)
 	}

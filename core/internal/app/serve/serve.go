@@ -671,6 +671,10 @@ func Run() {
 	// integration lands, counter CARD tenders are recorded as
 	// externally-captured (the device settles); posSvc.WithGateway is where
 	// the Clover terminal gateway wires in.
+	// The counter also guards the AR core's applications: while a sale's void
+	// has standing refund claims, the sale's invoice takes no application
+	// (its open cents are the void's interim, C2-5).
+	accountSvc.WithInvoiceApplyGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
 	wall.pos(mux, posHandler)
 

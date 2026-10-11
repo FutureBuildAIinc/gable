@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/gl"
@@ -35,13 +36,14 @@ import (
 
 // Service is the AR core and the reads of the account module.
 type Service struct {
-	db       *database.DB
-	gl       *gl.Service
-	logger   *slog.Logger
-	now      func() time.Time
-	auditLog *audit.Logger
-	events   EventRecorder
-	tx       TxRunner
+	db         *database.DB
+	gl         *gl.Service
+	logger     *slog.Logger
+	now        func() time.Time
+	auditLog   *audit.Logger
+	events     EventRecorder
+	tx         TxRunner
+	applyGuard InvoiceApplyGuard
 }
 
 // NewService builds the AR core. glSvc may be nil in a unit test that posts no
@@ -380,8 +382,29 @@ func (s *Service) setPaymentUnapplied(ctx context.Context, p *paymentRow, newUna
 	return nil
 }
 
-// insertApplication writes one application row.
+// insertApplication writes one application row. Every application path
+// passes here (a receipt's applications, the apply route, a credit memo, a
+// write off, the deposits), so this is the single place another module's
+// hold on the invoice is enforced: while the counter's split void has
+// standing claims, the invoice's open cents are an interim, and an
+// application would leave a live row the void's completion cannot reverse
+// (C2-5, the r14 review's P2-1).
 func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time, actor string, reason *string, glEntry *uuid.UUID) error {
+	if s.applyGuard != nil {
+		claims, err := s.applyGuard.PendingVoidClaimsOfInvoice(ctx, a.InvoiceID)
+		if err != nil {
+			return err
+		}
+		if len(claims) > 0 {
+			ids := make([]string, 0, len(claims))
+			for _, id := range claims {
+				ids = append(ids, id.String())
+			}
+			return conflict("void_claim_pending",
+				fmt.Sprintf("this invoice's sale has a void whose refund claims still stand (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before applying anything to the invoice",
+					strings.Join(ids, ", ")))
+		}
+	}
 	_, err := s.ex(ctx).Exec(ctx, `
 		INSERT INTO ar_applications (id, customer_id, currency, kind, payment_id, credit_memo_id, invoice_id, amount, reason,
 			applied_on, applied_by, act_id, gl_entry_id, created_at)

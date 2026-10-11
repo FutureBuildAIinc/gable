@@ -147,6 +147,17 @@ func (s *Service) WithAR(a ARCore) *Service { s.ar = a; return s }
 // WithInventory wires the stock moves.
 func (s *Service) WithInventory(i CounterInventory) *Service { s.inventory = i; return s }
 
+// PendingVoidClaimsOfInvoice answers the standing void claims of the sale
+// that owns the invoice, so the AR core's application guard can refuse an
+// application to the invoice's interim open cents while the void's outcome
+// is unsettled (C2-5, the r14 review's P2-1): an application would leave a
+// live row the void's completion cannot reverse, stranding the last claim
+// and the drawer. The service satisfies account.InvoiceApplyGuard; serve
+// wires the two.
+func (s *Service) PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid.UUID) ([]uuid.UUID, error) {
+	return s.repo.PendingVoidClaimsOfInvoice(ctx, invoiceID)
+}
+
 func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if s.tx != nil {
 		return s.tx.RunInTx(ctx, fn)

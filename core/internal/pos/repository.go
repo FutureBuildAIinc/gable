@@ -111,6 +111,7 @@ type Repository interface {
 	FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error
 	RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error)
 	SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error)
+	PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid.UUID) ([]uuid.UUID, error)
 	SessionPendingRefundIntentIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error)
 	// PendingRefundIntentIDs lists the ids of the sale's standing claims (the
 	// per tender void resolution reads them to know when every tender is
@@ -1036,6 +1037,31 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 		return false, fmt.Errorf("failed to read the sale's refund intents: %w", err)
 	}
 	return pending, nil
+}
+
+// PendingVoidClaimsOfInvoice lists the standing void claims of the sale that
+// owns the invoice, in creation order: the account core's application guard
+// (C2-5, the r14 review's P2-1) names them when it refuses an application to
+// the invoice's interim open cents.
+func (r *PostgresRepository) PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT i.id FROM pos_refund_intents i
+			JOIN pos_transactions t ON t.id = i.sale_id
+		WHERE t.invoice_id = $1 AND i.act = 'void' AND i.state = 'PENDING'
+		ORDER BY i.created_at, i.id`, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the invoice's void claims: %w", err)
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // SessionPendingRefundIntentIDs lists the ids of the card refund claims of
