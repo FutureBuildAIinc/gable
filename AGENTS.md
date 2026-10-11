@@ -214,23 +214,30 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 
 When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.00 — the cents value `7388` formatted as if it were dollars. Portal pages already get dollars from the API and should format directly. Quote pages get cents and `formatCents()` applies.
 
-### AR balance: read live from invoices; `customers.balance_due` is a secondary record
+### AR balance: derive from documents; `customers.balance_due` is a secondary record
 For **reads / decisions**, derive the customer's AR from documents, never from the
 denormalized `customers.balance_due` column. The portal AR summary, dashboard and reporting
-read `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')` (the canonical
-status set is `invoice.OpenInvoiceStatuses`). The order **credit-limit gate** reads
+read `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')` (each repeats the
+set that `invoice.OpenInvoiceStatuses` names; they do not net partial payments, the gate does).
+The order **credit-limit gate** reads
 `OpenReceivableCents` in the order repository (ADR 0005 section 5.3): the open amounts of the
 customer's open invoices and open credit memos (negative), less its unapplied cash, plus the
-unbilled remainder of its other confirmed, backordered and on hold orders; the order being
-checked adds its own total.
+unbilled remainder of its other confirmed, backordered and on hold orders. At confirm the order
+being checked adds its own total (over the limit parks it `ON_HOLD`); at fulfil it adds its own
+unbilled remainder (total less its non-void invoices) and over the limit answers 409
+`credit_limit`. The gate runs at confirm and fulfil, not at create, and only for a customer
+with a credit limit.
 
 The `balance_due` column **is** written, but only as a secondary subledger figure. The
-`account` package is its single writer: every posting method (`PostInvoice`, `PostCreditMemo`,
-`RecordPayment`, `Apply`, `WriteOff`, and the voids, refunds and reversals) goes through
-`account.Service.subledger`, which updates `balance_due` and inserts a `customer_transactions`
-row. A fulfilment (`order.Service.Fulfil`) creates its invoice through
-`invoice.CreateFulfilmentInvoice`, which posts through `account.Service.PostInvoice`; a payment
-(`payment.Service.Create`) credits it through `account.Service.RecordPayment`. The column can
+`account` package is its single writer: `PostInvoice`, `PostCreditMemo`, `Apply`, `WriteOff`,
+the voids, the credit memo refund and the reversals go through `account.Service.subledger`,
+which updates `balance_due` and inserts a `customer_transactions` row. `RecordPayment` posts
+the receipt (DR 1010 Cash / CR 2200 Customer Deposits) and reaches the subledger only through
+the applications sent with it; cash left unapplied, and a refund of unapplied cash
+(`RefundPayment`), move neither `balance_due` nor `customer_transactions`. A fulfilment
+(`order.Service.Fulfil`) creates its invoice through `invoice.CreateFulfilmentInvoice`, which
+posts through `account.Service.PostInvoice`; a payment (`payment.Service.Create`) reaches
+`RecordPayment` with its applications. The column can
 still drift from the live document figure for historical and seed rows, so don't trust it for
 decisions: derive live.
 
@@ -238,9 +245,10 @@ decisions: derive live.
 > balanced GL entry in the fulfilment's transaction (`account.Service.PostInvoice`, accounts by
 > stable code): DR 1020 Accounts Receivable for the total and DR 5010 Cost of Goods Sold for
 > the cost, against CR the revenue lines, CR 2020 Sales Tax Payable and CR 1030 Inventory for
-> the cost, with the AR subledger debit. POS completion posts `DR 1010 Cash / CR 4010 Sales
-> Revenue` through `gl.SyncCashSale` after commit (best effort). An over-limit order is parked
-> `ON_HOLD` (a valid `orders.status` as of migration 071).
+> the cost, with the AR subledger debit. POS completion posts the cash collected portion as
+> `DR 1010 Cash / CR 4010 Sales Revenue` through `gl.SyncCashSale` after commit (best effort);
+> an on account portion posts as an invoice through the AR core. An over-limit order is parked
+> `ON_HOLD` at confirm (a valid `orders.status` as of migration 071).
 >
 > **Invoice tax rate:** `invoice.CreateInvoice` resolves the rate from the invoice's branch
 > (`locations.default_tax_rate`, e.g. 0.12 in BC) via `repo.GetBranchTaxRate`; the
