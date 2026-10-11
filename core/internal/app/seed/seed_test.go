@@ -234,3 +234,85 @@ func TestPricingRuleUpsert_IsIdempotentAndRepairsValues(t *testing.T) {
 		t.Errorf("discount_pct = %v after re-seeding at 15, want 15 — DO NOTHING would have left the stale value", discount)
 	}
 }
+
+// CORRECTNESS: a re-seed moves the seed's own REG-01 and nothing else
+// (principal item 57 question 3's condition).
+//
+// The upsert conflicts on the id, so it can only ever touch the migration's
+// demo register REG-01; a register created by a person, an import or another
+// seed has another id and must be left exactly as it was. Of REG-01 the seed
+// owns the location and the branch alone: a register's name is an operator's
+// to keep, so a re-seed must not rename it back (r14 P3-2).
+//
+// DB-gated: it is a test of a Postgres upsert, so it needs Postgres, and it
+// runs the seeder's actual statement, twice.
+func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+
+	// A branch location of the test's own for the seed's target.
+	loc := uuid.New()
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'seed test branch')`,
+		loc, "SEEDT-"+loc.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	// A register created outside the seed, on a location and branch of its
+	// own, with its own name.
+	foreign := "REG-SEEDTEST-" + uuid.NewString()[:8]
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
+		 VALUES ($1, $2, $2, 'a person made this counter', false)`, foreign, loc); err != nil {
+		t.Fatal(err)
+	}
+	// REG-01 as an operator renamed it.
+	var origLoc, origBranch *string
+	if err := db.Pool.QueryRow(ctx, `SELECT location_id::text, branch_id::text FROM pos_registers WHERE id = 'REG-01'`).Scan(&origLoc, &origBranch); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, foreign)
+		_, _ = db.Pool.Exec(ctx, `UPDATE pos_registers SET location_id = $2, branch_id = $3, name = 'Counter 1' WHERE id = 'REG-01'`,
+			nil, origLoc, origBranch)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc)
+	})
+	if _, err := db.Pool.Exec(ctx, `UPDATE pos_registers SET name = 'renamed by the operator' WHERE id = 'REG-01'`); err != nil {
+		t.Fatal(err)
+	}
+
+	upsert := func() {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx, posRegisterUpsertSQL, loc.String()); err != nil {
+			t.Fatalf("the seeder's register upsert: %v", err)
+		}
+	}
+	upsert()
+	upsert()
+
+	// The register created outside the seed is exactly as it was.
+	var fLoc, fBranch, fName string
+	var fActive bool
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT location_id::text, branch_id::text, name, is_active FROM pos_registers WHERE id = $1`, foreign).
+		Scan(&fLoc, &fBranch, &fName, &fActive); err != nil {
+		t.Fatal(err)
+	}
+	if fLoc != loc.String() || fBranch != loc.String() || fName != "a person made this counter" || fActive {
+		t.Errorf("a re-seed changed a register it did not create: location %s branch %s name %q active %v", fLoc, fBranch, fName, fActive)
+	}
+
+	// The seed's own row moved onto the seed's location, twice idempotently,
+	// and kept the operator's name.
+	var loc1, branch1, name1 string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT location_id::text, branch_id::text, name FROM pos_registers WHERE id = 'REG-01'`).
+		Scan(&loc1, &branch1, &name1); err != nil {
+		t.Fatal(err)
+	}
+	if loc1 != loc.String() || branch1 != loc.String() {
+		t.Errorf("the seed's own register did not move to the seed's location: location %s branch %s", loc1, branch1)
+	}
+	if name1 != "renamed by the operator" {
+		t.Errorf("a re-seed renamed the register to %q, want the operator's name kept", name1)
+	}
+}

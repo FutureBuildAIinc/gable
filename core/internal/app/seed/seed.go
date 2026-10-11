@@ -1317,9 +1317,7 @@ func Run() {
 	// register branch". Migration 027 seeds REG-01 on a location that does not
 	// exist and migration 066 gives it the migration-time default branch, so
 	// the row is moved to Kelowna, the branch the seed makes the default.
-	db.Exec(`INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
-		VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
-		ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1, name = 'Main Counter - Kelowna'`, kelMainID.String())
+	db.Exec(posRegisterUpsertSQL, kelMainID.String())
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
 		VALUES ('sync-batch-001', 'REG-01', 42, 0, 0, NOW() - interval '2 hours')`)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
@@ -1367,6 +1365,22 @@ const pricingRuleUpsertSQL = `
 		starts_at        = EXCLUDED.starts_at,
 		expires_at       = EXCLUDED.expires_at,
 		updated_at       = NOW()`
+
+// posRegisterUpsertSQL moves the demo register REG-01 onto the location given
+// (Kelowna main, the branch the seed makes the default), as a package level
+// constant for the same reason as pricingRuleUpsertSQL: the behaviour worth
+// testing is what a re-seed leaves behind, and the test has to run the same
+// statement the seeder runs.
+//
+// The conflict is on the id, so the update can only ever touch the seed's own
+// REG-01 row (migration 027's demo register); a register with any other id,
+// created by a person, an import or another seed, is never matched. Of that
+// one row the seed owns the location and the branch alone: the register's
+// name is an operator's to keep (the principal's item 57 condition).
+const posRegisterUpsertSQL = `
+	INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
+	VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
+	ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1`
 
 // pricingRule is one row of the demo pricing_rules table.
 //
