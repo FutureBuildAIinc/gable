@@ -202,3 +202,79 @@ func (f *keyPinFixture) transactionsOn(t *testing.T, register string) int {
 	}
 	return n
 }
+
+// Fix round 7 (r15 P3-2): till open and a return stamped the register's
+// branch whatever the caller's branch context named, so a cashier granted only
+// A, sending X-Branch-Id A, opened a till and recorded a cash return at B.
+// (The register on a branched location half of that predates this PR; the
+// locationless half came with round 6's fallback.) Both now hold the request's
+// branch against the register's the way the sale already does: 403, nothing
+// written, and the caller's own register passes.
+func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	ctx := context.Background()
+	regA := f.r15reg(t, "t3a", uuid.New(), f.branchA)
+	regB := f.r15reg(t, "t3b", uuid.New(), f.branchB)
+	hdr := map[string]string{"X-Branch-Id": f.branchA.String()}
+	sessionsOn := func(reg string) (n int) {
+		if err := f.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM till_sessions WHERE register_id = $1`, reg).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	returnsOn := func(reg string) (n int) {
+		if err := f.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM pos_returns WHERE register_id = $1`, reg).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	t.Cleanup(func() {
+		for _, reg := range []string{regA, regB} {
+			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_return_lines WHERE return_id IN (SELECT id FROM pos_returns WHERE register_id = $1)`, reg)
+			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_returns WHERE register_id = $1`, reg)
+			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM till_sessions WHERE register_id = $1`, reg)
+		}
+	})
+
+	// The till open on another branch's register: 403, no session.
+	status, buf := f.userAs(t, "admin", "POST", "/api/v1/pos/till/open", `{"register_id":"`+regB+`","opening_float":50}`, hdr)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
+		t.Errorf("a user opening a till on another branch's register: %d %s, want the 403 naming the register rule", status, buf)
+	}
+	if n := sessionsOn(regB); n != 0 {
+		t.Errorf("the refused till open wrote %d sessions on the register, want none", n)
+	}
+
+	// The return on another branch's register: 403, no return.
+	retBody := `{"register_id":"` + regB + `","refund_method":"CASH","lines":[{"product_id":"` +
+		f.posProd.String() + `","quantity":1,"unit_price":1}]}`
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/returns", retBody, hdr)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
+		t.Errorf("a user recording a return on another branch's register: %d %s, want the 403 naming the register rule", status, buf)
+	}
+	if n := returnsOn(regB); n != 0 {
+		t.Errorf("the refused return wrote %d returns on the register, want none", n)
+	}
+
+	// The A controls: the caller's own register passes for both.
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/open", `{"register_id":"`+regA+`","opening_float":50}`, hdr)
+	var sess struct {
+		ID       uuid.UUID  `json:"id"`
+		BranchID *uuid.UUID `json:"branch_id"`
+	}
+	_ = json.Unmarshal(buf, &sess)
+	if status != http.StatusCreated || sess.BranchID == nil || *sess.BranchID != f.branchA {
+		t.Errorf("a user opening a till on its own register: %d %s, want 201 at branch A", status, buf)
+	}
+	retBody = `{"register_id":"` + regA + `","refund_method":"CASH","lines":[{"product_id":"` +
+		f.posProd.String() + `","quantity":1,"unit_price":1}]}`
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/returns", retBody, hdr)
+	var ret struct {
+		ID       uuid.UUID  `json:"id"`
+		BranchID *uuid.UUID `json:"branch_id"`
+	}
+	_ = json.Unmarshal(buf, &ret)
+	if status != http.StatusCreated || ret.BranchID == nil || *ret.BranchID != f.branchA {
+		t.Errorf("a user recording a return on its own register: %d %s, want 201 at branch A", status, buf)
+	}
+}

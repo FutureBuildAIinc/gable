@@ -141,6 +141,12 @@ func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
 	}
 	ret, err := h.service.ReturnSale(r.Context(), cashierID, req)
 	if err != nil {
+		// A register of another branch is a refusal, not a bad request.
+		var refused *RegisterBranchRefusedError
+		if errors.As(err, &refused) {
+			writePosRefusal(w, r, refused.Error(), "register", refused.RegisterID, "reason", "register of another branch")
+			return
+		}
 		httputil.RespondError(w, r, err.Error(), http.StatusBadRequest, err)
 		return
 	}
@@ -239,6 +245,12 @@ func (h *Handler) OpenTill(w http.ResponseWriter, r *http.Request) {
 	}
 	session, err := h.service.OpenTill(r.Context(), req.RegisterID, cashierID, int64(req.OpeningFloat*100.0+0.5))
 	if err != nil {
+		// A register of another branch is a refusal, not a conflict.
+		var refused *RegisterBranchRefusedError
+		if errors.As(err, &refused) {
+			writePosRefusal(w, r, refused.Error(), "register", refused.RegisterID, "reason", "register of another branch")
+			return
+		}
 		httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
 		return
 	}

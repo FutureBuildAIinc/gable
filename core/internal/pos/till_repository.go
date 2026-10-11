@@ -41,6 +41,11 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 		if err != nil {
 			return fmt.Errorf("failed to resolve register branch for till: %w", err)
 		}
+		// Hold the caller's branch context against the register's branch the
+		// way the sale does: nothing is written on a mismatch.
+		if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
+			return &RegisterBranchRefusedError{RegisterID: s.RegisterID}
+		}
 		s.BranchID = registerBranch
 	}
 

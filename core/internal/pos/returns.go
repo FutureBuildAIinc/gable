@@ -13,6 +13,7 @@ import (
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
@@ -144,8 +145,14 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, req Retur
 		return nil, fmt.Errorf("return total must be positive")
 	}
 
-	// Resolve the register's branch (for tax and stamping); best-effort.
+	// Resolve the register's branch (for tax and stamping); best-effort. The
+	// caller's branch context is held against it the way the sale does, so a
+	// request for another branch's register is refused before anything is
+	// written.
 	branchID, _ := s.repo.GetRegisterBranch(ctx, req.RegisterID)
+	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && branchID != nil && *reqBranch != *branchID {
+		return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
+	}
 
 	// Tax mirrors the sale path so a full return refunds the tax the sale
 	// charged (same exemption-aware, branch-rate calculation).
