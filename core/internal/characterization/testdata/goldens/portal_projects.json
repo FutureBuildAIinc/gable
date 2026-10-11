@@ -53,7 +53,8 @@
         "customer_id": "<id-2>",
         "id": "<id-4>",
         "name": "Golden Project Two",
-        "status": "Active",
+        "revision": 1,
+        "status": "active",
         "updated_at": "<ts+0d>"
       }
     }
@@ -67,72 +68,84 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-4>",
-          "name": "Golden Project Two",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-5>",
-          "name": "Golden Orders Project",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-6>",
-          "name": "Golden Project",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-7>",
-          "name": "West Kelowna Medical Plaza",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-8>",
-          "name": "Big White Lodge Reno Phase 1",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-9>",
-          "name": "Knox Park Pavilion",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-10>",
-          "name": "Glenmore Lofts",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "created_at": "<ts+0d>",
-          "customer_id": "<id-2>",
-          "id": "<id-11>",
-          "name": "Mission Hill Custom Home",
-          "status": "Active",
-          "updated_at": "<ts+0d>"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-4>",
+            "name": "Golden Project Two",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-5>",
+            "name": "Golden Orders Project",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-6>",
+            "name": "Golden Project",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-7>",
+            "name": "West Kelowna Medical Plaza",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-8>",
+            "name": "Big White Lodge Reno Phase 1",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-9>",
+            "name": "Knox Park Pavilion",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-10>",
+            "name": "Glenmore Lofts",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "created_at": "<ts+0d>",
+            "customer_id": "<id-2>",
+            "id": "<id-11>",
+            "name": "Mission Hill Custom Home",
+            "revision": 1,
+            "status": "active",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -146,15 +159,22 @@
       }
     },
     "response": {
-      "status": 200,
+      "status": 400,
       "content_type": "application/json",
       "body": {
-        "created_at": "<ts+0d>",
-        "customer_id": "<id-2>",
-        "id": "<id-4>",
-        "name": "Golden Project Two Renamed",
-        "status": "Completed",
-        "updated_at": "<ts+0d>"
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be one of: active, completed"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
       }
     }
   },
@@ -172,11 +192,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid project id"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -193,11 +219,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-13>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -206,21 +232,21 @@
     "name": "portal_projects.update.unknown",
     "request": {
       "method": "PUT",
-      "path": "/api/portal/v1/projects/<id-14>",
+      "path": "/api/portal/v1/projects/<id-15>",
       "body": {
         "name": "x"
       }
     },
     "response": {
-      "status": 500,
+      "status": 428,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
         },
         "meta": {
-          "request_id": "<id-15>"
+          "request_id": "<id-16>"
         }
       }
     }

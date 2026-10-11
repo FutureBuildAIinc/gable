@@ -23,6 +23,8 @@ import (
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/chargecode"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/gl"
@@ -38,6 +40,7 @@ import (
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -70,17 +73,20 @@ func asRole(next http.Handler) http.Handler {
 }
 
 type wallFixture struct {
-	srv              *httptest.Server
-	branchA, branchB uuid.UUID
-	yardA, yardB     uuid.UUID
-	productID        uuid.UUID
-	vendorID         uuid.UUID
-	poA, poB         uuid.UUID
-	poLineA, poLineB uuid.UUID
-	docCust          uuid.UUID
-	orderA, orderB   uuid.UUID
-	invA, invB       uuid.UUID
-	db               *database.DB
+	srv                *httptest.Server
+	branchA, branchB   uuid.UUID
+	yardA, yardB       uuid.UUID
+	productID          uuid.UUID
+	vendorID           uuid.UUID
+	poA, poB           uuid.UUID
+	poLineA, poLineB   uuid.UUID
+	docCust            uuid.UUID
+	orderA, orderB     uuid.UUID
+	invA, invB         uuid.UUID
+	memoA, memoB       uuid.UUID
+	crmCustA, crmCustB uuid.UUID
+	actA, actB         uuid.UUID
+	db                 *database.DB
 }
 
 func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixture {
@@ -94,7 +100,8 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	ctx := context.Background()
 	f := &wallFixture{db: db, branchA: uuid.New(), branchB: uuid.New(), yardA: uuid.New(), yardB: uuid.New(), productID: uuid.New(),
 		vendorID: uuid.New(), poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
-		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New()}
+		docCust: uuid.New(), orderA: uuid.New(), orderB: uuid.New(), invA: uuid.New(), invB: uuid.New(), memoA: uuid.New(), memoB: uuid.New(),
+		crmCustA: uuid.New(), crmCustB: uuid.New(), actA: uuid.New(), actB: uuid.New()}
 	for _, r := range []struct {
 		id     uuid.UUID
 		typ    string
@@ -157,13 +164,52 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 			t.Fatalf("seed invoice: %v", err)
 		}
 	}
+	// One posted credit memo per branch, so the credit memo path-id routes act
+	// on real records of each branch; branch A carries a tax rate so a free
+	// credit memo can be created there.
+	if _, err := db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = 0.05 WHERE id = $1`, f.branchA); err != nil {
+		t.Fatalf("branch rate: %v", err)
+	}
+	for _, m := range []struct{ id, inv, branch uuid.UUID }{{f.memoA, f.invA, f.branchA}, {f.memoB, f.invB, f.branchB}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO credit_memos (id, invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number,
+				memo_date, subtotal, tax_amount, total_amount, tax_rate)
+			VALUES ($1, $2, $3, $4, 'USD', 'OTHER', 'wall', 1, 'OPEN', credit_memo_next_number(), CURRENT_DATE, -1, 0, -1, 0)`,
+			m.id, m.inv, f.docCust, m.branch); err != nil {
+			t.Fatalf("seed credit memo: %v", err)
+		}
+	}
 	for _, sub := range []string{"u-a"} {
 		if _, err := db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, f.branchA); err != nil {
 			t.Fatalf("seed grant: %v", err)
 		}
 	}
+	// One customer and one logged activity per branch, so the crm routes act
+	// on real records of each branch.
+	for _, r := range []struct{ cust, act, branch uuid.UUID }{
+		{f.crmCustA, f.actA, f.branchA}, {f.crmCustB, f.actB, f.branchB},
+	} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
+			VALUES ($1, 'wall crm cust', $2, $3)`, r.cust, "WLCRM-"+r.cust.String()[:8], r.branch); err != nil {
+			t.Fatalf("seed crm customer: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, r.cust, r.branch); err != nil {
+			t.Fatalf("seed crm customer branch: %v", err)
+		}
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO crm_activities (id, customer_id, activity_type, description, activity_date)
+			VALUES ($1, $2, 'CALL', 'wall', now())`, r.act, r.cust); err != nil {
+			t.Fatalf("seed activity: %v", err)
+		}
+	}
 	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'activity' AND entity_id IN (SELECT id FROM crm_activities WHERE customer_id IN ($1, $2))`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'activity' AND entity_id IN (SELECT id FROM crm_activities WHERE customer_id IN ($1, $2))`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM crm_activities WHERE customer_id IN ($1, $2)`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2)`, f.crmCustA, f.crmCustB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, f.crmCustA, f.crmCustB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'u-a'`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM credit_memos WHERE customer_id = $1)`, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM credit_memo_lines WHERE credit_memo_id IN (SELECT id FROM credit_memos WHERE customer_id = $1)`, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM credit_memos WHERE customer_id = $1`, f.docCust)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoices WHERE id IN ($1, $2)`, f.invA, f.invB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id IN ($1, $2)`, f.orderA, f.orderB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, f.docCust)
@@ -187,8 +233,14 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.locations(mux, location.NewHandler(location.NewService(location.NewRepository(db)), location.NewUserRepository(db), middleware.RequireRole("admin", "owner")))
 	wall.inventory(mux, invSvc)
 	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
+	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
+	// The crm mount, driven here as serve wires it: the activity routes
+	// behind the branch middleware, their writes one transaction with the
+	// audit row and the activity.* event.
+	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)))
 	// The recommendation service is wired as serve wires it (serve.go), so
 	// the recommendations route answers from the real stock and velocity
 	// reads instead of 503: the route is behind the branch middleware and
@@ -209,11 +261,12 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
 	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
-	accountSvc := account.NewService(account.NewRepository(db), db, slog.Default())
+	accountSvc := account.NewService(db, glSvc, slog.Default())
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
 	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
 	wall.documents(mux, docHandler)
+	wall.invoices(mux, invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).WithOutbox(outbox.NewWriter(db, "")).WithOrders(orderSvc).WithStock(invSvc))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -271,6 +324,14 @@ func (f *wallFixture) call(t *testing.T, method, path, body, role, sub, branchHe
 // response body, for cases that read an id or a revision back.
 func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, branchHeader string) (int, []byte) {
 	t.Helper()
+	status, buf := f.callHdr(t, method, path, body, role, sub, branchHeader, nil)
+	return status, buf
+}
+
+// callHdr sends one request as role/sub with extra request headers, for the
+// routes whose writes carry their revision as If-Match.
+func (f *wallFixture) callHdr(t *testing.T, method, path, body, role, sub, branchHeader string, hdr map[string]string) (int, []byte) {
+	t.Helper()
 	req, err := http.NewRequest(method, f.srv.URL+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -280,6 +341,9 @@ func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, bran
 	req.Header.Set("X-Test-Sub", sub)
 	if branchHeader != "" {
 		req.Header.Set("X-Branch-Id", branchHeader)
+	}
+	for k, v := range hdr {
+		req.Header.Set(k, v)
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -291,6 +355,13 @@ func (f *wallFixture) callBody(t *testing.T, method, path, body, role, sub, bran
 		t.Fatal(err)
 	}
 	return res.StatusCode, buf
+}
+
+// callHdrStatus sends one request as callHdr and returns only the status.
+func (f *wallFixture) callHdrStatus(t *testing.T, method, path, body, role, sub, branchHeader string, hdr map[string]string) int {
+	t.Helper()
+	status, _ := f.callHdr(t, method, path, body, role, sub, branchHeader, hdr)
+	return status
 }
 
 func TestBranchWall_ServeWiring(t *testing.T) {
@@ -621,6 +692,62 @@ func TestBranchWall_PathIDRecords(t *testing.T) {
 	}
 }
 
+// The crm mount behind the real branch middleware: every route addresses a
+// customer by path or an activity of one, and the repository holds each read
+// and write to the customer's branches, so a caller held to branch A works its
+// own branch's records and finds branch B's activity a 404 on the reads and
+// the writes, its create on branch B's customer a 404, and that customer's
+// list an empty page.
+func TestBranchWall_CrmRoutes(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	match := map[string]string{"If-Match": `"1"`}
+
+	// The caller's own branch: every route answers.
+	if got := f.call(t, "GET", "/api/v1/activities/"+f.actA.String(), "", "sales", "u-a", A); got != http.StatusOK {
+		t.Errorf("own activity read: %d, want 200", got)
+	}
+	if got := f.callHdrStatus(t, "PUT", "/api/v1/activities/"+f.actA.String(),
+		`{"activity_type":"note","description":"own"}`, "sales", "u-a", A, match); got != http.StatusOK {
+		t.Errorf("own activity update: %d, want 200", got)
+	}
+	if got := f.callHdrStatus(t, "DELETE", "/api/v1/activities/"+f.actA.String(), "", "sales", "u-a", A,
+		map[string]string{"If-Match": `"2"`}); got != http.StatusNoContent {
+		t.Errorf("own activity delete: %d, want 204", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/customers/"+f.crmCustA.String()+"/activities",
+		`{"activity_type":"call","description":"own branch"}`, "sales", "u-a", A); got != http.StatusCreated {
+		t.Errorf("create on the caller's customer: %d, want 201", got)
+	}
+
+	// The second branch: the path-id routes are 404s, the create on the
+	// invisible customer is a 404, and its list is an empty page.
+	for _, c := range []struct {
+		name, method, path, body string
+		hdr                      map[string]string
+		want                     int
+	}{
+		{"read foreign activity", "GET", "/api/v1/activities/" + f.actB.String(), "", nil, http.StatusNotFound},
+		{"update foreign activity", "PUT", "/api/v1/activities/" + f.actB.String(),
+			`{"activity_type":"note","description":"no"}`, match, http.StatusNotFound},
+		{"delete foreign activity", "DELETE", "/api/v1/activities/" + f.actB.String(), "", match, http.StatusNotFound},
+	} {
+		if got := f.callHdrStatus(t, c.method, c.path, c.body, "sales", "u-a", A, c.hdr); got != c.want {
+			t.Errorf("crm %s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	if got := f.call(t, "POST", "/api/v1/customers/"+f.crmCustB.String()+"/activities",
+		`{"activity_type":"call","description":"no"}`, "sales", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("crm create on the foreign customer: %d, want 404", got)
+	}
+	status, body := f.callBody(t, "GET", "/api/v1/customers/"+f.crmCustB.String()+"/activities", "", "sales", "u-a", A)
+	if status != http.StatusOK || !strings.Contains(string(body), `"items":[]`) {
+		t.Errorf("crm list of the foreign customer = %d %s, want 200 with an empty page", status, body)
+	}
+}
+
 // The document print and email routes run behind the branch middleware, so
 // the branch filters the invoice and order repositories already carry apply
 // to every caller, and the handler holds the record's own branch to the wall
@@ -823,6 +950,10 @@ type invLevelPage struct {
 	} `json:"items"`
 	NextCursor *string `json:"next_cursor"`
 	Limit      int     `json:"limit"`
+	// Total answers include=total (the page and the count carry the same
+	// three arm predicate as the row page itself; the wall test asserts it
+	// agrees with what the page's rows would give).
+	Total *int `json:"total,omitempty"`
 }
 
 // The inventory levels list is the contract's envelope (ADR 0006 7.2) and is
@@ -878,6 +1009,26 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 		return page
 	}
+	// listTotal is the same call with include=total; the count must hold the
+	// same three arm predicate as the row page, so the answer agrees with the
+	// page's row count for every caller.
+	listTotal := func(role, sub, header string) (invLevelPage, int) {
+		t.Helper()
+		status, body := f.callBody(t, "GET",
+			"/api/v1/inventory?product_id="+f.productID.String()+"&include=total",
+			"", role, sub, header)
+		if status != http.StatusOK {
+			t.Fatalf("inventory list+total as %s/%s: %d %s", role, sub, status, body)
+		}
+		var page invLevelPage
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatalf("inventory list+total body is not the envelope: %v\n%s", err, body)
+		}
+		if page.Total == nil {
+			t.Fatalf("inventory list+total as %s/%s: total missing: %s", role, sub, body)
+		}
+		return page, *page.Total
+	}
 	rowAt := func(page invLevelPage, yard string) bool {
 		for _, it := range page.Items {
 			if it.LocationID != nil && *it.LocationID == yard {
@@ -901,9 +1052,9 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 
 	for _, c := range []struct {
 		name, role, sub, header string
-		wantRows                 int
-		wantA, wantB             bool
-		wantLegacy               bool
+		wantRows                int
+		wantA, wantB            bool
+		wantLegacy              bool
 	}{
 		{"warehouse, header A", "warehouse", "u-a", A, 1, true, false, false},
 		{"warehouse, no header", "warehouse", "u-a", "", 1, true, false, false},
@@ -922,6 +1073,14 @@ func TestBranchWall_InventoryListGrants(t *testing.T) {
 		}
 		if got := legacyIn(page); got != c.wantLegacy {
 			t.Errorf("inventory list, %s: legacy row present = %v, want %v", c.name, got, c.wantLegacy)
+		}
+		// include=total must hold the same three arm predicate as the row
+		// page: the count agrees with the page's row count for every caller.
+		// A drift in either side (the page starts matching the wrong rows,
+		// the count stops filtering) shows up as a mismatch.
+		_, total := listTotal(c.role, c.sub, c.header)
+		if total != c.wantRows {
+			t.Errorf("inventory count, %s: total = %d, want %d (the page's row count, the count and the page share the wall)", c.name, total, c.wantRows)
 		}
 	}
 }
@@ -1355,5 +1514,124 @@ func TestBranchWall_CatalogReads(t *testing.T) {
 	// A branch route refuses a path id that is not a branch.
 	if got := f.call(t, "PUT", "/api/v1/branches/"+f.yardA.String(), `{"code":"x","revision":1}`, "admin", "boss", ""); got != http.StatusNotFound {
 		t.Errorf("branch update of a yard: %d, want 404", got)
+	}
+}
+
+// The charge code master through serve's wiring: every pricing role reads it,
+// and a write takes the narrower guard, so a sales user cannot create or edit
+// a code (and with it the revenue account a charge line posts to).
+func TestBranchWall_ChargeCodeWritesTakeTheFinanceGuard(t *testing.T) {
+	testutil.LockOutboxTables(t) // the fixture's route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	const missing = "/api/v1/charge-codes/00000000-0000-0000-0000-000000000001"
+	for _, role := range []string{"admin", "owner", "sales", "finance"} {
+		if got := f.call(t, "GET", "/api/v1/charge-codes", "", role, "u-a", ""); got != http.StatusOK {
+			t.Errorf("%s lists charge codes: %d, want 200", role, got)
+		}
+	}
+	// warehouse prices inventory but never writes or reads charge codes, so
+	// the read guard refuses it as surely as the write guard does.
+	if got := f.call(t, "GET", "/api/v1/charge-codes", "", "warehouse", "u-a", ""); got != http.StatusForbidden {
+		t.Errorf("warehouse lists charge codes: %d, want 403", got)
+	}
+	for _, c := range []struct{ method, path string }{{"POST", "/api/v1/charge-codes"}, {"PUT", missing}} {
+		if got := f.call(t, c.method, c.path, `{}`, "sales", "u-a", ""); got != http.StatusForbidden {
+			t.Errorf("sales %s %s: %d, want 403", c.method, c.path, got)
+		}
+		if got := f.call(t, c.method, c.path, `{}`, "warehouse", "u-a", ""); got != http.StatusForbidden {
+			t.Errorf("warehouse %s %s: %d, want 403", c.method, c.path, got)
+		}
+		// Past the guard an empty body is refused by the handler, not the role.
+		if got := f.call(t, c.method, c.path, `{}`, "finance", "u-a", ""); got == http.StatusForbidden {
+			t.Errorf("finance %s %s: 403, want the guard to admit finance", c.method, c.path)
+		}
+	}
+}
+
+// The invoice and credit memo routes through serve's wiring: every read is held
+// to the caller's wall (a context branch, else the caller's grants, else every
+// branch for an administrator), a record outside it is a 404 on every route
+// that names it, the list covers the caller's branches only, and a branch a
+// credit memo create names is held to the payload branch rule (403 naming
+// branch_id).
+func TestBranchWall_InvoiceAndCreditMemoRoutes(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A, B := f.branchA.String(), f.branchB.String()
+
+	const ok = http.StatusOK
+	const no = http.StatusForbidden
+	const gone = http.StatusNotFound
+	free := func(branch string) string {
+		b := ""
+		if branch != "" {
+			b = fmt.Sprintf(`"branch_id":%q,`, branch)
+		}
+		return fmt.Sprintf(`{%s"customer_id":%q,"reason_code":"price_adjustment","reason":"wall","lines":[{"line_type":"charge","charge_code":"ADJUST","quantity":"-1","unit_price_ten_thousandths":1000}]}`, b, f.docCust)
+	}
+	for _, c := range []struct {
+		name, method, path, body, role, sub, header string
+		want                                        int
+	}{
+		// reads of a record by id
+		{"get own invoice", "GET", "/api/v1/invoices/" + f.invA.String(), "", "sales", "u-a", A, ok},
+		{"get foreign invoice, header A", "GET", "/api/v1/invoices/" + f.invB.String(), "", "sales", "u-a", A, gone},
+		{"get foreign invoice, no header", "GET", "/api/v1/invoices/" + f.invB.String(), "", "sales", "u-a", "", gone},
+		{"get own invoice, no header", "GET", "/api/v1/invoices/" + f.invA.String(), "", "sales", "u-a", "", ok},
+		{"get foreign invoice, admin", "GET", "/api/v1/invoices/" + f.invB.String(), "", "admin", "boss", "", ok},
+		{"get own credit memo", "GET", "/api/v1/credit-memos/" + f.memoA.String(), "", "finance", "u-a", A, ok},
+		{"get foreign credit memo, header A", "GET", "/api/v1/credit-memos/" + f.memoB.String(), "", "finance", "u-a", A, gone},
+		{"get foreign credit memo, no header", "GET", "/api/v1/credit-memos/" + f.memoB.String(), "", "finance", "u-a", "", gone},
+		{"get foreign credit memo, admin", "GET", "/api/v1/credit-memos/" + f.memoB.String(), "", "admin", "boss", "", ok},
+		// writes that address a record by path id
+		{"void foreign invoice, no header", "POST", "/api/v1/invoices/" + f.invB.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", "", gone},
+		{"void foreign invoice, header A", "POST", "/api/v1/invoices/" + f.invB.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", A, gone},
+		{"void own invoice with a credit memo, header A", "POST", "/api/v1/invoices/" + f.invA.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", A, http.StatusConflict},
+		{"post foreign credit memo, no header", "POST", "/api/v1/credit-memos/" + f.memoB.String() + "/transitions", `{"to":"open","revision":1}`, "finance", "u-a", "", gone},
+		{"void foreign credit memo, header A", "POST", "/api/v1/credit-memos/" + f.memoB.String() + "/transitions", `{"to":"void","revision":1,"reason":"x"}`, "finance", "u-a", A, gone},
+		{"edit foreign credit memo, no header", "PUT", "/api/v1/credit-memos/" + f.memoB.String(), strings.Replace(free(""), "{", `{"revision":1,`, 1), "sales", "u-a", "", gone},
+		// the payload branch rule on the create
+		{"create naming a foreign branch, header A", "POST", "/api/v1/credit-memos", free(B), "sales", "u-a", A, no},
+		{"create naming a foreign branch, no header", "POST", "/api/v1/credit-memos", free(B), "sales", "u-a", "", no},
+		{"create naming its own branch", "POST", "/api/v1/credit-memos", free(A), "sales", "u-a", A, http.StatusCreated},
+		{"create naming its own branch, no header", "POST", "/api/v1/credit-memos", free(A), "sales", "u-a", "", http.StatusCreated},
+		{"create naming a foreign branch, admin", "POST", "/api/v1/credit-memos", free(B), "admin", "boss", "", http.StatusConflict}, // branch B has no tax rate: a refusal, not the wall
+		{"create against a foreign invoice, header A", "POST", "/api/v1/credit-memos", fmt.Sprintf(`{"invoice_id":%q,"reason_code":"return","reason":"x","lines":[{"line_type":"charge","charge_code":"ADJUST","quantity":"-1","unit_price_ten_thousandths":1000}]}`, f.invB), "sales", "u-a", A, http.StatusBadRequest},
+		// a role the module does not serve
+		{"warehouse reads an invoice", "GET", "/api/v1/invoices/" + f.invA.String(), "", "warehouse", "u-a", A, no},
+	} {
+		if got := f.call(t, c.method, c.path, c.body, c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+
+	// the lists cover the caller's branches only
+	for _, c := range []struct {
+		name, path, role, sub, header string
+		wantA, wantB                  bool
+		idA, idB                      string
+	}{
+		{"invoices, header A", "/api/v1/invoices?limit=200", "sales", "u-a", A, true, false, f.invA.String(), f.invB.String()},
+		{"invoices, no header", "/api/v1/invoices?limit=200", "sales", "u-a", "", true, false, f.invA.String(), f.invB.String()},
+		{"invoices, a user with no grants", "/api/v1/invoices?limit=200", "sales", "u-none", "", false, false, f.invA.String(), f.invB.String()},
+		{"invoices, admin", "/api/v1/invoices?limit=200&customer_id=" + f.docCust.String(), "admin", "boss", "", true, true, f.invA.String(), f.invB.String()},
+		{"credit memos, header A", "/api/v1/credit-memos?limit=200", "finance", "u-a", A, true, false, f.memoA.String(), f.memoB.String()},
+		{"credit memos, no header", "/api/v1/credit-memos?limit=200", "finance", "u-a", "", true, false, f.memoA.String(), f.memoB.String()},
+		{"credit memos, a user with no grants", "/api/v1/credit-memos?limit=200", "finance", "u-none", "", false, false, f.memoA.String(), f.memoB.String()},
+		{"credit memos, admin", "/api/v1/credit-memos?limit=200&customer_id=" + f.docCust.String(), "admin", "boss", "", true, true, f.memoA.String(), f.memoB.String()},
+	} {
+		status, body := f.callBody(t, "GET", c.path, "", c.role, c.sub, c.header)
+		if status != http.StatusOK {
+			t.Errorf("%s: %d, want 200", c.name, status)
+			continue
+		}
+		if got := strings.Contains(string(body), c.idA); got != c.wantA {
+			t.Errorf("%s: branch A's record present = %v, want %v", c.name, got, c.wantA)
+		}
+		if got := strings.Contains(string(body), c.idB); got != c.wantB {
+			t.Errorf("%s: branch B's record present = %v, want %v", c.name, got, c.wantB)
+		}
 	}
 }

@@ -23,7 +23,7 @@ Give this once, at the start, tailored to what they care about.
 
 ```
 gable/
-  core/          Go 1.25 — one binary, ~41 domain modules (the "modular monolith")
+  core/          Go 1.26 — one binary, ~41 domain modules (the "modular monolith")
     cmd/core/       the one binary: `core serve` (wires every module
                     repo→service→handler→routes), `core worker` (background
                     jobs), `core migrate` (applies core/migrations/*.sql in

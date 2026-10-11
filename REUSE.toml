@@ -43,6 +43,19 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
 SPDX-License-Identifier = "LicenseRef-OpenLBM-Surface-1.0"
 
+# Generated JSON under core/api (links.json from the links table,
+# link-paths.json's shared vectors): JSON carries no comment header, so the
+# annotation stands in for it, the Commons license the directory's row in
+# LICENSE-MAP.md gives.
+[[annotations]]
+path = [
+  "core/api/links.json",
+  "core/api/link-paths.json",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 FutureBuild, Inc. and OpenLBM contributors"
+SPDX-License-Identifier = "LicenseRef-OpenLBM-Commons-1.0"
+
 # Shared web packages (auth, design-system, later api-client): Surface
 # licensed, same as the apps that consume them. The desk's shared tokens,
 # components and auth code were MOVED here (identifier for identifier).

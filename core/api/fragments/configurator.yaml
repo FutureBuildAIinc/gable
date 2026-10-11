@@ -1,20 +1,25 @@
 # SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 # SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 #
-# The product configurator, transcribed from internal/configurator as it
-# behaves today. It registers under the millwork app, so every route is also
-# gated by that app (404 app_disabled when it is off) and by the admin, owner
-# or sales guard. Quirks the transcription preserves: a preset's config is a
-# Go byte slice and serializes as a base64 string, not as a JSON object;
-# build-sku answers 400 for any service failure, a rule conflict or a
-# database fault alike; validate answers 200 with valid false for a conflict.
+# The product configurator on the wire contract of ADR 0001 (item C5-1b):
+# the one error envelope and the strict query posture on every route. The
+# rule matrix and the presets are seeded master data, so their lists are the
+# plain master array of the charge codes precedent (no cursor, no keyset) and
+# the module owns no write, no audit row and no event. A preset's config is
+# the JSON the dealer stored, not a base64 string. Every route registers
+# under the millwork app (404 app_disabled when it is off) and the admin,
+# owner or sales guard.
 paths:
   /api/v1/configurator/rules:
     get:
       operationId: configuratorListRules
       tags: [configurator]
       summary: List every configurator rule
-      description: Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+      description: >-
+        The whole rule matrix, the charge codes master shape: ordered by
+        dependency type and value, then attribute type and value, never null.
+        A query parameter the route does not declare is a 400
+        unsupported_query_parameter.
       responses:
         "200":
           description: The full rule set.
@@ -24,27 +29,39 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ConfiguratorRule"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/InternalErrorEither" }
   /api/v1/configurator/options:
     get:
       operationId: configuratorListOptions
       tags: [configurator]
       summary: List the allowed values of one attribute
       description: >-
-        Admin, owner or sales. Every query parameter other than attribute_type
-        is read as a current selection (attribute type to chosen value, first
-        value wins), for example attribute_type=Grade&Species=SYP. With no
-        selections, or when no rule matches them, the static defaults for the
-        attribute are answered (an empty array for an unknown attribute).
-        Otherwise the order of the options is unspecified.
+        The values the attribute may take under the current selections,
+        deterministically ordered by value. attribute_type is required; the
+        selections ride as one parameter, a comma separated list of
+        Type=Value pairs (selections=Species=SYP,Treatment=None), so the
+        route declares exactly the two names it reads (the base consumed
+        every unknown query name as a selection and never said so). With no
+        selections, or when no rule matches them, the static defaults for
+        the attribute answer (an empty array for an unknown attribute). A
+        parameter the route does not declare, a missing attribute_type or a
+        malformed selections value is a 400.
       parameters:
         - name: attribute_type
           in: query
           required: true
           description: The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType.
+          schema:
+            type: string
+        - name: selections
+          in: query
+          required: false
+          description: The current selections as Type=Value pairs, comma separated.
           schema:
             type: string
       responses:
@@ -56,17 +73,21 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ConfiguratorAvailableOption"
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/InternalErrorEither" }
   /api/v1/configurator/presets:
     get:
       operationId: configuratorListPresets
       tags: [configurator]
       summary: List the active presets
-      description: Admin, owner or sales. Active presets only, ordered by name. Never null.
+      description: >-
+        Active presets ordered by name, never null. product_type filters
+        (the filter filters); a parameter the route does not declare is a
+        400 unsupported_query_parameter.
       parameters:
         - name: product_type
           in: query
@@ -83,19 +104,23 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ConfiguratorPreset"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/InternalErrorEither" }
   /api/v1/configurator/validate:
     post:
       operationId: configuratorValidate
       tags: [configurator]
       summary: Validate a set of selections against the rules
       description: >-
-        Admin, owner or sales. The body is capped at 64 KiB; an oversized or
-        malformed body is a 400, as is an empty selections map. A rule conflict
-        is a 200 with valid false and the conflicts listed.
+        The body is capped at 64 KiB; an oversized or malformed body, or an
+        empty selections map, is a 400 naming the field. A rule conflict is
+        a 200 with valid false and the conflicts listed (conflicts is always
+        an array, never omitted). The verdict is deterministic: the same
+        selections always answer the same conflicts in the same order.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -115,22 +140,22 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
-        "500": { $ref: "#/components/responses/InternalError" }
+        "500": { $ref: "#/components/responses/InternalErrorEither" }
   /api/v1/configurator/build-sku:
     post:
       operationId: configuratorBuildSku
       tags: [configurator]
       summary: Build a non stock SKU from selections
       description: >-
-        Admin, owner or sales. The body is capped at 64 KiB. Product type and
-        selections are both required. The selections are validated first; a
-        conflict, and any other service failure including a database fault,
-        answers 400 (never 500). The SKU is NS, the product type code, then
-        the Species, Grade, Treatment and Dimensions selections upper cased
-        with spaces as hyphens; the keys other than those four are ignored.
+        The body is capped at 64 KiB. Product type and selections are both
+        required. The selections are validated first; a conflict is a 400
+        validation_failed whose details carry one config_conflict blocker per
+        violated rule (the base answered one fixed message and never said
+        which rules). The SKU is NS, the product type code, then the
+        Species, Grade, Treatment and Dimensions selections upper cased with
+        spaces as hyphens; the keys other than those four are ignored.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -150,17 +175,17 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/AppDisabled" }
-        "409": { $ref: "#/components/responses/ConflictEither" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
+        "500": { $ref: "#/components/responses/InternalErrorEither" }
 components:
   schemas:
     ConfiguratorRule:
       type: object
-      required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, created_at, updated_at]
+      required: [id, attribute_type, attribute_value, depends_on_type, depends_on_value, is_allowed, error_message, created_at, updated_at]
       description: >-
-        Go type configurator.ConfiguratorRule. error_message is a pointer with
-        omitempty, so it is absent when the database value is null.
+        One dependency rule. error_message is present as null when the
+        database value is null, never omitted (ADR 0001 section 12).
       properties:
         id:
           type: string
@@ -176,7 +201,7 @@ components:
         is_allowed:
           type: boolean
         error_message:
-          type: string
+          type: [string, "null"]
         created_at:
           type: string
           format: date-time
@@ -185,11 +210,11 @@ components:
           format: date-time
     ConfiguratorPreset:
       type: object
-      required: [id, name, product_type, config, is_active, created_at, updated_at]
+      required: [id, name, description, product_type, config, is_active, created_at, updated_at]
       description: >-
-        Go type configurator.ConfiguratorPreset. config is a Go byte slice, so
-        it serializes as a base64 string of the stored JSON text, not as a JSON
-        object. description is a pointer with omitempty, absent when null.
+        One preset. config is the JSON the dealer stored, carried as JSON (it
+        serialized as a base64 string before the conversion); description is
+        present as null when the database value is null.
       properties:
         id:
           type: string
@@ -197,13 +222,11 @@ components:
         name:
           type: string
         description:
-          type: string
+          type: [string, "null"]
         product_type:
           type: string
         config:
-          type: [string, "null"]
-          contentEncoding: base64
-          contentMediaType: application/json
+          description: The preset's attribute selections, as stored.
         is_active:
           type: boolean
         created_at:
@@ -214,20 +237,20 @@ components:
           format: date-time
     ConfiguratorAvailableOption:
       type: object
-      required: [value, allowed]
-      description: Go type configurator.AvailableOption. message is omitted when empty.
+      required: [value, allowed, message]
+      description: One value with its verdict; message is present as null when no rule explained a refusal.
       properties:
         value:
           type: string
         allowed:
           type: boolean
         message:
-          type: string
+          type: [string, "null"]
           description: Why the value is disallowed.
     ConfiguratorValidateRequest:
       type: object
       required: [selections]
-      description: Go type configurator.ValidateConfigRequest. An empty map is a 400.
+      description: An empty map is a 400 naming selections.
       properties:
         selections:
           type: object
@@ -237,7 +260,6 @@ components:
     ConfiguratorValidationConflict:
       type: object
       required: [attribute_type, attribute_value, depends_on_type, depends_on_value, message]
-      description: Go type configurator.ValidationConflict.
       properties:
         attribute_type:
           type: string
@@ -251,8 +273,8 @@ components:
           type: string
     ConfiguratorValidateResponse:
       type: object
-      required: [valid]
-      description: Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none.
+      required: [valid, conflicts]
+      description: conflicts is always an array, empty when the selections are valid.
       properties:
         valid:
           type: boolean
@@ -263,7 +285,7 @@ components:
     ConfiguratorBuildSKURequest:
       type: object
       required: [product_type, selections]
-      description: Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400.
+      description: An empty product type or an empty selections map is a 400 naming the field.
       properties:
         product_type:
           type: string
@@ -275,7 +297,6 @@ components:
     ConfiguratorBuildSKUResponse:
       type: object
       required: [sku, description]
-      description: Go type configurator.BuildSKUResponse.
       properties:
         sku:
           type: string

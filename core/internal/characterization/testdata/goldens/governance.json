@@ -15,11 +15,13 @@
       "content_type": "application/json",
       "body": {
         "author_id": null,
-        "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\n\n\n### 2. Proposed Solution\n\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
+        "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\ncharacterisation\n\n### 2. Proposed Solution\nnone\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
         "created_at": "<ts+0d>",
         "id": "<id-1>",
-        "problem_statement": "",
-        "proposed_solution": "",
+        "number": "RFC-000008",
+        "problem_statement": "characterisation",
+        "proposed_solution": "none",
+        "revision": 1,
         "status": "draft",
         "title": "Golden RFC",
         "updated_at": "<ts+0d>"
@@ -37,14 +39,402 @@
       "content_type": "application/json",
       "body": {
         "author_id": null,
-        "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\n\n\n### 2. Proposed Solution\n\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
+        "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\ncharacterisation\n\n### 2. Proposed Solution\nnone\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
         "created_at": "<ts+0d>",
         "id": "<id-1>",
-        "problem_statement": "",
-        "proposed_solution": "",
+        "number": "RFC-000008",
+        "problem_statement": "characterisation",
+        "proposed_solution": "none",
+        "revision": 1,
         "status": "draft",
         "title": "Golden RFC",
         "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.create.missing_fields",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/governance/rfcs",
+      "body": {
+        "problem_statement": "",
+        "proposed_solution": "",
+        "title": ""
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "title",
+              "message": "is required"
+            },
+            {
+              "field": "problem_statement",
+              "message": "is required"
+            },
+            {
+              "field": "proposed_solution",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.create.carries_status",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/governance/rfcs",
+      "body": {
+        "problem_statement": "p",
+        "proposed_solution": "s",
+        "status": "review",
+        "title": "T"
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "is not accepted on a create"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/governance/rfcs?status=draft&limit=5"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "author_id": null,
+            "created_at": "<ts+0d>",
+            "id": "<id-1>",
+            "number": "RFC-000008",
+            "revision": 1,
+            "status": "draft",
+            "title": "Golden RFC",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "author_id": "<id-4>",
+            "created_at": "<ts+0d>",
+            "id": "<id-5>",
+            "number": "RFC-000006",
+            "revision": 1,
+            "status": "draft",
+            "title": "Returns Restocking Fee Policy",
+            "updated_at": "<ts+0d>"
+          },
+          {
+            "author_id": "<id-4>",
+            "created_at": "<ts+0d>",
+            "id": "<id-6>",
+            "number": "RFC-000001",
+            "revision": 1,
+            "status": "draft",
+            "title": "Standardize SKU Format",
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 5,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.list.uppercase_status",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/governance/rfcs?status=DRAFT"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "status",
+              "message": "must be a comma separated list of: draft, review, approved, rejected"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-7>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.list.unknown_parameter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/governance/rfcs?author=none"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "unsupported_query_parameter",
+          "details": [
+            {
+              "field": "author",
+              "message": "unsupported query parameter"
+            }
+          ],
+          "message": "one or more query parameters are not supported by this route"
+        },
+        "meta": {
+          "request_id": "<id-8>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update.missing_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-1>",
+      "body": {
+        "title": "Golden RFC v2"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-9>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update.stale_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-1>",
+      "body": {
+        "revision": 9,
+        "title": "Golden RFC v2"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-1>",
+      "body": {
+        "revision": 1,
+        "title": "Golden RFC v2"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "author_id": null,
+        "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\ncharacterisation\n\n### 2. Proposed Solution\nnone\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "number": "RFC-000008",
+        "problem_statement": "characterisation",
+        "proposed_solution": "none",
+        "revision": 2,
+        "status": "draft",
+        "title": "Golden RFC v2",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.update.carries_status",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/governance/rfcs/<id-1>",
+      "body": {
+        "revision": 2,
+        "title": "T"
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "author_id": null,
+        "content": "# RFC: Golden RFC\n\n## Status: Draft\n## Author: *Fill in — this draft was expanded from a template, not written by a model*\n\n### 1. Problem Statement\ncharacterisation\n\n### 2. Proposed Solution\nnone\n\n### 3. Technical Implementation\n*To be filled by Engineering*\n\n### 4. Drawbacks & Alternatives\n*To be filled by Engineering*\n",
+        "created_at": "<ts+0d>",
+        "id": "<id-1>",
+        "number": "RFC-000008",
+        "problem_statement": "characterisation",
+        "proposed_solution": "none",
+        "revision": 3,
+        "status": "draft",
+        "title": "T",
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.transition.refused",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/governance/rfcs/<id-1>/transitions",
+      "body": {
+        "revision": 2,
+        "to": "approved"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-11>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.transition",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/governance/rfcs/<id-1>/transitions",
+      "body": {
+        "revision": 2,
+        "to": "review"
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "governance.rfc.events",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/events?types=rfc.created,rfc.updated,rfc.review&limit=50"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "number": "RFC-000008",
+              "revision": 1,
+              "status": "draft"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "rfc"
+            },
+            "event_id": "<id-13>",
+            "org": "default",
+            "type": "rfc.created"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "number": "RFC-000008",
+              "revision": 2,
+              "status": "draft"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "rfc"
+            },
+            "event_id": "<id-14>",
+            "org": "default",
+            "type": "rfc.updated"
+          },
+          {
+            "at": "<ts+0d>",
+            "branch_id": null,
+            "data": {
+              "number": "RFC-000008",
+              "revision": 3,
+              "status": "draft"
+            },
+            "entity": {
+              "id": "<id-1>",
+              "kind": "rfc"
+            },
+            "event_id": "<id-15>",
+            "org": "default",
+            "type": "rfc.updated"
+          }
+        ],
+        "limit": 50,
+        "next_cursor": "<cursor>"
       }
     }
   }

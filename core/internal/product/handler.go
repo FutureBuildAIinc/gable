@@ -44,6 +44,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// Kit components (ADR 0005 2.6), on the contract from birth.
 	mux.HandleFunc("GET /api/v1/products/{id}/kit-components", guard(h.HandleGetKitComponents))
 	mux.HandleFunc("PUT /api/v1/products/{id}/kit-components", guard(h.HandlePutKitComponents))
+	// The unit set (ADR 0006 sections 3.1 to 3.3, item C3-2A-units).
+	mux.HandleFunc("GET /api/v1/products/{id}/units", guard(h.HandleGetUnitSet))
+	mux.HandleFunc("PUT /api/v1/products/{id}/units", guard(h.HandlePutUnitSet))
 }
 
 // productsOrdering is the list's ordering scope: created_at DESC, id DESC,
@@ -81,7 +84,7 @@ func (h *Handler) HandleGetProduct(w http.ResponseWriter, r *http.Request) {
 		writeProductError(w, r, bad)
 		return
 	}
-	p, err := h.service.GetProduct(r.Context(), id)
+	p, err := h.service.GetProductDetail(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			writeProductError(w, r, httpx.NotFound("no such product"))
@@ -106,10 +109,25 @@ func (h *Handler) HandleCreateProduct(w http.ResponseWriter, r *http.Request) {
 		writeProductError(w, r, err)
 		return
 	}
+	// The read-back serves the set the row triggers wrote beside the insert
+	// (migration 099): the create's answer is the same shape as the read's.
+	if stored, err := h.service.GetProductDetail(r.Context(), p.ID); err == nil {
+		p = stored
+	} else {
+		p.Units = defaultUnitSet(p)
+	}
 	view := ViewOf(p)
 	w.Header().Set("Location", "/api/v1/products/"+view.ID.String())
 	httpx.WriteRevisionETag(w, view.Revision)
 	writeJSON(w, http.StatusCreated, view)
+}
+
+// defaultUnitSet is the set a fresh product carries when the read-back
+// cannot run: its stocking row, (1, 1), every use allowed.
+func defaultUnitSet(p *Product) []UnitSetRowView {
+	one := httpx.Quantity(10_000)
+	return []UnitSetRowView{{UOM: string(p.UOMPrimary), UnitQty: one, StockQty: one,
+		Sell: true, Purchase: true, Price: true}}
 }
 
 // HandleReorderAlerts handles GET /products/reorder-alerts

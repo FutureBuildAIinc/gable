@@ -1319,16 +1319,23 @@ components:
           description: Float dollars.
     PortalInvoice:
       type: object
-      required: [id, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, lines]
+      required: [id, number, is_overdue, order_id, status, total_amount, subtotal, tax_amount, payment_terms, due_date, paid_at, created_at, lines]
       properties:
         id:
           type: string
           format: uuid
+        number:
+          type: string
+          description: The invoice's gapless IN- number (C2-3).
+        is_overdue:
+          type: boolean
+          description: Computed, open and past its due date; overdue is no longer a status (C2-3).
         order_id:
           type: string
           format: uuid
         status:
           type: string
+          description: The stored status, uppercase (UNPAID, PARTIAL, PAID, VOID, WRITTEN_OFF); the portal keeps its legacy vocabulary.
         total_amount:
           type: number
           description: Float dollars.

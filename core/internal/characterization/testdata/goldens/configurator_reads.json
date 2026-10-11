@@ -10,7 +10,12 @@
       "content_type": "application/json",
       "body": [
         {
-          "config": "eyJncmFkZSI6ICJTVEsiLCAic3BlY2llcyI6ICJDZWRhciIsICJ0cmVhdG1lbnQiOiAiTm9uZSIsICJkaW1lbnNpb25zIjogIjF4Ni02In0=",
+          "config": {
+            "dimensions": "1x6-6",
+            "grade": "STK",
+            "species": "Cedar",
+            "treatment": "None"
+          },
           "created_at": "<ts+0d>",
           "description": "Western Red Cedar fence boards",
           "id": "<id-1>",
@@ -20,7 +25,13 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "config": "eyJncmFkZSI6ICIjMiIsICJ3aWR0aCI6IDM2LCAiaGVpZ2h0IjogODAsICJzcGVjaWVzIjogIlNZUCIsICJ0cmVhdG1lbnQiOiAiTm9uZSJ9",
+          "config": {
+            "grade": "#2",
+            "height": 80,
+            "species": "SYP",
+            "treatment": "None",
+            "width": 36
+          },
           "created_at": "<ts+0d>",
           "description": "Basic interior passage door",
           "id": "<id-2>",
@@ -30,7 +41,12 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "config": "eyJncmFkZSI6ICIjMiIsICJzcGVjaWVzIjogIlNZUCIsICJ0cmVhdG1lbnQiOiAiVHJlYXRhYmxlIiwgImRpbWVuc2lvbnMiOiAiMng2LTEwIn0=",
+          "config": {
+            "dimensions": "2x6-10",
+            "grade": "#2",
+            "species": "SYP",
+            "treatment": "Treatable"
+          },
           "created_at": "<ts+0d>",
           "description": "Pressure-treated SYP for deck framing",
           "id": "<id-3>",
@@ -58,6 +74,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Cedar",
+          "error_message": null,
           "id": "<id-4>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -68,6 +85,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Cedar",
+          "error_message": null,
           "id": "<id-5>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -78,6 +96,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Cedar",
+          "error_message": null,
           "id": "<id-6>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -110,6 +129,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Douglas Fir",
+          "error_message": null,
           "id": "<id-9>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -120,6 +140,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Douglas Fir",
+          "error_message": null,
           "id": "<id-10>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -130,6 +151,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Douglas Fir",
+          "error_message": null,
           "id": "<id-11>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -140,6 +162,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Douglas Fir",
+          "error_message": null,
           "id": "<id-12>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -150,6 +173,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Douglas Fir",
+          "error_message": null,
           "id": "<id-13>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -171,6 +195,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Hem-Fir",
+          "error_message": null,
           "id": "<id-15>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -192,6 +217,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Hem-Fir",
+          "error_message": null,
           "id": "<id-17>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -202,6 +228,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Hem-Fir",
+          "error_message": null,
           "id": "<id-18>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -212,6 +239,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "Hem-Fir",
+          "error_message": null,
           "id": "<id-19>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -222,6 +250,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SPF",
+          "error_message": null,
           "id": "<id-20>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -254,6 +283,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SPF",
+          "error_message": null,
           "id": "<id-23>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -264,6 +294,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SPF",
+          "error_message": null,
           "id": "<id-24>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -274,6 +305,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SYP",
+          "error_message": null,
           "id": "<id-25>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -284,6 +316,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SYP",
+          "error_message": null,
           "id": "<id-26>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -294,6 +327,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SYP",
+          "error_message": null,
           "id": "<id-27>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -315,6 +349,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SYP",
+          "error_message": null,
           "id": "<id-29>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"
@@ -325,6 +360,7 @@
           "created_at": "<ts+0d>",
           "depends_on_type": "Species",
           "depends_on_value": "SYP",
+          "error_message": null,
           "id": "<id-30>",
           "is_allowed": true,
           "updated_at": "<ts+0d>"

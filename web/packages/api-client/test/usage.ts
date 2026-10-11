@@ -54,6 +54,39 @@ async function _happy() {
   );
   const cancelledStatus: string | undefined = cancelled.body?.status;
 
+  // The delivery board read is one payload: routes with their stops
+  // embedded (include=stops), the date filter honoured.
+  const board = await client.get("/api/v1/delivery/routes", {
+    query: { date: "2030-05-06", include: "stops,total", limit: 50 },
+  });
+  const boardStops: number = board.body.items[0]?.stops?.length ?? 0;
+  const boardTotal: number | undefined = board.body.total;
+  const routeStatus: "draft" | "scheduled" | "in_transit" | "completed" | "cancelled" | undefined =
+    board.body.items[0]?.status;
+
+  const stopCreated = await client.post(
+    "/api/v1/delivery/deliveries",
+    { route_id: customerId, order_id: customerId, stop_sequence: 1 },
+  );
+  const stopRevision: number = stopCreated.body.delivery.revision ?? 1;
+
+  const delivered = await client.post(
+    "/api/v1/delivery/deliveries/{id}/transitions",
+    { to: "delivered", revision: stopRevision, pod_proof_url: "/uploads/pod/x.png", pod_signed_by: "foreman" },
+    { path: { id: stopCreated.body.delivery.id } },
+  );
+  const podTime: string | null = delivered.body.pod_timestamp;
+
+  const adjusted = await client.post(
+    "/api/v1/delivery/deliveries/{id}/adjust-qty",
+    {
+      adjusted_by: customerId,
+      adjustments: [{ product_id: customerId, original_qty: "10", adjusted_qty: "8", reason_code: "short_ship" }],
+    },
+    { path: { id: stopCreated.body.delivery.id } },
+  );
+  const adjustedRevision: number = adjusted.body.revision;
+
   const customers = await client.get("/api/v1/customers", { query: { q: "acme", tier: "gold", is_active: true, limit: 20 } });
   const limit: number | null | undefined = customers.body.items[0]?.credit_limit_cents;
   const terms: string | undefined = customers.body.items[0]?.payment_terms.code;
@@ -69,6 +102,34 @@ async function _happy() {
     { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" }, headers: { "If-Match": '"3"' } },
   );
   const customerRevision: number = edited.body.revision;
+
+  // Invoices and credit memos (ADR 0005 6.2 and 6.3): the cursor list, the
+  // detail with its lines, the void, and the credit memo from draft to posted.
+  const invoices = await client.get("/api/v1/invoices", { query: { status: "unpaid", overdue: "true", limit: 10 } });
+  const invoiceNumber: string | undefined = invoices.body.items[0]?.number;
+  const invoice = await client.get("/api/v1/invoices/{id}", { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } });
+  const billed: number = invoice.body.lines[0]?.line_total_cents ?? 0;
+  const open: number = invoice.body.open_cents;
+  const voided = await client.post(
+    "/api/v1/invoices/{id}/transitions",
+    { to: "void", revision: 2, reason: "billed in error" },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } },
+  );
+  const voidedAt: string | null | undefined = voided.body?.voided_at;
+  const memo = await client.post("/api/v1/credit-memos", {
+    invoice_id: "8f14e45f-ceea-467f-a830-aacd11a4",
+    reason_code: "return",
+    reason: "two pieces came back",
+    lines: [{ invoice_line_id: "8f14e45f-ceea-467f-a830-aacd11a4", quantity: "-2", restock: true }],
+  });
+  const memoNumber: string | null | undefined = memo.body?.number;
+  const posted = await client.post(
+    "/api/v1/credit-memos/{id}/transitions",
+    { to: "open", revision: 1 },
+    { path: { id: "8f14e45f-ceea-467f-a830-aacd11a4" } },
+  );
+  const memoTotal: number = posted.body?.total_cents ?? 0;
+
 
   // Products, pricing and locations (C3-1): the stocking unit, the scaled base
   // price, the stock totals as decimal strings, the price read's pair and
@@ -99,7 +160,8 @@ async function _happy() {
   );
   const locationType: string = moved.body.type;
 
-  return [quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, limit, terms, shipToRevision, customerRevision, stockUom, basePrice, available, unitPrice, basis, total, locationType];
+
+  return [invoiceNumber, billed, open, voidedAt, memoNumber, memoTotal, quoteTotal, nextCursor, firstStatus, revision, lineTotal, orderStatus, vehicleCount, cancelledStatus, boardStops, boardTotal, routeStatus, podTime, adjustedRevision, limit, terms, shipToRevision, customerRevision, stockUom, basePrice, available, unitPrice, basis, total, locationType];
 }
 
 // Wrong paths: each line must be a compile error --------------------------
@@ -114,6 +176,12 @@ async function _wrong() {
   // @ts-expect-error unknown query parameter (the quote list is cursor paged: no offset)
   await client.get("/api/v1/quotes", { query: { offset: 10 } });
 
+  const adjustWrong = {
+    adjusted_by: "8f14e45f",
+    adjustments: [{ product_id: "8f14e45f", original_qty: 10, adjusted_qty: 8, reason_code: "short_ship" as const }],
+  };
+  // @ts-expect-error a quantity is a decimal string, never a JSON number
+  await client.post("/api/v1/delivery/deliveries/{id}/adjust-qty", adjustWrong, { path: { id: "8f14e45f" } });
   // @ts-expect-error the wire status is lowercase
   await client.post("/api/v1/quotes/{id}/transitions", { to: "SENT" }, { path: { id: "8f14e45f" } });
 
@@ -134,6 +202,15 @@ async function _wrong() {
 
   // @ts-expect-error a ship-to needs its code, name and line1
   await client.post("/api/v1/customers/{id}/ship-tos", { name: "only a name" }, { path: { id: "x" } });
+
+  // @ts-expect-error overdue is a computed flag and a list filter: it is a true/false string
+  await client.get("/api/v1/invoices", { query: { overdue: 7 } });
+
+  // @ts-expect-error the only invoice transition a client sends is void; the body needs its target
+  await client.post("/api/v1/invoices/{id}/transitions", { revision: 1 }, { path: { id: "x" } });
+
+  // @ts-expect-error a credit memo names its reason by code and carries its lines
+  await client.post("/api/v1/credit-memos", { customer_id: "x" });
 
   // @ts-expect-error the product list is cursor paged: no offset
   await client.get("/api/v1/products", { query: { offset: 10 } });

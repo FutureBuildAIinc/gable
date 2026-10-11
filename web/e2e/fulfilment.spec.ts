@@ -151,17 +151,16 @@ test.describe('Fulfilment and will-call', () => {
       await page.screenshot({ path: path.join(SHOTS_DIR, 'order-backordered.png') });
     }
 
-    // A pickup order is refused a stop on a route: 409 pickup_order.
+    // A pickup order is refused a stop on a route: 409 pickup_order. The
+    // routes list is the cursor envelope (C5-1d); the seed always holds one.
     const pickup = await request.post('/api/v1/orders', {
       data: { customer_id: customer.id, delivery_type: 'pickup', lines: [{ product_id: product.id, quantity: '1' }] },
     });
     const pickupOrder = await pickup.json();
-    const routes = (await (await request.get('/api/v1/delivery/routes')).json()) as { id: string }[];
-    if (routes.length > 0) {
-      const stop = await request.post('/api/v1/delivery/deliveries', { data: { route_id: routes[0].id, order_id: pickupOrder.id, stop_sequence: 99 } });
-      expect(stop.status()).toBe(409);
-      const err = await stop.json();
-      expect(JSON.stringify(err)).toContain('pickup_order');
-    }
+    const routes = (await (await request.get('/api/v1/delivery/routes')).json()) as { items: { id: string }[] };
+    const stop = await request.post('/api/v1/delivery/deliveries', { data: { route_id: routes.items[0].id, order_id: pickupOrder.id, stop_sequence: 99 } });
+    expect(stop.status()).toBe(409);
+    const err = await stop.json();
+    expect(JSON.stringify(err)).toContain('pickup_order');
   });
 });

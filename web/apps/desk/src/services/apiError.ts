@@ -33,6 +33,11 @@ export class ApiError extends Error {
         return this.code === 'stale_revision';
     }
 
+    /** True when a 409 carries the named blocker (for example has_applications) in its details. */
+    hasBlocker(code: string): boolean {
+        return this.details.some(d => d.code === code);
+    }
+
     /** The message, with each field problem or blocker listed on its own line for validation_failed and invalid_state_transition. */
     get displayMessage(): string {
         if ((this.code === 'validation_failed' || this.code === 'invalid_state_transition') && this.details.length > 0) {

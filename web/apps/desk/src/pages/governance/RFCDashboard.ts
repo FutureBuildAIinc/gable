@@ -7,14 +7,14 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { GovernanceService } from '../../services/governance.service';
-import type { RFC } from '../../types/governance';
+import type { RFCSummary } from '../../types/governance';
 import { Plus, GitPullRequest, FileText, CheckCircle, Clock, AlertCircle } from 'lucide';
 
 @customElement('gable-rfc-dashboard')
 export class GableRFCDashboard extends LitElement {
   createRenderRoot() { return this; }
 
-  @state() private _rfcs: RFC[] = [];
+  @state() private _rfcs: RFCSummary[] = [];
   @state() private _loading = true;
 
   connectedCallback() {
@@ -73,7 +73,7 @@ export class GableRFCDashboard extends LitElement {
                   <tr class="border-b border-white/5 text-zinc-400 text-xs uppercase tracking-wider font-medium bg-white/5">
                     <th class="px-6 py-4">Status</th>
                     <th class="px-6 py-4">Title / ID</th>
-                    <th class="px-6 py-4">Problem Statement</th>
+                    <th class="px-6 py-4">Number</th>
                     <th class="px-6 py-4 text-right">Created</th>
                   </tr>
                 </thead>
@@ -112,8 +112,8 @@ export class GableRFCDashboard extends LitElement {
                           <div class="font-medium text-white group-hover:text-gable-green transition-colors">${rfc.title}</div>
                           <div class="text-xs text-zinc-500 font-mono mt-0.5">ID: ${rfc.id.substring(0, 8)}</div>
                         </td>
-                        <td class="px-6 py-4 text-zinc-400 max-w-md truncate">
-                          ${rfc.problem_statement}
+                        <td class="px-6 py-4 text-zinc-400 font-mono text-xs">
+                          ${rfc.number}
                         </td>
                         <td class="px-6 py-4 text-right text-zinc-500 font-mono text-xs">
                           ${new Date(rfc.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}

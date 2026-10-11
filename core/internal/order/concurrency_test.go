@@ -81,7 +81,7 @@ func newPoolWorld(t *testing.T, n int) *poolWorld {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, w.customerID)
 	})
 	glSvc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
-	inv := invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(account.NewRepository(db), db, slog.Default()), db)
+	inv := invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(db, glSvc, slog.Default()), db)
 	w.svc = func(tx order.TxRunner) *order.Service {
 		return order.NewService(order.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(tx).
 			WithAuditLog(audit.NewLogger(db)).

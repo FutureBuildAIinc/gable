@@ -6,8 +6,8 @@
 # envelope, a lowercase tier, integer _cents money (a credit limit that is
 # null for no limit), a revision with its ETag on every record, ship-to
 # addresses, the payment terms master, and per contact order authority. The
-# activities routes in the middle are the CRM module's and still speak the
-# shapes they had.
+# activities routes that sat in the middle are the CRM module's own since
+# C5-1b and live in the activities fragment on the wire contract.
 paths:
   /api/v1/customers:
     get:
@@ -710,80 +710,6 @@ paths:
           $ref: "#/components/responses/WirePreconditionRequired"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
-  /api/v1/customers/{customerId}/activities:
-    get:
-      operationId: customerListActivities
-      tags: [customer]
-      summary: List customer activities
-      description: >-
-        Returns activities for a customer, ordered by activity_date descending.
-        The handler guarantees a bare array: an empty array, never null, when the
-        customer has no activities.
-      parameters:
-        - name: customerId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-      responses:
-        "200":
-          description: Activities, a bare array that is empty when none exist.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "500":
-          $ref: "#/components/responses/InternalError"
-    post:
-      operationId: customerCreateActivity
-      tags: [customer]
-      summary: Create a customer activity
-      parameters:
-        - name: customerId
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-        - $ref: "#/components/parameters/XBranchId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CustomerActivityCreate"
-      responses:
-        "201":
-          description: The created activity.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Activity"
-        "400":
-          $ref: "#/components/responses/BadRequestEither"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/ForbiddenEither"
-        "409":
-          $ref: "#/components/responses/IdempotencyConflict"
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          $ref: "#/components/responses/UnprocessableEntity"
-        "500":
-          $ref: "#/components/responses/InternalError"
   /api/v1/customers/{customerId}/contacts:
     get:
       operationId: customerListContacts
@@ -1620,24 +1546,3 @@ components:
           type: integer
           format: int64
           description: PUT only, beside If-Match.
-    CustomerActivityCreate:
-      type: object
-      required: [activity_type]
-      description: >-
-        The Activity decoded from the body; customer_id comes from the path and
-        created_at and updated_at are set by the server. A supplied id is kept.
-        A missing or unknown activity_type answers 400.
-      properties:
-        contact_id:
-          type: string
-          format: uuid
-        activity_type:
-          $ref: "#/components/schemas/ActivityType"
-        description:
-          type: string
-        logged_by:
-          type: string
-          format: uuid
-        activity_date:
-          type: string
-          format: date-time

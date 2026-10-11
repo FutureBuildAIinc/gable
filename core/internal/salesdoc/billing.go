@@ -71,6 +71,65 @@ func BilledTotal(l *Line, before, after httpx.Quantity) (httpx.Cents, error) {
 	return hi - lo, nil
 }
 
+// BilledDiscount is the amount discount a billed piece of a line gave, in
+// cents: the gross extension of the piece (Extend over the cumulative
+// quantities, the telescoping difference like BilledTotal) less the piece's
+// net. Defining the share as gross less net, rather than prorating the
+// discount on its own, makes every invoice line satisfy line total + discount
+// = its gross piece to the cent, and the pieces of a line sum to the order
+// line's whole discount exactly (the carried C2-2b item).
+func BilledDiscount(l *Line, before, after httpx.Quantity) (httpx.Cents, error) {
+	if l.DiscountAmount == nil {
+		return 0, nil
+	}
+	uq, pq := derefQty(l.UOMQty), derefQty(l.PriceUOMQty)
+	price := derefPrice(l.UnitPrice)
+	gross := func(q httpx.Quantity) (httpx.Cents, error) {
+		if q <= 0 {
+			return 0, nil
+		}
+		return httpx.Extend(q, uq, pq, price)
+	}
+	hi, err := gross(after)
+	if err != nil {
+		return 0, err
+	}
+	lo, err := gross(before)
+	if err != nil {
+		return 0, err
+	}
+	net, err := BilledTotal(l, before, after)
+	if err != nil {
+		return 0, err
+	}
+	return (hi - lo) - net, nil
+}
+
+// PieceAgainstLive prices the piece of a line that brings its billed quantity
+// to after, against what the line's LIVE (not void) invoices already carry
+// (ADR 0005 2.4 and 6.2). The piece's total is the cumulative total at after
+// less the live invoice totals, and its discount is the gross extension at
+// after less the live gross (live totals plus live discounts) less that total,
+// so the live pieces of a line always sum to the line's own total and discount
+// to the cent, whichever invoice of the line was voided. Without a void the live
+// totals equal the cumulative total at the quantity before, and this is exactly
+// BilledTotal and BilledDiscount.
+func PieceAgainstLive(l *Line, after httpx.Quantity, liveTotal, liveDiscount httpx.Cents) (total, discount httpx.Cents, err error) {
+	hi, err := CumulativeTotal(l, after)
+	if err != nil {
+		return 0, 0, err
+	}
+	total = hi - liveTotal
+	if l.DiscountAmount == nil {
+		return total, 0, nil
+	}
+	gross, err := httpx.Extend(after, derefQty(l.UOMQty), derefQty(l.PriceUOMQty), derefPrice(l.UnitPrice))
+	if err != nil {
+		return 0, 0, err
+	}
+	return total, (gross - (liveTotal + liveDiscount)) - total, nil
+}
+
 // RevenueAccountProduct is the account product, kit and non stock lines post
 // their totals to (ADR 0005 section 8.3).
 const RevenueAccountProduct = "4010"

@@ -410,16 +410,15 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 // cart lines; a split sale gets a single summary line (the tax math on a
 // partial allocation is a per-line proration problem deferred until a
 // dealer needs split account tenders).
-func (s *Service) buildAccountInvoice(tx *POSTransaction, accountPortionCents int64) *invoice.Invoice {
-	inv := &invoice.Invoice{
-		BranchID:     tx.BranchID,
-		CustomerID:   *tx.CustomerID,
-		Status:       invoice.InvoiceStatusUnpaid,
-		PaymentTerms: invoice.TermsNet30,
+func (s *Service) buildAccountInvoice(tx *POSTransaction, accountPortionCents int64) *invoice.LegacyInvoice {
+	inv := &invoice.LegacyInvoice{
+		BranchID:   tx.BranchID,
+		CustomerID: *tx.CustomerID,
+		Status:     invoice.InvoiceStatusUnpaid,
 	}
 	if accountPortionCents >= tx.Total && len(tx.LineItems) > 0 {
 		for _, item := range tx.LineItems {
-			inv.Lines = append(inv.Lines, invoice.InvoiceLine{
+			inv.Lines = append(inv.Lines, invoice.LegacyLine{
 				ProductID: item.ProductID,
 				Quantity:  item.Quantity,
 				PriceEach: item.UnitPrice,
@@ -434,7 +433,7 @@ func (s *Service) buildAccountInvoice(tx *POSTransaction, accountPortionCents in
 	} else {
 		// Split tender: one summary line for the on-account portion,
 		// tax-inclusive (the register already charged the tax).
-		inv.Lines = []invoice.InvoiceLine{{
+		inv.Lines = []invoice.LegacyLine{{
 			ProductID: tx.LineItems[0].ProductID,
 			Quantity:  1,
 			PriceEach: accountPortionCents,

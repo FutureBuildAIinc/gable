@@ -35,6 +35,9 @@ func TestProductListHoldsOneConnection(t *testing.T) {
 
 	const probes = 5
 	marker := "PL4-" + uuid.NewString()[:8]
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM products WHERE sku LIKE $1`, marker+"%")
+	})
 	probeIDs := make(map[uuid.UUID]bool, probes)
 	for i := 0; i < probes; i++ {
 		var id uuid.UUID
@@ -46,9 +49,6 @@ func TestProductListHoldsOneConnection(t *testing.T) {
 		}
 		probeIDs[id] = true
 	}
-	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM products WHERE sku LIKE $1`, marker+"%")
-	})
 
 	svc := product.NewService(product.NewRepository(db))
 

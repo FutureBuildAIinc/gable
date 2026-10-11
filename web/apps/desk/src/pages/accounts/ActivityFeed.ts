@@ -37,11 +37,11 @@ export class GableActivityFeed extends LitElement {
     private async _fetchData() {
         try {
             this.loading = true;
-            const [acts, conts] = await Promise.all([
-                crmApi.listActivities(this.customerId),
+            const [activities, conts] = await Promise.all([
+                crmApi.listAllActivities(this.customerId),
                 CustomerService.listContacts(this.customerId, { limit: 200 }),
             ]);
-            this.activities = acts || [];
+            this.activities = activities;
             this.contacts = conts.items;
         } catch (err: unknown) {
             console.error('Failed to load activity data', err);
@@ -53,12 +53,17 @@ export class GableActivityFeed extends LitElement {
 
     private _getActivityIcon(type: string): string {
         switch (type) {
-            case 'CALL': return '\u{1F4DE}';
-            case 'MEETING': return '\u{1F91D}';
-            case 'EMAIL': return '\u{2709}\u{FE0F}';
-            case 'NOTE': return '\u{1F4DD}';
+            case 'call': return '\u{1F4DE}';
+            case 'meeting': return '\u{1F91D}';
+            case 'email': return '\u{2709}\u{FE0F}';
+            case 'note': return '\u{1F4DD}';
             default: return '\u{1F4CC}';
         }
+    }
+
+    /** The wire vocabulary is lowercase; the feed shows a capitalized label. */
+    private _activityLabel(type: string): string {
+        return type.charAt(0).toUpperCase() + type.slice(1);
     }
 
     private _getContactName(contactId?: string): string | null {
@@ -121,7 +126,7 @@ export class GableActivityFeed extends LitElement {
                                                     <div class="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
                                                         <div>
                                                             <p class="text-sm text-gray-500">
-                                                                <span class="font-medium text-gray-900">${activity.activity_type}</span>
+                                                                <span class="font-medium text-gray-900">${this._activityLabel(activity.activity_type)}</span>
                                                                 ${activity.contact_id ? html`
                                                                     with <span class="font-medium text-gray-900">${this._getContactName(activity.contact_id)}</span>
                                                                 ` : nothing}

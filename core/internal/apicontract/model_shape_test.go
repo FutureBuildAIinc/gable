@@ -19,7 +19,6 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/delivery"
-	"github.com/gablelbm/gable/internal/deposit"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
@@ -49,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/staff"
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/internal/techadmin"
+	"github.com/gablelbm/gable/internal/unit"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/internal/vision"
 	"github.com/gablelbm/gable/pkg/apps"
@@ -68,6 +68,8 @@ var modelBoundSchemas = []struct {
 	{"Quote", quote.Quote{}},
 	{"QuoteSummary", quote.QuoteSummary{}},
 	{"QuoteLine", quote.QuoteLine{}},
+	{"Tally", quote.Tally{}},
+	{"TallyRow", quote.TallyRow{}},
 	// order
 	{"Order", order.Order{}},
 	{"OrderSummary", order.OrderSummary{}},
@@ -88,10 +90,14 @@ var modelBoundSchemas = []struct {
 	{"OrderLine", order.OrderLine{}},
 	// invoice
 	{"Invoice", invoice.Invoice{}},
+	{"InvoiceSummary", invoice.InvoiceSummary{}},
 	{"InvoiceLine", invoice.InvoiceLine{}},
 	{"CreditMemo", invoice.CreditMemo{}},
+	{"CreditMemoSummary", invoice.CreditMemoSummary{}},
+	{"CreditMemoLine", invoice.CreditLine{}},
 	// payment
 	{"Payment", payment.Payment{}},
+	{"PaymentSummary", payment.Summary{}},
 	{"Refund", payment.Refund{}},
 	{"PaymentIntentResponse", payment.PaymentIntentResponse{}},
 	// product
@@ -102,6 +108,10 @@ var modelBoundSchemas = []struct {
 	{"PimCollateral", pim.PIMCollateral{}},
 	{"ProductDetail", pim.ProductDetail{}},
 	{"ProductView", product.View{}},
+	{"UnitSetDoc", product.UnitSetDoc{}},
+	{"UnitSetRow", product.UnitSetRowView{}},
+	// units (C3-2A-units, ADR 0006 section 2)
+	{"Unit", unit.Unit{}},
 	// location
 	{"Location", location.Location{}},
 	{"BranchSummary", location.BranchSummary{}},
@@ -119,20 +129,29 @@ var modelBoundSchemas = []struct {
 	{"DeliveryVehicle", delivery.Vehicle{}},
 	{"DeliveryDriver", delivery.Driver{}},
 	{"DeliveryRoute", delivery.Route{}},
-	{"Delivery", delivery.Delivery{}},
+	{"Delivery", delivery.Stop{}},
 	{"DeliveryPodPhoto", delivery.PODPhoto{}},
-	{"DeliveryCapacityWarning", delivery.CapacityWarning{}},
-	{"DeliveryRouteLeg", delivery.RouteLeg{}},
-	{"DeliveryRouteOptimizationResult", delivery.RouteOptimizationResult{}},
+	{"DeliveryQtyAdjustment", delivery.QtyAdjustment{}},
+	// CapacityWarning has no binding of its own: the assign result carries
+	// it as an inlined nullable property, the way the order wire carries
+	// its ship_to address.
 	// inventory
 	{"InventoryLevel", inventory.Level{}},
 	{"InventoryProductSummary", inventory.ProductSummary{}},
-	// deposits
-	{"Deposit", deposit.CustomerDeposit{}},
-	{"DepositApplication", deposit.DepositApplication{}},
-	// accounts
-	{"AccountSummary", account.AccountSummary{}},
-	{"CustomerTransaction", account.CustomerTransaction{}},
+	// accounts and the AR core (C2-4)
+	{"AccountSummary", account.Summary{}},
+	{"AccountTransaction", account.Transaction{}},
+	{"ArApplication", account.Application{}},
+	{"ArAgingItem", account.AgingItem{}},
+	{"ArAgingTotal", account.AgingTotal{}},
+	{"ArAgingSummary", account.AgingSummary{}},
+	{"ArStatement", account.Statement{}},
+	{"ArStatementCurrency", account.StatementCurrency{}},
+	{"ArStatementLine", account.StatementLine{}},
+	{"ArOpenDocument", account.OpenDocument{}},
+	{"ArReconciliation", account.Reconciliation{}},
+	{"ArDriftRow", account.DriftRow{}},
+	{"ArLedgerRow", account.LedgerRow{}},
 	// vendors
 	{"Vendor", vendor.Vendor{}},
 	// sales-team
@@ -184,26 +203,28 @@ var modelBoundSchemas = []struct {
 	{"PortalInvite", portal.PortalInvite{}},
 	// project (R1-7c)
 	{"Project", project.Project{}},
-	{"ProjectDashboard", project.ProjectDashboardDTO{}},
+	{"ProjectDashboard", project.ProjectDashboard{}},
 	{"ProjectItem", project.ProjectItem{}},
 	// partner (R1-7c)
 	{"PartnerDashboard", partner.DashboardDTO{}},
-	// admin, apps, governance, millwork, configurator (R1-7f)
-	{"TechAdminKey", techadmin.APIKey{}},
-	{"TechAdminCreateKeyResponse", techadmin.CreateKeyResponse{}},
-	{"TechAdminSettingsStatus", techadmin.AISettingsResponse{}},
+	// admin, apps, governance, millwork, configurator (R1-7f, C5-1a)
+	{"ApiKey", techadmin.APIKey{}},
+	{"AdminCreateKeyResponse", techadmin.CreatedKey{}},
+	{"AISettings", techadmin.AISettings{}},
+	{"RoutingSettings", techadmin.RoutingSettings{}},
 	{"StaffMember", staff.Staff{}},
 	{"StaffModule", staff.Module{}},
 	// AppsManifestStatus is apps.Status, which embeds Manifest and adds enabled
 	// and orphaned; the embedded struct is bound, the two extras checked by hand.
 	{"AppsManifestStatus", apps.Manifest{}},
-	{"GovernanceRFC", governance.RFC{}},
-	{"MillworkOption", millwork.MillworkOption{}},
-	{"ConfiguratorRule", configurator.ConfiguratorRule{}},
-	{"ConfiguratorPreset", configurator.ConfiguratorPreset{}},
+	{"RFC", governance.RFC{}},
+	{"RFCSummary", governance.RFCSummary{}},
+	{"MillworkOption", millwork.Option{}},
+	{"ConfiguratorRule", configurator.Rule{}},
+	{"ConfiguratorPreset", configurator.Preset{}},
 	{"ConfiguratorAvailableOption", configurator.AvailableOption{}},
 	{"ConfiguratorValidationConflict", configurator.ValidationConflict{}},
-	{"ConfiguratorValidateResponse", configurator.ValidateConfigResponse{}},
+	{"ConfiguratorValidateResponse", configurator.ValidateResponse{}},
 	{"ConfiguratorBuildSKUResponse", configurator.BuildSKUResponse{}},
 	// reporting, reports, dashboard (R1-7f)
 	{"ReportingSavedReport", reporting.SavedReport{}},

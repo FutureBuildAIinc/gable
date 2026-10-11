@@ -566,3 +566,56 @@ func TestBilledTotalPiecesStayNonNegative(t *testing.T) {
 		t.Errorf("%d of 200000 random lines billed a negative piece", negative)
 	}
 }
+
+// RULE (carried from C2-2b, ADR 0005 2.4): the invoice line's amount discount
+// share is its gross piece less its net piece, so line total + discount equals
+// the gross extension of the piece to the cent on every invoice, and the shares
+// over any sequence of partial invoices sum to the order line's discount exactly.
+func TestBilledDiscountSumsExactly(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	one := One
+	for trial := 0; trial < 500; trial++ {
+		ordered := httpx.Quantity(rng.Intn(1000000) + 10000)
+		price := httpx.Price(rng.Intn(900000) + 100)
+		pair := httpx.Quantity(rng.Intn(3000) + 1000)
+		gross, err := httpx.Extend(ordered, pair, one, price)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if gross < 100 {
+			continue
+		}
+		d := httpx.Cents(rng.Int63n(int64(gross)-1) + 1)
+		line := Line{Quantity: &ordered, UOMQty: &pair, PriceUOMQty: &one, UnitPrice: &price, DiscountAmount: &d}
+		var done httpx.Quantity
+		var sumTotal, sumDiscount, sumGross httpx.Cents
+		for done < ordered {
+			piece := httpx.Quantity(rng.Intn(int(ordered-done))) + 1
+			net, err := BilledTotal(&line, done, done+piece)
+			if err != nil {
+				t.Fatal(err)
+			}
+			share, err := BilledDiscount(&line, done, done+piece)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hi, _ := httpx.Extend(done+piece, pair, one, price)
+			lo := httpx.Cents(0)
+			if done > 0 {
+				lo, _ = httpx.Extend(done, pair, one, price)
+			}
+			if net+share != hi-lo {
+				t.Fatalf("trial %d: total %d + discount %d != the gross piece %d", trial, net, share, hi-lo)
+			}
+			sumTotal, sumDiscount, sumGross = sumTotal+net, sumDiscount+share, sumGross+(hi-lo)
+			_ = sumGross
+			done += piece
+		}
+		if sumDiscount != d {
+			t.Fatalf("trial %d: the pieces' discounts sum to %d, want the order line's %d", trial, sumDiscount, d)
+		}
+		if sumTotal != gross-d {
+			t.Fatalf("trial %d: the pieces' totals sum to %d, want %d", trial, sumTotal, gross-d)
+		}
+	}
+}

@@ -5,7 +5,8 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { formatCents } from '../../lib/utils.ts';
+import { WalkTruncatedError } from '../../lib/cursorWalk';
+import { formatCents, formatDay } from '../../lib/utils.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { keyed } from 'lit/directives/keyed.js';
@@ -14,6 +15,8 @@ import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import type { Customer, CustomerRequest, CustomerUpdateRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
+import type { Payment } from '../../types/payment.ts';
+import { paymentService } from '../../services/paymentService.ts';
 import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
 
 // Side-effect imports: register child custom elements
@@ -31,6 +34,18 @@ export class GableAccountDetail extends LitElement {
     @state() private customer: Customer | null = null;
     @state() private summary: AccountSummary | null = null;
     @state() private transactions: CustomerTransaction[] = [];
+    @state() private txnCursor: string | null = null;
+    @state() private txnLoadingMore = false;
+    @state() private unappliedPayments: Payment[] = [];
+    @state() private openInvoices: { id: string; number: string; open_cents: number }[] = [];
+    @state() private paymentsLoading = false;
+    @state() private paymentsLoaded = false;
+    @state() private applying: Payment | null = null;
+    @state() private voiding: Payment | null = null;
+    @state() private applyInvoiceId = '';
+    @state() private applyAmountDollars = 0;
+    @state() private voidReason = '';
+    @state() private paymentBusy = false;
     @state() private loading = true;
     @state() private activeTab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
     @state() private salesperson: SalesPerson | null = null;
@@ -59,15 +74,17 @@ export class GableAccountDetail extends LitElement {
 
     private async loadData(customerId: string) {
         try {
-            const [cust, summ, txns] = await Promise.all([
+            const [cust, summ, txnPage] = await Promise.all([
                 CustomerService.getCustomer(customerId),
                 AccountService.getAccountSummary(customerId),
                 AccountService.getTransactions(customerId)
             ]);
             this.customer = cust;
             this.summary = summ;
-            // The ledger route answers null for an account with no transactions yet.
-            this.transactions = txns ?? [];
+            // The ledger's list envelope; the cursor walks it ("Load more"
+            // follows when the account outgrows one page).
+            this.transactions = txnPage.items;
+            this.txnCursor = txnPage.next_cursor;
             if (cust.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(cust.salesperson_id);
@@ -79,6 +96,49 @@ export class GableAccountDetail extends LitElement {
             ToastService.show('Failed to load account data', 'error');
         } finally {
             this.loading = false;
+        }
+    }
+
+    /** The next page of the ledger, appended below the rows already shown. */
+    private async loadMoreTransactions() {
+        if (!this.customer || !this.txnCursor || this.txnLoadingMore) return;
+        this.txnLoadingMore = true;
+        try {
+            const page = await AccountService.getTransactions(this.customer.id, this.txnCursor);
+            this.transactions = [...this.transactions, ...page.items];
+            this.txnCursor = page.next_cursor;
+        } catch (error) {
+            console.error('Failed to load more transactions:', error);
+            ToastService.show('Failed to load more transactions', 'error');
+        } finally {
+            this.txnLoadingMore = false;
+        }
+    }
+
+    private async loadPayments(customerId: string) {
+        this.paymentsLoading = true;
+        try {
+            const [unapplied, open] = await Promise.all([
+                AccountService.getUnappliedPayments(customerId),
+                AccountService.getOpenInvoices(customerId)
+            ]);
+            this.unappliedPayments = unapplied;
+            this.openInvoices = open;
+        } catch (error) {
+            console.error('Failed to load payments:', error);
+            ToastService.show(error instanceof WalkTruncatedError ? error.message : 'Failed to load payments', 'error');
+        } finally {
+            this.paymentsLoading = false;
+        }
+    }
+
+    /** A tab switch; the payments tab reads the unapplied cash and the open
+     * invoices once it is first shown, not on every account load. */
+    private async handleTab(tab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm') {
+        this.activeTab = tab;
+        if (tab === 'payments' && !this.paymentsLoaded && this.customer) {
+            this.paymentsLoaded = true;
+            await this.loadPayments(this.customer.id);
         }
     }
 
@@ -179,7 +239,7 @@ export class GableAccountDetail extends LitElement {
         const active = this.activeTab === tabId;
         return html`
             <button
-                @click=${() => { this.activeTab = tabId; }}
+                @click=${() => { this.handleTab(tabId); }}
                 class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                     active
                         ? 'text-gable-green border-gable-green bg-gable-green/5'
@@ -192,13 +252,128 @@ export class GableAccountDetail extends LitElement {
         `;
     }
 
+    /** Opens the apply dialog on a payment, defaulting to its oldest open invoice. */
+    private openApply(pay: Payment) {
+        this.applying = pay;
+        this.applyInvoiceId = this.openInvoices[0]?.id ?? '';
+        this.applyAmountDollars = pay.unapplied_cents / 100;
+    }
+
+    /** Applies unapplied cash to one invoice (the revision is the precondition). */
+    private async submitApply(e: Event) {
+        e.preventDefault();
+        if (!this.applying || !this.customer) return;
+        const amountCents = Math.round(this.applyAmountDollars * 100);
+        if (amountCents <= 0 || !this.applyInvoiceId) return;
+        this.paymentBusy = true;
+        try {
+            await paymentService.apply(this.applying.id, [{ invoice_id: this.applyInvoiceId, amount_cents: amountCents }], this.applying.revision);
+            ToastService.show(`Applied ${formatCents(amountCents)} of ${this.applying.number}`, 'success');
+            this.applying = null;
+            await Promise.all([this.loadPayments(this.customer.id), this.loadData(this.customer.id)]);
+        } catch (error) {
+            ToastService.show(error instanceof Error ? error.message : 'Failed to apply the payment', 'error');
+        } finally {
+            this.paymentBusy = false;
+        }
+    }
+
+    /** Voids a posted payment: every application reversed, the invoices reopened. */
+    private async submitVoid(e: Event) {
+        e.preventDefault();
+        if (!this.voiding || !this.customer || !this.voidReason.trim()) return;
+        this.paymentBusy = true;
+        try {
+            await paymentService.void(this.voiding.id, this.voidReason.trim(), this.voiding.revision);
+            ToastService.show(`Payment ${this.voiding.number} voided`, 'success');
+            this.voiding = null;
+            await Promise.all([this.loadPayments(this.customer.id), this.loadData(this.customer.id)]);
+        } catch (error) {
+            ToastService.show(error instanceof Error ? error.message : 'Failed to void the payment', 'error');
+        } finally {
+            this.paymentBusy = false;
+        }
+    }
+
+    private renderApplyDialog() {
+        if (!this.applying) return nothing;
+        const invoice = this.openInvoices.find(i => i.id === this.applyInvoiceId);
+        return html`
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
+                <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
+                    <h2 id="apply-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Apply unapplied cash</h2>
+                    <p class="text-zinc-400 text-sm mb-6">${this.applying.number} holds ${formatCents(this.applying.unapplied_cents)} unapplied</p>
+                    <form @submit=${this.submitApply} class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-zinc-400 mb-1">Invoice</label>
+                            <select
+                                .value=${this.applyInvoiceId}
+                                @change=${(e: Event) => this.applyInvoiceId = (e.target as HTMLSelectElement).value}
+                                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100"
+                            >
+                                ${this.openInvoices.map(i => html`<option value=${i.id}>${i.number} (${formatCents(i.open_cents)} open)</option>`)}
+                            </select>
+                            ${invoice ? html`<p class="mt-1 text-xs text-zinc-500">${invoice.number} has ${formatCents(invoice.open_cents)} open</p>` : nothing}
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-zinc-400 mb-1">Amount to apply</label>
+                            <input type="number" required min="0.01" step="0.01"
+                                .value=${String(this.applyAmountDollars)}
+                                @input=${(e: InputEvent) => this.applyAmountDollars = parseFloat((e.target as HTMLInputElement).value)}
+                                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 font-mono"
+                            />
+                        </div>
+                        <div class="mt-8 flex justify-end gap-3">
+                            <button type="button" @click=${() => { this.applying = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
+                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
+                                ${this.paymentBusy ? 'Applying...' : 'Apply'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+    }
+
+    private renderVoidDialog() {
+        if (!this.voiding) return nothing;
+        return html`
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
+                <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
+                    <h2 id="void-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Void payment</h2>
+                    <p class="text-zinc-400 text-sm mb-6">Voiding ${this.voiding.number} reverses every application of it and reopens its invoices${this.voiding.method === 'card' ? '; a card payment is refunded through the gateway instead' : ''}.</p>
+                    <form @submit=${this.submitVoid} class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-zinc-400 mb-1">Reason</label>
+                            <input type="text" required maxlength="500"
+                                .value=${this.voidReason}
+                                @input=${(e: InputEvent) => this.voidReason = (e.target as HTMLInputElement).value}
+                                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100"
+                                placeholder="Why is this payment being voided?"
+                            />
+                        </div>
+                        <div class="mt-8 flex justify-end gap-3">
+                            <button type="button" @click=${() => { this.voiding = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
+                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
+                                ${this.paymentBusy ? 'Voiding...' : 'Void payment'}
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+    }
+
     private renderTxnTypeBadge(type: string) {
         let cls = 'bg-blue-500/10 text-blue-400';
         if (type === 'INVOICE') cls = 'bg-orange-500/10 text-orange-400';
-        if (type === 'PAYMENT') cls = 'bg-emerald-500/10 text-emerald-400';
+        if (type === 'PAYMENT' || type === 'DISCOUNT') cls = 'bg-emerald-500/10 text-emerald-400';
+        if (type === 'CREDIT_MEMO' || type === 'REFUND') cls = 'bg-teal-500/10 text-teal-300';
+        if (type === 'WRITE_OFF') cls = 'bg-red-500/10 text-red-400';
+        if (type === 'REVERSAL') cls = 'bg-zinc-500/10 text-zinc-400';
         return html`
             <span class="px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider ${cls}">
-                ${type}
+                ${type.replace('_', ' ')}
             </span>
         `;
     }
@@ -216,8 +391,9 @@ export class GableAccountDetail extends LitElement {
         const summary = this.summary;
         // A null limit is no limit; the summary reads it as 0, so the cards say "No limit" instead.
         const noLimit = customer.credit_limit_cents === null;
-        const availablePercentage = summary.credit_limit > 0
-            ? (summary.available_credit / summary.credit_limit) * 100
+        const limitCents = summary.credit_limit_cents ?? 0;
+        const availablePercentage = limitCents > 0
+            ? ((summary.available_credit_cents ?? 0) / limitCents) * 100
             : 0;
 
         return html`
@@ -349,7 +525,7 @@ export class GableAccountDetail extends LitElement {
                             Balance Due
                         </div>
                         <div class="text-3xl font-mono font-bold text-white">
-                            ${formatCents(summary.balance_due)}
+                            ${formatCents(summary.balance_cents)}
                         </div>
                         <div class="mt-2 text-xs text-zinc-500">Current outstanding balance</div>
                     </div>
@@ -360,7 +536,7 @@ export class GableAccountDetail extends LitElement {
                             Available Credit
                         </div>
                         <div class="text-3xl font-mono font-bold ${!noLimit && availablePercentage < 20 ? 'text-red-400' : 'text-white'}">
-                            ${noLimit ? 'No limit' : formatCents(summary.available_credit)}
+                            ${noLimit ? 'No limit' : formatCents(summary.available_credit_cents ?? 0)}
                         </div>
                         <div class="mt-2 w-full bg-white/10 h-1.5 rounded-full overflow-hidden">
                             <div
@@ -420,16 +596,84 @@ export class GableAccountDetail extends LitElement {
                                                     ${this.renderTxnTypeBadge(txn.type)}
                                                 </td>
                                                 <td class="px-4 py-3 text-white">${txn.description}</td>
-                                                <td class="px-4 py-3 text-right font-mono font-medium ${txn.amount > 0 ? 'text-white' : 'text-emerald-400'}">
-                                                    ${txn.amount > 0 ? '+' : ''}${(txn.amount / 100).toFixed(2)}
+                                                <td class="px-4 py-3 text-right font-mono font-medium ${txn.amount_cents > 0 ? 'text-white' : 'text-emerald-400'}">
+                                                    ${txn.amount_cents > 0 ? '+' : ''}${formatCents(txn.amount_cents)}
                                                 </td>
                                                 <td class="px-4 py-3 text-right font-mono text-zinc-300">
-                                                    ${(txn.balance_after / 100).toFixed(2)}
+                                                    ${formatCents(txn.balance_after_cents)}
                                                 </td>
                                             </tr>
                                         `)}
                                     </tbody>
                                 </table>
+                            </div>
+                            ${this.txnCursor ? html`
+                                <div class="mt-3 flex justify-center">
+                                    <button type="button" data-testid="ledger-load-more" ?disabled=${this.txnLoadingMore}
+                                        @click=${() => this.loadMoreTransactions()}
+                                        class="px-4 py-2 text-sm rounded border border-zinc-700 text-zinc-300 hover:bg-white/5 disabled:opacity-50">
+                                        ${this.txnLoadingMore ? 'Loading...' : 'Load more'}
+                                    </button>
+                                </div>` : nothing}
+                        ` : nothing}
+
+                        ${this.activeTab === 'payments' ? html`
+                            <div class="space-y-4" data-testid="payments-tab">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <h3 class="text-white font-semibold">Unapplied cash</h3>
+                                        <p class="text-zinc-500 text-sm">Cash held in deposits until it is applied to an invoice, refunded or voided</p>
+                                    </div>
+                                </div>
+                                ${this.paymentsLoading ? html`
+                                    <div class="p-8 text-center text-zinc-500">Loading payments...</div>
+                                ` : this.unappliedPayments.length === 0 ? html`
+                                    <div class="p-8 text-center text-zinc-500 border border-white/5 rounded-lg">No unapplied cash on this account</div>
+                                ` : html`
+                                    <div class="border border-white/5 rounded-lg overflow-hidden bg-slate-steel/20">
+                                        <table class="w-full text-sm" aria-label="Unapplied payments">
+                                            <thead class="bg-white/5 text-zinc-400 font-medium border-b border-white/5">
+                                                <tr>
+                                                    <th class="px-4 py-3 text-left">Payment</th>
+                                                    <th class="px-4 py-3 text-left">Received</th>
+                                                    <th class="px-4 py-3 text-left">Method</th>
+                                                    <th class="px-4 py-3 text-left">Reference</th>
+                                                    <th class="px-4 py-3 text-right">Amount</th>
+                                                    <th class="px-4 py-3 text-right">Unapplied</th>
+                                                    <th class="px-4 py-3 text-right">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-white/5">
+                                                ${this.unappliedPayments.map(pay => html`
+                                                    <tr class="hover:bg-white/5 transition-colors" data-testid="unapplied-payment">
+                                                        <td class="px-4 py-3 font-mono text-white">${pay.number}</td>
+                                                        <td class="px-4 py-3 text-zinc-400">${formatDay(pay.received_on)}</td>
+                                                        <td class="px-4 py-3 text-zinc-300">${pay.method}</td>
+                                                        <td class="px-4 py-3 text-zinc-400 font-mono text-xs">${pay.reference || '-'}</td>
+                                                        <td class="px-4 py-3 text-right font-mono text-zinc-300">${formatCents(pay.amount_cents)}</td>
+                                                        <td class="px-4 py-3 text-right font-mono text-amber-400">${formatCents(pay.unapplied_cents)}</td>
+                                                        <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                                                            <button
+                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-white font-medium"
+                                                                data-testid="apply-payment"
+                                                                @click=${() => this.openApply(pay)}
+                            ?disabled=${this.openInvoices.length === 0}
+                                                        >Apply</button>
+                                                            <button
+                                                                class="px-3 py-1.5 text-xs rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-200 font-medium"
+                                                                data-testid="void-payment"
+                                                                @click=${() => { this.voiding = pay; this.voidReason = ''; }}
+                                                            >Void</button>
+                                                        </td>
+                                                    </tr>
+                                                `)}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    ${this.openInvoices.length === 0 ? html`
+                                        <p class="text-zinc-500 text-sm">No open invoices to apply cash to.</p>
+                                    ` : nothing}
+                                `}
                             </div>
                         ` : nothing}
 
@@ -451,7 +695,7 @@ export class GableAccountDetail extends LitElement {
                             </div>
                         ` : nothing}
 
-                        ${(this.activeTab !== 'ledger' && this.activeTab !== 'shipto' && this.activeTab !== 'contacts' && this.activeTab !== 'crm') ? html`
+                        ${(this.activeTab !== 'ledger' && this.activeTab !== 'payments' && this.activeTab !== 'shipto' && this.activeTab !== 'contacts' && this.activeTab !== 'crm') ? html`
                             <div class="flex flex-col items-center justify-center h-64 border border-dashed border-white/10 rounded-lg text-zinc-500">
                                 ${icon(AlertCircle, 32, 'mb-2 opacity-50')}
                                 <p>This view is under construction.</p>
@@ -460,6 +704,8 @@ export class GableAccountDetail extends LitElement {
                     </div>
                 </div>
             </div>
+            ${this.renderApplyDialog()}
+            ${this.renderVoidDialog()}
         `;
     }
 }

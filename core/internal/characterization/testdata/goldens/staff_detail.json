@@ -20,7 +20,9 @@
         "full_name": "Golden D Staff",
         "id": "<id-1>",
         "modules": [],
+        "revision": 1,
         "role": "counter",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -41,7 +43,9 @@
         "full_name": "Golden D Staff",
         "id": "<id-1>",
         "modules": [],
+        "revision": 1,
         "role": "counter",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -57,8 +61,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "staff not found"
         },
         "meta": {
           "request_id": "<id-3>"
@@ -77,11 +81,64 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid staff id"
         },
         "meta": {
           "request_id": "<id-4>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.detail.update.missing_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/staff/<id-1>",
+      "body": {
+        "full_name": "Golden D Staff Renamed"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-5>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.detail.update.stale_revision",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/staff/<id-1>",
+      "body": {
+        "full_name": "Golden D Staff Renamed",
+        "revision": 9
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-6>"
         }
       }
     }
@@ -91,6 +148,9 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/admin/staff/<id-1>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "active": true,
         "full_name": "Golden D Staff Renamed",
@@ -107,7 +167,9 @@
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
         "modules": [],
+        "revision": 2,
         "role": "yard",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -117,6 +179,9 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/admin/staff/<id-2>",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "role": "yard"
       }
@@ -126,11 +191,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "NOT_FOUND",
-          "message": "Not Found"
+          "code": "not_found",
+          "message": "staff not found"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -149,11 +214,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid staff id"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -170,11 +241,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -188,13 +259,18 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "enabled": true,
-          "id": "ai_lm",
-          "name": "AI_LM"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "enabled": true,
+            "id": "ai_lm",
+            "name": "AI_LM",
+            "revision": 1
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -203,7 +279,8 @@
       "method": "PUT",
       "path": "/api/v1/admin/modules/ai_lm",
       "body": {
-        "enabled": false
+        "enabled": false,
+        "revision": 1
       }
     },
     "response": {
@@ -212,7 +289,32 @@
       "body": {
         "enabled": false,
         "id": "ai_lm",
-        "name": ""
+        "name": "AI_LM",
+        "revision": 2
+      }
+    }
+  },
+  {
+    "name": "staff.modules.set_disabled.stale",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/modules/ai_lm",
+      "body": {
+        "enabled": false,
+        "revision": 1
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-10>"
+        }
       }
     }
   },
@@ -228,11 +330,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -246,13 +348,18 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "enabled": false,
-          "id": "ai_lm",
-          "name": "AI_LM"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "enabled": false,
+            "id": "ai_lm",
+            "name": "AI_LM",
+            "revision": 2
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -261,7 +368,8 @@
       "method": "POST",
       "path": "/api/v1/admin/staff/<id-1>/modules",
       "body": {
-        "module_id": "ai_lm"
+        "module_id": "ai_lm",
+        "revision": 2
       }
     },
     "response": {
@@ -276,7 +384,38 @@
         "modules": [
           "ai_lm"
         ],
+        "revision": 3,
         "role": "yard",
+        "staff_no": null,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.modules.grant.again_idempotent",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff/<id-1>/modules",
+      "body": {
+        "module_id": "ai_lm",
+        "revision": 3
+      }
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens-d@example.com",
+        "full_name": "Golden D Staff Renamed",
+        "id": "<id-1>",
+        "modules": [
+          "ai_lm"
+        ],
+        "revision": 3,
+        "role": "yard",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -287,7 +426,8 @@
       "method": "POST",
       "path": "/api/v1/admin/staff/<id-1>/modules",
       "body": {
-        "module_id": ""
+        "module_id": "",
+        "revision": 3
       }
     },
     "response": {
@@ -295,11 +435,47 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "module_id",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-12>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.modules.grant.unknown_module",
+    "request": {
+      "method": "POST",
+      "path": "/api/v1/admin/staff/<id-1>/modules",
+      "body": {
+        "module_id": "no_such",
+        "revision": 3
+      }
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "module_id",
+              "message": "must be one of: ai_lm"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-13>"
         }
       }
     }
@@ -318,11 +494,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid staff id"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-14>"
         }
       }
     }
@@ -333,19 +515,20 @@
       "method": "POST",
       "path": "/api/v1/admin/staff/<id-2>/modules",
       "body": {
-        "module_id": "ai_lm"
+        "module_id": "ai_lm",
+        "revision": 1
       }
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "not_found",
+          "message": "staff not found"
         },
         "meta": {
-          "request_id": "<id-11>"
+          "request_id": "<id-15>"
         }
       }
     }
@@ -354,7 +537,10 @@
     "name": "staff.modules.revoke",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/admin/staff/<id-1>/modules/ai_lm"
+      "path": "/api/v1/admin/staff/<id-1>/modules/ai_lm",
+      "headers": {
+        "If-Match": "\"3\""
+      }
     },
     "response": {
       "status": 200,
@@ -366,7 +552,9 @@
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
         "modules": [],
+        "revision": 4,
         "role": "yard",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -375,7 +563,10 @@
     "name": "staff.modules.revoke.again",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/admin/staff/<id-1>/modules/ai_lm"
+      "path": "/api/v1/admin/staff/<id-1>/modules/ai_lm",
+      "headers": {
+        "If-Match": "\"4\""
+      }
     },
     "response": {
       "status": 200,
@@ -387,7 +578,9 @@
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
         "modules": [],
+        "revision": 4,
         "role": "yard",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -403,11 +596,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "details": [
+            {
+              "field": "id",
+              "message": "must be a UUID"
+            }
+          ],
+          "message": "invalid staff id"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-16>"
         }
       }
     }
@@ -418,7 +617,8 @@
       "method": "PUT",
       "path": "/api/v1/admin/modules/ai_lm",
       "body": {
-        "enabled": true
+        "enabled": true,
+        "revision": 2
       }
     },
     "response": {
@@ -427,7 +627,8 @@
       "body": {
         "enabled": true,
         "id": "ai_lm",
-        "name": ""
+        "name": "AI_LM",
+        "revision": 3
       }
     }
   },
@@ -447,7 +648,9 @@
         "full_name": "Golden D Staff Renamed",
         "id": "<id-1>",
         "modules": [],
+        "revision": 4,
         "role": "yard",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }

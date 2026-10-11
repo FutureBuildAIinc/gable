@@ -9,7 +9,10 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "base_url": null,
         "configured": false,
+        "key_hint": null,
+        "revision": 1,
         "source": "none"
       }
     }
@@ -20,7 +23,8 @@
       "method": "PUT",
       "path": "/api/v1/admin/settings/ai",
       "body": {
-        "api_key": ""
+        "api_key": "",
+        "revision": 1
       }
     },
     "response": {
@@ -28,8 +32,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "api_key",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-1>"
@@ -49,11 +59,58 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.save.missing_precondition",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/ai",
+      "body": {
+        "api_key": "golden-placeholder-value"
+      }
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-3>"
+        }
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.save.stale_precondition",
+    "request": {
+      "method": "PUT",
+      "path": "/api/v1/admin/settings/ai",
+      "body": {
+        "api_key": "golden-placeholder-value",
+        "revision": 9
+      }
+    },
+    "response": {
+      "status": 409,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "stale_revision",
+          "message": "the document was changed after this revision was read; reload and retry"
+        },
+        "meta": {
+          "request_id": "<id-4>"
         }
       }
     }
@@ -63,6 +120,9 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/admin/settings/ai",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "api_key": "golden-placeholder-value",
         "base_url": "ftp://not-allowed.invalid"
@@ -73,11 +133,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "base_url",
+              "message": "base URL scheme must be http or https, got \"ftp\""
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-5>"
         }
       }
     }
@@ -92,7 +158,10 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "base_url": null,
         "configured": false,
+        "key_hint": null,
+        "revision": 1,
         "source": "none"
       }
     }
@@ -102,6 +171,9 @@
     "request": {
       "method": "PUT",
       "path": "/api/v1/admin/settings/ai",
+      "headers": {
+        "If-Match": "\"1\""
+      },
       "body": {
         "api_key": "golden-placeholder-value"
       }
@@ -110,7 +182,11 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "status": "saved"
+        "base_url": null,
+        "configured": true,
+        "key_hint": "golden-pla...alue",
+        "revision": 2,
+        "source": "admin"
       }
     }
   },
@@ -124,9 +200,31 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "base_url": null,
         "configured": true,
         "key_hint": "golden-pla...alue",
+        "revision": 2,
         "source": "admin"
+      }
+    }
+  },
+  {
+    "name": "techadmin.ai.delete.missing_precondition",
+    "request": {
+      "method": "DELETE",
+      "path": "/api/v1/admin/settings/ai"
+    },
+    "response": {
+      "status": 428,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "precondition_required",
+          "message": "this write needs If-Match or a body revision"
+        },
+        "meta": {
+          "request_id": "<id-6>"
+        }
       }
     }
   },
@@ -134,7 +232,10 @@
     "name": "techadmin.ai.delete",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/admin/settings/ai"
+      "path": "/api/v1/admin/settings/ai",
+      "headers": {
+        "If-Match": "\"2\""
+      }
     },
     "response": {
       "status": 204,
@@ -154,7 +255,10 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "base_url": null,
         "configured": false,
+        "key_hint": null,
+        "revision": 3,
         "source": "none"
       }
     }
@@ -163,7 +267,10 @@
     "name": "techadmin.ai.delete.again",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/admin/settings/ai"
+      "path": "/api/v1/admin/settings/ai",
+      "headers": {
+        "If-Match": "\"3\""
+      }
     },
     "response": {
       "status": 204,
@@ -184,6 +291,8 @@
       "content_type": "application/json",
       "body": {
         "configured": false,
+        "key_hint": null,
+        "revision": 1,
         "source": "none"
       }
     }
@@ -194,7 +303,8 @@
       "method": "PUT",
       "path": "/api/v1/admin/settings/routing",
       "body": {
-        "api_key": ""
+        "api_key": "",
+        "revision": 1
       }
     },
     "response": {
@@ -202,11 +312,17 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "api_key",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-4>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -223,11 +339,11 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -238,14 +354,18 @@
       "method": "PUT",
       "path": "/api/v1/admin/settings/routing",
       "body": {
-        "api_key": "golden-placeholder-routing"
+        "api_key": "golden-placeholder-routing",
+        "revision": 1
       }
     },
     "response": {
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "status": "saved"
+        "configured": true,
+        "key_hint": "golden-pla...ting",
+        "revision": 2,
+        "source": "admin"
       }
     }
   },
@@ -261,6 +381,7 @@
       "body": {
         "configured": true,
         "key_hint": "golden-pla...ting",
+        "revision": 2,
         "source": "admin"
       }
     }
@@ -269,7 +390,10 @@
     "name": "techadmin.routing.delete",
     "request": {
       "method": "DELETE",
-      "path": "/api/v1/admin/settings/routing"
+      "path": "/api/v1/admin/settings/routing",
+      "headers": {
+        "If-Match": "\"2\""
+      }
     },
     "response": {
       "status": 204,
@@ -290,6 +414,8 @@
       "content_type": "application/json",
       "body": {
         "configured": false,
+        "key_hint": null,
+        "revision": 3,
         "source": "none"
       }
     }

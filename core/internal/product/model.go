@@ -105,6 +105,20 @@ type Product struct {
 	// means unpublished and is a different fact than zero.
 	LeadTimeDays *int `json:"-"`
 
+	// The unit set facts of ADR 0006 sections 3.1 and 3.2, added by item
+	// C3-2A-units: the three default units, the nominal board measure
+	// columns a random length tally reads, and the product's unit set rows
+	// (filled on the reads that serve them; a set always holds at least the
+	// stocking row, so Units is never empty on a stored row).
+	SaleUOM          string           `json:"-"`
+	PriceUOM         string           `json:"-"`
+	PurchaseUOM      string           `json:"-"`
+	BoardThicknessIn *httpx.Quantity  `json:"-"`
+	BoardWidthIn     *httpx.Quantity  `json:"-"`
+	BoardLengthFT    *httpx.Quantity  `json:"-"`
+	RandomLength     bool             `json:"-"`
+	Units            []UnitSetRowView `json:"-"`
+
 	CreatedAt httpx.Timestamp `json:"-"`
 	UpdatedAt httpx.Timestamp `json:"-"`
 }
@@ -149,6 +163,18 @@ type View struct {
 	Revision  int64           `json:"revision"`
 	CreatedAt httpx.Timestamp `json:"created_at"`
 	UpdatedAt httpx.Timestamp `json:"updated_at"`
+
+	// The unit set facts of ADR 0006 section 6 (C3-2A-units): the three
+	// default units, the nominal board measure columns (decimal strings,
+	// null when the product carries none) and the set itself.
+	SaleUOM          string           `json:"sale_uom"`
+	PriceUOM         string           `json:"price_uom"`
+	PurchaseUOM      string           `json:"purchase_uom"`
+	BoardThicknessIn *httpx.Quantity  `json:"board_thickness_in"`
+	BoardWidthIn     *httpx.Quantity  `json:"board_width_in"`
+	BoardLengthFT    *httpx.Quantity  `json:"board_length_ft"`
+	RandomLength     bool             `json:"random_length"`
+	Units            []UnitSetRowView `json:"units"`
 }
 
 // ViewOf builds the wire view of a domain row. The scaled fields are already
@@ -157,6 +183,9 @@ type View struct {
 // which the decimal round trip renders exactly for every value a NUMERIC
 // column can hold.
 func ViewOf(p *Product) View {
+	if p.Units == nil {
+		p.Units = []UnitSetRowView{}
+	}
 	base, cost := p.BasePriceScaled, p.AverageUnitCostScaled
 	if base == 0 {
 		base = priceFromFloat(p.BasePrice)
@@ -189,6 +218,10 @@ func ViewOf(p *Product) View {
 		ReorderPoint: rp, ReorderQty: rq,
 		OnHand: onHand, Allocated: allocated, Available: onHand - allocated,
 		Revision: p.Revision, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+		SaleUOM: p.SaleUOM, PriceUOM: p.PriceUOM, PurchaseUOM: p.PurchaseUOM,
+		BoardThicknessIn: p.BoardThicknessIn, BoardWidthIn: p.BoardWidthIn,
+		BoardLengthFT: p.BoardLengthFT, RandomLength: p.RandomLength,
+		Units: p.Units,
 	}
 }
 

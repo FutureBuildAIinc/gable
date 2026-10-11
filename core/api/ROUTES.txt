@@ -70,8 +70,8 @@ GET	/api/portal/v1/users	internal/portal	h.HandleListUsers
 PUT	/api/portal/v1/users/{id}/role	internal/portal	h.HandleUpdateUserRole
 PUT	/api/portal/v1/users/{id}/status	internal/portal	h.HandleUpdateUserStatus
 POST	/api/v1/a2a/purchase-order	cmd/server	a2aReceiver.ReceiveWebhook
-GET	/api/v1/accounts/{id}	internal/account	h.GetAccountSummary
-GET	/api/v1/accounts/{id}/transactions	internal/account	h.GetTransactions
+GET	/api/v1/accounts/{id}	internal/account	wrap(guard, h.HandleSummary)
+GET	/api/v1/accounts/{id}/transactions	internal/account	wrap(guard, h.HandleTransactions)
 DELETE	/api/v1/activities/{id}	internal/crm	h.HandleDeleteActivity
 GET	/api/v1/activities/{id}	internal/crm	h.HandleGetActivity
 PUT	/api/v1/activities/{id}	internal/crm	h.HandleUpdateActivity
@@ -103,6 +103,11 @@ POST	/api/v1/ap/payments	internal/ap	h.PayVendor
 GET	/api/v1/apps	pkg/apps	h.handleList
 POST	/api/v1/apps/{key}/disable	pkg/apps	h.handleDisable
 POST	/api/v1/apps/{key}/enable	pkg/apps	h.handleEnable
+GET	/api/v1/ar/aging	internal/account	wrap(guard, h.HandleAging)
+GET	/api/v1/ar/aging/summary	internal/account	wrap(guard, h.HandleAgingSummary)
+POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.HandleReverse)
+GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
+GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
 POST	/api/v1/bankrecon/import	internal/bankrecon	h.ImportCSV
@@ -119,10 +124,10 @@ GET	/api/v1/branches/{id}	internal/location	h.GetBranch
 PUT	/api/v1/branches/{id}	internal/location	h.UpdateBranch
 GET	/api/v1/branches/{id}/tree	internal/location	tree
 GET	/api/v1/branches/{id}/users	internal/location	h.ListBranchUsers
-GET	/api/v1/charge-codes	internal/chargecode	h.HandleList
-POST	/api/v1/charge-codes	internal/chargecode	h.HandleCreate
-GET	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleGet
-PUT	/api/v1/charge-codes/{id}	internal/chargecode	h.HandleUpdate
+GET	/api/v1/charge-codes	internal/chargecode	wrap(read, h.HandleList)
+POST	/api/v1/charge-codes	internal/chargecode	wrap(write, h.HandleCreate)
+GET	/api/v1/charge-codes/{id}	internal/chargecode	wrap(read, h.HandleGet)
+PUT	/api/v1/charge-codes/{id}	internal/chargecode	wrap(write, h.HandleUpdate)
 POST	/api/v1/configurator/build-sku	internal/configurator	h.handleBuildSKU
 GET	/api/v1/configurator/options	internal/configurator	h.handleGetOptions
 GET	/api/v1/configurator/presets	internal/configurator	h.handleGetPresets
@@ -131,7 +136,13 @@ POST	/api/v1/configurator/validate	internal/configurator	h.handleValidate
 DELETE	/api/v1/contacts/{id}	internal/customer	h.HandleDeleteContact
 GET	/api/v1/contacts/{id}	internal/customer	h.HandleGetContact
 PUT	/api/v1/contacts/{id}	internal/customer	h.HandleUpdateContact
-GET	/api/v1/credit-memos/{customerId}	internal/invoice	h.HandleListCreditMemos
+GET	/api/v1/credit-memos	internal/invoice	h.HandleListCreditMemos
+POST	/api/v1/credit-memos	internal/invoice	h.HandleCreateCreditMemo
+GET	/api/v1/credit-memos/{id}	internal/invoice	h.HandleGetCreditMemo
+PUT	/api/v1/credit-memos/{id}	internal/invoice	h.HandleUpdateCreditMemo
+POST	/api/v1/credit-memos/{id}/applications	internal/invoice	h.HandleCreditApply
+POST	/api/v1/credit-memos/{id}/refunds	internal/payment	h.HandleCreditRefund
+POST	/api/v1/credit-memos/{id}/transitions	internal/invoice	h.HandleCreditTransition
 GET	/api/v1/customers	internal/customer	h.HandleListCustomers
 POST	/api/v1/customers	internal/customer	h.HandleCreateCustomer
 GET	/api/v1/customers/{customerId}/activities	internal/crm	h.HandleListActivities
@@ -155,7 +166,7 @@ GET	/api/v1/delivery/deliveries/{id}	internal/delivery	h.HandleGetDelivery
 POST	/api/v1/delivery/deliveries/{id}/adjust-qty	internal/delivery	h.HandleAdjustQuantity
 POST	/api/v1/delivery/deliveries/{id}/pod-photo	internal/delivery	h.HandleUploadPODPhoto
 GET	/api/v1/delivery/deliveries/{id}/pod-photos	internal/delivery	h.HandleListPODPhotos
-PUT	/api/v1/delivery/deliveries/{id}/status	internal/delivery	h.HandleUpdateDeliveryStatus
+POST	/api/v1/delivery/deliveries/{id}/transitions	internal/delivery	h.HandleStopTransition
 GET	/api/v1/delivery/drivers	internal/delivery	h.HandleListDrivers
 POST	/api/v1/delivery/drivers	internal/delivery	h.HandleCreateDriver
 DELETE	/api/v1/delivery/drivers/{id}	internal/delivery	h.HandleDeleteDriver
@@ -164,23 +175,33 @@ PUT	/api/v1/delivery/drivers/{id}	internal/delivery	h.HandleUpdateDriver
 POST	/api/v1/delivery/drivers/{id}/photo	internal/delivery	h.HandleUploadDriverPhoto
 GET	/api/v1/delivery/routes	internal/delivery	h.HandleListRoutes
 POST	/api/v1/delivery/routes	internal/delivery	h.HandleCreateRoute
-POST	/api/v1/delivery/routes/{id}/complete	internal/delivery	h.HandleCompleteRoute
+GET	/api/v1/delivery/routes/{id}	internal/delivery	h.HandleGetRoute
 GET	/api/v1/delivery/routes/{id}/deliveries	internal/delivery	h.HandleListDeliveries
-POST	/api/v1/delivery/routes/{id}/dispatch	internal/delivery	h.HandleDispatchRoute
 POST	/api/v1/delivery/routes/{id}/optimize	internal/delivery	h.HandleOptimizeRoute
 POST	/api/v1/delivery/routes/{id}/reorder	internal/delivery	h.HandleReorderStops
+POST	/api/v1/delivery/routes/{id}/transitions	internal/delivery	h.HandleRouteTransition
 GET	/api/v1/delivery/vehicles	internal/delivery	h.HandleListVehicles
 POST	/api/v1/delivery/vehicles	internal/delivery	h.HandleCreateVehicle
 DELETE	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleDeleteVehicle
 GET	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleGetVehicle
 PUT	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleUpdateVehicle
 POST	/api/v1/delivery/vehicles/{id}/photo	internal/delivery	h.HandleUploadVehiclePhoto
-GET	/api/v1/deposits	internal/deposit	h.ListDeposits
-POST	/api/v1/deposits	internal/deposit	h.RecordDeposit
-GET	/api/v1/deposits/{id}	internal/deposit	h.GetDeposit
-POST	/api/v1/deposits/{id}/apply	internal/deposit	h.ApplyDeposit
 GET	/api/v1/documents/print/invoice/{id}	internal/document	h.HandlePrintInvoice
 GET	/api/v1/documents/print/pickticket/{id}	internal/document	h.HandlePrintPickTicket
+GET	/api/v1/drafts/orders	internal/order	k
+POST	/api/v1/drafts/orders	internal/order	k
+GET	/api/v1/drafts/orders/feed	internal/order	k
+GET	/api/v1/drafts/orders/{id}	internal/order	k
+PUT	/api/v1/drafts/orders/{id}	internal/order	k
+POST	/api/v1/drafts/orders/{id}/promote	internal/order	k
+POST	/api/v1/drafts/orders/{id}/transitions	internal/order	k
+GET	/api/v1/drafts/quotes	internal/quote	k
+POST	/api/v1/drafts/quotes	internal/quote	k
+GET	/api/v1/drafts/quotes/feed	internal/quote	k
+GET	/api/v1/drafts/quotes/{id}	internal/quote	k
+PUT	/api/v1/drafts/quotes/{id}	internal/quote	k
+POST	/api/v1/drafts/quotes/{id}/promote	internal/quote	k
+POST	/api/v1/drafts/quotes/{id}/transitions	internal/quote	k
 GET	/api/v1/edi/partners	internal/edi	h.ListPartners
 POST	/api/v1/edi/partners	internal/edi	h.CreatePartner
 DELETE	/api/v1/edi/partners/{id}	internal/edi	h.DeletePartner
@@ -208,14 +229,23 @@ GET	/api/v1/governance/rfcs	internal/governance	h.HandleListRFCs
 POST	/api/v1/governance/rfcs	internal/governance	h.HandleCreateRFC
 GET	/api/v1/governance/rfcs/{id}	internal/governance	h.HandleGetRFC
 PUT	/api/v1/governance/rfcs/{id}	internal/governance	h.HandleUpdateRFC
+POST	/api/v1/governance/rfcs/{id}/transitions	internal/governance	h.HandleTransition
 GET	/api/v1/inventory	internal/inventory	h.ListInventory
 POST	/api/v1/inventory/adjust	internal/inventory	h.AdjustStock
 POST	/api/v1/inventory/transfer	internal/inventory	h.MoveStock
 GET	/api/v1/invoices	internal/invoice	h.HandleList
 GET	/api/v1/invoices/{id}	internal/invoice	h.HandleGet
-POST	/api/v1/invoices/{id}/credit-memo	internal/invoice	h.HandleCreateCreditMemo
 POST	/api/v1/invoices/{id}/email	internal/document	h.HandleEmailInvoice
-GET	/api/v1/invoices/{id}/payments	internal/payment	h.GetPaymentHistory
+GET	/api/v1/invoices/{id}/payments	internal/invoice	h.HandleApplications
+POST	/api/v1/invoices/{id}/transitions	internal/invoice	h.HandleTransition
+POST	/api/v1/invoices/{id}/write-offs	internal/invoice	h.HandleWriteOff
+GET	/api/v1/links/customers/{id}	internal/links	Guarded(guard, h.resolveFor("customers", false))
+GET	/api/v1/links/drafts/orders/{id}	internal/links	Guarded(guard, h.resolveFor("orders", true))
+GET	/api/v1/links/drafts/quotes/{id}	internal/links	Guarded(guard, h.resolveFor("quotes", true))
+GET	/api/v1/links/invoices/{id}	internal/links	Guarded(guard, h.resolveFor("invoices", false))
+GET	/api/v1/links/orders/{id}	internal/links	Guarded(guard, h.resolveFor("orders", false))
+GET	/api/v1/links/products/{id}	internal/links	Guarded(guard, h.resolveFor("products", false))
+GET	/api/v1/links/quotes/{id}	internal/links	Guarded(guard, h.resolveFor("quotes", false))
 GET	/api/v1/locations	internal/location	list
 POST	/api/v1/locations	internal/location	create
 DELETE	/api/v1/locations/{id}	internal/location	h.DeleteLocation
@@ -232,8 +262,9 @@ GET	/api/v1/matching/exceptions	internal/matching	h.ListExceptions
 GET	/api/v1/matching/results/{po_id}	internal/matching	h.GetMatchResult
 POST	/api/v1/matching/run/{po_id}	internal/matching	h.RunMatch
 GET	/api/v1/me/branches	internal/location	h.ListMyBranches
-GET	/api/v1/millwork/options	internal/millwork	h.handleGetOptions
+GET	/api/v1/millwork/options	internal/millwork	h.handleListOptions
 POST	/api/v1/millwork/options	internal/millwork	h.handleCreateOption
+GET	/api/v1/millwork/options/{id}	internal/millwork	h.handleGetOption
 GET	/api/v1/orders	internal/order	h.HandleListOrders
 POST	/api/v1/orders	internal/order	h.HandleCreateOrder
 GET	/api/v1/orders/fulfillment-requests	internal/order	h.HandleListFulfilmentRequests
@@ -250,10 +281,14 @@ GET	/api/v1/payment-terms	internal/customer	h.HandleListTerms
 POST	/api/v1/payment-terms	internal/customer	h.HandleCreateTerms
 GET	/api/v1/payment-terms/{id}	internal/customer	h.HandleGetTerms
 PUT	/api/v1/payment-terms/{id}	internal/customer	h.HandleUpdateTerms
-POST	/api/v1/payments	internal/payment	h.CreatePayment
-POST	/api/v1/payments/card	internal/payment	h.ProcessCardPayment
-POST	/api/v1/payments/intent	internal/payment	h.CreatePaymentIntent
-POST	/api/v1/payments/refund	internal/payment	h.ProcessRefund
+GET	/api/v1/payments	internal/payment	h.HandleList
+POST	/api/v1/payments	internal/payment	h.HandleCreate
+POST	/api/v1/payments/card	internal/payment	h.HandleCard
+POST	/api/v1/payments/intent	internal/payment	h.HandleIntent
+GET	/api/v1/payments/{id}	internal/payment	h.HandleGet
+POST	/api/v1/payments/{id}/applications	internal/payment	h.HandleApply
+POST	/api/v1/payments/{id}/refunds	internal/payment	h.HandleRefund
+POST	/api/v1/payments/{id}/transitions	internal/payment	h.HandleTransition
 GET	/api/v1/pos/catalog	internal/pos	h.GetCatalog
 GET	/api/v1/pos/products/search	internal/pos	h.SearchProducts
 GET	/api/v1/pos/returns	internal/pos	h.ListReturns
@@ -316,6 +351,8 @@ POST	/api/v1/products/{id}/pim/generate/seo	internal/pim	h.HandleGenerateSEO
 GET	/api/v1/products/{id}/pim/media	internal/pim	h.HandleListMedia
 DELETE	/api/v1/products/{id}/pim/media/{mediaId}	internal/pim	h.HandleDeleteMedia
 PATCH	/api/v1/products/{id}/pim/media/{mediaId}/primary	internal/pim	h.HandleSetPrimaryMedia
+GET	/api/v1/products/{id}/units	internal/product	h.HandleGetUnitSet
+PUT	/api/v1/products/{id}/units	internal/product	h.HandlePutUnitSet
 GET	/api/v1/purchase-orders	internal/purchase_order	h.HandleListPOs
 POST	/api/v1/purchase-orders	internal/purchase_order	h.HandleCreatePO
 GET	/api/v1/purchase-orders/recommendations	internal/purchase_order	h.HandleGetRecommendations
@@ -342,6 +379,7 @@ POST	/api/v1/quotes/{id}/exposure/escalate-now	internal/pricing	h.HandleEscalate
 POST	/api/v1/quotes/{id}/exposure/override	internal/pricing	h.HandleOverride
 POST	/api/v1/quotes/{id}/exposure/request-ack	internal/pricing	h.HandleRequestAck
 GET	/api/v1/quotes/{id}/file	internal/quote	h.HandleDownloadOriginalFile
+PUT	/api/v1/quotes/{id}/file	internal/quote	h.HandleAttachFile
 POST	/api/v1/quotes/{id}/transitions	internal/quote	h.HandleTransition
 POST	/api/v1/reporting/builder/export	internal/reporting	h.HandleBuilderExport
 POST	/api/v1/reporting/builder/preview	internal/reporting	h.HandleBuilderPreview
@@ -368,6 +406,10 @@ POST	/api/v1/tax/exemptions	internal/tax	h.createExemption
 GET	/api/v1/tax/exemptions/{customerID}	internal/tax	h.getExemptions
 DELETE	/api/v1/tax/exemptions/{id}	internal/tax	h.deleteExemption
 POST	/api/v1/tax/preview	internal/tax	h.previewTax
+GET	/api/v1/units	internal/unit	h.handleList
+POST	/api/v1/units	internal/unit	h.handleCreate
+GET	/api/v1/units/{code}	internal/unit	h.handleGet
+PUT	/api/v1/units/{code}	internal/unit	h.handleUpdate
 GET	/api/v1/users	internal/location	h.ListKnownUsers
 GET	/api/v1/users/{sub}/branches	internal/location	h.ListUserBranches
 POST	/api/v1/users/{sub}/branches	internal/location	h.GrantUserBranch

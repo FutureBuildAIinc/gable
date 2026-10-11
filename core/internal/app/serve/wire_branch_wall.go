@@ -6,13 +6,19 @@ package serve
 import (
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/chargecode"
+	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/location"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -39,6 +45,13 @@ func newBranchWall(db *database.DB) *branchWall {
 		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
 	}
 	return w
+}
+
+// chargeCodes mounts the charge code master: every role that prices a line
+// reads it, and only admin, owner and finance write it (a code carries its
+// revenue account).
+func (w *branchWall) chargeCodes(mux *http.ServeMux, svc *chargecode.Service) {
+	chargecode.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"), w.scoped("admin", "owner", "finance"))
 }
 
 // locations mounts the location routes behind the branch middleware: the
@@ -69,6 +82,25 @@ func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 		RegisterRoutes(mux, w.scoped("admin", "owner", "sales"), w.scoped("admin", "owner", "finance"))
 }
 
+// crm mounts the activity routes behind the branch middleware: every route
+// addresses a customer (by path) or an activity of one, and the repositories
+// hold each read and write to the customer's branches, so a caller held to
+// branch A finds branch B's activity a 404.
+func (w *branchWall) crm(mux *http.ServeMux, svc *crm.Service) {
+	crm.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
+}
+
+// delivery mounts the delivery routes behind the branch middleware: a stop
+// walls through its order's branch and a route through its stops' orders (a
+// route with no stops carries no branch fact and is visible), so a caller
+// held to branch A finds branch B's stop or route a 404. Vehicles and
+// drivers carry no branch column (the fleet is dealer-wide), so their reads
+// run on the same mount without a wall, a stated limit of the module's
+// contract, listed in CONTRACT-CHANGES.md.
+func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...string) {
+	h.RegisterRoutes(mux, w.scoped(roles...))
+}
+
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"))
 }
@@ -78,6 +110,29 @@ func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
 	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales"),
 		w.scoped("admin", "owner", "finance", "warehouse"))
+}
+
+// invoices mounts the invoice and credit memo routes: the credit memo create
+// takes branch_id from its body and the writes address a document by path id,
+// so the service holds both to the caller's branch context (ADR 0007 section
+// 2.3) beside the wall every read already carries.
+func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
+	invoice.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+}
+
+// accounts mounts the account and AR routes: the reads (summary, subledger,
+// aging, statement) behind the role guard and the branch middleware, the
+// reconciliation and the application reversal behind the finance guard.
+func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
+	account.NewHandler(svc).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"), w.scoped("admin", "owner", "finance"))
+}
+
+// payments mounts the payment routes: the create takes branch_id from its body
+// and the writes address a payment by path id, so the service holds both to the
+// caller's branch context (ADR 0007 section 2.3) beside the wall every read
+// carries.
+func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
+	payment.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance", "cashier"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

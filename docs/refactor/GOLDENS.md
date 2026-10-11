@@ -39,7 +39,15 @@ run:
    which drawn value still varies per run; see the identity mask below for
    what that rules out.) After the seed finishes, the harness inserts its
    own clock-window fixture rows through SQL on the fresh database (see
-   "Clock-window fixture rows" below).
+   "Clock-window fixture rows" below). Before them it puts every branch on
+   `Etc/UTC` (`pinBranchZonesToUTC`): the server derives a document date
+   (the invoice date, and with it the GL entry date and the due date) in the
+   branch's zone, the seed leaves its branches in `America/Vancouver` and the
+   schema defaults the rest to `America/New_York`, and from UTC midnight to the
+   zone's own midnight the branch's date trails the harness's UTC seed day by
+   one. `TestBranchLocalDate` (internal/order) keeps the arithmetic pinned at
+   the instants the window opens and closes; the goldens simply do not sit in
+   it.
 3. **Real server.** It runs the real server - the `serve` role of the one
    `core` binary, `core serve` - as a subprocess on a free port with
    `AUTH_MODE=dev` (the same shape as CI's backend job). The whole wiring of
@@ -143,6 +151,8 @@ byte.
 | exposure event `idempotency_key` | `<idem-key>` | a hash over the event's creation instant |
 | quote analytics `avg_days_to_close` | `<days>` | at this base it averages only the quotes the script closes milliseconds after creating them; the seeded book has none |
 | `insurance_expiry`, `next_service_date` (vehicles) | `<ts>` | fixed calendar dates hardcoded in the demo seed's vehicle fixture; unlike every other seed date they move with the calendar, not the seed clock, so a seed-day offset would drift daily |
+| `cdl_expiry`, `hire_date` (seeded drivers) | `<ts>` | the same kind of fixed calendar dates in the demo seed's driver fixture; a seed-day offset moved one day per calendar day and turned `delivery_fleet` red on every day but the one it was recorded |
+| route `eta`, `estimated_arrival` | `<eta>` | the server's now plus minutes; a run in the last minutes before UTC midnight pushes it onto the next day while the end-of-run guard (which compares the clock at the end with the seed day) does not fire. A null stays null |
 
 Placeholders are numbered by walking the transcript (paths, request bodies,
 headers, response bodies) with map keys in sorted order, so the numbering is

@@ -26,7 +26,7 @@ back so every dealer benefits.
 
 | Layer | Technology |
 |---|---|
-| Backend | Go 1.25 (stdlib `net/http.ServeMux` + pgx v5) |
+| Backend | Go 1.26 (stdlib `net/http.ServeMux` + pgx v5) |
 | Database | PostgreSQL 16 |
 | Frontend | Lit 3 web components + TypeScript 5.9 + Vite 7 + Tailwind 3.4 |
 | Packaging | Docker |
@@ -43,7 +43,7 @@ back so every dealer benefits.
 
 ## Quickstart
 
-**Prerequisites:** Docker, Go 1.25+, Node 20+, PostgreSQL 16.
+**Prerequisites:** Docker, Go 1.26+, Node 20+, PostgreSQL 16.
 
 ```bash
 # 1. Boot Postgres alone (docker compose → localhost:5434)

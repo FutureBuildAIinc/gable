@@ -60,8 +60,77 @@ func r1bPlatformGroups() []groupDef {
 				      WHERE entity_type = 'api_key' AND entity_id = '{machineKeyID}'::uuid
 				      ORDER BY created_at, id`,
 			},
+			// The units module of C3-2A-units joins the same vocabulary
+			// (ADR 0006 section 2.3): units:read reads the catalogue, a
+			// write needs units:write, and the refusal is audited the same
+			// way.
+			{
+				name:   "machine_key.units_key",
+				method: "POST",
+				path:   "/api/v1/admin/keys",
+				body:   map[string]any{"name": "golden-units-key", "scopes": []any{"units:read"}},
+				extract: map[string]string{
+					"unitsKey":   "/api_key",
+					"unitsKeyID": "/key/id",
+				},
+			},
+			{name: "machine_key.units_read",
+				method:  "GET",
+				path:    "/api/v1/units/EA",
+				headers: map[string]string{"Authorization": "Bearer {unitsKey}"},
+			},
+			{
+				name:    "machine_key.units_write_refused",
+				method:  "POST",
+				path:    "/api/v1/units",
+				headers: map[string]string{"Authorization": "Bearer {unitsKey}"},
+				body:    map[string]any{"code": "SKID", "name": "Skid", "dimension": "count"},
+			},
+			{
+				name: "machine_key.units_refusal_audit_row",
+				sql: `SELECT action, entity_type, entity_id::text AS entity_id, actor_kind,
+				             actor_id, user_id, changes
+				      FROM audit_log
+				      WHERE entity_type = 'api_key' AND entity_id = '{unitsKeyID}'::uuid
+				      ORDER BY created_at, id`,
+			},
 			// Key management is user-only whatever the scopes.
 			{name: "machine_key.user_only_refused", method: "GET", path: "/api/v1/admin/keys", headers: bearer()},
+			// The finer admin scopes (ADR 0009): a settings key reaches the
+			// settings area, and the coarse admin scopes no longer do.
+			{
+				name:   "machine_key.finer_settings_key.create",
+				method: "POST",
+				path:   "/api/v1/admin/keys",
+				body:   map[string]any{"name": "golden-settings-key", "scopes": []any{"admin:settings"}},
+				extract: map[string]string{
+					"settingsKey": "/api_key",
+				},
+			},
+			{name: "machine_key.finer_settings_key.reads_settings", method: "GET", path: "/api/v1/admin/settings/ai",
+				headers: map[string]string{"Authorization": "Bearer {settingsKey}"}},
+			{name: "machine_key.finer_settings_key_refused_on_staff", method: "GET", path: "/api/v1/admin/staff",
+				headers: map[string]string{"Authorization": "Bearer {settingsKey}"}},
+			{
+				name:   "machine_key.coarse_admin_key.create",
+				method: "POST",
+				path:   "/api/v1/admin/keys",
+				body:   map[string]any{"name": "golden-coarse-key", "scopes": []any{"admin:read"}},
+				extract: map[string]string{
+					"coarseKey":   "/api_key",
+					"coarseKeyID": "/key/id",
+				},
+			},
+			{name: "machine_key.coarse_admin_key_refused_on_settings", method: "GET", path: "/api/v1/admin/settings/ai",
+				headers: map[string]string{"Authorization": "Bearer {coarseKey}"}},
+			// The refusal's audit row names the finer scope it lacked.
+			{
+				name: "machine_key.coarse_admin_key.refusal_audit_row",
+				sql: `SELECT action, changes->>'scope' AS refused_scope
+				      FROM audit_log
+				      WHERE entity_type = 'api_key' AND entity_id = '{coarseKeyID}'::uuid
+				      ORDER BY created_at, id`,
+			},
 			// A key-shaped token that is not a key.
 			{
 				name:    "machine_key.unknown_key",

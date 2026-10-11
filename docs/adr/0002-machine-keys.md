@@ -217,7 +217,10 @@ Accepted with this record, each named with the later item that narrows it:
   example `admin:settings`, `users:grants`) narrow this with the tech admin
   module's conversion in cycle 5, item C5-1, on its own record: no admin
   act is a draft, so the confirm gated scopes of ADR 0007 (`*:propose`,
-  `*:commit`) do not take it up.
+  `*:commit`) do not take it up. Narrowed by ADR 0009 (C5-1a): the admin
+  module's second path segment names an area scope (`admin:settings`,
+  `admin:staff`, `admin:modules`) that replaces the coarse scopes on that
+  area's routes, and the users module's writes are named `users:grants`.
 - **The prefix lookup is a timing oracle for prefix existence.** A request
   whose 12 character prefix matches a stored key but whose body is wrong
   pays one Argon2id compare; an unknown prefix returns before any hash

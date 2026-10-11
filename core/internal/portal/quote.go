@@ -157,7 +157,9 @@ type QuoteRequestLine struct {
 // quote request into a bulk insert.
 const maxQuoteRequestLines = 200
 
-// validUOMs is the uom_type enum from migration 001. A UOM outside it fails at
+// validUOMs is the sixteen code closed vocabulary the uom column held until
+// the unit catalogue of migration 099 replaced the enum. A UOM outside it
+// fails at
 // the database with an opaque enum error, so it is rejected here where the
 // message can name the field.
 var validUOMs = map[string]bool{
@@ -410,7 +412,7 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 				INSERT INTO quote_lines (
 					id, quote_id, product_id, sku, description, customer_note,
 					quantity, uom, unit_price, line_total, position, created_at
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uom_type, 0, 0, $9, NOW())
+				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, 0, $9, NOW())
 			`, uuid.New(), quoteID, l.ProductID, l.SKU, l.Description, l.CustomerNote, l.Quantity, l.UOM, i)
 			if err != nil {
 				return fmt.Errorf("failed to insert quote line: %w", err)
