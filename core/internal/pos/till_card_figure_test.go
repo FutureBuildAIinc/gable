@@ -102,6 +102,36 @@ func TestTheTillReportCardFigureSubtractsBookedVoidRefunds(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE (r14 P3-2): the CARD figure subtracts the session's card returns the
+// same way the CASH figure subtracts its cash returns: a return's card
+// refund rides its credit memo, so the figure joins it there.
+func TestTheTillReportCardFigureSubtractsCardReturns(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	sessionID := f.openTill(10000)
+	saleID, body := f.saleOf("3", withToken(tender("card", 1796)))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	if got := f.expectedOf(t, sessionID, "CARD"); got != 1796 {
+		t.Fatalf("the card figure after the sale = %d, want 1796", got)
+	}
+	// two card returns of one unit each: 599 back to the card twice
+	for i := 0; i < 2; i++ {
+		if r := f.cardReturnOn(t, saleID, lineID, "1"); r.status != http.StatusCreated {
+			t.Fatalf("card return %d = %d: %s", i+1, r.status, r.raw)
+		}
+	}
+	if got := f.expectedOf(t, sessionID, "CARD"); got != 598 {
+		t.Errorf("the card figure after two card returns = %d, want 598 (1796 collected less the 1198 refunded to the card)", got)
+	}
+	if got := f.expectedOf(t, sessionID, "CASH"); got != 10000 {
+		t.Errorf("the cash figure after two card returns = %d, want 10000 (a card return pays out of no drawer)", got)
+	}
+	f.assertARInvariants(t)
+}
+
 // RULE (the report's shape): the CARD figure is written only where the
 // session collected on cards. A cash only session's report carries no CARD
 // entry at all (a zero figure would name a collection that never happened),

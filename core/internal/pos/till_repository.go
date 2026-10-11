@@ -204,6 +204,20 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 		Scan(&agg.CardRefundsCents); err != nil {
 		return nil, fmt.Errorf("failed to aggregate the session's card refunds: %w", err)
 	}
+	// The session's card returns, through their credit memos, as the CASH
+	// figure counts its cash returns (r14 P3-2): a card return's refund rides
+	// its memo, never the tender's payment, so without this the CARD figure
+	// disagreed with the books by every card return of the session.
+	var cardReturnRefunds int64
+	if err := r.ex(ctx).QueryRow(ctx, `
+		SELECT COALESCE(SUM(ROUND(rf.amount * 100)::bigint), 0)
+		FROM payment_refunds rf
+		JOIN credit_memos cm ON cm.id = rf.credit_memo_id
+		JOIN pos_returns pr ON pr.credit_memo_id = cm.id
+		WHERE pr.till_session_id = $1 AND rf.method = 'CARD'`, sessionID).Scan(&cardReturnRefunds); err != nil {
+		return nil, fmt.Errorf("failed to aggregate the session's card return refunds: %w", err)
+	}
+	agg.CardRefundsCents += cardReturnRefunds
 	return agg, nil
 }
 
