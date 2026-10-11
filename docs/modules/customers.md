@@ -173,6 +173,36 @@ the exact guard is composed in
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
 
+A key bound to one branch (ADR 0007 section 5.5) reads a customer its
+branch shares with another, and changes a shared customer's record only on
+the branch local fields. The rule is deny by default: any header field not
+listed as branch local is restricted, so a field added later is restricted
+until it is listed in `branchLocalFields` (`core/internal/customer/shared.go`).
+A restricted write is `403 forbidden` in the words "a branch bound key may act
+only on its own branch: the customer is also held by branch <id>" (the lowest
+numbered other branch), with the `key.branch_refused` row, and the record is
+untouched. A customer the key's branch holds alone, a user and an unshared
+customer are unchanged. A dealer wide key changes the restricted fields and
+each change writes a `customer.shared_restricted_changed` audit row naming
+the key and the before and after value of every field.
+
+| Route | Field | Class | Reason |
+|---|---|---|---|
+| `PUT /customers/{id}` | `account_number`, `name`, `address` | RESTRICTED | the identity and billing address every branch's documents carry |
+| | `email`, `phone` | BRANCH LOCAL | contact channels of whoever deals with the customer |
+| | `tier`, `price_level_id` | RESTRICTED | price every branch's sales |
+| | `is_active` | RESTRICTED | deactivates the customer for every branch |
+| | `credit_limit_cents`, `currency`, `payment_terms_id`, `po_required` | RESTRICTED | credit, currency, terms and the purchase order rule at every branch |
+| | `salesperson_id` | RESTRICTED | one salesperson per customer across branches |
+| `PATCH /customers/{id}/salesperson` | `salesperson_id` | RESTRICTED | as above |
+| `PUT /customers/{id}/escalation-policy` | policy, threshold, agreement | RESTRICTED | governs the repricing of every branch's quotes |
+
+Ship-tos and contacts carry no branch column, so on a shared customer every
+existing one is shared: a bound key reads them and may add a new one with
+`POST`, and is refused `PUT /ship-tos/{id}`, `PUT /contacts/{id}` and
+`DELETE /contacts/{id}` in the same words. On a customer the key's branch
+holds alone, all of them are allowed.
+
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 8, 9, 11, 12.

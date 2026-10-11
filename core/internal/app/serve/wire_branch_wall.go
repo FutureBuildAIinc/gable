@@ -112,7 +112,12 @@ func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
 
 // customers mounts the customer routes: the create takes primary_branch_id from
 // its body, so it is held to the caller's branch context; payment terms writes
-// take the narrower finance guard.
+// take the narrower finance guard. The service also carries the shared
+// customer guard (principal rulings 43 to 45): a key bound to one branch
+// changes only the branch local fields of a customer another branch holds,
+// and adds but never changes or deletes its ship-tos and contacts. The routes
+// note their method and path so a refusal the service serves can name them in
+// its key.branch_refused row.
 func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 	svc.WithBranchGuard(customerguard.New(w.guard)).WithSharedGuard(customerguard.NewShared(w.keyWall))
 	customer.NewHandler(svc).RegisterRoutes(mux,

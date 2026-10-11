@@ -235,6 +235,15 @@ finance or warehouse paths (the exact guard is composed in
 Releasing a hold needs `admin`, `owner` or `finance`. A key without
 the scope is `403 forbidden`; the audit row carries the refused scope.
 
+A key bound to one branch (ADR 0007 section 5.5) may create or update an
+order only for a customer its branch holds (`POST /orders`, `PUT
+/orders/{id}`: `403 forbidden` naming `customer_id`, nothing written), and
+the exposure gate and override read the order under the branch wall before
+they look up its source quote. For every caller, an order refuses a
+`ship_to_id` or `ordered_by_contact_id` its customer does not own, with a
+`400 validation_failed` naming the field ("is not a ship-to of this
+customer", "is not a contact of this customer").
+
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 7a, 8, 9, 11, 12.

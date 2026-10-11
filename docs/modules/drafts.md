@@ -788,6 +788,13 @@ then up test (`TestMigration103_DownThenUpLosesNoRow` in
 `drafts` or `draft_events` row counts, because the down
 drops those tables and the row loss is by design.
 
+The draft promotions recheck the customer: a draft's payload may name any
+customer when it is saved, but `POST /drafts/quotes/{id}/promote` and
+`POST /drafts/orders/{id}/promote` read the customer from the stored payload
+and refuse a branch bound key whose pin does not hold it (`403 forbidden`
+naming `customer_id`), so a draft written by a user or an earlier call cannot
+become a document on another branch's customer.
+
 ## ADRs that govern this module
 
 - [`docs/adr/0007-drafts-links-and-confirm-gated-scopes.md`](../adr/0007-drafts-links-and-confirm-gated-scopes.md): the design. Sections 1 and 2 set the resource and the lifecycle; section 3 is the change feed (cursor, heartbeat, the key recheck, the hub, the stream limits, the retention); section 4 is promotion and the kind registry (the `Kind` interface and the promoter); section 5 is the scope grammar (read, write, propose, commit; the finer names; the policy table; the `ScopeTarget` resolution; the user only routes; the branch bound key); section 6 is the actor quadruple; section 7 is document numbers in record URLs; section 8 is the links surface; section 9 is the migration order; section 10 is the quote and order kinds and the file attach.

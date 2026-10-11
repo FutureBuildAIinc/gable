@@ -707,10 +707,32 @@ unbound keys keep exactly their reach on every route.
 A WALLED entry is a tested claim, not a label: its note names the column or
 join its module filters on (`quotes.branch_id`, a customer through
 `customer_branches`, a delivery through its order's branch, the dashboard
-and inventory through `locations.branch_id`), and a sweep drives every WALLED
-route that takes an id or a list with the other branch's twin row as a bound
-key's target: the foreign row answers exactly what a missing row answers (or
-a 403), never names the row, and nothing is written.
+and inventory through `locations.branch_id`), and a sweep drives the WALLED
+routes with the other branch's twin row as a bound key's target. Every write
+leg sends a body that passes the module's validation, shadowed by a control
+against the pin's own twin that must pass the same validation and reach the
+row (a leg whose control cannot finish in the harness says why in the test);
+the foreign leg must answer 403 or 404 and never a scope refusal; and a
+change is measured by a digest of every row that names the twin rows by id,
+never by table counts. A coverage test holds the allowlist against the legs
+and fails by name for any WALLED route no bound key leg drives. The routes
+that take their branch from the caller, and so name no foreign row to
+refuse, are driven once and must leave branch B's rows as they were and land
+the row they make at the pin's branch.
+
+A document write that names a customer in its body is held to the pin the
+same way a path customer is: the cash and card payment, the credit memo
+(create and update), the order and the quote (create and update, a document
+moved onto another customer included) and the draft promotions, which read
+the customer from the draft's stored payload, are refused a bound key whose
+pin does not hold that customer (403 naming `customer_id`, the
+`key.branch_refused` row, nothing written). Without it the payment and its
+GL entry, the credit, or the order with the other customer's tax exemption
+landed on a customer the key could not see. An order, for every caller,
+refuses a `ship_to_id` or an `ordered_by_contact_id` its customer does not
+own (400 naming the field, as the credit memo create does), so an order can
+never carry another customer's address. The order exposure gate and override
+read the order under the branch wall before they look up its source quote.
 
 The confinement contract the CONFINED routes hold: a body is read whole (a
 body that is not exactly one complete JSON value is refused, so the wall and
@@ -740,12 +762,56 @@ names a customer while targeting a tier is refused however many branches of
 that customer hold the pin: it prices every branch's customers of the tier.
 
 The stricter line on shared customers: a bound key may READ a customer its
-branch shares with another, but may not add or change a customer scoped
-pricing rule or tax exemption for it, because the write prices the other
-branch's sales to that customer too. Those writes are held to the customers
-the pin holds alone; the refusal names the other branch. A branch
-integration that must price shared customers holds an unbound key an operator
-keeps. A shared user's grant, revoke and home branch for the pin branch is
+branch shares with another (and the audit of that customer's category rules),
+but may not add or change a customer scoped pricing rule or tax exemption
+for it, because the write prices the other branch's sales to that customer
+too. Those writes are held to the customers the pin holds alone; the refusal
+names the other branch (the lowest numbered branch that is not the pin). A
+category rule whose target is not an account rule is dealer wide whether or
+not it also names a customer, so the legacy tier row migration 107 keeps NOT
+VALID cannot be deleted, singly or in bulk, by a bound key.
+
+The customer record follows the same rule, deny by default. On a customer
+held by the pin's branch and another, a bound key changes only the branch
+local fields; every other field of the record, and the salesperson and the
+escalation policy, is restricted, and a field added to the header write is
+restricted until it is listed as branch local. A restricted write is refused
+403 in the same words naming the other branch, with the `key.branch_refused`
+row and nothing changed. A customer the pin holds alone, a user and an
+unshared customer are unchanged. A dealer wide (unbound) key changes the
+restricted fields of a shared customer and every such change is audited as
+`customer.shared_restricted_changed` with the key as the actor and the before
+and after value of each field (a machine key carries no role, so the finance
+and owner condition of the ruling cannot be evaluated for a key and is
+recorded as an open question). Ship-tos and contacts carry no branch column,
+so for a shared customer every existing one is shared: a bound key reads
+them and may add new ones but may not change or delete any (the same
+refusal); for a customer the pin holds alone all of it is allowed. The
+fields:
+
+| Route | Field | Class | Reason |
+|---|---|---|---|
+| `PUT /customers/{id}` | `account_number` | RESTRICTED | the identifier every branch's documents and statements carry |
+| | `name` | RESTRICTED | printed on every branch's documents |
+| | `email` | BRANCH LOCAL | a contact channel of whoever deals with the customer |
+| | `phone` | BRANCH LOCAL | a contact channel of whoever deals with the customer |
+| | `address` | RESTRICTED | the billing address on every branch's invoices and statements |
+| | `tier` | RESTRICTED | prices every branch's sales |
+| | `is_active` | RESTRICTED | deactivates the customer for every branch |
+| | `price_level_id` | RESTRICTED | prices every branch's sales |
+| | `salesperson_id` | RESTRICTED | one salesperson per customer across branches; not plainly branch local |
+| | `credit_limit_cents` | RESTRICTED | the credit every branch's orders draw on |
+| | `currency` | RESTRICTED | the currency of every branch's documents |
+| | `payment_terms_id` | RESTRICTED | due dates and collections at every branch |
+| | `po_required` | RESTRICTED | a purchase order number required on every branch's orders |
+| | `primary_branch_id` | not changeable | 400 for every caller: it cannot be changed by an edit |
+| `PATCH /customers/{id}/salesperson` | `salesperson_id` | RESTRICTED | as above |
+| `PUT /customers/{id}/escalation-policy` | `policy`, `threshold_percent`, `agreement_signed_at`, `agreement_ref` | RESTRICTED | governs the repricing of every branch's quotes |
+| `POST /customers/{id}/ship-tos`, `/contacts` | a new record | allowed | adds; changes nothing shared |
+| `PUT /ship-tos/{id}`, `PUT /contacts/{id}`, `DELETE /contacts/{id}` | an existing record | shared records | refused on a shared customer, allowed on a customer the pin holds alone |
+
+A branch integration that must price shared customers holds an unbound key an
+operator keeps. A shared user's grant, revoke and home branch for the pin branch is
 accepted as confined and audited: the writes record their audit rows
 (`user.branch.granted`, `user.branch.revoked`, `user.home_branch.set`) with
 the machine key named as the actor.

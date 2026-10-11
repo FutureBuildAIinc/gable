@@ -235,6 +235,11 @@ is registered at the serve layer as `admin`, `owner`, `sales` (see
 A key without the scope is `403 forbidden`; the route names the path
 segment of the scope so the audit row carries it.
 
+A key bound to one branch (ADR 0007 section 5.5) may create or update a
+quote only for a customer its branch holds (`POST /quotes`, `PUT
+/quotes/{id}`: `403 forbidden` naming `customer_id`, nothing written),
+which also keeps a quote from being moved onto another branch's customer.
+
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 7a, 8, 9, 11, 12: the list envelope, the cursor, the error envelope, the enum casing, the money and quantity rules, the document number, the idempotency key, the revision precondition, the timestamps.
