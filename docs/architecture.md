@@ -73,9 +73,11 @@ dependency injected at construction in `core/internal/app/serve/serve.go`;
 occasionally an interface defined by the consumer with an adapter in the same
 file.
 
-**Example:** Order confirmation posts an invoice + GL entry + AR subledger
-debit in one transaction (`order.ConfirmInProcess` → `invoice.PostInvoiceToLedger`
-→ `gl.SyncInvoice` + `account.PostInvoice`/`account.RecordPayment`).
+**Example:** Order fulfilment posts an invoice, its GL entry and the AR
+subledger debit in one transaction (`order.Fulfil` →
+`invoice.CreateFulfilmentInvoice` → `account.PostInvoice`, which writes both
+the GL entry and the subledger debit). A payment is a separate path
+(`payment.Service` → `account.RecordPayment`).
 
 ### 4.2. Asynchronous events: in-process bus + transactional outbox
 `core/pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam.
