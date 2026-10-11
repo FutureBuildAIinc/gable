@@ -83,6 +83,10 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		WithAuditLog(audit.NewLogger(db)).WithBranchGuard(middleware.NewBranchGuard(db))
 	mux := http.NewServeMux()
 	ap.NewHandler(f.svc).RegisterRoutes(mux)
+	// The GL routes ride the same server (unauthenticated, as the desk's stand
+	// in serves them to the fixture's administrator): the void tests reach the
+	// ledger through the public reverse and void routes, not hand SQL.
+	gl.NewHandler(f.glSvc).RegisterRoutes(mux)
 	wallMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := &middleware.UserClaims{Role: "finance", Roles: []string{"finance"}}
 		claims.Subject = r.Header.Get("X-Test-Sub")
@@ -114,17 +118,26 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 	return f
 }
 
+// fixtureEntries is every journal entry the fixture's acts wrote for its
+// vendor: the entries whose source reference is one of the vendor's bills or
+// payments, plus each such entry's whole reversal chain (a reversal of a
+// reversal chains two levels down reverses_entry_id, so a one level walk would
+// miss it).
+const fixtureEntries = `WITH RECURSIVE mine(id) AS (
+	SELECT id FROM gl_journal_entries
+	WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
+	   OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
+	UNION
+	SELECT e.id FROM gl_journal_entries e JOIN mine ON e.reverses_entry_id = mine.id
+) SELECT id FROM mine`
+
 // cleanup removes everything the fixture's vendor produced, children first.
 func (f *fixture) cleanup() {
 	ctx := context.Background()
 	exec := func(sql string, args ...any) { _, _ = f.db.Pool.Exec(ctx, sql, args...) }
 	inv := `SELECT id FROM vendor_invoices WHERE vendor_id = $1`
-	entries := `SELECT id FROM gl_journal_entries WHERE source_ref_id IN (` + inv + `)
-	             OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)`
-	exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE reverses_entry_id IN `+entries+`)`, f.vendor)
-	exec(`DELETE FROM gl_journal_entries WHERE reverses_entry_id IN `+entries, f.vendor)
-	exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id IN `+entries, f.vendor)
-	exec(`DELETE FROM gl_journal_entries WHERE id IN `+entries, f.vendor)
+	exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id IN (`+fixtureEntries+`)`, f.vendor)
+	exec(`DELETE FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor)
 	exec(`DELETE FROM events_outbox WHERE entity_type = 'vendor_invoice' AND entity_id IN `+inv, f.vendor)
 	exec(`DELETE FROM audit_log WHERE entity_type = 'vendor_invoice' AND entity_id IN `+inv, f.vendor)
 	exec(`DELETE FROM ap_payment_applications WHERE invoice_id IN `+inv, f.vendor)
@@ -294,6 +307,55 @@ func (f *fixture) payHeaders(headers []string, cents int64, invoiceIDs ...string
 }
 
 // ---------------------------------------------------------------------------
+// Reaching the ledger through the public GL routes.
+// ---------------------------------------------------------------------------
+
+// glReverse runs the GL reverse route on an entry.
+func (f *fixture) glReverse(entry string) resp {
+	f.t.Helper()
+	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
+}
+
+// glVoidEntry runs the GL void route on an entry.
+func (f *fixture) glVoidEntry(entry string) resp {
+	f.t.Helper()
+	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+}
+
+// glEntryOf is the bill's linked entry id.
+func (f *fixture) glEntryOf(invoiceID string) string {
+	f.t.Helper()
+	var entry string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT gl_entry_id::text FROM vendor_invoices WHERE id = $1`, invoiceID).Scan(&entry); err != nil {
+		f.t.Fatal(err)
+	}
+	return entry
+}
+
+// glReversalOf is the id of the one reversal pointing at an entry.
+func (f *fixture) glReversalOf(entry string) string {
+	f.t.Helper()
+	var rev string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id::text FROM gl_journal_entries WHERE reverses_entry_id = $1`, entry).Scan(&rev); err != nil {
+		f.t.Fatal(err)
+	}
+	return rev
+}
+
+// number is the bill's own number (AP-).
+func (f *fixture) number(invoiceID string) string {
+	f.t.Helper()
+	var n string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT number FROM vendor_invoices WHERE id = $1`, invoiceID).Scan(&n); err != nil {
+		f.t.Fatal(err)
+	}
+	return n
+}
+
+// ---------------------------------------------------------------------------
 // Reading the ledger, the events and the control account.
 // ---------------------------------------------------------------------------
 
@@ -334,9 +396,19 @@ func (f *fixture) entryLegsWhere(t *testing.T, db *database.DB, where string, ar
 }
 
 // controlBalance is the AP control account's balance in cents, from the
-// entries this fixture's acts wrote (approves credit it, payments and
-// reversals debit it), scoped to the fixture's own bills and payments.
+// POSTED entries this fixture's acts wrote (approves credit it, payments and
+// reversals debit it; the trial balance sums POSTED entries alone, so an
+// entry the GL void route voided counts nowhere), scoped to the fixture's
+// own bills and payments.
 func (f *fixture) controlBalance() int64 {
+	f.t.Helper()
+	return f.controlBalanceIn("")
+}
+
+// controlBalanceIn is controlBalance for one currency (every currency when
+// the code is empty): the tie the trial balance states per currency, never
+// across two.
+func (f *fixture) controlBalanceIn(currency string) int64 {
 	f.t.Helper()
 	var balance int64
 	err := f.db.Pool.QueryRow(context.Background(), `
@@ -344,11 +416,8 @@ func (f *fixture) controlBalance() int64 {
 		FROM gl_journal_lines l
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		JOIN gl_accounts a ON a.id = l.account_id
-		WHERE a.code = '2010' AND e.id IN (
-		    SELECT id FROM gl_journal_entries
-		    WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
-		       OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
-		       OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))`, f.vendor).Scan(&balance)
+		WHERE a.code = '2010' AND e.status = 'POSTED' AND ($2 = '' OR e.currency = $2) AND e.id IN (
+		    `+fixtureEntries+`)`, f.vendor, currency).Scan(&balance)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -358,10 +427,18 @@ func (f *fixture) controlBalance() int64 {
 // openSum is what the vendor's open bills owe, in cents.
 func (f *fixture) openSum() int64 {
 	f.t.Helper()
+	return f.openSumIn("")
+}
+
+// openSumIn is openSum for one currency (every currency when the code is
+// empty).
+func (f *fixture) openSumIn(currency string) int64 {
+	f.t.Helper()
 	var open int64
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT ROUND(COALESCE(SUM(amount_open), 0) * 100)::bigint FROM vendor_invoices WHERE vendor_id = $1 AND status IN ('APPROVED', 'PARTIAL')`,
-		f.vendor).Scan(&open); err != nil {
+		`SELECT ROUND(COALESCE(SUM(amount_open), 0) * 100)::bigint FROM vendor_invoices
+		WHERE vendor_id = $1 AND status IN ('APPROVED', 'PARTIAL') AND ($2 = '' OR currency = $2)`,
+		f.vendor, currency).Scan(&open); err != nil {
 		f.t.Fatal(err)
 	}
 	return open
@@ -376,11 +453,7 @@ func (f *fixture) balanced() bool {
 		SELECT count(*) FROM gl_journal_entries e
 		JOIN (SELECT journal_entry_id, SUM(debit) d, SUM(credit) c FROM gl_journal_lines GROUP BY journal_entry_id) s
 		  ON s.journal_entry_id = e.id
-		WHERE e.id IN (
-		      SELECT id FROM gl_journal_entries
-		      WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
-		         OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
-		         OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))
+		WHERE e.id IN (`+fixtureEntries+`)
 		  AND s.d <> s.c`, f.vendor).Scan(&bad)
 	if err != nil {
 		f.t.Fatal(err)

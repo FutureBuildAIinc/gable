@@ -301,6 +301,100 @@ func (r *Repository) Lock(ctx context.Context, id uuid.UUID) (*LockedInvoice, er
 	return &locked, nil
 }
 
+// chainLive is the liveness test every AP act keys on (review r4 P1-1): the
+// entry and its whole reversal chain, walked down reverses_entry_id through
+// entries of any status, net a nonzero amount on the control account when
+// only their POSTED entries are summed, exactly as the trial balance sums
+// 2010: per currency, never across two (review r6 P2-1), so a chain holding
+// two currencies whose whole sums cancel still reads live in the currency
+// that holds the amount, however the chain arose (legacy rows included). A
+// reversal row of one level says nothing by itself: a reversal that a later
+// reversal put back leaves the credit live at any depth, and a chain whose
+// POSTED entries cancel holds none. The %s is the root entries' predicate;
+// its argument placeholders are the query's own.
+const chainLive = `WITH RECURSIVE chain(root, id) AS (
+	SELECT e.id, e.id FROM gl_journal_entries e WHERE %s
+	UNION
+	SELECT c.root, n.id FROM gl_journal_entries n JOIN chain c ON n.reverses_entry_id = c.id
+)
+SELECT c.root FROM chain c
+JOIN gl_journal_entries e ON e.id = c.id AND e.status = 'POSTED'
+JOIN gl_journal_lines l ON l.journal_entry_id = e.id
+JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010'
+GROUP BY c.root, e.currency
+HAVING SUM(l.credit - l.debit) <> 0`
+
+// HasPostedInvoiceEntry reports whether a VENDOR_INVOICE journal entry of the
+// bill stands live in the control account, linked or not: the entry's whole
+// reversal chain nets a nonzero amount on 2010 over its POSTED entries (the
+// predicate migration 106 links by, made chain wide in review r4 P1-1), so a
+// void can tell a bill whose credit is in the ledger from one that posted
+// nothing, whatever mix of reversals and voids the chain holds.
+func (r *Repository) HasPostedInvoiceEntry(ctx context.Context, id uuid.UUID) (bool, error) {
+	sql := fmt.Sprintf(`SELECT count(*) FROM (%s) live_roots`, fmt.Sprintf(chainLive,
+		`e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1 AND e.reverses_entry_id IS NULL`))
+	var n int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, sql, id).Scan(&n); err != nil {
+		return false, fmt.Errorf("failed to read the bill's journal entries: %w", err)
+	}
+	return n > 0, nil
+}
+
+// LiveInvoiceEntryOtherThan names the bill's newest live VENDOR_INVOICE entry
+// other than the one excluded (found is false when the excluded entry is the
+// only live one; a nil exclude names no entry, so every live entry of the
+// bill matches): the double posted shape, whose duplicate credit a void
+// would strand under a VOIDED bill (review r2 P3-1). Live is the chain net
+// of HasPostedInvoiceEntry, never one reversal level (review r4 P1-1).
+func (r *Repository) LiveInvoiceEntryOtherThan(ctx context.Context, invoiceID, exclude uuid.UUID) (entryNumber int64, entryID uuid.UUID, found bool, err error) {
+	sql := fmt.Sprintf(`SELECT root.entry_number, root.id FROM (%s) live_roots
+		JOIN gl_journal_entries root ON root.id = live_roots.root
+		ORDER BY root.created_at DESC, root.id DESC LIMIT 1`, fmt.Sprintf(chainLive,
+		`e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1 AND e.reverses_entry_id IS NULL AND e.id <> $2`))
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, sql, invoiceID, exclude).Scan(&entryNumber, &entryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, uuid.Nil, false, nil
+	}
+	if err != nil {
+		return 0, uuid.Nil, false, fmt.Errorf("failed to read the bill's journal entries: %w", err)
+	}
+	return entryNumber, entryID, true, nil
+}
+
+// LinkedEntryLedger reads the linked entry's place in the ledger. live says
+// its credit stands in the control account: the entry's whole reversal chain
+// nets a nonzero amount on 2010 over its POSTED entries, the trial balance's
+// own lens (review r4 P1-1: a reversal of a reversal puts the credit back,
+// so one level down the chain decides nothing), summed per currency, never
+// across two (review r6 P2-1): live when any one currency's net is nonzero,
+// so a mixed currency chain whose whole sums cancel still reads live in the
+// currency that holds the amount. reversalTaken says a reversal row of any
+// status points at the entry, so the one reversal an entry may hold is
+// already taken and no new reversal can post while that row stands. An entry
+// deleted by hand holds no credit: live is false (review r2 P2-1).
+func (r *Repository) LinkedEntryLedger(ctx context.Context, id uuid.UUID) (live, reversalTaken bool, err error) {
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		WITH RECURSIVE chain(id) AS (
+			SELECT id FROM gl_journal_entries WHERE id = $1
+			UNION
+			SELECT n.id FROM gl_journal_entries n JOIN chain c ON n.reverses_entry_id = c.id
+		)
+		SELECT COALESCE((
+		          SELECT count(*) FROM (
+		                SELECT e.currency FROM gl_journal_lines l
+		                JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+		                JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010'
+		                WHERE e.id IN (SELECT id FROM chain)
+		                GROUP BY e.currency
+		                HAVING SUM(l.credit - l.debit) <> 0) nets), 0) <> 0,
+		       EXISTS(SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = $1)`, id).
+		Scan(&live, &reversalTaken)
+	if err != nil {
+		return false, false, fmt.Errorf("failed to read the linked journal entry: %w", err)
+	}
+	return live, reversalTaken, nil
+}
+
 // LockForPayment takes one invoice of the named vendor FOR UPDATE, in the
 // caller's id order (ADR 0008 section 9 step 5a). No row means no such
 // invoice for this vendor.

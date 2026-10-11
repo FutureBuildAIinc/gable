@@ -372,6 +372,31 @@ func (s *Service) approve(ctx context.Context, id uuid.UUID, pre Precondition, w
 			return httpx.InvalidStateTransition("only a pending bill can be approved",
 				httpx.Blocker("invoice_not_pending", "the bill is "+locked.Status.Status()))
 		}
+		// A pending bill cannot carry a paid amount: a payment applies only
+		// to an approved or partial bill (ADR 0008 7.4), so this is a legacy
+		// or hand edited row, and amount_open sits where migration 106
+		// clamped it, below the total. The approve posts the whole total
+		// while amount_open stands still, which would leave money in 2010 no
+		// bill owes (review r8 P3-1), so the act is refused and the row is
+		// left for the operator to mend by hand.
+		if locked.AmountPaidCents != 0 {
+			return httpx.InvalidStateTransition("a pending bill cannot carry a paid amount; mend amount_paid by hand",
+				httpx.Blocker("has_paid_amount", fmt.Sprintf("%d cents are paid against this bill", int64(locked.AmountPaidCents))))
+		}
+		// The approve decides on the ledger like every AP act (review r4
+		// P3-2): a legacy PENDING bill whose posting ran before the status
+		// moved (the base's sync could post first; migration 106 links only
+		// APPROVED or PARTIAL, so such a row carries its entry linked by
+		// hand or not at all) already holds its credit in 2010, and an
+		// approve would post a second one no bill owes. The refusal names
+		// the live entry, whatever depth its reversal chain has reached
+		// (P1-1's chain lens); nothing is written.
+		if number, other, found, err := s.repo.LiveInvoiceEntryOtherThan(ctx, id, uuid.Nil); err != nil {
+			return err
+		} else if found {
+			return httpx.InvalidStateTransition("the bill already holds a live journal entry, so an approve would post its own entry beside the net amount already standing in accounts payable",
+				httpx.Blocker("entry_not_linked", fmt.Sprintf("journal entry #%d (%s) still leaves a net amount standing in accounts payable for this bill, as a credit or as a debit, whichever way its chain nets; mend the bill's ledger by hand before approving", number, other)))
+		}
 		lines, err := s.repo.LinesWithCodes(ctx, id)
 		if err != nil {
 			return err
@@ -469,16 +494,28 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 }
 
 // void is the transition that reverses the entry: a pending bill has nothing
-// posted and simply dies; an approved one's entry is reversed whole; a bill
-// that prices to zero posted nothing and voids with nothing to reverse. A bill
-// with money applied is refused: the payments have to be undone first. A bill
-// that owes (approved or partial, a nonzero total) but has no linked entry is
-// refused too: no route links an entry to a bill, and a legacy bill of that
-// shape may hold the removed sync's one leg credit, which a plain void would
-// strand. So is a linked entry that does not balance (that one leg shape,
-// linked by hand): its reversal would not balance either. Both refusals are a
-// stated limit: such a bill stays approved and payable until a later repair
-// item.
+// posted and simply dies; an approved one's linked entry is reversed whole
+// when its credit stands live in the control account; a bill whose entry is
+// not live (one that prices to zero, a legacy bill whose posting was
+// swallowed, or an entry the GL routes have already undone, linked or not)
+// holds no credit in the control account and voids with nothing to reverse.
+// Liveness is decided on the whole reversal chain, never on one step of it
+// (review r4 P1-1): a bill's credit is live exactly when the POSTED entries
+// of its VENDOR_INVOICE entry and that entry's whole reversal chain leave a
+// net amount on 2010, so a reversal that a later reversal put back leaves
+// the credit live again at any depth. A bill with money applied is refused:
+// the payments have to be undone first. So is a bill that holds a live
+// VENDOR_INVOICE entry it is not linked to (a legacy bill: its posting was
+// swallowed, it holds the removed sync's one leg credit, a hand edit may
+// even have zeroed its total after the approve, or it was posted twice and
+// only the newest entry is linked, the duplicate named by the refusal): a
+// plain void would strand that credit. A linked entry that does not balance
+// (that one leg shape, linked by hand) is refused too, because its reversal
+// would not balance either, and so is a linked entry whose chain still nets
+// a live credit while the one reversal row the entry may hold is already
+// taken (the row is not posted, or the chain was reinstated behind it).
+// Every refusal is a stated limit: such a bill keeps its status until a
+// later repair item.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
@@ -501,33 +538,83 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 		if !from.allows(StatusVoided) {
 			return httpx.InvalidStateTransition("a " + from.Status() + " bill cannot be voided")
 		}
-		// An approved or partial bill that owes but has no linked entry (a
-		// legacy bill: its posting was swallowed, or it holds the removed
-		// sync's one leg credit) must not void silently: a credit may stay in
-		// the control account with nothing to reverse. A zero total bill posted
-		// nothing and owes nothing, so it voids.
-		if (from == StatusApproved || from == StatusPartial) && locked.GLEntryID == nil && locked.TotalCents != 0 {
-			return httpx.InvalidStateTransition("the bill has no linked journal entry, so a void could leave its credit in accounts payable",
-				httpx.Blocker("entry_not_linked", "no route links a journal entry to a bill yet; the bill stays approved and payable until a later repair item"))
+		// A bill that holds a posted, unreversed VENDOR_INVOICE entry it is
+		// not linked to (a legacy bill: its posting was swallowed, or it holds
+		// the removed sync's one leg credit, and a hand edit may have zeroed
+		// its total after the approve) must not void silently: the credit
+		// would stay in the control account with nothing to reverse, whatever
+		// the bill's total says now (review r8 P3-2). A bill with no live
+		// entry holds no credit in the ledger, so it voids with nothing to
+		// reverse.
+		live, err := s.repo.HasPostedInvoiceEntry(ctx, id)
+		if err != nil {
+			return err
+		}
+		if locked.GLEntryID == nil && live {
+			return httpx.InvalidStateTransition("the bill holds a posted journal entry it is not linked to, so a void could leave the entry's net amount standing in accounts payable",
+				httpx.Blocker("entry_not_linked", "no route links a journal entry to a bill yet; the bill keeps its status until a later repair item"))
 		}
 		var reversal *uuid.UUID
 		if locked.GLEntryID != nil {
-			entry, err := s.gl.PostReversal(ctx, gl.ReversalInput{
-				EntryID: *locked.GLEntryID, EntryDate: s.now(), Currency: locked.Currency,
-				Reason: reason, PostedBy: who.Actor,
-			})
-			if err != nil {
-				if errors.Is(err, gl.ErrPeriodClosed) {
-					return conflictBlocker("period_closed", "the reversal would be dated into a closed fiscal period")
-				}
-				if errors.Is(err, gl.ErrUnbalanced) {
-					return httpx.InvalidStateTransition("the linked entry does not balance and a void would mirror it into another unbalanced entry",
-						httpx.Blocker("entry_unbalanced", "the bill's linked journal entry does not balance (the removed sync's one leg shape); the bill stays approved and payable until a later repair item"))
-				}
-				return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
+			// A second live entry beside the linked one (the double posted
+			// shape: the base read the status outside its transaction, so a
+			// double click could post it twice) must not be stranded under a
+			// VOIDED bill: no route could reach it again (review r2 P3-1).
+			if number, other, found, err := s.repo.LiveInvoiceEntryOtherThan(ctx, id, *locked.GLEntryID); err != nil {
+				return err
+			} else if found {
+				return httpx.InvalidStateTransition("the bill holds a second live journal entry beside its linked one, so a void would strand that entry's credit in accounts payable",
+					httpx.Blocker("entry_not_linked", fmt.Sprintf("journal entry #%d (%s) is also live for this bill; reverse it before voiding", number, other)))
 			}
-			if entry != nil {
-				reversal = &entry.ID
+			// The linked arm is keyed on the ledger too, never on the pointer
+			// alone (review r2 P2-1): an entry the GL routes have already
+			// reversed or voided holds no live credit, so the void has
+			// nothing to reverse rather than a failure. Liveness is the net
+			// of the whole reversal chain (review r4 P1-1), so a reversal of
+			// a reversal that put the credit back reads live again. A live
+			// entry whose one reversal row is already taken (the row is not
+			// posted, or the chain was reinstated behind it) cannot be
+			// reversed again: the void is refused rather than stranding the
+			// credit.
+			liveLinked, reversalTaken, err := s.repo.LinkedEntryLedger(ctx, *locked.GLEntryID)
+			if err != nil {
+				return err
+			}
+			if liveLinked && reversalTaken {
+				return httpx.InvalidStateTransition("the linked entry's reversal chain still nets a nonzero amount on accounts payable while the one reversal the entry may hold is taken, so no new reversal can post",
+					httpx.Blocker("reversal_not_posted", "a net amount stands in accounts payable, as a credit or as a debit, whichever way the chain nets; mend the linked entry's reversal chain before voiding the bill; the bill keeps its status until then"))
+			}
+			if liveLinked {
+				entry, err := s.gl.PostReversal(ctx, gl.ReversalInput{
+					EntryID: *locked.GLEntryID, EntryDate: s.now(), Currency: locked.Currency,
+					Reason: reason, PostedBy: who.Actor,
+				})
+				if err != nil {
+					if errors.Is(err, gl.ErrPeriodClosed) {
+						return conflictBlocker("period_closed", "the reversal would be dated into a closed fiscal period")
+					}
+					if errors.Is(err, gl.ErrUnbalanced) {
+						return httpx.InvalidStateTransition("the linked entry does not balance and a void would mirror it into another unbalanced entry",
+							httpx.Blocker("entry_unbalanced", "the bill's linked journal entry does not balance (the removed sync's one leg shape); the bill stays approved and payable until a later repair item"))
+					}
+					if errors.Is(err, gl.ErrAlreadyReversed) {
+						return httpx.InvalidStateTransition("the linked entry's reversal appeared while the void ran, so its credit is already undone",
+							httpx.Blocker("reversal_not_posted", "the linked journal entry is reversed; the bill keeps its status until then"))
+					}
+					// A GL void of the linked entry committed between the
+					// void's ledger read and the reversal's own read of the
+					// entry (review r6 P3-1): the same 409 as the other lost
+					// races, nothing written, and the retry voids with
+					// nothing to reverse.
+					if errors.Is(err, gl.ErrNotPosted) {
+						return httpx.InvalidStateTransition("the linked entry was voided while the void ran, so there is nothing left to reverse",
+							httpx.Blocker("reversal_not_posted", "the linked journal entry is no longer posted; the bill keeps its status until then"))
+					}
+					return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
+				}
+				if entry != nil {
+					reversal = &entry.ID
+				}
 			}
 		}
 		if err := s.repo.MarkVoided(ctx, id); err != nil {
@@ -591,7 +678,9 @@ func (s *Service) ListVendorInvoices(ctx context.Context, vendorID *uuid.UUID, s
 // PayVendor records a payment to a vendor and applies it to the bills it
 // names, in id order, under their locks: only an approved or partial bill
 // takes money (ADR 0008 7.4). The entry posts through gl.PostEntry inside the
-// act's transaction; a posting failure fails the act.
+// act's transaction in the bills' currency (a payment naming bills of more
+// than one currency is refused, review r2 P2-2); a posting failure fails the
+// act.
 func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APPayment, error) {
 	// The invoices are locked in id order (ADR 0008 section 9 step 5a), so
 	// every contender takes them in one order; the money then applies in the
@@ -632,6 +721,23 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 					httpx.Blocker("invoice_not_approved", inv.Number+" is "+inv.Status.Status()))
 			}
 			locked[id] = inv
+		}
+
+		// The payment's entry posts in the bills' currency, so the control
+		// account ties per currency (the trial balance never sums across two,
+		// review r2 P2-2): every named bill must share one currency, and a
+		// payment that spans two is refused naming the bills that differ.
+		currency := ""
+		var setter uuid.UUID
+		for _, id := range lockedIDs {
+			c := locked[id].Currency
+			if currency == "" {
+				currency, setter = c, id
+			} else if c != currency {
+				return httpx.InvalidStateTransition("a payment cannot span bills of different currencies",
+					httpx.Blocker("currency_mismatch", fmt.Sprintf("%s is %s and %s is %s",
+						locked[setter].Number, currency, locked[id].Number, c)))
+			}
 		}
 
 		var events []outbox.Event
@@ -680,7 +786,7 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 			ref := p.ID
 			entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
 				EntryDate: mustDate(in.PaymentDate), Memo: "Vendor payment " + p.ID.String(),
-				Source: gl.SourceVendorPmt, SourceRefID: &ref, PostedBy: who.Actor,
+				Source: gl.SourceVendorPmt, SourceRefID: &ref, Currency: currency, PostedBy: who.Actor,
 				Legs: []gl.Leg{
 					{AccountCode: gl.AccountCodeAP, Description: "Accounts Payable", Debit: in.AmountCents - remaining},
 					{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents - remaining},
