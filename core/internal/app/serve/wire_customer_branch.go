@@ -153,6 +153,45 @@ func posSyncCustomersOf() func(ctx context.Context, r *http.Request) ([]uuid.UUI
 	}
 }
 
+// documentCustomersOf resolves the customers a document write names: its body
+// customer_id, and the customer of the job its job_id names (a projects row
+// belongs to exactly one customer, and a document on the job is priced and
+// posted through that customer, the same resolution the pricing rule write
+// and the calculate read carry). A job that does not exist names nothing the
+// wall can hold and the handler's own answer covers it.
+func documentCustomersOf(db *database.DB) func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		if db == nil {
+			return nil, errors.New("document customer lookup: no database")
+		}
+		var body struct {
+			CustomerID string `json:"customer_id"`
+			JobID      string `json:"job_id"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		var out []uuid.UUID
+		if id, err := uuid.Parse(body.CustomerID); err == nil {
+			out = append(out, id)
+		}
+		if raw := body.JobID; raw != "" {
+			if job, err := uuid.Parse(raw); err == nil {
+				var customer *uuid.UUID
+				err := db.GetExecutor(ctx).QueryRow(ctx,
+					`SELECT customer_id FROM projects WHERE id = $1`, job).Scan(&customer)
+				if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return nil, err
+				}
+				if customer != nil {
+					out = append(out, *customer)
+				}
+			}
+		}
+		return out, nil
+	}
+}
+
 // queryCustomerOf resolves the customer a query parameter names. A value that
 // does not parse names nothing the wall can hold and passes to the handler's
 // own validation; an absent value passes unless required says otherwise (the

@@ -20,18 +20,145 @@ import (
 	"github.com/google/uuid"
 )
 
+// round5FirstMint is the fixture's first mint (the pos and pricing scopes),
+// kept for the legs that need it once the fixture has swapped to the document
+// family mint.
+type round5FirstMint struct{ raw, id string }
+
 // round5Fixture is the pin fixture with the branch tax rates and the walled
-// twins seeded, keeping the first mint (the pos and pricing scopes) available
-// beside the document family mint.
-func round5Fixture(t *testing.T) (*keyPinFixture, *walledTwins, string) {
+// twins seeded, swapped to the document family mint; the first mint stays
+// reachable for the pos legs.
+func round5Fixture(t *testing.T) (*keyPinFixture, *walledTwins, round5FirstMint) {
 	t.Helper()
 	f := newKeyPinFixture(t)
-	firstBound := f.bound
+	first := round5FirstMint{raw: f.bound, id: f.boundKeyID}
+	f.bound, f.unbound, f.boundKeyID = f.bound2, f.unbound2, f.bound2KeyID
 	if _, err := f.db.Pool.Exec(context.Background(),
 		`UPDATE locations SET default_tax_rate = 0.05 WHERE id IN ($1, $2)`, f.branchA, f.branchB); err != nil {
 		t.Fatalf("seed the branch tax rate: %v", err)
 	}
-	return f, f.seedWalledTwins(t), firstBound
+	return f, f.seedWalledTwins(t), first
+}
+
+// auditRowsFor counts the given key's refusal rows.
+func (f *keyPinFixture) auditRowsFor(t *testing.T, keyID string) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'key.branch_refused' AND actor_id = $1`, keyID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// TestKeyBranchPin_JobOfAnotherCustomer is round 11 P1-1 and round 10 P2-2:
+// an order or a quote took a job_id of another customer's project, and the
+// order was priced by that customer's job rule. Every caller's build now
+// refuses a job_id whose project belongs to a different customer than the
+// document's (400 naming job_id, the credit memo's words), and a bound key is
+// refused at the wall before that, the body's job_id held through
+// projects.customer_id on the create and the update alike.
+func TestKeyBranchPin_JobOfAnotherCustomer(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	ctx := context.Background()
+	// B's job carries a fixed price JOB_OVERRIDE rule naming no customer, so a
+	// document that takes the job is priced by it: without the refusal the
+	// leak shows as the other customer's price.
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO pricing_rules (name, rule_type, product_id, job_id, fixed_price)
+		 VALUES ('pin job override', 'JOB_OVERRIDE', $1, $2, 0.42)`, f.posProd, f.jobB); err != nil {
+		t.Fatalf("seed the job rule: %v", err)
+	}
+	A := f.custID.String()
+	orderBody := func(customer, job string) string {
+		return fmt.Sprintf(`{"customer_id":%q,"job_id":%q,"delivery_type":"pickup","lines":[%s]}`,
+			customer, job, f.productLine())
+	}
+	quoteBody := func(customer, job string) string {
+		return fmt.Sprintf(`{"customer_id":%q,"job_id":%q,"lines":[%s]}`, customer, job, f.quoteLine())
+	}
+	refuseJob := func(label, method, path, body string) {
+		t.Helper()
+		for _, who := range []string{"unbound", "user"} {
+			status, buf := f.send(t, who, method, path, body, nil)
+			if status != http.StatusBadRequest || !strings.Contains(string(buf), "job_id") ||
+				!strings.Contains(string(buf), "is not a job of this customer") {
+				t.Errorf("%s: %s naming the foreign job: %d %s, want the 400 naming job_id", label, who, status, buf)
+			}
+		}
+		before := f.auditRows(t)
+		status, buf := f.key(t, f.bound, method, path, body, nil)
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
+			t.Errorf("%s: bound key naming the foreign job: %d %s, want the pin's 403", label, status, buf)
+		}
+		if after := f.auditRows(t); after != before+1 {
+			t.Errorf("%s: bound key refusal rows %d then %d, want one new row", label, before, after)
+		}
+	}
+
+	// The creates: the foreign job is refused for every caller, the A control
+	// on the pin's own job completes and is priced by the catalogue, not by
+	// the override.
+	refuseJob("order create", "POST", "/api/v1/orders", orderBody(A, f.jobB.String()))
+	if id := f.made(t, "bound", "orders", "POST", "/api/v1/orders", orderBody(A, f.jobA.String()), http.StatusCreated); id == uuid.Nil {
+		t.Fatal("the A control order create did not answer its id")
+	} else {
+		doc := f.readJSON(t, "/api/v1/orders/"+id.String())
+		if doc["job_id"] != f.jobA.String() {
+			t.Errorf("the A control order carries job %v, want the pin's own", doc["job_id"])
+		}
+		if doc["subtotal_cents"] != float64(100) {
+			t.Errorf("the A control order's subtotal is %v, want the catalogue's 100 (the override is on the foreign job)", doc["subtotal_cents"])
+		}
+	}
+	refuseJob("quote create", "POST", "/api/v1/quotes", quoteBody(A, f.jobB.String()))
+	f.made(t, "bound", "quotes", "POST", "/api/v1/quotes", quoteBody(A, f.jobA.String()), http.StatusCreated)
+
+	// The updates move an existing document onto the foreign job: every caller
+	// gets the same refusal on its own fresh A document (the revision is read
+	// per document), and the control PUT keeps the pin's own job.
+	freshOrder := func() uuid.UUID {
+		return f.made(t, "bound", "orders", "POST", "/api/v1/orders", orderBody(A, f.jobA.String()), http.StatusCreated)
+	}
+	freshQuote := func() uuid.UUID {
+		return f.made(t, "bound", "quotes", "POST", "/api/v1/quotes", quoteBody(A, f.jobA.String()), http.StatusCreated)
+	}
+	docPut := func(kind string, doc uuid.UUID, job string) string {
+		rev := f.readJSON(t, "/api/v1/"+kind+"/"+doc.String())["revision"]
+		if kind == "orders" {
+			return fmt.Sprintf(`{"customer_id":%q,"job_id":%q,"delivery_type":"pickup","revision":%v,"lines":[%s]}`,
+				A, job, rev, f.productLine())
+		}
+		return fmt.Sprintf(`{"customer_id":%q,"job_id":%q,"revision":%v,"lines":[%s]}`, A, job, rev, f.quoteLine())
+	}
+	for _, who := range []string{"unbound", "user"} {
+		doc := freshOrder()
+		if status, buf := f.send(t, who, "PUT", "/api/v1/orders/"+doc.String(), docPut("orders", doc, f.jobB.String()), nil); status != http.StatusBadRequest {
+			t.Errorf("order update: %s naming the foreign job: %d %s, want the 400 naming job_id", who, status, buf)
+		}
+		doc = freshQuote()
+		if status, buf := f.send(t, who, "PUT", "/api/v1/quotes/"+doc.String(), docPut("quotes", doc, f.jobB.String()), nil); status != http.StatusBadRequest {
+			t.Errorf("quote update: %s naming the foreign job: %d %s, want the 400 naming job_id", who, status, buf)
+		}
+	}
+	orderDoc, quoteDoc := freshOrder(), freshQuote()
+	refuseJob("order update", "PUT", "/api/v1/orders/"+orderDoc.String(), docPut("orders", orderDoc, f.jobB.String()))
+	refuseJob("quote update", "PUT", "/api/v1/quotes/"+quoteDoc.String(), docPut("quotes", quoteDoc, f.jobB.String()))
+	f.allow(t, "bound", "PUT", "/api/v1/orders/"+orderDoc.String(), docPut("orders", orderDoc, f.jobA.String()), nil, http.StatusOK)
+	f.allow(t, "bound", "PUT", "/api/v1/quotes/"+quoteDoc.String(), docPut("quotes", quoteDoc, f.jobA.String()), nil, http.StatusOK)
+
+	// Nothing of B's side moved: no document names the foreign job (the wire's
+	// job_id is the tables' project_id).
+	for _, table := range []string{"orders", "quotes"} {
+		var n int
+		if err := f.db.Pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM `+table+` WHERE project_id = $1`, f.jobB).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s naming the foreign job: %d rows, want none", table, n)
+		}
+	}
 }
 
 // TestKeyBranchPin_PosSyncCustomerWall is round 10 P1-1: the offline sync
@@ -41,7 +168,7 @@ func round5Fixture(t *testing.T) (*keyPinFixture, *walledTwins, string) {
 // A control completes the same sale on the pin's own customer, and the user
 // keeps the reach.
 func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
-	f, _, firstBound := round5Fixture(t)
+	f, _, first := round5Fixture(t)
 	// The register's completion deducts stock from the default (null location)
 	// row; the fixture's teardown removes every inventory row of the product.
 	if _, err := f.db.Pool.Exec(context.Background(),
@@ -76,15 +203,15 @@ func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 	}
 
 	before := invoicesOn(f.custB)
-	rows := f.auditRows(t)
-	status, buf := f.key(t, firstBound, "POST", "/api/v1/pos/sync", sync(f.regA, f.custB.String()), nil)
+	rows := f.auditRowsFor(t, first.id)
+	status, buf := f.key(t, first.raw, "POST", "/api/v1/pos/sync", sync(f.regA, f.custB.String()), nil)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
 		t.Errorf("bound key pos sync naming the foreign customer: %d %s, want the pin's 403", status, buf)
 	}
 	if !strings.Contains(string(buf), "customer_id") {
 		t.Errorf("the pos sync refusal does not name customer_id: %s", buf)
 	}
-	if after := f.auditRows(t); after != rows+1 {
+	if after := f.auditRowsFor(t, first.id); after != rows+1 {
 		t.Errorf("pos sync refusal: key.branch_refused rows %d then %d, want one new row", rows, after)
 	}
 	if after := invoicesOn(f.custB); after != before {
@@ -98,7 +225,7 @@ func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 	// ACCOUNT tender invoices that customer, and the user keeps the same reach
 	// on the foreign customer's sale at the foreign register.
 	ownBefore := invoicesOn(f.custID)
-	status, buf = f.key(t, firstBound, "POST", "/api/v1/pos/sync", sync(f.regA, f.custID.String()), nil)
+	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", sync(f.regA, f.custID.String()), nil)
 	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
 		t.Errorf("bound key pos sync on the pin's own customer: %d %s, want the sale synced", status, buf)
 	}

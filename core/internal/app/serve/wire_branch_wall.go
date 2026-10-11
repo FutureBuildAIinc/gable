@@ -44,11 +44,12 @@ type branchWall struct {
 	guard   *middleware.BranchGuard
 	keyWall *middleware.KeyBranchWall
 	scoped  func(roles ...string) func(http.Handler) http.Handler
+	db      *database.DB
 }
 
 func newBranchWall(db *database.DB) *branchWall {
 	w := &branchWall{mw: middleware.NewBranchMiddleware(db).Handler, guard: middleware.NewBranchGuard(db),
-		keyWall: middleware.NewKeyBranchWall(db, audit.NewLogger(db))}
+		keyWall: middleware.NewKeyBranchWall(db, audit.NewLogger(db)), db: db}
 	w.scoped = func(roles ...string) func(http.Handler) http.Handler {
 		return middleware.Compose(middleware.RequireRole(roles...), w.mw)
 	}
@@ -147,20 +148,26 @@ func (w *branchWall) delivery(mux *http.ServeMux, h *delivery.Handler, roles ...
 
 // quotes mounts the quote routes: the create and the update take customer_id
 // from their body, so a branch bound key reaches them only while the pin holds
-// that customer (round 9 P1-1).
+// that customer (round 9 P1-1), and their job_id is held the same way through
+// the job's customer (round 11 P1-1). The conversion rechecks the quote's own
+// customer under the same wall (round 11 P2-1): a quote moved onto another
+// branch's customer by a caller who may must not become an order at the pin's
+// branch.
 func (w *branchWall) quotes(mux *http.ServeMux, svc *quote.Service) {
 	quote.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
-		w.bodyCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/quotes", "PUT /api/v1/quotes/{id}"))
+		w.bodyDocumentCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/quotes", "PUT /api/v1/quotes/{id}"))
 }
 
 // orders mounts the order routes: the create takes branch_id from its body,
 // so it is held to the caller's branch context (ADR 0007 section 2.3), and the
 // create and the update take customer_id from it, so a branch bound key
 // reaches them only while the pin holds that customer (round 9 P1-1: the
-// order would otherwise take another branch's tax exemption).
+// order would otherwise take another branch's tax exemption). Their job_id is
+// held the same way through the job's customer (round 11 P1-1: the order
+// would otherwise be priced by the other customer's job rule).
 func (w *branchWall) orders(mux *http.ServeMux, svc *order.Service) {
 	order.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux,
-		w.bodyCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/orders", "PUT /api/v1/orders/{id}"),
+		w.bodyDocumentCustomer(w.scoped("admin", "owner", "sales"), "POST /api/v1/orders", "PUT /api/v1/orders/{id}"),
 		w.scoped("admin", "owner", "finance", "warehouse"))
 }
 
@@ -210,6 +217,13 @@ func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
 // other routes of the group keep the guard alone.
 func (w *branchWall) bodyCustomer(base func(http.Handler) http.Handler, patterns ...string) func(http.Handler) http.Handler {
 	return w.patternWall(base, w.keyWall.CustomerBodyBranch(), patterns...)
+}
+
+// bodyDocumentCustomer is bodyCustomer over a document body, whose job_id
+// names a customer through its project as well (round 11 P1-1): the hold is
+// on the body's customer_id and the customer of the job its job_id names.
+func (w *branchWall) bodyDocumentCustomer(base func(http.Handler) http.Handler, patterns ...string) func(http.Handler) http.Handler {
+	return w.patternWall(base, w.keyWall.CustomerBranch(documentCustomersOf(w.db)), patterns...)
 }
 
 // patternWall runs hold after base on the listed route patterns and base alone

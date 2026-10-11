@@ -186,10 +186,11 @@ func (s *Service) build(ctx context.Context, d *Draft, branchID uuid.UUID, actor
 			Details: []httpx.FieldError{{Field: "customer_id", Message: "no such customer"}}}
 	}
 
-	// A ship-to or a contact the customer does not own is refused for every
-	// caller, as the credit memo create refuses it (round 9 P1-2): the
-	// snapshot would carry another customer's address.
-	shipOK, contactOK, err := s.repo.OwnedBy(ctx, d.CustomerID, d.ShipToID, d.OrderedByContactID)
+	// A ship-to, a contact or a job the customer does not own is refused for
+	// every caller, as the credit memo create refuses it (round 9 P1-2, round
+	// 11 P1-1): the snapshot would carry another customer's address, and a
+	// foreign job's rules would price the document.
+	shipOK, contactOK, jobOK, err := s.repo.OwnedBy(ctx, d.CustomerID, d.ShipToID, d.OrderedByContactID, d.JobID)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +200,9 @@ func (s *Service) build(ctx context.Context, d *Draft, branchID uuid.UUID, actor
 	}
 	if !contactOK {
 		notOwned = append(notOwned, httpx.FieldError{Field: "ordered_by_contact_id", Message: "is not a contact of this customer"})
+	}
+	if !jobOK {
+		notOwned = append(notOwned, httpx.FieldError{Field: "job_id", Message: "is not a job of this customer"})
 	}
 	if len(notOwned) > 0 {
 		return nil, validationFailed("one or more fields failed validation", notOwned...)
@@ -1743,6 +1747,17 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 		return nil, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
 			Message: "a referenced record does not exist",
 			Details: []httpx.FieldError{{Field: "customer_id", Message: "no such customer"}}}
+	}
+	// The quote's stored job is rechecked against the quote's customer here:
+	// a row that predates the job ownership rule (or a cross branch write the
+	// convert wall refuses a bound key) must not price the converted order.
+	if src.JobID != nil {
+		if _, _, jobOK, err := s.repo.OwnedBy(ctx, src.CustomerID, nil, nil, src.JobID); err != nil {
+			return nil, err
+		} else if !jobOK {
+			return nil, validationFailed("one or more fields failed validation",
+				httpx.FieldError{Field: "job_id", Message: "is not a job of this customer"})
+		}
 	}
 
 	o := Order{}

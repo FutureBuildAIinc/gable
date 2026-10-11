@@ -664,8 +664,8 @@ func (f *fakeOrderRepo) CustomerFacts(_ context.Context, customerID uuid.UUID) (
 func (f *fakeOrderRepo) ContactAuthority(context.Context, uuid.UUID) (order.ContactAuthority, error) {
 	return order.ContactAuthority{Exists: true, CanPlaceOrders: true}, nil
 }
-func (f *fakeOrderRepo) OwnedBy(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID) (bool, bool, error) {
-	return true, true, nil
+func (f *fakeOrderRepo) OwnedBy(context.Context, uuid.UUID, *uuid.UUID, *uuid.UUID, *uuid.UUID) (bool, bool, bool, error) {
+	return true, true, true, nil
 }
 func (f *fakeOrderRepo) DefaultShipToID(context.Context, uuid.UUID) (*uuid.UUID, error) {
 	return nil, nil
