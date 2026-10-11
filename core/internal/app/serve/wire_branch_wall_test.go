@@ -35,6 +35,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -267,6 +268,11 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
 	wall.documents(mux, docHandler)
 	wall.invoices(mux, invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).WithOutbox(outbox.NewWriter(db, "")).WithOrders(orderSvc).WithStock(invSvc))
+	// The counter, as serve mounts it: the register routes behind the cashier
+	// wall, the refund claim resolution behind the finance wall (its sale read
+	// carries the branch context).
+	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).WithAR(accountSvc).WithInventory(invSvc).WithTxRunner(db)
+	wall.pos(mux, pos.NewHandler(posSvc))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -466,6 +472,23 @@ func TestBranchWall_ServeWiring(t *testing.T) {
 		if got := f.call(t, "POST", "/api/v1/locations", create("BRANCH", nil), role, "u-a", A); got != no {
 			t.Errorf("%s create type BRANCH: %d, want 403", role, got)
 		}
+	}
+
+	// POS refund claim resolution: the finance money mover runs behind the
+	// branch middleware and its own finance and owner wall (the claim's sale
+	// read carries the branch context, so another branch's claim is a missing
+	// row).
+	resolve := func() string {
+		return fmt.Sprintf(`{"outcome":"no_refund","reconciliation_reference":"R","reason":"w"}`)
+	}
+	if got := f.call(t, "POST", "/api/v1/pos/refund-intents/"+uuid.NewString()+"/resolve", resolve(), "cashier", "u-a", A); got != no {
+		t.Errorf("cashier on the resolution: %d, want 403", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/pos/refund-intents/"+uuid.NewString()+"/resolve", resolve(), "finance", "u-a", B); got != no {
+		t.Errorf("finance at an ungranted branch header: %d, want 403 (the branch middleware)", got)
+	}
+	if got := f.call(t, "POST", "/api/v1/pos/refund-intents/"+uuid.NewString()+"/resolve", resolve(), "finance", "u-a", A); got != http.StatusNotFound {
+		t.Errorf("finance inside the branch on an unknown claim: %d, want 404", got)
 	}
 	if got := f.call(t, "POST", "/api/v1/locations", create("BIN", f.branchB), "admin", "boss", ""); got != http.StatusCreated {
 		t.Errorf("admin create under any branch: %d, want 201", got)

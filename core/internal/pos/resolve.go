@@ -74,6 +74,15 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	if err != nil {
 		return nil, err
 	}
+	// The branch wall (ninth review P1-3, tenth review P2-2): the claim is
+	// settled only inside the caller's branch. The sale read carries the
+	// branch context the middleware settled, so a caller held to another
+	// branch finds the missing row (404) before anything of the claim is
+	// touched, on either leg; the legs' transactions take the same scoped
+	// sale row lock.
+	if _, err := s.repo.GetSale(ctx, rec.SaleID); err != nil {
+		return nil, err
+	}
 	if rec.State != "PENDING" {
 		return nil, conflict("intent_not_pending",
 			fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", rec.State))
@@ -83,9 +92,14 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	switch in.Outcome {
 	case "no_refund":
 		// nothing moved at the terminal: the claim is released and the money
-		// is reconciled by the reference the operator recorded
+		// is reconciled by the reference the operator recorded. The sale row
+		// lock (scoped to the caller's branch) comes first, so the wall holds
+		// under the release too.
 		out.State = "FAILED"
 		if err := s.inTx(ctx, func(ctx context.Context) error {
+			if err := s.repo.LockSale(ctx, rec.SaleID); err != nil {
+				return err
+			}
 			if err := s.repo.FailRefundIntentByID(ctx, intentID); err != nil {
 				return err
 			}

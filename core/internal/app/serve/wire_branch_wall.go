@@ -19,6 +19,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -133,6 +134,16 @@ func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
 // carries.
 func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
 	payment.NewHandler(svc.WithBranchGuard(w.guard)).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance", "cashier"))
+}
+
+// pos mounts the counter's routes behind the branch middleware: the counter's
+// own acts through the register's wall, and the operator resolution of a
+// stranded refund claim (the finance money mover) through the finance wall,
+// because the claim's sale is read through the caller's branch context, so a
+// finance user held to one branch finds another branch's claim a missing row
+// (ninth review P1-3, ADR 0007 section 2.3).
+func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler) {
+	h.RegisterRoutes(mux, w.scoped("admin", "owner", "cashier"), w.scoped("finance", "owner"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

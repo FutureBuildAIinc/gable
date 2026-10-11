@@ -25,7 +25,11 @@ type Handler struct {
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
 
 // RegisterRoutes registers the counter's routes. roleGuard composes with
-// the branch middleware in serve.go.
+// the branch middleware in serve.go; resolveGuard, when passed as the second
+// guard, is the resolution route's own (the finance and owner roles behind
+// the branch middleware), and when absent the route's own finance and owner
+// role check stands alone, as it does in tests that mount the branch
+// middleware around the whole mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guard := func(handler http.HandlerFunc) http.HandlerFunc {
 		if len(roleGuard) > 0 && roleGuard[0] != nil {
@@ -34,6 +38,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 			}
 		}
 		return handler
+	}
+	resolveMount := func(handler http.HandlerFunc) http.HandlerFunc {
+		if len(roleGuard) > 1 && roleGuard[1] != nil {
+			return func(w http.ResponseWriter, r *http.Request) {
+				roleGuard[1](handler).ServeHTTP(w, r)
+			}
+		}
+		return resolveGuard(handler)
 	}
 
 	// The sale lifecycle
@@ -68,9 +80,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// The operator resolution of a stranded refund claim (FROM-PRINCIPAL 41):
 	// finance and owner only, and never a machine key, bound or not, refused
 	// in the route itself. It carries no cashier identity and no client
-	// revision: the operator's record is its own authority, so it takes its
-	// own role guard, not the counter's.
-	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveGuard(h.ResolveRefundIntent))
+	// revision: the operator's record is its own authority. It runs behind
+	// the branch middleware like every money route of the counter (ninth
+	// review P1-3): the claim's sale is read through the caller's branch
+	// context, so another branch's claim is a missing row.
+	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveMount(h.ResolveRefundIntent))
 }
 
 // resolveGuard wraps the resolution route: the finance and owner roles only
