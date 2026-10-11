@@ -20,6 +20,7 @@ import (
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/payment"
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
@@ -237,6 +238,17 @@ func (w *branchWall) patternWall(base, hold func(http.Handler) http.Handler, pat
 func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) func(http.Handler) http.Handler {
 	return w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(draftPayloadCustomerOf(db)),
 		"POST /api/v1/drafts/"+kind+"/{id}/promote")
+}
+
+// pos mounts the POS routes: the repositories hold the by id reads and writes
+// to their branch, and the offline sync replays whole sales whose bodies name
+// a customer (an ACCOUNT tender invoices that customer at the register's
+// branch), so the sync is held to the pin through the customer each replayed
+// sale names (round 10 P1-1). The cashier creates refuse a machine key
+// outright in the handler (a cashier must be a user).
+func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
+	h.RegisterRoutes(mux, w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()),
+		"POST /api/v1/pos/sync"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

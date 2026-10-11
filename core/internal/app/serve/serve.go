@@ -669,7 +669,7 @@ func Run() {
 	// as externally-captured (the device settles); posSvc.WithGateway is where
 	// the Clover terminal gateway wires in.
 	posHandler := pos.NewHandler(posSvc)
-	posHandler.RegisterRoutes(mux, scoped("admin", "owner", "cashier"))
+	wall.pos(mux, posHandler, "admin", "owner", "cashier")
 
 	// Accounts Payable Module: the vendor invoice routes on the wire contract
 	// (C4-1b, ADR 0008 7.4). The bills carry a branch, so every route runs

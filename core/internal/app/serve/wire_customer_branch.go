@@ -129,6 +129,30 @@ func previewCustomerOf(db *database.DB) func(ctx context.Context, r *http.Reques
 	}
 }
 
+// posSyncCustomersOf resolves the customers an offline sync's body names: one
+// customer per replayed sale (items[].customer_id). A sale that names no
+// customer (a walk in, paid in cash) names nothing the wall can hold and
+// passes; the register's branch still holds the rows the replay writes.
+func posSyncCustomersOf() func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+	return func(ctx context.Context, r *http.Request) ([]uuid.UUID, error) {
+		var body struct {
+			Items []struct {
+				CustomerID string `json:"customer_id"`
+			} `json:"items"`
+		}
+		if err := middleware.DecodeOneJSONBody(r, &body); err != nil {
+			return nil, err
+		}
+		var out []uuid.UUID
+		for _, item := range body.Items {
+			if id, err := uuid.Parse(item.CustomerID); err == nil {
+				out = append(out, id)
+			}
+		}
+		return out, nil
+	}
+}
+
 // queryCustomerOf resolves the customer a query parameter names. A value that
 // does not parse names nothing the wall can hold and passes to the handler's
 // own validation; an absent value passes unless required says otherwise (the

@@ -398,7 +398,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/payments/{id}/refunds":                           {KeyBranchClassWalled, "payments.branch_id (MemoFactsFor and the refund wall)"},
 	"POST /api/v1/payments/{id}/transitions":                       {KeyBranchClassWalled, "payments.branch_id (the payment repository wall)"},
 	"POST /api/v1/pos/returns":                                     {KeyBranchClassWalled, "pos_registers.branch_id on create; no machine key cashier"},
-	"POST /api/v1/pos/sync":                                        {KeyBranchClassWalled, "pos_registers.branch_id on every replayed create (CreateTransaction)"},
+	"POST /api/v1/pos/sync":                                        {KeyBranchClassWalled, "pos_registers.branch_id on every replayed create, and items[].customer_id through the customer branch wall (round 10 P1-1); TestKeyBranchPin_PosSyncCustomerWall"},
 	"POST /api/v1/pos/till/open":                                   {KeyBranchClassWalled, "the register's branch (pos_registers.branch_id, refused on a mismatch) and no machine key cashier"},
 	"POST /api/v1/pos/till/{id}/close":                             {KeyBranchClassWalled, "till_sessions.branch_id (the close reads the session first); TestKeyBranchPin_PosAndAccountRows"},
 	"POST /api/v1/pos/transactions":                                {KeyBranchClassWalled, "pos_registers.branch_id on create, pos_transactions.branch_id after; no machine key cashier"},
