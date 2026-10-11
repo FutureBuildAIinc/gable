@@ -290,6 +290,18 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 		if err != nil {
 			return err
 		}
+		// The claim row, locked and read right after the sale lock (r12
+		// P3-1): the loser of a same outcome race is told the race here (the
+		// claim the winner settled), never a state refusal the winner's own
+		// completion of the void would answer below.
+		held, err := s.repo.LockRefundIntent(ctx, rec.ID)
+		if err != nil {
+			return err
+		}
+		if held.State != "PENDING" {
+			return conflict("intent_not_pending",
+				fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", held.State))
+		}
 		if sale.Status != StatusCompleted {
 			return httpx.InvalidStateTransition("only a completed sale is voided")
 		}
@@ -314,17 +326,6 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 		}
 		if sale.InvoiceID == nil {
 			return conflict("no_invoice", "the sale carries no invoice to void")
-		}
-		// The claim row, locked under the sale: a concurrent resolution of the
-		// same claim settles here or waits on the sale lock, never beside this
-		// booking.
-		held, err := s.repo.LockRefundIntent(ctx, rec.ID)
-		if err != nil {
-			return err
-		}
-		if held.State != "PENDING" {
-			return conflict("intent_not_pending",
-				fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", held.State))
 		}
 		tenders, err := s.repo.GetTenders(ctx, rec.SaleID)
 		if err != nil {
