@@ -46,6 +46,8 @@ func (f *keyPinFixture) madeRow(t *testing.T, table string, id uuid.UUID) {
 		ctx := context.Background()
 		exec := func(stmt string) { _, _ = f.db.Pool.Exec(ctx, stmt, id) }
 		switch table {
+		case "drafts":
+			exec(`DELETE FROM draft_events WHERE draft_id = $1`)
 		case "payments":
 			exec(`DELETE FROM ar_applications WHERE payment_id = $1`)
 		case "orders":
@@ -164,6 +166,8 @@ func (f *keyPinFixture) refusedPin(t *testing.T, label, method, path, body strin
 // the reach they had.
 func TestKeyBranchPin_BodyCustomerWall(t *testing.T) {
 	f, _ := round4Fixture(t)
+	f.record()
+	defer driverDone(t, "body")
 	A, B := f.custID.String(), f.custB.String()
 	line := f.productLine()
 

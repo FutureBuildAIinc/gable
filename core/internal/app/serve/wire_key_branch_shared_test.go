@@ -40,7 +40,7 @@ func seedSharedCustomer(t *testing.T, f *keyPinFixture, branches ...uuid.UUID) *
 	}
 	exec(`INSERT INTO customer_ship_tos (id, customer_id, code, name, line1) VALUES ($1, $2, 'shared', 'pin shared', 'pin')`, s.shipTo, s.id)
 	exec(`INSERT INTO customer_contacts (id, customer_id, first_name, last_name) VALUES ($1, $2, 'pin', 'shared')`, s.contact, s.id)
-	exec(`INSERT INTO sales_team (id, name, email, role) VALUES ($1, 'pin rep', $2, 'sales')`, s.salesperson, "pin-rep-"+s.salesperson.String()[:8]+"@example.com")
+	exec(`INSERT INTO sales_team (id, name, email, phone, role) VALUES ($1, 'pin rep', $2, '555-0100', 'sales')`, s.salesperson, "pin-rep-"+s.salesperson.String()[:8]+"@example.com")
 	rows, err := f.db.Pool.Query(ctx, `SELECT id FROM payment_terms ORDER BY code LIMIT 2`)
 	if err != nil {
 		t.Fatal(err)
@@ -62,13 +62,13 @@ func seedSharedCustomer(t *testing.T, f *keyPinFixture, branches ...uuid.UUID) *
 		t.Fatalf("a price level: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `UPDATE customers SET salesperson_id = NULL WHERE salesperson_id = $1`, s.salesperson)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id = $1 AND action LIKE 'customer.%'`, s.id)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'customer' AND entity_id = $1::text`, s.id)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customer_contacts WHERE customer_id = $1`, s.id)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customer_ship_tos WHERE customer_id = $1`, s.id)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, s.id)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, s.id)
-		_, _ = f.db.Pool.Exec(ctx, `UPDATE customers SET salesperson_id = NULL WHERE salesperson_id = $1`, s.salesperson)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM sales_team WHERE id = $1`, s.salesperson)
 	})
 	return s

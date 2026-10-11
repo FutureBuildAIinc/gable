@@ -22,6 +22,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/ap"
@@ -121,6 +122,8 @@ type keyPinFixture struct {
 	unbound2    string    // the same scopes, no pin
 	boundKeyID  string    // the bound key's id, the actor its refusal audit rows name
 	bound2KeyID string    // the second bound key's id
+	boundFirst  string    // the first mint's bound key, kept when a test swaps in the second
+	recording   bool      // mark every bound key call for the walled route coverage test
 }
 
 // pinKeyScopes opens every route under test: the location writes, the branch
@@ -137,7 +140,7 @@ var pinDocumentScopes = []string{
 	"payments:read", "payments:write", "credit-memos:read", "credit-memos:write",
 	"orders:read", "orders:write", "orders:propose", "orders:commit", "quotes:propose", "quotes:commit",
 	"dashboard:read", "inventory:read", "inventory:write", "locations:read", "locations:write",
-	"products:read", "branches:read",
+	"products:read", "branches:read", "documents:read", "activities:read", "activities:write", "ar:read", "ar:write",
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"purchase-orders:read", "purchase-orders:write", "quotes:read", "quotes:write",
 }
@@ -309,6 +312,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		t.Fatalf("seed z reports: %v", err)
 	}
 	t.Cleanup(func() {
+		purgeFixtureRows(ctx, db, []uuid.UUID{f.custID, f.custB}, []uuid.UUID{f.branchA, f.branchB, f.branchC, f.branchC2})
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE account_number LIKE 'PINNEW-%'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote_exposure_event'
 			AND entity_id IN (SELECT id::text FROM quote_exposure_events WHERE quote_id IN ($1, $2))`, f.quoteA, f.quoteB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'quote' AND entity_id IN ($1, $2)`, f.quoteA, f.quoteB)
@@ -481,7 +486,15 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	quoteSvc := quote.NewService(quote.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	wall.quotes(mux, quoteSvc)
-	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
+	// The order service exactly as serve builds it: the price engine, the tax
+	// provider, inventory, the invoice writer and the pre-ship exposure gate.
+	orderSvc := orderwire.New(orderwire.Deps{
+		DB: db, Config: &config.Config{}, Logger: slog.Default(), AuditLog: audit.NewLogger(db),
+		Inventory: inventory.NewService(inventory.NewRepository(db)), Invoices: invoiceSvc, Accounts: accountSvc,
+		Pricing:   pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db),
+		Customers: customerSvc, Escalators: escRepo, QuoteLines: quoteRepo,
+	})
+	quoteSvc.WithOrderCreator(orderSvc)
 	wall.orders(mux, orderSvc)
 	wall.invoices(mux, invoiceSvc.WithOrders(orderSvc).WithStock(inventory.NewService(inventory.NewRepository(db))))
 	wall.payments(mux, paymentSvc.WithBranchGuard(wall.guard))
@@ -495,10 +508,19 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	if derr != nil {
 		t.Fatalf("draft kind registration: %v", derr)
 	}
-	draftsSvc := drafts.NewService(drafts.NewRepository(db), draftsRegistry).
+	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
+	draftsRepo := drafts.NewRepository(db)
+	draftHub := drafts.NewHub(draftsRepo, 100*time.Millisecond, slog.Default())
+	t.Cleanup(draftHub.Stop)
+	draftsSvc := drafts.NewService(draftsRepo, draftsRegistry).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)).
-		WithBranchGuard(wall.guard)
-	draftsHandler := drafts.NewHandler(draftsSvc)
+		WithBranchGuard(wall.guard).WithFeed(draftHub)
+	draftsHandler := drafts.NewHandler(draftsSvc).WithFeedHandler(
+		drafts.NewFeedHandler(draftsSvc, draftsRepo, draftHub, drafts.FeedSettings{
+			Heartbeat: 200 * time.Millisecond, Poll: 100 * time.Millisecond, Batch: 100,
+			WriteTimeout: 2 * time.Second, MaxLifetime: 10 * time.Second, Retention: time.Hour,
+			MaxStreamsPerPrincipal: 8, MaxStreams: 32,
+		}, func(ctx context.Context, keyID uuid.UUID) (bool, error) { return keys.KeyActive(ctx, keyID) }))
 	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, wall.draftGuard(db, "quotes", quoteKind.Roles()...))
 	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, wall.draftGuard(db, "orders", orderKind.Roles()...))
 	linksHandler := links.NewHandler(links.Settings{},
@@ -565,7 +587,6 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		RegisterRoutes(mux, wall.scoped("admin", "owner", "finance"))
 	wall.inventory(mux, inventory.NewService(inventory.NewRepository(db)))
 
-	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	techadmin.NewHandler(keys).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 	mint := func(name string, branch *uuid.UUID) (string, string) {
 		t.Helper()
@@ -577,6 +598,11 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		if err != nil {
 			t.Fatalf("mint %s: %v", name, err)
 		}
+		// A bound key references its branch, so the fixture's branch rows can
+		// only be removed once the keys it minted are gone.
+		t.Cleanup(func() {
+			_, _ = db.Pool.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, key.ID)
+		})
 		return raw, key.ID.String()
 	}
 	f.bound, f.boundKeyID = mint("pin bound to A", &f.branchA)
@@ -698,6 +724,7 @@ func (f *keyPinFixture) key(t *testing.T, raw, method, path, body string, hdr ma
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.mark(raw, method, path)
 	return res.StatusCode, buf
 }
 
@@ -1480,6 +1507,8 @@ func TestKeyBranchPin_RowWithoutBranch(t *testing.T) {
 // refused outright (the allowlist gate), like the GL surface.
 func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f := newKeyPinFixture(t)
+	f.record()
+	defer driverDone(t, "pos")
 	custA, custB := f.custID.String(), f.custB.String()
 	missing := uuid.NewString()
 	linesOn := func(tx uuid.UUID) (n int) {

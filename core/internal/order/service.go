@@ -1547,6 +1547,13 @@ func (s *Service) writeEvent(ctx context.Context, ev *outbox.Event) error {
 // CheckExposureGate reports whether the order is currently blocked by the
 // pre-ship gate.
 func (s *Service) CheckExposureGate(ctx context.Context, id uuid.UUID) error {
+	// The exposure lookups read the order's source quote by id alone, so the
+	// order is read under the caller's branch wall first: a key bound to one
+	// branch finds another branch's order a 404 and learns nothing about its
+	// quote.
+	if _, err := s.GetOrder(ctx, id); err != nil {
+		return err
+	}
 	if s.exposure == nil {
 		return nil
 	}
@@ -1555,6 +1562,12 @@ func (s *Service) CheckExposureGate(ctx context.Context, id uuid.UUID) error {
 
 // OverrideExposure records an explicit owner override of the pre-ship gate.
 func (s *Service) OverrideExposure(ctx context.Context, id uuid.UUID, notes, actor, role string) error {
+	// The override clears the exposure of the order's source quote, found by
+	// the order id alone: read the order under the caller's branch wall first,
+	// so a key bound to one branch cannot clear another branch's quote.
+	if _, err := s.GetOrder(ctx, id); err != nil {
+		return err
+	}
 	if s.overrider == nil {
 		return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed,
 			Message: "exposure override not available"}

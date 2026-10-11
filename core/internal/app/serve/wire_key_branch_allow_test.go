@@ -347,10 +347,12 @@ func newAllowlistGateFixture(t *testing.T) *allowlistGateFixture {
 	keys := techadmin.NewService(techadmin.NewRepository(db)).WithTxRunner(db)
 	mint := func(name string, branch *uuid.UUID) string {
 		t.Helper()
-		raw, _, err := keys.GenerateKey(ctx, name, middleware.ValidScopeGrammar(), branch)
+		raw, key, err := keys.GenerateKey(ctx, name, middleware.ValidScopeGrammar(), branch)
 		if err != nil {
 			t.Fatalf("mint %s: %v", name, err)
 		}
+		// The bound key references the branch, so it goes before the branch.
+		t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM api_keys WHERE id = $1`, key.ID) })
 		return raw
 	}
 	f := &allowlistGateFixture{t: t,
@@ -611,6 +613,13 @@ func TestKeyBranchPin_SharedCustomerWrites(t *testing.T) {
 		t.Fatalf("seed shared branches: %v", err)
 	}
 	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM tax_exemptions WHERE customer_id = $1`, shared)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type IN ('category_rule', 'pricing_rule')
+			AND entity_id IN (SELECT id::text FROM category_pricing_rules WHERE customer_id = $1 UNION SELECT id::text FROM pricing_rules WHERE customer_id = $1)`, shared)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM category_pricing_audit WHERE rule_id IN (SELECT id FROM category_pricing_rules WHERE customer_id = $1)`, shared)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM category_pricing_rules WHERE customer_id = $1`, shared)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pricing_rules WHERE customer_id = $1`, shared)
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customer_branches WHERE customer_id = $1`, shared)
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customers WHERE id = $1`, shared)
 	})

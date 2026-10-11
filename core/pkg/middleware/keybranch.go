@@ -320,7 +320,8 @@ func (w *KeyBranchWall) CustomerBranchExclusive(customersOf func(ctx context.Con
 // customerHeldOutsidePin answers one branch that holds any of the customers
 // besides the pin, and whether the pin holds every one of them at all. A
 // customer the pin does not hold (no row, or only other branches) sets held
-// false; the message names the other branch only when one exists.
+// false; the message names the other branch only when one exists, the lowest
+// numbered one that is not the pin, so the answer is the same every time.
 func (w *KeyBranchWall) customerHeldOutsidePin(ctx context.Context, customers []uuid.UUID, pin uuid.UUID) (uuid.UUID, bool, error) {
 	if w.db == nil {
 		return uuid.Nil, false, errors.New("key branch wall: no database for the customer branch lookup")
@@ -344,7 +345,8 @@ func (w *KeyBranchWall) customerHeldOutsidePin(ctx context.Context, customers []
 		// its branches when one exists.
 		var other *uuid.UUID
 		err := w.db.GetExecutor(ctx).QueryRow(ctx,
-			`SELECT branch_id FROM customer_branches WHERE customer_id = ANY($1) LIMIT 1`, ids).Scan(&other)
+			`SELECT branch_id FROM customer_branches WHERE customer_id = ANY($1) AND branch_id <> $2 ORDER BY branch_id LIMIT 1`,
+			ids, pin).Scan(&other)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, false, fmt.Errorf("key branch wall: customer branch lookup: %w", err)
 		}
@@ -355,7 +357,7 @@ func (w *KeyBranchWall) customerHeldOutsidePin(ctx context.Context, customers []
 	}
 	var outside *uuid.UUID
 	err := w.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT branch_id FROM customer_branches WHERE customer_id = ANY($1) AND branch_id <> $2 LIMIT 1`, ids, pin).Scan(&outside)
+		`SELECT branch_id FROM customer_branches WHERE customer_id = ANY($1) AND branch_id <> $2 ORDER BY branch_id LIMIT 1`, ids, pin).Scan(&outside)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, false, fmt.Errorf("key branch wall: customer branch lookup: %w", err)
 	}
