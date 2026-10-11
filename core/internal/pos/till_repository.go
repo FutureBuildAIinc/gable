@@ -34,7 +34,7 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 	if s.BranchID == nil {
 		var registerBranch *uuid.UUID
 		err := r.db.GetExecutor(ctx).QueryRow(ctx,
-			`SELECT l.branch_id
+			`SELECT COALESCE(l.branch_id, r.branch_id)
 			 FROM pos_registers r
 			 LEFT JOIN locations l ON l.id = r.location_id
 			 WHERE r.id = $1`, s.RegisterID).Scan(&registerBranch)

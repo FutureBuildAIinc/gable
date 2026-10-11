@@ -72,10 +72,10 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	}
 	tx.CreatedAt = time.Now()
 
-	// Derive the register's branch_id (via its assigned location).
+	// Derive the register's branch_id (its location's branch, else its own pos_registers.branch_id).
 	var registerBranch *uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT l.branch_id
+		`SELECT COALESCE(l.branch_id, r.branch_id)
 		 FROM pos_registers r
 		 LEFT JOIN locations l ON l.id = r.location_id
 		 WHERE r.id = $1`, tx.RegisterID).Scan(&registerBranch)

@@ -14,12 +14,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// GetRegisterBranch resolves a register's branch (via its assigned location).
-// Returns (nil, nil) when the register has no location/branch mapping.
+// GetRegisterBranch resolves a register's branch (its location's branch, else its own pos_registers.branch_id).
+// Returns (nil, nil) when the register does not exist.
 func (r *PostgresRepository) GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error) {
 	var branchID *uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT l.branch_id
+		`SELECT COALESCE(l.branch_id, r.branch_id)
 		 FROM pos_registers r
 		 LEFT JOIN locations l ON l.id = r.location_id
 		 WHERE r.id = $1`, registerID).Scan(&branchID)
