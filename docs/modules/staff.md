@@ -44,8 +44,9 @@ Every route is in `core/api/fragments/admin.yaml` and the registered
 handles are in `core/internal/staff/handler.go` and
 `core/internal/staff/routes.go`. The route census
 (`core/api/ROUTES.txt`) lists each one under the `internal/staff`
-package (the route census has a `package` column, not a module
-column).
+module, the third tab column of the census header
+line `method pattern module handler` (the column holds the registering
+package's directory, the convention every other module shares).
 
 | Method | Path | One line |
 |---|---|---|
@@ -104,13 +105,62 @@ returns.
 
 `AdminCreateStaffRequest` carries `email` (required), `full_name`
 (required), `staff_no` (optional, null by default), `role` (defaults
-to `staff`), `active` (defaults to true). A duplicate email or staff
-number is a `409 conflict` naming the field. `AdminUpdateStaffRequest`
-makes every editable field a pointer: nil leaves it alone, so a `PUT`
-that only flips `active` must not blank out the email it did not
-send; a `staff_no` of null clears the number. `AdminGrantModuleRequest`
+to `staff`), `active` (defaults to true). A `revision` field on a
+create is a `400 validation_failed` naming `revision`: a create has
+no revision to precondition on. A duplicate email or staff number is
+a `409 conflict` naming the field. `AdminUpdateStaffRequest` makes
+every editable field a pointer: nil leaves it alone, so a `PUT` that
+only flips `active` must not blank out the email it did not send; a
+`staff_no` of null clears the number. `AdminGrantModuleRequest`
 carries `module_id` (required; must name a module in the catalog,
 `ai_lm` today) and `revision` (optional body precondition).
+
+## Headers and error answers
+
+`POST /api/v1/admin/staff` carries the `Idempotency-Key` header (ADR
+0001 section 9); the 201 answer carries the `Location` header
+(`/api/v1/admin/staff/{id}`) and the `ETag` header (the revision, 1,
+in quotes). The error answers are 400 (validation or unknown field),
+401, 403, 409 (`duplicate` with the blocker `email_taken` or
+`staff_no_taken`), 413 (payload too large), 422 (unprocessable entity)
+and 500 (internal error).
+
+`GET /api/v1/admin/staff` accepts the `active` query parameter
+(`true` or `false`; any other value is a 400 naming `active`), plus the
+`cursor`, `limit` and `include` parameters of ADR 0001. The error
+answers are 400 (strict query), 401, 403, 500.
+
+`GET /api/v1/admin/staff/{id}` answers 200 with the `ETag` header; the
+error answers are 400 (bad UUID), 401, 403, 404, 500.
+
+`PUT /api/v1/admin/staff/{id}` carries `If-Match` (the staff revision
+in quotes, optional) and `Idempotency-Key`; `revision` is the body
+form of the same precondition (428 `precondition_required` without
+either, 409 `stale_revision` on a stale one). The 200 answer carries
+the `ETag` header (the new revision in quotes). The error answers are
+400, 401, 403, 404, 409 `stale_revision`, 413, 422, 428, 500.
+
+`POST /api/v1/admin/staff/{id}/modules` carries `If-Match` and
+`Idempotency-Key`; `revision` is the body form of the same
+precondition (428 without, 409 on a stale one). The 200 answer
+carries the `ETag` header (the new revision). The error answers are
+400 (unknown module id names `module_id`), 401, 403, 404, 409, 413,
+422, 428, 500.
+
+`DELETE /api/v1/admin/staff/{id}/modules/{module_id}` requires
+`If-Match` (the staff revision in quotes). The 200 answer carries
+the `ETag` header (the new revision). The error answers are 400
+(unknown module id), 401, 403, 404, 409, 428, 500.
+
+`GET /api/v1/admin/modules` is the fixed catalog list; its cursor
+scope is `admin_modules.id_asc` (`core/internal/staff/handler.go`). The
+error answers are 400 (strict query), 401, 403, 500.
+
+`PUT /api/v1/admin/modules/{id}` carries `Idempotency-Key` and
+`If-Match`; `revision` is the body form of the same precondition
+(428 without, 409 on a stale one). The 200 answer carries the `ETag`
+header (the flag's new revision in quotes). The error answers are
+400, 401, 403, 404 (unknown module id), 409, 413, 422, 428, 500.
 
 ### Money and quantity conventions
 
@@ -162,7 +212,7 @@ routes needs `admin:staff`; the module flag routes need
 core serves them through `RequiredScopeForPath`). The user guard at
 the serve layer for every staff route (roster, grants, module flags)
 is `admin`, `owner` (the exact guard is composed in
-`core/internal/app/serve/serve.go` at the `staffHandler.RegisterRoutes`
+`core/internal/app/serve/wire_staff.go` at the `staffHandler.RegisterRoutes`
 line; the `RegisterRoutes` body of `core/internal/staff/routes.go`
 applies the same guard to every route it mounts, and a caller that
 passes no guard is a privilege escalation path the package comment
