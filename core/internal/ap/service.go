@@ -483,20 +483,25 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 // posted and simply dies; an approved one's linked entry is reversed whole
 // when its credit stands live in the control account; a bill whose entry is
 // not live (one that prices to zero, a legacy bill whose posting was
-// swallowed, or an entry the GL routes have already reversed or voided,
-// linked or not) holds no credit in the control account and voids with
-// nothing to reverse. A bill with money applied is refused: the payments
-// have to be undone first. So is a bill that holds a live VENDOR_INVOICE
-// entry it is not linked to (a legacy bill: its posting was swallowed, it
-// holds the removed sync's one leg credit, a hand edit may even have zeroed
-// its total after the approve, or it was posted twice and only the newest
-// entry is linked, the duplicate named by the refusal): a plain void would
-// strand that credit. A linked entry that does not balance (that one leg
-// shape, linked by hand) is refused too, because its reversal would not
-// balance either, and so is a linked entry whose reversal row is not posted:
-// its credit stands live while the one reversal an entry may hold is already
-// taken. Every refusal is a stated limit: such a bill keeps its status until
-// a later repair item.
+// swallowed, or an entry the GL routes have already undone, linked or not)
+// holds no credit in the control account and voids with nothing to reverse.
+// Liveness is decided on the whole reversal chain, never on one step of it
+// (review r4 P1-1): a bill's credit is live exactly when the POSTED entries
+// of its VENDOR_INVOICE entry and that entry's whole reversal chain leave a
+// net amount on 2010, so a reversal that a later reversal put back leaves
+// the credit live again at any depth. A bill with money applied is refused:
+// the payments have to be undone first. So is a bill that holds a live
+// VENDOR_INVOICE entry it is not linked to (a legacy bill: its posting was
+// swallowed, it holds the removed sync's one leg credit, a hand edit may
+// even have zeroed its total after the approve, or it was posted twice and
+// only the newest entry is linked, the duplicate named by the refusal): a
+// plain void would strand that credit. A linked entry that does not balance
+// (that one leg shape, linked by hand) is refused too, because its reversal
+// would not balance either, and so is a linked entry whose chain still nets
+// a live credit while the one reversal row the entry may hold is already
+// taken (the row is not posted, or the chain was reinstated behind it).
+// Every refusal is a stated limit: such a bill keeps its status until a
+// later repair item.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
@@ -550,17 +555,20 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 			// The linked arm is keyed on the ledger too, never on the pointer
 			// alone (review r2 P2-1): an entry the GL routes have already
 			// reversed or voided holds no live credit, so the void has
-			// nothing to reverse rather than a failure. An entry whose
-			// reversal row is not POSTED keeps its credit live while the one
-			// reversal an entry may hold is taken, so no new reversal can
-			// post: the void is refused rather than stranding the credit.
+			// nothing to reverse rather than a failure. Liveness is the net
+			// of the whole reversal chain (review r4 P1-1), so a reversal of
+			// a reversal that put the credit back reads live again. A live
+			// entry whose one reversal row is already taken (the row is not
+			// posted, or the chain was reinstated behind it) cannot be
+			// reversed again: the void is refused rather than stranding the
+			// credit.
 			liveLinked, reversalTaken, err := s.repo.LinkedEntryLedger(ctx, *locked.GLEntryID)
 			if err != nil {
 				return err
 			}
 			if liveLinked && reversalTaken {
-				return httpx.InvalidStateTransition("the linked entry holds a reversal that is not posted, so its credit stands in accounts payable while no new reversal can post",
-					httpx.Blocker("reversal_not_posted", "mend the not posted reversal before voiding the bill; the bill keeps its status until then"))
+				return httpx.InvalidStateTransition("the linked entry's reversal chain still holds its credit live in accounts payable while the one reversal the entry may hold is taken, so no new reversal can post",
+					httpx.Blocker("reversal_not_posted", "mend the linked entry's reversal chain before voiding the bill; the bill keeps its status until then"))
 			}
 			if liveLinked {
 				entry, err := s.gl.PostReversal(ctx, gl.ReversalInput{

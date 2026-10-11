@@ -1541,6 +1541,276 @@ func TestWire_VoidRefusesDoublePostedBill(t *testing.T) {
 	}
 }
 
+// RULE (review r4 P1-1): a bill's credit is live exactly when the POSTED
+// entries of its VENDOR_INVOICE entry and that entry's whole reversal chain
+// leave a net amount on 2010, and every AP act decides on that net, never on
+// one step of the chain. A reversal that a later reversal put back (a
+// reinstatement) leaves the credit live at any depth, and a chain whose
+// POSTED entries cancel holds none, whatever a single reversal row says.
+func TestWire_VoidDecidesOnTheWholeReversalChain(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// chainNet is the net 2010 amount of the POSTED entries of the entry's
+	// whole reversal chain, in cents (the trial balance's own lens).
+	chainNet := func(entry string) int64 {
+		return f.count(`WITH RECURSIVE c(id) AS (SELECT id FROM gl_journal_entries WHERE id = $1
+			UNION SELECT e.id FROM gl_journal_entries e JOIN c ON e.reverses_entry_id = c.id)
+			SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint FROM gl_journal_lines l
+			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010' WHERE e.id IN (SELECT id FROM c)`, entry)
+	}
+
+	// buildChain approves a bill of cents and grows its linked entry's
+	// reversal chain to depth (1 is the entry's own reversal, 2 that
+	// reversal's, and so on), then voids the named chain positions through
+	// the GL routes. It answers the bill id and the linked entry.
+	buildChain := func(name string, cents int64, depth int, voided ...int) (string, string) {
+		id, r1 := f.enter(name, "1", cents*100)
+		if a := f.approve(id, r1); a.status != http.StatusOK {
+			t.Fatal(a.raw)
+		}
+		entry := f.glEntryOf(id)
+		cur := entry
+		for i := 1; i <= depth; i++ {
+			if rv := f.glReverse(cur); rv.status != http.StatusOK {
+				t.Fatalf("%s: reverse chain depth %d = %d: %s", name, i, rv.status, rv.raw)
+			}
+			cur = f.glReversalOf(cur)
+		}
+		for _, p := range voided {
+			e := entry
+			for i := 0; i < p; i++ {
+				e = f.glReversalOf(e)
+			}
+			if vv := f.glVoidEntry(e); vv.status != http.StatusOK {
+				t.Fatalf("%s: void chain position %d = %d: %s", name, p, vv.status, vv.raw)
+			}
+		}
+		return id, entry
+	}
+
+	// netMultiple is the net the chain leaves on 2010 in whole credits: the
+	// entry counts +1, its reversal -1, the reversal's reversal +1, and a
+	// voided position counts 0.
+	netMultiple := func(depth int, voided ...int) int64 {
+		gone := map[int]bool{}
+		for _, p := range voided {
+			gone[p] = true
+		}
+		var net int64
+		for k := 0; k <= depth; k++ {
+			if gone[k] {
+				continue
+			}
+			if k%2 == 0 {
+				net++
+			} else {
+				net--
+			}
+		}
+		return net
+	}
+
+	shapes := []struct {
+		name   string
+		depth  int
+		voided []int
+	}{
+		{"CHAIN-D0", 0, nil},
+		{"CHAIN-D1", 1, nil},
+		{"CHAIN-D2", 2, nil}, // the reinstatement, review r4 P1-1
+		{"CHAIN-D3", 3, nil},
+		{"CHAIN-D1-R1V", 1, []int{1}}, // review r2 P1-1 through the routes
+		{"CHAIN-D2-R2V", 2, []int{2}},
+		{"CHAIN-D3-R3V", 3, []int{3}},
+		{"CHAIN-D2-R1V", 2, []int{1}}, // the reversal voided after its own reversal: twice the credit stands
+		{"CHAIN-D3-R1V", 3, []int{1}},
+	}
+
+	for i, shape := range shapes {
+		cents := int64(1100 + i*100)
+		wantNet := netMultiple(shape.depth, shape.voided...) * cents
+
+		// The void of the linked bill. The chain built, the bill keeps its
+		// link and its APPROVED status, revision 2.
+		id, entry := buildChain(shape.name+"-LV", cents, shape.depth, shape.voided...)
+		if got := chainNet(entry); got != wantNet {
+			t.Fatalf("%s: the chain nets %d, want %d (the shape itself is wrong)", shape.name, got, wantNet)
+		}
+		control, open := f.controlBalance(), f.openSum()
+		before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+		v := f.void(id, 2, "chain test")
+		switch {
+		case wantNet == 0:
+			// Nothing stands in 2010: the void owes the ledger nothing.
+			if v.status != http.StatusOK {
+				t.Errorf("%s: void a bill whose chain nets zero = %d, want 200: %s", shape.name, v.status, v.raw)
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+				t.Errorf("%s: %d entries were written for a void with nothing to reverse", shape.name, after-before)
+			}
+			if got, want := f.controlBalance(), control; got != want {
+				t.Errorf("%s: after the void: control %d, want the untouched %d", shape.name, got, want)
+			}
+			if got, want := f.openSum(), open-cents; got != want {
+				t.Errorf("%s: after the void: open %d, want %d", shape.name, got, want)
+			}
+			if got := chainNet(entry); got != 0 {
+				t.Errorf("%s: after the void: the chain still nets %d on 2010, want 0", shape.name, got)
+			}
+			if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id); n != 1 {
+				t.Errorf("%s: the bill is not VOIDED after its void", shape.name)
+			}
+		case wantNet != 0 && shape.depth == 0:
+			// The plain bill: its live entry is reversed whole.
+			if v.status != http.StatusOK {
+				t.Errorf("%s: void a bill whose entry stands live = %d, want 200: %s", shape.name, v.status, v.raw)
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before+1 {
+				t.Errorf("%s: %d entries were written for a reversing void, want 1", shape.name, after-before)
+			}
+			if got, want := f.controlBalance(), control-cents; got != want {
+				t.Errorf("%s: after the void: control %d, want %d", shape.name, got, want)
+			}
+			if got, want := f.openSum(), open-cents; got != want {
+				t.Errorf("%s: after the void: open %d, want %d", shape.name, got, want)
+			}
+		default:
+			// A live chain whose entry already holds a reversal row: no new
+			// reversal can post, so the void is refused naming the shape.
+			if v.status != http.StatusConflict {
+				t.Errorf("%s: void a bill whose chain nets %d with a reversal row taken = %d, want 409: %s", shape.name, wantNet, v.status, v.raw)
+			}
+			if v.status == http.StatusConflict {
+				if code, blockers, _ := errorOf(t, v); code != "invalid_state_transition" || blockers[0] != "reversal_not_posted" {
+					t.Errorf("%s: the void refusal = %q %v, want reversal_not_posted", shape.name, code, blockers)
+				}
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+				t.Errorf("%s: %d entries were written for a refused void", shape.name, after-before)
+			}
+			if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
+				t.Errorf("%s: a refused void changed the bill", shape.name)
+			}
+			if got, want := f.controlBalance(), control; got != want {
+				t.Errorf("%s: after the refused void: control %d, want the untouched %d", shape.name, got, want)
+			}
+			if got, want := f.openSum(), open; got != want {
+				t.Errorf("%s: after the refused void: open %d, want the untouched %d", shape.name, got, want)
+			}
+			if got := chainNet(entry); got != wantNet {
+				t.Errorf("%s: after the refused void: the chain nets %d, want the live %d under the bill that still owes it", shape.name, got, wantNet)
+			}
+		}
+		if !f.balanced() {
+			t.Errorf("%s: an entry does not balance after the void", shape.name)
+		}
+
+		// The void of the same shape with the link nulled (the legacy
+		// unlinked bill migration 106 leaves behind).
+		id, entry = buildChain(shape.name+"-UV", cents, shape.depth, shape.voided...)
+		if got := chainNet(entry); got != wantNet {
+			t.Fatalf("%s unlinked: the chain nets %d, want %d", shape.name, got, wantNet)
+		}
+		mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
+		control, open = f.controlBalance(), f.openSum()
+		before = f.count(`SELECT count(*) FROM gl_journal_entries`)
+		v = f.void(id, 2, "chain test")
+		if wantNet == 0 {
+			if v.status != http.StatusOK {
+				t.Errorf("%s unlinked: void a bill whose chain nets zero = %d, want 200: %s", shape.name, v.status, v.raw)
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+				t.Errorf("%s unlinked: %d entries were written for a void with nothing to reverse", shape.name, after-before)
+			}
+			if got, want := f.controlBalance(), control; got != want {
+				t.Errorf("%s unlinked: after the void: control %d, want the untouched %d", shape.name, got, want)
+			}
+			if got, want := f.openSum(), open-cents; got != want {
+				t.Errorf("%s unlinked: after the void: open %d, want %d", shape.name, got, want)
+			}
+			if got := chainNet(entry); got != 0 {
+				t.Errorf("%s unlinked: after the void: the chain still nets %d on 2010, want 0", shape.name, got)
+			}
+			if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id); n != 1 {
+				t.Errorf("%s unlinked: the bill is not VOIDED after its void", shape.name)
+			}
+		} else {
+			if v.status != http.StatusConflict {
+				t.Errorf("%s unlinked: void a bill whose chain nets %d = %d, want 409: %s", shape.name, wantNet, v.status, v.raw)
+			}
+			if v.status == http.StatusConflict {
+				if code, blockers, _ := errorOf(t, v); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
+					t.Errorf("%s unlinked: the void refusal = %q %v, want entry_not_linked", shape.name, code, blockers)
+				}
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+				t.Errorf("%s unlinked: %d entries were written for a refused void", shape.name, after-before)
+			}
+			if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
+				t.Errorf("%s unlinked: a refused void changed the bill", shape.name)
+			}
+			if got, want := f.controlBalance(), control; got != want {
+				t.Errorf("%s unlinked: after the refused void: control %d, want the untouched %d", shape.name, got, want)
+			}
+			if got, want := f.openSum(), open; got != want {
+				t.Errorf("%s unlinked: after the refused void: open %d, want the untouched %d", shape.name, got, want)
+			}
+			if got := chainNet(entry); got != wantNet {
+				t.Errorf("%s unlinked: after the refused void: the chain nets %d, want the live %d under the bill that still owes it", shape.name, got, wantNet)
+			}
+		}
+		if !f.balanced() {
+			t.Errorf("%s: an entry does not balance after the unlinked void", shape.name)
+		}
+
+	}
+}
+
+// The reproducer of review r4 P1-1, as the review wrote it: reverse the bill's
+// entry, then reverse that reversal (a reinstatement), then void the bill.
+// The credit is back in 2010, so the void must refuse, linked or not, and the
+// bill must never sit VOIDED with its credit live.
+func TestWire_VoidRefusesReinstatedEntry(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	for _, unlink := range []bool{false, true} {
+		id, r1 := f.enter(fmt.Sprintf("V-REINST-%v", unlink), "1", 160000) // 16.00
+		if a := f.approve(id, r1); a.status != http.StatusOK {
+			t.Fatal(a.raw)
+		}
+		entry := f.glEntryOf(id)
+		if rv := f.glReverse(entry); rv.status != http.StatusOK {
+			t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+		}
+		// Reverse the reversal: the original credit is reinstated in 2010.
+		if rr := f.glReverse(f.glReversalOf(entry)); rr.status != http.StatusOK {
+			t.Fatalf("reverse the reversal = %d: %s", rr.status, rr.raw)
+		}
+		if unlink {
+			mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
+		}
+		live := func() int64 {
+			return f.count(`WITH RECURSIVE c(id) AS (SELECT id FROM gl_journal_entries WHERE id = $1
+				UNION SELECT e.id FROM gl_journal_entries e JOIN c ON e.reverses_entry_id = c.id)
+				SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint FROM gl_journal_lines l
+				JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+				JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010' WHERE e.id IN (SELECT id FROM c)`, entry)
+		}
+		if got := live(); got != 1600 {
+			t.Fatalf("the reinstated credit = %d, want 1600", got)
+		}
+		v := f.void(id, 2, "wrong bill")
+		if v.status != http.StatusConflict {
+			t.Errorf("unlinked=%v: void a bill whose credit was reinstated = %d, want 409: %s", unlink, v.status, v.raw)
+		}
+		if got := live(); got != 0 && f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id) == 1 {
+			t.Errorf("unlinked=%v: the bill is VOIDED with %d cents of its credit live in 2010", unlink, got)
+		}
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is

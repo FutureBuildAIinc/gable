@@ -118,17 +118,26 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 	return f
 }
 
+// fixtureEntries is every journal entry the fixture's acts wrote for its
+// vendor: the entries whose source reference is one of the vendor's bills or
+// payments, plus each such entry's whole reversal chain (a reversal of a
+// reversal chains two levels down reverses_entry_id, so a one level walk would
+// miss it).
+const fixtureEntries = `WITH RECURSIVE mine(id) AS (
+	SELECT id FROM gl_journal_entries
+	WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
+	   OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
+	UNION
+	SELECT e.id FROM gl_journal_entries e JOIN mine ON e.reverses_entry_id = mine.id
+) SELECT id FROM mine`
+
 // cleanup removes everything the fixture's vendor produced, children first.
 func (f *fixture) cleanup() {
 	ctx := context.Background()
 	exec := func(sql string, args ...any) { _, _ = f.db.Pool.Exec(ctx, sql, args...) }
 	inv := `SELECT id FROM vendor_invoices WHERE vendor_id = $1`
-	entries := `SELECT id FROM gl_journal_entries WHERE source_ref_id IN (` + inv + `)
-	             OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)`
-	exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE reverses_entry_id IN `+entries+`)`, f.vendor)
-	exec(`DELETE FROM gl_journal_entries WHERE reverses_entry_id IN `+entries, f.vendor)
-	exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id IN `+entries, f.vendor)
-	exec(`DELETE FROM gl_journal_entries WHERE id IN `+entries, f.vendor)
+	exec(`DELETE FROM gl_journal_lines WHERE journal_entry_id IN (`+fixtureEntries+`)`, f.vendor)
+	exec(`DELETE FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor)
 	exec(`DELETE FROM events_outbox WHERE entity_type = 'vendor_invoice' AND entity_id IN `+inv, f.vendor)
 	exec(`DELETE FROM audit_log WHERE entity_type = 'vendor_invoice' AND entity_id IN `+inv, f.vendor)
 	exec(`DELETE FROM ap_payment_applications WHERE invoice_id IN `+inv, f.vendor)
@@ -408,10 +417,7 @@ func (f *fixture) controlBalanceIn(currency string) int64 {
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		JOIN gl_accounts a ON a.id = l.account_id
 		WHERE a.code = '2010' AND e.status = 'POSTED' AND ($2 = '' OR e.currency = $2) AND e.id IN (
-		    SELECT id FROM gl_journal_entries
-		    WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
-		       OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
-		       OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))`, f.vendor, currency).Scan(&balance)
+		    `+fixtureEntries+`)`, f.vendor, currency).Scan(&balance)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -447,11 +453,7 @@ func (f *fixture) balanced() bool {
 		SELECT count(*) FROM gl_journal_entries e
 		JOIN (SELECT journal_entry_id, SUM(debit) d, SUM(credit) c FROM gl_journal_lines GROUP BY journal_entry_id) s
 		  ON s.journal_entry_id = e.id
-		WHERE e.id IN (
-		      SELECT id FROM gl_journal_entries
-		      WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
-		         OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
-		         OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))
+		WHERE e.id IN (`+fixtureEntries+`)
 		  AND s.d <> s.c`, f.vendor).Scan(&bad)
 	if err != nil {
 		f.t.Fatal(err)

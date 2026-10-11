@@ -301,20 +301,37 @@ func (r *Repository) Lock(ctx context.Context, id uuid.UUID) (*LockedInvoice, er
 	return &locked, nil
 }
 
-// HasPostedInvoiceEntry reports whether a posted, unreversed VENDOR_INVOICE
-// journal entry stands for the bill, linked or not: the predicate migration
-// 106 links by, so a void can tell a bill whose credit is in the ledger from
-// one that posted nothing. A reversal counts only while it is POSTED (the
-// trial balance sums POSTED entries alone, so an entry whose reversal was
-// voided keeps its credit live, review r2 P1-1).
+// chainLive is the liveness test every AP act keys on (review r4 P1-1): the
+// entry and its whole reversal chain, walked down reverses_entry_id through
+// entries of any status, net a nonzero amount on the control account when
+// only their POSTED entries are summed, exactly as the trial balance sums
+// 2010. A reversal row of one level says nothing by itself: a reversal that a
+// later reversal put back leaves the credit live at any depth, and a chain
+// whose POSTED entries cancel holds none. The %s is the root entries'
+// predicate; its argument placeholders are the query's own.
+const chainLive = `WITH RECURSIVE chain(root, id) AS (
+	SELECT e.id, e.id FROM gl_journal_entries e WHERE %s
+	UNION
+	SELECT c.root, n.id FROM gl_journal_entries n JOIN chain c ON n.reverses_entry_id = c.id
+)
+SELECT c.root FROM chain c
+JOIN gl_journal_entries e ON e.id = c.id AND e.status = 'POSTED'
+JOIN gl_journal_lines l ON l.journal_entry_id = e.id
+JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010'
+GROUP BY c.root
+HAVING SUM(l.credit - l.debit) <> 0`
+
+// HasPostedInvoiceEntry reports whether a VENDOR_INVOICE journal entry of the
+// bill stands live in the control account, linked or not: the entry's whole
+// reversal chain nets a nonzero amount on 2010 over its POSTED entries (the
+// predicate migration 106 links by, made chain wide in review r4 P1-1), so a
+// void can tell a bill whose credit is in the ledger from one that posted
+// nothing, whatever mix of reversals and voids the chain holds.
 func (r *Repository) HasPostedInvoiceEntry(ctx context.Context, id uuid.UUID) (bool, error) {
+	sql := fmt.Sprintf(`SELECT count(*) FROM (%s) live_roots`, fmt.Sprintf(chainLive,
+		`e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1 AND e.reverses_entry_id IS NULL`))
 	var n int
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT count(*) FROM gl_journal_entries e
-		WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1
-		  AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
-		  AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id AND r.status = 'POSTED')`, id).Scan(&n)
-	if err != nil {
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, sql, id).Scan(&n); err != nil {
 		return false, fmt.Errorf("failed to read the bill's journal entries: %w", err)
 	}
 	return n > 0, nil
@@ -322,15 +339,16 @@ func (r *Repository) HasPostedInvoiceEntry(ctx context.Context, id uuid.UUID) (b
 
 // LiveInvoiceEntryOtherThan names the bill's newest live VENDOR_INVOICE entry
 // other than the one excluded (found is false when the excluded entry is the
-// only live one): the double posted shape, whose duplicate credit a void
-// would strand under a VOIDED bill (review r2 P3-1).
+// only live one; a nil exclude names no entry, so every live entry of the
+// bill matches): the double posted shape, whose duplicate credit a void
+// would strand under a VOIDED bill (review r2 P3-1). Live is the chain net
+// of HasPostedInvoiceEntry, never one reversal level (review r4 P1-1).
 func (r *Repository) LiveInvoiceEntryOtherThan(ctx context.Context, invoiceID, exclude uuid.UUID) (entryNumber int64, entryID uuid.UUID, found bool, err error) {
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT e.entry_number, e.id FROM gl_journal_entries e
-		WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1
-		  AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL AND e.id <> $2
-		  AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id AND r.status = 'POSTED')
-		ORDER BY e.created_at DESC, e.id DESC LIMIT 1`, invoiceID, exclude).Scan(&entryNumber, &entryID)
+	sql := fmt.Sprintf(`SELECT root.entry_number, root.id FROM (%s) live_roots
+		JOIN gl_journal_entries root ON root.id = live_roots.root
+		ORDER BY root.created_at DESC, root.id DESC LIMIT 1`, fmt.Sprintf(chainLive,
+		`e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1 AND e.reverses_entry_id IS NULL AND e.id <> $2`))
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, sql, invoiceID, exclude).Scan(&entryNumber, &entryID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return 0, uuid.Nil, false, nil
 	}
@@ -341,25 +359,31 @@ func (r *Repository) LiveInvoiceEntryOtherThan(ctx context.Context, invoiceID, e
 }
 
 // LinkedEntryLedger reads the linked entry's place in the ledger. live says
-// its credit stands in the control account (the entry is POSTED and no POSTED
-// reversal points at it); reversalTaken says a reversal row that is not
-// POSTED points at it, so the one reversal an entry may hold is already
-// taken and no new reversal can post while that row stands. An entry deleted
-// by hand holds no credit: live is false (review r2 P2-1).
+// its credit stands in the control account: the entry's whole reversal chain
+// nets a nonzero amount on 2010 over its POSTED entries, the trial balance's
+// own lens (review r4 P1-1: a reversal of a reversal puts the credit back,
+// so one level down the chain decides nothing). reversalTaken says a reversal
+// row of any status points at the entry, so the one reversal an entry may
+// hold is already taken and no new reversal can post while that row stands.
+// An entry deleted by hand holds no credit: live is false (review r2 P2-1).
 func (r *Repository) LinkedEntryLedger(ctx context.Context, id uuid.UUID) (live, reversalTaken bool, err error) {
-	var isPosted, postedReversal bool
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT e.status = 'POSTED',
-		       EXISTS(SELECT 1 FROM gl_journal_entries p WHERE p.reverses_entry_id = e.id AND p.status = 'POSTED'),
-		       EXISTS(SELECT 1 FROM gl_journal_entries n WHERE n.reverses_entry_id = e.id AND n.status <> 'POSTED')
-		FROM gl_journal_entries e WHERE e.id = $1`, id).Scan(&isPosted, &postedReversal, &reversalTaken)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, false, nil
-	}
+		WITH RECURSIVE chain(id) AS (
+			SELECT id FROM gl_journal_entries WHERE id = $1
+			UNION
+			SELECT n.id FROM gl_journal_entries n JOIN chain c ON n.reverses_entry_id = c.id
+		)
+		SELECT COALESCE((
+		          SELECT SUM(l.credit - l.debit) FROM gl_journal_lines l
+		          JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+		          JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010'
+		          WHERE e.id IN (SELECT id FROM chain)), 0) <> 0,
+		       EXISTS(SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = $1)`, id).
+		Scan(&live, &reversalTaken)
 	if err != nil {
 		return false, false, fmt.Errorf("failed to read the linked journal entry: %w", err)
 	}
-	return isPosted && !postedReversal, reversalTaken, nil
+	return live, reversalTaken, nil
 }
 
 // LockForPayment takes one invoice of the named vendor FOR UPDATE, in the
