@@ -2,24 +2,26 @@
 
 This document defines the physical data model for GableLBM. We prioritize data integrity, unit-awareness, and a "double-entry" ledger for all asset movements (Inventory, Cash, Receivables).
 
+This page covers the inventory, sales and pricing, and finance tables only (19 of the schema's 126 tables). The migrations in `core/migrations` are the source of truth for everything else.
+
 ## Core Principles
-1. **Primary keys**: most tables use `UUID`; a few catalogue tables (notably `units`, `gl_accounts`, `price_levels`, `vendors`) use natural keys.
-2. **Quantities and money**: physical quantities use `NUMERIC(12,4)`; money uses `NUMERIC(12,2)` or `DECIMAL(10,2)`; the migration runner chooses the precision per column.
-3. **Stock is moved, never overwritten**: a stock change is an `UPDATE` on `inventory` for the affected `product_id`/`location_id`, recorded against a header in `gl_journal_entries` when money is involved.
+1. **Primary keys**: the tables on this page use `UUID` keys, except `units`, whose natural key is `code`.
+2. **Quantities and money**: physical quantities use `NUMERIC(12,4)`; money totals, balances, payments and ledger amounts use `NUMERIC(12,2)`; unit prices and costs use `NUMERIC(12,4)`. Money is a decimal amount of currency units, not integer cents, with one exception: the freight tables `po_freight_charges` and `po_freight_allocations` store integer cents in `*_cents BIGINT` columns. Check the column in the migrations before building on it.
+3. **Stock quantities**: current stock is held in `inventory` rows keyed by `product_id` and `location_id`. The table has no cost column and no foreign key to the ledger.
 4. **Unit awareness**: every quantity is paired with a unit code; the catalogue in `core/migrations/099_units_catalogue_and_sets.sql` is the source of truth.
 
 ---
 
 ## 1. Inventory Module
 
-The Inventory module handles the complexity of LBM products, conversions (Piece to MBF), and multi-yard logistics. The actual schema records current stock on a single `inventory` row per `product_id`/`location_id` pair; older revisions did not. The unit catalogue in `core/migrations/099_units_catalogue_and_sets.sql` is the source of truth for units.
+The Inventory module handles the complexity of LBM products, conversions (Piece to MBF), and multi-yard logistics. The schema records current stock in `inventory` rows keyed by `product_id` and `location_id`; no unique constraint limits it to one row per pair. The unit catalogue in `core/migrations/099_units_catalogue_and_sets.sql` is the source of truth for units.
 
 ### Mermaid ERD
 ```mermaid
 erDiagram
     PRODUCT ||--o{ INVENTORY : "stocked at"
     LOCATION ||--o{ INVENTORY : "holds"
-    PRODUCT ||--|| UNIT : "uom_primary"
+    UNIT ||--o{ PRODUCT : "uom_primary"
     LOCATION ||--o{ LOCATION : "parent"
 
     PRODUCT {
@@ -107,8 +109,8 @@ CREATE TABLE products (
     base_price NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
     upc TEXT,
     vendor TEXT,
-    reorder_point DECIMAL(10, 4) DEFAULT 0,
-    reorder_qty DECIMAL(10, 4) DEFAULT 0,
+    reorder_point NUMERIC(12, 4) DEFAULT 0,
+    reorder_qty NUMERIC(12, 4) DEFAULT 0,
     weight_lbs DECIMAL(10, 2) DEFAULT 0,
     category VARCHAR(64),
     species VARCHAR(64),
@@ -152,7 +154,7 @@ CREATE TABLE locations (
     zip TEXT,
     phone TEXT,
     tax_jurisdiction_code TEXT,
-    default_tax_rate NUMERIC(7,4),
+    default_tax_rate NUMERIC(9,6),
     timezone TEXT NOT NULL DEFAULT 'America/New_York',
     active BOOLEAN NOT NULL DEFAULT TRUE,
     branch_id UUID REFERENCES locations(id) ON DELETE RESTRICT,
@@ -171,7 +173,7 @@ CREATE TABLE inventory (
     location TEXT NOT NULL,                          -- legacy free-text
     location_id UUID REFERENCES locations(id) ON DELETE RESTRICT,
     quantity NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
-    allocated DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    allocated NUMERIC(12, 4) NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -181,7 +183,7 @@ CREATE TABLE inventory (
 
 ## 2. Sales & Pricing Module
 
-The Sales module implements the core pricing waterfall and order management flows. The header `customer_jobs` was dropped in migration 091 (rows moved into `projects`); the table `pricing_rules` carries the scoping columns the page used to call `price_rules.value`.
+The Sales module implements the core pricing waterfall and order management flows. The pricing waterfall is stored in `pricing_rules`; `customer_jobs` was dropped in migration 091 (its rows moved into `projects`).
 
 ### Mermaid ERD
 ```mermaid
@@ -226,7 +228,6 @@ erDiagram
         uuid id PK
         text name "Retail, Level 1"
         numeric multiplier "e.g. 0.85"
-        bigint revision
     }
 
     PRICING_RULE {
@@ -284,7 +285,7 @@ erDiagram
         uuid project_id FK "nullable"
         uuid branch_id FK
         uuid salesperson_id FK
-        text status "DRAFT, CONFIRMED, ON_HOLD, FULFILLED, CANCELLED"
+        text status "DRAFT, ON_HOLD, CONFIRMED, BACKORDERED, FULFILLED, CANCELLED"
         numeric total_amount
         numeric subtotal
         text number "unique"
@@ -336,7 +337,6 @@ CREATE TABLE customers (
     payment_terms_id UUID REFERENCES payment_terms(id),
     primary_branch_id UUID NOT NULL REFERENCES locations(id),
     salesperson_id UUID REFERENCES sales_team(id),
-    payment_terms VARCHAR(20) DEFAULT 'NET30',
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -364,11 +364,11 @@ CREATE TABLE pricing_rules (
     job_id UUID REFERENCES projects(id),
     category TEXT,
     fixed_price NUMERIC(12,4),
-    discount_pct NUMERIC(6,4),
-    markup_pct NUMERIC(6,4),
+    discount_pct NUMERIC(12,4),
+    markup_pct NUMERIC(12,4),
     min_quantity NUMERIC(12,4) DEFAULT 0,
     max_quantity NUMERIC(12,4),
-    margin_floor_pct NUMERIC(6,4),
+    margin_floor_pct NUMERIC(12,4),
     starts_at TIMESTAMPTZ,
     expires_at TIMESTAMPTZ,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -430,9 +430,9 @@ CREATE TABLE orders (
     branch_id UUID NOT NULL REFERENCES locations(id),
     salesperson_id UUID REFERENCES sales_team(id),
     number TEXT UNIQUE,
-    currency CHAR(3) NOT NULL DEFAULT 'USD',
-    status TEXT NOT NULL CHECK (status IN ('DRAFT','CONFIRMED','ON_HOLD','FULFILLED','CANCELLED')),
-    total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    currency CHAR(3) NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('DRAFT','ON_HOLD','CONFIRMED','BACKORDERED','FULFILLED','CANCELLED')),
+    total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
     subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
     delivery_type TEXT NOT NULL DEFAULT 'DELIVERY',
     scheduled_delivery_date DATE,
@@ -445,7 +445,7 @@ CREATE TABLE orders (
 CREATE TABLE order_lines (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    product_id UUID REFERENCES products(id) ON DELETE RESTRICT,
     quote_line_id UUID REFERENCES quote_lines(id) ON DELETE SET NULL,
     line_type TEXT NOT NULL DEFAULT 'PRODUCT',
     position INTEGER NOT NULL DEFAULT 0,
@@ -453,8 +453,8 @@ CREATE TABLE order_lines (
     charge_code_id UUID REFERENCES charge_codes(id),
     sku TEXT,
     description TEXT,
-    quantity NUMERIC(12, 4) NOT NULL,
-    unit_price NUMERIC(12, 4) NOT NULL,
+    quantity NUMERIC(12, 4),
+    unit_price NUMERIC(12, 4),
     priced_unit_price NUMERIC(12, 4),
     price_source TEXT NOT NULL DEFAULT 'PRICE_LIST',
     uom TEXT,
@@ -469,7 +469,7 @@ CREATE TABLE order_lines (
     quantity_fulfilled NUMERIC(12, 4) NOT NULL DEFAULT 0,
     taxable BOOLEAN NOT NULL DEFAULT TRUE,
     is_special_order BOOLEAN NOT NULL DEFAULT FALSE,
-    special_order_cost DECIMAL(10, 2),
+    special_order_cost NUMERIC(12, 4),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
@@ -488,7 +488,7 @@ erDiagram
     INVOICE ||--|{ INVOICE_LINE : "contains"
     INVOICE ||--o{ PAYMENT : "applied by"
     CUSTOMER ||--o{ PAYMENT : "paid"
-    PAYMENT ||--o{ GL_JOURNAL_ENTRY : "posts"
+    GL_JOURNAL_ENTRY |o--o{ PAYMENT : "posted as"
     INVOICE ||--o{ AR_APPLICATION : "applies"
     GL_JOURNAL_ENTRY ||--|{ GL_JOURNAL_LINE : "double-entry"
     GL_ACCOUNT ||--o{ GL_JOURNAL_LINE : "account link"
@@ -504,7 +504,7 @@ erDiagram
         date due_date
         date discount_due_date
         numeric discount_percent
-        text status "UNPAID, PARTIAL, PAID, VOID, WRITTEN_OFF, OVERDUE"
+        text status "UNPAID, PARTIAL, PAID, VOID, WRITTEN_OFF"
         numeric total_amount
         numeric subtotal
         numeric tax_amount
@@ -553,7 +553,7 @@ erDiagram
         numeric amount
         numeric amount_unapplied
         text status "POSTED, VOIDED"
-        text method "CASH, CARD, CHECK, ACCOUNT, ACH, WIRE, OTHER"
+        text method "CASH, CARD, CHECK, ACCOUNT, ACH, OTHER"
         char currency
         text reference
         text notes
@@ -576,8 +576,7 @@ erDiagram
         uuid payment_id FK
         uuid invoice_id FK
         numeric amount
-        timestamptz applied_at
-        bigint revision
+        date applied_on
     }
 
     GL_ACCOUNT {
@@ -590,7 +589,6 @@ erDiagram
         text normal_balance "DEBIT, CREDIT"
         boolean is_active
         text description
-        bigint revision
     }
 
     GL_JOURNAL_ENTRY {
@@ -598,11 +596,10 @@ erDiagram
         serial entry_number
         date entry_date
         text memo
-        text source "MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING"
+        text source "MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, REVERSAL, VENDOR_INVOICE, VENDOR_PAYMENT, RETURN, DEPOSIT, CREDIT_MEMO, WRITE_OFF"
         uuid source_ref_id
         text status "DRAFT, POSTED, VOID"
         text posted_by
-        bigint revision
     }
 
     GL_JOURNAL_LINE {
@@ -629,7 +626,6 @@ CREATE TABLE gl_accounts (
     normal_balance VARCHAR(10) NOT NULL CHECK (normal_balance IN ('DEBIT','CREDIT')),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     description TEXT DEFAULT '',
-    revision BIGINT NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -638,7 +634,7 @@ CREATE TABLE gl_accounts (
 CREATE TABLE invoices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
-    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
+    order_id UUID REFERENCES orders(id) ON DELETE RESTRICT,
     branch_id UUID NOT NULL REFERENCES locations(id),
     number TEXT UNIQUE,
     invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
@@ -646,12 +642,11 @@ CREATE TABLE invoices (
     discount_due_date DATE,
     discount_percent NUMERIC(7, 4),
     payment_terms_id UUID NOT NULL REFERENCES payment_terms(id),
-    payment_terms VARCHAR(20) DEFAULT 'NET30',
-    status TEXT NOT NULL CHECK (status IN ('UNPAID','PARTIAL','PAID','VOID','WRITTEN_OFF','OVERDUE')),
-    total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
-    subtotal DECIMAL(10, 2) DEFAULT 0,
-    tax_amount DECIMAL(10, 2) DEFAULT 0,
-    tax_rate DECIMAL(5, 4) DEFAULT 0,
+    status TEXT NOT NULL CHECK (status IN ('UNPAID','PARTIAL','PAID','VOID','WRITTEN_OFF')),
+    total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    subtotal NUMERIC(12, 2) DEFAULT 0,
+    tax_amount NUMERIC(12, 2) DEFAULT 0,
+    tax_rate NUMERIC(9, 6) DEFAULT 0,
     currency CHAR(3) NOT NULL DEFAULT 'USD',
     delivery_type TEXT NOT NULL DEFAULT 'PICKUP',
     picked_up_by TEXT,
@@ -669,7 +664,7 @@ CREATE TABLE invoices (
 CREATE TABLE invoice_lines (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
-    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    product_id UUID REFERENCES products(id) ON DELETE RESTRICT,
     parent_line_id UUID REFERENCES invoice_lines(id) ON DELETE CASCADE,
     charge_code_id UUID REFERENCES charge_codes(id),
     line_type TEXT NOT NULL DEFAULT 'PRODUCT',
@@ -680,8 +675,8 @@ CREATE TABLE invoice_lines (
     price_uom TEXT,
     uom_qty NUMERIC(12, 4),
     price_uom_qty NUMERIC(12, 4),
-    quantity DECIMAL(10, 4) NOT NULL,
-    price_each DECIMAL(10, 2) NOT NULL,
+    quantity NUMERIC(12, 4),
+    price_each NUMERIC(12, 4),
     unit_price NUMERIC(12, 4),
     priced_unit_price NUMERIC(12, 4),
     price_adjusted_by TEXT,
@@ -703,8 +698,8 @@ CREATE TABLE payments (
     amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
     amount_unapplied NUMERIC(12, 2) NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED','VOIDED')),
-    method TEXT NOT NULL CHECK (method IN ('CASH','CARD','CHECK','ACCOUNT','ACH','WIRE','OTHER')),
-    currency CHAR(3) NOT NULL DEFAULT 'USD',
+    method TEXT NOT NULL CHECK (method IN ('CASH','CARD','CHECK','ACCOUNT','ACH','OTHER')),
+    currency CHAR(3) NOT NULL,
     reference TEXT,
     notes TEXT,
     received_on DATE NOT NULL,
@@ -726,11 +721,10 @@ CREATE TABLE payments (
 -- AR applications (101)
 CREATE TABLE ar_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    payment_id UUID NOT NULL REFERENCES payments(id),
+    payment_id UUID REFERENCES payments(id),
     invoice_id UUID NOT NULL REFERENCES invoices(id),
     amount NUMERIC(12, 2) NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    revision BIGINT NOT NULL DEFAULT 1
+    applied_on DATE NOT NULL
 );
 
 -- Double-Entry Ledger (025)
@@ -739,11 +733,10 @@ CREATE TABLE gl_journal_entries (
     entry_number SERIAL,
     entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
     memo TEXT NOT NULL DEFAULT '',
-    source VARCHAR(20) NOT NULL DEFAULT 'MANUAL' CHECK (source IN ('MANUAL','INVOICE','PAYMENT','ADJUSTMENT','CLOSING')),
+    source VARCHAR(20) NOT NULL DEFAULT 'MANUAL' CHECK (source IN ('MANUAL','INVOICE','PAYMENT','ADJUSTMENT','CLOSING','REVERSAL','VENDOR_INVOICE','VENDOR_PAYMENT','RETURN','DEPOSIT','CREDIT_MEMO','WRITE_OFF')),
     source_ref_id UUID,
     status VARCHAR(10) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED','VOID')),
     posted_by VARCHAR(100),
-    revision BIGINT NOT NULL DEFAULT 1,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
