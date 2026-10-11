@@ -103,6 +103,7 @@ func (f *fixture) create(t *testing.T, body string, hdr map[string]string) resp 
 // The create shape: integer cents, optional attributes present as null,
 // revision and the ETag, Location, an unknown field refused.
 func TestCreate_Shape(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	res := f.create(t, `{"category":"`+f.prefix+`-door","name":"Clear pine","price_adjustment_cents":1250,"attributes":{"grade":"Clear"}}`, nil)
 	if res.status != http.StatusCreated {
@@ -138,6 +139,7 @@ func TestCreate_Shape(t *testing.T) {
 // One 400 with every offending field; a negative adjustment (a discount) is
 // a value, not a refusal; a body the route cannot consume is bad_request.
 func TestCreate_FieldValidation(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	res := f.create(t, `{"category":"  ","name":"","price_adjustment_cents":12.5}`, nil)
 	if res.status != http.StatusBadRequest {
@@ -170,6 +172,7 @@ func TestCreate_FieldValidation(t *testing.T) {
 // every row once, include=total, an unknown parameter and a missing
 // category refused.
 func TestList_EnvelopeCursor(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	cat := f.prefix + "-cat"
 	for _, name := range []string{"one", "two", "three"} {
@@ -232,6 +235,7 @@ func TestList_EnvelopeCursor(t *testing.T) {
 // The by-id read: the option with its ETag; a malformed id a 400 naming id;
 // an unknown option a 404.
 func TestGet_Errors(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	created := f.create(t, `{"category":"`+f.prefix+`-g","name":"by id","price_adjustment_cents":5}`, nil)
 	id := created.body["id"].(string)
@@ -251,6 +255,7 @@ func TestGet_Errors(t *testing.T) {
 
 // The create writes its audit row and its event, in one transaction.
 func TestCreate_AuditRowAndEvent(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	created := f.create(t, `{"category":"`+f.prefix+`-a","name":"audited","price_adjustment_cents":1}`, nil)
 	id := created.body["id"].(string)
@@ -275,6 +280,7 @@ func TestCreate_AuditRowAndEvent(t *testing.T) {
 // Idempotency: the same create twice with one key returns the first response
 // and makes one row; the same key with another body is 422.
 func TestCreate_IdempotentReplay(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	key := map[string]string{"Idempotency-Key": "mw-wire-" + uuid.NewString()}
 	body := `{"category":"` + f.prefix + `-idem","name":"once","price_adjustment_cents":1}`

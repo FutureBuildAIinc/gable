@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -100,6 +101,7 @@ func TestRouteComplete_FromDraftIs409InvalidState(t *testing.T) {
 // accepted a second complete and wrote a second route.completed
 // event.
 func TestRouteComplete_FromCompletedIs409InvalidState(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route, stop, _ := f.seedStop(t, f.branch)
 
@@ -157,6 +159,7 @@ func TestRouteComplete_FromCompletedIs409InvalidState(t *testing.T) {
 // now exits on the invalid_state check ahead of the count read; this
 // case pins the count read on the wire).
 func TestRouteComplete_DispatchedEmptyIs409RouteEmpty(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route := f.seedEmptyRoute(t)
 
@@ -191,6 +194,7 @@ func TestRouteComplete_DispatchedEmptyIs409RouteEmpty(t *testing.T) {
 // production dispatch + complete sequence to pin the allowed
 // transition against the database.
 func TestRouteComplete_FromInTransitAllowedOnce(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route, stop, _ := f.seedStop(t, f.branch)
 

@@ -95,6 +95,7 @@ func rowOf(t *testing.T, body map[string]any, uom string) map[string]any {
 // LF stores BF (1, 1.5) and MBF (1, 1500); a client pair is stored
 // canonically; and the answer carries the four defaults.
 func TestUnitSetDerivations(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 
 	// The 2x4x8: rules 1 to 4, LF as (8, 1).
@@ -243,6 +244,7 @@ func TestUnitSetDerivations(t *testing.T) {
 // in the message, and an ordered pair that cannot resolve within the bound
 // is a 400 naming the row.
 func TestUnitSetAgreementRefusals(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 
 	// BF (1, 1.5) beside MBF (1, 1400): the standard 1000 to 1 disagrees.
@@ -298,6 +300,7 @@ func TestUnitSetAgreementRefusals(t *testing.T) {
 // named in warnings, with the finer stocking unit that would make every
 // sell row exact. The warning does not refuse.
 func TestUnitSetWarning(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	paver, rev := f.createBoard(map[string]any{"description": "6x9 paver", "stock_uom": "PCS"})
 	res := f.putUnits(paver, unitsBody(rev, "PCS", "SF", "PCS", "PCS", []any{
@@ -329,6 +332,7 @@ func TestUnitSetWarning(t *testing.T) {
 // TestUnitSetPriceUnitHold proves A2's CHECK through the PUT: a price unit
 // other than the stocking unit is a 400 naming price_uom until C3-2B.
 func TestUnitSetPriceUnitHold(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	id, rev := f.createBoard(map[string]any{
 		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
@@ -351,6 +355,7 @@ func TestUnitSetPriceUnitHold(t *testing.T) {
 // with the blocker; and the invariant refusals (a random length product is
 // stocked in LF; the stocking row carries price).
 func TestUnitSetStockingUnitRefusals(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	ctx := context.Background()
 
@@ -472,6 +477,7 @@ func TestUnitSetStockingUnitRefusals(t *testing.T) {
 // of migration 099 serves raw writers only; the write marks itself with the
 // transaction local gable.unit_set_write flag.
 func TestUnitSetStockingUnitChangeKeepsTheNamedDefaults(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	id, rev := f.createBoard(map[string]any{
 		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
@@ -514,6 +520,7 @@ func TestUnitSetStockingUnitChangeKeepsTheNamedDefaults(t *testing.T) {
 // width, length, random_length) read from the product row the write locked,
 // not the zero values the answer literal left them at.
 func TestUnitSetPutAnswerCarriesTheBoardMeasureFacts(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	fixed, rev := f.createBoard(map[string]any{
 		"board_thickness_in": "2", "board_width_in": "4", "board_length_ft": "8",
@@ -552,6 +559,7 @@ func TestUnitSetPutAnswerCarriesTheBoardMeasureFacts(t *testing.T) {
 // what is stored, and the stock_unit_in_use and price_unit_held holds fire
 // as 409s, never a 500 from a deferred trigger.
 func TestUnitSetStockingUnitComesFromStockUOM(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	ctx := context.Background()
 	var locID string
@@ -654,6 +662,7 @@ func TestUnitSetStockingUnitComesFromStockUOM(t *testing.T) {
 // the check (a new bin, a new order line) is cycle 4's stock identity work
 // and is not what this test pins.
 func TestUnitSetStockHoldLocksTheRowsItReads(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	ctx := context.Background()
 	held, _ := f.createBoard(map[string]any{"description": "hold locks", "stock_uom": "PCS"})
@@ -725,6 +734,7 @@ func TestUnitSetStockHoldLocksTheRowsItReads(t *testing.T) {
 // refused naming it, an unknown unit refused, and a body field the PUT does
 // not apply (board_thickness_in) refused naming it.
 func TestUnitSetFieldRefusals(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	id, rev := f.createBoard(nil)
 
@@ -778,6 +788,7 @@ func TestUnitSetFieldRefusals(t *testing.T) {
 // three contenders on one revision leave exactly one winner, and a failing
 // event write rolls the whole replace back.
 func TestUnitSetAuditRevisionAndConcurrency(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newSetFixture(t)
 	ctx := context.Background()
 	id, rev := f.createBoard(nil)

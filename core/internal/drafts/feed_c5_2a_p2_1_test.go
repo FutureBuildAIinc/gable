@@ -146,6 +146,7 @@ func TestFeedStreamLimits(t *testing.T) {
 // noise does not arrive within the hub's poll cycle. An unwired
 // filter admits the noise and the assertion fails.
 func TestFeedSubjectFilterExcludesNoiseCreatedAfterReady(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	subject := f.createQuote(t)
 
@@ -206,6 +207,7 @@ func TestFeedSubjectFilterExcludesNoiseCreatedAfterReady(t *testing.T) {
 // instead of the draft's branch to k.Promote lands the quote in the
 // header's branch and the assertion fails.
 func TestPromotionRunsAtDraftsBranchWithKillSwitchOn(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 
@@ -326,6 +328,7 @@ func TestPromotionRunsAtDraftsBranchWithKillSwitchOn(t *testing.T) {
 // sha256. A refactor that drops the status check, the size bound, or the
 // audit row lets one of these assertions fail.
 func TestQuoteFileRoute_Status_Audit_Bound(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	// Create a draft, promote it to a quote, then attach a file.
@@ -379,6 +382,7 @@ func TestQuoteFileRoute_Status_Audit_Bound(t *testing.T) {
 // the revision unchanged. Disable the status check in AttachFile and this
 // test goes red on the first assertion (the attach answers 200).
 func TestQuoteFileRouteRefusedOutsideDraft(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 

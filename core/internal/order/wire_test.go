@@ -343,6 +343,7 @@ func TestOrderCreateValidation(t *testing.T) {
 // conversion pair must be 1 and 1; any other pair on equal units is a 400 on
 // uom_qty.
 func TestOrderCreateEqualUnitsPairMustBeOneAndOne(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	for _, c := range []struct {
@@ -505,6 +506,7 @@ func TestOrderCreateOverrideAndDiscountAudit(t *testing.T) {
 // snapshots the code's revenue account; a text line carries only its
 // description, its priced fields null but present.
 func TestOrderCreateChargeAndTextLines(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	r := f.do("POST", "/api/v1/orders", map[string]any{
@@ -558,6 +560,7 @@ func TestOrderCreateChargeAndTextLines(t *testing.T) {
 // RULE (ADR 0005 2.6): a kit explodes into its components, is priced as a
 // whole, and its components carry no price and no tax.
 func TestOrderCreateKitExplodes(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	ctx := context.Background()
@@ -622,6 +625,7 @@ func TestOrderCreateKitExplodes(t *testing.T) {
 // RULE (ADR 0005 5.2): the edit replaces header and lines in draft only,
 // with the revision precondition; a line keeps its id across edits.
 func TestOrderUpdate(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	created := f.create()
@@ -684,6 +688,7 @@ func TestOrderUpdate(t *testing.T) {
 // walks every row once, the filters that filter, the unknown parameter
 // refused, include=total.
 func TestOrderList(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 	f := newFixture(t, db)
 	ids := []string{}

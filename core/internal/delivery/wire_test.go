@@ -294,6 +294,7 @@ func (f *fixture) seedOtherBranchOrder(t *testing.T, branch uuid.UUID) uuid.UUID
 // revision and the ETag, Location, timestamps at microsecond precision,
 // optional fields present as null.
 func TestVehicleCreate_Shape(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	res := f.do(t, http.MethodPost, "/api/v1/delivery/vehicles",
 		`{"name":"Truck 9","vehicle_type":"box_truck","license_plate":"W-0009","insurance_expiry":"2027-01-31"}`, nil)
@@ -444,6 +445,7 @@ func TestVehicleList_EnvelopeCursor(t *testing.T) {
 // 409 stale_revision, If-Match strong and weak, the body revision, the two
 // disagreeing, and the new revision and ETag on success.
 func TestVehicleUpdate_Revision(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	vehicle, _ := f.seedFleet(t)
 	body := `{"name":"Renamed","vehicle_type":"van","license_plate":"W-0001"}`
@@ -483,6 +485,7 @@ func TestVehicleUpdate_Revision(t *testing.T) {
 // A driver's lifecycle: create (status defaults to active, lowercase on the
 // wire), update (status required), delete.
 func TestDriverLifecycle(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	res := f.do(t, http.MethodPost, "/api/v1/delivery/drivers",
 		`{"name":"Wire driver","cdl_expiry":"2028-03-01","hire_date":"2024-06-15"}`, nil)
@@ -736,6 +739,7 @@ func TestRoute_NullVehicleAndDriverServeNull(t *testing.T) {
 // each dispatch answers 409 with the right blocker, then asserts an
 // assign onto each route answers 201.
 func TestRoute_DispatchRefusedWithoutVehicleOrDriver(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	ctx := context.Background()
 
@@ -850,6 +854,7 @@ func TestRoute_DispatchRefusedWithoutVehicleOrDriver(t *testing.T) {
 // complete action routes are gone): 428 without a revision, the wrong edge
 // a 409 invalid_state_transition with its blocker, and the events in order.
 func TestRouteTransitions(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route, stop, _ := f.seedStop(t, f.branch)
 
@@ -917,6 +922,7 @@ func TestRouteTransitions(t *testing.T) {
 // a delivered stop needs its POD, queues its fulfilment inside the same
 // transaction, and a stop cannot complete twice.
 func TestStopLifecycle(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route, _, order := f.seedStop(t, f.branch)
 	today := time.Now().UTC().Format("2006-01-02")
@@ -980,6 +986,7 @@ func TestStopLifecycle(t *testing.T) {
 // The reorder: the list must name every stop exactly once, and the write
 // needs the route's revision.
 func TestReorderStops(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route, _, order := f.seedStop(t, f.branch)
 	res := f.assignOrder(t, route, order, nil)
@@ -1034,6 +1041,7 @@ func TestReorderStops(t *testing.T) {
 // more: the input parse refuses a client's 0, so the default must not mint
 // one either (an empty route's first stop is 1, not the column's old 0).
 func TestAssignStopSequenceDefault(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	route, stop, order := f.seedStop(t, f.branch)
 	_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM deliveries WHERE id = $1`, stop)
@@ -1053,6 +1061,7 @@ func TestAssignStopSequenceDefault(t *testing.T) {
 // reason vocabulary is lowercase only (the live failure: nothing was
 // written, only a log line).
 func TestAdjustQty_RecordsRow(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	_, stop, _ := f.seedStop(t, f.branch)
 	product := uuid.New()
@@ -1194,6 +1203,7 @@ func TestBranchWall(t *testing.T) {
 // assign onto the same route takes stop_sequence 206, and the reorder list
 // is told it must name every stop exactly once.
 func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	ctx := context.Background()
 	var customer uuid.UUID
@@ -1362,6 +1372,7 @@ func TestRoute_OverTwoHundredStopsAreAllRead(t *testing.T) {
 // returns the first response (replay header) and makes one row and one
 // event; the same key with another body is 422.
 func TestIdempotency(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	key := "wire-" + uuid.NewString()
 	body := `{"name":"Idem truck","vehicle_type":"van","license_plate":"W-IDEM1"}`
@@ -1528,6 +1539,7 @@ func TestBranchWall_PODPhotoRefusalLeavesNoFile(t *testing.T) {
 // unknown id, and counts files in the upload directory before and
 // after: the refused request must not have written a file.
 func TestBranchWall_VehicleAndDriverPhotoRefusalLeaveNoFile(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t)
 	uploadDir := t.TempDir()
 	t.Chdir(uploadDir)
