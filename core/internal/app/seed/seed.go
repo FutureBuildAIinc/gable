@@ -1373,14 +1373,20 @@ const pricingRuleUpsertSQL = `
 // statement the seeder runs.
 //
 // The conflict is on the id, so the update can only ever touch the seed's own
-// REG-01 row (migration 027's demo register); a register with any other id,
-// created by a person, an import or another seed, is never matched. Of that
-// one row the seed owns the location and the branch alone: the register's
-// name is an operator's to keep (the principal's item 57 condition).
+// REG-01 row; a register with any other id, created by a person, an import or
+// another seed, is never matched. Of that one row the seed owns the location
+// and the branch alone, and only while the row still sits on migration 027's
+// placeholder location: the row is born in migration 027 on every database,
+// so a REG-01 an operator re-pointed by hand is not the seed's to move back
+// (item 57's condition reads 027 as another seed; r16 P2), and the register's
+// name is an operator's to keep the same way. The update therefore fires only
+// under that placeholder, which also makes a second run a no-op: the row no
+// longer carries it.
 const posRegisterUpsertSQL = `
 	INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
 	VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
-	ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1`
+	ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1
+		WHERE pos_registers.location_id = '00000000-0000-0000-0000-000000000000'`
 
 // pricingRule is one row of the demo pricing_rules table.
 //

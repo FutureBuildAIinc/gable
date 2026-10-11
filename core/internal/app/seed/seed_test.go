@@ -241,17 +241,23 @@ func TestPricingRuleUpsert_IsIdempotentAndRepairsValues(t *testing.T) {
 // The upsert conflicts on the id, so it can only ever touch the migration's
 // demo register REG-01; a register created by a person, an import or another
 // seed has another id and must be left exactly as it was. Of REG-01 the seed
-// owns the location and the branch alone: a register's name is an operator's
-// to keep, so a re-seed must not rename it back (r14 P3-2).
+// owns the location and the branch alone, and only while the row still sits
+// on migration 027's placeholder location: a register's name is an
+// operator's to keep, so a re-seed must not rename it back (r14 P3-2), and a
+// register the operator re-pointed by hand is not the seed's to move back
+// either, because migration 027 created the row and item 57's condition
+// reads that as another seed (r16 P2).
 //
 // DB-gated: it is a test of a Postgres upsert, so it needs Postgres, and it
-// runs the seeder's actual statement, twice.
+// runs the seeder's actual statement, twice per leg.
 func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 
-	// A branch location of the test's own for the seed's target.
+	// A branch location of the test's own for the seed's target, and one the
+	// operator re-point leg moves REG-01 onto.
 	loc := uuid.New()
+	opLoc := uuid.New()
 	if _, err := db.Pool.Exec(ctx,
 		`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'seed test branch')`,
 		loc, "SEEDT-"+loc.String()[:8]); err != nil {
@@ -265,16 +271,27 @@ func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 		 VALUES ($1, $2, $2, 'a person made this counter', false)`, foreign, loc); err != nil {
 		t.Fatal(err)
 	}
-	// REG-01 as an operator renamed it.
-	var origLoc, origBranch *string
-	if err := db.Pool.QueryRow(ctx, `SELECT location_id::text, branch_id::text FROM pos_registers WHERE id = 'REG-01'`).Scan(&origLoc, &origBranch); err != nil {
-		t.Fatal(err)
+	// REG-01 as migrations 027 and 066 leave it: the placeholder location, the
+	// default branch, the name 027 gave. The fixture is forced, not assumed:
+	// the upsert under test can never put the row back once it has moved, so
+	// the test starts from the migration shape whatever an earlier run (or an
+	// operator) left behind, and the cleanup restores the same shape.
+	restoreMigrationShape := func() {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx,
+			`UPDATE pos_registers SET location_id = '00000000-0000-0000-0000-000000000000',
+				branch_id = (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'),
+				name = 'Counter 1'
+			 WHERE id = 'REG-01'`); err != nil {
+			t.Fatalf("restore REG-01's migration shape: %v", err)
+		}
 	}
+	restoreMigrationShape()
 	t.Cleanup(func() {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, foreign)
-		_, _ = db.Pool.Exec(ctx, `UPDATE pos_registers SET location_id = $2, branch_id = $3, name = 'Counter 1' WHERE id = 'REG-01'`,
-			nil, origLoc, origBranch)
+		restoreMigrationShape()
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, loc)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, opLoc)
 	})
 	if _, err := db.Pool.Exec(ctx, `UPDATE pos_registers SET name = 'renamed by the operator' WHERE id = 'REG-01'`); err != nil {
 		t.Fatal(err)
@@ -314,5 +331,34 @@ func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 	}
 	if name1 != "renamed by the operator" {
 		t.Errorf("a re-seed renamed the register to %q, want the operator's name kept", name1)
+	}
+
+	// An operator re-pointed REG-01 onto a location and branch of their own
+	// and named it: the row migration 027 created is not the seed's to move
+	// back, so a re-seed, run twice, leaves it exactly where the operator
+	// put it.
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'seed test operator branch')`,
+		opLoc, "SEEDT-"+opLoc.String()[:8]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Pool.Exec(ctx,
+		`UPDATE pos_registers SET location_id = $1, branch_id = $1, name = 'operator counter' WHERE id = 'REG-01'`, opLoc); err != nil {
+		t.Fatal(err)
+	}
+	upsert()
+	upsert()
+	var opLoc1, opBranch1, opName1 string
+	if err := db.Pool.QueryRow(ctx,
+		`SELECT location_id::text, branch_id::text, name FROM pos_registers WHERE id = 'REG-01'`).
+		Scan(&opLoc1, &opBranch1, &opName1); err != nil {
+		t.Fatal(err)
+	}
+	if opLoc1 != opLoc.String() || opBranch1 != opLoc.String() {
+		t.Errorf("a re-seed moved an operator re-pointed REG-01: location %s branch %s, want it kept at %s",
+			opLoc1, opBranch1, opLoc)
+	}
+	if opName1 != "operator counter" {
+		t.Errorf("a re-seed renamed the re-pointed register to %q, want the operator's name kept", opName1)
 	}
 }
