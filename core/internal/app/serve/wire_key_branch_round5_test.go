@@ -231,6 +231,49 @@ func TestKeyBranchPin_QuoteConvertCustomerWall(t *testing.T) {
 	}
 }
 
+// TestKeyBranchPin_ActivityContactOwnership is round 11 P2-3: a CRM activity
+// of customer A took a contact of customer B, for every caller. The create and
+// the update now refuse a contact_id the activity's customer does not own, 400
+// naming contact_id with the order's words, so one branch's record can never
+// point at another's contact.
+func TestKeyBranchPin_ActivityContactOwnership(t *testing.T) {
+	f, w, _ := round5Fixture(t)
+	A, conA, conB := f.custID.String(), w.conA.String(), w.conB.String()
+	create := func(contact string) string {
+		return fmt.Sprintf(`{"activity_type":"call","description":"pin","contact_id":%q}`, contact)
+	}
+	for _, who := range []string{"bound", "unbound", "user"} {
+		status, buf := f.send(t, who, "POST", "/api/v1/customers/"+A+"/activities", create(conB), nil)
+		if status != http.StatusBadRequest || !strings.Contains(string(buf), "contact_id") ||
+			!strings.Contains(string(buf), "is not a contact of this customer") {
+			t.Errorf("%s activity naming the foreign contact: %d %s, want the 400 naming contact_id", who, status, buf)
+		}
+	}
+	created := f.made(t, "bound", "crm_activities", "POST", "/api/v1/customers/"+A+"/activities", create(conA), http.StatusCreated)
+	if created == uuid.Nil {
+		t.Fatal("the A control activity create did not answer its id")
+	}
+	put := func(contact string) string {
+		return fmt.Sprintf(`{"activity_type":"call","description":"pin","contact_id":%q,"revision":1}`, contact)
+	}
+	for _, who := range []string{"bound", "unbound", "user"} {
+		status, buf := f.send(t, who, "PUT", "/api/v1/activities/"+created.String(), put(conB), nil)
+		if status != http.StatusBadRequest || !strings.Contains(string(buf), "is not a contact of this customer") {
+			t.Errorf("%s activity update naming the foreign contact: %d %s, want the 400 naming contact_id", who, status, buf)
+		}
+	}
+	f.allow(t, "bound", "PUT", "/api/v1/activities/"+created.String(), put(conA), nil, http.StatusOK)
+	// No activity of the pin's customer points at the foreign contact.
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM crm_activities WHERE customer_id = $1 AND contact_id = $2`, f.custID, w.conB).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d activities of the pin's customer name the foreign contact", n)
+	}
+}
+
 // TestKeyBranchPin_PosSyncCustomerWall is round 10 P1-1: the offline sync
 // replays whole sales whose bodies name a customer, so a key pinned to A
 // posting a sale on a customer held only by B (its ACCOUNT tender invoicing

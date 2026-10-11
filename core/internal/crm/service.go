@@ -93,9 +93,33 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
 	return a, nil
 }
 
+// notOwnedContact is the 400 an activity write gets for a contact its
+// customer does not own (round 11 P2-3), the order's words for the same
+// shape.
+func notOwnedContact() error {
+	return httpx.BadRequest("one or more fields failed validation",
+		httpx.FieldError{Field: "contact_id", Message: "is not a contact of this customer"})
+}
+
+// contactOwned refuses a contact the customer does not own; nil names none.
+func (s *Service) contactOwned(ctx context.Context, customerID uuid.UUID, contact *uuid.UUID) error {
+	if contact == nil {
+		return nil
+	}
+	ok, err := s.repo.ContactBelongsTo(ctx, *contact, customerID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return notOwnedContact()
+	}
+	return nil
+}
+
 // Create logs one activity for the customer the path names. The customer is
 // checked behind the caller's branch wall first, so a create on a customer
-// the caller cannot see is the same 404 as reading it.
+// the caller cannot see is the same 404 as reading it, and the contact must
+// be the customer's own.
 func (s *Service) Create(ctx context.Context, customerID uuid.UUID, d *Draft) (*Activity, error) {
 	var out *Activity
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -105,6 +129,9 @@ func (s *Service) Create(ctx context.Context, customerID uuid.UUID, d *Draft) (*
 		}
 		if !visible {
 			return httpx.NotFound("customer not found")
+		}
+		if err := s.contactOwned(ctx, customerID, d.ContactID); err != nil {
+			return err
 		}
 		now := httpx.TimestampOf(s.now().UTC())
 		a := &Activity{
@@ -150,6 +177,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 			return notFound(err)
 		}
 		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
+			return err
+		}
+		if err := s.contactOwned(ctx, cur.CustomerID, d.ContactID); err != nil {
 			return err
 		}
 		next := *cur
