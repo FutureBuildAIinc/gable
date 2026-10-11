@@ -258,25 +258,32 @@ transaction:
 
 1. Lock the bill (`repo.Lock`); check the revision under the lock.
 2. Refuse `409 invoice_not_pending` if the bill is not `pending`.
-3. Load the lines with their account codes (`repo.LinesWithCodes`).
-4. Refuse `409 line_needs_account` if any line's code is empty, naming
+3. Refuse `409 has_paid_amount` if `amount_paid_cents` is not zero: a
+   payment applies only to an `approved` or `partial` bill, so a paid
+   amount on a `pending` bill is a legacy or hand edited row whose
+   `amount_open` sits where migration 106 clamped it, below the total;
+   the approve would post the whole total while `amount_open` stands
+   still, leaving money in `2010` no bill owes. The row is left for the
+   operator to mend by hand (a stated limit).
+4. Load the lines with their account codes (`repo.LinesWithCodes`).
+5. Refuse `409 line_needs_account` if any line's code is empty, naming
    the line's position.
-5. Build the entry (`postInvoiceEntry`): a debit leg per line on the
+6. Build the entry (`postInvoiceEntry`): a debit leg per line on the
    line's account, the tax spread across the line accounts pro rata to
    their extensions with the last line taking the remainder
-   (`tax * line_total_cents / subtotal_cents`, the remainder accumulated
-   into the last line), the credit to `gl.AccountCodeAP = "2010"` for
-   the whole total.
-6. Post the entry through `gl.PostEntry` in the same transaction. The
+   (`tax_cents * line_total_cents / subtotal_cents`, the remainder accumulated
+   into the last line), the credit to `gl.AccountCodeAP = "2010"` for the
+   whole total.
+7. Post the entry through `gl.PostEntry` in the same transaction. The
    posting can raise `period_closed` (closed fiscal period),
    `account_missing` (chart of accounts code absent) or
    `entry_unbalanced` (debits and credits do not balance); each is
    mapped to a 409 by the module and fails the act (ADR 0008 7.4).
-7. Mark the bill approved with the linked `gl_entry_id` and the
+8. Mark the bill approved with the linked `gl_entry_id` and the
    approver (the caller's UUID when the actor is a parseable UUID,
    else nil for an in-process caller; `s.ApproveInvoice` passes the
    caller-given approver id).
-8. Write the audit row, then the event
+9. Write the audit row, then the event
    (`vendor_invoice.approved`) in the same transaction (ADR 0003
    section 2).
 

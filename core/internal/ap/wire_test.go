@@ -661,6 +661,50 @@ func TestWire_ApproveAccountMissing(t *testing.T) {
 // a 500. A payment naming one bill twice would apply it twice (the second pass
 // reuses the stale locked summary) and only the amount_open CHECK stops it, so
 // Parse refuses the repeated id up front.
+// RULE (review r8 P3-1): a pending bill cannot carry a paid amount. A payment
+// applies only to an approved or partial bill, so amount_paid on a pending
+// bill is a legacy or hand edited row; migration 106 clamped its amount_open
+// below the total (a bill paid past its total sits at zero), and the approve
+// posts the whole total while amount_open stands still, so 2010 would hold
+// money no bill owes. The approve refuses such a bill; nothing is written.
+func TestWire_ApproveRefusesLegacyPaidAmount(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// The unknown status shape: a bill the migration made PENDING, paid past
+	// its total, its open clamped to zero (what 106's LEAST leaves).
+	id1, r1 := f.enter("V-PAID-1", "1", 40000) // 4.00
+	mustExec(t, f.db, `UPDATE vendor_invoices SET amount_paid = 9.00, amount_open = 0.00 WHERE id = $1`, id1)
+	// The drift shape: paid part of its total, its open clamped to the rest.
+	id2, r2 := f.enter("V-PAID-2", "1", 100000) // 10.00
+	mustExec(t, f.db, `UPDATE vendor_invoices SET amount_paid = 3.00, amount_open = 7.00 WHERE id = $1`, id2)
+
+	for _, bill := range []struct {
+		id  string
+		rev int64
+	}{{id1, r1}, {id2, r2}} {
+		a := f.approve(bill.id, bill.rev)
+		if a.status != http.StatusConflict {
+			t.Fatalf("approve a pending bill with a paid amount = %d, want 409: %s", a.status, a.raw)
+		}
+		if code, blockers, _ := errorOf(t, a); code != "invalid_state_transition" || blockers[0] != "has_paid_amount" {
+			t.Errorf("approve a pending bill with a paid amount = %q %v, want has_paid_amount", code, blockers)
+		}
+		if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'PENDING' AND revision = 1`, bill.id); n != 1 {
+			t.Error("a refused approve changed the bill")
+		}
+		if n := f.count(`SELECT count(*) FROM gl_journal_entries WHERE source = 'VENDOR_INVOICE' AND source_ref_id = $1`, bill.id); n != 0 {
+			t.Errorf("%d entries were written for a refused approve", n)
+		}
+		if !f.balanced() {
+			t.Error("an entry does not balance")
+		}
+		if got, want := f.controlBalance(), f.openSum(); got != want {
+			t.Errorf("after the refused approve: control %d, open %d", got, want)
+		}
+	}
+}
+
 func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))

@@ -174,7 +174,11 @@ paths:
         posting failure fails the act (a closed period is a 409 blocker
         period_closed; a line with no account is a 409 blocker
         line_needs_account; a required chart of accounts code that is missing
-        is a 409 blocker account_missing naming it). To voided: from pending
+        is a 409 blocker account_missing naming it; a pending bill that
+        already carries a paid amount, a legacy or hand edited row no payment
+        of its own could write, is a 409 blocker has_paid_amount naming the
+        cents, and the row is left for the operator to mend by hand). To
+        voided: from pending
         (nothing posted) or
         approved (the entry is reversed whole; a bill that prices to zero
         posted nothing and voids with nothing to reverse); a reason is

@@ -372,6 +372,17 @@ func (s *Service) approve(ctx context.Context, id uuid.UUID, pre Precondition, w
 			return httpx.InvalidStateTransition("only a pending bill can be approved",
 				httpx.Blocker("invoice_not_pending", "the bill is "+locked.Status.Status()))
 		}
+		// A pending bill cannot carry a paid amount: a payment applies only
+		// to an approved or partial bill (ADR 0008 7.4), so this is a legacy
+		// or hand edited row, and amount_open sits where migration 106
+		// clamped it, below the total. The approve posts the whole total
+		// while amount_open stands still, which would leave money in 2010 no
+		// bill owes (review r8 P3-1), so the act is refused and the row is
+		// left for the operator to mend by hand.
+		if locked.AmountPaidCents != 0 {
+			return httpx.InvalidStateTransition("a pending bill cannot carry a paid amount; mend amount_paid by hand",
+				httpx.Blocker("has_paid_amount", fmt.Sprintf("%d cents are paid against this bill", int64(locked.AmountPaidCents))))
+		}
 		lines, err := s.repo.LinesWithCodes(ctx, id)
 		if err != nil {
 			return err
