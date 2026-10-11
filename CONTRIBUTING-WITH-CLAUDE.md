@@ -110,7 +110,7 @@ contribution. You are done — you don't owe anybody a patch.
 guessing, discover that the local default Postgres port is **5434** (matching
 `docker-compose.yml`, not the standard 5432), find every doc that says otherwise, fix them,
 verify every link in the files it touched still resolves, make sure the SPDX header is right
-for the directory, and open a pull request against **`refactor/v1`** with a description that says
+for the directory, and open a pull request against **`staging`** with a description that says
 exactly how it verified the fix.
 
 ### 3 · You're a developer and want to add a test
@@ -136,8 +136,8 @@ one; and if it finds a real bug it files an issue rather than writing the wrong 
 
 These apply whether or not you used AI.
 
-**1 · Pull requests target `refactor/v1`, never `main`.**
-Maintainers fast-forward `refactor/v1 → main` after review. See
+**1 · Pull requests target `staging`, never `main`.**
+Maintainers fast-forward `staging → main` after review. See
 [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 **2 · Never commit a secret.**
