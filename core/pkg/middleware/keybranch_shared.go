@@ -61,6 +61,14 @@ type SharedAuditor interface {
 	AuditSharedCustomerChange(ctx context.Context, keyID string, customer uuid.UUID, changes map[string]any) error
 }
 
+// SharedRefusalAuditor is the optional audit seam for the refusal of a user or
+// an unbound key on a shared customer's restricted fields: those callers have
+// no pin, so the key.branch_refused row does not fit them. The row's entity is
+// the customer.
+type SharedRefusalAuditor interface {
+	AuditSharedCustomerRefusal(ctx context.Context, actorKind, actorID string, customer, branch uuid.UUID, fields []string, method, path string)
+}
+
 // callerHasRole reports whether the user claims hold one of the roles.
 func callerHasRole(claims *UserClaims, roles ...string) bool {
 	if claims == nil {
@@ -165,6 +173,24 @@ func (w *KeyBranchWall) RecordSharedRefusal(ctx context.Context) {
 	}
 	note, _ := ctx.Value(requestNoteKey{}).(requestNote)
 	w.auditor.AuditKeyBranchRefusal(ctx, keyID, pin, note.method, note.path)
+}
+
+// RecordSharedCallerRefusal writes the audit row of a refusal served to a user
+// or an unbound key, outside the refused write's transaction. A bound key's
+// refusal has its own row (RecordSharedRefusal).
+func (w *KeyBranchWall) RecordSharedCallerRefusal(ctx context.Context, customer, branch uuid.UUID, fields []string) {
+	a, ok := w.auditor.(SharedRefusalAuditor)
+	if !ok {
+		return
+	}
+	kind, actor := "user", ""
+	if keyID, isKey := KeyIDFromContext(ctx); isKey {
+		kind, actor = "key", keyID
+	} else if claims := ClaimsFromContext(ctx); claims != nil {
+		actor = claims.Subject
+	}
+	note, _ := ctx.Value(requestNoteKey{}).(requestNote)
+	a.AuditSharedCustomerRefusal(ctx, kind, actor, customer, branch, fields, note.method, note.path)
 }
 
 // RecordSharedChange writes the audit row of an unbound key's change to a

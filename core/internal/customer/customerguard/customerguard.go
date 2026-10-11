@@ -49,6 +49,11 @@ func (a *Shared) Shared(ctx context.Context, customerID uuid.UUID) (customer.Sha
 // RecordRefusal writes the refusal's key.branch_refused row.
 func (a *Shared) RecordRefusal(ctx context.Context) { a.w.RecordSharedRefusal(ctx) }
 
+// RecordCallerRefusal writes the refusal row of a user or an unbound key.
+func (a *Shared) RecordCallerRefusal(ctx context.Context, customerID, branch uuid.UUID, fields []string) {
+	a.w.RecordSharedCallerRefusal(ctx, customerID, branch, fields)
+}
+
 // RecordChange writes the dealer wide key's audit row.
 func (a *Shared) RecordChange(ctx context.Context, customerID uuid.UUID, changes map[string]any) error {
 	return a.w.RecordSharedChange(ctx, customerID, changes)

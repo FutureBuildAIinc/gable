@@ -64,6 +64,10 @@ type SharedGuard interface {
 	// RecordRefusal writes the refusal's audit row; it runs after the refused
 	// write's transaction has rolled back.
 	RecordRefusal(ctx context.Context)
+	// RecordCallerRefusal writes the audit row of a refusal served to a user
+	// or an unbound key (no pin, so no key.branch_refused row); it runs after
+	// the refused write's transaction has rolled back.
+	RecordCallerRefusal(ctx context.Context, customerID, branch uuid.UUID, fields []string)
 	// RecordChange writes the audit row of a dealer wide key's restricted
 	// change, inside the write's transaction.
 	RecordChange(ctx context.Context, customerID uuid.UUID, changes map[string]any) error
@@ -77,30 +81,45 @@ func (s *Service) WithSharedGuard(g SharedGuard) *Service {
 
 // sharedRefusal is the 403 a bound key gets on a restricted write; it carries
 // the marker the outer method turns into the refusal's audit row.
-type sharedRefusal struct{ err *httpx.Error }
+type sharedRefusal struct {
+	err *httpx.Error
+	// caller marks a refusal served to a user or an unbound key; the rest
+	// is what its audit row names.
+	caller   bool
+	customer uuid.UUID
+	branch   uuid.UUID
+	fields   []string
+}
 
 func (e *sharedRefusal) Error() string { return e.err.Message }
 
 func refusedOn(branch uuid.UUID, fields ...string) *sharedRefusal {
-	return refusedSharing("a branch bound key may act only on its own branch", branch, fields...)
+	return refusedSharing(branch, fields...)
 }
 
 // refusedCallerOn is the refusal a caller without the finance or owner role
 // (a user) or without the customers:restricted scope (an unbound key) gets on
-// a shared customer's restricted fields: the same words, naming a branch that
-// holds the customer (principal ruling item 48).
-func refusedCallerOn(branch uuid.UUID, fields ...string) *sharedRefusal {
-	return refusedSharing("a shared customer's restricted fields change only with the finance or owner role, or an unbound key carrying customers:restricted", branch, fields...)
+// a shared customer's restricted fields: the bound key's words, naming the
+// lowest numbered branch that holds the customer (principal ruling item 48,
+// ADR 0007 section 5.5). Its audit row is the caller refusal row.
+func refusedCallerOn(customer, branch uuid.UUID, fields ...string) *sharedRefusal {
+	ref := refusedSharing(branch, fields...)
+	ref.caller, ref.customer, ref.branch, ref.fields = true, customer, branch, fields
+	return ref
 }
 
-func refusedSharing(rule string, branch uuid.UUID, fields ...string) *sharedRefusal {
+// sharedRefusalWords is the one rule sentence every shared customer refusal
+// carries, whoever the caller is.
+const sharedRefusalWords = "a branch bound key may act only on its own branch"
+
+func refusedSharing(branch uuid.UUID, fields ...string) *sharedRefusal {
 	sort.Strings(fields)
 	details := make([]httpx.FieldError, 0, len(fields))
 	for _, f := range fields {
 		details = append(details, httpx.FieldError{Field: f, Code: httpx.CodeForbidden, Message: "shared with another branch"})
 	}
 	return &sharedRefusal{err: &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
-		Message: rule + ": the customer is also held by branch " + branch.String(),
+		Message: sharedRefusalWords + ": the customer is also held by branch " + branch.String(),
 		Details: details}}
 }
 
@@ -110,7 +129,11 @@ func (s *Service) sharedOutcome(ctx context.Context, err error) error {
 	var ref *sharedRefusal
 	if errors.As(err, &ref) {
 		if s.shared != nil {
-			s.shared.RecordRefusal(ctx)
+			if ref.caller {
+				s.shared.RecordCallerRefusal(ctx, ref.customer, ref.branch, ref.fields)
+			} else {
+				s.shared.RecordRefusal(ctx)
+			}
 		}
 		return ref.err
 	}
@@ -137,7 +160,7 @@ func (s *Service) checkRestricted(ctx context.Context, id uuid.UUID, changes map
 		return refusedOn(verdict.Branch, fields...)
 	}
 	if verdict.RefuseCaller {
-		return refusedCallerOn(verdict.Branch, fields...)
+		return refusedCallerOn(id, verdict.Branch, fields...)
 	}
 	if verdict.Audit {
 		return s.shared.RecordChange(ctx, id, changes)
