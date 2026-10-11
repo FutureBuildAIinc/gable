@@ -53,18 +53,18 @@ Development flows through two branches:
 | Branch | Purpose |
 |---|---|
 | `main` | Stable trunk. Fork-ready. Releases are cut from here. |
-| `staging` | Integration branch. Contributions land here first. |
+| `refactor/v1` | Integration branch. Contributions land here first. |
 
-**Open your pull request against `staging`.** After review, maintainers
-fast-forward `staging → main`. Do not target `main` directly.
+**Open your pull request against `refactor/v1`.** After review, maintainers
+fast-forward `refactor/v1 → main`. Do not target `main` directly.
 
 ## Pull request workflow
 
 1. Fork the repository (or branch directly if you have write access).
-2. Branch off `staging`: `git checkout -b feat/short-description staging`.
+2. Branch off `refactor/v1`: `git checkout -b feat/short-description refactor/v1`.
 3. Make your change. Keep commits focused — one logical change per commit.
 4. Run the pre-flight gates below **before pushing**.
-5. Open the PR against `staging` and fill out the PR template.
+5. Open the PR against `refactor/v1` and fill out the PR template.
 6. Address review feedback; a maintainer merges once it's approved and green.
 
 ### Pre-flight checklist
@@ -104,7 +104,7 @@ make license-check
 
 # ---- Container images (the `docker` job) ---------------------------------
 docker build -f core/Dockerfile .
-docker build -f web/apps/desk/Dockerfile .
+docker build -f web/Dockerfile .
 ```
 
 Equivalent make targets: `build`, `vet`, `test`, `test-short`, `cover`,
