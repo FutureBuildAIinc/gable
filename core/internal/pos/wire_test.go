@@ -818,6 +818,7 @@ func int64Of(v any) int64 {
 type fakeGateway struct {
 	charges     []*payment.GatewayResult
 	refunds     []string
+	refundCents []int64
 	voids       []string
 	chargeCalls int
 	currency    []string
@@ -886,6 +887,7 @@ func (g *fakeGateway) Refund(ctx context.Context, id string, cents int64) (*paym
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.refunds = append(g.refunds, id)
+	g.refundCents = append(g.refundCents, cents)
 	var err error
 	if len(g.refundErrs) > 0 {
 		err, g.refundErrs = g.refundErrs[0], g.refundErrs[1:]
