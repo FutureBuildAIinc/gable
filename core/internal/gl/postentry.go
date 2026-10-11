@@ -19,6 +19,7 @@ import (
 const (
 	AccountCodeInventory      = "1030"
 	AccountCodeSalesTax       = "2020"
+	AccountCodeAP             = "2010" // Accounts Payable: what vendors are owed (C4-1b, ADR 0008 7.4)
 	AccountCodeCOGS           = "5010"
 	AccountCodeDeliveryRev    = "4020"
 	AccountCodeSalesDiscounts = "4050"
@@ -38,6 +39,9 @@ var (
 	// ErrPeriodClosed is the 077 trigger's refusal, mapped: the act answers 409
 	// with the blocker period_closed.
 	ErrPeriodClosed = errors.New("gl: the entry is dated into a closed fiscal period")
+	// ErrAccountMissing names a code the chart of accounts does not hold, so
+	// the act can answer a 409 telling the operator what to mend.
+	ErrAccountMissing = errors.New("gl: a required account is missing from the chart of accounts")
 )
 
 // Leg is one leg of a posting, by stable account code. A leg with a zero

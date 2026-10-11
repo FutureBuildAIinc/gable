@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/gablelbm/gable/internal/ap"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/money"
@@ -37,9 +39,9 @@ type POSource interface {
 // APSource is the slice of the accounts-payable service the matcher needs,
 // declared by the consumer for the same reason. *ap.Service satisfies it as-is.
 type APSource interface {
-	ListVendorInvoices(ctx context.Context, vendorID *uuid.UUID, status string) ([]ap.VendorInvoice, error)
-	GetVendorInvoice(ctx context.Context, id uuid.UUID) (*ap.VendorInvoice, error)
-	ApproveInvoice(ctx context.Context, invoiceID uuid.UUID, approverID uuid.UUID) (*ap.VendorInvoice, error)
+	ListVendorInvoices(ctx context.Context, vendorID *uuid.UUID, status string) ([]ap.Invoice, error)
+	GetVendorInvoice(ctx context.Context, id uuid.UUID) (*ap.Invoice, error)
+	ApproveInvoice(ctx context.Context, invoiceID uuid.UUID, approverID uuid.UUID) (*ap.Invoice, error)
 }
 
 // Service handles 3-way PO matching business logic.
@@ -87,15 +89,14 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 		return nil, fmt.Errorf("failed to list vendor invoices: %w", err)
 	}
 
-	var vendorInvoice *ap.VendorInvoice
-	for i, inv := range invoices {
+	var vendorInvoice *ap.Invoice
+	for _, inv := range invoices {
 		if inv.POID != nil && *inv.POID == poID {
 			fullInv, err := s.apSvc.GetVendorInvoice(ctx, inv.ID)
 			if err != nil {
 				continue
 			}
 			vendorInvoice = fullInv
-			_ = i
 			break
 		}
 	}
@@ -134,7 +135,7 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 	}
 
 	// 5. Build invoice line lookup (by index position since we can't match by product)
-	invoiceLines := make(map[int]ap.VendorInvoiceLine)
+	invoiceLines := make(map[int]ap.InvoiceLine)
 	if vendorInvoice != nil {
 		for i, line := range vendorInvoice.Lines {
 			invoiceLines[i] = line
@@ -160,8 +161,12 @@ func (s *Service) RunMatch(ctx context.Context, poID uuid.UUID) (*MatchResult, e
 
 		// Get corresponding invoice line (matched by position)
 		if invLine, ok := invoiceLines[i]; ok {
-			detail.InvoicedQty = invLine.Quantity
-			detail.InvoiceUnitPrice = invLine.UnitPrice
+			// The AP line's quantity and unit price are the wire's scale 4
+			// types since C4-1b; the comparison here stays in the floats and
+			// cents this unconverted module already uses until its own
+			// conversion (C4-2 E).
+			detail.InvoicedQty = quantityFloat(invLine.Quantity)
+			detail.InvoiceUnitPrice = int64(math.Round(float64(invLine.UnitPriceTenThousandths) / 100))
 		}
 
 		// If no invoice line exists, it is an exception: there is nothing to
@@ -344,6 +349,13 @@ func lineAmountDiffCents(detail *MatchLineDetail) int64 {
 		qty = detail.ReceivedQty
 	}
 	return money.RoundToCents(float64(detail.InvoiceUnitPrice-detail.POUnitCost) * qty)
+}
+
+// quantityFloat reads a wire quantity as the float this module's unconverted
+// tolerance arithmetic still works in.
+func quantityFloat(q httpx.Quantity) float64 {
+	f, _ := strconv.ParseFloat(q.DecimalString(), 64)
+	return f
 }
 
 func calcVariancePct(expected, actual float64) float64 {
