@@ -705,6 +705,62 @@ func TestWire_ApproveRefusesLegacyPaidAmount(t *testing.T) {
 	}
 }
 
+// RULE (PR 89 r1 P2-1): an omitted currency comes from the currency.default
+// setting, read by the create's resolve (USD where the setting is absent).
+// Parse leaves the field empty when the request omits it, so the setting is
+// read on the route; a currency the request does name is validated as an ISO
+// 4217 code of three capital letters.
+func TestWire_CreateCurrencyFromSetting(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	mustExec(t, f.db, `INSERT INTO system_settings (key, value) VALUES ('currency.default', 'EUR')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM system_settings WHERE key = 'currency.default'`)
+	})
+
+	// An omitted currency takes the setting's value.
+	body := f.createBody("V-CUR-1", "1", 1000)
+	r := f.do("POST", "/api/v1/ap/invoices", body)
+	if r.status != http.StatusCreated {
+		t.Fatalf("create with the currency omitted = %d: %s", r.status, r.raw)
+	}
+	if got := str(t, r.body, "currency"); got != "EUR" {
+		t.Errorf("an omitted currency = %q, want the setting's EUR", got)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND currency = 'EUR'`, str(t, r.body, "id")); n != 1 {
+		t.Error("the bill was not stored in the setting's currency")
+	}
+
+	// A named currency still wins, and a bad one is still refused.
+	body2 := f.createBody("V-CUR-2", "1", 1000)
+	body2["currency"] = "CAD"
+	r2 := f.do("POST", "/api/v1/ap/invoices", body2)
+	if r2.status != http.StatusCreated {
+		t.Fatalf("create with a named currency = %d: %s", r2.status, r2.raw)
+	}
+	if got := str(t, r2.body, "currency"); got != "CAD" {
+		t.Errorf("a named currency = %q, want CAD", got)
+	}
+	body3 := f.createBody("V-CUR-3", "1", 1000)
+	body3["currency"] = "usd"
+	r3 := f.do("POST", "/api/v1/ap/invoices", body3)
+	if r3.status != http.StatusBadRequest {
+		t.Fatalf("create with a lowercase currency = %d, want 400: %s", r3.status, r3.raw)
+	}
+	if _, _, fields := errorOf(t, r3); len(fields) == 0 || fields[0] != "currency" {
+		t.Errorf("create with a lowercase currency = %v, want currency", fields)
+	}
+
+	// A create posts nothing, so the tie stands where it was.
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want {
+		t.Errorf("after the creates: control %d, open %d", got, want)
+	}
+}
+
 func TestWire_PaymentRefusesDuplicateInvoiceIDs(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))

@@ -12,9 +12,12 @@ the due date, the tax) and the priced lines (the goods or services, the
 quantity, the unit price, the GL account the line's money lands on). A
 payment names the bills it applies to (in the order the desk pays them)
 and locks that order on the database so concurrent payments cannot
-deadlock or both spend the same open amount (repeats are refused as
-`invoice_ids[i] (appears twice)` by `PayRequest.Parse`, and over-payment
-as `exceeds_open` by `PayVendor`). Both acts post one journal entry
+deadlock or both spend the same open amount (a repeated bill id in one
+payment's `invoice_ids` is refused as `invoice_ids[i] (appears twice)`
+by `PayRequest.Parse`, and over-payment as `exceeds_open` by
+`PayVendor`; a repeated payment, the same request sent twice, is a
+replay caught by the `Idempotency-Key`, not by these checks). Both acts
+post one journal entry
 inside one transaction: a payment that posts `DR 2010 / CR 1010`, and an
 approve that builds the entry from the lines and credits the whole
 total to `2010`.
@@ -121,7 +124,7 @@ scope.
 | `vendor_name` | text | Snapshot of the vendor name. |
 | `branch_id` | UUID | The branch the bill belongs to. |
 | `vendor_invoice_number` | text | The vendor's own number, 1 to 64 characters, unique per vendor. |
-| `currency` | ISO 4217 | The bill's currency; an omitted currency is `USD`. |
+| `currency` | ISO 4217 | The bill's currency; an omitted currency comes from the `currency.default` setting (`USD` where the setting is absent). |
 | `invoice_date` | date | YYYY-MM-DD. |
 | `due_date` | date | YYYY-MM-DD. |
 | `po_id` | UUID, nullable | The purchase order this bill was matched to (FK since migration 106). |
@@ -213,7 +216,9 @@ target is a 403 naming `branch_id`), `vendor_invoice_number` (1 to 64
 characters, unique per vendor; a duplicate is a 409 naming the field),
 `invoice_date`, `due_date` (both YYYY-MM-DD), optional `po_id`
 (an unknown PO is a 400 naming `po_id`), optional `currency`
-(an omitted currency is `USD`; a request's currency
+(an omitted currency comes from the `currency.default` setting, which
+the create's `resolve` reads (`USD` where the setting is absent); a
+request's currency
 must be an ISO 4217 code of three capital letters), `tax_cents`, `notes`
 (at most 2000 characters) and `lines` (at least one line, the same
 set of fields as the line schema minus `id`, `position` and
@@ -446,9 +451,10 @@ only AP route with a payload branch. `POST /ap/payments` carries no
 outside the caller's wall is a 400 naming `invoice_ids[i]`,
 `LockForPayment` at `repository.go:307-319`). The branch resolves in
 three steps (`service.go:263-278`): the payload `branch_id`, the
-caller's context branch, or the `default_branch_id` setting. The
-`currency` is `Parse`'s `USD` on the route (input.go:117-122); the
-`currency.default` setting is not read on the create path.
+caller's context branch, or the `default_branch_id` setting. An omitted
+`currency` is left empty by `Parse` and the create's `resolve` reads the
+`currency.default` setting for it (`USD` where the setting is absent),
+on the route and in process alike.
 
 ## Stated limits
 
@@ -547,14 +553,15 @@ curl -X POST http://localhost:8080/api/v1/ap/invoices \
   -H 'X-Branch-Id: <seeded branch uuid>' \
   -H 'Idempotency-Key: 1' \
   -H 'Content-Type: application/json' \
-  -d @ap-invoice-create.json
+  -d '{"vendor_id":"<seeded vendor uuid>","vendor_invoice_number":"INV-1001","invoice_date":"2026-01-10","due_date":"2026-02-10","tax_cents":0,"lines":[{"description":"2x4x8 SPF","quantity":"100","unit_price_ten_thousandths":41250,"gl_account_id":"<seeded 5020 account uuid>"}]}'
 ```
 
-with a body that names the seeded vendor, the seeded branch, a
-1 to 64 character `vendor_invoice_number`, the two dates as
-YYYY-MM-DD, an ISO 4217 currency, `tax_cents`, optional `notes` and at
-least one line (`description`, `quantity` as a decimal string,
-`unit_price_ten_thousandths` int64 and the line's `gl_account_id`):
+The body names the seeded vendor, a 1 to 64 character
+`vendor_invoice_number`, the two dates as YYYY-MM-DD, optional `notes`
+and at least one line (`description`, `quantity` as a decimal string,
+`unit_price_ten_thousandths` int64 and the line's `gl_account_id`; the
+currency may be named and otherwise comes from the `currency.default`
+setting). The approve then follows:
 
 ```
 curl -X POST http://localhost:8080/api/v1/ap/invoices/<id>/transitions \
