@@ -636,7 +636,9 @@ func (s *Service) ListVendorInvoices(ctx context.Context, vendorID *uuid.UUID, s
 // PayVendor records a payment to a vendor and applies it to the bills it
 // names, in id order, under their locks: only an approved or partial bill
 // takes money (ADR 0008 7.4). The entry posts through gl.PostEntry inside the
-// act's transaction; a posting failure fails the act.
+// act's transaction in the bills' currency (a payment naming bills of more
+// than one currency is refused, review r2 P2-2); a posting failure fails the
+// act.
 func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APPayment, error) {
 	// The invoices are locked in id order (ADR 0008 section 9 step 5a), so
 	// every contender takes them in one order; the money then applies in the
@@ -677,6 +679,23 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 					httpx.Blocker("invoice_not_approved", inv.Number+" is "+inv.Status.Status()))
 			}
 			locked[id] = inv
+		}
+
+		// The payment's entry posts in the bills' currency, so the control
+		// account ties per currency (the trial balance never sums across two,
+		// review r2 P2-2): every named bill must share one currency, and a
+		// payment that spans two is refused naming the bills that differ.
+		currency := ""
+		var setter uuid.UUID
+		for _, id := range lockedIDs {
+			c := locked[id].Currency
+			if currency == "" {
+				currency, setter = c, id
+			} else if c != currency {
+				return httpx.InvalidStateTransition("a payment cannot span bills of different currencies",
+					httpx.Blocker("currency_mismatch", fmt.Sprintf("%s is %s and %s is %s",
+						locked[setter].Number, currency, locked[id].Number, c)))
+			}
 		}
 
 		var events []outbox.Event
@@ -725,7 +744,7 @@ func (s *Service) PayVendor(ctx context.Context, in *PayInput, who Caller) (*APP
 			ref := p.ID
 			entry, err := s.gl.PostEntry(ctx, gl.PostingInput{
 				EntryDate: mustDate(in.PaymentDate), Memo: "Vendor payment " + p.ID.String(),
-				Source: gl.SourceVendorPmt, SourceRefID: &ref, PostedBy: who.Actor,
+				Source: gl.SourceVendorPmt, SourceRefID: &ref, Currency: currency, PostedBy: who.Actor,
 				Legs: []gl.Leg{
 					{AccountCode: gl.AccountCodeAP, Description: "Accounts Payable", Debit: in.AmountCents - remaining},
 					{AccountCode: gl.AccountCodeCash, Description: "Cash", Credit: in.AmountCents - remaining},

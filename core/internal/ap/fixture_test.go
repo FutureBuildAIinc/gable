@@ -335,6 +335,17 @@ func (f *fixture) glReversalOf(entry string) string {
 	return rev
 }
 
+// number is the bill's own number (AP-).
+func (f *fixture) number(invoiceID string) string {
+	f.t.Helper()
+	var n string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT number FROM vendor_invoices WHERE id = $1`, invoiceID).Scan(&n); err != nil {
+		f.t.Fatal(err)
+	}
+	return n
+}
+
 // ---------------------------------------------------------------------------
 // Reading the ledger, the events and the control account.
 // ---------------------------------------------------------------------------
@@ -382,17 +393,25 @@ func (f *fixture) entryLegsWhere(t *testing.T, db *database.DB, where string, ar
 // own bills and payments.
 func (f *fixture) controlBalance() int64 {
 	f.t.Helper()
+	return f.controlBalanceIn("")
+}
+
+// controlBalanceIn is controlBalance for one currency (every currency when
+// the code is empty): the tie the trial balance states per currency, never
+// across two.
+func (f *fixture) controlBalanceIn(currency string) int64 {
+	f.t.Helper()
 	var balance int64
 	err := f.db.Pool.QueryRow(context.Background(), `
 		SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint
 		FROM gl_journal_lines l
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		JOIN gl_accounts a ON a.id = l.account_id
-		WHERE a.code = '2010' AND e.status = 'POSTED' AND e.id IN (
+		WHERE a.code = '2010' AND e.status = 'POSTED' AND ($2 = '' OR e.currency = $2) AND e.id IN (
 		    SELECT id FROM gl_journal_entries
 		    WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
 		       OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
-		       OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))`, f.vendor).Scan(&balance)
+		       OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))`, f.vendor, currency).Scan(&balance)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -402,10 +421,18 @@ func (f *fixture) controlBalance() int64 {
 // openSum is what the vendor's open bills owe, in cents.
 func (f *fixture) openSum() int64 {
 	f.t.Helper()
+	return f.openSumIn("")
+}
+
+// openSumIn is openSum for one currency (every currency when the code is
+// empty).
+func (f *fixture) openSumIn(currency string) int64 {
+	f.t.Helper()
 	var open int64
 	if err := f.db.Pool.QueryRow(context.Background(),
-		`SELECT ROUND(COALESCE(SUM(amount_open), 0) * 100)::bigint FROM vendor_invoices WHERE vendor_id = $1 AND status IN ('APPROVED', 'PARTIAL')`,
-		f.vendor).Scan(&open); err != nil {
+		`SELECT ROUND(COALESCE(SUM(amount_open), 0) * 100)::bigint FROM vendor_invoices
+		WHERE vendor_id = $1 AND status IN ('APPROVED', 'PARTIAL') AND ($2 = '' OR currency = $2)`,
+		f.vendor, currency).Scan(&open); err != nil {
 		f.t.Fatal(err)
 	}
 	return open

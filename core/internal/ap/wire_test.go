@@ -1335,6 +1335,107 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	}
 }
 
+// RULE (review r2 P2-2): a payment's entry posts in the bills' currency, not
+// the setting's, so 2010 ties per currency; a payment naming bills of more
+// than one currency is refused with the currency_mismatch blocker naming the
+// bills, and nothing is written.
+func TestWire_PaymentCurrencyFollowsTheBills(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	// Migration 091 seeds the row and the whole base reads it, so the test
+	// borrows it briefly and puts it back; the shared lock every wire test
+	// holds keeps the parallel packages off it for the window.
+	restore := `INSERT INTO system_settings (key, value) VALUES ('currency.default', 'USD')
+		ON CONFLICT (key) DO UPDATE SET value = 'USD'`
+	t.Cleanup(func() { mustExec(t, f.db, restore) })
+	mustExec(t, f.db, `UPDATE system_settings SET value = 'EUR' WHERE key = 'currency.default'`)
+
+	// A bill entered while the setting read EUR, paid after the setting went
+	// back to USD: the payment entry must post in the bill's EUR.
+	eur, r1 := f.enter("V-CURPAY-1", "1", 1000000) // 100.00
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND currency = 'EUR'`, eur); n != 1 {
+		t.Fatal("the bill was not entered in the setting's EUR")
+	}
+	mustExec(t, f.db, restore)
+	if a := f.approve(eur, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if got, want := f.controlBalanceIn("EUR"), f.openSumIn("EUR"); got != want || want != 10000 {
+		t.Fatalf("after the approve: EUR control %d, open %d, want both 10000", got, want)
+	}
+	if p := f.pay(10000, eur); p.status != http.StatusCreated {
+		t.Fatalf("pay the EUR bill = %d: %s", p.status, p.raw)
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
+		JOIN ap_payments p ON p.id = e.source_ref_id
+		WHERE e.source = 'VENDOR_PAYMENT' AND p.vendor_id = $1 AND e.currency = 'EUR'`, f.vendor); n != 1 {
+		t.Errorf("%d payment entries post in the bill's EUR, want 1", n)
+	}
+	if !f.balanced() {
+		t.Error("the payment entry does not balance")
+	}
+	for _, c := range []string{"EUR", "USD", "CAD"} {
+		if got, want := f.controlBalanceIn(c), f.openSumIn(c); got != want {
+			t.Errorf("after the payment: %s control %d, open %d, want equal", c, got, want)
+		}
+	}
+
+	// A payment naming bills of two currencies is refused, naming them, and
+	// nothing is written.
+	usd, r2 := f.enter("V-CURPAY-2", "1", 500000) // 50.00
+	cadBody := f.createBody("V-CURPAY-3", "1", 700000)
+	cadBody["currency"] = "CAD"
+	cr := f.do("POST", "/api/v1/ap/invoices", cadBody)
+	if cr.status != http.StatusCreated {
+		t.Fatalf("enter the CAD bill = %d: %s", cr.status, cr.raw)
+	}
+	cad, r3 := str(t, cr.body, "id"), rev(t, cr)
+	if a := f.approve(usd, r2); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if got, want := f.controlBalanceIn("USD"), f.openSumIn("USD"); got != want || want != 5000 {
+		t.Fatalf("after the USD approve: USD control %d, open %d, want both 5000", got, want)
+	}
+	if a := f.approve(cad, r3); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if got, want := f.controlBalanceIn("CAD"), f.openSumIn("CAD"); got != want || want != 7000 {
+		t.Fatalf("after the CAD approve: CAD control %d, open %d, want both 7000", got, want)
+	}
+	payments := f.count(`SELECT count(*) FROM ap_payments WHERE vendor_id = $1`, f.vendor)
+	applications := f.count(`SELECT count(*) FROM ap_payment_applications a JOIN vendor_invoices i ON i.id = a.invoice_id WHERE i.vendor_id = $1`, f.vendor)
+	entries := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	mixed := f.pay(12000, usd, cad)
+	if mixed.status != http.StatusConflict {
+		t.Fatalf("pay bills of two currencies = %d, want 409: %s", mixed.status, mixed.raw)
+	}
+	if code, blockers, _ := errorOf(t, mixed); code != "invalid_state_transition" || blockers[0] != "currency_mismatch" {
+		t.Errorf("pay bills of two currencies = %q %v, want currency_mismatch", code, blockers)
+	}
+	for _, number := range []string{f.number(usd), f.number(cad)} {
+		if !strings.Contains(string(mixed.raw), number) {
+			t.Errorf("the refusal does not name %s: %s", number, mixed.raw)
+		}
+	}
+	if after := f.count(`SELECT count(*) FROM ap_payments WHERE vendor_id = $1`, f.vendor); after != payments {
+		t.Errorf("%d payments were written for a refused payment", after-payments)
+	}
+	if after := f.count(`SELECT count(*) FROM ap_payment_applications a JOIN vendor_invoices i ON i.id = a.invoice_id WHERE i.vendor_id = $1`, f.vendor); after != applications {
+		t.Errorf("%d applications were written for a refused payment", after-applications)
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != entries {
+		t.Errorf("%d entries were written for a refused payment", after-entries)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	for _, c := range []string{"EUR", "USD", "CAD"} {
+		if got, want := f.controlBalanceIn(c), f.openSumIn(c); got != want {
+			t.Errorf("after the refused payment: %s control %d, open %d, want equal", c, got, want)
+		}
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is
