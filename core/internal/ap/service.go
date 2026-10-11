@@ -486,17 +486,17 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 // swallowed, or an entry the GL routes have already reversed or voided,
 // linked or not) holds no credit in the control account and voids with
 // nothing to reverse. A bill with money applied is refused: the payments
-// have to be undone first. A bill that holds a live VENDOR_INVOICE entry it
-// is not linked to is refused too: no route links an entry to a bill, and a
-// legacy bill of that shape may hold the removed sync's one leg credit (a
-// hand edit may even have zeroed its total after the approve), or it was
-// posted twice and only the newest entry is linked, the duplicate named by
-// the refusal: a plain void would strand that credit. So is a linked entry that does not balance (that
-// one leg shape, linked by hand): its reversal would not balance either,
-// and so is a linked entry whose reversal row is not posted: its credit
-// stands live while the one reversal an entry may hold is already taken.
-// Every refusal is a stated limit: such a bill keeps its status until a
-// later repair item.
+// have to be undone first. So is a bill that holds a live VENDOR_INVOICE
+// entry it is not linked to (a legacy bill: its posting was swallowed, it
+// holds the removed sync's one leg credit, a hand edit may even have zeroed
+// its total after the approve, or it was posted twice and only the newest
+// entry is linked, the duplicate named by the refusal): a plain void would
+// strand that credit. A linked entry that does not balance (that one leg
+// shape, linked by hand) is refused too, because its reversal would not
+// balance either, and so is a linked entry whose reversal row is not posted:
+// its credit stands live while the one reversal an entry may hold is already
+// taken. Every refusal is a stated limit: such a bill keeps its status until
+// a later repair item.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
