@@ -87,6 +87,20 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 		return nil, conflict("intent_not_pending",
 			fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", rec.State))
 	}
+	// The outcome the operator records cannot contradict the claim's own
+	// record (ninth review P2-1, tenth review P3-1): the claim's refund id
+	// was written in its own committed write the moment the terminal
+	// answered, so a PENDING claim carrying one is a refund that moved. A no
+	// refund over it would release a tender whose money is gone, and a
+	// refund under a different id would book money the terminal never moved.
+	if in.Outcome == "no_refund" && rec.RefundTxID != "" {
+		return nil, conflict("refund_recorded",
+			fmt.Sprintf("the claim carries the terminal's refund id %s: the money moved, record the refund, not a no refund", rec.RefundTxID))
+	}
+	if in.Outcome == "refund" && rec.RefundTxID != "" && in.RefundTxID != rec.RefundTxID {
+		return nil, conflict("refund_tx_id_conflict",
+			fmt.Sprintf("the claim carries the terminal's refund id %s, not %s: record the terminal's own id", rec.RefundTxID, in.RefundTxID))
+	}
 	out := &RefundIntentResolved{ID: rec.ID, SaleID: rec.SaleID, TenderID: rec.TenderID, Act: rec.Act,
 		Outcome: in.Outcome, RefundTxID: in.RefundTxID, ReconciliationRef: in.ReconciliationReference}
 	switch in.Outcome {
