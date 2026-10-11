@@ -105,6 +105,7 @@ func TestConcurrency_PromotionRacingEdits(t *testing.T) {
 // told the draft already went (or that their revision is stale, whichever
 // lands first).
 func TestConcurrency_ThreePromoters(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
 	id := f.create()
 

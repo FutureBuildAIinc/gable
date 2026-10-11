@@ -16,6 +16,7 @@ import (
 )
 
 func TestWire_ReadInvoiceByDocumentNumber(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	invoiceID, _ := f.invoice("10")
 	head := f.getInvoice(invoiceID)

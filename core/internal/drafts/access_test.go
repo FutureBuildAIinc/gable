@@ -308,6 +308,7 @@ func pickCode(r resp) string {
 // link routes and the entity routes answer exactly the statuses the table
 // gives, with the refused scope named.
 func TestAccessTable_KeyKindsAgainstEveryNewRoute(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newAccessFixture(t, testutil.RequireDB(t))
 
 	// One quote entity (for the entity and link rows) made by a person.
@@ -509,6 +510,7 @@ func TestAccessTable_KeyKindsAgainstEveryNewRoute(t *testing.T) {
 // quote.created then draft.promoted, the audit row naming the propose key
 // as proposer and the commit key as committer).
 func TestProposeKeyCannotCommit(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newAccessFixture(t, testutil.RequireDB(t))
 	propose := f.mint("propose only", []string{"quotes:propose"}, nil)
 	commit := f.mint("commit", []string{"quotes:commit"}, nil)

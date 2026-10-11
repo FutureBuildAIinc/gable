@@ -285,16 +285,19 @@ func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 // are per product, not per product and branch) and are shared across every
 // branch. The recompute's velocity read therefore must see every branch's
 // sales, the way the cron path does (Scheduler.runRefresh calls the same
-// service with context.Background and no branch context: the velocity read's
-// predicate arm 3 fires, every branch's data flows). The HTTP route is
+// service on the system caller's context, branchctx.WithSystem over
+// context.Background: the velocity read's predicate arm 3 fires, every
+// branch's data flows). The HTTP route is
 // mounted behind the branch middleware, which would otherwise populate a
 // BranchContext that scopes the velocity read to the caller (a bound
 // purchasing user with header A reads arm 1, branch A's sales only; an
 // administrator without a header still reads arm 3 today because IsAdmin
 // suppresses GrantsSubForQuery). To keep the HTTP and cron paths writing
 // the same targets, this handler strips the BranchContext the middleware
-// put on the request and marks the resulting context as a system caller,
-// the seam the cron path already is, so the velocity read sees every
+// put on the request: the same scenario the cron path is in, no populated
+// BranchContext on the call, so the velocity read's arm 3 fires, and
+// marks the resulting context as a system caller, the trusted-caller mark
+// the portal and A2A receivers carry, so the velocity read sees every
 // branch's data and a bound user's refresh writes the same targets an
 // administrator's would.
 func (h *Handler) HandleRefreshReorderTargets(w http.ResponseWriter, r *http.Request) {

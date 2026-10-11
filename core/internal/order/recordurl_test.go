@@ -17,6 +17,7 @@ import (
 )
 
 func TestWire_ReadOrderByDocumentNumber(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	r := f.create()
 	number, ok := r.body["number"].(string)

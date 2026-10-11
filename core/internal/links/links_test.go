@@ -243,6 +243,7 @@ func (f *fixture) quotePayload() map[string]any {
 // answering the desk, the front door and the app links, with the record
 // segment the number when the entity has one and the UUID otherwise.
 func TestLinksResolveEveryEntity(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t), links.Settings{})
 
 	// A quote, an order and a quote draft exist.
@@ -329,6 +330,7 @@ func TestLinksResolveEveryEntity(t *testing.T) {
 // GABLE_PUBLIC_URL is set and relative without it, and links.agent from the
 // template and null without it.
 func TestLinksSettings(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	db := testutil.RequireDB(t)
 
 	f := newFixture(t, db, links.Settings{})
