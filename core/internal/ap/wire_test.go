@@ -816,10 +816,12 @@ func TestWire_PayAmountIsCents(t *testing.T) {
 // but no pointer to it; the migration links the newest posted, unreversed,
 // balanced VENDOR_INVOICE entry, and the void reverses exactly that entry, so
 // the tie (every entry balanced, 2010 equal to what the open bills owe) holds
-// for a legacy bill as for a new one. A legacy approved bill whose entry is
-// missing is refused rather than voided silently with the credit stranded in
-// 2010, and so is one whose linked entry is the base's one leg shape: a void
-// would mirror it into another unbalanced entry.
+// for a legacy bill as for a new one. A legacy approved bill that holds a
+// posted, unreversed entry it is not linked to is refused rather than voided
+// silently with the credit stranded in 2010, and so is one whose linked entry
+// is the base's one leg shape: a void would mirror it into another unbalanced
+// entry. A legacy bill whose entry never posted holds no credit in 2010 and
+// voids with nothing to reverse.
 // A bill that prices to zero (a zero price, or a positive price that rounds
 // to 0 cents at the line) approves with no entry, because there is nothing to
 // post. It owes nothing, so its void has nothing to reverse and goes through:
@@ -912,9 +914,11 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 		t.Error("the void lost the legacy entry link")
 	}
 
-	// The unlinked legacy bill: its entry never posted (the base swallowed the
-	// journal error). The void is refused with a blocker, and nothing is
-	// written: no reversal, no status change, the tie untouched.
+	// The unlinked legacy bill whose entry never posted (the base swallowed
+	// the journal error): nothing of its own stands in 2010, so the void has
+	// nothing to reverse and goes through (review r8 P3-2 keys the no
+	// reversal arm on the live entry, not the total). The bill dies owing
+	// nothing more, and the tie the hand deletion broke is mended.
 	id2, r1b := f.enter("V-LEG-2", "1", 2000) // 20.00
 	if a := f.approve(id2, r1b); a.status != http.StatusOK {
 		t.Fatal(a.raw)
@@ -925,17 +929,23 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	mustExec(t, f.db, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, id2)
 	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
 	rv := f.void(id2, 2, "legacy bill voided")
-	if rv.status != http.StatusConflict {
-		t.Fatalf("void the unlinked legacy bill = %d, want 409: %s", rv.status, rv.raw)
+	if rv.status != http.StatusOK {
+		t.Fatalf("void the unlinked legacy bill = %d, want 200: %s", rv.status, rv.raw)
 	}
-	if code, blockers, _ := errorOf(t, rv); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
-		t.Errorf("void the unlinked legacy bill = %q %v, want entry_not_linked", code, blockers)
-	}
-	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id2); n != 1 {
-		t.Error("a refused legacy void changed the bill")
+	if str(t, rv.body, "status") != "voided" {
+		t.Errorf("the unlinked legacy bill = %s, want voided", rv.raw)
 	}
 	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
-		t.Errorf("%d entries were written for a refused void", after-before)
+		t.Errorf("%d entries were written for a void with nothing to reverse", after-before)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED' AND amount_open = 0.00`, id2); n != 1 {
+		t.Error("the unlinked legacy bill did not die owing nothing")
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), f.openSum(); got != want || want != 0 {
+		t.Errorf("after the unlinked legacy void: control %d, open %d, want both 0", got, want)
 	}
 
 	// The base's real legacy shape: the entry the base's approve posted has
@@ -974,8 +984,7 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	// The tie after the refused act: the only unbalanced entry in the fixture
 	// is the seeded legacy one (no act of the fixture wrote an unbalanced
 	// entry), and the refusal moved no money: the control account and the
-	// open sum stand where the seed left them (the earlier unlinked bill's
-	// deleted entry is the legacy gap, its credit absent from 2010).
+	// open sum stand where the seed left them.
 	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
 		JOIN (SELECT journal_entry_id, SUM(debit) d, SUM(credit) c FROM gl_journal_lines GROUP BY journal_entry_id) s
 		  ON s.journal_entry_id = e.id
@@ -991,6 +1000,94 @@ func TestWire_VoidLegacyApprovedBill(t *testing.T) {
 	}
 	if got, want := f.openSum(), openBefore; got != want {
 		t.Errorf("after the refused one leg void: open %d, want the untouched %d", got, want)
+	}
+}
+
+// RULE (review r8 P3-2): the void's no reversal arm is keyed on the bill
+// holding no posted, unreversed VENDOR_INVOICE entry, not on its total. A
+// legacy bill hand edited to a zero total after its approve still holds the
+// credit its entry posted, and a plain void would strand that credit in 2010
+// under a voided bill: such a bill is refused when the entry is not linked,
+// and voids with the entry reversed when it is. A bill with no live entry at
+// all (a zero total bill that posted nothing) holds no credit and voids with
+// nothing to reverse (TestWire_VoidZeroBill and the unlinked case above).
+func TestWire_VoidHandEditedZeroTotalBill(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// The hand edited shape: approved over the base's one leg credit (which
+	// migration 106 leaves unlinked), its total then edited to zero and its
+	// open with it.
+	id, r1 := f.enter("V-EDIT-1", "1", 100000) // 10.00
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	mustExec(t, f.db, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN
+		(SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)
+		AND account_id <> (SELECT id FROM gl_accounts WHERE code = '2010')`, id)
+	mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL, total = 0.00, amount_open = 0.00 WHERE id = $1`, id)
+	if f.balanced() {
+		t.Fatal("the seeded one leg entry balances; the seed did not take")
+	}
+	control, open := f.controlBalance(), f.openSum()
+	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v := f.void(id, 2, "hand edited bill voided")
+	if v.status != http.StatusConflict {
+		t.Fatalf("void a hand edited zero total bill over a live entry = %d, want 409: %s", v.status, v.raw)
+	}
+	if code, blockers, _ := errorOf(t, v); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
+		t.Errorf("void a hand edited zero total bill = %q %v, want entry_not_linked", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
+		t.Error("a refused hand edited void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+		t.Errorf("%d entries were written for a refused void", after-before)
+	}
+	// The tie after the refused act: the refusal moved no money, and the only
+	// unbalanced entry is the seeded legacy one.
+	if got, want := f.controlBalance(), control; got != want {
+		t.Errorf("after the refused hand edited void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open; got != want {
+		t.Errorf("after the refused hand edited void: open %d, want the untouched %d", got, want)
+	}
+
+	// The linked shape: the same hand edit over a linked, balanced entry
+	// voids with the entry reversed, so 2010 gives the credit back and the
+	// bill dies owing nothing.
+	id2, r2 := f.enter("V-EDIT-2", "1", 100000) // 10.00
+	if a := f.approve(id2, r2); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	mustExec(t, f.db, `UPDATE vendor_invoices SET total = 0.00, amount_open = 0.00 WHERE id = $1`, id2)
+	control2, open2 := f.controlBalance(), f.openSum()
+	v2 := f.void(id2, 2, "hand edited bill voided")
+	if v2.status != http.StatusOK {
+		t.Fatalf("void a linked zero total bill = %d, want 200: %s", v2.status, v2.raw)
+	}
+	if str(t, v2.body, "status") != "voided" {
+		t.Errorf("the linked zero total bill = %s, want voided", v2.raw)
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries r JOIN gl_journal_entries o ON o.id = r.reverses_entry_id
+		WHERE o.source_ref_id = $1`, id2); n != 1 {
+		t.Errorf("%d reversals of the linked entry, want exactly 1", n)
+	}
+	if got, want := f.controlBalance(), control2-1000; got != want {
+		t.Errorf("after the linked void: control %d, want the reversed %d", got, want)
+	}
+	if got, want := f.openSum(), open2; got != want {
+		t.Errorf("after the linked void: open %d, want the untouched %d", got, want)
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
+		JOIN (SELECT journal_entry_id, SUM(debit) d, SUM(credit) c FROM gl_journal_lines GROUP BY journal_entry_id) s
+		  ON s.journal_entry_id = e.id
+		WHERE e.id IN (SELECT id FROM gl_journal_entries
+		               WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
+		                  OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)
+		                  OR reverses_entry_id IN (SELECT gl_entry_id FROM vendor_invoices WHERE vendor_id = $1))
+		  AND s.d <> s.c`, f.vendor); n != 1 {
+		t.Errorf("%d unbalanced entries stand, want only the seeded legacy one", n)
 	}
 }
 

@@ -301,6 +301,23 @@ func (r *Repository) Lock(ctx context.Context, id uuid.UUID) (*LockedInvoice, er
 	return &locked, nil
 }
 
+// HasPostedInvoiceEntry reports whether a posted, unreversed VENDOR_INVOICE
+// journal entry stands for the bill, linked or not: the predicate migration
+// 106 links by, so a void can tell a bill whose credit is in the ledger from
+// one that posted nothing.
+func (r *Repository) HasPostedInvoiceEntry(ctx context.Context, id uuid.UUID) (bool, error) {
+	var n int
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT count(*) FROM gl_journal_entries e
+		WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1
+		  AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id)`, id).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("failed to read the bill's journal entries: %w", err)
+	}
+	return n > 0, nil
+}
+
 // LockForPayment takes one invoice of the named vendor FOR UPDATE, in the
 // caller's id order (ADR 0008 section 9 step 5a). No row means no such
 // invoice for this vendor.

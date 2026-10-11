@@ -303,22 +303,27 @@ transaction:
    cents applied; the payments have to be undone first.
 4. Refuse `409 invalid_state_transition` if the bill's `from` does not
    allow `voided` (the `partial` and `paid` rows in the map).
-5. Refuse `409 entry_not_linked` if the bill is `approved` or `partial`,
-   has a nonzero `total_cents` and no `gl_entry_id`: a credit may stay
-   in `2010` with nothing to reverse, so the bill stays approved and
-   payable (a stated limit).
+5. Refuse `409 entry_not_linked` if the bill holds a posted, unreversed
+   `VENDOR_INVOICE` journal entry it is not linked to (`repo
+   .HasPostedInvoiceEntry`, the predicate migration 106 links by): a
+   credit may stay in `2010` with nothing to reverse, whatever the
+   bill's `total_cents` says now (a hand edit may even have zeroed the
+   total after the approve), so the bill keeps its status (a stated
+   limit).
 6. If the bill has a `gl_entry_id`, post the reversal through
    `gl.PostReversal` with the void time as `EntryDate` and the reason.
    `PostReversal` can raise `period_closed` (mapped to 409) or
    `entry_unbalanced` (the removed sync's one leg shape, mapped to 409
-   `entry_unbalanced`); the latter also stays approved and payable (a
-   stated limit).
+   `entry_unbalanced`); the latter also keeps its status (a stated
+   limit).
 7. Mark the bill voided; write the audit row, then the event
    (`vendor_invoice.voided`) in the same transaction.
 
-A bill that prices to zero posted nothing and owes nothing: there is
-no `gl_entry_id`, the reversal block is skipped, and the void goes
-through with nothing to reverse.
+A bill with no posted, unreversed entry of its own holds no credit in
+`2010` and voids with nothing to reverse: a bill that prices to zero
+posted nothing, and a legacy bill whose posting was swallowed or whose
+entry was already reversed holds nothing to undo. A bill whose live
+entry is linked voids with that entry reversed whole.
 
 ### Pay
 
@@ -449,12 +454,14 @@ caller's context branch, or the `default_branch_id` setting. The
 
 These are limits the module lives with until a later repair item.
 
-- An `approved` or `partial` bill with a nonzero `total_cents` and no
-  linked `gl_entry_id` is refused a `to: "voided"` with `409
+- A bill that holds a posted, unreversed `VENDOR_INVOICE` journal entry
+  it is not linked to is refused a `to: "voided"` with `409
   entry_not_linked`: the credit may stay in `2010` with nothing to
-  reverse, so the bill stays approved and payable. This is the legacy
-  unlinked bill (its posting was swallowed, or it holds the removed
-  sync's one leg credit).
+  reverse, so the bill keeps its status. This is the legacy unlinked
+  bill (its posting was swallowed, it holds the removed sync's one leg
+  credit, or its total was hand edited after the approve). A legacy bill
+  with no live entry at all voids with nothing to reverse, owing nothing
+  through the ledger.
 - A bill linked to an entry that does not balance (the removed sync's
   one leg shape, debit absent) is refused the same void with `409
   entry_unbalanced`. Its reversal would mirror the imbalance into
