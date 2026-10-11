@@ -601,6 +601,15 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 						return httpx.InvalidStateTransition("the linked entry's reversal appeared while the void ran, so its credit is already undone",
 							httpx.Blocker("reversal_not_posted", "the linked journal entry is reversed; the bill keeps its status until then"))
 					}
+					// A GL void of the linked entry committed between the
+					// void's ledger read and the reversal's own read of the
+					// entry (review r6 P3-1): the same 409 as the other lost
+					// races, nothing written, and the retry voids with
+					// nothing to reverse.
+					if errors.Is(err, gl.ErrNotPosted) {
+						return httpx.InvalidStateTransition("the linked entry was voided while the void ran, so there is nothing left to reverse",
+							httpx.Blocker("reversal_not_posted", "the linked journal entry is no longer posted; the bill keeps its status until then"))
+					}
 					return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
 				}
 				if entry != nil {

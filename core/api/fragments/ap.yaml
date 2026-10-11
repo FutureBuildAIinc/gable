@@ -211,7 +211,11 @@ paths:
         blocker, and a bill whose linked entry does not balance with the
         entry_unbalanced blocker; nothing is written on any refusal, and a
         reversal insert that loses a race with a concurrent GL reverse on the
-        same entry answers the same reversal_not_posted 409, never a 500. No
+        same entry answers the same reversal_not_posted 409, never a 500, and
+        so does a GL void of the linked entry that commits while the void
+        runs (the entry is no longer POSTED, there is nothing left to
+        reverse, nothing is written and the retry voids with nothing to
+        reverse). No
         route links an entry to a bill yet: such a bill keeps its status
         until a later repair item (a stated limit).
       parameters:

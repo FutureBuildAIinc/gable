@@ -155,6 +155,13 @@ type ReversalInput struct {
 // points at (the one-reversal-per-entry index would refuse it too).
 var ErrAlreadyReversed = errors.New("gl: the entry is already reversed")
 
+// ErrNotPosted is the refusal to reverse an entry that is no longer POSTED
+// (a concurrent act voided it while this one ran between its own two reads
+// of the entry): the callers that race a GL act map it beside
+// ErrAlreadyReversed, so the loss answers the same 409, never a 500 (review
+// r6 P3-1).
+var ErrNotPosted = errors.New("gl: only a POSTED entry can be reversed")
+
 // PostReversal books the net zero reversal of a POSTED entry through the
 // caller's transaction: the same accounts, debits and credits swapped, source
 // REVERSAL, reverses_entry_id set, dated the given business date (period
@@ -169,7 +176,7 @@ func (s *Service) PostReversal(ctx context.Context, in ReversalInput) (*JournalE
 		return nil, err
 	}
 	if orig.Status != StatusPosted {
-		return nil, fmt.Errorf("gl: only a POSTED entry can be reversed (current: %s)", orig.Status)
+		return nil, fmt.Errorf("%w (current: %s)", ErrNotPosted, orig.Status)
 	}
 	if reversed, err := s.repo.IsReversed(ctx, in.EntryID); err != nil {
 		return nil, err

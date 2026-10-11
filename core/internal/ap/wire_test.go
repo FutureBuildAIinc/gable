@@ -2225,6 +2225,74 @@ func TestWire_VoidRefusesCrossCurrencyChainBuiltInTheLedger(t *testing.T) {
 	}
 }
 
+// RULE (review r6 P3-1): an AP void racing a GL void of the linked entry must
+// never answer 500. The void's ledger read can see the entry POSTED while the
+// GL void commits beneath it, and the reversal it then books meets an entry
+// that is no longer POSTED: that loss maps to the same 409 reversal_not_posted
+// as the other lost races, nothing written, and the retry voids with nothing
+// to reverse. Fifty rounds, never a 500 on either side.
+func TestWire_VoidVoidRaceNever500(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	for round := 1; round <= 50; round++ {
+		id, r1 := f.enter(fmt.Sprintf("V-VRACE-%02d", round), "1", 1400000) // 140.00
+		if a := f.approve(id, r1); a.status != http.StatusOK {
+			t.Fatal(a.raw)
+		}
+		entry := f.glEntryOf(id)
+		controlBefore, openBefore := f.controlBalanceIn("USD"), f.openSumIn("USD")
+		apRes, glRes := make(chan resp, 1), make(chan resp, 1)
+		start := make(chan struct{})
+		go func() { <-start; apRes <- f.void(id, 2, "race round") }()
+		go func() { <-start; glRes <- f.glVoidEntry(entry) }()
+		close(start)
+		ap, gl := <-apRes, <-glRes
+		if ap.status >= 500 {
+			t.Errorf("round %d: the AP void answered %d in the race: %s", round, ap.status, ap.raw)
+		}
+		if gl.status >= 500 {
+			t.Errorf("round %d: the GL void answered %d in the race: %s", round, gl.status, gl.raw)
+		}
+		if ap.status != http.StatusOK && ap.status != http.StatusConflict {
+			t.Errorf("round %d: the AP void answered %d, want 200 or 409: %s", round, ap.status, ap.raw)
+		}
+		if ap.status == http.StatusConflict {
+			_, blockers, _ := errorOf(t, ap)
+			if len(blockers) != 1 || blockers[0] != "reversal_not_posted" {
+				t.Errorf("round %d: the lost race's blockers = %v, want [reversal_not_posted]", round, blockers)
+			}
+			// Nothing was written by the refused void: the bill is still there
+			// to void, and the retry voids with nothing to reverse.
+			before := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor)
+			retry := f.void(id, 2, "race round retry")
+			if retry.status != http.StatusOK {
+				t.Errorf("round %d: the retry void after the GL void = %d, want 200: %s", round, retry.status, retry.raw)
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor); after != before {
+				t.Errorf("round %d: %d entries were written by the retry void with nothing to reverse", round, after-before)
+			}
+		}
+		if !f.balanced() {
+			t.Errorf("round %d: an entry does not balance after the race", round)
+		}
+		// The tie after the round is asserted on the refused arm alone, as a
+		// delta against the round's own snapshot: the GL void that won
+		// beneath the refusal is the one ledger move (its entry no longer
+		// sums in the control), the retry then voids the bill with nothing to
+		// reverse, and the AP act wrote nothing. Where the AP void won, the
+		// GL void of the entry beside the void's own reversal is the known
+		// out of scope shape (the GL item), so no whole tie holds there.
+		if ap.status == http.StatusConflict {
+			if got, want := f.controlBalanceIn("USD"), controlBefore-14000; got != want {
+				t.Errorf("round %d: USD control %d after the refused void, want %d (the GL void's gap alone)", round, got, want)
+			}
+			if got, want := f.openSumIn("USD"), openBefore-14000; got != want {
+				t.Errorf("round %d: USD open %d after the refused void and its retry, want %d (the retry closed the round's bill)", round, got, want)
+			}
+		}
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is

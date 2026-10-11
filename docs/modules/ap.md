@@ -78,7 +78,10 @@ reinstated behind it, so no new reversal can post) with
 `reversal_not_posted`: all stay approved and payable until a later
 repair item (no route today links an entry to a bill). Every refusal
 writes nothing, and a reversal insert that loses a race on the one
-reversal index answers the same `reversal_not_posted` 409, never a 500.
+reversal index answers the same `reversal_not_posted` 409, never a 500;
+so does a GL void of the linked entry that commits while the void runs
+(the entry is no longer POSTED, there is nothing left to reverse,
+nothing is written and the retry voids with nothing to reverse).
 The approve decides on the same liveness: a pending bill that already
 holds a live journal entry is refused `entry_not_linked` naming it,
 rather than posting a second credit no bill owes.
