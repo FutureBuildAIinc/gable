@@ -140,9 +140,9 @@ shared with every other write). Status codes both routes answer:
 | `400` | Malformed JSON body. |
 | `401` | Missing or invalid credentials. |
 | `403` | Adjust: the body's `location_id` is in a branch the caller may not target. Transfer: the body's `from_location_id` or `to_location_id` is in a branch the caller may not target. |
-| `409` | `Idempotency-Key` replay or revision conflict. |
+| `409` | The `Idempotency-Key` is already in progress under a concurrent request (`idempotency_in_progress`); the routes raise no 409 of their own. |
 | `413` | Payload too large. |
-| `422` | Unprocessable entity. |
+| `422` | The `Idempotency-Key` was reused with a different request (`idempotency_key_reused`). |
 | `500` | Adjust: a result that would leave negative stock. Transfer: a cross-branch move, a non positive `quantity`, or insufficient unallocated stock at the source. |
 
 ## Events the module writes

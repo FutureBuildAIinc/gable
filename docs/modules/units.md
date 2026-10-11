@@ -216,9 +216,12 @@ derivations of ADR 0006 section 3.2 fill them.
 and the four default columns at the product's revision in one
 transaction, accepts the `Idempotency-Key` header, and reads the
 revision precondition from the `If-Match` header or the body's
-`revision`; a missing or stale revision is `428`, both sent and
-disagreeing is `400`. Required fields: `revision`, `stock_uom`,
-`sale_uom`, `price_uom`, `purchase_uom`, `units`. Optional:
+`revision`; neither sent is `428`, a stale one is `409`
+(`stale_revision`), both sent and disagreeing is `400`. The server
+requires `stock_uom`, `sale_uom`, `price_uom` and `purchase_uom`
+(each a 400 `is required` when absent) and each row's `uom`;
+`revision` may be left out when `If-Match` is sent, and an absent
+`units` list is an empty set. Optional:
 `base_price_ten_thousandths`. From C3-2B a
 `base_price_ten_thousandths` body field is required whenever the
 PUT changes `price_uom` (the stored base is a price per the old
@@ -236,10 +239,10 @@ route answers:
 | `401` | Missing or invalid credentials. |
 | `403` | Forbidden. |
 | `404` | Unknown product. |
-| `409` | `409 Idempotency-Key` replay, or a stocking unit change refused by blocker `stock_unit_in_use` (product still has stock or an open order line in the old `stock_uom`), `price_unit_held` (a base price or pricing row ties the old stocking unit), `unit_in_use` (a removed row is named by a price). |
+| `409` | A stale revision (`stale_revision`); the `Idempotency-Key` already in progress under a concurrent request (`idempotency_in_progress`); or a stocking unit change refused by blocker `stock_unit_in_use` (product still has stock or an open order line in the old `stock_uom`), `price_unit_held` (a base price or pricing row ties the old stocking unit), `unit_in_use` (a removed row is named by a price). |
 | `413` | Payload too large. |
-| `422` | Unprocessable entity. |
-| `428` | Missing or stale revision precondition. |
+| `422` | The `Idempotency-Key` was reused with a different request (`idempotency_key_reused`). |
+| `428` | Neither `If-Match` nor a body `revision` was sent. |
 | `500` | Internal error. |
 
 ### Pair arithmetic and exactness
