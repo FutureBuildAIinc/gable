@@ -727,7 +727,9 @@ A document write that names a customer in its body is held to the pin the
 same way a path customer is: the cash and card payment, the credit memo
 (create and update), the order and the quote (create and update, a document
 moved onto another customer included), the offline POS sync (the customer
-each replayed sale names, whose ACCOUNT tender invoices it) and the draft
+each replayed sale names, whose ACCOUNT tender invoices it, and the batch
+register itself, a batch naming another branch's register refused 403 before
+any item runs and before the `pos_sync_log` row names it) and the draft
 promotions, which read the customer from the draft's stored payload, are
 refused a bound key whose pin does not hold that customer (403 naming
 `customer_id`, the `key.branch_refused` row, nothing written). Without it

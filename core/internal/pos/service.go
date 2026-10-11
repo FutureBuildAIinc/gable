@@ -630,6 +630,19 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, req OfflineSyncRe
 		BatchID: req.BatchID,
 	}
 
+	// The batch register is the register the client says the batch ran on,
+	// and the log row names it: hold it to the caller's branch context the
+	// way each replayed create is held, before any item runs and before the
+	// batch is logged, so neither the log nor a replay names another branch's
+	// register for a caller held to one branch.
+	if req.RegisterID != "" {
+		if branch, err := s.repo.GetRegisterBranch(ctx, req.RegisterID); err == nil && branch != nil {
+			if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
+				return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
+			}
+		}
+	}
+
 	syncTag := "offline-v1"
 
 	for _, offlineTx := range req.Items {

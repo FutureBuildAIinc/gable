@@ -484,8 +484,11 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/pos/transactions/%s/complete", body: posTender, twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true,
 			noControl: "the completion deducts stock from a location this fixture does not stock, so the control answers 422 past the body and the transaction read"},
 		{method: "POST", path: "/api/v1/pos/transactions/%s/void", twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
-		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true,
-			reach: "the sync replays a batch for the register its body names; the leg proves the call leaves branch B's transactions as they were"},
+		// The sync is held by the module itself now: a batch whose register
+		// names another branch is refused before any item runs (round 7), so
+		// the foreign leg is a held leg and the control on the pin's own
+		// register reaches the module.
+		{method: "POST", path: "/api/v1/pos/sync", body: posSync, twin: f.txnB, own: f.txnA, first: true},
 		// The creates that take the branch they land on from the body.
 		{method: "POST", path: "/api/v1/customers", twin: f.branchB, own: f.branchA,
 			body: inBranch(`{"account_number":"PINNEW-%s","name":"pin new","primary_branch_id":%q}`)},

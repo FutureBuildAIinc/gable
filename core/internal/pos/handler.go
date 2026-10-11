@@ -535,6 +535,13 @@ func (h *Handler) SyncOffline(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.SyncOfflineTransactions(r.Context(), req)
 	if err != nil {
+		// A batch register of another branch is a refusal, not an internal
+		// error.
+		var refused *RegisterBranchRefusedError
+		if errors.As(err, &refused) {
+			writePosRefusal(w, r, refused.Error(), "register", refused.RegisterID, "reason", "register of another branch")
+			return
+		}
 		httputil.RespondError(w, r, "offline sync failed", http.StatusInternalServerError, err)
 		return
 	}
