@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -61,6 +62,21 @@ func TestKeyBranchPin_LegacyTierRowStaysDealerWide(t *testing.T) {
 	f.refuseForeign(t, "GET", "/api/v1/pricing/category-rules/"+legacy.String()+"/audit", "", nil)
 	if !exists(legacy) {
 		t.Fatal("the pinned key deleted the legacy tier row")
+	}
+	// An update of the legacy row answers the invariant's own refusal for
+	// every caller (round 11 P3-1: the NOT VALID constraint revalidates on
+	// the write, which used to surface as a 500), while the bound key is
+	// refused at the pin first.
+	putBody := `{"rule_type":"markup","value_pct":"12"}`
+	f.refuseForeign(t, "PUT", "/api/v1/pricing/category-rules/"+legacy.String(), putBody, rev(legacy))
+	for _, who := range []string{"unbound", "user"} {
+		status, buf := f.send(t, who, "PUT", "/api/v1/pricing/category-rules/"+legacy.String(), putBody, rev(legacy))
+		if status != http.StatusConflict || !strings.Contains(string(buf), "single target") {
+			t.Errorf("%s updating the legacy tier row: %d %s, want the 409 naming the single target invariant", who, status, buf)
+		}
+	}
+	if !exists(legacy) {
+		t.Fatal("the legacy tier row was updated away")
 	}
 	// The unbound key keeps the delete, single and bulk, each on a fresh row.
 	f.allow(t, "unbound", "DELETE", "/api/v1/pricing/category-rules/"+legacy.String(), "", rev(legacy), http.StatusNoContent)

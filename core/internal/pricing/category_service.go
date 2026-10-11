@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -321,6 +322,18 @@ func (s *CategoryPricingService) UpdateCategoryRule(ctx context.Context, r *Cate
 		}
 		if err := httpx.CheckRevision(old.Revision, pre.IfMatch, pre.Revision); err != nil {
 			return err
+		}
+		// A legacy row that breaks migration 107's single target invariant
+		// (the constraint the migration leaves NOT VALID on a database that
+		// carries one) cannot pass through an update: the write revalidates
+		// the row, which the database would answer as an internal error. The
+		// refusal names the invariant for every caller (round 11 P3-1).
+		if (old.TargetType == TargetTypeTier && old.CustomerID != nil) ||
+			(old.TargetType == TargetTypeAccount && old.Tier != "") {
+			return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict,
+				Message: "the rule names both a tier and a customer, which the single target check refuses; reconcile the row before editing it",
+				Details: []httpx.FieldError{httpx.Blocker("single_target",
+					"an account rule carries no tier, a tier rule no customer")}}
 		}
 		r.TargetType, r.CustomerID, r.Tier, r.CategoryID = old.TargetType, old.CustomerID, old.Tier, old.CategoryID
 		if err := s.catRepo.UpdateCategoryRule(ctx, r, old.Revision); err != nil {
