@@ -170,9 +170,14 @@ specifications — that's an IP problem this project has explicitly cleaned up o
 ## 5 · If the mapping itself looks wrong
 
 If a file's header disagrees with `LICENSE-MAP.md`/`REUSE.toml`, or a directory isn't covered
-at all, that's a real finding worth reporting. Note that `REUSE.toml` currently annotates
-`core/**`, `web/apps/desk/**`, and `docs/**` — root-level markdown and `.claude/**` are **not**
-covered by annotations, which is why files in those places carry their headers inline.
+at all, that's a real finding worth reporting. Note that `REUSE.toml` annotates the major
+source components (`core/internal/**`, `core/pkg/**` with the `core/pkg/apps/**` carve-out,
+`core/cmd/**`, `core/migrations/**`, `web/apps/**`, `web/packages/**`, `tauri/**`, `docs/**`)
+plus several root-level paths via globs (`*.md`, `NOTICE`, `.github/**`, `.do/**`,
+`.claude/**`, `Makefile`, `scripts/**`, `manifest.yaml`, `docker-compose.yml`,
+`core/go.mod`, `core/go.sum`, `core/Dockerfile`, `core/scripts/**`). The inline SPDX
+headers you see in `.claude/skills/*/SKILL.md` and in `CLAUDE.md`/`AGENTS.md` are kept for
+clarity even where an annotation would suffice; the REUSE gate reads both.
 
 Do **not** edit `REUSE.toml` or `LICENSE-MAP.md` to "fix" it yourself — those are maintainer-
 owned. Use **`report-an-issue`** and include the exact file, the header it has, and the header

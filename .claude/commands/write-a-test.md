@@ -9,4 +9,4 @@ Use the **add-a-test** skill.
 
 Target: $ARGUMENTS
 
-If no target was given, compute the untested-module list first and recommend one by value (invoice tax/rounding, account.PostTransaction, the ERP/portal money boundary, or frontend formatCents). Read the source before writing. Prove the test can fail. House rules apply: no tautological tests, characterization tests are labelled, a discovered bug gets an issue rather than a `want:` that encodes it.
+If no target was given, compute the untested-module list first and recommend one by value (invoice tax/rounding, the account package's posting methods, the ERP/portal money boundary, or frontend formatCents). Read the source before writing. Prove the test can fail. House rules apply: no tautological tests, characterization tests are labelled, a discovered bug gets an issue rather than a `want:` that encodes it.
