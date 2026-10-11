@@ -23699,7 +23699,10 @@ components:
         register_id: {type: string}
         branch_id: {type: [string, "null"], format: uuid}
         over_short_cents: {type: integer, format: int64}
-        payload: {type: string, format: byte, description: "The frozen closing report as JSON bytes."}
+        payload:
+          allOf:
+            - $ref: "#/components/schemas/PosTillReport"
+          description: The frozen closing report, a JSON object.
         generated_at: {type: string, format: date-time}
     PosSearchResult:
       type: object

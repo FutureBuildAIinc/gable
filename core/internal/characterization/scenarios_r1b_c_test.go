@@ -730,13 +730,12 @@ func r1bCPOSGroups() []groupDef {
 					extract: map[string]string{"c_till_reopened": "/id"},
 				},
 				{name: "pos.till.report.after_close", method: "GET", path: "/api/v1/pos/till/{c_till}/report"},
-				{name: "pos.till.zreport", method: "GET", path: "/api/v1/pos/till/{c_till}/zreport",
-					// The frozen report embeds the session's own ids and
-					// timestamps; the amounts are what the golden pins.
-					maskFields: map[string]any{"payload": "<zreport-payload>"}},
+				// The frozen report's payload is pinned whole: the normaliser
+				// rewrites its ids and timestamps the same way it does the
+				// live report's, so the golden shows the field.
+				{name: "pos.till.zreport", method: "GET", path: "/api/v1/pos/till/{c_till}/zreport"},
 				{name: "pos.till.zreport.not_found", method: "GET", path: "/api/v1/pos/till/" + cMissingID + "/zreport"},
-				{name: "pos.zreports.list", method: "GET", path: "/api/v1/pos/zreports?register_id=REG-01",
-					maskFields: map[string]any{"payload": "<zreport-payload>"}},
+				{name: "pos.zreports.list", method: "GET", path: "/api/v1/pos/zreports?register_id=REG-01"},
 				{name: "pos.zreports.list.other_day", method: "GET", path: "/api/v1/pos/zreports?register_id=REG-01&date={today-30}"},
 				{name: "pos.zreports.list.unknown_register", method: "GET", path: "/api/v1/pos/zreports?register_id=REG-NONE"},
 			},

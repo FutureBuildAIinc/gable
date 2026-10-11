@@ -4,6 +4,7 @@
 package pos
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -242,14 +243,16 @@ type TillReport struct {
 }
 
 // ZReport is the immutable end-of-day snapshot generated once when a till
-// session closes. Payload is the frozen closing TillReport.
+// session closes. Payload is the frozen closing TillReport, an object on the
+// wire (raw JSON, never a base64 encoded string a reader must decode before
+// it can parse).
 type ZReport struct {
 	ID            uuid.UUID       `json:"id"`
 	TillSessionID uuid.UUID       `json:"till_session_id"`
 	RegisterID    string          `json:"register_id"`
 	BranchID      *uuid.UUID      `json:"branch_id"`
 	OverShort     httpx.Cents     `json:"over_short_cents"`
-	Payload       []byte          `json:"payload"`
+	Payload       json.RawMessage `json:"payload"`
 	GeneratedAt   httpx.Timestamp `json:"generated_at"`
 }
 
