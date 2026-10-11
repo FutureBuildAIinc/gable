@@ -14,6 +14,18 @@ import (
 	"github.com/google/uuid"
 )
 
+// RegisterBranchRefusedError is the refusal a write answers when the caller's
+// branch context disagrees with the register's own branch. It is a typed error
+// so the HTTP layer can answer it 403 instead of the 500 a plain service
+// error maps to, nothing written either way.
+type RegisterBranchRefusedError struct {
+	RegisterID string
+}
+
+func (e *RegisterBranchRefusedError) Error() string {
+	return fmt.Sprintf("register %s belongs to a different branch than the request", e.RegisterID)
+}
+
 // Repository handles POS data persistence.
 type Repository interface {
 	CreateTransaction(ctx context.Context, tx *POSTransaction) error
@@ -85,7 +97,7 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 
 	// Reject if the caller's branch context disagrees with the register's branch.
 	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
-		return fmt.Errorf("register %s belongs to a different branch than the request", tx.RegisterID)
+		return &RegisterBranchRefusedError{RegisterID: tx.RegisterID}
 	}
 
 	query := `

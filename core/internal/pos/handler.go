@@ -5,6 +5,7 @@ package pos
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -66,10 +67,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/returns", guard(h.ListReturns))
 }
 
-// cashierRefusalBody is the wire ADR's error envelope for the one refusal
-// this package writes. The shared writer lands with the platform packages;
+// posRefusalBody is the wire ADR's error envelope for the refusals this
+// package writes. The shared writer lands with the platform packages;
 // pkg/actor and pkg/middleware write the same shape for theirs.
-type cashierRefusalBody struct {
+type posRefusalBody struct {
 	Error struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
@@ -77,6 +78,28 @@ type cashierRefusalBody struct {
 	Meta struct {
 		RequestID string `json:"request_id"`
 	} `json:"meta"`
+}
+
+// writePosRefusal answers the request with 403 and the refusal's words.
+// httputil.RespondError logs the words but answers the client with the
+// generic message of the status, and a caller has to read which register and
+// branch the refusal names.
+func writePosRefusal(w http.ResponseWriter, r *http.Request, message string, logAttrs ...any) {
+	reqID := w.Header().Get("X-Request-ID")
+	if reqID == "" {
+		reqID = r.Header.Get("X-Request-ID")
+	}
+
+	var body posRefusalBody
+	body.Error.Code = "forbidden"
+	body.Error.Message = message
+	body.Meta.RequestID = reqID
+
+	attrs := append([]any{"status", http.StatusForbidden, "method", r.Method, "path", r.URL.Path, "request_id", reqID}, logAttrs...)
+	slog.Warn("POS refusal", attrs...)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // refuseMachineKeyCashier answers the request with 403 when the caller
@@ -93,26 +116,7 @@ func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
-	reqID := w.Header().Get("X-Request-ID")
-	if reqID == "" {
-		reqID = r.Header.Get("X-Request-ID")
-	}
-
-	var body cashierRefusalBody
-	body.Error.Code = "forbidden"
-	body.Error.Message = "a cashier must be a user"
-	body.Meta.RequestID = reqID
-
-	slog.Warn("machine key refused on a POS cashier route",
-		"key_id", keyID,
-		"status", http.StatusForbidden,
-		"method", r.Method,
-		"path", r.URL.Path,
-		"request_id", reqID,
-	)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-	_ = json.NewEncoder(w).Encode(body)
+	writePosRefusal(w, r, "a cashier must be a user", "key_id", keyID, "reason", "machine key on a POS cashier route")
 	return true
 }
 
@@ -329,6 +333,12 @@ func (h *Handler) StartTransaction(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.StartTransaction(r.Context(), req.RegisterID, req.CashierID, req.CustomerID)
 	if err != nil {
+		// A register of another branch is a refusal, not an internal error.
+		var refused *RegisterBranchRefusedError
+		if errors.As(err, &refused) {
+			writePosRefusal(w, r, refused.Error(), "register", refused.RegisterID, "reason", "register of another branch")
+			return
+		}
 		httputil.RespondError(w, r, "failed to start transaction", http.StatusInternalServerError, err)
 		return
 	}

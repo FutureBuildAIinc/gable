@@ -8,6 +8,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
@@ -147,4 +148,57 @@ func TestKeyBranchPin_Migration108LegacyReturnStaysReachable(t *testing.T) {
 	if status != http.StatusOK || !strings.Contains(string(buf), ret.String()) {
 		t.Errorf("the legacy return list with X-Branch-Id the register's branch: %d %s, want the return listed", status, buf)
 	}
+}
+
+// Fix round 7 (r15 P3-1): a user's sale on a register whose branch disagrees
+// with the request's branch context is refused (the round 6 rule), but the
+// handler answered it with the 500 it maps every service error to. The refusal
+// answers 403 like the other register refusals, nothing written; the control
+// sale on the caller's own register still answers 201 at its branch.
+func TestKeyBranchPin_UserRegisterBranchRefusalAnswers403(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	ctx := context.Background()
+	regA := f.r15reg(t, "txa", uuid.New(), f.branchA)
+	regB := f.r15reg(t, "txb", uuid.New(), f.branchB)
+	hdr := map[string]string{"X-Branch-Id": f.branchA.String()}
+	created := []uuid.UUID{}
+	t.Cleanup(func() {
+		for _, id := range created {
+			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, id)
+			_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, id)
+		}
+	})
+
+	status, buf := f.userAs(t, "admin", "POST", "/api/v1/pos/transactions", `{"register_id":"`+regB+`"}`, hdr)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
+		t.Errorf("a user's sale on another branch's register: %d %s, want the 403 naming the register rule", status, buf)
+	}
+	if n := f.transactionsOn(t, regB); n != 0 {
+		t.Errorf("the refused sale wrote %d transactions on the register, want none", n)
+	}
+
+	// The control: the caller's own register.
+	body := `{"register_id":"` + regA + `","cashier_id":"` + uuid.NewString() + `"}`
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/transactions", body, hdr)
+	var tx struct {
+		ID       uuid.UUID  `json:"id"`
+		BranchID *uuid.UUID `json:"branch_id"`
+	}
+	if err := json.Unmarshal(buf, &tx); err == nil && tx.ID != uuid.Nil {
+		created = append(created, tx.ID)
+	}
+	if status != http.StatusCreated || tx.BranchID == nil || *tx.BranchID != f.branchA {
+		t.Errorf("a user's sale on its own register: %d %s, want 201 at branch A", status, buf)
+	}
+}
+
+// transactionsOn counts the transactions a register holds.
+func (f *keyPinFixture) transactionsOn(t *testing.T, register string) int {
+	t.Helper()
+	var n int
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM pos_transactions WHERE register_id = $1`, register).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
