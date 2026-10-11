@@ -1350,19 +1350,28 @@ that carries one is a refund that moved and one without it may not have. A
 pending intent is resolved by one guarded admin route, for the finance and
 owner roles and never a machine key, inside the caller's branch (the claim's
 sale is read through the branch context, so a caller outside the branch
-finds a missing row): the operator records the terminal's actual
+finds a missing row; and a caller whose context carries no branch, the
+default branch setting off and no header sent, has the sale's own branch
+held to the caller's grants, the same missing row outside them): the
+operator records the terminal's actual
 outcome, either its refund id (the act's own money transaction then books it
 with every cap and lock) or an explicit "no refund" with a reconciliation
 reference (the intent is released and nothing moves), and one audit row names
 the person, the intent, the outcome and the reason. The record cannot
 contradict the claim's own: a no refund over a claim carrying the terminal's
 refund id, and a refund recorded under a different id, are refused. The
-claim row is locked inside the resolution's transaction and every state
+claim row is locked inside the resolution's transaction, read right after
+the sale row it settles under, and every state
 change refuses when it settles no row, so of any number of concurrent
-resolutions exactly one books. A void's resolution accounts for each card
-tender separately: it books only the resolved tender's refund, and the
-sale's void completes only when no claim of the sale is pending anymore,
-the tenders whose refunds were declined keeping their charge as unapplied
+resolutions exactly one books and the losers are told the race, never a
+state refusal the winner's own completion caused. A void's resolution
+accounts for each card tender separately: it books only the resolved
+tender's refund, and the sale's void completes when no claim of the sale is
+pending anymore, from whichever leg empties them (a booked refund or a no
+refund alike), so the order the claims are resolved in never decides the
+end state; a void whose every claim settles without a booked refund keeps
+the sale completable by a fresh void. The tenders whose refunds were
+declined keep their charge as unapplied
 credit owed to the customer.
 
 ### 12. Events
