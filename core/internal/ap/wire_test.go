@@ -1381,6 +1381,49 @@ func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
 	if got, want := f.openSum(), open3; got != want {
 		t.Errorf("after the refused void: open %d, want the untouched %d", got, want)
 	}
+
+	// The entry voided by the GL void route and its reversal voided with it
+	// (review r3 P3-3's untested first branch): neither POSTED entry counts
+	// in 2010, so the chain holds no credit and the void has nothing to
+	// reverse, whatever the reversal row standing on the entry says.
+	id4, r4 := f.enter("V-GLU-4", "1", 600000) // 60.00
+	if a := f.approve(id4, r4); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry4 := f.glEntryOf(id4)
+	if rv := f.glReverse(entry4); rv.status != http.StatusOK {
+		t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+	}
+	if vv := f.glVoidEntry(entry4); vv.status != http.StatusOK {
+		t.Fatalf("void the entry = %d: %s", vv.status, vv.raw)
+	}
+	if vv := f.glVoidEntry(f.glReversalOf(entry4)); vv.status != http.StatusOK {
+		t.Fatalf("void the reversal = %d: %s", vv.status, vv.raw)
+	}
+	control4, open4 := f.controlBalance(), f.openSum()
+	if control4 != control3 || open4 != open3+6000 {
+		t.Fatalf("control %d, open %d, want the shape's own %d more owed and no more credit (control %d, open %d)", control4, open4, 6000, control3, open3)
+	}
+	before4 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v4 := f.void(id4, 2, "wrong bill")
+	if v4.status != http.StatusOK {
+		t.Fatalf("void a bill whose entry and reversal are both void = %d, want 200: %s", v4.status, v4.raw)
+	}
+	if str(t, v4.body, "status") != "voided" {
+		t.Errorf("the bill = %s, want voided", v4.raw)
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before4 {
+		t.Errorf("%d entries were written for a void with nothing to reverse", after-before4)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), control4; got != want {
+		t.Errorf("after the void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open4-6000; got != want {
+		t.Errorf("after the void: open %d, want %d", got, want)
+	}
 }
 
 // RULE (review r2 P2-2): a payment's entry posts in the bills' currency, not
