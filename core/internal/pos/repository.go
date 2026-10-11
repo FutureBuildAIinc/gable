@@ -119,12 +119,18 @@ type Repository interface {
 	PendingRefundIntentIDs(ctx context.Context, saleID uuid.UUID) ([]uuid.UUID, error)
 	SaleHasVoidIntentDone(ctx context.Context, saleID uuid.UUID) (bool, error)
 	// MarkRefundIntentRefunded writes the gateway's own refund id onto the
-	// standing claim in its own committed write, the moment the terminal
-	// answers; GetRefundIntent reads one claim whole, LockRefundIntent reads
-	// one claim whole under its row lock (the resolution's transaction), and
-	// FailRefundIntentByID releases one claim by its id (the operator
-	// resolution's no refund leg).
-	MarkRefundIntentRefunded(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error
+	// claim in its own committed write, the moment the terminal answers,
+	// whatever state the claim is in; StampRefundIntentAnswered records that
+	// the call came back carrying no verdict, and
+	// MarkRefundIntentUnansweredUnknown marks a claim a resolution settles on
+	// an expired lease (the terminal never spoke); GetRefundIntent reads one
+	// claim whole, LockRefundIntent reads one claim whole under its row lock
+	// (the resolution's transaction), and FailRefundIntentByID releases one
+	// claim by its id (the operator resolution's no refund leg).
+	MarkRefundIntentRefunded(ctx context.Context, intentID uuid.UUID, refundTxID string) error
+	StampRefundIntentAnswered(ctx context.Context, intentID uuid.UUID) error
+	MarkRefundIntentUnansweredUnknown(ctx context.Context, intentID uuid.UUID) error
+	AbandonRefundIntent(ctx context.Context, intentID uuid.UUID) error
 	GetRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error)
 	LockRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error)
 	FailRefundIntentByID(ctx context.Context, id uuid.UUID) error
@@ -757,9 +763,10 @@ func (r *PostgresRepository) InsertRefundIntent(ctx context.Context, intent Refu
 		intent.ID = uuid.New()
 	}
 	_, err := r.ex(ctx).Exec(ctx, `
-		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, request, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', $7, NOW(), NOW())`,
-		intent.ID, intent.SaleID, intent.TenderID, intent.GatewayTxID, intent.AmountCents, intent.Act, intent.Request)
+		INSERT INTO pos_refund_intents (id, sale_id, tender_id, gateway_tx_id, amount, act, state, request, answer_due_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5::numeric / 100, $6, 'PENDING', $7, NOW() + make_interval(secs => $8), NOW(), NOW())`,
+		intent.ID, intent.SaleID, intent.TenderID, intent.GatewayTxID, intent.AmountCents, intent.Act, intent.Request,
+		int64(refundAnswerLease.Seconds()))
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -793,13 +800,14 @@ func (r *PostgresRepository) CompleteRefundIntent(ctx context.Context, saleID, t
 }
 
 // FailRefundIntent releases the tender's live intent after its gateway call
-// failed: no money moved for it, so the tender may be refunded again. A call
-// that settles no row answers the same intent_not_pending refusal; the
-// decline path's caller treats it as settled by another hand, never as a
-// failure of its own release.
+// failed: no money moved for it, so the tender may be refunded again. The
+// decline is the terminal's own answer, so the claim's answer is stamped and
+// its state leaves IN_FLIGHT. A call that settles no row answers the same
+// intent_not_pending refusal; the decline path's caller treats it as settled
+// by another hand, never as a failure of its own release.
 func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error {
 	tag, err := r.ex(ctx).Exec(ctx, `
-		UPDATE pos_refund_intents SET state = 'FAILED', updated_at = NOW()
+		UPDATE pos_refund_intents SET state = 'FAILED', answered_at = NOW(), answer_state = 'ANSWERED', updated_at = NOW()
 		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID)
 	if err != nil {
 		return fmt.Errorf("failed to release the refund intent: %w", mapWriteError(err))
@@ -811,17 +819,63 @@ func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tende
 }
 
 // MarkRefundIntentRefunded writes the gateway's own refund id onto the
-// tender's standing claim. Its own committed write, made the moment the
-// terminal answers and before the money transaction opens: a PENDING intent
-// carrying a refund id is a refund the terminal moved, one without it is a
-// refund that may not have moved, so a claim that outlives its act can be
-// told apart and resolved (seventh review P2-3).
-func (r *PostgresRepository) MarkRefundIntentRefunded(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error {
-	_, err := r.ex(ctx).Exec(ctx, `
-		UPDATE pos_refund_intents SET refund_tx_id = NULLIF($3, ''), updated_at = NOW()
-		WHERE sale_id = $1 AND tender_id = $2 AND state = 'PENDING'`, saleID, tenderID, refundTxID)
+// claim, whatever state the claim is in (r14 P1-1: a wrong early release can
+// never orphan the terminal's id), and stamps the answer in its own committed
+// write, made the moment the terminal answers and before the money
+// transaction opens: a claim carrying a refund id is a refund the terminal
+// moved, one without it is a refund that may not have moved, so a claim that
+// outlives its act can be told apart and resolved (seventh review P2-3).
+func (r *PostgresRepository) MarkRefundIntentRefunded(ctx context.Context, intentID uuid.UUID, refundTxID string) error {
+	tag, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET refund_tx_id = NULLIF($2, ''), answered_at = NOW(), answer_state = 'ANSWERED', updated_at = NOW()
+		WHERE id = $1`, intentID, refundTxID)
 	if err != nil {
 		return fmt.Errorf("failed to record the refund id on the intent: %w", mapWriteError(err))
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("the refund claim %s is gone: the terminal's refund id %s was not recorded", intentID, refundTxID)
+	}
+	return nil
+}
+
+// StampRefundIntentAnswered records that the claim's own terminal call came
+// back carrying no verdict (a transport error, a status that proves
+// nothing): the call is off the wire, so the claim is stranded and
+// resolvable, exactly as the unknown outcome row records it (r14 P1-1).
+func (r *PostgresRepository) StampRefundIntentAnswered(ctx context.Context, intentID uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET answered_at = NOW(), answer_state = 'ANSWERED', updated_at = NOW()
+		WHERE id = $1 AND answered_at IS NULL`, intentID)
+	if err != nil {
+		return fmt.Errorf("failed to stamp the claim's answer: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// MarkRefundIntentUnansweredUnknown marks a claim UNKNOWN when a resolution
+// proceeds on its in flight lease expiring with no answer at all: the
+// terminal never spoke, and the claim's own record must say so (r14 P1-1).
+// A claim the terminal did answer is left alone.
+func (r *PostgresRepository) MarkRefundIntentUnansweredUnknown(ctx context.Context, intentID uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET answer_state = 'UNKNOWN', updated_at = NOW()
+		WHERE id = $1 AND answered_at IS NULL`, intentID)
+	if err != nil {
+		return fmt.Errorf("failed to mark the unanswered claim: %w", mapWriteError(err))
+	}
+	return nil
+}
+
+// AbandonRefundIntent records that the claim's act ended before the terminal
+// was ever asked for it (a void that stopped at an earlier tender's refusal,
+// r14 P1-1): no answer can ever come back, so the claim is stranded from now
+// and its record says the terminal never spoke.
+func (r *PostgresRepository) AbandonRefundIntent(ctx context.Context, intentID uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET answered_at = NOW(), answer_state = 'UNKNOWN', updated_at = NOW()
+		WHERE id = $1 AND answered_at IS NULL`, intentID)
+	if err != nil {
+		return fmt.Errorf("failed to abandon the never called claim: %w", mapWriteError(err))
 	}
 	return nil
 }
@@ -832,8 +886,15 @@ type RefundIntentRecord struct {
 	RefundIntent
 	State      string
 	RefundTxID string
-	ResolvedAt *time.Time
-	CreatedAt  time.Time
+	// The in flight lease (r14 P1-1): AnswerDueAt is when the claim may be
+	// resolved if its own terminal call never settles it; AnsweredAt is
+	// stamped by every path that ends that call; AnswerState carries
+	// IN_FLIGHT, ANSWERED or UNKNOWN (a resolution on an expired lease).
+	AnswerDueAt time.Time
+	AnsweredAt  *time.Time
+	AnswerState string
+	ResolvedAt  *time.Time
+	CreatedAt   time.Time
 }
 
 // GetRefundIntent reads one claim whole.
@@ -842,10 +903,10 @@ func (r *PostgresRepository) GetRefundIntent(ctx context.Context, id uuid.UUID) 
 	var request []byte
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, sale_id, tender_id, gateway_tx_id, ROUND(amount * 100)::bigint, act, state,
-			COALESCE(refund_tx_id, ''), request, created_at, updated_at
+			COALESCE(refund_tx_id, ''), answer_due_at, answered_at, answer_state, request, created_at, updated_at
 		FROM pos_refund_intents WHERE id = $1`, id).
 		Scan(&rec.ID, &rec.SaleID, &rec.TenderID, &rec.GatewayTxID, &rec.AmountCents, &rec.Act, &rec.State,
-			&rec.RefundTxID, &request, &rec.CreatedAt, &rec.ResolvedAt)
+			&rec.RefundTxID, &rec.AnswerDueAt, &rec.AnsweredAt, &rec.AnswerState, &request, &rec.CreatedAt, &rec.ResolvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("refund claim not found")
 	}
@@ -900,10 +961,10 @@ func (r *PostgresRepository) LockRefundIntent(ctx context.Context, id uuid.UUID)
 	var request []byte
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, sale_id, tender_id, gateway_tx_id, ROUND(amount * 100)::bigint, act, state,
-			COALESCE(refund_tx_id, ''), request, created_at, updated_at
+			COALESCE(refund_tx_id, ''), answer_due_at, answered_at, answer_state, request, created_at, updated_at
 		FROM pos_refund_intents WHERE id = $1 FOR UPDATE`, id).
 		Scan(&rec.ID, &rec.SaleID, &rec.TenderID, &rec.GatewayTxID, &rec.AmountCents, &rec.Act, &rec.State,
-			&rec.RefundTxID, &request, &rec.CreatedAt, &rec.ResolvedAt)
+			&rec.RefundTxID, &rec.AnswerDueAt, &rec.AnsweredAt, &rec.AnswerState, &request, &rec.CreatedAt, &rec.ResolvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("refund claim not found")
 	}
@@ -930,26 +991,33 @@ func (r *PostgresRepository) FailRefundIntentByID(ctx context.Context, id uuid.U
 }
 
 // RefundIntentFacts is the intent table's authority on one tender: what its
-// standing claims hold, and whether a void's intent already refunded the
-// tender whole.
+// standing claims hold, whether a void's intent already refunded the tender
+// whole, and the cents of refunds the terminal moved that never booked.
 type RefundIntentFacts struct {
 	PendingCents int64
 	DoneVoid     bool
+	// UnbookedRefundedCents sums the settled claims that carry the terminal's
+	// refund id without a booking of their own (r14 P1-1's defence in depth:
+	// a late refund behind a wrongly released claim). A PENDING claim's own
+	// booking names its refund id, so PENDING never counts here; the tender
+	// that paid once at the terminal is never asked to pay again.
+	UnbookedRefundedCents int64
 }
 
 // RefundIntentFacts reads the tender's intents: the cents its PENDING claims
 // hold (claimed at the terminal, not yet booked, so no pos_returns row counts
-// them) and whether any DONE intent of act void refunded the tender whole.
-// The DONE return intents need no field of their own: their booking commits
-// the pos_returns row beside them in one transaction, so CardRefundedCents
-// already counts them.
+// them), whether any DONE intent of act void refunded the tender whole, and
+// the cents of recorded refunds that never booked. The DONE return intents
+// need no field of their own: their booking commits the pos_returns row
+// beside them in one transaction, so CardRefundedCents already counts them.
 func (r *PostgresRepository) RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error) {
 	var facts RefundIntentFacts
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT COALESCE(ROUND(SUM(CASE WHEN state = 'PENDING' THEN ABS(amount) ELSE 0 END) * 100)::bigint, 0),
-			COALESCE(BOOL_OR(act = 'void' AND state = 'DONE'), FALSE)
+			COALESCE(BOOL_OR(act = 'void' AND state = 'DONE'), FALSE),
+			COALESCE(ROUND(SUM(CASE WHEN refund_tx_id IS NOT NULL AND state NOT IN ('DONE', 'PENDING') THEN ABS(amount) ELSE 0 END) * 100)::bigint, 0)
 		FROM pos_refund_intents WHERE sale_id = $1 AND tender_id = $2`, saleID, tenderID).
-		Scan(&facts.PendingCents, &facts.DoneVoid)
+		Scan(&facts.PendingCents, &facts.DoneVoid, &facts.UnbookedRefundedCents)
 	if err != nil {
 		return facts, fmt.Errorf("failed to read the tender's refund intents: %w", err)
 	}

@@ -593,7 +593,12 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}); err != nil {
 			return nil, err
 		}
-		res, err := s.gateway.Refund(ctx, *target.GatewayTxID, claim.intent.AmountCents)
+		// The call is bounded (r14 P1-1): every path it can take ends inside
+		// the bound, so the claim it holds never sits in flight past its own
+		// settle path.
+		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
+		res, err := s.gateway.Refund(callCtx, *target.GatewayTxID, claim.intent.AmountCents)
+		cancel()
 		if err != nil {
 			// no verdict came back (a timeout, a cancel): the terminal may
 			// have moved the money, so the claim stands and the unknown
@@ -616,9 +621,10 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		// the gateway's own refund id, on the standing claim the moment the
 		// terminal answers and in its own committed write (seventh review
-		// P2-3): a PENDING claim carrying a refund id is a refund that moved,
-		// one without it is a refund that may not have
-		if err := s.repo.MarkRefundIntentRefunded(ctx, claim.intent.SaleID, claim.intent.TenderID, res.TransactionID); err != nil {
+		// P2-3), whatever state the claim is in (r14 P1-1): a claim carrying
+		// a refund id is a refund that moved, one without it is a refund that
+		// may not have
+		if err := s.repo.MarkRefundIntentRefunded(ctx, claim.intent.ID, res.TransactionID); err != nil {
 			s.logger.Error("CRITICAL: the gateway's refund id was not written to the claim",
 				"intent_id", claim.intent.ID, "sale_id", claim.intent.SaleID, "error", err)
 		}
@@ -773,6 +779,27 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		// beside the orphan row that records the gateway's figure, and the
 		// books never record a cent less than the terminal moved.
 		if claim != nil {
+			// The claim row locked and read whole under the sale row lock
+			// (r14 P1-1): a replay may only settle a claim whose own terminal
+			// call has answered (or whose in flight lease expired with no
+			// answer at all, marked UNKNOWN then), never a live one, and the
+			// id it books must be the terminal's own.
+			held, err := s.repo.LockRefundIntent(ctx, claim.intent.ID)
+			if err != nil {
+				return err
+			}
+			if held.State != "PENDING" {
+				return conflict("intent_not_pending",
+					fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", held.State))
+			}
+			if err := s.settleUnansweredClaim(ctx, held); err != nil {
+				return err
+			}
+			if held.RefundTxID != "" && held.RefundTxID != claim.refundTxID {
+				return conflict("refund_tx_id_conflict",
+					fmt.Sprintf("the claim carries the terminal's refund id %s, not %s: record the terminal's own id",
+						held.RefundTxID, claim.refundTxID))
+			}
 			cf, err := s.repo.RefundIntentFacts(ctx, claim.intent.SaleID, claim.intent.TenderID)
 			if err != nil {
 				return err
@@ -781,6 +808,10 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return conflict("tender_refunded",
 					"the card tender was already refunded whole by this sale's void: no second refund of it can be made")
 			}
+			if cf.UnbookedRefundedCents > 0 {
+				return conflict("tender_refunded",
+					"the terminal already refunded this tender under a recorded refund id that never booked: reconcile that claim before refunding the tender again")
+			}
 			if cf.PendingCents == 0 {
 				// this return's own claim left PENDING underneath it (a
 				// concurrent resolution won the claim): the race is lost, not
@@ -788,7 +819,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return conflict("intent_not_pending",
 					"the refund claim was settled by another resolution first")
 			}
-			if held := cf.PendingCents - claim.intent.AmountCents; held != 0 {
+			if heldOthers := cf.PendingCents - claim.intent.AmountCents; heldOthers != 0 {
 				return conflict("refund_in_flight",
 					"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
 			}

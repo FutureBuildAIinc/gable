@@ -30,6 +30,20 @@ import (
 // compensation, which run detached from the refused request.
 const reversalTimeout = 30 * time.Second
 
+// refundCallTimeout bounds one terminal refund call, so every path a claim's
+// call can take ends inside it: an answer, the terminal's own no, or an
+// error that stamps the claim answered with no verdict. Without a bound a
+// hung connection would hold the tender's claim in flight forever.
+const refundCallTimeout = 30 * time.Second
+
+// refundAnswerLease is the stated in flight timeout the claim carries from
+// the moment it opens (r14 P1-1): while it runs and the terminal has not
+// answered, the resolve route and the drawer close refuse the claim; once it
+// expires with no answer at all (a crashed or hung act) the claim becomes
+// resolvable and records that the terminal never spoke. It exceeds the call
+// bound so a bounded call's error always lands inside the lease.
+const refundAnswerLease = 90 * time.Second
+
 // gatewayRefund is one refund the counter made at the gateway before its
 // transaction opened.
 type gatewayRefund struct {
@@ -44,6 +58,18 @@ type gatewayRefund struct {
 	act    string
 	entity uuid.UUID
 	actor  string
+}
+
+// abandonRefundIntent strands a claim the act ended before the terminal was
+// reached, in its own committed write: the terminal will never answer for it,
+// so the claim records that (UNKNOWN) and stays resolvable as any stranded
+// claim is. A failing write is logged and left alone: the claim stays on its
+// in flight lease, which expires and reaches the same state (the safe side).
+func (s *Service) abandonRefundIntent(ctx context.Context, intent RefundIntent) {
+	if err := s.repo.AbandonRefundIntent(context.WithoutCancel(ctx), intent.ID); err != nil {
+		s.logger.Error("CRITICAL: the never called claim was not abandoned",
+			"act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID, "error", err)
+	}
 }
 
 // failRefundIntent releases a refund intent whose gateway call failed, in
@@ -119,6 +145,13 @@ func (s *Service) checkCardClaim(ctx context.Context, saleID, tenderID uuid.UUID
 		return conflict("refund_in_flight",
 			"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
 	}
+	// Defence in depth (r14 P1-1): a recorded refund the terminal moved but
+	// the books never took holds the tender even on a settled claim, so a
+	// late answer behind an early release can never be paid twice.
+	if facts.UnbookedRefundedCents > 0 {
+		return conflict("tender_refunded",
+			"the terminal already refunded this tender under a recorded refund id that never booked: reconcile that claim before refunding the tender again")
+	}
 	booked, err := s.repo.CardRefundedCents(ctx, saleID)
 	if err != nil {
 		return err
@@ -141,6 +174,17 @@ func (s *Service) unknownRefundOutcome(ctx context.Context, intent RefundIntent,
 	s.logger.Error("CRITICAL: the card refund answered no verdict; the claim stands until it is reconciled",
 		"intent_id", intent.ID, "act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID,
 		"gateway_tx_id", intent.GatewayTxID, "amount_cents", intent.AmountCents, "error", err)
+	// The call is off the wire (r14 P1-1): stamp the answer so the claim is
+	// stranded and resolvable, exactly as the unknown outcome row records it,
+	// never held as though its terminal call were still live. A failing stamp
+	// is logged beside the row: the claim stays IN_FLIGHT until its lease
+	// expires, the safe side.
+	sctx, scancel := context.WithTimeout(context.WithoutCancel(ctx), reversalTimeout)
+	defer scancel()
+	if serr := s.repo.StampRefundIntentAnswered(sctx, intent.ID); serr != nil {
+		s.logger.Error("CRITICAL: the no verdict answer was not stamped on the claim",
+			"intent_id", intent.ID, "sale_id", intent.SaleID, "error", serr)
+	}
 	if s.auditLog == nil {
 		return
 	}

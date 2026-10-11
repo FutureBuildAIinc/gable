@@ -161,7 +161,12 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	// again until that is reconciled (fourth review P1-4).
 	var refunds []gatewayRefund
 	for i := range intents {
-		res, err := s.gateway.Refund(ctx, intents[i].GatewayTxID, intents[i].AmountCents)
+		// The call is bounded (r14 P1-1): every path it can take ends inside
+		// the bound, so the claim it holds never sits in flight past its own
+		// settle path.
+		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
+		res, err := s.gateway.Refund(callCtx, intents[i].GatewayTxID, intents[i].AmountCents)
+		cancel()
 		refundErr := err
 		verdict := refundAccepted
 		if err == nil {
@@ -178,13 +183,19 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			// and tenth review P2-3), while a definite refusal status proves
 			// nothing moved (the claim is released). The refunds already
 			// taken are recorded in committed rows with their claims left
-			// standing, because the money transaction never opens now.
+			// standing, because the money transaction never opens now. The
+			// tenders after this one are never asked (r14 P1-1): their
+			// claims are abandoned, stranded from now rather than held on a
+			// lease for calls that will never be made.
 			if err != nil {
 				s.unknownRefundOutcome(ctx, intents[i], err)
 			} else if verdict == refundDeclined {
 				s.failRefundIntent(ctx, intents[i])
 			} else {
 				s.unknownRefundOutcome(ctx, intents[i], noVerdictOf(res))
+			}
+			for j := i + 1; j < len(intents); j++ {
+				s.abandonRefundIntent(ctx, intents[j])
 			}
 			for _, r := range refunds {
 				s.recordOrphanRefund(ctx, r, refundErr)
@@ -196,8 +207,9 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		}
 		// the gateway's own refund id, on the standing claim the moment the
 		// terminal answers and in its own committed write (seventh review
-		// P2-3): a PENDING claim carrying a refund id is a refund that moved
-		if err := s.repo.MarkRefundIntentRefunded(ctx, saleID, intents[i].TenderID, res.TransactionID); err != nil {
+		// P2-3), whatever state the claim is in (r14 P1-1): a claim carrying
+		// a refund id is a refund that moved
+		if err := s.repo.MarkRefundIntentRefunded(ctx, intents[i].ID, res.TransactionID); err != nil {
 			s.logger.Error("CRITICAL: the gateway's refund id was not written to the claim",
 				"intent_id", intents[i].ID, "sale_id", saleID, "error", err)
 		}

@@ -106,6 +106,14 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 		return nil, conflict("intent_not_pending",
 			fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", rec.State))
 	}
+	// The claim's own terminal call (r14 P1-1): a claim with no answer inside
+	// its in flight lease is live, not stranded. Releasing it (a no refund)
+	// would free a tender whose money may still move, and the terminal's late
+	// answer would then book beside a settled claim. The legs recheck the
+	// same lease under the claim's row lock.
+	if err := s.refuseUnansweredClaim(rec); err != nil {
+		return nil, err
+	}
 	// The outcome the operator records cannot contradict the claim's own
 	// record (ninth review P2-1, tenth review P3-1): the claim's refund id
 	// was written in its own committed write the moment the terminal
@@ -157,7 +165,9 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			}
 			// the claim row, locked under the sale: a contender resolution
 			// of the same claim loses here with the race named, never beside
-			// this release (ninth review P2-2)
+			// this release (ninth review P2-2), and a live claim (its own
+			// terminal call unanswered inside its lease) is refused, never
+			// released (r14 P1-1)
 			held, err := s.repo.LockRefundIntent(ctx, intentID)
 			if err != nil {
 				return err
@@ -165,6 +175,9 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			if held.State != "PENDING" {
 				return conflict("intent_not_pending",
 					fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", held.State))
+			}
+			if err := s.settleUnansweredClaim(ctx, held); err != nil {
+				return err
 			}
 			if err := s.repo.FailRefundIntentByID(ctx, intentID); err != nil {
 				return err
@@ -282,6 +295,32 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	}
 }
 
+// refuseUnansweredClaim is the in flight lease's read side (r14 P1-1): a
+// claim whose own terminal call has not answered and whose lease has not run
+// out is live, and nothing may settle it.
+func (s *Service) refuseUnansweredClaim(rec *RefundIntentRecord) error {
+	if rec.AnsweredAt != nil || !s.now().Before(rec.AnswerDueAt) {
+		return nil
+	}
+	return conflict("refund_in_flight",
+		"the claim's own terminal call has not answered: resolve it once the terminal answers or its in flight lease expires")
+}
+
+// settleUnansweredClaim is the lease's write side, run under the claim's row
+// lock inside a settling transaction (r14 P1-1): an answered claim settles
+// as it is; a claim whose lease expired with no answer at all is marked
+// UNKNOWN first, so its own record says the terminal never spoke; a claim
+// still inside its lease settles nothing.
+func (s *Service) settleUnansweredClaim(ctx context.Context, held *RefundIntentRecord) error {
+	if held.AnsweredAt != nil {
+		return nil
+	}
+	if err := s.refuseUnansweredClaim(held); err != nil {
+		return err
+	}
+	return s.repo.MarkRefundIntentUnansweredUnknown(ctx, held.ID)
+}
+
 // runVoidResolutionTx books one tender's leg of a stranded void (ninth review
 // P1-1, tenth review P1-2): the void's own money transaction reverses and
 // refunds every card tender, so replaying it on the word of one claim booked a
@@ -312,7 +351,10 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 		// The claim row, locked and read right after the sale lock (r12
 		// P3-1): the loser of a same outcome race is told the race here (the
 		// claim the winner settled), never a state refusal the winner's own
-		// completion of the void would answer below.
+		// completion of the void would answer below. A claim still inside its
+		// in flight lease with no answer settles nothing (r14 P1-1), and the
+		// refund booked must be the terminal's own id when the claim carries
+		// one.
 		held, err := s.repo.LockRefundIntent(ctx, rec.ID)
 		if err != nil {
 			return err
@@ -320,6 +362,14 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 		if held.State != "PENDING" {
 			return conflict("intent_not_pending",
 				fmt.Sprintf("the refund claim is %s: only a PENDING claim is resolved", held.State))
+		}
+		if err := s.settleUnansweredClaim(ctx, held); err != nil {
+			return err
+		}
+		if held.RefundTxID != "" && held.RefundTxID != in.RefundTxID {
+			return conflict("refund_tx_id_conflict",
+				fmt.Sprintf("the claim carries the terminal's refund id %s, not %s: record the terminal's own id",
+					held.RefundTxID, in.RefundTxID))
 		}
 		if sale.Status != StatusCompleted {
 			return httpx.InvalidStateTransition("only a completed sale is voided")

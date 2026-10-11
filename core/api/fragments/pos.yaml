@@ -798,7 +798,11 @@ paths:
         money transaction with every cap and lock, completing the claim DONE;
         outcome no_refund carries the reconciliation reference finance filed,
         marks the claim FAILED and moves nothing. Both write one audit row
-        naming the person, the intent, the outcome and the reason. Only the
+        naming the person, the intent, the outcome and the reason. A claim
+        whose own terminal call has not answered is live, not stranded: while
+        its in flight lease runs the resolve answers 409 refund_in_flight,
+        and once the lease expires with no answer at all the claim is marked
+        UNKNOWN and settles as recorded. Only the
         finance and owner roles; a machine key is refused in the route
         itself, bound or not. A bare resolve, a refund without its refund id
         and a no refund without its reference are 400s naming the field; a
