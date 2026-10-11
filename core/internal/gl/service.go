@@ -188,7 +188,11 @@ func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
 // same accounts, debits and credits swapped, linked via reverses_entry_id.
 // The original stays POSTED (it happened); the reversal cancels its effect.
 // Enforced once per entry (DB unique index + a pre-check). The reversal is
-// dated today, so it is period-checked at post time like any other entry.
+// dated today, so it is period-checked at post time like any other entry, and
+// it posts in the original's own currency: the entry priced its legs into
+// that currency, so a reversal in the setting's code would leave the control
+// account holding both halves of one undo in different currencies (review r6
+// P2-1).
 func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason string) (uuid.UUID, error) {
 	orig, err := s.repo.GetJournalEntry(ctx, id)
 	if err != nil {
@@ -218,6 +222,7 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 		Status:          StatusPosted,
 		PostedBy:        "system",
 		ReversesEntryID: &orig.ID,
+		Currency:        orig.Currency,
 	}
 	for _, l := range orig.Lines {
 		rev.Lines = append(rev.Lines, JournalLine{

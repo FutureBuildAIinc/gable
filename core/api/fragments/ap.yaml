@@ -186,7 +186,11 @@ paths:
         approved; a bill's credit is live exactly when the POSTED entries of
         its VENDOR_INVOICE entry and that entry's whole reversal chain leave
         a net amount on Accounts Payable (a reversal of a reversal puts the
-        credit back, whatever depth the chain has reached), and the void
+        credit back, whatever depth the chain has reached; the net is summed
+        per currency, never across two, as the trial balance sums it, so a
+        chain holding two currencies whose whole sums cancel still reads
+        live in the currency that holds the amount, however the chain
+        arose), and the void
         decides on that net, never on one step of the chain: a bill whose
         entry holds no live credit (one that prices to zero, a legacy bill
         whose posting was swallowed, or an entry the GL routes have already

@@ -58,7 +58,11 @@ A bill's credit is live exactly when the POSTED entries of its
 `VENDOR_INVOICE` entry and that entry's whole reversal chain leave a net
 amount on `2010`, and the void decides on that net, never on one step of
 the chain: a reversal that a later reversal put back leaves the credit
-live at any depth, and a chain whose POSTED entries cancel holds none. A
+live at any depth, and a chain whose POSTED entries cancel holds none.
+The net is summed per currency, never across two (the trial balance never
+sums across two), so a chain holding two currencies whose whole sums
+cancel still reads live in the currency that holds the amount, however
+the chain arose: legacy rows included. A
 bill whose entry holds no live credit (one that prices to zero, or one
 the GL routes have already undone, linked or not) voids with nothing to
 reverse; a linked live entry with no reversal row is reversed whole

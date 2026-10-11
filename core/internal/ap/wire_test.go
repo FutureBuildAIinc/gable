@@ -2058,6 +2058,173 @@ func TestWire_VoidReverseRaceNever500(t *testing.T) {
 	}
 }
 
+// The reproducer of review r6 P2-1, as the review wrote it: a CAD bill whose
+// entry the GL reverse route reversed (the reversal posted in the setting's
+// USD before the fix, so the chain held CAD 20 and USD -20) must not void
+// 200 over a stranded CAD credit: the liveness net never sums across two
+// currencies, so the chain reads live in its CAD half and the void refuses.
+func TestWire_VoidRefusesCrossCurrencyReversedEntry(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	body := f.createBody("V-XCUR", "1", 200000) // 20.00
+	body["currency"] = "CAD"                     // the setting stays USD
+	c := f.do("POST", "/api/v1/ap/invoices", body)
+	if c.status != http.StatusCreated {
+		t.Fatal(c.raw)
+	}
+	id := str(t, c.body, "id")
+	if a := f.approve(id, rev(t, c)); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry := f.glEntryOf(id)
+	if rv := f.glReverse(entry); rv.status != http.StatusOK {
+		t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+	}
+	v := f.void(id, 2, "wrong bill")
+	if v.status == http.StatusOK && f.controlBalanceIn("CAD") != f.openSumIn("CAD") {
+		t.Errorf("void = 200 and the bill is VOIDED with CAD control %d against CAD open %d: the CAD credit is stranded",
+			f.controlBalanceIn("CAD"), f.openSumIn("CAD"))
+	}
+}
+
+// RULE (review r6 P2-1, the belt): the chain liveness nets per currency,
+// never across two (the trial balance never sums across two currencies), so
+// a chain holding two currencies whose nets cancel still reads live in the
+// currency that holds the amount, however the chain arose (legacy rows
+// included). The shape is built directly in the ledger: the GL route's own
+// reversal carries the entry's currency since the route's fix, so no route
+// can build it any more. The void, its unlinked arm and the legacy approve
+// all decide on the same per currency net.
+func TestWire_VoidRefusesCrossCurrencyChainBuiltInTheLedger(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	// handReversal inserts, directly in the ledger, a POSTED reversal of the
+	// entry in the named currency: the wrong currency reversal shape.
+	handReversal := func(entry uuid.UUID, currency string) {
+		t.Helper()
+		id := uuid.New()
+		mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, reverses_entry_id, created_at, updated_at, currency)
+			VALUES ($1, now(), 'hand built wrong currency reversal', 'REVERSAL', $2, 'POSTED', 'test', $2, now(), now(), $3)`, id, entry, currency)
+		mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+			SELECT gen_random_uuid(), $1, l.account_id, 'hand built reversal: ' || l.description, l.credit, l.debit
+			FROM gl_journal_lines l WHERE l.journal_entry_id = $2`, id, entry)
+	}
+	chainNetIn := func(entry, currency string) int64 {
+		return f.count(`WITH RECURSIVE c(id) AS (SELECT id FROM gl_journal_entries WHERE id = $1
+			UNION SELECT e.id FROM gl_journal_entries e JOIN c ON e.reverses_entry_id = c.id)
+			SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint FROM gl_journal_lines l
+			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010' AND e.currency = $2
+			WHERE e.id IN (SELECT id FROM c)`, entry, currency)
+	}
+
+	// The linked arm: a CAD bill whose entry's reversal was built in USD.
+	body := f.createBody("V-XCUR-LEDGER", "1", 200000) // 20.00
+	body["currency"] = "CAD"                           // the setting stays USD
+	c := f.do("POST", "/api/v1/ap/invoices", body)
+	if c.status != http.StatusCreated {
+		t.Fatal(c.raw)
+	}
+	id := str(t, c.body, "id")
+	if a := f.approve(id, rev(t, c)); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry := f.glEntryOf(id)
+	if got, want := f.controlBalanceIn("CAD"), int64(2000); got != want {
+		t.Fatalf("the CAD control after the approve = %d, want %d", got, want)
+	}
+	if got, want := f.openSumIn("CAD"), int64(2000); got != want {
+		t.Fatalf("the CAD open after the approve = %d, want %d", got, want)
+	}
+	if !f.balanced() {
+		t.Fatal("an entry does not balance after the approve")
+	}
+	handReversal(uuid.MustParse(entry), "USD")
+	if got, want := chainNetIn(entry, "CAD"), int64(2000); got != want {
+		t.Fatalf("the chain nets %d in CAD, want %d (the hand edit)", got, want)
+	}
+	if got, want := chainNetIn(entry, "USD"), int64(-2000); got != want {
+		t.Fatalf("the chain nets %d in USD, want %d (the hand edit)", got, want)
+	}
+	entries := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor)
+	v := f.void(id, 2, "wrong currency chain")
+	if v.status != http.StatusConflict {
+		t.Fatalf("void a bill whose chain holds two currencies = %d, want 409: %s", v.status, v.raw)
+	}
+	if _, blockers, _ := errorOf(t, v); len(blockers) != 1 || blockers[0] != "reversal_not_posted" {
+		t.Errorf("the void's blockers = %v, want [reversal_not_posted]", blockers)
+	}
+	if got := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor); got != entries {
+		t.Errorf("the refused void wrote %d entries, want none", got-entries)
+	}
+	if got := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED'`, id); got != 1 {
+		t.Errorf("the bill left APPROVED: %d rows say so", got)
+	}
+	if got, want := f.controlBalanceIn("CAD"), int64(2000); got != want {
+		t.Errorf("the CAD control after the refusal = %d, want %d (nothing written)", got, want)
+	}
+	if got, want := f.openSumIn("CAD"), int64(2000); got != want {
+		t.Errorf("the CAD open after the refusal = %d, want %d (nothing written)", got, want)
+	}
+	if got, want := f.controlBalanceIn("USD"), int64(-2000); got != want {
+		t.Errorf("the USD control after the refusal = %d, want %d (the hand edit's gap, untouched)", got, want)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance after the refusal")
+	}
+
+	// The unlinked arm of the same shape: the liveness read of a bill with no
+	// linked entry nets per currency too, so the unlink cannot make the CAD
+	// half of the chain disappear from the decision.
+	mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
+	v2 := f.void(id, 2, "wrong currency chain, unlinked")
+	if v2.status != http.StatusConflict {
+		t.Fatalf("void the unlinked bill = %d, want 409: %s", v2.status, v2.raw)
+	}
+	if _, blockers, _ := errorOf(t, v2); len(blockers) != 1 || blockers[0] != "entry_not_linked" {
+		t.Errorf("the unlinked void's blockers = %v, want [entry_not_linked]", blockers)
+	}
+	if got := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor); got != entries {
+		t.Errorf("the refused unlinked void wrote %d entries, want none", got-entries)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance after the unlinked refusal")
+	}
+
+	// The legacy approve arm: a PENDING bill whose hand built chain holds two
+	// currencies is refused, never approved into a second credit.
+	body2 := f.createBody("V-XCUR-PENDING", "1", 200000) // 20.00
+	body2["currency"] = "CAD"
+	c2 := f.do("POST", "/api/v1/ap/invoices", body2)
+	if c2.status != http.StatusCreated {
+		t.Fatal(c2.raw)
+	}
+	id2 := str(t, c2.body, "id")
+	e2 := uuid.New()
+	mustExec(t, f.db, `INSERT INTO gl_journal_entries (id, entry_date, memo, source, source_ref_id, status, posted_by, created_at, updated_at, currency)
+		VALUES ($1, now(), 'hand built bill entry', 'VENDOR_INVOICE', $2, 'POSTED', 'test', now(), now(), 'CAD')`, e2, id2)
+	mustExec(t, f.db, `INSERT INTO gl_journal_lines (id, journal_entry_id, account_id, description, debit, credit)
+		VALUES (gen_random_uuid(), $1, $2, 'hand built bill line', 20.00, 0),
+		       (gen_random_uuid(), $1, (SELECT id FROM gl_accounts WHERE code = '2010'), 'hand built bill line', 0, 20.00)`, e2, f.expense)
+	handReversal(e2, "USD")
+	a2 := f.approve(id2, 1)
+	if a2.status != http.StatusConflict {
+		t.Fatalf("approve a pending bill whose chain holds two currencies = %d, want 409: %s", a2.status, a2.raw)
+	}
+	if _, blockers, _ := errorOf(t, a2); len(blockers) != 1 || blockers[0] != "entry_not_linked" {
+		t.Errorf("the approve's blockers = %v, want [entry_not_linked]", blockers)
+	}
+	if got, want := f.controlBalanceIn("CAD"), int64(4000); got != want {
+		t.Errorf("the CAD control after the refused approve = %d, want %d (the two hand shapes, nothing written)", got, want)
+	}
+	if got, want := f.openSumIn("CAD"), int64(2000); got != want {
+		t.Errorf("the CAD open after the refused approve = %d, want %d (the pending bill owes nothing yet)", got, want)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance after the refused approve")
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is
