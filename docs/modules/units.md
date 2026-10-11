@@ -37,7 +37,8 @@ because their size is per product.
 
 The worked examples of ADR 0006 section 3.2: a 2x4x8 stocked in
 `PCS` stores `LF (8, 1)`, `BF (1, 0.1875)` and `MBF (1, 187.5)`,
-all in canonical form (R2, GCD reduced, scale 4). A 2x4 random
+all in canonical form (R2, GCD reduced, scale 4). The row's unit
+sits on the left; the stocking unit's quantity on the right. A 2x4 random
 length product stocked in `LF` stores `LF (1, 1)`, `BF (1, 1.5)`
 and `MBF (1, 1500)`. A 6x9 paver stocked in `PCS` and sold by `SF`
 has `1 SF = 8/3 PCS`, which is not exact at scale 4, so the unit
@@ -71,6 +72,15 @@ Every route below is in `core/api/fragments/units.yaml` and
 The unit catalogue is dealer wide (no branch wall). The product
 unit set is owned by the product module and inherits its product
 guard; the catalogue itself has its own read and write guards.
+
+The catalogue routes answer:
+
+| Route | Status codes and headers |
+|---|---|
+| `GET /api/v1/units` | `200`, `400`, `401`, `403`, `500`. Query: `cursor`, `limit`, `include=total`, `dimension` (one of `count, length, area, volume, weight, board_measure`), `is_active` (`true` or `false`); a repeated parameter is `400`. |
+| `POST /api/v1/units` | `201` with `Location: /api/v1/units/{code}` and `ETag` (revision 1) headers, body `Unit`; `400`, `401`, `403`, `409` (idempotency or code already exists with details `{field: "code", message: "already exists"}`), `413`, `422`, `500`. The `Idempotency-Key` header is accepted. `is_active` in the body is accepted but ignored: a created unit is always active. |
+| `GET /api/v1/units/{code}` | `200` with `ETag` header; `400` (path code off `^[A-Z]{1,6}$`), `401`, `403`, `404` (`no such unit`), `500`. |
+| `PUT /api/v1/units/{code}` | `200` with `ETag` header (new revision); `400`, `401`, `403`, `404`, `409` (stale revision), `413`, `422`, `428` (missing revision precondition), `500`. The `Idempotency-Key` header and the `If-Match` header are accepted; the precondition is the body `revision` or the `If-Match` header, both must agree. |
 
 ## The catalogue resource
 
@@ -113,11 +123,11 @@ unit set row or any line names the unit). The body fields
 | Field | Wire form | Note |
 |---|---|---|
 | `name` | text | 1 to 80 characters. |
-| `is_active` | boolean | Deactivate a dealer unit; reactivation is the same call. |
-| `dimension` | enum | One of `count`, `length`, `area`, `volume`, `weight`, `board_measure`. Immutability holds while any product unit set row or any line names the unit. |
+| `is_active` | boolean | Deactivate or reactivate any unit, system units included. |
+| `dimension` | enum | One of `count`, `length`, `area`, `volume`, `weight`, `board_measure`. A system unit's `dimension` and standard size never change; a dealer unit's `dimension` and standard size become immutable once any product unit set row or any line names the unit. |
 | `std_unit_qty` | quantity | Half the standard pair; same immutability rule as `dimension`. |
 | `std_ref_qty` | quantity | The other half; the pair is sent together or omitted together. |
-| `revision` | integer | The revision precondition the server checks when the `If-Match` header is absent. |
+| `revision` | integer | The revision precondition; send it or `If-Match`, both must agree; neither is `428`. |
 
 ### Standard sizes and the dimension reference
 
@@ -193,22 +203,44 @@ derivations of ADR 0006 section 3.2 fill them.
 
 | Field | Wire form | Note |
 |---|---|---|
-| `uom` | code | The row's unit. |
-| `unit_qty` | quantity | The left side of the pair, scale 4. |
-| `stock_qty` | quantity | The right side of the pair, scale 4. |
+| `uom` | code | The row's unit. Required. |
+| `unit_qty` | quantity | The left side of the pair, scale 4. Sent with `stock_qty` or omitted; one alone is a `400` naming the missing side. |
+| `stock_qty` | quantity | The right side of the pair, scale 4. Sent with `unit_qty` or omitted; one alone is a `400` naming the missing side. |
 | `sell` | boolean | The row can be a sale unit. |
 | `purchase` | boolean | The row can be a purchase unit. |
-| `price` | boolean | The row can be a price unit. A change of the stocking unit (the `price_unit_held` hold of ADR 0006 9.1) is refused while the product has a nonzero `base_price_ten_thousandths`, a customer contract, a pricing rule with a fixed price, or a product price row (`product/unitset.go` `ProductPriceHeld`). |
+| `price` | boolean | The row can be a price unit. |
 
-`UnitSetPut` replaces the whole set and the four default columns at
-the product's revision. A row may omit its pair (the derivations of
-ADR 0006 section 3.2 fill it); a sent pair is stored canonically
-and must agree with every derivation that applies. From C3-2B a
+`UnitSetPut` is the body of `PUT /api/v1/products/{id}/units` (see
+`core/api/fragments/product.yaml`
+`components.schemas.UnitSetPut`). The PUT replaces the whole set
+and the four default columns at the product's revision in one
+transaction, accepts the `Idempotency-Key` header, and reads the
+revision precondition from the `If-Match` header or the body's
+`revision`; a missing or stale revision is `428`, both sent and
+disagreeing is `400`. Required fields: `revision`, `stock_uom`,
+`sale_uom`, `price_uom`, `purchase_uom`, `units`. Optional:
+`base_price_ten_thousandths`. From C3-2B a
 `base_price_ten_thousandths` body field is required whenever the
 PUT changes `price_uom` (the stored base is a price per the old
 unit); sent with an unchanged `price_uom` it simply sets the base
 price (`ADR 0006` section 3.2). A field the PUT cannot apply (the
-board measure columns) is a `400` naming it.
+board measure columns) is a `400` naming it. Today a PUT whose
+`price_uom` is not equal to `stock_uom` is a `400` naming
+`price_uom` (the hold of ADR 0006 9.1 lifts with C3-2B). The
+route answers:
+
+| Status | Meaning |
+|---|---|
+| `200` | The completed set with its new revision and ETag. |
+| `400` | A required field is missing, `price_uom` differs from `stock_uom`, or any other validation fails. |
+| `401` | Missing or invalid credentials. |
+| `403` | Forbidden. |
+| `404` | Unknown product. |
+| `409` | `409 Idempotency-Key` replay, or a stocking unit change refused by blocker `stock_unit_in_use` (product still has stock or an open order line in the old `stock_uom`), `price_unit_held` (a base price or pricing row ties the old stocking unit), `unit_in_use` (a removed row is named by a price). |
+| `413` | Payload too large. |
+| `422` | Unprocessable entity. |
+| `428` | Missing or stale revision precondition. |
+| `500` | Internal error. |
 
 ### Pair arithmetic and exactness
 
@@ -223,9 +255,9 @@ the lowest integer terms `(p, q)`, or `(p x k, q x k)` for the
 largest `k` of `0.1, 0.01, 0.001, 0.0001` that fits the bound; a
 ratio that fits the `NUMERIC(12,4)` bound in no form above is
 refused where it is written, never at a line (`ErrOutOfBound`).
-Worked: 187.5 PCS to 1 MBF is `(187.5, 1)`; 8 LF to 1 PCS is
-`(8, 1)`; 1 BF of 2x4 is 1.5 LF so `(1, 1.5)`; 28 BF = 3 PCS of
-2x4x14 is `(28, 3)`; GAL to CF is `(576, 77)`. The arithmetic over
+Worked: 8 LF to 1 PCS is `(8, 1)`; 1 BF of 2x4 is 1.5 LF so
+`(1, 1.5)`; 28 BF = 3 PCS of 2x4x14 is `(28, 3)`; GAL to CF is
+`(576, 77)`. The arithmetic over
 both sides is exact rational over `int64` (`math/big.Rat`, never
 `float64`, never parsing through text).
 
@@ -328,7 +360,7 @@ report; both parse the flag through `migrate.ParseArgs` in
 the new dealer units it would insert (with row counts across the
 columns) and the values that would abort the migration (exit code
 `1`). Migration 099 inserts the 23 standard units
-(`099_units_catalogue_and_sets.sql:70-93`); the seed does not
+(`099_units_catalogue_and_sets.sql:71-93`); the seed does not
 touch the catalogue, so after `make migrate` the report lists no
 new dealer units for them.
 

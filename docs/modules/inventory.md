@@ -101,10 +101,10 @@ server) until C4-1; the read is on the `Quantity` contract.
 
 | Field | Wire form | Note |
 |---|---|---|
-| `product_id` | UUID | The product the cycle count names. Required. |
+| `product_id` | UUID | The product the cycle count names. Required by the contract; the decoder does not check it. |
 | `location_id` | UUID, nullable | The location the count names; nullable for a legacy row. |
-| `quantity` | number | The new on-hand quantity (when `is_delta` is false) or the delta to add or subtract (when `is_delta` is true). Required. |
-| `reason` | text | The cycle count's reason; informational, persisted. |
+| `quantity` | number | The new on-hand quantity (when `is_delta` is false) or the delta to add or subtract (when `is_delta` is true). Required by the contract; the decoder does not check it. |
+| `reason` | text | Accepted and discarded: no movement row is written until C4-1 (ADR 0008). |
 | `is_delta` | boolean | If true, add or subtract `quantity`; if false, replace the on-hand with `quantity`. |
 
 `StockMovementRequest` (see
@@ -114,24 +114,48 @@ server) until C4-1; the read is on the `Quantity` contract.
 
 | Field | Wire form | Note |
 |---|---|---|
-| `product_id` | UUID | The product moved. Required. |
-| `from_location_id` | UUID, nullable | The source location; nullable only when the destination is also a legacy row without a location. |
+| `product_id` | UUID | The product moved. Required by the contract; the decoder does not check it. |
+| `from_location_id` | UUID, nullable | The source location; null is the legacy row with no location, in which case the source branch lookup and the source inventory + unallocated check are skipped (destination is always a required UUID, never a legacy row). |
 | `to_location_id` | UUID | The destination location. Required. |
-| `quantity` | number | The amount moved; must be positive. Required. |
-| `reason` | text | The transfer's reason; informational, persisted. |
+| `quantity` | number | The amount moved; must be positive. Required by the contract; the decoder does not check it. |
+| `reason` | text | Accepted and discarded: the wire value is prefixed into the inner adjustment, which discards it; no movement row is written until C4-1 (ADR 0008). |
 
 `InventoryStatusAck` (see
 `core/api/fragments/inventory.yaml`
 `components.schemas.InventoryStatusAck`), the body of either write's
 `200`: `{ "status": "ok" }`.
 
+### Write headers and error answers
+
+Both `POST /api/v1/inventory/adjust` and
+`POST /api/v1/inventory/transfer` accept the `Idempotency-Key` and
+`X-Branch-Id` request headers (see `core/api/fragments/inventory.yaml`
+under each operation's `parameters`; `X-Branch-Id` is the branch wall
+header from the `inventory` list, `Idempotency-Key` the dedupe header
+shared with every other write). Status codes both routes answer:
+
+| Status | Meaning |
+|---|---|
+| `200` | Adjusted or transferred; body is `{ "status": "ok" }`. |
+| `400` | Malformed JSON body. |
+| `401` | Missing or invalid credentials. |
+| `403` | Adjust: the body's `location_id` is in a branch the caller may not target. Transfer: the body's `from_location_id` or `to_location_id` is in a branch the caller may not target. |
+| `409` | `Idempotency-Key` replay or revision conflict. |
+| `413` | Payload too large. |
+| `422` | Unprocessable entity. |
+| `500` | Adjust: a result that would leave negative stock. Transfer: a cross-branch move, a non positive `quantity`, or insufficient unallocated stock at the source. |
+
 ## Events the module writes
 
-The write routes write the `inventory` rows directly (see
-`core/internal/inventory/repository.go` lines 82-98 for the insert
-and lines 199-327 for the updates). No outbox events and no
-`audit_log` rows are written by the inventory module today; the read
-side does not write events.
+The write routes write the `inventory` rows directly. The only two
+writes the routes make are `CreateInventory`
+(`core/internal/inventory/repository.go:80-94`) and `UpdateInventory`
+(`core/internal/inventory/repository.go:96-107`); the calls live in
+`core/internal/inventory/service.go` `AdjustStock` (creates on a
+missing row, updates on an existing one) and the inner `AdjustStock`
+calls inside `MoveStock`. No outbox events and no `audit_log` rows
+are written by the inventory module today; the read side does not
+write events.
 
 ## Scopes, roles and keys
 
