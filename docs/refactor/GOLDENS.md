@@ -396,12 +396,12 @@ last).
 | crm | `crm` | POST /api/v1/customers/{id}/activities; GET /api/v1/customers/{id}/activities; invalid activity_type (400) |
 | gl | `gl` | GET /api/v1/gl/accounts; POST /api/v1/gl/journal-entries; POST /api/v1/gl/journal-entries/{id}/post; unbalanced entry (400) |
 | quote | `quote` | POST /api/v1/quotes (and the refused create without a unit of measure, 400); GET /api/v1/quotes/{id}; GET /api/v1/quotes (the cursor envelope, the status filter with `include=total`, the refused uppercase status, the refused `offset`, the refused cursor); PUT /api/v1/quotes/{id} at its revision (DRAFT edit), without a revision (428) and with a stale one (409); POST /api/v1/quotes/{id}/transitions through every allowed edge (draft to sent/accepted/rejected/expired, sent to accepted/rejected/expired, rejected to draft, expired to draft), the refused accepted to sent (409) and the unknown target (400); POST /api/v1/quotes/{id}/convert; GET /api/v1/events for the `quote.*` events the group wrote; GET /api/v1/quotes/analytics |
-| pricing exposure | `exposure` | GET /api/v1/quotes/{id}/exposure (before and after an event); POST .../request-ack; POST .../acknowledge (409 cleared); POST .../override (409 cleared); POST .../escalate-now (500, see notes); GET /api/v1/quotes/exposure?owner=all (list and summary) |
-| order | `order` | POST /api/v1/orders; GET /api/v1/orders/{id}; GET /api/v1/orders?limit=1 (envelope + newest = this script's order); GET /api/v1/orders/{id}/exposure-gate; POST /api/v1/orders/{id}/cancel (204 then 409); POST /api/v1/orders/{id}/exposure-override; GET unknown id (404) |
-| invoice (via order flow) | `invoice` | POST /api/v1/orders/{id}/confirm and /fulfill (204s; the invoice-creating flow); GET /api/v1/invoices; GET /api/v1/invoices/{id}; POST /api/v1/invoices/{id}/credit-memo; GET /api/v1/credit-memos/{customerId}; GET unknown id (404) |
+| pricing exposure | `exposure` | GET /api/v1/quotes/{id}/exposure (before and after an event); POST .../request-ack; POST .../acknowledge (409 cleared); POST .../override (409 cleared); POST .../escalate-now; GET /api/v1/quotes/exposure?owner=all (list and summary) |
+| order | `order` | POST /api/v1/orders; GET /api/v1/orders/{id}; GET /api/v1/orders?limit=1 (envelope + newest = this script's order); GET /api/v1/orders/{id}/exposure-gate; POST /api/v1/orders/{id}/transitions (cancel-equivalent edge, 409 wrong target, 428 no revision); POST /api/v1/orders/{id}/exposure-override; GET unknown id (404) |
+| invoice (via order flow) | `invoice` | POST /api/v1/orders/{id}/transitions (and /allocate, the invoice-creating flow); POST /api/v1/orders/{id}/fulfillments; GET /api/v1/orders/fulfillment-requests; GET /api/v1/invoices; GET /api/v1/invoices/{id}; POST /api/v1/credit-memos; GET /api/v1/credit-memos/{id}; GET /api/v1/credit-memos?invoice_id=; GET unknown id (404) |
 | payment | `payment` | POST /api/v1/payments; GET /api/v1/invoices/{id}/payments; POST /api/v1/payments/intent (503 with no gateway configured) |
 | account | `account` | GET /api/v1/accounts/{id}; GET /api/v1/accounts/{id}/transactions (pins the nullable array) |
-| deposit | `deposit` | POST /api/v1/deposits; GET /api/v1/deposits/{id}; zero amount (400) |
+| deposit | `deposit` | POST /api/v1/payments (201 and two refused 400); GET /api/v1/payments/{id}; GET /api/v1/payments?order_id=; GET /api/v1/orders/{id}; POST /api/v1/credit-memos/{id}/refunds (409) |
 | tax | `tax` | GET /api/v1/tax/exemptions/{customerID} (empty, pins []); POST /api/v1/tax/exemptions; POST /api/v1/tax/preview |
 | vendor | `vendor` | POST /api/v1/vendors; GET /api/v1/vendors/{id}; GET /api/v1/vendors |
 | purchase_order | `purchase_order` | POST /api/v1/purchase-orders; GET /api/v1/purchase-orders/{id}; bad vendor_id (400) |
@@ -415,7 +415,7 @@ last).
 | pricing rebates | `rebate` | POST /api/v1/pricing/rebates/programs; GET /api/v1/pricing/rebates/programs?vendor_id= |
 | pricing escalators | `escalator` | GET /api/v1/market-indices; PUT /api/v1/market-indices/{id} |
 | delivery | `delivery` | POST /api/v1/delivery/vehicles; GET /api/v1/delivery/vehicles; POST /api/v1/delivery/drivers; GET /api/v1/delivery/drivers/{id} |
-| inventory | `inventory` | GET /api/v1/inventory?product_id= (empty, pins null); POST /api/v1/inventory/adjust; missing product_id (400) |
+| inventory | `inventory` | GET /api/v1/inventory?product_id= (empty, pins null); GET /api/v1/inventory?limit=2&include=total (page envelope); POST /api/v1/inventory/adjust |
 | document | `document` | GET /api/v1/documents/print/pickticket/{orderId} (PDF, text hash); unknown id (404) |
 | reporting | `reporting` | POST /api/v1/reporting/save; GET /api/v1/reporting/saved; POST /api/v1/reporting/schedules; GET /api/v1/reporting/schedules; missing fields (400) |
 | dashboard | `dashboard` | GET /api/v1/dashboard/inventory-alerts (clock-free read); the clock-window reads live in `clockwindow` |
@@ -438,12 +438,11 @@ last).
 | location item | `location_item` | GET /api/v1/branches/{id}/tree; PUT/DELETE /api/v1/locations/{id} |
 | product item | `product_item` | GET /api/v1/products/reorder-alerts; PATCH /api/v1/products/{id}/dimensions, /lead-time, /margins |
 | tax exemption item | `tax_exemption_item` | DELETE /api/v1/tax/exemptions/{id} |
-| deposits | `deposit_apply` | GET /api/v1/deposits; POST /api/v1/deposits/{id}/apply |
-| payment gateway | `payment_gateway` | POST /api/v1/payments/card (402, no gateway); POST /api/v1/payments/refund (500, no gateway) |
+| payment gateway | `payment_gateway` | POST /api/v1/payments/card (402, no gateway); POST /api/v1/payments/refund (405, legacy route gone) |
 | documents | `document_invoice` | GET /api/v1/documents/print/invoice/{id} (PDF text hash); POST /api/v1/invoices/{id}/email (202, async) |
 | quote file | `quote_file` | GET /api/v1/quotes/{id}/file |
 | inventory transfer | `inventory_transfer` | POST /api/v1/inventory/transfer |
-| ap payments | `ap_payments` | POST /api/v1/ap/invoices/{id}/approve (401/400 only: dev mode has no claims, so no approver); GET/POST /api/v1/ap/payments |
+| ap payments | `ap_payments` | POST /api/v1/ap/invoices/{id}/transitions (approve via {"to":"approved"}, and a 409 wrong target, 428 no revision); GET /api/v1/ap/payments?vendor_id=; POST /api/v1/ap/payments (201, two refused 400, 409 already-paid) |
 | gl | `gl_accounts_entries`, `gl_fiscal_periods` | POST /api/v1/gl/accounts; PUT /api/v1/gl/accounts/{id}; GET /api/v1/gl/journal-entries and /{id}; POST .../{id}/reverse and /void; GET /api/v1/gl/fiscal-periods; POST .../{id}/close and /reopen |
 | matching | `matching_runs` | GET /api/v1/matching/exceptions; GET /api/v1/matching/results/{po_id}; POST /api/v1/matching/run/{po_id} |
 | bankrecon | `bankrecon_sessions` | POST /api/v1/bankrecon/import, /match, /unmatch; GET/POST /api/v1/bankrecon/sessions; GET /api/v1/bankrecon/sessions/{id}; POST .../{id}/complete |
@@ -457,7 +456,7 @@ last).
 | pim | `pim_media` | products/{id}/detail; collateral GET/DELETE; media GET/DELETE/primary PATCH; generate/* (500, no AI key) |
 | techadmin | `techadmin_keys`, `techadmin_settings` | DELETE /api/v1/admin/keys/{id}; settings/ai and settings/routing GET/PUT/DELETE (invented placeholder values only) |
 | staff detail | `staff_detail` | GET/PUT /api/v1/admin/staff/{id}; PUT /api/v1/admin/modules/{id}; POST/DELETE /api/v1/admin/staff/{id}/modules |
-| governance | `governance_rfcs` | GET /api/v1/governance/rfcs (500); PUT /api/v1/governance/rfcs/{id} |
+| governance | `governance_rfcs` | GET /api/v1/governance/rfcs (200, plus 400 on a bad uuid); PUT /api/v1/governance/rfcs/{id} (200, plus 400 on a bad uuid and 404 on a missing one); POST .../{id}/transitions (200, 400) |
 | configurator | `configurator_reads` | GET /api/v1/configurator/presets and /rules |
 | server | `server_routes` | `/uploads/` (the file server's plain 404) |
 | partner | `partner_quotes` | GET /api/partner/v1/quotes and /quotes/{id} (the dev-mode 401) |
