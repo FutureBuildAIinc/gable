@@ -121,8 +121,10 @@ func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
 // shared customer's restricted fields change only for the finance or owner
 // role (a user) or an unbound key carrying customers:restricted, which is why
 // the third guard admits finance on exactly the three restricted field routes
-// (the header write, the salesperson and the escalation policy) and nowhere
-// else: every other customer route keeps the roles it had. The routes note their method and path so a
+// (the header write, the salesperson and the escalation policy) and the two
+// reads those writes need (the record and its escalation policy, so finance
+// can hold the revision it must send as If-Match, item 57) and nowhere else:
+// every other customer route keeps the roles it had. The routes note their method and path so a
 // refusal the service serves can name them in its key.branch_refused row.
 func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 	svc.WithBranchGuard(customerguard.New(w.guard)).WithSharedGuard(customerguard.NewShared(w.keyWall))

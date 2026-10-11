@@ -173,10 +173,13 @@ func TestKeyBranchPin_BoundKeyWithTheScopeIsRefused(t *testing.T) {
 	}
 }
 
-// Fix round 6 (item 54 question 1): the finance role reaches only the three
-// restricted field routes of a customer, not every customer route. Customer
-// and contact create, the reads and the other writes answer finance what
-// refactor/v1 answered (403 insufficient role); the restricted changes pass.
+// Fix round 6 (item 54 question 1) and round 7 (principal item 57 question 1):
+// the finance role reaches only the three restricted field routes of a
+// customer and the two reads those writes need (the record and its escalation
+// policy: finance cannot send If-Match on a record it cannot read), not every
+// customer route. Customer and contact create, the other reads and the other
+// writes answer finance what refactor/v1 answered (403 insufficient role); the
+// restricted changes pass, on revisions finance reads itself.
 func TestKeyBranchPin_FinanceReachesOnlyTheRestrictedRoutes(t *testing.T) {
 	f, _, _ := round5Fixture(t)
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
@@ -186,10 +189,13 @@ func TestKeyBranchPin_FinanceReachesOnlyTheRestrictedRoutes(t *testing.T) {
 		{"POST", "/api/v1/customers", `{"name":"finance create"}`},
 		{"POST", sh + "/contacts", `{"name":"finance contact"}`},
 		{"POST", sh + "/ship-tos", `{"name":"finance ship to"}`},
-		{"GET", sh, ""},
 		{"GET", "/api/v1/customers", ""},
 		{"GET", sh + "/contacts", ""},
-		{"GET", sh + "/escalation-policy", ""},
+		{"GET", sh + "/ship-tos", ""},
+		{"GET", "/api/v1/ship-tos/" + s.shipTo.String(), ""},
+		{"GET", "/api/v1/contacts/" + s.contact.String(), ""},
+		{"GET", sh + "/activities", ""},
+		{"POST", sh + "/activities", `{"activity_type":"call","description":"finance activity"}`},
 	}
 	for _, r := range refused {
 		status, buf := f.userAs(t, "finance", r.method, r.path, r.body, nil)
@@ -197,22 +203,31 @@ func TestKeyBranchPin_FinanceReachesOnlyTheRestrictedRoutes(t *testing.T) {
 			t.Errorf("finance %s %s: %d %s, want the 403 insufficient role refactor/v1 answers", r.method, r.path, status, buf)
 		}
 	}
+	// The two reads the restricted writes need (item 57 question 1): finance
+	// reads the customer and its escalation policy, and nothing else opened.
+	for _, path := range []string{sh, sh + "/escalation-policy"} {
+		status, buf := f.userAs(t, "finance", "GET", path, "", nil)
+		if status != http.StatusOK {
+			t.Errorf("finance GET %s: %d %s, want 200, the read the restricted write needs", path, status, buf)
+		}
+	}
 	// The sales user keeps the reads.
 	if status, buf := f.userAs(t, "sales", "GET", sh, "", nil); status != http.StatusOK {
 		t.Errorf("sales GET customer: %d %s, want 200", status, buf)
 	}
 
-	// The three restricted field routes pass for finance on the shared customer.
+	// The three restricted field routes pass for finance on the shared
+	// customer, on the revisions finance reads itself.
 	if status, buf := f.userAs(t, "finance", "PUT", sh,
-		f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 333000}), nil); status != http.StatusOK {
+		f.customerReplaceAs(t, "finance", s.id, map[string]any{"credit_limit_cents": 333000}), nil); status != http.StatusOK {
 		t.Errorf("finance changing the credit limit: %d %s, want 200", status, buf)
 	}
-	cur := f.readJSON(t, sh)
+	cur := f.readJSONAs(t, "finance", sh)
 	raw, _ := json.Marshal(map[string]any{"salesperson_id": s.salesperson.String(), "revision": cur["revision"]})
 	if status, buf := f.userAs(t, "finance", "PATCH", sh+"/salesperson", string(raw), nil); status != http.StatusOK {
 		t.Errorf("finance changing the salesperson: %d %s, want 200", status, buf)
 	}
-	esc := f.readJSON(t, sh+"/escalation-policy")
+	esc := f.readJSONAs(t, "finance", sh+"/escalation-policy")
 	raw, _ = json.Marshal(map[string]any{"policy": "require_ack", "threshold_percent": "7.5", "revision": esc["revision"]})
 	if status, buf := f.userAs(t, "finance", "PUT", sh+"/escalation-policy", string(raw), nil); status != http.StatusOK {
 		t.Errorf("finance setting the escalation policy: %d %s, want 200", status, buf)

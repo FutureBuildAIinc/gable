@@ -143,8 +143,15 @@ func multipartFile(field, name, content string) (string, string) {
 // customerReplace builds a PUT /customers/{id} body from the customer's
 // current values with the change given applied, on the revision it reads.
 func (f *keyPinFixture) customerReplace(t *testing.T, id uuid.UUID, change map[string]any) string {
+	return f.customerReplaceAs(t, "admin", id, change)
+}
+
+// customerReplaceAs is customerReplace with the record read as the role given:
+// a role that may write a restricted field but not list customers (finance,
+// item 57) still reads the record it replaces.
+func (f *keyPinFixture) customerReplaceAs(t *testing.T, role string, id uuid.UUID, change map[string]any) string {
 	t.Helper()
-	cur := f.readJSON(t, "/api/v1/customers/"+id.String())
+	cur := f.readJSONAs(t, role, "/api/v1/customers/"+id.String())
 	body := map[string]any{"revision": cur["revision"]}
 	for _, k := range []string{"account_number", "name", "email", "phone", "address", "tier", "is_active",
 		"price_level_id", "salesperson_id", "credit_limit_cents", "currency", "payment_terms_id", "po_required"} {

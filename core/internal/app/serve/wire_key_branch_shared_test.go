@@ -102,6 +102,20 @@ func (f *keyPinFixture) readJSON(t *testing.T, path string) map[string]any {
 	return m
 }
 
+// readJSONAs reads a record as the role given, as a map.
+func (f *keyPinFixture) readJSONAs(t *testing.T, role, path string) map[string]any {
+	t.Helper()
+	status, buf := f.userAs(t, role, "GET", path, "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("read %s as %s: %d %s", path, role, status, buf)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(buf, &m); err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
 // sharedChangeRows reads the audit rows a dealer wide key's change to a
 // shared customer left, oldest first.
 func (f *keyPinFixture) sharedChangeRows(t *testing.T, customer uuid.UUID) []map[string]any {

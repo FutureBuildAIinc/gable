@@ -36,7 +36,10 @@ func NewHandler(service *Service) *Handler {
 // and editing terms is a finance act, choosing them is a sales one). A third
 // guard, when given, replaces it on the three routes that change a customer's
 // restricted fields (the header write, the salesperson and the escalation
-// policy), so a role can reach those without reaching the rest.
+// policy) and on the two reads those writes need (the record and its
+// escalation policy: a role that may change a restricted field under If-Match
+// must be able to read the revision, item 57), so a role can reach those
+// without reaching the rest.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guardWith := func(g func(http.Handler) http.Handler) func(http.HandlerFunc) http.HandlerFunc {
 		return func(handler http.HandlerFunc) http.HandlerFunc {
@@ -62,10 +65,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	mux.HandleFunc("GET /api/v1/customers", guard(h.HandleListCustomers))
 	mux.HandleFunc("POST /api/v1/customers", guard(h.HandleCreateCustomer))
-	mux.HandleFunc("GET /api/v1/customers/{id}", guard(h.HandleGetCustomer))
+	mux.HandleFunc("GET /api/v1/customers/{id}", restricted(h.HandleGetCustomer))
 	mux.HandleFunc("PUT /api/v1/customers/{id}", restricted(h.HandleUpdateCustomer))
 	mux.HandleFunc("PATCH /api/v1/customers/{id}/salesperson", restricted(h.HandleUpdateSalesperson))
-	mux.HandleFunc("GET /api/v1/customers/{id}/escalation-policy", guard(h.HandleGetEscalationPolicy))
+	mux.HandleFunc("GET /api/v1/customers/{id}/escalation-policy", restricted(h.HandleGetEscalationPolicy))
 	mux.HandleFunc("PUT /api/v1/customers/{id}/escalation-policy", restricted(h.HandleSetEscalationPolicy))
 	mux.HandleFunc("GET /api/v1/price_levels", guard(h.HandleListPriceLevels))
 
