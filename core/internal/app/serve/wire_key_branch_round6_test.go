@@ -5,6 +5,7 @@ package serve
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -169,5 +170,51 @@ func TestKeyBranchPin_BoundKeyWithTheScopeIsRefused(t *testing.T) {
 	// The control: a customer the pin holds alone.
 	if status, buf := f.key(t, scoped, "PUT", "/api/v1/customers/"+f.custID.String(), change(f.custID), nil); status != http.StatusOK {
 		t.Errorf("scoped bound key changing its own customer's restricted field: %d %s, want 200", status, buf)
+	}
+}
+
+// Fix round 6 (item 54 question 1): the finance role reaches only the three
+// restricted field routes of a customer, not every customer route. Customer
+// and contact create, the reads and the other writes answer finance what
+// refactor/v1 answered (403 insufficient role); the restricted changes pass.
+func TestKeyBranchPin_FinanceReachesOnlyTheRestrictedRoutes(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
+	sh := "/api/v1/customers/" + s.id.String()
+
+	refused := []struct{ method, path, body string }{
+		{"POST", "/api/v1/customers", `{"name":"finance create"}`},
+		{"POST", sh + "/contacts", `{"name":"finance contact"}`},
+		{"POST", sh + "/ship-tos", `{"name":"finance ship to"}`},
+		{"GET", sh, ""},
+		{"GET", "/api/v1/customers", ""},
+		{"GET", sh + "/contacts", ""},
+		{"GET", sh + "/escalation-policy", ""},
+	}
+	for _, r := range refused {
+		status, buf := f.userAs(t, "finance", r.method, r.path, r.body, nil)
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "insufficient role") {
+			t.Errorf("finance %s %s: %d %s, want the 403 insufficient role refactor/v1 answers", r.method, r.path, status, buf)
+		}
+	}
+	// The sales user keeps the reads.
+	if status, buf := f.userAs(t, "sales", "GET", sh, "", nil); status != http.StatusOK {
+		t.Errorf("sales GET customer: %d %s, want 200", status, buf)
+	}
+
+	// The three restricted field routes pass for finance on the shared customer.
+	if status, buf := f.userAs(t, "finance", "PUT", sh,
+		f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 333000}), nil); status != http.StatusOK {
+		t.Errorf("finance changing the credit limit: %d %s, want 200", status, buf)
+	}
+	cur := f.readJSON(t, sh)
+	raw, _ := json.Marshal(map[string]any{"salesperson_id": s.salesperson.String(), "revision": cur["revision"]})
+	if status, buf := f.userAs(t, "finance", "PATCH", sh+"/salesperson", string(raw), nil); status != http.StatusOK {
+		t.Errorf("finance changing the salesperson: %d %s, want 200", status, buf)
+	}
+	esc := f.readJSON(t, sh+"/escalation-policy")
+	raw, _ = json.Marshal(map[string]any{"policy": "require_ack", "threshold_percent": "7.5", "revision": esc["revision"]})
+	if status, buf := f.userAs(t, "finance", "PUT", sh+"/escalation-policy", string(raw), nil); status != http.StatusOK {
+		t.Errorf("finance setting the escalation policy: %d %s, want 200", status, buf)
 	}
 }

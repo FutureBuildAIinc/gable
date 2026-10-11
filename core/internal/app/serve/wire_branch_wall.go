@@ -120,13 +120,16 @@ func (w *branchWall) inventory(mux *http.ServeMux, svc *inventory.Service) {
 // holds, and adds but never changes or deletes its ship-tos and contacts; a
 // shared customer's restricted fields change only for the finance or owner
 // role (a user) or an unbound key carrying customers:restricted, which is why
-// the guard admits finance here. The routes note their method and path so a
+// the third guard admits finance on exactly the three restricted field routes
+// (the header write, the salesperson and the escalation policy) and nowhere
+// else: every other customer route keeps the roles it had. The routes note their method and path so a
 // refusal the service serves can name them in its key.branch_refused row.
 func (w *branchWall) customers(mux *http.ServeMux, svc *customer.Service) {
 	svc.WithBranchGuard(customerguard.New(w.guard)).WithSharedGuard(customerguard.NewShared(w.keyWall))
 	customer.NewHandler(svc).RegisterRoutes(mux,
-		middleware.Compose(w.scoped("admin", "owner", "sales", "finance"), w.keyWall.RecordRequest()),
-		w.scoped("admin", "owner", "finance"))
+		middleware.Compose(w.scoped("admin", "owner", "sales"), w.keyWall.RecordRequest()),
+		w.scoped("admin", "owner", "finance"),
+		middleware.Compose(w.scoped("admin", "owner", "sales", "finance"), w.keyWall.RecordRequest()))
 }
 
 // crm mounts the activity routes behind the branch middleware: every route
