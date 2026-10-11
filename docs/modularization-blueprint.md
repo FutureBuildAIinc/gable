@@ -15,7 +15,7 @@ deployed one instance + one database per dealer, so **"installed for this
 company" = "enabled on this instance."** The registry is a DB table, so
 enablement survives redeploys and is runtime-toggleable without a rebuild.
 
-This is a formalization, not a rewrite. The backend is already ~40 modules
+This is a formalization, not a rewrite. The backend is already 47 domain modules
 with a mostly uniform contract; the work is to (a) give modules a declared
 identity (manifest), (b) gate their routes and nav on enablement, and
 (c) progressively replace imperative wiring with manifest-driven wiring.
@@ -28,7 +28,7 @@ identity (manifest), (b) gate their routes and nav on enablement, and
 | **Manifest** | Declared metadata: `key`, `name`, `summary`, `category`, `core`, `depends_on`. Backend manifest lives in the module (`manifest.go`); frontend manifest in `web/apps/desk/src/apps/<key>.ts` (routes + nav). |
 | **Core app** | Cannot be disabled (product, inventory, order, invoice, customer, settings…). Still listed on the Apps page. |
 | **Registry (backend)** | `pkg/apps.Registry`: syncs manifests to the `apps` table at boot, answers `IsEnabled` (30s cache, same pattern as `ai.KeyStore`), gates routes, exposes `/api/v1/apps`. |
-| **Registry (frontend)** | `web/apps/desk/src/apps/registry.ts`: aggregates frontend manifests into the route table, the path→tag map, and generated nav items; filters by enablement via `AppsService`. |
+| **Registry (frontend)** | `web/apps/desk/src/apps/registry.ts`: aggregates frontend manifests into the route table and the path→tag map, and exposes them to `lib/workspace.ts`, which builds the zone table; `AppsService` answers enablement for the route gate and the launcher. |
 
 ## 3. Backend design (as built in Phase 0)
 
@@ -69,19 +69,22 @@ var App = apps.Manifest{Key: "millwork", Name: "Millwork", Category: "Operations
 func (h *Handler) RegisterRoutes(mux apps.Router, roleGuard ...func(http.Handler) http.Handler)
 ```
 
-The five current signature variants (portal, partner/project, integrations,
-reporting, pricing, location) converge on this shape during Phase 1.
+The six current signature variants (the `roleGuard ...` shape on `*http.ServeMux`
+used by most handlers, portal, partner/project, integrations, unit, account)
+converge on this shape during Phase 1.
 
 ## 4. Frontend design (as built in Phase 0)
 
 - **`web/apps/desk/src/apps/`**: `types.ts` (manifest shape), one manifest per
   converted app (routes: `{path, tag, load, layout}`; nav:
-  `{label, path, icon, section, order}`), `registry.ts` aggregating them.
+  `{label, path, icon, order}`), `registry.ts` aggregating them.
 - **Single source of truth**: for converted apps, the manifest feeds
   (1) `routes.ts` (spread via `appRoutes()`), (2) the path→tag resolution in
   `app.ts` (registry consulted before the legacy `_pathToTag` map), and
-  (3) generated sidebar items in `app-shell.ts`. The legacy dual-table
-  pattern (`routes.ts` + `_pathToTag`) retires app by app.
+  (3) generated nav zones in `lib/workspace.ts` (the tab/menu table the
+  shell renders). The legacy triple-table pattern (`routes.ts` +
+  `_pathToTag` + the hardcoded `staticZones` array in `lib/workspace.ts`)
+  retires app by app.
 - **`AppsService`**: fetches `/api/v1/apps` once per session (refreshes on
   toggle), exposes `isEnabled(key)`, emits `apps-changed`. Nav re-renders on
   the event; a route belonging to a disabled app renders a friendly
@@ -99,8 +102,8 @@ reporting, pricing, location) converge on this shape during Phase 1.
 2. Frontend: create `web/apps/desk/src/apps/<key>.ts`; move its routes out of
    `routes.ts` and its tag mappings out of `app.ts`; delete its hardcoded nav
    item(s); add nav entries to the manifest.
-3. Add/verify at least one backend smoke test for the module (22 modules
-   currently have zero tests — conversions are the vehicle to fix that).
+3. Add/verify at least one backend smoke test for the module (1 module
+   currently has zero tests; conversions are the vehicle to fix that).
 4. Verify: `go build ./... && go test ./internal/<module>/...`,
    `npx tsc --noEmit`, toggle the app off and on against a live backend.
 
@@ -121,13 +124,13 @@ any route resolves to the 404 component.
 
 ## 6. Phases
 
-**Phase 0 — Framework + references (this PR).** Registry, gate, Apps API,
+**Phase 0: Framework + references (landed).** Registry, gate, Apps API,
 Apps page, generated-nav plumbing, `millwork` + `governance` converted
 end-to-end, full catalog visible. Cleanup: binaries, doc drift, NATS orphan,
 CI triggers, dead deps.
 
 **Phase 1 — Convert the long tail.** All leaf apps via the recipe; unify the
-five `RegisterRoutes` variants; retire `_pathToTag` and all hardcoded nav
+six `RegisterRoutes` variants; retire `_pathToTag` and all hardcoded nav
 arrays (ERP, portal, yard; give driver a generated nav); wire the dark pages
 as installable apps; per-app smoke tests.
 
@@ -152,7 +155,8 @@ community app packaging (out-of-tree modules) if the OSS ecosystem wants it.
 - **Dependency-graph mistakes:** `SetEnabled` validates both directions and
   the API returns 409 with the offending keys; core flags protect the spine.
 - **Frontend/backend enablement skew:** UI treats `/api/v1/apps` as truth and
-  refetches on toggle and on any `app_disabled` API response.
+  refetches on toggle; the disabled-app panel keeps the rest of the shell
+  usable until the operator re-enables or navigates away.
 - **Fork/branch drift:** `Sync` never deletes and flags orphans instead, so a
   fork with extra modules keeps working.
 - **Demo/staging seeds:** all apps default `enabled=TRUE`; deploys are
