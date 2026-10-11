@@ -146,12 +146,11 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 		entry := resolveAuditOf(rec, in, actor)
 		switch rec.Act {
 		case "void":
-			refund := gatewayRefund{gatewayTxID: rec.GatewayTxID, refundTxID: in.RefundTxID,
-				amountCents: rec.AmountCents, tenderID: rec.TenderID, act: "void", entity: rec.SaleID, actor: actor}
+			// a refused replay writes no orphan row (tenth review P3-2): the
+			// claim and the stranded act's own rows already record the money
+			// that moved, and finance reconciling orphans must not see the
+			// same refund once per attempt
 			if _, err := s.runVoidResolutionTx(ctx, rec, in, entry, actor); err != nil {
-				// the replay refused after the terminal's money moved: the
-				// claim stands and the orphan row records the refund
-				s.recordOrphanRefund(ctx, refund, err)
 				return nil, err
 			}
 			return out, nil
@@ -179,13 +178,12 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 				}
 			}
 			// the refund row names the recorded refund, and the claim the
-			// replay completes with is the operator's own record
+			// replay completes with is the operator's own record; the replay
+			// writes no orphan row on refusal (tenth review P3-2)
 			st.in.GatewayTxID = in.RefundTxID
 			claim := &refundClaim{intent: rec.RefundIntent, tenderCap: tenderCap,
-				refundTxID: in.RefundTxID, resolveAudit: &entry}
+				refundTxID: in.RefundTxID, resolveAudit: &entry, replay: true}
 			if _, err := s.postReturn(ctx, st, claim); err != nil {
-				s.recordOrphanRefund(ctx, gatewayRefund{gatewayTxID: rec.GatewayTxID, refundTxID: in.RefundTxID,
-					amountCents: rec.AmountCents, tenderID: rec.TenderID, act: "return", entity: rec.SaleID, actor: actor}, err)
 				return nil, err
 			}
 			return out, nil

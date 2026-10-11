@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -318,6 +319,48 @@ func TestAPartlyLegacyLineCompletesWithTheLinkedReturn(t *testing.T) {
 	}
 	if got := f.accountBalance("1010"); got != 54 {
 		t.Errorf("cash balance = %d, want 54 (the sale in, the linked refund out; the legacy 54 never left this drawer)", got)
+	}
+	f.assertARInvariants(t)
+}
+
+// RULE (ninth review P3-2, the tax completion): the legacy quantity counts in
+// the test that the return finishes every taxable line, so the return that
+// brings the last goods back takes the sale's whole remaining tax exactly,
+// rounded shares and all. A legacy return of one unit carrying one cent less
+// tax than the per unit share leaves the completing return a remainder the
+// rounded share alone would strand.
+func TestTheLegacyQuantityCompletesTheTaxableLine(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	f.openTill(0)
+	// 3 at 5.50: line 1650, tax 146, total 1796
+	saleID := f.startSale(nil)
+	if r := f.addLine(saleID, f.productLine("3")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	if r := f.completeSale(saleID, withToken(tender("card", 1796))); r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
+	// a legacy return of one unit whose recorded tax is 48, one cent under
+	// the per unit 49: the linked return of the other two completes the line
+	legacyReturnOf(t, f, saleID, "1", "5.50", "5.50", "5.50", "0.48", "5.98", "CASH")
+	f.assertARInvariants(t)
+	r := f.cardReturnOn(t, saleID, lineID, "2")
+	if r.status != http.StatusCreated {
+		t.Fatalf("the completing card return = %d: %s", r.status, r.raw)
+	}
+	if got := num(t, r.body, "subtotal_cents"); got != -1100 {
+		t.Errorf("the completing return subtotal = %d, want -1100 (the line's remaining money)", got)
+	}
+	if got := num(t, r.body, "tax_cents"); got != -98 {
+		t.Errorf("the completing return tax = %d, want -98 (the sale's 146 less the legacy 48: the rounded share 97 would strand a cent)", got)
+	}
+	if got := f.scalar(`SELECT ROUND(amount * 100)::bigint FROM pos_refund_intents WHERE sale_id = $1 AND act = 'return'`, saleID).(int64); got != 1198 {
+		t.Errorf("the claim holds %d cents, want 1198", got)
 	}
 	f.assertARInvariants(t)
 }

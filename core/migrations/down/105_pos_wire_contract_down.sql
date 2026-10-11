@@ -8,19 +8,35 @@
 -- walk-in customer goes only when nothing references it.
 
 -- The down deletes the kit, component, charge and text lines the old shape
--- cannot hold. A completed sale's lines are history the invoice and the
--- returns read, so the down refuses while any belongs to one, naming the
--- count, and changes nothing.
+-- cannot hold. A completed or voided sale's lines are history the invoice
+-- and the returns read, so the down refuses while any belongs to one, naming
+-- the count, and changes nothing.
 DO $$
 DECLARE held BIGINT;
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.columns
                WHERE table_schema = current_schema() AND table_name = 'pos_line_items' AND column_name = 'line_type') THEN
         EXECUTE 'SELECT count(*) FROM pos_line_items l JOIN pos_transactions t ON t.id = l.transaction_id
-                 WHERE l.line_type IN (''KIT'', ''COMPONENT'', ''CHARGE'', ''TEXT'') AND t.status = ''COMPLETED'''
+                 WHERE l.line_type IN (''KIT'', ''COMPONENT'', ''CHARGE'', ''TEXT'') AND t.status IN (''COMPLETED'', ''VOIDED'')'
             INTO held;
         IF held > 0 THEN
-            RAISE EXCEPTION '105 down refused: % kit, component, charge or text lines belong to completed sales; the old line shape cannot hold them', held;
+            RAISE EXCEPTION '105 down refused: % kit, component, charge or text lines belong to completed or voided sales; the old line shape cannot hold them', held;
+        END IF;
+    END IF;
+END $$;
+
+-- The down drops pos_refund_intents with its rows, and a PENDING claim
+-- dropped that way silently releases its tender (the next refund of the
+-- card would pay it twice), so the down refuses while any claim is still
+-- pending, naming the count and changing nothing.
+DO $$
+DECLARE pending BIGINT;
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = current_schema() AND table_name = 'pos_refund_intents') THEN
+        SELECT count(*) INTO pending FROM pos_refund_intents WHERE state = 'PENDING';
+        IF pending > 0 THEN
+            RAISE EXCEPTION '105 down refused: % refund claims are still pending; dropping the intents table would release their tenders', pending;
         END IF;
     END IF;
 END $$;
@@ -81,7 +97,9 @@ ALTER TABLE pos_returns DROP COLUMN IF EXISTS revision;
 ALTER TABLE pos_returns DROP COLUMN IF EXISTS updated_at;
 
 -- 2. the lines and tenders. The refund intents go first (their foreign keys
--- block the tender and sale deletes).
+-- block the tender and sale deletes): the table goes with its rows, DONE and
+-- FAILED alike, which is why the refusal above holds while any claim is
+-- still PENDING (a dropped PENDING claim releases its tender).
 DROP TABLE IF EXISTS pos_refund_intents;
 DROP INDEX IF EXISTS idx_pos_tenders_payment;
 ALTER TABLE pos_tenders DROP COLUMN IF EXISTS payment_id;

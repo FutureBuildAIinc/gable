@@ -134,6 +134,12 @@ func TestAMovedRemainderRefusesTheBookingAndKeepsTheClaim(t *testing.T) {
 	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE id = $1 AND state = 'PENDING'`, intentID); got != 1 {
 		t.Errorf("the replay settled the claim it could not book")
 	}
+	// the resolution writes no orphan row of its own (tenth review P3-2): the
+	// claim and the act's own row already record the money, and finance
+	// reconciling orphans must not see the same refund twice
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 1 {
+		t.Errorf("%d orphaned refund rows after the refused replay, want 1 (the stranded act's own record alone)", got)
+	}
 	f.assertARInvariants(t)
 }
 
@@ -189,6 +195,11 @@ func TestTheVoidResolutionsAuditRowRollsBackWithItsBooking(t *testing.T) {
 	}
 	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.refund_intent.resolved' AND changes->>'intent_id' = $1`, intentID); got != 0 {
 		t.Errorf("%d resolution audit rows after a rolled back replay, want 0 (the row rides the booking's transaction)", got)
+	}
+	// the refused replay writes no orphan row either (tenth review P3-2): the
+	// stranded act's own record already names the refund
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action = 'pos.gateway_refund_orphaned' AND entity_id = $1`, saleID); got != 1 {
+		t.Errorf("%d orphaned refund rows after the rolled back replay, want 1 (the stranded void's own record alone)", got)
 	}
 	// the failure gone, the booking writes exactly one
 	f.events.fail = ""

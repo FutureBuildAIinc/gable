@@ -103,14 +103,15 @@ type Repository interface {
 	// FailRefundIntent releases the claim of a gateway call that failed.
 	// RefundIntentFacts reads the table's authority for one tender (what its
 	// live claims hold and whether a void already refunded it whole);
-	// SaleHasPendingRefundIntent and SessionHasPendingRefundIntent answer
-	// whether any claim of a sale, or of a session's sales, still stands.
+	// SaleHasPendingRefundIntent answers whether any claim of a sale still
+	// stands; SessionPendingRefundIntentIDs lists the ids of the standing
+	// claims of a session's sales, so the close's refusal can name them.
 	InsertRefundIntent(ctx context.Context, intent RefundIntent) error
 	CompleteRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error
 	FailRefundIntent(ctx context.Context, saleID, tenderID uuid.UUID) error
 	RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error)
 	SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error)
-	SessionHasPendingRefundIntent(ctx context.Context, sessionID uuid.UUID) (bool, error)
+	SessionPendingRefundIntentIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error)
 	// PendingRefundIntentIDs lists the ids of the sale's standing claims (the
 	// per tender void resolution reads them to know when every tender is
 	// resolved); SaleHasVoidIntentDone answers whether the sale's void already
@@ -968,20 +969,30 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 	return pending, nil
 }
 
-// SessionHasPendingRefundIntent answers whether any card refund claim of the
-// session's sales still stands: the drawer cannot be counted and closed while
-// a terminal refund of one of its sales may still move money.
-func (r *PostgresRepository) SessionHasPendingRefundIntent(ctx context.Context, sessionID uuid.UUID) (bool, error) {
-	var pending bool
-	err := r.ex(ctx).QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM pos_refund_intents i
+// SessionPendingRefundIntentIDs lists the ids of the card refund claims of
+// the session's sales that still stand, in creation order: the drawer cannot
+// be counted and closed while a terminal refund of one of its sales may
+// still move money, and the refusal names the claims so the cashier knows
+// who unblocks the drawer.
+func (r *PostgresRepository) SessionPendingRefundIntentIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.ex(ctx).Query(ctx, `
+		SELECT i.id FROM pos_refund_intents i
 			JOIN pos_transactions t ON t.id = i.sale_id
-			WHERE t.till_session_id = $1 AND i.state = 'PENDING')`, sessionID).
-		Scan(&pending)
+			WHERE t.till_session_id = $1 AND i.state = 'PENDING'
+			ORDER BY i.created_at, i.id`, sessionID)
 	if err != nil {
-		return false, fmt.Errorf("failed to read the session's refund intents: %w", err)
+		return nil, fmt.Errorf("failed to read the session's refund intents: %w", err)
 	}
-	return pending, nil
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // InvoiceLineCost is one invoice line's id and the unit cost the sale

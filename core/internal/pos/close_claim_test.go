@@ -12,6 +12,7 @@ package pos_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/payment"
@@ -53,6 +54,15 @@ func TestTheCloseRefusesWhileAVoidIsParkedAtTheGateway(t *testing.T) {
 	_, blockers, _ := errorOf(t, r)
 	if len(blockers) == 0 || blockers[0] != "refund_in_flight" {
 		t.Errorf("blockers = %v, want refund_in_flight (the void's claim holds the session)", blockers)
+	}
+	// the refusal names the standing claim and who unblocks the drawer (tenth
+	// review P3-5): the cashier knows the claim id and the resolve route
+	intentID, _, _, _ := pendingIntent(t, f, saleID)
+	if !strings.Contains(string(r.raw), intentID) {
+		t.Errorf("the close's refusal does not name the standing claim %s: %s", intentID, r.raw)
+	}
+	if !strings.Contains(string(r.raw), "/api/v1/pos/refund-intents/") {
+		t.Errorf("the close's refusal does not name the resolve route: %s", r.raw)
 	}
 	if got := f.scalar(`SELECT status FROM till_sessions WHERE id = $1`, sessionID); got != "OPEN" {
 		t.Errorf("the session = %v, want OPEN (the close refused, nothing was counted)", got)

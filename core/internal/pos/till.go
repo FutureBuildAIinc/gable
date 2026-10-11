@@ -6,6 +6,7 @@ package pos
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -135,11 +136,18 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		// behind it would then be refused session_closed with the card
 		// already refunded. Under the session lock, before anything is
 		// counted.
-		if pending, err := s.repo.SessionHasPendingRefundIntent(ctx, sessionID); err != nil {
+		claims, err := s.repo.SessionPendingRefundIntentIDs(ctx, sessionID)
+		if err != nil {
 			return err
-		} else if pending {
+		}
+		if len(claims) > 0 {
+			ids := make([]string, 0, len(claims))
+			for _, id := range claims {
+				ids = append(ids, id.String())
+			}
 			return conflict("refund_in_flight",
-				"a card refund of one of this session's sales is still in flight: settle it before closing the drawer")
+				fmt.Sprintf("a card refund claim of one of this session's sales is still in flight (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before closing the drawer",
+					strings.Join(ids, ", ")))
 		}
 		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
 		now := time.Now()

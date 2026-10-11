@@ -88,12 +88,16 @@ type returnState struct {
 // claimed, what the tender kept, and the gateway's own refund id once the
 // terminal answered. resolveAudit, when set, is written inside the money
 // transaction: the operator resolution's own record, rolling back with the
-// booking it names.
+// booking it names. replay marks the operator resolution's replay of a
+// stranded claim: its money moved long before the act stranded, so a refused
+// replay writes no orphan row (the claim and the act's own rows already
+// record it; tenth review P3-2).
 type refundClaim struct {
 	intent       RefundIntent
 	tenderCap    int64
 	refundTxID   string
 	resolveAudit *audit.Entry
+	replay       bool
 }
 
 // priceReturn resolves the return's customer, prices and guards its lines and
@@ -1086,7 +1090,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		// The gateway already refunded and the transaction refused: the
 		// money is accounted for in a committed row of its own carrying the
 		// gateway ids.
-		if claim != nil && claim.refundTxID != "" {
+		if claim != nil && !claim.replay && claim.refundTxID != "" {
 			s.recordOrphanRefund(ctx, gatewayRefund{gatewayTxID: claim.intent.GatewayTxID, refundTxID: claim.refundTxID,
 				amountCents: claim.intent.AmountCents, tenderID: claim.intent.TenderID, act: claim.intent.Act,
 				entity: claim.intent.SaleID, actor: st.actor}, err)
