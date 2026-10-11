@@ -53,11 +53,45 @@ func (r *PostgresRepository) ExecuteInTx(ctx context.Context, fn func(context.Co
 
 func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UUID, locationID *uuid.UUID) (*Inventory, error) {
 	// The write path's read follows the branch wall (C2-5's carried fix from
-	// PR 44's review): a bound caller with no location reads its own
-	// branch's rows, never another branch's; an unbound caller keeps the
-	// legacy behaviour (the named location's row, else the row with no
-	// location).
+	// PR 44's review, restated by the r14 review): a request that names a
+	// location reads exactly that location's row, held to the caller's branch
+	// when the context carries one (a row on another branch is refused by
+	// ErrLocationOutsideBranch, never substituted); only a request that names
+	// no location lets the branch rule pick a row, and it takes the branch's
+	// first row by creation, a stated rule the stock routes document, never
+	// the largest quantity by accident; an unbound request that names no
+	// location keeps the legacy behaviour, the row with no location.
 	branch := branchctx.IDForQuery(ctx)
+	var inv Inventory
+	var rowBranch *uuid.UUID
+	if locationID != nil {
+		err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+			SELECT i.id, i.product_id, i.location_id, i.location, i.quantity, i.allocated, i.updated_at, l.branch_id
+			FROM inventory i
+			LEFT JOIN locations l ON l.id = i.location_id
+			WHERE i.product_id = $1 AND i.location_id = $2
+			ORDER BY i.created_at, i.id
+			LIMIT 1`, productID, locationID).Scan(
+			&inv.ID,
+			&inv.ProductID,
+			&inv.LocationID,
+			&inv.Location,
+			&inv.Quantity,
+			&inv.Allocated,
+			&inv.UpdatedAt,
+			&rowBranch,
+		)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to get inventory: %w", err)
+		}
+		if branch != nil && (rowBranch == nil || *rowBranch != *branch) {
+			return nil, ErrLocationOutsideBranch
+		}
+		return &inv, nil
+	}
 	query := `
 		SELECT i.id, i.product_id, i.location_id, i.location, i.quantity, i.allocated, i.updated_at
 		FROM inventory i
@@ -65,14 +99,12 @@ func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UU
 		WHERE i.product_id = $1
 		  AND (
 			($2::uuid IS NOT NULL AND l.branch_id = $2)
-			OR ($2::uuid IS NULL AND $3::uuid IS NULL AND i.location_id IS NULL)
-			OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND i.location_id = $3)
+			OR ($2::uuid IS NULL AND i.location_id IS NULL)
 		  )
-		ORDER BY i.quantity DESC NULLS LAST, i.id
+		ORDER BY i.created_at, i.id
 		LIMIT 1
 	`
-	var inv Inventory
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID, branch, locationID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID, branch).Scan(
 		&inv.ID,
 		&inv.ProductID,
 		&inv.LocationID,
