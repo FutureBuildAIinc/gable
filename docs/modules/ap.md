@@ -62,7 +62,10 @@ live at any depth, and a chain whose POSTED entries cancel holds none.
 The net is summed per currency, never across two (the trial balance never
 sums across two), so a chain holding two currencies whose whole sums
 cancel still reads live in the currency that holds the amount, however
-the chain arose: legacy rows included. A
+the chain arose: legacy rows included. The net may stand as a credit or
+as a debit (a chain whose original entry was reversed and then voided
+holds the reversal's debit alone), and the refusals name a net amount
+standing in accounts payable, never a credit alone. A
 bill whose entry holds no live credit (one that prices to zero, or one
 the GL routes have already undone, linked or not) voids with nothing to
 reverse; a linked live entry with no reversal row is reversed whole
@@ -300,9 +303,10 @@ transaction:
    journal entry, naming it by its number and id: a legacy `pending`
    row whose posting ran before the status moved (the base's sync could
    post first; migration 106 links only `approved` or `partial`, so the
-   row carries its entry linked by hand or not at all) already holds its
-   credit in `2010`, and the approve would post a second one no bill
-   owes. Live is the chain net of the void (below), never one reversal
+   row carries its entry linked by hand or not at all) already leaves a
+   net amount standing in `2010` (as a credit or as a debit, whichever
+   way its chain nets), and the approve would post its own entry beside
+   it. Live is the chain net of the void (below), never one reversal
    level; nothing is written.
 5. Load the lines with their account codes (`repo.LinesWithCodes`).
 6. Refuse `409 line_needs_account` if any line's code is empty, naming
@@ -368,7 +372,9 @@ entry with no reversal row is reversed whole in the entry's own
 currency, and a live entry whose one reversal row is already taken (the
 row is not posted, or a reversal of a reversal put the credit back
 behind it, so no new reversal can post under the one reversal index) is
-refused `409 reversal_not_posted` naming the shape, nothing written. A
+refused `409 reversal_not_posted` naming the shape, nothing written. The
+net may stand as a credit or as a debit, and the refusals name a net
+amount standing in accounts payable, never a credit alone. A
 reversal insert that loses a race with a concurrent GL reverse meets
 the one reversal index and answers the same 409, never a 500.
 
@@ -506,23 +512,26 @@ on the route and in process alike.
 These are limits the module lives with until a later repair item.
 
 - A bill that holds a live `VENDOR_INVOICE` journal entry it is not
-  linked to is refused a `to: "voided"` with `409 entry_not_linked`: the
-  credit may stay in `2010` with nothing to reverse, so the bill keeps
+  linked to is refused a `to: "voided"` with `409 entry_not_linked`: a
+  net amount may stay in `2010` with nothing to reverse, so the bill keeps
   its status. This is the legacy unlinked bill (its posting was
   swallowed, it holds the removed sync's one leg credit, or its total
   was hand edited after the approve); live means the entry's whole
   reversal chain nets a nonzero amount on `2010` over its POSTED
-  entries. A legacy bill with no live entry at all voids with nothing to
+  entries, per currency, as a credit or as a debit. A legacy bill with
+  no live entry at all voids with nothing to
   reverse, owing nothing through the ledger.
 - A bill whose linked entry is live while its one reversal row is
   already taken (the row is not posted, or a reversal of a reversal put
   the credit back behind it) is refused the same void with `409
   reversal_not_posted`: no new reversal can post under the one reversal
-  index, so the chain must be mended by hand first.
+  index, so the chain must be mended by hand first. The refusal names
+  the net amount standing in `2010`, as a credit or as a debit,
+  whichever way the chain nets.
 - A pending bill that already holds a live journal entry is refused the
-  approve with `409 entry_not_linked` naming it: the row already holds
-  its credit in `2010`, and mending the link by hand comes before any
-  approve.
+  approve with `409 entry_not_linked` naming it: the row already leaves
+  a net amount standing in `2010`, and mending the ledger by hand comes
+  before any approve.
 - A bill linked to an entry that does not balance (the removed sync's
   one leg shape, debit absent) is refused the same void with `409
   entry_unbalanced`. Its reversal would mirror the imbalance into

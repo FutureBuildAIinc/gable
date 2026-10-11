@@ -394,8 +394,8 @@ func (s *Service) approve(ctx context.Context, id uuid.UUID, pre Precondition, w
 		if number, other, found, err := s.repo.LiveInvoiceEntryOtherThan(ctx, id, uuid.Nil); err != nil {
 			return err
 		} else if found {
-			return httpx.InvalidStateTransition("the bill already holds a live journal entry, so an approve would post a second credit in accounts payable",
-				httpx.Blocker("entry_not_linked", fmt.Sprintf("journal entry #%d (%s) still holds this bill's credit; mend the bill's ledger by hand before approving", number, other)))
+			return httpx.InvalidStateTransition("the bill already holds a live journal entry, so an approve would post its own entry beside the net amount already standing in accounts payable",
+				httpx.Blocker("entry_not_linked", fmt.Sprintf("journal entry #%d (%s) still leaves a net amount standing in accounts payable for this bill, as a credit or as a debit, whichever way its chain nets; mend the bill's ledger by hand before approving", number, other)))
 		}
 		lines, err := s.repo.LinesWithCodes(ctx, id)
 		if err != nil {
@@ -551,7 +551,7 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 			return err
 		}
 		if locked.GLEntryID == nil && live {
-			return httpx.InvalidStateTransition("the bill holds a posted journal entry it is not linked to, so a void could leave its credit in accounts payable",
+			return httpx.InvalidStateTransition("the bill holds a posted journal entry it is not linked to, so a void could leave the entry's net amount standing in accounts payable",
 				httpx.Blocker("entry_not_linked", "no route links a journal entry to a bill yet; the bill keeps its status until a later repair item"))
 		}
 		var reversal *uuid.UUID
@@ -581,8 +581,8 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 				return err
 			}
 			if liveLinked && reversalTaken {
-				return httpx.InvalidStateTransition("the linked entry's reversal chain still holds its credit live in accounts payable while the one reversal the entry may hold is taken, so no new reversal can post",
-					httpx.Blocker("reversal_not_posted", "mend the linked entry's reversal chain before voiding the bill; the bill keeps its status until then"))
+				return httpx.InvalidStateTransition("the linked entry's reversal chain still nets a nonzero amount on accounts payable while the one reversal the entry may hold is taken, so no new reversal can post",
+					httpx.Blocker("reversal_not_posted", "a net amount stands in accounts payable, as a credit or as a debit, whichever way the chain nets; mend the linked entry's reversal chain before voiding the bill; the bill keeps its status until then"))
 			}
 			if liveLinked {
 				entry, err := s.gl.PostReversal(ctx, gl.ReversalInput{

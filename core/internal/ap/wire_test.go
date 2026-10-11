@@ -2293,6 +2293,80 @@ func TestWire_VoidVoidRaceNever500(t *testing.T) {
 	}
 }
 
+// RULE (review r5 P3-1): a net negative chain (the original entry was
+// reversed and then voided, so the reversal's debit stands alone on 2010) is
+// refused by words that are true: the liveness net may stand as a credit or
+// as a debit, so every refusal names a net amount on accounts payable and
+// none says a credit is live where a debit stands.
+func TestWire_VoidRefusalWordsMatchANetNegativeChain(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id, r1 := f.enter("V-NEGNET", "1", 160000) // 16.00
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry := f.glEntryOf(id)
+	if rv := f.glReverse(entry); rv.status != http.StatusOK {
+		t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+	}
+	if vv := f.glVoidEntry(entry); vv.status != http.StatusOK {
+		t.Fatalf("void the original entry = %d: %s", vv.status, vv.raw)
+	}
+	net := func() int64 {
+		return f.count(`WITH RECURSIVE c(id) AS (SELECT id FROM gl_journal_entries WHERE id = $1
+			UNION SELECT e.id FROM gl_journal_entries e JOIN c ON e.reverses_entry_id = c.id)
+			SELECT ROUND(COALESCE(SUM(l.credit - l.debit), 0) * 100)::bigint FROM gl_journal_lines l
+			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
+			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2010' WHERE e.id IN (SELECT id FROM c)`, entry)
+	}
+	if got := net(); got != -1600 {
+		t.Fatalf("the chain nets %d, want -1600 (the reversal's debit alone stands)", got)
+	}
+	entries := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor)
+	words := func(act string, r resp) {
+		t.Helper()
+		if r.status != http.StatusConflict {
+			t.Fatalf("%s = %d, want 409: %s", act, r.status, r.raw)
+		}
+		e, ok := r.body["error"].(map[string]any)
+		if !ok {
+			t.Fatalf("%s: no error envelope in %s", act, r.raw)
+		}
+		msg, _ := e["message"].(string)
+		if !strings.Contains(msg, "net amount") && !strings.Contains(msg, "nonzero") {
+			t.Errorf("%s: the refusal's message does not name the net amount that stands: %s", act, msg)
+		}
+		if strings.Contains(msg, "credit") {
+			t.Errorf("%s: the refusal's message says a credit is live while a debit stands: %s", act, msg)
+		}
+	}
+	// The linked arm: the reversal's debit stands, the entry's one reversal
+	// row is taken, so the void is refused.
+	words("the linked void", f.void(id, 2, "wrong bill"))
+	// The unlinked arm: the same chain read through the unlinked predicate.
+	mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
+	words("the unlinked void", f.void(id, 2, "wrong bill, unlinked"))
+	// The approve arm: a hand set PENDING bill over the same chain.
+	mustExec(t, f.db, `UPDATE vendor_invoices SET status = 'PENDING' WHERE id = $1`, id)
+	words("the approve", f.approve(id, 2))
+	// Every refusal wrote nothing and the ties did not move.
+	if got := f.count(`SELECT count(*) FROM gl_journal_entries WHERE id IN (`+fixtureEntries+`)`, f.vendor); got != entries {
+		t.Errorf("the three refusals wrote %d entries, want none", got-entries)
+	}
+	if got := net(); got != -1600 {
+		t.Errorf("the chain nets %d after the refusals, want the untouched -1600", got)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance after the refusals")
+	}
+	if got, want := f.controlBalance(), int64(-1600); got != want {
+		t.Errorf("the control = %d after the refusals, want the GL acts' %d", got, want)
+	}
+	if got, want := f.openSum(), int64(0); got != want {
+		t.Errorf("the open = %d after the refusals, want %d (the bill is PENDING)", got, want)
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is

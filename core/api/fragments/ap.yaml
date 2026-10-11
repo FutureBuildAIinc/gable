@@ -190,7 +190,9 @@ paths:
         per currency, never across two, as the trial balance sums it, so a
         chain holding two currencies whose whole sums cancel still reads
         live in the currency that holds the amount, however the chain
-        arose), and the void
+        arose; the net may stand as a credit or as a debit, and the
+        refusals name a net amount standing on Accounts Payable, never a
+        credit alone), and the void
         decides on that net, never on one step of the chain: a bill whose
         entry holds no live credit (one that prices to zero, a legacy bill
         whose posting was swallowed, or an entry the GL routes have already
