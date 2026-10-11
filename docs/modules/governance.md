@@ -33,8 +33,8 @@ draft for another pass. Approved is terminal: the proposal is done.
 Every route is in `core/api/fragments/governance.yaml` and the
 registered handles are in `core/internal/governance/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`internal/governance` package (the route census has a `package` column,
-not a module column). The five routes sit behind the apps registry's
+`internal/governance` module (the `module` column is the registering
+package's directory relative to the Go module root). The five routes sit behind the apps registry's
 gated router; when the governance app is disabled they answer
 `app_disabled` and the SPA hides them.
 
@@ -192,6 +192,8 @@ curl -X POST http://localhost:8080/api/v1/governance/rfcs \
 ```
 
 The wire tests in `core/internal/governance/wire_test.go` pin the
-platform and HTTP behaviour; the transaction proofs in
-`core/internal/governance/tx_test.go` pin the lifecycle and the
-revision guard.
+platform and HTTP behaviour, including the lifecycle and the revision
+guard; the transaction proofs in
+`core/internal/governance/tx_test.go` pin the transaction wrapping
+(a failing outbox rolls the create, update and transition back) and
+the pool concurrency lane rule.

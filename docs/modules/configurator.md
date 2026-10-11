@@ -33,8 +33,8 @@ sales rep picks from.
 Every route is in `core/api/fragments/configurator.yaml` and the
 registered handles are in `core/internal/configurator/handler.go`.
 The route census (`core/api/ROUTES.txt`) lists each one under the
-`internal/configurator` package (the route census has a `package`
-column, not a module column).
+`internal/configurator` module (the `module` column is the registering
+package's directory relative to the Go module root).
 
 | Method | Path | One line |
 |---|---|---|
