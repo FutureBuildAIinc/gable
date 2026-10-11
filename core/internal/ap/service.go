@@ -480,18 +480,22 @@ func (s *Service) postInvoiceEntry(ctx context.Context, inv *Summary, lines []Li
 }
 
 // void is the transition that reverses the entry: a pending bill has nothing
-// posted and simply dies; an approved one's entry is reversed whole; a bill
-// with no posted, unreversed entry of its own (one that prices to zero, or a
-// legacy bill whose posting was swallowed or whose entry was already
-// reversed) holds no credit in the control account and voids with nothing to
-// reverse. A bill with money applied is refused: the payments have to be
-// undone first. A bill that holds a posted, unreversed entry it is not linked
-// to is refused too: no route links an entry to a bill, and a legacy bill of
-// that shape may hold the removed sync's one leg credit (a hand edit may even
-// have zeroed its total after the approve), which a plain void would strand.
-// So is a linked entry that does not balance (that one leg shape, linked by
-// hand): its reversal would not balance either. Both refusals are a stated
-// limit: such a bill keeps its status until a later repair item.
+// posted and simply dies; an approved one's linked entry is reversed whole
+// when its credit stands live in the control account; a bill whose entry is
+// not live (one that prices to zero, a legacy bill whose posting was
+// swallowed, or an entry the GL routes have already reversed or voided,
+// linked or not) holds no credit in the control account and voids with
+// nothing to reverse. A bill with money applied is refused: the payments
+// have to be undone first. A bill that holds a posted, unreversed entry it
+// is not linked to is refused too: no route links an entry to a bill, and a
+// legacy bill of that shape may hold the removed sync's one leg credit (a
+// hand edit may even have zeroed its total after the approve), which a
+// plain void would strand. So is a linked entry that does not balance (that
+// one leg shape, linked by hand): its reversal would not balance either,
+// and so is a linked entry whose reversal row is not posted: its credit
+// stands live while the one reversal an entry may hold is already taken.
+// Every refusal is a stated limit: such a bill keeps its status until a
+// later repair item.
 func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reason string, who Caller) (*Invoice, error) {
 	if reason == "" {
 		return nil, httpx.BadRequest("one or more fields failed validation",
@@ -532,22 +536,43 @@ func (s *Service) void(ctx context.Context, id uuid.UUID, pre Precondition, reas
 		}
 		var reversal *uuid.UUID
 		if locked.GLEntryID != nil {
-			entry, err := s.gl.PostReversal(ctx, gl.ReversalInput{
-				EntryID: *locked.GLEntryID, EntryDate: s.now(), Currency: locked.Currency,
-				Reason: reason, PostedBy: who.Actor,
-			})
+			// The linked arm is keyed on the ledger too, never on the pointer
+			// alone (review r2 P2-1): an entry the GL routes have already
+			// reversed or voided holds no live credit, so the void has
+			// nothing to reverse rather than a failure. An entry whose
+			// reversal row is not POSTED keeps its credit live while the one
+			// reversal an entry may hold is taken, so no new reversal can
+			// post: the void is refused rather than stranding the credit.
+			liveLinked, reversalTaken, err := s.repo.LinkedEntryLedger(ctx, *locked.GLEntryID)
 			if err != nil {
-				if errors.Is(err, gl.ErrPeriodClosed) {
-					return conflictBlocker("period_closed", "the reversal would be dated into a closed fiscal period")
-				}
-				if errors.Is(err, gl.ErrUnbalanced) {
-					return httpx.InvalidStateTransition("the linked entry does not balance and a void would mirror it into another unbalanced entry",
-						httpx.Blocker("entry_unbalanced", "the bill's linked journal entry does not balance (the removed sync's one leg shape); the bill stays approved and payable until a later repair item"))
-				}
-				return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
+				return err
 			}
-			if entry != nil {
-				reversal = &entry.ID
+			if liveLinked && reversalTaken {
+				return httpx.InvalidStateTransition("the linked entry holds a reversal that is not posted, so its credit stands in accounts payable while no new reversal can post",
+					httpx.Blocker("reversal_not_posted", "mend the not posted reversal before voiding the bill; the bill keeps its status until then"))
+			}
+			if liveLinked {
+				entry, err := s.gl.PostReversal(ctx, gl.ReversalInput{
+					EntryID: *locked.GLEntryID, EntryDate: s.now(), Currency: locked.Currency,
+					Reason: reason, PostedBy: who.Actor,
+				})
+				if err != nil {
+					if errors.Is(err, gl.ErrPeriodClosed) {
+						return conflictBlocker("period_closed", "the reversal would be dated into a closed fiscal period")
+					}
+					if errors.Is(err, gl.ErrUnbalanced) {
+						return httpx.InvalidStateTransition("the linked entry does not balance and a void would mirror it into another unbalanced entry",
+							httpx.Blocker("entry_unbalanced", "the bill's linked journal entry does not balance (the removed sync's one leg shape); the bill stays approved and payable until a later repair item"))
+					}
+					if errors.Is(err, gl.ErrAlreadyReversed) {
+						return httpx.InvalidStateTransition("the linked entry's reversal appeared while the void ran, so its credit is already undone",
+							httpx.Blocker("reversal_not_posted", "the linked journal entry is reversed; the bill keeps its status until then"))
+					}
+					return fmt.Errorf("failed to reverse the vendor invoice entry: %w", err)
+				}
+				if entry != nil {
+					reversal = &entry.ID
+				}
 			}
 		}
 		if err := s.repo.MarkVoided(ctx, id); err != nil {

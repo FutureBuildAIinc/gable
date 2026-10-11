@@ -376,8 +376,10 @@ func (f *fixture) entryLegsWhere(t *testing.T, db *database.DB, where string, ar
 }
 
 // controlBalance is the AP control account's balance in cents, from the
-// entries this fixture's acts wrote (approves credit it, payments and
-// reversals debit it), scoped to the fixture's own bills and payments.
+// POSTED entries this fixture's acts wrote (approves credit it, payments and
+// reversals debit it; the trial balance sums POSTED entries alone, so an
+// entry the GL void route voided counts nowhere), scoped to the fixture's
+// own bills and payments.
 func (f *fixture) controlBalance() int64 {
 	f.t.Helper()
 	var balance int64
@@ -386,7 +388,7 @@ func (f *fixture) controlBalance() int64 {
 		FROM gl_journal_lines l
 		JOIN gl_journal_entries e ON e.id = l.journal_entry_id
 		JOIN gl_accounts a ON a.id = l.account_id
-		WHERE a.code = '2010' AND e.id IN (
+		WHERE a.code = '2010' AND e.status = 'POSTED' AND e.id IN (
 		    SELECT id FROM gl_journal_entries
 		    WHERE source_ref_id IN (SELECT id FROM vendor_invoices WHERE vendor_id = $1)
 		       OR source_ref_id IN (SELECT id FROM ap_payments WHERE vendor_id = $1)

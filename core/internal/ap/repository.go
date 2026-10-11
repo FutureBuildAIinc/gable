@@ -320,6 +320,28 @@ func (r *Repository) HasPostedInvoiceEntry(ctx context.Context, id uuid.UUID) (b
 	return n > 0, nil
 }
 
+// LinkedEntryLedger reads the linked entry's place in the ledger. live says
+// its credit stands in the control account (the entry is POSTED and no POSTED
+// reversal points at it); reversalTaken says a reversal row that is not
+// POSTED points at it, so the one reversal an entry may hold is already
+// taken and no new reversal can post while that row stands. An entry deleted
+// by hand holds no credit: live is false (review r2 P2-1).
+func (r *Repository) LinkedEntryLedger(ctx context.Context, id uuid.UUID) (live, reversalTaken bool, err error) {
+	var isPosted, postedReversal bool
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT e.status = 'POSTED',
+		       EXISTS(SELECT 1 FROM gl_journal_entries p WHERE p.reverses_entry_id = e.id AND p.status = 'POSTED'),
+		       EXISTS(SELECT 1 FROM gl_journal_entries n WHERE n.reverses_entry_id = e.id AND n.status <> 'POSTED')
+		FROM gl_journal_entries e WHERE e.id = $1`, id).Scan(&isPosted, &postedReversal, &reversalTaken)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("failed to read the linked journal entry: %w", err)
+	}
+	return isPosted && !postedReversal, reversalTaken, nil
+}
+
 // LockForPayment takes one invoice of the named vendor FOR UPDATE, in the
 // caller's id order (ADR 0008 section 9 step 5a). No row means no such
 // invoice for this vendor.

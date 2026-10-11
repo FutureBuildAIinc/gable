@@ -1212,6 +1212,129 @@ func TestWire_VoidRefusesUnlinkedBillWhoseReversalIsVoid(t *testing.T) {
 	}
 }
 
+// RULE (review r2 P2-1): the void's linked arm is keyed on the ledger too,
+// never on the pointer alone. A linked entry the GL routes have already
+// reversed or voided holds no live credit in 2010, so the bill voids with
+// nothing to reverse (never a 500). A linked entry whose reversal was itself
+// voided keeps its credit live while the one reversal row the entry may hold
+// is already taken, so no new reversal can post: that void is refused with
+// the reversal_not_posted blocker and nothing is written.
+func TestWire_VoidLinkedEntryAlreadyUndoneByGL(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+
+	// Reversed by the GL reverse route: the credit is already undone, so the
+	// void owes the ledger nothing and the open the bill carried closes.
+	id1, r1 := f.enter("V-GLU-1", "1", 300000) // 30.00
+	if a := f.approve(id1, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if rv := f.glReverse(f.glEntryOf(id1)); rv.status != http.StatusOK {
+		t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+	}
+	control1, open1 := f.controlBalance(), f.openSum()
+	if control1 != 0 || open1 != 3000 {
+		t.Fatalf("control %d, open %d, want 0 and 3000", control1, open1)
+	}
+	before1 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v1 := f.void(id1, 2, "wrong bill")
+	if v1.status != http.StatusOK {
+		t.Fatalf("void a bill whose linked entry the GL route reversed = %d, want 200: %s", v1.status, v1.raw)
+	}
+	if str(t, v1.body, "status") != "voided" {
+		t.Errorf("the bill = %s, want voided", v1.raw)
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before1 {
+		t.Errorf("%d entries were written for a void with nothing to reverse", after-before1)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), control1; got != want {
+		t.Errorf("after the void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open1-3000; got != want {
+		t.Errorf("after the void: open %d, want %d", got, want)
+	}
+
+	// Voided by the GL void route: the entry is not POSTED, so it counts
+	// nowhere in 2010; the bill voids with nothing to reverse.
+	id2, r2 := f.enter("V-GLU-2", "1", 400000) // 40.00
+	if a := f.approve(id2, r2); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	if vv := f.glVoidEntry(f.glEntryOf(id2)); vv.status != http.StatusOK {
+		t.Fatalf("void the entry = %d: %s", vv.status, vv.raw)
+	}
+	control2, open2 := f.controlBalance(), f.openSum()
+	if control2 != 0 || open2 != 4000 {
+		t.Fatalf("control %d, open %d, want 0 and 4000", control2, open2)
+	}
+	before2 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v2 := f.void(id2, 2, "wrong bill")
+	if v2.status != http.StatusOK {
+		t.Fatalf("void a bill whose linked entry the GL route voided = %d, want 200: %s", v2.status, v2.raw)
+	}
+	if str(t, v2.body, "status") != "voided" {
+		t.Errorf("the bill = %s, want voided", v2.raw)
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before2 {
+		t.Errorf("%d entries were written for a void with nothing to reverse", after-before2)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), control2; got != want {
+		t.Errorf("after the void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open2-4000; got != want {
+		t.Errorf("after the void: open %d, want %d", got, want)
+	}
+
+	// The reversal voided by the GL void route: the original credit stands
+	// live again (a voided reversal undoes nothing), but the entry's one
+	// reversal row is taken, so the void cannot reverse the credit either:
+	// refused, nothing written, the tie keeps holding.
+	id3, r3 := f.enter("V-GLU-3", "1", 500000) // 50.00
+	if a := f.approve(id3, r3); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry3 := f.glEntryOf(id3)
+	if rv := f.glReverse(entry3); rv.status != http.StatusOK {
+		t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+	}
+	if vv := f.glVoidEntry(f.glReversalOf(entry3)); vv.status != http.StatusOK {
+		t.Fatalf("void the reversal = %d: %s", vv.status, vv.raw)
+	}
+	control3, open3 := f.controlBalance(), f.openSum()
+	if control3 != 5000 || open3 != 5000 {
+		t.Fatalf("control %d, open %d, want both 5000", control3, open3)
+	}
+	before3 := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v3 := f.void(id3, 2, "wrong bill")
+	if v3.status != http.StatusConflict {
+		t.Fatalf("void a bill whose linked entry's reversal is void = %d, want 409: %s", v3.status, v3.raw)
+	}
+	if code, blockers, _ := errorOf(t, v3); code != "invalid_state_transition" || blockers[0] != "reversal_not_posted" {
+		t.Errorf("void a bill whose linked entry's reversal is void = %q %v, want reversal_not_posted", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id3); n != 1 {
+		t.Error("a refused void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before3 {
+		t.Errorf("%d entries were written for a refused void", after-before3)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), control3; got != want {
+		t.Errorf("after the refused void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open3; got != want {
+		t.Errorf("after the refused void: open %d, want the untouched %d", got, want)
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is
