@@ -100,8 +100,8 @@ func (h *EDIHandler) GetPartner(w http.ResponseWriter, r *http.Request) {
 	p, err := h.repo.GetPartner(r.Context(), id)
 	if err != nil {
 		// The same discipline as UpdatePartner below: only the not-found
-		// sentinel is a 404. Anything else — a dropped connection, a pool
-		// timeout — is a 500; flattening it into a 404 tells the caller a
+		// sentinel is a 404. Anything else (a dropped connection, a pool
+		// timeout) is a 500; flattening it into a 404 tells the caller a
 		// partner that exists is gone.
 		if errors.Is(err, ErrPartnerNotFound) {
 			httputil.RespondError(w, r, "Partner not found", http.StatusNotFound, err)

@@ -193,7 +193,7 @@ func TestPostgresEDIRepository_ListCatalogEntriesDefaultsTheLimit(t *testing.T) 
 
 // CORRECTNESS: a missing row is the ErrPartnerNotFound sentinel (which the
 // handler maps to 404 with errors.Is), and only that: the old wrap turned
-// every failure — a dropped connection included — into "trading partner not
+// every failure (a dropped connection included) into "trading partner not
 // found", so a transient error read like missing data.
 func TestPostgresEDIRepository_GetMissingPartnerIsTheNotFoundSentinel(t *testing.T) {
 	repo := NewEDIRepository(testutil.RequireDB(t))

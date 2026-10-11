@@ -369,7 +369,7 @@ func TestGetPartner_ReadFailureIs500Not404(t *testing.T) {
 
 	rec := doEDI(t, ediMux(repo), http.MethodGet, "/api/v1/edi/partners/"+uuid.NewString(), "")
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 — a connection failure must not answer 404 for an existing partner: %s", rec.Code, rec.Body)
+		t.Fatalf("status = %d, want 500: a connection failure must not answer 404 for an existing partner: %s", rec.Code, rec.Body)
 	}
 	if strings.Contains(rec.Body.String(), "Partner not found") {
 		t.Errorf("body = %s, want the internal error shape, not the not-found one", rec.Body)
