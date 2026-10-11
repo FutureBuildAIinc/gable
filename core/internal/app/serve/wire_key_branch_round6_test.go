@@ -52,9 +52,11 @@ func (f *keyPinFixture) sharedRefusalRows(t *testing.T, customer uuid.UUID) int 
 	return n
 }
 
-// Fix round 6 (r13 P3-1): the unbound key and the user refused on a shared
-// customer's restricted fields get the bound key's words and leave a refusal
-// row of their own; the callers the rule admits leave none.
+// Fix round 6 (r13 P3-1) and round 7 (item 57 question 2): the unbound key
+// and the user refused on a shared customer's restricted fields get a refusal
+// whose lead in names the caller ("this key" for a machine key, "this role"
+// for a user) ahead of the one clause naming the other branch, and leave a
+// refusal row of their own; the callers the rule admits leave none.
 func TestKeyBranchPin_SharedCallerRefusalRow(t *testing.T) {
 	f, _, _ := round5Fixture(t)
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
@@ -66,12 +68,12 @@ func TestKeyBranchPin_SharedCallerRefusalRow(t *testing.T) {
 	if f.branchB.String() < f.branchA.String() {
 		lowest = f.branchB
 	}
-	words := "a branch bound key may act only on its own branch: the customer is also held by branch " + lowest.String()
+	clause := "the customer is also held by branch " + lowest.String()
 
-	check := func(who string, status int, buf []byte, rowsBefore int) {
+	check := func(who, lead string, status int, buf []byte, rowsBefore int) {
 		t.Helper()
-		if status != http.StatusForbidden || !strings.Contains(string(buf), words) {
-			t.Errorf("%s changing a restricted field: %d %s, want the 403 in the bound key's words naming branch %s", who, status, buf, lowest)
+		if status != http.StatusForbidden || !strings.Contains(string(buf), lead+": "+clause) {
+			t.Errorf("%s changing a restricted field: %d %s, want the 403 %q", who, status, buf, lead+": "+clause)
 		}
 		if got := f.sharedRefusalRows(t, s.id) - rowsBefore; got != 1 {
 			t.Errorf("%s refusal left %d refusal rows, want one", who, got)
@@ -79,11 +81,11 @@ func TestKeyBranchPin_SharedCallerRefusalRow(t *testing.T) {
 	}
 	before := f.sharedRefusalRows(t, s.id)
 	status, buf := f.key(t, f.unbound, "PUT", sh, change(), nil)
-	check("unbound key without the scope", status, buf, before)
+	check("unbound key without the scope", "this key may not change a shared customer's restricted fields", status, buf, before)
 	for _, role := range []string{"sales", "admin"} {
 		before = f.sharedRefusalRows(t, s.id)
 		status, buf = f.userAs(t, role, "PUT", sh, change(), nil)
-		check(role+" user", status, buf, before)
+		check(role+" user", "this role may not change a shared customer's restricted fields", status, buf, before)
 	}
 	// The row names the actor, the fields and the method.
 	var kind, raw string
@@ -161,7 +163,7 @@ func TestKeyBranchPin_BoundKeyWithTheScopeIsRefused(t *testing.T) {
 	}
 	rows := refusals()
 	status, buf := f.key(t, scoped, "PUT", "/api/v1/customers/"+s.id.String(), change(s.id), nil)
-	if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "this key may act only on its own branch") {
 		t.Errorf("scoped bound key changing a shared customer's restricted field: %d %s, want the pin's 403", status, buf)
 	}
 	if after := refusals(); after != rows+1 {
@@ -264,7 +266,7 @@ func TestKeyBranchPin_ActivityFollowsTheContactRule(t *testing.T) {
 	}
 	_, rev, _ := state(logged)
 	ifMatch := map[string]string{"If-Match": fmt.Sprintf(`"%d"`, rev)}
-	words := "a branch bound key may act only on its own branch"
+	words := "this key may act only on its own branch"
 
 	rows := f.auditRows(t)
 	status, buf := f.key(t, f.bound, "PUT", path,

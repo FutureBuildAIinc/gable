@@ -342,3 +342,51 @@ func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 		t.Errorf("the control sync wrote %d pos_sync_log rows, want its one", n)
 	}
 }
+
+// Fix round 7 (principal item 57 question 2): the shared customer refusals
+// carry one clause naming the other branch behind a lead in that names the
+// caller, words true for whoever reads them. A bound key read "a branch bound
+// key may act only on its own branch" even as a sales user, which is wrong
+// for a user. Now: the bound key's lead names the key and its pin, the
+// unbound key's lead names the key and the scope it lacks, and a user's lead
+// names the role and the finance or owner roles that may.
+func TestKeyBranchPin_SharedRefusalWordsNameTheCaller(t *testing.T) {
+	f, _, _ := round5Fixture(t)
+	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
+	sh := "/api/v1/customers/" + s.id.String()
+	change := func() string {
+		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 666000 + int(time.Now().UnixNano()%1000)})
+	}
+	lowest := f.branchA
+	if f.branchB.String() < f.branchA.String() {
+		lowest = f.branchB
+	}
+	cases := []struct {
+		who, lead string // who: "bound key", "unbound key", or a user role
+	}{
+		{"bound key", "this key may act only on its own branch"},
+		{"unbound key", "this key may not change a shared customer's restricted fields"},
+		{"sales", "this role may not change a shared customer's restricted fields"},
+	}
+	for _, c := range cases {
+		var status int
+		var buf []byte
+		if c.who == "bound key" {
+			status, buf = f.key(t, f.bound, "PUT", sh, change(), nil)
+		} else if c.who == "unbound key" {
+			status, buf = f.key(t, f.unbound, "PUT", sh, change(), nil)
+		} else {
+			status, buf = f.userAs(t, c.who, "PUT", sh, change(), nil)
+		}
+		// The bound key's refusal names the lowest holder besides the pin
+		// (branch B here); the caller refusals name the lowest holder at all.
+		named := f.branchB
+		if c.who != "bound key" {
+			named = lowest
+		}
+		want := c.lead + ": the customer is also held by branch " + named.String()
+		if status != http.StatusForbidden || !strings.Contains(string(buf), want) {
+			t.Errorf("%s changing a restricted field: %d %s, want the 403 %q", c.who, status, buf, want)
+		}
+	}
+}

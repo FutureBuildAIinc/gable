@@ -52,7 +52,11 @@ type SharedVerdict struct {
 	// key without the customers:restricted scope, and the customer is shared
 	// (principal ruling item 48).
 	RefuseCaller bool
-	Audit        bool // a scoped dealer wide key, and several branches hold the customer
+	// RefuseCallerKey marks a RefuseCaller refusal served to a machine key
+	// (an unbound key) rather than a user: the refusal's lead in names the
+	// caller (principal ruling item 57).
+	RefuseCallerKey bool
+	Audit           bool // a scoped dealer wide key, and several branches hold the customer
 }
 
 // SharedGuard decides how the caller stands to a shared customer. The
@@ -94,32 +98,52 @@ type sharedRefusal struct {
 func (e *sharedRefusal) Error() string { return e.err.Message }
 
 func refusedOn(branch uuid.UUID, fields ...string) *sharedRefusal {
-	return refusedSharing(branch, fields...)
+	return refusedSharing(branch, boundKeyRefusalLead, fields...)
 }
 
 // refusedCallerOn is the refusal a caller without the finance or owner role
 // (a user) or without the customers:restricted scope (an unbound key) gets on
-// a shared customer's restricted fields: the bound key's words, naming the
-// lowest numbered branch that holds the customer (principal ruling item 48,
-// ADR 0007 section 5.5). Its audit row is the caller refusal row.
-func refusedCallerOn(customer, branch uuid.UUID, fields ...string) *sharedRefusal {
-	ref := refusedSharing(branch, fields...)
+// a shared customer's restricted fields, naming the lowest numbered branch
+// that holds the customer (principal ruling item 48, ADR 0007 section 5.5).
+// Its lead in names the caller, so its words are true for whoever reads them
+// (item 57): "this key" for a machine key, "this role" for a user. Its audit
+// row is the caller refusal row.
+func refusedCallerOn(customer, branch uuid.UUID, callerKey bool, fields ...string) *sharedRefusal {
+	lead := callerRoleRefusalLead
+	if callerKey {
+		lead = callerKeyRefusalLead
+	}
+	ref := refusedSharing(branch, lead, fields...)
 	ref.caller, ref.customer, ref.branch, ref.fields = true, customer, branch, fields
 	return ref
 }
 
-// sharedRefusalWords is the one rule sentence every shared customer refusal
-// carries, whoever the caller is.
-const sharedRefusalWords = "a branch bound key may act only on its own branch"
+// The lead ins of the shared customer refusals (principal ruling item 57):
+// words true for the caller they name, ahead of the one clause every caller
+// shares. ADR 0007 section 5.5 quotes them.
+const (
+	// boundKeyRefusalLead: the pin holds this key to its own branch.
+	boundKeyRefusalLead = "this key may act only on its own branch"
+	// callerKeyRefusalLead: this machine key lacks the dedicated scope.
+	callerKeyRefusalLead = "this key may not change a shared customer's restricted fields"
+	// callerRoleRefusalLead: this role is neither finance nor owner.
+	callerRoleRefusalLead = "this role may not change a shared customer's restricted fields"
+)
 
-func refusedSharing(branch uuid.UUID, fields ...string) *sharedRefusal {
+// sharedRefusalClause is the one rule sentence every shared customer refusal
+// carries after its caller specific lead in: it names the other branch.
+func sharedRefusalClause(branch uuid.UUID) string {
+	return "the customer is also held by branch " + branch.String()
+}
+
+func refusedSharing(branch uuid.UUID, lead string, fields ...string) *sharedRefusal {
 	sort.Strings(fields)
 	details := make([]httpx.FieldError, 0, len(fields))
 	for _, f := range fields {
 		details = append(details, httpx.FieldError{Field: f, Code: httpx.CodeForbidden, Message: "shared with another branch"})
 	}
 	return &sharedRefusal{err: &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
-		Message: sharedRefusalWords + ": the customer is also held by branch " + branch.String(),
+		Message: lead + ": " + sharedRefusalClause(branch),
 		Details: details}}
 }
 
@@ -160,7 +184,7 @@ func (s *Service) checkRestricted(ctx context.Context, id uuid.UUID, changes map
 		return refusedOn(verdict.Branch, fields...)
 	}
 	if verdict.RefuseCaller {
-		return refusedCallerOn(id, verdict.Branch, fields...)
+		return refusedCallerOn(id, verdict.Branch, verdict.RefuseCallerKey, fields...)
 	}
 	if verdict.Audit {
 		return s.shared.RecordChange(ctx, id, changes)

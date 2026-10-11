@@ -279,7 +279,8 @@ func TestKeyBranchPin_ActivityContactOwnership(t *testing.T) {
 // role (a user) or an unbound machine key carrying the dedicated
 // customers:restricted scope, minted only by an owner and audited when it is
 // minted. A sales user, an admin user and every unbound key without the scope
-// are refused in the same words naming the other branch; a branch bound key is
+// are refused in caller specific words naming the other branch (the lead in
+// names the caller, item 57); a branch bound key is
 // refused even with the scope; the allowed key's change keeps its
 // customer.shared_restricted_changed audit row.
 func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
@@ -324,7 +325,7 @@ func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
 
 	// The bound key with the scope is still refused (the pin rule comes first).
 	if status, buf := f.key(t, f.bound, "PUT", sh, change(), nil); status != http.StatusForbidden ||
-		!strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
+		!strings.Contains(string(buf), "this key may act only on its own branch") {
 		t.Errorf("bound key changing a restricted field: %d %s, want the pin's 403", status, buf)
 	}
 
@@ -336,11 +337,12 @@ func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
 	if f.branchB.String() < f.branchA.String() {
 		lowest = f.branchB
 	}
-	callerRefusal := "the customer is also held by branch " + lowest.String()
+	callerRefusal := "this key may not change a shared customer's restricted fields: the customer is also held by branch " + lowest.String()
 	if status, buf := f.key(t, f.unbound, "PUT", sh, change(), nil); status != http.StatusForbidden ||
 		!strings.Contains(string(buf), callerRefusal) {
-		t.Errorf("unbound key without the scope changing a restricted field: %d %s, want the 403 naming branch B", status, buf)
+		t.Errorf("unbound key without the scope changing a restricted field: %d %s, want the 403 in the key's caller words", status, buf)
 	}
+	roleRefusal := "this role may not change a shared customer's restricted fields: the customer is also held by branch " + lowest.String()
 	before := len(f.sharedChangeRows(t, s.id))
 	if status, buf := f.key(t, minted.APIKey, "PUT", sh, change(), nil); status != http.StatusOK {
 		t.Errorf("unbound key with the scope changing a restricted field: %d %s, want 200", status, buf)
@@ -349,12 +351,12 @@ func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
 		t.Errorf("the scoped key's change left %d audit rows, want one new row", len(rows)-before)
 	}
 
-	// The user legs: sales and admin are refused in the same words, finance
-	// and owner change the field (no audit row for a user).
+	// The user legs: sales and admin are refused in the role's caller words,
+	// finance and owner change the field (no audit row for a user).
 	for _, role := range []string{"sales", "admin"} {
 		if status, buf := f.userAs(t, role, "PUT", sh, change(), nil); status != http.StatusForbidden ||
-			!strings.Contains(string(buf), callerRefusal) {
-			t.Errorf("%s user changing a restricted field: %d %s, want the 403 naming branch B", role, status, buf)
+			!strings.Contains(string(buf), roleRefusal) {
+			t.Errorf("%s user changing a restricted field: %d %s, want the 403 in the role's caller words", role, status, buf)
 		}
 	}
 	rowsBefore := len(f.sharedChangeRows(t, s.id))

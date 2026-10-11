@@ -798,19 +798,29 @@ held by the pin's branch and another, a bound key changes only the branch
 local fields; every other field of the record, and the salesperson and the
 escalation policy, is restricted, and a field added to the header write is
 restricted until it is listed as branch local. A restricted write is refused
-403 in the same words naming the other branch, with the `key.branch_refused`
+403 naming the other branch, with the `key.branch_refused`
 row and nothing changed. A customer the pin holds alone and an unshared
 customer are unchanged for every caller. Who may change a shared customer's
 restricted fields (the principal's ruling on the open question below): a
 user only with the finance or owner role, a machine key only when unbound
 and carrying the dedicated `customers:restricted` scope. The finance role
 reaches exactly the three routes that change those fields (the header
-write, the salesperson and the escalation policy) and no other customer
-route: customer and contact create, the reads and the other writes keep the
+write, the salesperson and the escalation policy) and the two reads those
+writes need, the record and its escalation policy (a caller that must send
+the revision as `If-Match` has to be able to read it; reads only, nothing
+else opens), and no other customer route: customer and contact create, the
+other reads and the other writes keep the
 roles they had before this section. A sales or admin user, and every
-unbound key without the scope, are refused in the same words as the bound
-key (the words of the rule above, naming the lowest numbered branch holding
-the customer) and the refusal writes a `customer.shared_restricted_refused`
+unbound key without the scope, are refused with one shared clause naming
+the lowest numbered branch holding the customer behind a lead in that names
+the caller, words true for whoever reads them (the principal's item 57
+ruling): a bound key reads "this key may act only on its own branch: the
+customer is also held by branch X", an unbound key without the scope reads
+"this key may not change a shared customer's restricted fields: the
+customer is also held by branch X", and a user without the finance or owner
+role reads "this role may not change a shared customer's restricted fields:
+the customer is also held by branch X". The refusal writes a
+`customer.shared_restricted_refused`
 row for the customer, naming the actor, the refused fields, that branch and
 the method and path (the bound key's refusal keeps its `key.branch_refused`
 row); a caller with no claims at all is refused fail closed; a bound key is

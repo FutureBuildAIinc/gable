@@ -49,6 +49,10 @@ type SharedVerdict struct {
 	// for an unbound key without the customers:restricted scope, on a
 	// customer another branch also holds (principal ruling item 48).
 	RefuseCaller bool
+	// RefuseCallerKey marks a RefuseCaller refusal served to a machine key
+	// (an unbound key) rather than a user, so the refusal's lead in can name
+	// the caller (principal ruling item 57).
+	RefuseCallerKey bool
 	// Audit is set for an unbound key carrying the dedicated scope when two
 	// or more branches hold the customer: its change goes through, audited
 	// with the actor and the before and after values.
@@ -137,7 +141,7 @@ func (w *KeyBranchWall) SharedCustomer(ctx context.Context, customer uuid.UUID) 
 	}
 	scopes, _ := KeyScopesFromContext(ctx)
 	if !scopeHeld(scopes, CustomerRestrictedScope) {
-		return SharedVerdict{RefuseCaller: true, Branch: other}, nil
+		return SharedVerdict{RefuseCaller: true, RefuseCallerKey: true, Branch: other}, nil
 	}
 	return SharedVerdict{Audit: true, Branch: other}, nil
 }
