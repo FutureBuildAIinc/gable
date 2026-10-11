@@ -3,162 +3,177 @@
 This document defines the physical data model for GableLBM. We prioritize data integrity, unit-awareness, and a "double-entry" ledger for all asset movements (Inventory, Cash, Receivables).
 
 ## Core Principles
-1. **Always UUID**: All primary keys are `UUID v4`.
-2. **Atomic Units**: Physical quantities are stored in `decimal(19,4)` to prevent rounding errors.
-3. **Double-Entry Everything**: Inventory isn't just "updated"; it's moved from `FromLocation` to `ToLocation`.
-4. **Unit Awareness**: Every quantity must be paired with a `UOMID`.
+1. **Primary keys**: most tables use `UUID`; a few catalogue tables (notably `units`, `gl_accounts`, `price_levels`, `vendors`) use natural keys.
+2. **Quantities and money**: physical quantities use `NUMERIC(12,4)`; money uses `NUMERIC(12,2)` or `DECIMAL(10,2)`; the migration runner chooses the precision per column.
+3. **Stock is moved, never overwritten**: a stock change is an `UPDATE` on `inventory` for the affected `product_id`/`location_id`, recorded against a header in `gl_journal_entries` when money is involved.
+4. **Unit awareness**: every quantity is paired with a unit code; the catalogue in `core/migrations/099_units_catalogue_and_sets.sql` is the source of truth.
 
 ---
 
 ## 1. Inventory Module
 
-The Inventory module handles the complexity of LBM products, conversions (Piece to MBF), and multi-yard logistics.
+The Inventory module handles the complexity of LBM products, conversions (Piece to MBF), and multi-yard logistics. The actual schema records current stock on a single `inventory` row per `product_id`/`location_id` pair; older revisions did not. The unit catalogue in `core/migrations/099_units_catalogue_and_sets.sql` is the source of truth for units.
 
 ### Mermaid ERD
 ```mermaid
 erDiagram
-    PRODUCT ||--o{ STOCK_QUANT : "current levels"
-    PRODUCT ||--o{ INVENTORY_MOVE_LINE : "moved"
-    UOM_FAMILY ||--|{ UOM : "contains"
-    PRODUCT ||--|| UOM : "base unit"
-    LOCATION ||--o{ STOCK_QUANT : "holds"
-    INVENTORY_MOVE ||--|{ INVENTORY_MOVE_LINE : "contains"
-    LOCATION ||--o{ INVENTORY_MOVE : "from/to"
+    PRODUCT ||--o{ INVENTORY : "stocked at"
+    LOCATION ||--o{ INVENTORY : "holds"
+    PRODUCT ||--|| UNIT : "uom_primary"
+    LOCATION ||--o{ LOCATION : "parent"
 
     PRODUCT {
         uuid id PK
-        string sku "unique"
-        string name
-        uuid base_uom_id FK
-        string category
-        decimal weight_lbs
-        decimal volume_bf
-        decimal average_cost
-        jsonb metadata "custom attributes"
+        text sku "unique"
+        text description
+        text uom_primary FK
+        numeric base_price
+        text upc
+        text vendor
+        numeric reorder_point
+        numeric reorder_qty
+        numeric weight_lbs
+        text category
+        text species
+        text grade
+        text image_url
+        uuid category_id FK
+        boolean is_kit
+        boolean taxable
+        bigint revision
     }
 
-    UOM_FAMILY {
-        uuid id PK
-        string name "e.g. Length, Volume"
-    }
-
-    UOM {
-        uuid id PK
-        uuid family_id FK
-        string name "Piece, Bunk, MBF"
-        enum type "reference, bigger, smaller"
-        decimal ratio "relative to reference"
+    UNIT {
+        text code PK
+        text name
+        text dimension "COUNT, LENGTH, AREA, VOLUME, WEIGHT, BOARD_MEASURE"
+        numeric std_unit_qty
+        numeric std_ref_qty
+        boolean is_system
+        boolean is_active
     }
 
     LOCATION {
         uuid id PK
-        string name "Yard A, Bin 4"
-        enum type "physical, virtual, transit"
-        boolean allow_negative "sales floor vs storage"
+        uuid parent_id FK
+        text path "Zone A/Row 1"
+        text type "ZONE, AISLE, SHELF, BIN, YARD, BRANCH"
+        text code
+        text description
+        text name
+        text address
+        text city
+        text state
+        text zip
+        text phone
+        text tax_jurisdiction_code
+        numeric default_tax_rate
+        text timezone
+        boolean active
+        uuid branch_id FK
+        numeric latitude
+        numeric longitude
+        bigint revision
     }
 
-    STOCK_QUANT {
+    INVENTORY {
         uuid id PK
         uuid product_id FK
+        text location
         uuid location_id FK
-        decimal qty_on_hand
-        decimal qty_reserved
-        timestamp inbound_date
-    }
-
-    INVENTORY_MOVE {
-        uuid id PK
-        string reference "PO# or Order#"
-        enum move_type "receipt, delivery, internal, reman"
-        uuid from_location_id FK
-        uuid to_location_id FK
-        enum state "draft, confirmed, done"
-        timestamp created_at
-    }
-
-    INVENTORY_MOVE_LINE {
-        uuid id PK
-        uuid move_id FK
-        uuid product_id FK
-        uuid uom_id FK
-        decimal qty
+        numeric quantity
+        numeric allocated
+        timestamptz created_at
     }
 ```
 
 ### PostgreSQL Schema (Excerpt)
 
 ```sql
--- Core Types
-CREATE TYPE move_state AS ENUM ('draft', 'confirmed', 'done', 'cancelled');
-CREATE TYPE location_type AS ENUM ('physical', 'virtual', 'transit', 'production');
+-- UOM Enum Type (001, dropped in 099 after the units catalogue replaces it)
+DO $$ BEGIN
+    CREATE TYPE uom_type AS ENUM (
+        'PCS','EA','LF','SF','BF','MBF','SQ','BOX','CTN','RL',
+        'GAL','LBS','BAG','BUNDLE','PAIR','SET'
+    );
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
--- Products
+-- Products (001, altered through 099)
 CREATE TABLE products (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    sku VARCHAR(100) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    base_uom_id UUID NOT NULL,
-    category VARCHAR(100),
-    weight_lbs DECIMAL(19,4) DEFAULT 0,
-    volume_bf DECIMAL(19,4) DEFAULT 0,
-    average_cost DECIMAL(19,4) DEFAULT 0,
-    metadata JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    sku TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    uom_primary TEXT REFERENCES units(code),
+    base_price NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+    upc TEXT,
+    vendor TEXT,
+    reorder_point DECIMAL(10, 4) DEFAULT 0,
+    reorder_qty DECIMAL(10, 4) DEFAULT 0,
+    weight_lbs DECIMAL(10, 2) DEFAULT 0,
+    category VARCHAR(64),
+    species VARCHAR(64),
+    grade VARCHAR(64),
+    image_url TEXT,
+    category_id UUID REFERENCES product_categories(id),
+    is_kit BOOLEAN NOT NULL DEFAULT FALSE,
+    taxable BOOLEAN NOT NULL DEFAULT TRUE,
+    revision BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- UOM System
-CREATE TABLE uom_families (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL
+-- Unit catalogue (099). Code is the natural primary key.
+CREATE TABLE units (
+    code         TEXT PRIMARY KEY CHECK (code ~ '^[A-Z]{1,6}$'),
+    name         TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 80),
+    dimension    TEXT NOT NULL CHECK (dimension IN ('COUNT','LENGTH','AREA','VOLUME','WEIGHT','BOARD_MEASURE')),
+    std_unit_qty NUMERIC(12,4) NULL CHECK (std_unit_qty IS NULL OR std_unit_qty > 0),
+    std_ref_qty  NUMERIC(12,4) NULL CHECK (std_ref_qty IS NULL OR std_ref_qty > 0),
+    CHECK ((std_unit_qty IS NULL) = (std_ref_qty IS NULL)),
+    is_system    BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active    BOOLEAN NOT NULL DEFAULT TRUE,
+    revision     BIGINT NOT NULL DEFAULT 1,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE uoms (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    family_id UUID REFERENCES uom_families(id),
-    name VARCHAR(50) NOT NULL,
-    ratio DECIMAL(19,8) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Locations & Stock
+-- Locations (002, altered through 093)
 CREATE TABLE locations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    type location_type DEFAULT 'physical',
-    parent_id UUID REFERENCES locations(id),
-    is_active BOOLEAN DEFAULT TRUE
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    parent_id UUID REFERENCES locations(id) ON DELETE RESTRICT,
+    path TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL,                -- 'ZONE','AISLE','SHELF','BIN','YARD','BRANCH'
+    code TEXT NOT NULL,
+    description TEXT,
+    name TEXT,
+    address TEXT,
+    city TEXT,
+    state TEXT,
+    zip TEXT,
+    phone TEXT,
+    tax_jurisdiction_code TEXT,
+    default_tax_rate NUMERIC(7,4),
+    timezone TEXT NOT NULL DEFAULT 'America/New_York',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    branch_id UUID REFERENCES locations(id) ON DELETE RESTRICT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    revision BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(parent_id, code)
 );
 
-CREATE TABLE stock_quant (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    product_id UUID REFERENCES products(id),
-    location_id UUID REFERENCES locations(id),
-    qty_on_hand DECIMAL(19,4) NOT NULL DEFAULT 0,
-    qty_reserved DECIMAL(19,4) NOT NULL DEFAULT 0,
-    lot_number VARCHAR(100),
-    inbound_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(product_id, location_id, lot_number)
-);
-
--- The Double-Entry Engine
-CREATE TABLE inventory_moves (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    reference VARCHAR(255),
-    move_type VARCHAR(50),
-    from_location_id UUID REFERENCES locations(id),
-    to_location_id UUID REFERENCES locations(id),
-    state move_state DEFAULT 'draft',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE TABLE inventory_move_lines (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    move_id UUID REFERENCES inventory_moves(id) ON DELETE CASCADE,
-    product_id UUID REFERENCES products(id),
-    uom_id UUID REFERENCES uoms(id),
-    qty DECIMAL(19,4) NOT NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- Inventory (001, altered through 099)
+CREATE TABLE inventory (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    location TEXT NOT NULL,                          -- legacy free-text
+    location_id UUID REFERENCES locations(id) ON DELETE RESTRICT,
+    quantity NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+    allocated DECIMAL(10, 4) NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 ```
 
@@ -166,185 +181,296 @@ CREATE TABLE inventory_move_lines (
 
 ## 2. Sales & Pricing Module
 
-The Sales module implements the core pricing waterfall and order management flows.
+The Sales module implements the core pricing waterfall and order management flows. The header `customer_jobs` was dropped in migration 091 (rows moved into `projects`); the table `pricing_rules` carries the scoping columns the page used to call `price_rules.value`.
 
 ### Mermaid ERD
 ```mermaid
 erDiagram
-    CUSTOMER ||--o{ CUSTOMER_JOB : "has multiple"
+    CUSTOMER ||--o{ PROJECT : "has jobs"
     CUSTOMER ||--o{ QUOTE : "requests"
-    CUSTOMER_JOB ||--o{ QUOTE : "linked to"
     PRICE_LEVEL ||--o{ CUSTOMER : "default level"
     QUOTE ||--|{ QUOTE_LINE : "contains"
-    QUOTE ||--o{ SALES_ORDER : "converts to"
-    SALES_ORDER ||--|{ SALES_ORDER_LINE : "contains"
-    PRODUCT ||--o{ PRICE_RULE : "target"
-    CUSTOMER ||--o{ PRICE_RULE : "target"
+    QUOTE ||--o{ ORDER : "converts to"
+    ORDER ||--|{ ORDER_LINE : "contains"
+    PRODUCT ||--o{ PRICING_RULE : "target"
+    CUSTOMER ||--o{ PRICING_RULE : "target"
+    PROJECT ||--o{ PRICING_RULE : "target"
     PRODUCT ||--o{ QUOTE_LINE : "quoted"
-    PRODUCT ||--o{ SALES_ORDER_LINE : "sold"
+    PRODUCT ||--o{ ORDER_LINE : "sold"
 
     CUSTOMER {
         uuid id PK
-        string name
-        string account_number
+        text name
+        text account_number "unique"
         uuid price_level_id FK
-        decimal credit_limit
-        decimal balance_due
+        numeric credit_limit
+        numeric balance_due
+        text email
+        text phone
+        text address
+        uuid payment_terms_id FK
+        uuid primary_branch_id FK
+        boolean is_active
+        bigint revision
     }
 
-    CUSTOMER_JOB {
+    PROJECT {
         uuid id PK
         uuid customer_id FK
-        string name "e.g. Smith Deck"
-        decimal budget_limit
-        boolean job_is_taxable
+        text name
+        text status "Active, Inactive"
+        bigint revision
     }
 
     PRICE_LEVEL {
         uuid id PK
-        string name "Retail, Level 1"
-        decimal multiplier "e.g. 0.85"
+        text name "Retail, Level 1"
+        numeric multiplier "e.g. 0.85"
+        bigint revision
     }
 
-    PRICE_RULE {
+    PRICING_RULE {
         uuid id PK
+        text name
+        text rule_type "QUANTITY_BREAK, JOB_OVERRIDE, PROMOTIONAL"
         uuid product_id FK "nullable"
-        uuid category_id FK "nullable"
+        text category "nullable"
         uuid customer_id FK "nullable"
         uuid job_id FK "nullable"
-        enum type "NetPrice, DiscountPercentage"
-        decimal value
-        decimal min_qty
-        timestamp start_date
-        timestamp end_date
+        numeric fixed_price
+        numeric discount_pct
+        numeric markup_pct
+        numeric min_quantity
+        numeric max_quantity
+        numeric margin_floor_pct
+        timestamptz starts_at
+        timestamptz expires_at
+        boolean is_active
+        integer priority
     }
 
     QUOTE {
         uuid id PK
         uuid customer_id FK
-        uuid job_id FK
-        uuid root_quote_id "versioning"
-        enum state "draft, sent, accepted, expired"
-        decimal total_amount
-        timestamp expires_at
+        uuid project_id FK
+        text state "DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED"
+        numeric total_amount
+        uuid branch_id FK
+        text number "unique"
+        timestamptz expires_at
+        bigint revision
     }
 
     QUOTE_LINE {
         uuid id PK
         uuid quote_id FK
         uuid product_id FK
-        decimal qty
-        uuid uom_id FK
-        decimal unit_price
-        decimal current_cost "locked at quote time"
+        text sku
+        text description
+        numeric quantity
+        text uom FK
+        text price_uom FK
+        numeric uom_qty
+        numeric price_uom_qty
+        numeric unit_price
+        numeric line_total
+        integer position
     }
 
-    SALES_ORDER {
+    ORDER {
         uuid id PK
         uuid customer_id FK
-        uuid job_id FK
-        uuid quote_id FK "optional"
-        enum state "pending, confirmed, delivered"
-        decimal total_amount
-        timestamp created_at
+        uuid quote_id FK "nullable"
+        uuid project_id FK "nullable"
+        uuid branch_id FK
+        uuid salesperson_id FK
+        text status "DRAFT, CONFIRMED, ON_HOLD, FULFILLED, CANCELLED"
+        numeric total_amount
+        numeric subtotal
+        text number "unique"
+        text currency
+        date scheduled_delivery_date
+        bigint revision
     }
 
-    SALES_ORDER_LINE {
+    ORDER_LINE {
         uuid id PK
         uuid order_id FK
         uuid product_id FK
-        decimal qty
-        uuid uom_id FK
-        decimal unit_price
-        decimal line_total
+        uuid quote_line_id FK
+        numeric quantity
+        numeric unit_price
+        numeric line_total
+        numeric quantity_allocated
+        numeric quantity_backordered
+        numeric quantity_fulfilled
+        text line_type
+        integer position
+        boolean taxable
     }
 ```
 
 ### PostgreSQL Schema (Excerpt)
 
 ```sql
--- Pricing
+-- Pricing (003)
 CREATE TABLE price_levels (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    multiplier DECIMAL(19,4) NOT NULL DEFAULT 1.0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    multiplier NUMERIC(12, 4) NOT NULL DEFAULT 1.0000,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Customers
+-- Customers (003, altered through 091)
 CREATE TABLE customers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(255) NOT NULL,
-    account_number VARCHAR(50) UNIQUE NOT NULL,
-    price_level_id UUID REFERENCES price_levels(id),
-    credit_limit DECIMAL(19,4) DEFAULT 0,
-    balance_due DECIMAL(19,4) DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    account_number TEXT UNIQUE NOT NULL,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    price_level_id UUID REFERENCES price_levels(id) ON DELETE SET NULL,
+    credit_limit NUMERIC(12, 2) DEFAULT 0.00,
+    balance_due NUMERIC(12, 2) DEFAULT 0.00,
+    payment_terms_id UUID REFERENCES payment_terms(id),
+    primary_branch_id UUID NOT NULL REFERENCES locations(id),
+    salesperson_id UUID REFERENCES sales_team(id),
+    payment_terms VARCHAR(20) DEFAULT 'NET30',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    revision BIGINT NOT NULL DEFAULT 1
 );
 
-CREATE TABLE customer_jobs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES customers(id),
+-- Jobs (035 created projects; 091 moved customer_jobs into projects and dropped customer_jobs)
+CREATE TABLE projects (
+    id UUID PRIMARY KEY,
+    customer_id UUID NOT NULL REFERENCES customers(id),
     name VARCHAR(255) NOT NULL,
-    budget_limit DECIMAL(19,4) DEFAULT 0,
-    job_is_taxable BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    status VARCHAR(50) NOT NULL DEFAULT 'Active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    revision BIGINT NOT NULL DEFAULT 1
 );
 
--- The Pricing Waterfall
-CREATE TABLE price_rules (
+-- The Pricing Waterfall (016, job_id retargeted to projects at 091)
+CREATE TABLE pricing_rules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    rule_type TEXT NOT NULL CHECK (rule_type IN ('QUANTITY_BREAK', 'JOB_OVERRIDE', 'PROMOTIONAL')),
     product_id UUID REFERENCES products(id),
     customer_id UUID REFERENCES customers(id),
-    job_id UUID REFERENCES customer_jobs(id),
-    type VARCHAR(50) NOT NULL,
-    value DECIMAL(19,4) NOT NULL,
-    min_qty DECIMAL(19,4) DEFAULT 0,
-    start_date TIMESTAMP WITH TIME ZONE,
-    end_date TIMESTAMP WITH TIME ZONE,
-    priority INTEGER DEFAULT 0
+    job_id UUID REFERENCES projects(id),
+    category TEXT,
+    fixed_price NUMERIC(12,4),
+    discount_pct NUMERIC(6,4),
+    markup_pct NUMERIC(6,4),
+    min_quantity NUMERIC(12,4) DEFAULT 0,
+    max_quantity NUMERIC(12,4),
+    margin_floor_pct NUMERIC(6,4),
+    starts_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    priority INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Quotes & Orders
+-- Quote state enum (003)
+CREATE TYPE quote_state AS ENUM (
+    'DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'
+);
+
+-- Quotes (003, altered through 091: job_id dropped; project_id added)
 CREATE TABLE quotes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES customers(id),
-    job_id UUID REFERENCES customer_jobs(id),
-    root_quote_id UUID REFERENCES quotes(id),
-    state VARCHAR(50) DEFAULT 'draft',
-    total_amount DECIMAL(19,4) DEFAULT 0,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID REFERENCES customers(id) ON DELETE RESTRICT,
+    project_id UUID REFERENCES projects(id),
+    state quote_state NOT NULL DEFAULT 'DRAFT',
+    total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00,
+    margin_total NUMERIC(12, 2) DEFAULT 0.00,
+    branch_id UUID NOT NULL REFERENCES locations(id),
+    number TEXT UNIQUE,
+    source TEXT NOT NULL DEFAULT 'manual',
+    created_by UUID,
     expires_at TIMESTAMP WITH TIME ZONE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    sent_at TIMESTAMP WITH TIME ZONE,
+    accepted_at TIMESTAMP WITH TIME ZONE,
+    rejected_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    revision BIGINT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE quote_lines (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     quote_id UUID REFERENCES quotes(id) ON DELETE CASCADE,
-    product_id UUID REFERENCES products(id),
-    uom_id UUID REFERENCES uoms(id),
-    qty DECIMAL(19,4) NOT NULL,
-    unit_price DECIMAL(19,4) NOT NULL,
-    current_cost DECIMAL(19,4) NOT NULL
-);
-
-CREATE TABLE sales_orders (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES customers(id),
-    job_id UUID REFERENCES customer_jobs(id),
-    quote_id UUID REFERENCES quotes(id),
-    state VARCHAR(50) DEFAULT 'pending',
-    total_amount DECIMAL(19,4) DEFAULT 0,
+    product_id UUID REFERENCES products(id) ON DELETE RESTRICT,
+    sku TEXT NOT NULL,
+    description TEXT NOT NULL,
+    quantity NUMERIC(12, 4) NOT NULL,
+    uom TEXT REFERENCES units(code),
+    price_uom TEXT REFERENCES units(code),
+    uom_qty NUMERIC(12, 4) NOT NULL DEFAULT 1,
+    price_uom_qty NUMERIC(12, 4) NOT NULL DEFAULT 1,
+    unit_price NUMERIC(12, 4) NOT NULL,
+    line_total NUMERIC(12, 2) NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    customer_note TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE sales_order_lines (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id UUID REFERENCES sales_orders(id) ON DELETE CASCADE,
-    product_id UUID REFERENCES products(id),
-    uom_id UUID REFERENCES uoms(id),
-    qty DECIMAL(19,4) NOT NULL,
-    unit_price DECIMAL(19,4) NOT NULL,
-    line_total DECIMAL(19,4) NOT NULL
+-- Orders (004; ON_HOLD added in 071)
+CREATE TABLE orders (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+    quote_id UUID REFERENCES quotes(id) ON DELETE SET NULL,
+    project_id UUID REFERENCES projects(id),
+    branch_id UUID NOT NULL REFERENCES locations(id),
+    salesperson_id UUID REFERENCES sales_team(id),
+    number TEXT UNIQUE,
+    currency CHAR(3) NOT NULL DEFAULT 'USD',
+    status TEXT NOT NULL CHECK (status IN ('DRAFT','CONFIRMED','ON_HOLD','FULFILLED','CANCELLED')),
+    total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    subtotal NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    delivery_type TEXT NOT NULL DEFAULT 'DELIVERY',
+    scheduled_delivery_date DATE,
+    packing_manifest JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    revision BIGINT NOT NULL DEFAULT 1
+);
+
+CREATE TABLE order_lines (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    quote_line_id UUID REFERENCES quote_lines(id) ON DELETE SET NULL,
+    line_type TEXT NOT NULL DEFAULT 'PRODUCT',
+    position INTEGER NOT NULL DEFAULT 0,
+    parent_line_id UUID REFERENCES order_lines(id) ON DELETE CASCADE,
+    charge_code_id UUID REFERENCES charge_codes(id),
+    sku TEXT,
+    description TEXT,
+    quantity NUMERIC(12, 4) NOT NULL,
+    unit_price NUMERIC(12, 4) NOT NULL,
+    priced_unit_price NUMERIC(12, 4),
+    price_source TEXT NOT NULL DEFAULT 'PRICE_LIST',
+    uom TEXT,
+    price_uom TEXT,
+    uom_qty NUMERIC(12, 4),
+    price_uom_qty NUMERIC(12, 4),
+    discount_percent NUMERIC(7, 4),
+    discount_amount NUMERIC(12, 2),
+    line_total NUMERIC(12, 2),
+    quantity_allocated NUMERIC(12, 4) NOT NULL DEFAULT 0,
+    quantity_backordered NUMERIC(12, 4) NOT NULL DEFAULT 0,
+    quantity_fulfilled NUMERIC(12, 4) NOT NULL DEFAULT 0,
+    taxable BOOLEAN NOT NULL DEFAULT TRUE,
+    is_special_order BOOLEAN NOT NULL DEFAULT FALSE,
+    special_order_cost DECIMAL(10, 2),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
@@ -357,153 +483,280 @@ The Finance module handles AR, Invoicing, and a strict double-entry ledger for a
 ### Mermaid ERD
 ```mermaid
 erDiagram
-    SALES_ORDER ||--o{ INVOICE : "invoiced"
+    ORDER ||--o{ INVOICE : "invoiced"
     CUSTOMER ||--o{ INVOICE : "billed to"
-    CUSTOMER_JOB ||--o{ INVOICE : "job linkage"
     INVOICE ||--|{ INVOICE_LINE : "contains"
-    INVOICE ||--o{ PAYMENT : "paid by"
-    CUSTOMER_JOB ||--o{ LIEN_NOTICE : "tracked"
-    LEDGER_ENTRY ||--|{ LEDGER_LINE : "double-entry"
-    CHART_OF_ACCOUNTS ||--o{ LEDGER_LINE : "account link"
+    INVOICE ||--o{ PAYMENT : "applied by"
+    CUSTOMER ||--o{ PAYMENT : "paid"
+    PAYMENT ||--o{ GL_JOURNAL_ENTRY : "posts"
+    INVOICE ||--o{ AR_APPLICATION : "applies"
+    GL_JOURNAL_ENTRY ||--|{ GL_JOURNAL_LINE : "double-entry"
+    GL_ACCOUNT ||--o{ GL_JOURNAL_LINE : "account link"
 
     INVOICE {
         uuid id PK
         uuid customer_id FK
-        uuid job_id FK
-        uuid sales_order_id FK
-        string invoice_number "unique"
-        timestamp invoice_date
-        timestamp due_date
-        decimal subtotal
-        decimal tax_total
-        decimal total_amount
-        decimal balance_remaining
-        enum state "open, paid, void"
+        uuid order_id FK
+        uuid branch_id FK
+        uuid payment_terms_id FK
+        text number "unique"
+        date invoice_date
+        date due_date
+        date discount_due_date
+        numeric discount_percent
+        text status "UNPAID, PARTIAL, PAID, VOID, WRITTEN_OFF, OVERDUE"
+        numeric total_amount
+        numeric subtotal
+        numeric tax_amount
+        numeric tax_rate
+        char currency
+        text delivery_type
+        text picked_up_by
+        uuid delivery_id FK
+        timestamptz paid_at
+        timestamptz voided_at
+        bigint revision
     }
 
     INVOICE_LINE {
         uuid id PK
         uuid invoice_id FK
         uuid product_id FK
-        decimal qty
-        decimal unit_price
-        decimal line_total
+        uuid parent_line_id FK
+        uuid charge_code_id FK
+        text line_type
+        integer position
+        text sku
+        text description
+        text uom
+        text price_uom
+        numeric uom_qty
+        numeric price_uom_qty
+        numeric quantity
+        numeric price_each
+        numeric unit_price
+        numeric priced_unit_price
+        text price_adjusted_by
+        text override_reason
+        boolean taxable
     }
 
     PAYMENT {
         uuid id PK
         uuid customer_id FK
-        decimal amount
-        enum method "check, cash, credit, e-payment"
-        string reference "check# or transaction_id"
-        timestamp payment_date
-        jsonb application_map "split across invoices"
+        uuid branch_id FK
+        uuid invoice_id FK "nullable"
+        uuid order_id FK "nullable"
+        uuid project_id FK "nullable"
+        uuid gl_entry_id FK
+        text number "unique"
+        numeric amount
+        numeric amount_unapplied
+        text status "POSTED, VOIDED"
+        text method "CASH, CARD, CHECK, ACCOUNT, ACH, WIRE, OTHER"
+        char currency
+        text reference
+        text notes
+        date received_on
+        timestamptz voided_at
+        text voided_by
+        text void_reason
+        date voided_on
+        text gateway_tx_id
+        text gateway_status
+        text token_id
+        text card_last4
+        text card_brand
+        text auth_code
+        bigint revision
     }
 
-    LIEN_NOTICE {
+    AR_APPLICATION {
         uuid id PK
-        uuid job_id FK
-        timestamp notice_sent_at
-        timestamp expires_at
-        enum state "active, released, expired"
-        string document_url "link to PDF"
+        uuid payment_id FK
+        uuid invoice_id FK
+        numeric amount
+        timestamptz applied_at
+        bigint revision
     }
 
-    CHART_OF_ACCOUNTS {
+    GL_ACCOUNT {
         uuid id PK
-        string code "e.g. 1200-AR"
-        string name "Accounts Receivable"
-        enum account_type "asset, liability, equity, income, expense"
+        text code "unique"
+        text name
+        text type "ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE"
+        text subtype
+        uuid parent_id FK
+        text normal_balance "DEBIT, CREDIT"
+        boolean is_active
+        text description
+        bigint revision
     }
 
-    LEDGER_ENTRY {
+    GL_JOURNAL_ENTRY {
         uuid id PK
-        string reference "Invoice# or Payment#"
-        timestamp posted_at
-        string memo
+        serial entry_number
+        date entry_date
+        text memo
+        text source "MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING"
+        uuid source_ref_id
+        text status "DRAFT, POSTED, VOID"
+        text posted_by
+        bigint revision
     }
 
-    LEDGER_LINE {
+    GL_JOURNAL_LINE {
         uuid id PK
-        uuid ledger_entry_id FK
+        uuid journal_entry_id FK
         uuid account_id FK
-        decimal debit
-        decimal credit
+        text description
+        numeric debit
+        numeric credit
     }
 ```
 
 ### PostgreSQL Schema (Excerpt)
 
 ```sql
--- Chart of Accounts
-CREATE TABLE chart_of_accounts (
+-- Chart of Accounts (025)
+CREATE TABLE gl_accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    code VARCHAR(50) UNIQUE NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    account_type VARCHAR(50) NOT NULL,
-    is_active BOOLEAN DEFAULT TRUE
+    code VARCHAR(20) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    type VARCHAR(20) NOT NULL CHECK (type IN ('ASSET','LIABILITY','EQUITY','REVENUE','EXPENSE')),
+    subtype VARCHAR(50) DEFAULT '',
+    parent_id UUID REFERENCES gl_accounts(id),
+    normal_balance VARCHAR(10) NOT NULL CHECK (normal_balance IN ('DEBIT','CREDIT')),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    description TEXT DEFAULT '',
+    revision BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Invoices
+-- Invoices (005, altered through 097)
 CREATE TABLE invoices (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES customers(id),
-    job_id UUID REFERENCES customer_jobs(id),
-    sales_order_id UUID REFERENCES sales_orders(id),
-    invoice_number VARCHAR(50) UNIQUE NOT NULL,
-    invoice_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    due_date TIMESTAMP WITH TIME ZONE,
-    subtotal DECIMAL(19,4) NOT NULL,
-    tax_total DECIMAL(19,4) NOT NULL,
-    total_amount DECIMAL(19,4) NOT NULL,
-    balance_remaining DECIMAL(19,4) NOT NULL,
-    state VARCHAR(50) DEFAULT 'open',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(id) ON DELETE RESTRICT,
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE RESTRICT,
+    branch_id UUID NOT NULL REFERENCES locations(id),
+    number TEXT UNIQUE,
+    invoice_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    due_date DATE,
+    discount_due_date DATE,
+    discount_percent NUMERIC(7, 4),
+    payment_terms_id UUID NOT NULL REFERENCES payment_terms(id),
+    payment_terms VARCHAR(20) DEFAULT 'NET30',
+    status TEXT NOT NULL CHECK (status IN ('UNPAID','PARTIAL','PAID','VOID','WRITTEN_OFF','OVERDUE')),
+    total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    subtotal DECIMAL(10, 2) DEFAULT 0,
+    tax_amount DECIMAL(10, 2) DEFAULT 0,
+    tax_rate DECIMAL(5, 4) DEFAULT 0,
+    currency CHAR(3) NOT NULL DEFAULT 'USD',
+    delivery_type TEXT NOT NULL DEFAULT 'PICKUP',
+    picked_up_by TEXT,
+    delivery_id UUID REFERENCES deliveries(id) ON DELETE SET NULL,
+    paid_at TIMESTAMP WITH TIME ZONE,
+    voided_at TIMESTAMPTZ,
+    voided_by TEXT,
+    void_reason TEXT,
+    voided_on DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    revision BIGINT NOT NULL DEFAULT 1
 );
 
 CREATE TABLE invoice_lines (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    invoice_id UUID REFERENCES invoices(id) ON DELETE CASCADE,
-    product_id UUID REFERENCES products(id),
-    qty DECIMAL(19,4) NOT NULL,
-    unit_price DECIMAL(19,4) NOT NULL,
-    line_total DECIMAL(19,4) NOT NULL
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    invoice_id UUID NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+    parent_line_id UUID REFERENCES invoice_lines(id) ON DELETE CASCADE,
+    charge_code_id UUID REFERENCES charge_codes(id),
+    line_type TEXT NOT NULL DEFAULT 'PRODUCT',
+    position INTEGER NOT NULL DEFAULT 0,
+    sku TEXT,
+    description TEXT,
+    uom TEXT,
+    price_uom TEXT,
+    uom_qty NUMERIC(12, 4),
+    price_uom_qty NUMERIC(12, 4),
+    quantity DECIMAL(10, 4) NOT NULL,
+    price_each DECIMAL(10, 2) NOT NULL,
+    unit_price NUMERIC(12, 4),
+    priced_unit_price NUMERIC(12, 4),
+    price_adjusted_by TEXT,
+    override_reason TEXT,
+    taxable BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Payments
+-- Payments (008, altered through 101)
 CREATE TABLE payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    customer_id UUID REFERENCES customers(id),
-    amount DECIMAL(19,4) NOT NULL,
-    payment_method VARCHAR(50),
-    reference_number VARCHAR(255),
-    payment_date TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    application_map JSONB
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id UUID NOT NULL REFERENCES customers(id),
+    branch_id UUID NOT NULL REFERENCES locations(id),
+    invoice_id UUID REFERENCES invoices(id) ON DELETE RESTRICT,
+    order_id UUID REFERENCES orders(id),
+    project_id UUID REFERENCES projects(id),
+    gl_entry_id UUID REFERENCES gl_journal_entries(id),
+    number TEXT UNIQUE,
+    amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
+    amount_unapplied NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED','VOIDED')),
+    method TEXT NOT NULL CHECK (method IN ('CASH','CARD','CHECK','ACCOUNT','ACH','WIRE','OTHER')),
+    currency CHAR(3) NOT NULL DEFAULT 'USD',
+    reference TEXT,
+    notes TEXT,
+    received_on DATE NOT NULL,
+    voided_at TIMESTAMPTZ,
+    voided_by TEXT,
+    void_reason TEXT,
+    voided_on DATE,
+    gateway_tx_id VARCHAR(128),
+    gateway_status VARCHAR(32),
+    token_id VARCHAR(128),
+    card_last4 VARCHAR(4),
+    card_brand VARCHAR(16),
+    auth_code VARCHAR(32),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revision BIGINT NOT NULL DEFAULT 1
 );
 
--- Construction Lien Tracking
-CREATE TABLE lien_notices (
+-- AR applications (101)
+CREATE TABLE ar_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id UUID REFERENCES customer_jobs(id),
-    notice_sent_at TIMESTAMP WITH TIME ZONE,
-    expires_at TIMESTAMP WITH TIME ZONE,
-    state VARCHAR(50) DEFAULT 'active',
-    document_url VARCHAR(2048)
+    payment_id UUID NOT NULL REFERENCES payments(id),
+    invoice_id UUID NOT NULL REFERENCES invoices(id),
+    amount NUMERIC(12, 2) NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revision BIGINT NOT NULL DEFAULT 1
 );
 
--- Double-Entry Ledger
-CREATE TABLE ledger_entries (
+-- Double-Entry Ledger (025)
+CREATE TABLE gl_journal_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    reference VARCHAR(255),
-    posted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    memo TEXT
+    entry_number SERIAL,
+    entry_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    memo TEXT NOT NULL DEFAULT '',
+    source VARCHAR(20) NOT NULL DEFAULT 'MANUAL' CHECK (source IN ('MANUAL','INVOICE','PAYMENT','ADJUSTMENT','CLOSING')),
+    source_ref_id UUID,
+    status VARCHAR(10) NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','POSTED','VOID')),
+    posted_by VARCHAR(100),
+    revision BIGINT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
-CREATE TABLE ledger_lines (
+CREATE TABLE gl_journal_lines (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    ledger_entry_id UUID REFERENCES ledger_entries(id) ON DELETE CASCADE,
-    account_id UUID REFERENCES chart_of_accounts(id),
-    debit DECIMAL(19,4) NOT NULL DEFAULT 0,
-    credit DECIMAL(19,4) NOT NULL DEFAULT 0
+    journal_entry_id UUID NOT NULL REFERENCES gl_journal_entries(id) ON DELETE CASCADE,
+    account_id UUID NOT NULL REFERENCES gl_accounts(id),
+    description TEXT DEFAULT '',
+    debit DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    credit DECIMAL(12, 2) NOT NULL DEFAULT 0,
+    CONSTRAINT chk_debit_or_credit CHECK (
+        (debit > 0 AND credit = 0) OR (debit = 0 AND credit > 0)
+    )
 );
 ```
