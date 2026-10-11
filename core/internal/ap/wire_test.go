@@ -1915,6 +1915,61 @@ func TestWire_VoidRefusesReinstatedEntry(t *testing.T) {
 	}
 }
 
+// RULE (review r4 P3-1, the race r3 P3-1 read): an AP void racing a GL
+// reverse of the linked entry must never answer 500. Whichever side loses
+// the insert meets the one reversal index (ux_gl_entry_single_reversal), and
+// that loss maps to the same 409 reversal_not_posted as the belt, with
+// nothing written: every round leaves exactly one reversal of the entry, the
+// bill either voided or still voidable, and the tie holding.
+func TestWire_VoidReverseRaceNever500(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	for round := 1; round <= 20; round++ {
+		id, r1 := f.enter(fmt.Sprintf("V-RACE-%02d", round), "1", 1400000) // 140.00
+		if a := f.approve(id, r1); a.status != http.StatusOK {
+			t.Fatal(a.raw)
+		}
+		entry := f.glEntryOf(id)
+		apRes, glRes := make(chan resp, 1), make(chan resp, 1)
+		start := make(chan struct{})
+		go func() { <-start; apRes <- f.void(id, 2, "race round") }()
+		go func() { <-start; glRes <- f.glReverse(entry) }()
+		close(start)
+		ap, gl := <-apRes, <-glRes
+		if ap.status >= 500 {
+			t.Errorf("round %d: the AP void answered %d in the race: %s", round, ap.status, ap.raw)
+		}
+		if gl.status >= 500 {
+			t.Errorf("round %d: the GL reverse answered %d in the race: %s", round, gl.status, gl.raw)
+		}
+		if n := f.count(`SELECT count(*) FROM gl_journal_entries WHERE reverses_entry_id = $1`, entry); n != 1 {
+			t.Fatalf("round %d: %d reversals of the entry stand, want exactly one winner", round, n)
+		}
+		if voided := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'VOIDED'`, id); voided == 0 {
+			// The GL side won the reversal: the void refused (or landed too
+			// late to reverse anything), and its retry must now void with
+			// nothing to reverse, closing the gap the GL act made.
+			if ap.status != http.StatusConflict && ap.status != http.StatusOK {
+				t.Errorf("round %d: the AP void answered %d with the bill not voided: %s", round, ap.status, ap.raw)
+			}
+			before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+			retry := f.void(id, 2, "race round retry")
+			if retry.status != http.StatusOK {
+				t.Errorf("round %d: the retry void after the GL reversal = %d, want 200: %s", round, retry.status, retry.raw)
+			}
+			if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+				t.Errorf("round %d: %d entries were written by the retry void with nothing to reverse", round, after-before)
+			}
+		}
+		if !f.balanced() {
+			t.Errorf("round %d: an entry does not balance after the race", round)
+		}
+		if got, want := f.controlBalance(), f.openSum(); got != want || got != 0 {
+			t.Errorf("round %d: control %d against open %d, want both 0 after the round", round, got, want)
+		}
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is

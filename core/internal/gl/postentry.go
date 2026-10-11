@@ -120,6 +120,17 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 		if strings.Contains(err.Error(), closedPeriodMessagePart) {
 			return nil, fmt.Errorf("%w: %v", ErrPeriodClosed, err)
 		}
+		// A reversal whose entry was reversed by a concurrent act while this
+		// one ran: the insert meets the one reversal index (a pre-check
+		// cannot see an uncommitted contender), and the loss maps to
+		// ErrAlreadyReversed so the caller answers the same refusal as the
+		// belt, never a 500 (review r4 P3-1).
+		if in.ReversesEntryID != nil {
+			var pg interface{ SQLState() string }
+			if errors.As(err, &pg) && pg.SQLState() == "23505" {
+				return nil, fmt.Errorf("%w: another reversal of the entry committed first", ErrAlreadyReversed)
+			}
+		}
 		return nil, err
 	}
 	return entry, nil
