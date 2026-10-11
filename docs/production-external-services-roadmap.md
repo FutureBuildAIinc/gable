@@ -5,10 +5,8 @@
 this open commons repo
 **What this builds on:** the as-built open implementation — `core/internal/ai/openrouter.go`
 (one OpenAI-compatible client) and `core/internal/delivery/ors.go` (OpenRouteService),
-both keyed at runtime via `system_settings`. Module boundaries in
-[`architecture.md`](./architecture.md): `Logistics / delivery` and the
-`Platform (not apps) / config, ai, domain, notification, techadmin, governance` rows.
-**Last updated:** 2026-06-18
+both keyed at runtime via `system_settings`. Summarised in `AGENTS.md` § "External services are
+OSS-migrated" (imported by `CLAUDE.md`); module boundaries in [`architecture.md`](./architecture.md).
 
 ---
 
@@ -149,9 +147,9 @@ a self-hosted target degrades gracefully (e.g. self-host its own OCR/PDF + image
   spawning `go generateImageAsync(...)`; the client polls). A synchronous FLUX.2 Pro image gen
   (model ~8-13s, end-to-end including the multi-MB base64 payload + DB write ~8-24s) would exceed
   the demo's ~24s App Platform / Cloudflare gateway timeout -> HTTP 504, which is why the request
-  never blocks on it. Text + vision (<=10s) are unaffected. Stopgaps that fit under a longer-running
-  gateway but don't remove the limit: a faster model (`flux.2-klein-4b`) or a smaller `image_config`
-  size.
+  never blocks on it. Text + vision (<=10s) are unaffected. The shipped path is async, so the
+  gateway limit does not apply to it. Stopgaps that would fit a synchronous call under the gateway
+  without removing the limit: a faster model (`flux.2-klein-4b`) or a smaller `image_config` size.
 - **Data residency / PII:** freight invoices and material lists contain customer names,
   addresses, pricing. Decide per-tenant whether documents may transit a third-party model;
   offer a self-hosted inference option for dealers that require it.
@@ -203,8 +201,9 @@ The community implementation should preserve these seams so production is config
 4. **Caching & schema:** the `locations.latitude/longitude` columns added in the community repo
    (lazy-geocoded on first route from each branch and persisted back via
    `delivery.PostgresRepository.SetBranchLatLng`) carry straight into production. There is no
-   separate geocode cache table today; repeat-address savings come from the persisted
-   `locations` lat/lng itself.
+   geocode cache table today. Branch origins are geocoded once and persisted on
+   `locations`; order delivery addresses are geocoded per delivery (`geocodeOrderStop`) with no
+   address keyed cache, which is the gap the §1.6 cache decision covers.
 
 ---
 
