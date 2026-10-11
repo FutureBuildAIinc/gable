@@ -1368,11 +1368,17 @@ state refusal the winner's own completion caused. A void's resolution
 accounts for each card tender separately: it books only the resolved
 tender's refund, and the sale's void completes when no claim of the sale is
 pending anymore, from whichever leg empties them (a booked refund or a no
-refund alike), so the order the claims are resolved in never decides the
-end state; a void whose every claim settles without a booked refund keeps
-the sale completable by a fresh void. The tenders whose refunds were
-declined keep their charge as unapplied
-credit owed to the customer.
+refund of the last claim alike), so the order the claims are resolved in
+never decides the end state; a void whose every claim settles without a
+booked refund keeps the sale completable by a fresh void. Between one
+tender's booked refund and the last claim's resolution the sale stands
+completed in an interim state: the booked refund reversed its application,
+so the invoice is open again for the booked cents and the customer's balance
+carries them as owed, until the last claim resolves and the void completes,
+and the till close is refused while any claim of the session is pending, so
+the interim never slips into a counted drawer. The tenders whose refunds
+were declined keep their charge as unapplied credit owed to the customer,
+
 
 ### 12. Events
 
