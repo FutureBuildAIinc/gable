@@ -161,9 +161,15 @@ envelope after the change.
 `POST /api/v1/admin/keys` carries the `Idempotency-Key` header (ADR
 0001 section 9); the 201 answer carries the `Location` header
 (`/api/v1/admin/keys/{id}`). The error answers are 400 (validation:
-`name` required, each `scopes[i]` a non-empty printable string;
-`branch_id` a UUID or null), 401, 403, 409 (wire conflict), 413
-(payload too large), 422 (unprocessable entity) and 500.
+`name` required and at most 255 characters; each `scopes[i]` non
+empty, at most 128 printable ASCII characters and one the grant
+grammar knows (`middleware.ValidScopeGrammar`: a known module's
+`<module>:<verb>`, with `propose` and `commit` only on a module with a
+registered draft kind); at most 64 scopes; `branch_id` a UUID naming an existing
+branch location, or null), 401, 403, 409 (the `Idempotency-Key`
+already in progress, `idempotency_in_progress`), 413 (payload too
+large), 422 (the `Idempotency-Key` reused with a different request,
+`idempotency_key_reused`) and 500.
 
 `GET /api/v1/admin/keys` accepts the `cursor`, `limit` and `include`
 parameters of ADR 0001. The error answers are 400 (strict query), 401,

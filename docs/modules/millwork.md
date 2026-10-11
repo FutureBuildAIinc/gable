@@ -92,8 +92,8 @@ error).
 400 (strict query), 401, 403, 404 (`app_disabled`), 500.
 
 `GET /api/v1/millwork/options/{id}` answers 200 with the `ETag` header
-and the error answers are 400 (bad UUID), 401, 403, 404 (`app_disabled`),
-500.
+and the error answers are 400 (bad UUID), 401, 403, 404 (`not_found`
+for an unknown id, `app_disabled` when the millwork app is off), 500.
 
 ## Lifecycle and transitions
 

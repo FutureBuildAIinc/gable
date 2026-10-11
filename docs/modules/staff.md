@@ -138,7 +138,8 @@ in quotes, optional) and `Idempotency-Key`; `revision` is the body
 form of the same precondition (428 `precondition_required` without
 either, 409 `stale_revision` on a stale one). The 200 answer carries
 the `ETag` header (the new revision in quotes). The error answers are
-400, 401, 403, 404, 409 `stale_revision`, 413, 422, 428, 500.
+400, 401, 403, 404, 409 (`stale_revision`, or `duplicate` when the
+email or staff number is taken), 413, 422, 428, 500.
 
 `POST /api/v1/admin/staff/{id}/modules` carries `If-Match` and
 `Idempotency-Key`; `revision` is the body form of the same
