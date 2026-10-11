@@ -200,7 +200,10 @@ func shipToFrom(d *ShipToDraft, id, customerID uuid.UUID, now httpx.Timestamp) *
 
 // CreateShipTo adds a ship-to. The customer's first active ship-to becomes
 // the default unless the request says otherwise; naming a default moves the
-// default from the one that held it.
+// default from the one that held it. On a shared customer that move changes a
+// shared ship to (every branch's delivery orders default to it), so a bound
+// key's add that names is_default true is refused in the shared rule's words;
+// a customer the pin holds alone still may.
 func (s *Service) CreateShipTo(ctx context.Context, customerID uuid.UUID, d *ShipToDraft) (*ShipTo, error) {
 	var out *ShipTo
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -222,6 +225,11 @@ func (s *Service) CreateShipTo(ctx context.Context, customerID uuid.UUID, d *Shi
 			st.IsDefault = n == 0
 		}
 		if st.IsDefault {
+			if d.DefaultGiven {
+				if err := s.checkSharedChild(ctx, customerID, "is_default"); err != nil {
+					return err
+				}
+			}
 			if err := s.repo.ClearDefaultShipTo(ctx, customerID, st.ID); err != nil {
 				return err
 			}
@@ -235,7 +243,7 @@ func (s *Service) CreateShipTo(ctx context.Context, customerID uuid.UUID, d *Shi
 		return s.record(ctx, cust, EventUpdated, PartShipTo, map[string]any{"ship_to_id": out.ID, "action": "created"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }

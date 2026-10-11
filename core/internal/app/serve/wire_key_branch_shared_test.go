@@ -38,7 +38,7 @@ func seedSharedCustomer(t *testing.T, f *keyPinFixture, branches ...uuid.UUID) *
 	for _, b := range branches {
 		exec(`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, s.id, b)
 	}
-	exec(`INSERT INTO customer_ship_tos (id, customer_id, code, name, line1) VALUES ($1, $2, 'shared', 'pin shared', 'pin')`, s.shipTo, s.id)
+	exec(`INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, is_default) VALUES ($1, $2, 'shared', 'pin shared', 'pin', TRUE)`, s.shipTo, s.id)
 	exec(`INSERT INTO customer_contacts (id, customer_id, first_name, last_name) VALUES ($1, $2, 'pin', 'shared')`, s.contact, s.id)
 	exec(`INSERT INTO sales_team (id, name, email, phone, role) VALUES ($1, 'pin rep', $2, '555-0100', 'sales')`, s.salesperson, "pin-rep-"+s.salesperson.String()[:8]+"@example.com")
 	rows, err := f.db.Pool.Query(ctx, `SELECT id FROM payment_terms ORDER BY code LIMIT 2`)
@@ -333,6 +333,39 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	}
 	if id := f.made(t, "bound", "", "POST", sh+"/contacts", `{"first_name":"pin","last_name":"new"}`, http.StatusCreated); id != uuid.Nil {
 		t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customer_contacts WHERE id = $1`, id) })
+	}
+	// A default add is a change in disguise (round 11 P2-2, round 10 P2-1):
+	// naming is_default true clears the existing default, which on a shared
+	// customer is a shared ship to every branch's delivery orders default to.
+	// The bound key is refused in the same words; the customer the pin holds
+	// alone still may, and the unbound key and the user keep the reach.
+	shipDigest := func(customer uuid.UUID) string {
+		var d string
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT md5(string_agg(row_to_json(s)::text, ',' ORDER BY s.id)) FROM customer_ship_tos s WHERE s.customer_id = $1 AND s.is_default`,
+			customer).Scan(&d); err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	defaultAdd := `{"code":"pindef","name":"pin default","line1":"2 pin","is_default":true}`
+	before, rows := shipDigest(s.id), f.auditRows(t)
+	if status, buf := f.key(t, f.bound, "POST", sh+"/ship-tos", defaultAdd, nil); status != http.StatusForbidden ||
+		!strings.Contains(string(buf), "the customer is also held by branch "+f.branchB.String()) {
+		t.Errorf("bound key adding a default ship-to to the shared customer: %d %s, want a 403 naming branch B", status, buf)
+	}
+	if after := f.auditRows(t); after != rows+1 {
+		t.Errorf("bound key default ship-to add: key.branch_refused rows %d then %d, want one new row", rows, after)
+	}
+	if shipDigest(s.id) != before {
+		t.Errorf("the refused default add still changed the shared customer's default ship-to")
+	}
+	if id := f.made(t, "bound", "", "POST", alone+"/ship-tos", defaultAdd, http.StatusCreated); id != uuid.Nil {
+		t.Cleanup(func() { _, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM customer_ship_tos WHERE id = $1`, id) })
+	}
+	if status, buf := f.send(t, "user", "POST", sh+"/ship-tos",
+		`{"code":"pindefu","name":"pin default user","line1":"2 pin","is_default":true}`, nil); status != http.StatusCreated {
+		t.Errorf("user adding a default ship-to to the shared customer: %d %s, want 201", status, buf)
 	}
 	shipPath, contactPath := "/api/v1/ship-tos/"+s.shipTo.String(), "/api/v1/contacts/"+s.contact.String()
 	childRefusals := []struct {
