@@ -388,7 +388,7 @@ func (s *Service) setPaymentUnapplied(ctx context.Context, p *paymentRow, newUna
 // hold on the invoice is enforced: while the counter's split void has
 // standing claims, the invoice's open cents are an interim, and an
 // application would leave a live row the void's completion cannot reverse
-// (C2-5, the r14 review's P2-1).
+// (C2-5, the fourteenth review's P2-1).
 func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time, actor string, reason *string, glEntry *uuid.UUID) error {
 	if s.applyGuard != nil {
 		claims, err := s.applyGuard.PendingVoidClaimsOfInvoice(ctx, a.InvoiceID)

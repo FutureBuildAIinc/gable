@@ -53,7 +53,7 @@ func (r *PostgresRepository) ExecuteInTx(ctx context.Context, fn func(context.Co
 
 func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UUID, locationID *uuid.UUID) (*Inventory, error) {
 	// The write path's read follows the branch wall (C2-5's carried fix from
-	// PR 44's review, restated by the r14 review): a request that names a
+	// PR 44's review, restated by the fourteenth review): a request that names a
 	// location reads exactly that location's row, held to the caller's branch
 	// when the context carries one (a row on another branch is refused by
 	// ErrLocationOutsideBranch, never substituted); only a request that names

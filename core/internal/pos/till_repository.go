@@ -205,7 +205,7 @@ func (r *PostgresRepository) AggregateTillSession(ctx context.Context, sessionID
 		return nil, fmt.Errorf("failed to aggregate the session's card refunds: %w", err)
 	}
 	// The session's card returns, through their credit memos, as the CASH
-	// figure counts its cash returns (r14 P3-2): a card return's refund rides
+	// figure counts its cash returns (fourteenth review P3-2): a card return's refund rides
 	// its memo, never the tender's payment, so without this the CARD figure
 	// disagreed with the books by every card return of the session.
 	var cardReturnRefunds int64

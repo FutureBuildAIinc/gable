@@ -3,7 +3,7 @@
 
 package pos_test
 
-// The split void's interim invoice (the r14 review's P2-1): while a claim of
+// The split void's interim invoice (the fourteenth review's P2-1): while a claim of
 // the sale's void still stands, the booked cents show as owed on the
 // statement, but nothing may be applied to that invoice: an application
 // would leave a live row the void's completion cannot reverse, stranding the

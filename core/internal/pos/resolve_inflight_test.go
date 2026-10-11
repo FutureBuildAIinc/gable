@@ -3,7 +3,7 @@
 
 package pos_test
 
-// The claim's own terminal call (the r14 review's P1-1): a resolution that
+// The claim's own terminal call (the fourteenth review's P1-1): a resolution that
 // lands while the act's refund is still on the wire releases a tender whose
 // money has not answered yet, the terminal then refunds it, and a later act
 // refunds the same tender again. A live claim holds the resolve and the

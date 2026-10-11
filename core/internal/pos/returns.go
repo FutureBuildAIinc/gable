@@ -593,7 +593,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}); err != nil {
 			return nil, err
 		}
-		// The call is bounded (r14 P1-1): every path it can take ends inside
+		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
@@ -621,7 +621,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 		}
 		// the gateway's own refund id, on the standing claim the moment the
 		// terminal answers and in its own committed write (seventh review
-		// P2-3), whatever state the claim is in (r14 P1-1): a claim carrying
+		// P2-3), whatever state the claim is in (fourteenth review P1-1): a claim carrying
 		// a refund id is a refund that moved, one without it is a refund that
 		// may not have
 		if err := s.repo.MarkRefundIntentRefunded(ctx, claim.intent.ID, res.TransactionID); err != nil {
@@ -780,7 +780,7 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 		// books never record a cent less than the terminal moved.
 		if claim != nil {
 			// The claim row locked and read whole under the sale row lock
-			// (r14 P1-1): a replay may only settle a claim whose own terminal
+			// (fourteenth review P1-1): a replay may only settle a claim whose own terminal
 			// call has answered (or whose in flight lease expired with no
 			// answer at all, marked UNKNOWN then), never a live one, and the
 			// id it books must be the terminal's own.

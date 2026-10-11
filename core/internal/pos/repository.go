@@ -820,7 +820,7 @@ func (r *PostgresRepository) FailRefundIntent(ctx context.Context, saleID, tende
 }
 
 // MarkRefundIntentRefunded writes the gateway's own refund id onto the
-// claim, whatever state the claim is in (r14 P1-1: a wrong early release can
+// claim, whatever state the claim is in (fourteenth review P1-1: a wrong early release can
 // never orphan the terminal's id), and stamps the answer in its own committed
 // write, made the moment the terminal answers and before the money
 // transaction opens: a claim carrying a refund id is a refund the terminal
@@ -842,7 +842,7 @@ func (r *PostgresRepository) MarkRefundIntentRefunded(ctx context.Context, inten
 // StampRefundIntentAnswered records that the claim's own terminal call came
 // back carrying no verdict (a transport error, a status that proves
 // nothing): the call is off the wire, so the claim is stranded and
-// resolvable, exactly as the unknown outcome row records it (r14 P1-1).
+// resolvable, exactly as the unknown outcome row records it (fourteenth review P1-1).
 func (r *PostgresRepository) StampRefundIntentAnswered(ctx context.Context, intentID uuid.UUID) error {
 	_, err := r.ex(ctx).Exec(ctx, `
 		UPDATE pos_refund_intents SET answered_at = NOW(), answer_state = 'ANSWERED', updated_at = NOW()
@@ -855,7 +855,7 @@ func (r *PostgresRepository) StampRefundIntentAnswered(ctx context.Context, inte
 
 // MarkRefundIntentUnansweredUnknown marks a claim UNKNOWN when a resolution
 // proceeds on its in flight lease expiring with no answer at all: the
-// terminal never spoke, and the claim's own record must say so (r14 P1-1).
+// terminal never spoke, and the claim's own record must say so (fourteenth review P1-1).
 // A claim the terminal did answer is left alone.
 func (r *PostgresRepository) MarkRefundIntentUnansweredUnknown(ctx context.Context, intentID uuid.UUID) error {
 	_, err := r.ex(ctx).Exec(ctx, `
@@ -869,7 +869,7 @@ func (r *PostgresRepository) MarkRefundIntentUnansweredUnknown(ctx context.Conte
 
 // AbandonRefundIntent records that the claim's act ended before the terminal
 // was ever asked for it (a void that stopped at an earlier tender's refusal,
-// r14 P1-1): no answer can ever come back, so the claim is stranded from now
+// fourteenth review P1-1): no answer can ever come back, so the claim is stranded from now
 // and its record says the terminal never spoke.
 func (r *PostgresRepository) AbandonRefundIntent(ctx context.Context, intentID uuid.UUID) error {
 	_, err := r.ex(ctx).Exec(ctx, `
@@ -887,7 +887,7 @@ type RefundIntentRecord struct {
 	RefundIntent
 	State      string
 	RefundTxID string
-	// The in flight lease (r14 P1-1): AnswerDueAt is when the claim may be
+	// The in flight lease (fourteenth review P1-1): AnswerDueAt is when the claim may be
 	// resolved if its own terminal call never settles it; AnsweredAt is
 	// stamped by every path that ends that call; AnswerState carries
 	// IN_FLIGHT, ANSWERED or UNKNOWN (a resolution on an expired lease).
@@ -998,7 +998,7 @@ type RefundIntentFacts struct {
 	PendingCents int64
 	DoneVoid     bool
 	// UnbookedRefundedCents sums the settled claims that carry the terminal's
-	// refund id without a booking of their own (r14 P1-1's defence in depth:
+	// refund id without a booking of their own (the fourteenth review's P1-1 defence in depth:
 	// a late refund behind a wrongly released claim). A PENDING claim's own
 	// booking names its refund id, so PENDING never counts here; the tender
 	// that paid once at the terminal is never asked to pay again.
@@ -1041,7 +1041,7 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 
 // PendingVoidClaimsOfInvoice lists the standing void claims of the sale that
 // owns the invoice, in creation order: the account core's application guard
-// (C2-5, the r14 review's P2-1) names them when it refuses an application to
+// (C2-5, the fourteenth review's P2-1) names them when it refuses an application to
 // the invoice's interim open cents.
 func (r *PostgresRepository) PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid.UUID) ([]uuid.UUID, error) {
 	rows, err := r.ex(ctx).Query(ctx, `

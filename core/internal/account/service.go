@@ -48,7 +48,7 @@ func (s *Service) WithOutbox(e EventRecorder) *Service { s.events = e; return s 
 // holds mid act: the counter wires it so that while a sale's void has
 // standing refund claims, the sale's invoice takes no application (its open
 // cents are the void's interim, and a live application would strand the
-// void's completion; C2-5, the r14 review's P2-1). The guard answers the
+// void's completion; C2-5, the fourteenth review's P2-1). The guard answers the
 // standing claims of the invoice's sale, named in the refusal. Optional:
 // without it applications apply as before.
 type InvoiceApplyGuard interface {

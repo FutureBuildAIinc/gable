@@ -3,7 +3,7 @@
 
 package inventory_test
 
-// The write path's row against a real database (the r14 review's P1-2): a
+// The write path's row against a real database (the fourteenth review's P1-2): a
 // branch scoped caller that names a location acts on exactly that location's
 // row, a location outside the caller's branch is refused, and only a request
 // that names no location lets the branch rule pick a row. The stock routes

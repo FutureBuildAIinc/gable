@@ -102,7 +102,7 @@ func TestTheTillReportCardFigureSubtractsBookedVoidRefunds(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
-// RULE (r14 P3-2): the CARD figure subtracts the session's card returns the
+// RULE (fourteenth review P3-2): the CARD figure subtracts the session's card returns the
 // same way the CASH figure subtracts its cash returns: a return's card
 // refund rides its credit memo, so the figure joins it there.
 func TestTheTillReportCardFigureSubtractsCardReturns(t *testing.T) {

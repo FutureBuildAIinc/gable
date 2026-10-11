@@ -1347,6 +1347,19 @@ or ERROR proves nothing either way and leaves the claim standing the same
 way. The gateway's refund id is written onto the intent the
 moment the terminal answers, in its own committed write, so a pending intent
 that carries one is a refund that moved and one without it may not have. A
+claim also records its own terminal call: the call is bounded, every path it
+can take (the refund id's committed write, the decline release, the no
+verdict record, and an abandon stamp for a tender whose call was never
+reached) stamps the answer, and the claim carries an in flight lease from
+the moment it opens. While the terminal has not answered and the lease runs,
+the claim is live, not stranded: the resolve route and the till close refuse
+it (409 `refund_in_flight`), so a tender whose money has not answered cannot
+be released and then refunded twice; once the lease expires with no answer
+at all (a crashed or hung act) the claim is marked UNKNOWN and settles as
+the operator records. The terminal's refund id is written onto the claim
+whatever state it is in, and a recorded refund that never booked holds the
+tender against every later act, so a late answer behind an early release can
+never be paid twice. A
 pending intent is resolved by one guarded admin route, for the finance and
 owner roles and never a machine key, inside the caller's branch (the claim's
 sale is read through the branch context, so a caller outside the branch
@@ -1376,7 +1389,12 @@ completed in an interim state: the booked refund reversed its application,
 so the invoice is open again for the booked cents and the customer's balance
 carries them as owed, until the last claim resolves and the void completes,
 and the till close is refused while any claim of the session is pending, so
-the interim never slips into a counted drawer. The tenders whose refunds
+the interim never slips into a counted drawer. Nothing may be applied to the
+interim invoice while the void's claims stand: every application path (a
+receipt's applications, the apply route, a credit memo, a write off) refuses
+with 409 `void_claim_pending` naming the claims, so the void is always
+completable and a credit that might have been absorbed stays on its own
+payment, payable back whence it came. The tenders whose refunds
 were declined keep their charge as unapplied credit owed to the customer,
 payable back to the card through the payment's own refund route (capped at
 the unapplied cents): that route is the way back. The payment apply route
@@ -1821,7 +1839,11 @@ Inputs proved: IN-1.1, IN-1.2, IN-1.3, IN-1.4, IN-3.2, IN-3.7. Tests: a split
 tender sale posts one invoice entry, one receipt per tender and one
 application entry per tender; the till's expected cash equals the sum of the
 session's cash payments (already net of change; change is never subtracted
-a second time) plus the opening float less cash refunds; a void of a sale with
+a second time) plus the opening float less cash refunds, and the expected
+CARD figure names the session's net card collection, its completed sales'
+card tenders less the booked card refunds (a void's resolutions book against
+the tender's payment) and its card returns' refunds through their credit
+memos, dropping with the tender when a void completes; a void of a sale with
 a card tender refunds through the gateway and leaves the ledger at zero for
 the sale; a return restocks and reverses COGS; the offline sync completes
 each sale through the same path; a sale whose event write fails leaves no

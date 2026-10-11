@@ -37,7 +37,7 @@ const reversalTimeout = 30 * time.Second
 const refundCallTimeout = 30 * time.Second
 
 // refundAnswerLease is the stated in flight timeout the claim carries from
-// the moment it opens (r14 P1-1): while it runs and the terminal has not
+// the moment it opens (fourteenth review P1-1): while it runs and the terminal has not
 // answered, the resolve route and the drawer close refuse the claim; once it
 // expires with no answer at all (a crashed or hung act) the claim becomes
 // resolvable and records that the terminal never spoke. It exceeds the call
@@ -145,7 +145,7 @@ func (s *Service) checkCardClaim(ctx context.Context, saleID, tenderID uuid.UUID
 		return conflict("refund_in_flight",
 			"a card refund of this sale's tender is already in flight: only one refund of a tender runs at a time")
 	}
-	// Defence in depth (r14 P1-1): a recorded refund the terminal moved but
+	// Defence in depth (fourteenth review P1-1): a recorded refund the terminal moved but
 	// the books never took holds the tender even on a settled claim, so a
 	// late answer behind an early release can never be paid twice.
 	if facts.UnbookedRefundedCents > 0 {
@@ -174,7 +174,7 @@ func (s *Service) unknownRefundOutcome(ctx context.Context, intent RefundIntent,
 	s.logger.Error("CRITICAL: the card refund answered no verdict; the claim stands until it is reconciled",
 		"intent_id", intent.ID, "act", intent.Act, "sale_id", intent.SaleID, "tender_id", intent.TenderID,
 		"gateway_tx_id", intent.GatewayTxID, "amount_cents", intent.AmountCents, "error", err)
-	// The call is off the wire (r14 P1-1): stamp the answer so the claim is
+	// The call is off the wire (fourteenth review P1-1): stamp the answer so the claim is
 	// stranded and resolvable, exactly as the unknown outcome row records it,
 	// never held as though its terminal call were still live. A failing stamp
 	// is logged beside the row: the claim stays IN_FLIGHT until its lease

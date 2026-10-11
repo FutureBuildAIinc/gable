@@ -161,7 +161,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	// again until that is reconciled (fourth review P1-4).
 	var refunds []gatewayRefund
 	for i := range intents {
-		// The call is bounded (r14 P1-1): every path it can take ends inside
+		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.
 		callCtx, cancel := context.WithTimeout(ctx, refundCallTimeout)
@@ -184,7 +184,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 			// nothing moved (the claim is released). The refunds already
 			// taken are recorded in committed rows with their claims left
 			// standing, because the money transaction never opens now. The
-			// tenders after this one are never asked (r14 P1-1): their
+			// tenders after this one are never asked (fourteenth review P1-1): their
 			// claims are abandoned, stranded from now rather than held on a
 			// lease for calls that will never be made.
 			if err != nil {
@@ -207,7 +207,7 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 		}
 		// the gateway's own refund id, on the standing claim the moment the
 		// terminal answers and in its own committed write (seventh review
-		// P2-3), whatever state the claim is in (r14 P1-1): a claim carrying
+		// P2-3), whatever state the claim is in (fourteenth review P1-1): a claim carrying
 		// a refund id is a refund that moved
 		if err := s.repo.MarkRefundIntentRefunded(ctx, intents[i].ID, res.TransactionID); err != nil {
 			s.logger.Error("CRITICAL: the gateway's refund id was not written to the claim",

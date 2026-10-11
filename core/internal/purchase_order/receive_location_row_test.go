@@ -3,7 +3,7 @@
 
 package purchase_order_test
 
-// The receipt's row (the r14 review's P1-2): a branch scoped caller that
+// The receipt's row (the fourteenth review's P1-2): a branch scoped caller that
 // receives a line into a named yard writes that yard's row, never the
 // branch's largest row. The receive goes through the same inventory read the
 // stock routes use, so this pins the only other caller of the adjust.

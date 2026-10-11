@@ -150,7 +150,7 @@ func (s *Service) WithInventory(i CounterInventory) *Service { s.inventory = i; 
 // PendingVoidClaimsOfInvoice answers the standing void claims of the sale
 // that owns the invoice, so the AR core's application guard can refuse an
 // application to the invoice's interim open cents while the void's outcome
-// is unsettled (C2-5, the r14 review's P2-1): an application would leave a
+// is unsettled (C2-5, the fourteenth review's P2-1): an application would leave a
 // live row the void's completion cannot reverse, stranding the last claim
 // and the drawer. The service satisfies account.InvoiceApplyGuard; serve
 // wires the two.
