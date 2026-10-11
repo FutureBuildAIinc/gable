@@ -5,9 +5,9 @@
 this open commons repo
 **What this builds on:** the as-built open implementation — `core/internal/ai/openrouter.go`
 (one OpenAI-compatible client) and `core/internal/delivery/ors.go` (OpenRouteService),
-both keyed at runtime via `system_settings`. Summarised in `CLAUDE.md` §
-"External services are OSS-migrated"; module boundaries in
-[`architecture.md`](./architecture.md).
+both keyed at runtime via `system_settings`. Module boundaries in
+[`architecture.md`](./architecture.md): `Logistics / delivery` and the
+`Platform (not apps) / config, ai, domain, notification, techadmin, governance` rows.
 **Last updated:** 2026-06-18
 
 ---
@@ -144,13 +144,14 @@ config change — *except* the OpenRouter-only extensions (`plugins` file-parser
 a self-hosted target degrades gracefully (e.g. self-host its own OCR/PDF + image-gen path).
 
 ### 2.2 Production concerns to specify
-- **Image generation must be async (validated 2026-06-18 on the demo):** synchronous FLUX.2 Pro
-  image gen (~8–24s end-to-end, incl. the multi-MB base64 payload + DB write) reliably exceeds the
-  demo's ~24s App Platform / Cloudflare gateway timeout → HTTP 504, even though the model itself
-  returns in ~8–13s. Text + vision (≤10s) are unaffected. Production fix: generate images in a
-  background job and have the client poll for the result (or stream), rather than blocking the
-  request. Stopgaps that fit under the gateway but don't remove the limit: a faster model
-  (`flux.2-klein-4b`) or a smaller `image_config` size.
+- **Image generation already runs async on the demo** (`core/internal/pim/service.go`
+  `GenerateImage` returns immediately after inserting a `generating` placeholder media row and
+  spawning `go generateImageAsync(...)`; the client polls). A synchronous FLUX.2 Pro image gen
+  (model ~8-13s, end-to-end including the multi-MB base64 payload + DB write ~8-24s) would exceed
+  the demo's ~24s App Platform / Cloudflare gateway timeout -> HTTP 504, which is why the request
+  never blocks on it. Text + vision (<=10s) are unaffected. Stopgaps that fit under a longer-running
+  gateway but don't remove the limit: a faster model (`flux.2-klein-4b`) or a smaller `image_config`
+  size.
 - **Data residency / PII:** freight invoices and material lists contain customer names,
   addresses, pricing. Decide per-tenant whether documents may transit a third-party model;
   offer a self-hosted inference option for dealers that require it.
@@ -199,8 +200,11 @@ The community implementation should preserve these seams so production is config
    adapter — note that divergence when choosing the engine.
 3. **Geocoding:** keep the `Geocode(address) → (lat,lng,confidence)` interface narrow so Pelias
    (community + self-host) or Nominatim/Photon are drop-in.
-4. **Caching & schema:** the `locations.latitude/longitude` columns and a geocode cache added in
-   the community repo carry straight into production.
+4. **Caching & schema:** the `locations.latitude/longitude` columns added in the community repo
+   (lazy-geocoded on first route from each branch and persisted back via
+   `delivery.PostgresRepository.SetBranchLatLng`) carry straight into production. There is no
+   separate geocode cache table today; repeat-address savings come from the persisted
+   `locations` lat/lng itself.
 
 ---
 
