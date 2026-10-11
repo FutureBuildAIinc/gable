@@ -801,11 +801,18 @@ row and nothing changed. A customer the pin holds alone and an unshared
 customer are unchanged for every caller. Who may change a shared customer's
 restricted fields (the principal's ruling on the open question below): a
 user only with the finance or owner role, a machine key only when unbound
-and carrying the dedicated `customers:restricted` scope. A sales or admin
-user, and every unbound key without the scope, are refused in the same
-words naming the lowest numbered branch holding the customer; a caller with
-no claims at all is refused fail closed; a bound key is refused even with
-the scope. The scope is in the grant grammar (ADR 0002 section 2) though no
+and carrying the dedicated `customers:restricted` scope. The finance role
+reaches exactly the three routes that change those fields (the header
+write, the salesperson and the escalation policy) and no other customer
+route: customer and contact create, the reads and the other writes keep the
+roles they had before this section. A sales or admin user, and every
+unbound key without the scope, are refused in the same words as the bound
+key (the words of the rule above, naming the lowest numbered branch holding
+the customer) and the refusal writes a `customer.shared_restricted_refused`
+row for the customer, naming the actor, the refused fields, that branch and
+the method and path (the bound key's refusal keeps its `key.branch_refused`
+row); a caller with no claims at all is refused fail closed; a bound key is
+refused even with the scope. The scope is in the grant grammar (ADR 0002 section 2) though no
 route requires it, so no module scope and no default grant carries it; only
 an owner may mint it, and the mint's `key.created` audit row names it. An
 allowed key's change is audited as `customer.shared_restricted_changed`
@@ -813,7 +820,9 @@ with the key as the actor and the before and after value of each field; a
 user's change writes no row. Ship-tos and contacts carry no branch column,
 so for a shared customer every existing one is shared: a bound key reads
 them and may add new ones but may not change or delete any (the same
-refusal), and an add that names `is_default: true` is refused like a
+refusal; CRM activities follow the same rule, because an activity carries no
+branch tag, so on a shared customer a bound key adds one and never changes
+or deletes one), and an add that names `is_default: true` is refused like a
 change, because naming a default clears the existing default, a shared
 ship to every branch's delivery orders default to; for a customer the pin
 holds alone all of it is allowed. The escalation audit's before and after

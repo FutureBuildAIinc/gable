@@ -166,10 +166,12 @@ segment is the first path segment under `/api/v1/`). Ship-tos need
 `contacts:read` or `contacts:write`; payment terms need
 `payment-terms:read` or `payment-terms:write`; price levels need
 `price_levels:read`. The user guard at the serve layer is
-`admin`, `owner`, `sales` and `finance` for customer reads and writes
-(finance reaches the record so the shared customer rule below can hear
-its role), with `admin`, `owner`, `finance` taking the narrower payment
-terms writes; the exact guard is composed in
+`admin`, `owner` and `sales` for customer reads and writes, with
+`admin`, `owner`, `finance` taking the narrower payment terms writes and
+`finance` added on exactly the three routes that change a customer's
+restricted fields (`PUT /customers/{id}`, `PATCH /customers/{id}/salesperson`
+and `PUT /customers/{id}/escalation-policy`; the shared customer rule below
+hears its role there) and on no other customer route; the exact guard is composed in
 `core/internal/app/serve/wire_branch_wall.go` at `wall.customers`.
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
@@ -185,10 +187,13 @@ numbered other branch), with the `key.branch_refused` row, and the record is
 untouched. A customer the key's branch holds alone and an unshared customer
 are unchanged for every caller. Who else may change a shared customer's
 restricted fields: a user only with the `finance` or `owner` role (a sales
-or admin user is refused in the same words naming a branch that holds the
-customer, and a caller with no claims at all is refused fail closed), and a
-dealer wide key only while it carries the dedicated `customers:restricted`
-scope; every other unbound key is refused with the same words, and a branch
+or admin user is refused in the bound key's words naming the lowest
+numbered branch that holds the customer, and a caller with no claims at all
+is refused fail closed), and a dealer wide key only while it carries the
+dedicated `customers:restricted` scope; every other unbound key is refused
+in the same words. A refusal of a user or an unbound key writes a
+`customer.shared_restricted_refused` audit row for the customer naming the
+actor, the refused fields, that branch and the method and path. A branch
 bound key is refused even with the scope. The scope is in the grant grammar
 but no route requires it, so no module scope and no default grant carries
 it; only an owner may mint it, and the mint's `key.created` audit row names

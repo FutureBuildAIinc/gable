@@ -124,7 +124,13 @@ second branch's request is a 404. For every caller, a create or an update
 refuses a `contact_id` the activity's customer does not own with a `400
 validation_failed` naming `contact_id` ("is not a contact of this
 customer", the order's words), so one branch's record can never point at
-another's contact. A key without the scope is `403
+another's contact. On a customer another branch also holds, a branch bound
+key adds an activity but never changes or deletes one: an activity carries
+no branch tag, so every existing one is shared. The refusal is `403
+forbidden` in the customer contact rule's words ("a branch bound key may act
+only on its own branch: the customer is also held by branch <id>"), with the
+`key.branch_refused` row and the activity untouched; a customer the pin holds
+alone, an unbound key and a user are unchanged. A key without the scope is `403
 forbidden`; the audit row carries the refused scope.
 
 ## ADRs that govern this module
