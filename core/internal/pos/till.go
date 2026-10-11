@@ -30,7 +30,12 @@ func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, c
 		expected[m] = v
 	}
 	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds
-	expected["CARD"] = tendered["CARD"] - cardRefunds
+	// The CARD figure is written only where the session collected on cards:
+	// a cash only session's report carries no card figure, as before (a
+	// booked card refund always implies the tender that was collected).
+	if cardTendered, ok := tendered["CARD"]; ok {
+		expected["CARD"] = cardTendered - cardRefunds
+	}
 	return expected
 }
 

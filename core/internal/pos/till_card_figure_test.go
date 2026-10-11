@@ -101,3 +101,36 @@ func TestTheTillReportCardFigureSubtractsBookedVoidRefunds(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 }
+
+// RULE (the report's shape): the CARD figure is written only where the
+// session collected on cards. A cash only session's report carries no CARD
+// entry at all (a zero figure would name a collection that never happened),
+// and the close stores the same map.
+func TestTheTillReportCarriesNoCardFigureForACashOnlySession(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	sessionID := f.openTill(10000)
+	f.saleOf("1", tender("cash", 599))
+	r := f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
+	if r.status != http.StatusOK {
+		t.Fatalf("the till report = %d: %s", r.status, r.raw)
+	}
+	byMethod, ok := r.body["expected_by_method"].(map[string]any)
+	if !ok {
+		t.Fatalf("the report carries no expected_by_method: %s", r.raw)
+	}
+	if _, ok := byMethod["CARD"]; ok {
+		t.Errorf("the cash only session's report carries a CARD figure (%v), want none", byMethod["CARD"])
+	}
+	if v := int64Of(byMethod["CASH"]); v != 10000+599 {
+		t.Errorf("expected CASH = %d, want %d (the float and the cash tender)", v, 10000+599)
+	}
+	if cr := f.do("POST", "/api/v1/pos/till/"+sessionID+"/close", map[string]any{
+		"counted_by_method": map[string]any{"cash": 10599},
+	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); cr.status != http.StatusOK {
+		t.Fatalf("the close = %d: %s", cr.status, cr.raw)
+	}
+	if _, ok := f.tillExpected(t, sessionID)["CARD"]; ok {
+		t.Errorf("the closed session's stored expected_by_method carries a CARD figure, want none")
+	}
+}
