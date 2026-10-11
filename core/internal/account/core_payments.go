@@ -212,6 +212,11 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	plans := make([]plan, 0, len(lines))
 	for _, l := range lines {
 		inv := byID[l.InvoiceID]
+		// the counter's hold first (C2-5): a held interim invoice refuses
+		// before its amounts are even read
+		if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+			return err
+		}
 		switch {
 		case inv.Status == invVoid:
 			return conflict("invoice_void", "the invoice is void: it takes no application")
@@ -357,6 +362,11 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	}
 	for _, l := range in.Lines {
 		inv := byID[l.InvoiceID]
+		// the counter's hold first (C2-5): a held interim invoice refuses
+		// before its amounts are even read
+		if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+			return nil, err
+		}
 		switch {
 		case inv.Status == invVoid:
 			return nil, conflict("invoice_void", "the invoice is void: it takes no application")
@@ -414,6 +424,11 @@ func (s *Service) WriteOff(ctx context.Context, in WriteOffIn) (*Effects, error)
 	inv := byID[in.InvoiceID]
 	if inv.Status != invUnpaid && inv.Status != invPartial {
 		return nil, httpx.InvalidStateTransition("only an unpaid or partly paid invoice can be written off: it is " + lower(inv.Status))
+	}
+	// the counter's hold first (C2-5): a held interim invoice refuses before
+	// its amounts are even read
+	if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+		return nil, err
 	}
 	if in.AmountCents > inv.Open {
 		return nil, conflict("exceeds_open_amount", fmt.Sprintf("invoice %s has %d cents open: %d cents were asked", inv.Number, inv.Open, in.AmountCents))

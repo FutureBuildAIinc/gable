@@ -382,29 +382,36 @@ func (s *Service) setPaymentUnapplied(ctx context.Context, p *paymentRow, newUna
 	return nil
 }
 
-// insertApplication writes one application row. Every application path
-// passes here (a receipt's applications, the apply route, a credit memo, a
-// write off, the deposits), so this is the single place another module's
-// hold on the invoice is enforced: while the counter's split void has
-// standing claims, the invoice's open cents are an interim, and an
-// application would leave a live row the void's completion cannot reverse
-// (C2-5, the fourteenth review's P2-1).
-func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time, actor string, reason *string, glEntry *uuid.UUID) error {
-	if s.applyGuard != nil {
-		claims, err := s.applyGuard.PendingVoidClaimsOfInvoice(ctx, a.InvoiceID)
-		if err != nil {
-			return err
-		}
-		if len(claims) > 0 {
-			ids := make([]string, 0, len(claims))
-			for _, id := range claims {
-				ids = append(ids, id.String())
-			}
-			return conflict("void_claim_pending",
-				fmt.Sprintf("this invoice's sale has a void whose refund claims still stand (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before applying anything to the invoice",
-					strings.Join(ids, ", ")))
-		}
+// refuseHeldInvoice refuses an application to an invoice another module
+// holds mid act: the counter wires the guard (C2-5, the fourteenth review's
+// P2-1) so that while a sale's void has standing refund claims, the sale's
+// invoice takes no application: its open cents are the void's interim, and a
+// live application would strand the void's completion. The refusal names the
+// standing claims and comes before the amount checks, so the operator is
+// told the invoice is held whatever they asked for. Without a guard nothing
+// changes.
+func (s *Service) refuseHeldInvoice(ctx context.Context, invoiceID uuid.UUID) error {
+	if s.applyGuard == nil {
+		return nil
 	}
+	claims, err := s.applyGuard.PendingVoidClaimsOfInvoice(ctx, invoiceID)
+	if err != nil {
+		return err
+	}
+	if len(claims) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(claims))
+	for _, id := range claims {
+		ids = append(ids, id.String())
+	}
+	return conflict("void_claim_pending",
+		fmt.Sprintf("this invoice's sale has a void whose refund claims still stand (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before applying anything to the invoice",
+			strings.Join(ids, ", ")))
+}
+
+// insertApplication writes one application row.
+func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time, actor string, reason *string, glEntry *uuid.UUID) error {
 	_, err := s.ex(ctx).Exec(ctx, `
 		INSERT INTO ar_applications (id, customer_id, currency, kind, payment_id, credit_memo_id, invoice_id, amount, reason,
 			applied_on, applied_by, act_id, gl_entry_id, created_at)
