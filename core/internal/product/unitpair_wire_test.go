@@ -91,6 +91,7 @@ func (f *pairWireFixture) pairQuoteLine(t *testing.T, productID, customerID, uom
 }
 
 func TestUnitPairWire(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newPairWireFixture(t)
 	ctx := context.Background()
 

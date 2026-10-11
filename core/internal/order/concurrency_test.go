@@ -54,6 +54,13 @@ func newPoolWorld(t *testing.T, n int) *poolWorld {
 		}
 	}
 	must(`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Pool Co', $2, `+branch+`)`, w.customerID, "POOL-"+uuid.NewString()[:8])
+	// The default branch's rate is shared state: read the prior value and
+	// restore it in cleanup, so this world's write does not leak a rate onto
+	// a neighbouring test in any package.
+	var oldRate *string
+	if err := db.Pool.QueryRow(ctx, `SELECT default_tax_rate::text FROM locations WHERE id = `+branch).Scan(&oldRate); err != nil {
+		t.Fatalf("read default branch rate: %v", err)
+	}
 	must(`UPDATE locations SET default_tax_rate = 0.088750 WHERE id = ` + branch)
 	yard := uuid.New()
 	must(`INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, `+branch+`, `+branch+`)`, yard, "PL-"+yard.String()[:8])
@@ -64,6 +71,7 @@ func newPoolWorld(t *testing.T, n int) *poolWorld {
 		must(`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 1000, 0)`, p, yard)
 	}
 	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `UPDATE locations SET default_tax_rate = $1 WHERE id = `+branch, oldRate)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT e.id FROM gl_journal_entries e JOIN invoices i ON e.source_ref_id = i.id WHERE i.customer_id = $1)`, w.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id IN (SELECT id FROM invoices WHERE customer_id = $1)`, w.customerID)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_id IN (SELECT id FROM orders WHERE customer_id = $1) OR entity_id IN (SELECT id FROM invoices WHERE customer_id = $1)`, w.customerID)

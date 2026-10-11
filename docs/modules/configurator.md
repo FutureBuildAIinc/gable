@@ -33,8 +33,8 @@ sales rep picks from.
 Every route is in `core/api/fragments/configurator.yaml` and the
 registered handles are in `core/internal/configurator/handler.go`.
 The route census (`core/api/ROUTES.txt`) lists each one under the
-`internal/configurator` package (the route census has a `package`
-column, not a module column).
+`internal/configurator` module (the `module` column is the registering
+package's directory relative to the Go module root).
 
 | Method | Path | One line |
 |---|---|---|
@@ -46,7 +46,24 @@ column, not a module column).
 
 Every route registers under the millwork app (a 404
 `app_disabled` when the millwork app is off) and the `admin`,
-`owner` or `sales` guard.
+`owner` or `sales` guard. The `GET` routes take a strict set of
+query parameters; a parameter the route does not declare is a 400
+`unsupported_query_parameter` (`core/internal/platform/httpx`).
+
+| Method | Path | Query parameters |
+|---|---|---|
+| GET | `/api/v1/configurator/rules` | none (every declared name is a 400) |
+| GET | `/api/v1/configurator/options` | `attribute_type` (required, single value); `selections` (a comma separated list of `Type=Value` pairs) |
+| GET | `/api/v1/configurator/presets` | `product_type` (single value; absent or empty lists every active preset) |
+| POST | `/api/v1/configurator/validate` | none (every declared name is a 400) |
+| POST | `/api/v1/configurator/build-sku` | none (every declared name is a 400) |
+
+The options route reads `attribute_type` once; a repeated or blank
+value is a 400 naming it. The options route reads `selections`
+once; a repeated parameter is a 400 naming it, and a pair without
+`=` or with an empty key or value is a 400 ("must be a comma
+separated list of Type=Value pairs"). The presets route reads
+`product_type` once; a repeated parameter is a 400 naming it.
 
 ## The main resources
 
@@ -77,12 +94,74 @@ validates first, answers 400 `validation_failed` with one
 `config_conflict` blocker per violated rule, and otherwise returns
 `{sku, description}`.
 
+## Request bodies
+
+The two `POST` routes take a JSON body parsed in
+`core/internal/configurator/handler.go` `parseSelectionsBody`. The
+body is bounded by the platform request size limit (10 MiB,
+`core/internal/app/serve/chain.go`); a larger body is a 413. A body
+that is not valid JSON, or is empty, is a 400 that names no field;
+an empty `selections` map is a 400 naming `selections`. Every
+problem collected by the parse is answered in a single 400.
+
+### Validate (`POST /api/v1/configurator/validate`)
+
+The schema is `ConfiguratorValidateRequest`; the Go type is the
+local `parseSelectionsBody` decode.
+
+| Field | Required | Note |
+|---|---|---|
+| `selections` | yes | A map from attribute type to chosen value; missing or empty is a 400 naming "is required". |
+| `product_type` | refused | A present value is a 400 naming "is not a field of this route". |
+
+### Build SKU (`POST /api/v1/configurator/build-sku`)
+
+The schema is `ConfiguratorBuildSKURequest`; the Go type is the
+local `parseSelectionsBody` decode with `productType = true`.
+
+| Field | Required | Note |
+|---|---|---|
+| `product_type` | yes | Absent or blank after trim is a 400 naming "is required". |
+| `selections` | yes | A map from attribute type to chosen value; missing or empty is a 400 naming "is required". |
+
+The SKU rule is `NS-<product type code>-<species>-<grade>-<treatment>-<dimensions>`
+joined with `-` (`core/internal/configurator/service.go` `BuildSKU`).
+The product type code maps `Lumber` to `LBR`, `Door` to `DR`,
+`Trim` to `TRM`, `Panel` to `PNL`; any other product type is upper
+cased and cut to three characters. The four selection keys are
+`Species`, `Grade`, `Treatment`, `Dimensions`, in that order;
+their values are upper cased and spaces become hyphens. Selection
+keys other than those four are ignored. Selection values that are
+empty or `"None"` are skipped (they do not appear in the SKU or
+the description). The description joins the same keys with spaces
+in the same order, again skipping empty and `"None"` values, and
+prefixes the product type.
+
+## Error answers on the write routes
+
+The error answers below are the ones declared in
+`core/api/fragments/configurator.yaml` and the codes raised by the
+service and the platform layer; the source that raises each is
+named in the source column.
+
+| Status | Meaning | Source |
+|---|---|---|
+| 400 | A missing required field, an unknown field on the route (`product_type` on validate), invalid or empty JSON, an empty `selections` map, or a `validation_failed` whose details carry one `config_conflict` blocker per violated rule on build-sku. | `configurator.yaml` `BadRequestEither`; `handler.go` `parseSelectionsBody`; `service.go` `BuildSKU` (`httpx.CodeValidationFailed`, `httpx.Blocker("config_conflict", ...)`) |
+| 401 | The auth layer answers every route with the ADR 0001 envelope, code `unauthorized`. | `_shared.yaml` `Unauthorized`; `pkg/middleware` auth |
+| 403 | The role guard or the machine-key scope check refuses the caller, code `forbidden`. | `_shared.yaml` `Forbidden`; `pkg/middleware` machinekey |
+| 404 | The millwork app is disabled and the route's gated router answers `app_disabled`. | `configurator.yaml` `AppDisabled`; apps registry gate |
+| 413 | The body exceeded the platform's request size limit. | `_shared.yaml` `PayloadTooLarge` |
+| 422 | The idempotency layer rejected the write (`idempotency_key_reused` for a key replayed with a different request: method, path, query or body). | `_shared.yaml` `UnprocessableEntity`; idempotency middleware |
+| 500 | A handler or database error. | `configurator.yaml` `InternalErrorEither` |
+
 ## Lifecycle and transitions
 
 The configurator has no lifecycle of its own. The rules and the
 presets are master data; the module owns no write, no audit row
-and no event. The build route is idempotent through the platform
-`Idempotency-Key` header.
+and no event. Both `POST` routes take the `Idempotency-Key`
+header; a replay of a completed request answers with
+`Idempotency-Replayed: true` (the `Idempotency-Key` parameter on
+`core/api/fragments/_shared.yaml`).
 
 ## Events the module writes
 

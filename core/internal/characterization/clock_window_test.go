@@ -3,7 +3,10 @@
 
 package characterization
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // TestNormaliseRunTimingEta pins the normalisation that makes the route
 // goldens independent of the wall clock near UTC midnight: an ETA is the
@@ -11,23 +14,55 @@ import "testing"
 // must produce the same transcript. The end-of-run guard cannot catch it (the
 // run ends before midnight; only the ETA crosses it).
 func TestNormaliseRunTimingEta(t *testing.T) {
-	n := &normaliser{ids: map[string]string{}, seedDay: "2031-01-15"}
+	// The captured instant sits just before midnight: every timestamp the run
+	// writes after it counts from here.
+	n := &normaliser{ids: map[string]string{}, seedDay: "2031-01-15", base: time.Date(2031, 1, 15, 23, 59, 50, 0, time.UTC)}
 	for _, eta := range []string{
 		"2031-01-15T12:15:00Z", // midday
 		"2031-01-16T00:09:50Z", // 23:59:50 plus a 10 minute leg
 		"2031-01-15T23:59:50-08:00",
 	} {
-		body := map[string]any{"eta": eta, "estimated_arrival": eta, "other": "2031-01-16T00:09:50Z"}
+		body := map[string]any{"eta": eta, "estimated_arrival": eta, "other": "2031-02-14T23:59:55Z"}
 		got := n.value(body, "").(map[string]any)
 		if got["eta"] != "<eta>" || got["estimated_arrival"] != "<eta>" {
 			t.Errorf("eta %q normalised to %v / %v, want <eta>", eta, got["eta"], got["estimated_arrival"])
 		}
-		if got["other"] != "<ts+1d>" {
+		if got["other"] != "<ts+30d>" {
 			t.Errorf("a field that is not run timing must keep its day offset, got %v", got["other"])
 		}
 	}
 	if got := n.value(map[string]any{"eta": nil}, "").(map[string]any)["eta"]; got != nil {
 		t.Errorf("a null eta must stay null, got %v", got)
+	}
+}
+
+// TestNormaliseCountsFromTheCapturedInstant pins the day-boundary fix: with
+// the capture taken just before UTC midnight, a timestamp the run writes just
+// after midnight counts as the same day (+0d), not the next calendar day
+// (+1d), because it falls inside the run's window from the captured instant,
+// while everything outside that window (date arithmetic a month out, the
+// seed's backdated fixtures, a value a full day later) keeps the calendar
+// day count the goldens recorded.
+func TestNormaliseCountsFromTheCapturedInstant(t *testing.T) {
+	base := time.Date(2031, 1, 15, 23, 59, 30, 0, time.UTC)
+	n := &normaliser{ids: map[string]string{}, seedDay: base.Format(dayLayout), base: base}
+	for _, c := range []struct {
+		ts   string
+		want string
+		why  string
+	}{
+		{"2031-01-15T23:59:45Z", "<ts+0d>", "written seconds after the capture, same side of midnight"},
+		{"2031-01-16T00:00:20Z", "<ts+0d>", "written seconds after the capture, across midnight"},
+		{"2031-01-16T00:09:50Z", "<ts+0d>", "written minutes after the capture, across midnight"},
+		{"2031-02-14T23:59:45Z", "<ts+30d>", "a net-30 style due date keeps its day count"},
+		{"2031-01-16T23:59:40Z", "<ts+1d>", "a full day later, still +1d"},
+		{"2031-01-15T23:59:29Z", "<ts+0d>", "dated before the capture on the seed day, calendar count"},
+		{"2031-01-15 00:05:00", "<ts+0d>", "the Postgres text form, dated before the capture on the seed day"},
+		{"2030-11-01T00:00:00Z", "<ts-75d>", "a backdated fixture keeps its calendar day count"},
+	} {
+		if got := n.string(c.ts); got != c.want {
+			t.Errorf("ts %q (%s) normalised to %s, want %s", c.ts, c.why, got, c.want)
+		}
 	}
 }
 

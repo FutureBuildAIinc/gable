@@ -189,6 +189,7 @@ func TestDraftPayloadRefusals(t *testing.T) {
 // and a PUT can move subject_revision only forward and only up to the
 // subject's current revision.
 func TestDraftSubjectRevisionAndRebaseBounds(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 
 	// Make a quote to edit: create, then promote one draft onto it.
@@ -316,6 +317,7 @@ func TestDraftRevisionPreconditions(t *testing.T) {
 // edit is not a transition), open discards, discarded reopens, and promoted
 // is terminal.
 func TestDraftEditRuleAndTransitions(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	id := f.create()
 
@@ -374,6 +376,7 @@ func TestDraftEditRuleAndTransitions(t *testing.T) {
 // status, subject and creator filters, the branch wall's shape, the cursor
 // walking every row once, and the strictness.
 func TestDraftListAndCursor(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	mine := []string{f.create(), f.create(), f.create()}
 	subject := f.createQuote(t)

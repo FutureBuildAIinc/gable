@@ -66,6 +66,27 @@ The `ActivityType` enum is the four values above; the database keeps
 its uppercase CHECK vocabulary, mapped at the boundary (ADR 0001
 section 6).
 
+### The request body
+
+`POST` and `PUT` take one body, `ActivityRequest`. Every field problem
+is collected into one 400 with a `details` entry per field, and an
+unknown field is refused.
+
+| Field | Type | Rules |
+|---|---|---|
+| `activity_type` | `ActivityType` | Required; one of the four values. |
+| `description` | text | Required; trimmed, not empty, at most 4000 characters. |
+| `contact_id` | UUID, nullable | Optional. |
+| `logged_by` | UUID, nullable | Optional. |
+| `activity_date` | timestamp | Optional; defaults to now on create. |
+| `revision` | integer | On update only, 1 or more; a create carrying one is a 400. |
+
+The customer is named by the path on both routes: a body
+`customer_id` is a 400. A `PUT` replaces `activity_type`,
+`description`, `contact_id` and `logged_by`, so one it leaves out is
+cleared; only `activity_date` keeps its stored value when the body
+leaves it out.
+
 ### Money and quantity conventions
 
 Activities carry no money and no quantity. The list cursor is the

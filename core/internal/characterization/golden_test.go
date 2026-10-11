@@ -48,7 +48,7 @@ import (
 // Everything else - money, statuses, field names, error text, null versus
 // empty array - is real behaviour and is compared byte for byte.
 func normaliseTranscript(steps []capturedStep) []capturedStep {
-	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay, base: seedInstant}
 	for i := range steps {
 		steps[i].Request.Path = n.string(steps[i].Request.Path)
 		steps[i].Request.Body = n.value(steps[i].Request.Body, "")
@@ -63,7 +63,8 @@ func normaliseTranscript(steps []capturedStep) []capturedStep {
 type normaliser struct {
 	ids     map[string]string
 	count   int
-	seedDay string // UTC day of the seed, "2006-01-02"; dates normalise to offsets from it
+	seedDay string    // UTC day of the seed, "2006-01-02"; dates normalise to offsets from it
+	base    time.Time // the instant seedDay was captured; timestamps count day offsets from it
 }
 
 var (
@@ -199,21 +200,54 @@ func (n *normaliser) string(s string) string {
 	return s
 }
 
-// tsPlaceholder rewrites one timestamp as <ts+Nd> / <ts-Nd>: N is the value's
-// day offset from the seed day (taken from the leading date; the within-day
-// time is run timing). The regex has already asserted the shape; a parse
-// failure is a harness bug and keeps the raw value (loudly failing every
-// comparison) rather than silently degrading.
+// tsPlaceholder rewrites one timestamp as <ts+Nd> / <ts-Nd>: N is the
+// value's calendar-day offset from the seed day, as ever, except that a
+// value whose instant falls inside the run's own window (the captured seed
+// instant to two hours past it) counts +0d. The run's own writes (created
+// at, updated at) are minutes after the capture; counting their calendar
+// days flipped them from +0d to +1d when those minutes crossed UTC
+// midnight, which the end-of-run guard cannot catch (it compares the day
+// only after every group ran). On a run that never crosses midnight the
+// window changes nothing: every value inside it sits on the seed day and
+// already counted +0d, so the recorded goldens are byte for byte what they
+// were. The regex has already asserted the shape; a parse failure is a
+// harness bug and keeps the raw value (loudly failing every comparison)
+// rather than silently degrading.
 func (n *normaliser) tsPlaceholder(m string) string {
 	d, err := time.Parse(dayLayout, m[:10])
 	if err != nil {
 		return "<ts>"
 	}
 	off := int(d.Sub(parseSeedDay(n.seedDay)).Hours() / 24)
+	if v, ok := parseInstant(m); ok && !v.Before(n.base) && v.Before(n.base.Add(2*time.Hour)) {
+		off = 0
+	}
 	if off >= 0 {
 		return fmt.Sprintf("<ts+%dd>", off)
 	}
 	return fmt.Sprintf("<ts%dd>", off)
+}
+
+// parseInstant parses one matched timestamp in the shapes the two regexes
+// accept: RFC 3339 with Z or a numeric offset, the Postgres text form with
+// an hours-only offset, and the Postgres text form with no offset (read as
+// UTC, the pinned zone of the harness database).
+func parseInstant(m string) (time.Time, bool) {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999999999-0700",
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02 15:04:05.999999999-07",
+		"2006-01-02 15:04:05-07",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		if v, err := time.Parse(layout, m); err == nil {
+			return v, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // dayOffset rewrites one calendar date as its day offset from the seed day.
@@ -250,7 +284,7 @@ func parseSeedDay(s string) time.Time {
 // normalisation applied: it pins what the document says, not where each glyph
 // sits.
 func binarySummary(raw []byte) map[string]any {
-	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay, base: seedInstant}
 	text := pdfText(raw)
 	sum := sha256.Sum256([]byte(n.string(text)))
 	return map[string]any{

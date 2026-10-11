@@ -45,8 +45,10 @@ Every route is in `core/api/fragments/admin.yaml` and
 `core/internal/staff/routes.go` (the staff roster and the module flags)
 and `core/pkg/apps/handler.go` (the apps catalog). The route census
 (`core/api/ROUTES.txt`) lists each one under the `internal/techadmin`,
-`internal/staff` or `pkg/apps` package (the route census has a `package`
-column, not a module column).
+`internal/staff` or `pkg/apps` module, the third tab column of the
+census header line `method pattern module handler` (the column holds
+the registering package's directory, the convention every other
+module shares).
 
 The exposure scan route at `POST /api/v1/admin/exposure-scan` is the
 pricing module's `HandleAdminScan`; the route guard admits
@@ -105,14 +107,18 @@ leaves the package. The raw key never appears in `ApiKey`: it lives in
 the `api_key` field of the `AdminCreateKeyResponse` envelope and only
 there, at mint.
 
-`AdminCreateKeyRequest` carries `name` (required) and `scopes`
-(optional, array of text; a mint naming none grants none). One scope has
-its own gate: `customers:restricted` (the shared customer restricted
-fields admission, ADR 0007 section 5.5) is granted only by an owner, the
-admin role getting a `403 forbidden` that names the scope; the mint's
-`key.created` audit row names every granted scope, that one included. `AdminCreateKeyResponse` carries `api_key`
-(the raw key, `sk_live_` plus 43 URL safe base64 characters) and `key`
-(the saved `ApiKey` row).
+`AdminCreateKeyRequest` carries `name` (required), `scopes`
+(optional, array of text; stored verbatim, grammar validation at the
+mint is ADR 0007 section 5.3) and `branch_id` (nullable UUID; the
+branch bound key's pin per ADR 0007 section 5.5, set at mint and never
+edited). A mint naming no scopes grants none. One scope has its own
+gate: `customers:restricted` (the shared customer restricted fields
+admission, ADR 0007 section 5.5) is granted only by an owner, the admin
+role getting a `403 forbidden` that names the scope, and the mint's
+`key.created` audit row names every granted scope, that one included.
+`AdminCreateKeyResponse` carries `api_key` (the raw key, `sk_live_`
+plus 43 URL safe base64 characters) and `key` (the saved `ApiKey` row,
+which also carries `branch_id`).
 
 `AISettings` (`components.schemas.AISettings`) is the AI settings
 document: a singleton with a revision anchor in `admin_revisions`.
@@ -127,7 +133,8 @@ document: a singleton with a revision anchor in `admin_revisions`.
 
 `AdminSaveAISettingsRequest` carries `api_key` (required),
 `base_url` (pointer: absent leaves the override, empty clears it, a URL
-sets it; http and non host URLs are refused) and `revision` (the body
+sets it; non host URLs are refused, plaintext http is allowed only for
+loopback hosts, the rest must use https) and `revision` (the body
 form of the `If-Match` precondition; 428 without, 409 stale).
 
 `RoutingSettings` (`components.schemas.RoutingSettings`) is the routing
@@ -153,6 +160,74 @@ The apps list envelope is `{apps: [...]}`; it is not the list envelope
 of ADR 0001 section 1 (no cursor, no `next_cursor`, no `limit`, no
 `include=total`). The enable and disable answers return the same
 envelope after the change.
+
+## Headers and error answers
+
+`POST /api/v1/admin/keys` carries the `Idempotency-Key` header (ADR
+0001 section 9); the 201 answer carries the `Location` header
+(`/api/v1/admin/keys/{id}`). The error answers are 400 (validation:
+`name` required and at most 255 characters; each `scopes[i]` non
+empty, at most 128 printable ASCII characters and one the grant
+grammar knows (`middleware.ValidScopeGrammar`: a known module's
+`<module>:<verb>`, with `propose` and `commit` only on a module with a
+registered draft kind); at most 64 scopes; `branch_id` a UUID naming an existing
+branch location, or null), 401, 403, 409 (the `Idempotency-Key`
+already in progress, `idempotency_in_progress`), 413 (payload too
+large), 422 (the `Idempotency-Key` reused with a different request,
+`idempotency_key_reused`) and 500.
+
+`GET /api/v1/admin/keys` accepts the `cursor`, `limit` and `include`
+parameters of ADR 0001. The error answers are 400 (strict query), 401,
+403, 500.
+
+`DELETE /api/v1/admin/keys/{id}` is outside the idempotency layer (a
+malformed id is a 400 naming `id`, an unknown key is a 404, a live
+key is a 204, an already revoked key an idempotent 204). The error
+answers are 400, 401, 403, 404, 500.
+
+`GET /api/v1/admin/settings/ai` carries no `Idempotency-Key` (a GET).
+The 200 answer carries the `ETag` header (the revision in quotes). The
+error answers are 401, 403, 500.
+
+`PUT /api/v1/admin/settings/ai` carries `Idempotency-Key` and
+`If-Match` (the revision in quotes; optional, `revision` is the body
+form, 428 without either, 409 `stale_revision` on a stale one). The
+200 answer carries the `ETag` header (the new revision). The error
+answers are 400, 401, 403, 409, 413, 422, 428, 500.
+
+`DELETE /api/v1/admin/settings/ai` requires `If-Match` (the revision
+in quotes) and answers 204. The error answers are 401, 403, 409, 428,
+500.
+
+`GET /api/v1/admin/settings/routing` mirrors the AI settings: the 200
+answer carries the `ETag` header, the error answers are 401, 403, 500.
+
+`PUT /api/v1/admin/settings/routing` carries `Idempotency-Key` and
+`If-Match`; the 200 answer carries the `ETag` header. The error
+answers are 400, 401, 403, 409, 413, 422, 428, 500.
+
+`DELETE /api/v1/admin/settings/routing` requires `If-Match`; the
+error answers are 401, 403, 409, 428, 500.
+
+`GET /api/v1/apps` is reachable by any authenticated role (no admin
+guard). The error answers are 401, 500.
+
+`POST /api/v1/apps/{key}/enable` carries `Idempotency-Key`. The 200
+answer is the full apps list envelope `{apps: [...]}`. The error
+answers are 400, 401, 403, 404 (the key names no compiled in manifest
+or the manifest has no registry row, the standard error envelope), 409
+(`app_dependency_conflict` with the blockers, or the idempotency
+in_progress claim), 413, 422, 500.
+
+`POST /api/v1/apps/{key}/disable` carries `Idempotency-Key`. The 200
+answer is the full apps list envelope. The error answers are 400, 401,
+403, 404, 409 (`app_core`, `app_dependency_conflict` with the
+dependents as blockers, or the idempotency in_progress claim), 413,
+422, 500.
+
+`POST /api/v1/admin/exposure-scan` carries `Idempotency-Key`. The 200
+answer is `AdminExposureScanResult` (`ok` boolean). The error answers
+are 400, 401, 403, 409, 413, 422, 500.
 
 ### Money and quantity conventions
 
@@ -229,7 +304,8 @@ The user guard at the serve layer for every tech admin route (key
 management, AI and routing settings, the staff roster and the module
 flags) is `admin`, `owner` (the exact guard is composed in
 `core/internal/app/serve/serve.go` at the `techAdminHandler.RegisterRoutes`
-line for techadmin, at the `staffHandler.RegisterRoutes` line for staff).
+line for techadmin, in `core/internal/app/serve/wire_staff.go` at the
+`staffHandler.RegisterRoutes` line for staff).
 The apps catalog is reachable by every authenticated role (the SPA
 needs it to build its navigation); the apps toggle routes require
 `admin` or `owner`. A key without the scope is `403 forbidden`; the

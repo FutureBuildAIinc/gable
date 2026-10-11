@@ -16,6 +16,7 @@ import (
 )
 
 func TestWire_ReadQuoteByDocumentNumber(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	r := f.create()
 	number := str(t, r.body, "number")

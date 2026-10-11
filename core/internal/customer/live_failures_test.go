@@ -111,6 +111,7 @@ func TestLiveFailure_ErrorEnvelope(t *testing.T) {
 // cannot take answered 500. A customer with no tier hit the enum cast, and a
 // duplicate account number the unique index.
 func TestLiveFailure_CreateWhatTheDatabaseCannotTake(t *testing.T) {
+	testutil.LockOutboxTables(t) // this test writes events_outbox rows
 	f := newFixture(t, testutil.RequireDB(t))
 	first := f.do("POST", "/api/v1/customers", map[string]any{"account_number": f.account(), "name": "No Tier Co"})
 	if first.status != http.StatusCreated {
