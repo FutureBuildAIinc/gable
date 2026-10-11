@@ -56,6 +56,27 @@ column, not a module column).
 | `product` | object, optional | The product summary, embedded under `include=product`. |
 | `updated_at` | timestamp | RFC 3339 UTC. |
 
+The `product` object embedded under `include=product` is the
+`InventoryProductSummary` (see
+`core/api/fragments/inventory.yaml`
+`components.schemas.InventoryProductSummary`):
+
+| Field | Wire form | Note |
+|---|---|---|
+| `id` | UUID | The product's id, the same value as `product_id` on the level. |
+| `sku` | text | The product's SKU. |
+| `description` | text | The product's description. |
+| `stock_uom` | code | The product's stocking unit, the unit the level's quantities are counted in. |
+
+### The list envelope
+
+The list is the keyset envelope of ADR 0001 section 1,
+`InventoryLevelPage` (see
+`core/api/fragments/inventory.yaml`
+`components.schemas.InventoryLevelPage`): `items` (never null),
+`next_cursor` (null when the page is the last one), `limit`, and
+`total` present only under `include=total`.
+
 ### Money and quantity conventions
 
 Quantities are decimal strings with at most four fraction digits. The
@@ -67,6 +88,42 @@ row; the cost of the product is on the product itself.
 A level has no lifecycle of its own. The two writes are
 `/api/v1/inventory/adjust` and `/api/v1/inventory/transfer`; the
 fragments name the legacy shapes they keep until C4-1.
+
+### The write request and ack shapes
+
+The write bodies stay on the legacy `number` shape (a `float64` on the
+server) until C4-1; the read is on the `Quantity` contract.
+
+`StockAdjustmentRequest` (see
+`core/api/fragments/inventory.yaml`
+`components.schemas.StockAdjustmentRequest`), body of
+`POST /api/v1/inventory/adjust`:
+
+| Field | Wire form | Note |
+|---|---|---|
+| `product_id` | UUID | The product the cycle count names. Required. |
+| `location_id` | UUID, nullable | The location the count names; nullable for a legacy row. |
+| `quantity` | number | The new on-hand quantity (when `is_delta` is false) or the delta to add or subtract (when `is_delta` is true). Required. |
+| `reason` | text | The cycle count's reason; informational, persisted. |
+| `is_delta` | boolean | If true, add or subtract `quantity`; if false, replace the on-hand with `quantity`. |
+
+`StockMovementRequest` (see
+`core/api/fragments/inventory.yaml`
+`components.schemas.StockMovementRequest`), body of
+`POST /api/v1/inventory/transfer`:
+
+| Field | Wire form | Note |
+|---|---|---|
+| `product_id` | UUID | The product moved. Required. |
+| `from_location_id` | UUID, nullable | The source location; nullable only when the destination is also a legacy row without a location. |
+| `to_location_id` | UUID | The destination location. Required. |
+| `quantity` | number | The amount moved; must be positive. Required. |
+| `reason` | text | The transfer's reason; informational, persisted. |
+
+`InventoryStatusAck` (see
+`core/api/fragments/inventory.yaml`
+`components.schemas.InventoryStatusAck`), the body of either write's
+`200`: `{ "status": "ok" }`.
 
 ## Events the module writes
 

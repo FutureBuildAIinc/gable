@@ -62,7 +62,7 @@ Every route below is in `core/api/fragments/units.yaml` and
 | Method | Path | One line |
 |---|---|---|
 | GET | `/api/v1/units` | Cursor list of units, ordered by `code`; `dimension` and `is_active` filter. |
-| POST | `/api/v1/units` | Create a dealer unit; `code` and `name` required. |
+| POST | `/api/v1/units` | Create a dealer unit; `code`, `name` and `dimension` required, the standard size optional. |
 | GET | `/api/v1/units/{code}` | One unit with its standard size. |
 | PUT | `/api/v1/units/{code}` | Edit a unit's name, dimension, standard size and `is_active`; revision precondition. |
 | GET | `/api/v1/products/{id}/units` | One product's unit set: `stock_uom`, `sale_uom`, `price_uom`, `purchase_uom`, the set rows, the board measure facts, the base price, and the warnings list. |
@@ -73,6 +73,12 @@ unit set is owned by the product module and inherits its product
 guard; the catalogue itself has its own read and write guards.
 
 ## The catalogue resource
+
+The list is the keyset envelope of ADR 0001 section 1,
+`UnitPage` (see `core/api/fragments/units.yaml`
+`components.schemas.UnitPage`): `items` (never null), `next_cursor`
+(null when the page is the last one), `limit`, and `total` present
+only under `include=total`.
 
 `Unit` (see `core/api/fragments/units.yaml`
 `components.schemas.Unit`).
@@ -89,17 +95,29 @@ guard; the catalogue itself has its own read and write guards.
 | `revision` | integer | Starts at 1; returned as ETag. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
 
-`UnitCreate` requires `code` and `name`; `dimension` defaults to
-`count`; the standard size is `std_unit_qty` and `std_ref_qty`
-both, or neither. `is_system` and `revision` are never accepted on
-the create body.
+`UnitCreate` requires `code`, `name` and `dimension`; the standard size
+is `std_unit_qty` and `std_ref_qty` both, or neither. `is_system` and
+`revision` are never accepted on the create body (the validation that
+names the dimension required lives in
+`core/internal/unit/input.go` `ParseCreate`).
 
 `UnitUpdate` is the put at the unit's revision (`If-Match` or
 `revision`). A field the PUT cannot change is a `400` naming it:
 the immutability rules of `core/internal/unit/service.go` (a system
 unit's `code`, `dimension` and standard size never change; a dealer
 unit's `dimension` and standard size are immutable once any product
-unit set row or any line names the unit).
+unit set row or any line names the unit). The body fields
+(see `core/api/fragments/units.yaml`
+`components.schemas.UnitUpdate`):
+
+| Field | Wire form | Note |
+|---|---|---|
+| `name` | text | 1 to 80 characters. |
+| `is_active` | boolean | Deactivate a dealer unit; reactivation is the same call. |
+| `dimension` | enum | One of `count`, `length`, `area`, `volume`, `weight`, `board_measure`. Immutability holds while any product unit set row or any line names the unit. |
+| `std_unit_qty` | quantity | Half the standard pair; same immutability rule as `dimension`. |
+| `std_ref_qty` | quantity | The other half; the pair is sent together or omitted together. |
+| `revision` | integer | The revision precondition the server checks when the `If-Match` header is absent. |
 
 ### Standard sizes and the dimension reference
 
@@ -167,6 +185,11 @@ this database` for the columns B0 has not converted yet
 
 `UnitSetRow` is one row of the set: `unit_qty` of the row's unit
 is `stock_qty` of the product's stocking unit, in canonical form.
+The PUT body row is `UnitSetRowPut` (see
+`core/api/fragments/product.yaml`
+`components.schemas.UnitSetRowPut`): only `uom` is required;
+`unit_qty` and `stock_qty` may be omitted, in which case the
+derivations of ADR 0006 section 3.2 fill them.
 
 | Field | Wire form | Note |
 |---|---|---|
