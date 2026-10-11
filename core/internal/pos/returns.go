@@ -119,6 +119,19 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn) (*returnState, 
 			return nil, httpx.InvalidStateTransition(
 				fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", original.Status.Status()))
 		}
+		// Every refund method but the card's own consults the intent table
+		// before the return prices (ninth review P1-2): a card claim PENDING
+		// at the terminal may already have paid these goods back, so neither
+		// the drawer nor the account pays them a second time. The money
+		// transaction rechecks it under the sale row lock.
+		if in.RefundMethod != RefundCard {
+			if pending, err := s.repo.SaleHasPendingRefundIntent(ctx, original.ID); err != nil {
+				return nil, err
+			} else if pending {
+				return nil, conflict("refund_in_flight",
+					"a card refund of this sale is still in flight: settle it before refunding by any other method")
+			}
+		}
 		// A return that names the sale names its lines (third review P1-1):
 		// a product line at a client price would stand outside every cap, so
 		// every line of a named sale carries the sale line it returns. Only
@@ -631,17 +644,18 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				return httpx.InvalidStateTransition(
 					fmt.Sprintf("cannot return against a %s sale: a voided sale's goods came back with the void", sale.Status.Status()))
 			}
-			// A cash return of a sale whose card refund claim still stands is
-			// refused (eighth review P2-1): the claim may already have taken
-			// the terminal's money, and the drawer must not pay the same
-			// goods a second time. Under the sale row lock, before any money
-			// of this return moves.
-			if in.RefundMethod == RefundCash {
+			// A return refunded by any method but the card's own, of a sale
+			// whose card refund claim still stands, is refused (eighth review
+			// P2-1, ninth review P1-2): the claim may already have taken the
+			// terminal's money, and neither the drawer nor the account may
+			// pay the same goods a second time. Under the sale row lock,
+			// before any money of this return moves.
+			if in.RefundMethod != RefundCard {
 				if pending, err := s.repo.SaleHasPendingRefundIntent(ctx, sale.ID); err != nil {
 					return err
 				} else if pending {
 					return conflict("refund_in_flight",
-						"a card refund of this sale is still in flight: settle it before paying cash back from the drawer")
+						"a card refund of this sale is still in flight: settle it before refunding by any other method")
 				}
 			}
 			// The cap, rechecked under the lock: a return that raced this one
