@@ -33,9 +33,13 @@ make help
 | CI job | Gate? | What it runs |
 |---|---|---|
 | **Backend** | ✅ merge gate | `go vet ./...`, `go build ./...`, `go run ./cmd/migrate`, `go test -race -coverprofile=… ./...` |
-| **Frontend** | ✅ merge gate | `npm ci`, `npx tsc --noEmit`, `npm run lint`, tests with coverage, `npm run build` |
+| **Frontend** | ✅ merge gate | `npm ci` (from `web/`), `npm run typecheck`, `npm run lint`, tests with coverage, `npm run build` |
+| **App Shape** | ✅ merge gate | `bash scripts/check-shape.sh`: required paths, manifest fields, CLAUDE.md import, JSON validity, no stray root artefacts |
+| **Tauri shell** | ✅ merge gate | builds the front door, runs the Tauri unit tests, builds a Linux debug bundle, smoke-tests it under a virtual display |
 | **License (REUSE)** | ✅ merge gate | `reuse lint` (report) then `python3 .github/scripts/reuse_gate.py` (the gate) |
-| **Docker Build** | ✅ merge gate | builds `core/Dockerfile` and `web/apps/desk/Dockerfile` |
+| **Playwright (E2E)** | ✅ merge gate | full stack built (dev auth), Postgres migrated + seeded, `core serve` with `AUTH_MODE=dev`, nginx, then `npx playwright test` |
+| **Local stack** | ✅ merge gate | `make up` (the same compose file a developer uses), then `make smoke` |
+| **Docker Build** | ✅ merge gate | builds `core/Dockerfile` and `web/Dockerfile` (both bundles, one nginx) |
 | **Vulnerabilities** | ⚠️ **advisory only** | pinned `govulncheck` — `continue-on-error`, also runs nightly |
 
 `govulncheck` is deliberately **not** a merge gate: an upstream CVE landing overnight must not
@@ -75,12 +79,12 @@ make test             # cd core && go test -race ./...     (needs Postgres)
 make test-short       # cd core && go test -short ./...    (no Postgres — DB tests self-skip)
 make cover            # coverage profile + function summary
 
-# Frontend
-make fe-install       # cd web/apps/desk && npm ci
-make fe-typecheck     # cd web/apps/desk && npx tsc --noEmit
-make fe-lint          # cd web/apps/desk && npm run lint
-make fe-test          # cd web/apps/desk && npm run test -- --run
-make fe-build         # cd web/apps/desk && npm run build
+# Frontend (web/ is one npm workspace: apps/*, packages/*)
+make fe-install       # cd web && npm ci
+make fe-typecheck     # cd web && npm run typecheck
+make fe-lint          # cd web && npm run lint
+make fe-test          # cd web && npm run test
+make fe-build         # cd web && npm run build
 
 # Licensing
 make license-check    # reuse lint (report) + .github/scripts/reuse_gate.py (the gate)
@@ -130,8 +134,10 @@ Rotate the credential first, then rewrite the branch (`git reset` + recommit, or
 `git rebase -i`) before pushing.
 
 Also confirm you have not introduced `AUTH_MODE=dev` into any config that could reach a public
-host. It is fine in `.do/app-demo.yaml` and `.do/app-staging.yaml` (demo data only); never
-anywhere else. See [`SECURITY.md`](../../../SECURITY.md).
+host. The current `.do/app-demo.yaml` and `.do/app-staging.yaml` both run with
+`AUTH_MODE=production` (with placeholder `JWKS_URL`); leave them that way. `AUTH_MODE=dev` is
+for local development only, never to be committed anywhere it could be picked up by a deploy.
+See [`SECURITY.md`](../../../SECURITY.md).
 
 ## 4 · SPDX header must match the directory
 
@@ -212,9 +218,9 @@ From [`AGENTS.md`](../../../AGENTS.md) § Pre-Flight Checks — verify each that
       additive and reversible; applies from empty.
 - [ ] **New endpoint**: under the correct prefix (`/api/v1`, `/api/portal/v1`,
       `/api/integration`, `/api/v1/a2a`) **and** wired into a `RegisterRoutes` call in
-      `core/cmd/server/main.go`. An endpoint that isn't wired in silently doesn't exist.
-- [ ] **New public path**: if it must skip auth, it has to be in the whitelist in
-      `core/cmd/server/main.go` — and adding one deserves a security review.
+      `core/internal/app/serve/serve.go`. An endpoint that isn't wired in silently doesn't exist.
+- [ ] **New public path**: if it must skip auth, it has to be in the `publicAPIPaths` whitelist
+      in `core/internal/app/serve/serve.go`, and adding one deserves a security review.
 - [ ] **Money on ERP pages**: rendered with `formatCents()` from `web/apps/desk/src/lib/utils.ts`, never
       `.toFixed(2)` on a cents field. Portal pages receive dollars and must not use it.
 - [ ] **UI**: design tokens from `web/apps/desk/tailwind.config.js`, no hardcoded colours; JetBrains
