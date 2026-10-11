@@ -221,12 +221,13 @@ func TestTheStrandedVoidOfTwoTendersResolvesOneTenderAtATime(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
-// RULE (the half resolved void): a sale whose first tender's refund moved and
-// whose second tender's call answered no verdict leaves one claim PENDING
-// without an id. After the first is resolved as a refund and the second as a
-// no refund, the sale stands completed with one tender's refund booked: the
-// goods cannot be paid back again by any method, because the sale's void
-// already refunded a card tender at the terminal.
+// RULE (the half resolved void, r12 P1-1): a sale whose first tender's refund
+// moved and whose second tender's call answered no verdict leaves one claim
+// PENDING without an id. After the first is resolved as a refund and the
+// second as a no refund, the void completes the same way it would have
+// completed in the other order: the sale is VOIDED, the stock is back, the
+// no refund tender's charge is unapplied credit the dealer owes, and no
+// method may pay the goods again (the goods came back with the void).
 func TestAGoodCannotBeReturnedAgainAfterAPartlyResolvedVoid(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()},
@@ -272,27 +273,33 @@ func TestAGoodCannotBeReturnedAgainAfterAPartlyResolvedVoid(t *testing.T) {
 	}, "finance"); rr.status != http.StatusOK {
 		t.Fatalf("the unknown claim's no refund = %d: %s", rr.status, rr.raw)
 	}
-	if got := str(t, f.getSale(t, saleID), "status"); got != "completed" {
-		t.Errorf("sale status = %q, want completed (a no refund moves nothing: the void stays incomplete)", got)
+	if got := str(t, f.getSale(t, saleID), "status"); got != "voided" {
+		t.Errorf("sale status = %q, want voided (the no refund that empties the claims completes the void, whatever order the claims were resolved in)", got)
 	}
-	// the goods were already refunded on one card: no method pays them again
+	// the goods came back with the void: no method pays them again
 	r = f.returnOn(t, saleID, lineID, "1")
 	if r.status != http.StatusConflict {
-		t.Fatalf("the cash return after the partly resolved void = %d, want 409: %s", r.status, r.raw)
+		t.Fatalf("the cash return after the completed void = %d, want 409: %s", r.status, r.raw)
 	}
-	_, blockers, _ := errorOf(t, r)
-	if len(blockers) == 0 || blockers[0] != "void_refund_recorded" {
-		t.Errorf("blockers = %v, want void_refund_recorded (the void already refunded a card tender)", blockers)
+	if code, _, _ := errorOf(t, r); code != "invalid_state_transition" {
+		t.Errorf("the cash return's code = %s, want invalid_state_transition (the voided sale's goods came back with it)", code)
 	}
 	if rr := f.accountReturnOn(t, saleID, lineID, "1"); rr.status != http.StatusConflict {
-		t.Fatalf("the account return after the partly resolved void = %d, want 409: %s", rr.status, rr.raw)
+		t.Fatalf("the account return after the completed void = %d, want 409: %s", rr.status, rr.raw)
 	}
 	// a card return cannot pick a tender of a two card sale either
 	if rr := f.cardReturnOn(t, saleID, lineID, "1"); rr.status != http.StatusConflict {
-		t.Fatalf("the card return after the partly resolved void = %d, want 409: %s", rr.status, rr.raw)
+		t.Fatalf("the card return after the completed void = %d, want 409: %s", rr.status, rr.raw)
 	}
 	if got := f.accountBalance("1010"); got != 599-moved["amount"].(int64) {
 		t.Errorf("card balance = %d, want %d (nothing further moved)", got, 599-moved["amount"].(int64))
+	}
+	// the no refund tender's charge is the credit the dealer owes the customer
+	if got := f.unappliedOf(t, unknown["tender_id"].(string)); got != 599-moved["amount"].(int64) {
+		t.Errorf("the no refund tender's payment holds %d unapplied cents, want %d (the credit owed)", got, 599-moved["amount"].(int64))
+	}
+	if got := f.stock(); got != "100.0000/0.0000" {
+		t.Errorf("stock = %s, want 100 (the completed void restocked the unit)", got)
 	}
 	if got := f.counterReturns(t); got != 0 {
 		t.Errorf("%d returns booked, want 0", got)

@@ -114,6 +114,28 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			if err := s.repo.LockSale(ctx, rec.SaleID); err != nil {
 				return err
 			}
+			sale, err := s.repo.GetSale(ctx, rec.SaleID)
+			if err != nil {
+				return err
+			}
+			// A void's release can complete the sale's void (r12 P1-1), so
+			// the drawer's session is held the same way the refund leg holds
+			// it, in the same order (the sale, the session, the claim): the
+			// completion and the close serialize whichever leg finishes the
+			// void.
+			if rec.Act == "void" && sale.TillSessionID != nil {
+				if err := s.repo.LockTillSession(ctx, *sale.TillSessionID, false); err != nil {
+					return err
+				}
+				session, err := s.repo.GetTillSession(ctx, *sale.TillSessionID)
+				if err != nil {
+					return err
+				}
+				if session.Status != TillOpen {
+					return conflict("session_closed",
+						"the till session this sale was made in is closed: return the goods through POST /pos/returns instead")
+				}
+			}
 			// the claim row, locked under the sale: a contender resolution
 			// of the same claim loses here with the race named, never beside
 			// this release (ninth review P2-2)
@@ -131,6 +153,43 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			if s.auditLog != nil {
 				if err := s.auditLog.Log(ctx, resolveAuditOf(rec, in, actor)); err != nil {
 					return fmt.Errorf("failed to write the resolution audit row: %w", err)
+				}
+			}
+			// The completion runs from this leg too (r12 P1-1): when the
+			// release emptied the sale's standing claims and some void claim
+			// already booked a tender's refund, the void completes here the
+			// same way the refund leg completes it, under the same sale and
+			// claim locks, so the order finance resolves the claims in never
+			// decides the end state. A void whose every claim settled without
+			// a booked refund keeps the sale completable by a fresh void, as
+			// a terminal that declined every card does.
+			if rec.Act == "void" && sale.Status == StatusCompleted {
+				pending, err := s.repo.PendingRefundIntentIDs(ctx, rec.SaleID)
+				if err != nil {
+					return err
+				}
+				if len(pending) == 0 {
+					done, err := s.repo.SaleHasVoidIntentDone(ctx, rec.SaleID)
+					if err != nil {
+						return err
+					}
+					if done {
+						tenders, err := s.repo.GetTenders(ctx, rec.SaleID)
+						if err != nil {
+							return err
+						}
+						fxAll, err := s.completeVoidFromResolution(ctx, sale, tenders, in.Reason, actor, rec.ID)
+						if err != nil {
+							return err
+						}
+						if fxAll != nil {
+							for _, ev := range fxAll.Events() {
+								if err := s.recordEvent(ctx, ev); err != nil {
+									return err
+								}
+							}
+						}
+					}
 				}
 			}
 			return nil
@@ -214,11 +273,13 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 // The sale's void (the cash legs, the declined tenders' reversals, the invoice
 // void, the stock, the sale's own VOIDED) completes in the same transaction
 // only when no claim of the sale is PENDING anymore; until then the sale
-// stands completed between resolutions. A tender whose refund was declined,
-// or recorded as a no refund, is never paid out: its application is reversed
-// and the money stays unapplied on the customer's account, the credit the
-// dealer owes, and no method may return the sale's goods again once a tender's
-// refund is booked (the return routes read the same table).
+// stands completed between resolutions, and the no refund leg completes it
+// the same way when it empties the claims (r12 P1-1), so the order the claims
+// are resolved in never decides the end state. A tender whose refund was
+// declined, or recorded as a no refund, is never paid out: its application is
+// reversed and the money stays unapplied on the customer's account, the
+// credit the dealer owes, and no method may return the sale's goods again
+// once a tender's refund is booked (the return routes read the same table).
 func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentRecord, in ResolveIntentIn, entry audit.Entry, actor string) (*Sale, error) {
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -320,81 +381,11 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 			return err
 		}
 		if len(pending) == 0 {
-			lines, err := s.repo.GetLines(ctx, rec.SaleID)
+			cfx, err := s.completeVoidFromResolution(ctx, sale, tenders, in.Reason, actor, rec.ID)
 			if err != nil {
 				return err
 			}
-			for _, t := range tendersInIDOrder(tenders) {
-				if t.PaymentID == nil {
-					continue
-				}
-				switch t.Method {
-				case TenderCash, TenderCheck:
-					fx, err := s.ar.VoidPayment(ctx, account.VoidPaymentIn{
-						PaymentID: *t.PaymentID, Reason: in.Reason, Actor: actor, On: date})
-					if err != nil {
-						return err
-					}
-					mergeEffects(&fxAll, fx)
-				case TenderCard:
-					applicationID, live, err := cardApplicationLive(ctx, s, *t.PaymentID)
-					if err != nil {
-						return err
-					}
-					if !live {
-						continue
-					}
-					fx, err := s.ar.Reverse(ctx, account.ReverseIn{
-						ApplicationID: applicationID, Reason: in.Reason, Actor: actor, On: date})
-					if err != nil {
-						return err
-					}
-					mergeEffects(&fxAll, fx)
-				}
-			}
-			var entryID *uuid.UUID
-			if err := s.db.GetExecutor(ctx).QueryRow(ctx,
-				`SELECT gl_entry_id FROM invoices WHERE id = $1`, sale.InvoiceID).Scan(&entryID); err != nil {
-				return err
-			}
-			fx, err := s.ar.VoidInvoice(ctx, account.VoidInvoiceIn{
-				InvoiceID: *sale.InvoiceID, EntryID: entryID, Reason: in.Reason, Actor: actor, On: date})
-			if err != nil {
-				return err
-			}
-			mergeEffects(&fxAll, fx)
-			for i := range lines {
-				l := &lines[i]
-				if !l.IsStocked() || l.Quantity == nil {
-					continue
-				}
-				if err := s.inventory.RestockQty(ctx, *l.ProductID, sale.BranchID, *l.Quantity); err != nil {
-					return err
-				}
-			}
-			if err := s.repo.VoidSale(ctx, rec.SaleID); err != nil {
-				return err
-			}
-			if s.auditLog != nil {
-				if err := s.auditLog.Log(ctx, audit.Entry{
-					Action: "pos.transaction.voided", EntityType: "pos_transaction", EntityID: rec.SaleID, UserID: actor,
-					Changes: map[string]any{
-						"number": sale.Number, "total_cents": int64(sale.TotalCents), "reason": in.Reason,
-						"register_id": sale.RegisterID, "customer_id": sale.CustomerID,
-						"resolved_by_claim": rec.ID,
-					}}); err != nil {
-					return fmt.Errorf("failed to write the audit row: %w", err)
-				}
-			}
-			branch := sale.BranchID
-			if err := s.recordEvent(ctx, outbox.Event{Type: EventSaleVoided, EntityType: "pos_transaction", EntityID: rec.SaleID,
-				BranchID: &branch, Data: eventJSON(map[string]any{
-					"number": sale.Number, "customer_id": sale.CustomerID, "status": StatusVoided.Status(),
-					"from_status": StatusCompleted.Status(), "revision": sale.Revision + 1, "currency": sale.Currency,
-					"total_cents": int64(sale.TotalCents), "reason": in.Reason,
-				})}); err != nil {
-				return err
-			}
+			mergeEffects(&fxAll, cfx)
 		}
 		if fxAll != nil {
 			for _, ev := range fxAll.Events() {
@@ -410,4 +401,96 @@ func (s *Service) runVoidResolutionTx(ctx context.Context, rec *RefundIntentReco
 		return nil, err
 	}
 	return out, nil
+}
+
+// completeVoidFromResolution finishes a stranded void's sale once every claim
+// of the sale is settled (r12 P1-1): the cash and check payments voided,
+// every live card application reversed to unapplied credit, the invoice
+// voided, the stock back, the sale VOIDED, its audit row and its event. Both
+// legs of the resolution call it under the same sale and claim locks (the
+// refund leg after its own tender's booking, the no refund leg after its
+// release emptied the claims beside a booked refund), so whatever order the
+// claims are resolved in, the end state is this one completion.
+func (s *Service) completeVoidFromResolution(ctx context.Context, sale *Sale, tenders []Tender, reason, actor string, claimID uuid.UUID) (*account.Effects, error) {
+	var fxAll *account.Effects
+	date, err := s.repo.BranchLocalDate(ctx, sale.BranchID, s.now())
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range tendersInIDOrder(tenders) {
+		if t.PaymentID == nil {
+			continue
+		}
+		switch t.Method {
+		case TenderCash, TenderCheck:
+			fx, err := s.ar.VoidPayment(ctx, account.VoidPaymentIn{
+				PaymentID: *t.PaymentID, Reason: reason, Actor: actor, On: date})
+			if err != nil {
+				return nil, err
+			}
+			mergeEffects(&fxAll, fx)
+		case TenderCard:
+			applicationID, live, err := cardApplicationLive(ctx, s, *t.PaymentID)
+			if err != nil {
+				return nil, err
+			}
+			if !live {
+				continue
+			}
+			fx, err := s.ar.Reverse(ctx, account.ReverseIn{
+				ApplicationID: applicationID, Reason: reason, Actor: actor, On: date})
+			if err != nil {
+				return nil, err
+			}
+			mergeEffects(&fxAll, fx)
+		}
+	}
+	var entryID *uuid.UUID
+	if err := s.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT gl_entry_id FROM invoices WHERE id = $1`, sale.InvoiceID).Scan(&entryID); err != nil {
+		return nil, err
+	}
+	fx, err := s.ar.VoidInvoice(ctx, account.VoidInvoiceIn{
+		InvoiceID: *sale.InvoiceID, EntryID: entryID, Reason: reason, Actor: actor, On: date})
+	if err != nil {
+		return nil, err
+	}
+	mergeEffects(&fxAll, fx)
+	lines, err := s.repo.GetLines(ctx, sale.ID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range lines {
+		l := &lines[i]
+		if !l.IsStocked() || l.Quantity == nil {
+			continue
+		}
+		if err := s.inventory.RestockQty(ctx, *l.ProductID, sale.BranchID, *l.Quantity); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.repo.VoidSale(ctx, sale.ID); err != nil {
+		return nil, err
+	}
+	if s.auditLog != nil {
+		if err := s.auditLog.Log(ctx, audit.Entry{
+			Action: "pos.transaction.voided", EntityType: "pos_transaction", EntityID: sale.ID, UserID: actor,
+			Changes: map[string]any{
+				"number": sale.Number, "total_cents": int64(sale.TotalCents), "reason": reason,
+				"register_id": sale.RegisterID, "customer_id": sale.CustomerID,
+				"resolved_by_claim": claimID,
+			}}); err != nil {
+			return nil, fmt.Errorf("failed to write the audit row: %w", err)
+		}
+	}
+	branch := sale.BranchID
+	if err := s.recordEvent(ctx, outbox.Event{Type: EventSaleVoided, EntityType: "pos_transaction", EntityID: sale.ID,
+		BranchID: &branch, Data: eventJSON(map[string]any{
+			"number": sale.Number, "customer_id": sale.CustomerID, "status": StatusVoided.Status(),
+			"from_status": StatusCompleted.Status(), "revision": sale.Revision + 1, "currency": sale.Currency,
+			"total_cents": int64(sale.TotalCents), "reason": reason,
+		})}); err != nil {
+		return nil, err
+	}
+	return fxAll, nil
 }
