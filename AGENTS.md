@@ -63,7 +63,7 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 - **State:** `@state()` internal, `@property()` external; framework-agnostic singleton services under `web/apps/desk/src/services/`
 
 ## Architecture
-- **Pattern:** Modular monolith — single Go binary, ~40 modules under `core/internal/<module>/`
+- **Pattern:** Modular monolith: single Go binary, 54 directories under `core/internal/` (47 domain modules)
 - **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `core/internal/app/serve/serve.go`
 - **Apps platform (Phase 0):** modules are becoming installable *apps* — manifest + DB registry (`apps` table, migration 074) + per-instance enable/disable via `pkg/apps`, managed at **Tech Admin → Apps** (`/admin/apps`). Converted so far: `millwork`, `governance`. Conversion recipe + phases: `docs/modularization-blueprint.md`
 - **Cross-module:** Synchronous Go interfaces. Two side effects are asynchronous, both delivered by the worker through the transactional outbox (`core/pkg/outbox`): price exposure notifications (`quote.exposure.*`), and the order module queueing allocation requests in its own table when a purchase order is received (`purchase_order.received`); no cross-module *write* goes through an event
@@ -206,7 +206,7 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 | Surface | Wire format | Notes |
 |---|---|---|
 | ERP `/api/v1/orders`, `/api/v1/invoices`, `/api/v1/credit-memos` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths, quantities decimal strings | Converted onto ADR 0001 by C2-2 (orders) and C2-3 (invoices, credit memos): the list envelope, a lowercase status with the transitions route, a document number (`IN-` and `CM-` gapless), a revision with its `ETag`, the shared sales line shape (`docs/adr/0005-sales-and-money-core.md` sections 2 and 6). Credit memo lines, totals and open amounts are NEGATIVE. DB columns stay `NUMERIC`; the modules convert in SQL |
-| Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go:61` has a TODO to migrate. Don't mix with ERP frontend helpers |
+| Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go` (lines 64, 73, 127, 137, 221, 278, 287) has a TODO to migrate. Don't mix with ERP frontend helpers |
 | Quotes `/api/v1/quotes` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths (`unit_price_ten_thousandths`) | Converted by R1-15 onto ADR 0001; the template is `docs/refactor/MODULE-RECIPE.md`. DB columns stay `NUMERIC`; the module converts in SQL, never through float64 |
 | Customers `/api/v1/customers` | **int64 cents** (`credit_limit_cents`, null for no limit; `balance_cents`, read only) | Converted by C2-1 onto ADR 0001 with ship-tos and the payment terms master (`docs/adr/0005-sales-and-money-core.md` section 7). `customers.credit_limit` is NULL for no limit and 0 is no credit. DB columns stay `NUMERIC(12,2)`; the module converts in SQL |
 | DailyTill, reporting | **float64 dollars** | Legacy float convention |
@@ -215,26 +215,32 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.00 — the cents value `7388` formatted as if it were dollars. Portal pages already get dollars from the API and should format directly. Quote pages get cents and `formatCents()` applies.
 
 ### AR balance: read live from invoices; `customers.balance_due` is a secondary record
-For **reads / decisions**, compute the customer's AR balance live from open invoices —
-`SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')`. The
-canonical status set lives in `invoice.OpenInvoiceStatuses`; the portal AR summary,
-dashboard, reporting, and the order **credit-limit gate** (`order.Service.overCreditLimit`)
-all go through it, so they agree. The credit gate no longer reads the denormalized
-`customers.balance_due` column.
+For **reads / decisions**, derive the customer's AR from documents, never from the
+denormalized `customers.balance_due` column. The portal AR summary, dashboard and reporting
+read `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')` (the canonical
+status set is `invoice.OpenInvoiceStatuses`). The order **credit-limit gate** reads
+`OpenReceivableCents` in the order repository (ADR 0005 section 5.3): the open amounts of the
+customer's open invoices and open credit memos (negative), less its unapplied cash, plus the
+unbilled remainder of its other confirmed, backordered and on hold orders; the order being
+checked adds its own total.
 
-The `balance_due` column **is** now written — but only as a secondary subledger figure:
-`order.FulfillOrder` posts each invoice to the GL + the AR subledger via
-`invoice.PostInvoiceToLedger` (single AR writer = `account.PostTransaction`, which updates
-`balance_due` + inserts a `customer_transactions` row), and `payment.ProcessPayment` credits
-it. It can still drift from the live-invoice figure for historical/seed rows, so don't trust
-it for decisions — derive live.
+The `balance_due` column **is** written, but only as a secondary subledger figure. The
+`account` package is its single writer: every posting method (`PostInvoice`, `PostCreditMemo`,
+`RecordPayment`, `Apply`, `WriteOff`, and the voids, refunds and reversals) goes through
+`account.Service.subledger`, which updates `balance_due` and inserts a `customer_transactions`
+row. A fulfilment (`order.Service.Fulfil`) creates its invoice through
+`invoice.CreateFulfilmentInvoice`, which posts through `account.Service.PostInvoice`; a payment
+(`payment.Service.Create`) credits it through `account.Service.RecordPayment`. The column can
+still drift from the live document figure for historical and seed rows, so don't trust it for
+decisions: derive live.
 
-> Financial posting is now wired (was aspirational): a fulfilled order produces one
-> tax-inclusive invoice + a balanced `DR Accounts Receivable / CR Sales Revenue` GL entry
-> (`gl.SyncInvoice`, accounts resolved by stable code 1010/1020/4010) + an AR subledger
-> debit, all in one transaction. POS completion posts `DR Cash / CR Sales Revenue`
-> post-commit (best-effort). An over-limit order is parked `ON_HOLD` (a valid `orders.status`
-> as of migration 071).
+> Financial posting is wired: a fulfilled order produces one tax inclusive invoice and one
+> balanced GL entry in the fulfilment's transaction (`account.Service.PostInvoice`, accounts by
+> stable code): DR 1020 Accounts Receivable for the total and DR 5010 Cost of Goods Sold for
+> the cost, against CR the revenue lines, CR 2020 Sales Tax Payable and CR 1030 Inventory for
+> the cost, with the AR subledger debit. POS completion posts `DR 1010 Cash / CR 4010 Sales
+> Revenue` through `gl.SyncCashSale` after commit (best effort). An over-limit order is parked
+> `ON_HOLD` (a valid `orders.status` as of migration 071).
 >
 > **Invoice tax rate:** `invoice.CreateInvoice` resolves the rate from the invoice's branch
 > (`locations.default_tax_rate`, e.g. 0.12 in BC) via `repo.GetBranchTaxRate`; the
