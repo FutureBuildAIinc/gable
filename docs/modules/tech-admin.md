@@ -106,7 +106,11 @@ the `api_key` field of the `AdminCreateKeyResponse` envelope and only
 there, at mint.
 
 `AdminCreateKeyRequest` carries `name` (required) and `scopes`
-(optional, array of text). `AdminCreateKeyResponse` carries `api_key`
+(optional, array of text; a mint naming none grants none). One scope has
+its own gate: `customers:restricted` (the shared customer restricted
+fields admission, ADR 0007 section 5.5) is granted only by an owner, the
+admin role getting a `403 forbidden` that names the scope; the mint's
+`key.created` audit row names every granted scope, that one included. `AdminCreateKeyResponse` carries `api_key`
 (the raw key, `sk_live_` plus 43 URL safe base64 characters) and `key`
 (the saved `ApiKey` row).
 

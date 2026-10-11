@@ -99,7 +99,11 @@ under `/api/v1/`). The by-customer routes need `customers:read` and
 sales wall; the exact guard is composed in
 `core/internal/app/serve/wire_branch_wall.go` at `wall.crm`. Every
 route carries the branch wall through the activity's customer: a
-second branch's request is a 404. A key without the scope is `403
+second branch's request is a 404. For every caller, a create or an update
+refuses a `contact_id` the activity's customer does not own with a `400
+validation_failed` naming `contact_id` ("is not a contact of this
+customer", the order's words), so one branch's record can never point at
+another's contact. A key without the scope is `403
 forbidden`; the audit row carries the refused scope.
 
 ## ADRs that govern this module

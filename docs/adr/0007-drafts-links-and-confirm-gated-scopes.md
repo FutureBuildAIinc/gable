@@ -715,7 +715,10 @@ row (a leg whose control cannot finish in the harness says why in the test);
 the foreign leg must answer 403 or 404 and never a scope refusal; and a
 change is measured by a digest of every row that names the twin rows by id,
 never by table counts. A coverage test holds the allowlist against the legs
-and fails by name for any WALLED route no bound key leg drives. The routes
+and fails by name for any WALLED route no bound key leg drives; the legs it
+counts are the drivers' explicit twin marks (the foreign twin, the reach and
+list legs), never an A control, so a route driven only by its control
+fails by name. The routes
 that take their branch from the caller, and so name no foreign row to
 refuse, are driven once and must leave branch B's rows as they were and land
 the row they make at the pin's branch.
@@ -723,16 +726,30 @@ the row they make at the pin's branch.
 A document write that names a customer in its body is held to the pin the
 same way a path customer is: the cash and card payment, the credit memo
 (create and update), the order and the quote (create and update, a document
-moved onto another customer included) and the draft promotions, which read
-the customer from the draft's stored payload, are refused a bound key whose
-pin does not hold that customer (403 naming `customer_id`, the
-`key.branch_refused` row, nothing written). Without it the payment and its
-GL entry, the credit, or the order with the other customer's tax exemption
-landed on a customer the key could not see. An order, for every caller,
-refuses a `ship_to_id` or an `ordered_by_contact_id` its customer does not
-own (400 naming the field, as the credit memo create does), so an order can
-never carry another customer's address. The order exposure gate and override
-read the order under the branch wall before they look up its source quote.
+moved onto another customer included), the offline POS sync (the customer
+each replayed sale names, whose ACCOUNT tender invoices it) and the draft
+promotions, which read the customer from the draft's stored payload, are
+refused a bound key whose pin does not hold that customer (403 naming
+`customer_id`, the `key.branch_refused` row, nothing written). Without it
+the payment and its GL entry, the credit, the order with the other
+customer's tax exemption, or the replayed register sale and its invoice
+landed on a customer the key could not see. The quote conversion rechecks
+the quote's stored customer under the same wall, as the draft promotions
+recheck their payload: a quote a caller moved onto another branch's
+customer must not become an order at the pin's branch. The intent create
+takes no customer, so it stands outside the wall and its own 400 unknown
+field answer serves every caller alike. An order or a quote names a job as
+well, so the body's `job_id` is held through the job's customer
+(`projects.customer_id`, the resolution the pricing rule write and the
+calculate read carry) on the creates and the updates alike. An order, for
+every caller, refuses a `ship_to_id`, an `ordered_by_contact_id` or a
+`job_id` its customer does not own (400 naming the field, as the credit
+memo create does), so a document can never carry another customer's
+address, contact, or job and its pricing rules; the quote's own build
+refuses the foreign job the same way, and a CRM activity refuses a
+`contact_id` its customer does not own for every caller with the same
+words. The order exposure gate and override read the order under the
+branch wall before they look up its source quote.
 
 The confinement contract the CONFINED routes hold: a body is read whole (a
 body that is not exactly one complete JSON value is refused, so the wall and
@@ -769,7 +786,10 @@ too. Those writes are held to the customers the pin holds alone; the refusal
 names the other branch (the lowest numbered branch that is not the pin). A
 category rule whose target is not an account rule is dealer wide whether or
 not it also names a customer, so the legacy tier row migration 107 keeps NOT
-VALID cannot be deleted, singly or in bulk, by a bound key.
+VALID cannot be deleted, singly or in bulk, by a bound key, and an update of
+such a row is refused for every caller with a 409 naming the single target
+invariant, where the database's revalidation on the write would otherwise
+surface as an internal error.
 
 The customer record follows the same rule, deny by default. On a customer
 held by the pin's branch and another, a bound key changes only the branch
@@ -777,16 +797,27 @@ local fields; every other field of the record, and the salesperson and the
 escalation policy, is restricted, and a field added to the header write is
 restricted until it is listed as branch local. A restricted write is refused
 403 in the same words naming the other branch, with the `key.branch_refused`
-row and nothing changed. A customer the pin holds alone, a user and an
-unshared customer are unchanged. A dealer wide (unbound) key changes the
-restricted fields of a shared customer and every such change is audited as
-`customer.shared_restricted_changed` with the key as the actor and the before
-and after value of each field (a machine key carries no role, so the finance
-and owner condition of the ruling cannot be evaluated for a key and is
-recorded as an open question). Ship-tos and contacts carry no branch column,
+row and nothing changed. A customer the pin holds alone and an unshared
+customer are unchanged for every caller. Who may change a shared customer's
+restricted fields (the principal's ruling on the open question below): a
+user only with the finance or owner role, a machine key only when unbound
+and carrying the dedicated `customers:restricted` scope. A sales or admin
+user, and every unbound key without the scope, are refused in the same
+words naming the lowest numbered branch holding the customer; a caller with
+no claims at all is refused fail closed; a bound key is refused even with
+the scope. The scope is in the grant grammar (ADR 0002 section 2) though no
+route requires it, so no module scope and no default grant carries it; only
+an owner may mint it, and the mint's `key.created` audit row names it. An
+allowed key's change is audited as `customer.shared_restricted_changed`
+with the key as the actor and the before and after value of each field; a
+user's change writes no row. Ship-tos and contacts carry no branch column,
 so for a shared customer every existing one is shared: a bound key reads
 them and may add new ones but may not change or delete any (the same
-refusal); for a customer the pin holds alone all of it is allowed. The
+refusal), and an add that names `is_default: true` is refused like a
+change, because naming a default clears the existing default, a shared
+ship to every branch's delivery orders default to; for a customer the pin
+holds alone all of it is allowed. The escalation audit's before and after
+values carry the agreement's signature date beside its reference. The
 fields:
 
 | Route | Field | Class | Reason |
@@ -808,6 +839,7 @@ fields:
 | `PATCH /customers/{id}/salesperson` | `salesperson_id` | RESTRICTED | as above |
 | `PUT /customers/{id}/escalation-policy` | `policy`, `threshold_percent`, `agreement_signed_at`, `agreement_ref` | RESTRICTED | governs the repricing of every branch's quotes |
 | `POST /customers/{id}/ship-tos`, `/contacts` | a new record | allowed | adds; changes nothing shared |
+| `POST /customers/{id}/ship-tos` with `is_default: true` | the existing default | shared record | the add clears the shared default, so it is refused like a change (an add naming no default stays allowed) |
 | `PUT /ship-tos/{id}`, `PUT /contacts/{id}`, `DELETE /contacts/{id}` | an existing record | shared records | refused on a shared customer, allowed on a customer the pin holds alone |
 
 A branch integration that must price shared customers holds an unbound key an

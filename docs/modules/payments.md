@@ -426,7 +426,10 @@ branch the request carries through `X-Branch-Id` (ADR 0007).
 A key bound to one branch (ADR 0007 section 5.5) may post a payment (`POST
 /payments`, `/payments/card`) only for a customer its branch holds: `403
 forbidden` naming `customer_id`, nothing written, so no payment or GL entry
-lands on a customer the key cannot see.
+lands on a customer the key cannot see. The intent create takes no
+customer, so it stands outside that wall: a body naming `customer_id` gets
+the route's own `400` unknown field answer, for a bound key exactly as for
+every other caller.
 
 ## ADRs that govern this module
 

@@ -166,9 +166,10 @@ segment is the first path segment under `/api/v1/`). Ship-tos need
 `contacts:read` or `contacts:write`; payment terms need
 `payment-terms:read` or `payment-terms:write`; price levels need
 `price_levels:read`. The user guard at the serve layer is
-`admin`, `owner`, `sales` for customer reads and writes, with
-`admin`, `owner`, `finance` taking the narrower payment terms writes;
-the exact guard is composed in
+`admin`, `owner`, `sales` and `finance` for customer reads and writes
+(finance reaches the record so the shared customer rule below can hear
+its role), with `admin`, `owner`, `finance` taking the narrower payment
+terms writes; the exact guard is composed in
 `core/internal/app/serve/wire_branch_wall.go` at `wall.customers`.
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
@@ -181,10 +182,19 @@ until it is listed in `branchLocalFields` (`core/internal/customer/shared.go`).
 A restricted write is `403 forbidden` in the words "a branch bound key may act
 only on its own branch: the customer is also held by branch <id>" (the lowest
 numbered other branch), with the `key.branch_refused` row, and the record is
-untouched. A customer the key's branch holds alone, a user and an unshared
-customer are unchanged. A dealer wide key changes the restricted fields and
-each change writes a `customer.shared_restricted_changed` audit row naming
-the key and the before and after value of every field.
+untouched. A customer the key's branch holds alone and an unshared customer
+are unchanged for every caller. Who else may change a shared customer's
+restricted fields: a user only with the `finance` or `owner` role (a sales
+or admin user is refused in the same words naming a branch that holds the
+customer, and a caller with no claims at all is refused fail closed), and a
+dealer wide key only while it carries the dedicated `customers:restricted`
+scope; every other unbound key is refused with the same words, and a branch
+bound key is refused even with the scope. The scope is in the grant grammar
+but no route requires it, so no module scope and no default grant carries
+it; only an owner may mint it, and the mint's `key.created` audit row names
+it. An allowed key's change writes a `customer.shared_restricted_changed`
+audit row naming the key and the before and after value of every field; a
+user's change writes none.
 
 | Route | Field | Class | Reason |
 |---|---|---|---|
@@ -196,12 +206,17 @@ the key and the before and after value of every field.
 | | `salesperson_id` | RESTRICTED | one salesperson per customer across branches |
 | `PATCH /customers/{id}/salesperson` | `salesperson_id` | RESTRICTED | as above |
 | `PUT /customers/{id}/escalation-policy` | policy, threshold, agreement | RESTRICTED | governs the repricing of every branch's quotes |
+| `POST /customers/{id}/ship-tos` with `is_default: true` | the existing default | shared record | the add clears the shared default ship to, so it is refused like a change; an add naming no default is allowed |
 
 Ship-tos and contacts carry no branch column, so on a shared customer every
 existing one is shared: a bound key reads them and may add a new one with
 `POST`, and is refused `PUT /ship-tos/{id}`, `PUT /contacts/{id}` and
-`DELETE /contacts/{id}` in the same words. On a customer the key's branch
-holds alone, all of them are allowed.
+`DELETE /contacts/{id}` in the same words. A ship-to add that names
+`is_default: true` is refused the same way, because naming a default
+clears the customer's existing default, which on a shared customer is a
+shared ship to every branch's delivery orders default to; an add that
+names no default stays allowed. On a customer the key's branch
+holds alone, all of it is allowed.
 
 ## ADRs that govern this module
 

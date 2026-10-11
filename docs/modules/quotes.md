@@ -236,9 +236,15 @@ A key without the scope is `403 forbidden`; the route names the path
 segment of the scope so the audit row carries it.
 
 A key bound to one branch (ADR 0007 section 5.5) may create or update a
-quote only for a customer its branch holds (`POST /quotes`, `PUT
-/quotes/{id}`: `403 forbidden` naming `customer_id`, nothing written),
-which also keeps a quote from being moved onto another branch's customer.
+quote only for a customer its branch holds, and only for a job that
+customer owns (`POST /quotes`, `PUT /quotes/{id}`: `403 forbidden` naming
+`customer_id`, nothing written), which also keeps a quote from being moved
+onto another branch's customer. The conversion rechecks the quote's stored
+customer under the same wall (`POST /quotes/{id}/convert`: the 403 naming
+`customer_id`), so a quote a caller moved onto a foreign customer cannot
+become an order at the pin's branch. For every caller, a quote refuses a
+`job_id` its customer does not own with the order's words ("is not a job
+of this customer").
 
 ## ADRs that govern this module
 
