@@ -70,7 +70,10 @@ The cursor scope is `events.position` (`core/internal/events/handler.go`,
 inside a Postgres advisory transaction lock (`outbox` lock key
 1869462626, the ASCII bytes `outb`, `core/migrations/089_events_outbox.sql`
 lines 13 to 25; enforced by the BEFORE INSERT trigger at lines 75 to
-99). That makes `position` order equal to commit order among writers
+91, where the trigger function (`events_outbox_assign_position`) is
+created at lines 80 to 86 and the trigger itself at lines 88 to 91;
+the `event_subscriber_cursors` table that follows at lines 93 to 99
+is separate). That makes `position` order equal to commit order among writers
 on the same database: a writer cannot draw a position until every
 lower positioned writer's transaction has finished, so a reader paged
 on `position > cursor` cannot skip a row that commits late. A rolled
@@ -184,7 +187,7 @@ walking each module's `service.go` and `model.go` and listing the
 constants it writes through the outbox (the `outbox.Event{Type: ...}`
 and `outbox.Write` call sites). The table reports the constant name,
 its module's source line, and the writer site; CONTRACT-CHANGES
-(section "Events (R1-12)") names additional events the refactor
+(the R1-12 row of the contract changes table) names additional events the refactor
 items will ship on later conversions, but those conversions have not
 landed yet and their writers are not in the tree.
 
@@ -197,48 +200,48 @@ landed yet and their writers are not in the tree.
 | `activity.deleted` | crm | `EventDeleted` (`core/internal/crm/service.go:42`) | `core/internal/crm/service.go` `record` |
 | `project.created` | project | `EventCreated` (`core/internal/project/service.go:40`) | `core/internal/project/service.go:124` (`record` of `Service`) |
 | `project.updated` | project | `EventUpdated` (`core/internal/project/service.go:41`) | `core/internal/project/service.go:183` (`record` of `Service`) |
-| `quote.created` | quote | `EventCreated` (`core/internal/quote/service.go:64`) | `core/internal/quote/service.go:482`; also the portal at `core/internal/portal/quote.go:432` |
-| `quote.sent` | quote | `EventSent` (`core/internal/quote/service.go:65`) | `core/internal/quote/service.go:638` (`transitionEvents[to]` map) |
-| `quote.accepted` | quote | `EventAccepted` (`core/internal/quote/service.go:66`) | `core/internal/quote/service.go:744` |
-| `quote.rejected` | quote | `EventRejected` (`core/internal/quote/service.go:67`) | `core/internal/quote/service.go:638` |
-| `quote.expired` | quote | `EventExpired` (`core/internal/quote/service.go:68`) | `core/internal/quote/service.go:638` |
-| `quote.reopened` | quote | `EventReopened` (`core/internal/quote/service.go:69`) | `core/internal/quote/service.go:638` |
+| `quote.created` | quote | `EventCreated` (`core/internal/quote/service.go:68`) | `core/internal/quote/service.go:489` (the `writeEvent` call that emits `s.buildEvent(out, EventCreated, "")` at line 522); also the portal at `core/internal/portal/quote.go:432` |
+| `quote.sent` | quote | `EventSent` (`core/internal/quote/service.go:69`) | `core/internal/quote/service.go:785` (`s.record(ctx, out, transitionEvents[to], from.Status())`) |
+| `quote.accepted` | quote | `EventAccepted` (`core/internal/quote/service.go:70`) | `core/internal/quote/service.go:891` |
+| `quote.rejected` | quote | `EventRejected` (`core/internal/quote/service.go:71`) | `core/internal/quote/service.go:785` (`s.record(ctx, out, transitionEvents[to], from.Status())`) |
+| `quote.expired` | quote | `EventExpired` (`core/internal/quote/service.go:72`) | `core/internal/quote/service.go:785` (`s.record(ctx, out, transitionEvents[to], from.Status())`) |
+| `quote.reopened` | quote | `EventReopened` (`core/internal/quote/service.go:73`) | `core/internal/quote/service.go:785` (`s.record(ctx, out, transitionEvents[to], from.Status())`) |
 | `quote.exposure.flagged` | pricing (exposure) | `SubjectExposureFlagged` (`core/pkg/eventbus/eventbus.go:75`) | `core/internal/pricing/exposure_service.go:431` (through `SubjectForEvent`, `exposure_model.go:55`) |
 | `quote.exposure.escalated` | pricing (exposure) | `SubjectExposureEscalated` (`core/pkg/eventbus/eventbus.go:76`) | `core/internal/pricing/exposure_service.go:431` |
 | `quote.exposure.ack_required` | pricing (exposure) | `SubjectExposureAckRequired` (`core/pkg/eventbus/eventbus.go:77`) | `core/internal/pricing/exposure_service.go:431` |
 | `quote.exposure.acknowledged` | pricing (exposure) | `SubjectExposureAcknowledged` (`core/pkg/eventbus/eventbus.go:78`) | `core/internal/pricing/exposure_service.go:431` |
 | `quote.exposure.cleared` | pricing (exposure) | `SubjectExposureCleared` (`core/pkg/eventbus/eventbus.go:79`) | `core/internal/pricing/exposure_service.go:431` |
-| `order.created` | order | `EventCreated` (`core/internal/order/service.go:70`) | `core/internal/order/service.go:748`, `1579` (the record helper at `service.go:1411`) |
-| `order.updated` | order | `EventUpdated` (`core/internal/order/service.go:71`) | `core/internal/order/service.go:828` |
-| `order.confirmed` | order | `EventConfirmed` (`core/internal/order/service.go:72`) | `core/internal/order/service.go:1105`, `1326` |
-| `order.hold` | order | `EventHold` (`core/internal/order/service.go:73`) | `core/internal/order/service.go:1132` |
-| `order.hold_released` | order | `EventHoldReleased` (`core/internal/order/service.go:74`) | `core/internal/order/service.go:1099` |
-| `order.backordered` | order | `EventBackordered` (`core/internal/order/alloc.go:33`) | `core/internal/order/service.go:1110`, `1330`; `core/internal/order/invoice_void.go:112` |
+| `order.created` | order | `EventCreated` (`core/internal/order/service.go:71`) | `core/internal/order/service.go:769`, `1672` (the record helper at `service.go:1489`) |
+| `order.updated` | order | `EventUpdated` (`core/internal/order/service.go:72`) | `core/internal/order/service.go:868` |
+| `order.confirmed` | order | `EventConfirmed` (`core/internal/order/service.go:73`) | `core/internal/order/service.go:1180`, `1401` |
+| `order.hold` | order | `EventHold` (`core/internal/order/service.go:74`) | `core/internal/order/service.go:1207`, `1367` |
+| `order.hold_released` | order | `EventHoldReleased` (`core/internal/order/service.go:75`) | `core/internal/order/service.go:1174` |
+| `order.backordered` | order | `EventBackordered` (`core/internal/order/alloc.go:33`) | `core/internal/order/service.go:1185`, `1405`; `core/internal/order/invoice_void.go:112` |
 | `order.backorder_released` | order | `EventBackorderReleased` (`core/internal/order/alloc.go:34`) | `core/internal/order/alloc.go:353` |
-| `order.reopened` | order | `EventReopened` (`core/internal/order/service.go:75`) | `core/internal/order/service.go:1151`; `core/internal/order/invoice_void.go:120` |
-| `order.cancelled` | order | `EventCancelled` (`core/internal/order/service.go:76`) | `core/internal/order/service.go:1179` |
-| `order.closed_short` | order | `EventClosedShort` (`core/internal/order/service.go:77`) | `core/internal/order/service.go:1210` |
+| `order.reopened` | order | `EventReopened` (`core/internal/order/service.go:76`) | `core/internal/order/service.go:1226`; `core/internal/order/invoice_void.go:120` |
+| `order.cancelled` | order | `EventCancelled` (`core/internal/order/service.go:77`) | `core/internal/order/service.go:1254` |
+| `order.closed_short` | order | `EventClosedShort` (`core/internal/order/service.go:78`) | `core/internal/order/service.go:1285` |
 | `order.partially_fulfilled` | order | `EventPartiallyFulfilled` (`core/internal/order/fulfil.go:27`) | `core/internal/order/fulfil.go:647` |
 | `order.fulfilled` | order | `EventFulfilled` (`core/internal/order/fulfil.go:28`) | `core/internal/order/fulfil.go:647` |
 | `order.fulfillment_parked` | order | `EventFulfillmentParked` (`core/internal/order/fulfil_queue.go:16`) | `core/internal/order/fulfil_queue.go` (queue parked rows) |
 | `invoice.created` | invoice, order | `EventInvoiceCreated` (`core/internal/order/fulfil.go:29`) | `core/internal/order/fulfil.go:873` (`recordInvoice`, the fulfilment's invoice creation) |
 | `invoice.paid` | order | inline string `"invoice.paid"` | `core/internal/order/fulfil.go:888` (zero total, payment inside fulfilment) |
-| `invoice.partial` | account | `EventInvoicePartial` (`core/internal/account/model.go:54`) | `core/internal/account/effects.go:145` |
-| `invoice.paid` | account | `EventInvoicePaid` (`core/internal/account/model.go:55`) | `core/internal/account/effects.go:150` |
-| `invoice.voided` | invoice | `EventInvoiceVoided` (`core/internal/invoice/model.go:252`) | `core/internal/invoice/service.go:429` |
-| `invoice.written_off` | account | `EventInvoiceWrittenOff` (`core/internal/account/model.go:56`) | `core/internal/account/effects.go:152` |
-| `invoice.reopened` | account | `EventInvoiceReopened` (`core/internal/account/model.go:57`) | `core/internal/account/effects.go:148` |
+| `invoice.partial` | account | `EventInvoicePartial` (`core/internal/account/model.go:54`) | `core/internal/account/effects.go:155` (the `outbox.Event{Type: typ, ...}` builder; the `typ := EventInvoicePartial` line is at 145) |
+| `invoice.paid` | account | `EventInvoicePaid` (`core/internal/account/model.go:55`) | `core/internal/account/effects.go:155` (the `outbox.Event{Type: typ, ...}` builder; the `typ = EventInvoicePaid` line is at 150) |
+| `invoice.voided` | invoice | `EventInvoiceVoided` (`core/internal/invoice/model.go:252`) | `core/internal/invoice/service.go:468` |
+| `invoice.written_off` | account | `EventInvoiceWrittenOff` (`core/internal/account/model.go:56`) | `core/internal/account/effects.go:155` (the `outbox.Event{Type: typ, ...}` builder; the `typ = EventInvoiceWrittenOff` line is at 152) |
+| `invoice.reopened` | account | `EventInvoiceReopened` (`core/internal/account/model.go:57`) | `core/internal/account/effects.go:155` (the `outbox.Event{Type: typ, ...}` builder; the `typ = EventInvoiceReopened` line is at 148) |
 | `credit_memo.created` | invoice | `EventCreditCreated` (`core/internal/invoice/model.go:254`) | `core/internal/invoice/service_cm.go:245` |
 | `credit_memo.updated` | invoice | `EventCreditUpdated` (`core/internal/invoice/model.go:255`) | `core/internal/invoice/service_cm.go:323` |
 | `credit_memo.posted` | invoice | `EventCreditPosted` (`core/internal/invoice/model.go:256`) | `core/internal/invoice/service_cm.go:459` |
 | `credit_memo.voided` | invoice | `EventCreditVoided` (`core/internal/invoice/model.go:257`) | `core/internal/invoice/service_cm.go:591` |
-| `credit_memo.applied` | account | `EventCreditApplied` (`core/internal/account/model.go:59`) | `core/internal/account/effects.go:136` |
-| `credit_memo.partial` | account | `EventCreditPartial` (`core/internal/account/model.go:58`) | `core/internal/account/effects.go:131` |
-| `credit_memo.reopened` | account | `EventCreditReopened` (`core/internal/account/model.go:60`) | `core/internal/account/effects.go:134` |
+| `credit_memo.applied` | account | `EventCreditApplied` (`core/internal/account/model.go:59`) | `core/internal/account/effects.go:139` (the `outbox.Event{Type: typ, ...}` builder; the `typ = EventCreditApplied` line is at 136) |
+| `credit_memo.partial` | account | `EventCreditPartial` (`core/internal/account/model.go:58`) | `core/internal/account/effects.go:139` (the `outbox.Event{Type: typ, ...}` builder; the `typ := EventCreditPartial` line is at 131) |
+| `credit_memo.reopened` | account | `EventCreditReopened` (`core/internal/account/model.go:60`) | `core/internal/account/effects.go:139` (the `outbox.Event{Type: typ, ...}` builder; the `typ = EventCreditReopened` line is at 134) |
 | `credit_memo.refunded` | payment | inline string `"credit_memo.refunded"` | `core/internal/payment/service_card.go:263` |
 | `payment.recorded` | payment | `EventRecorded` (`core/internal/payment/service.go:273`) | `core/internal/payment/service.go:267` (`recordedEvent` of `Service`) |
-| `payment.applied` | account | `EventPaymentApplied` (`core/internal/account/model.go:52`) | `core/internal/account/effects.go:115` |
-| `payment.unapplied` | account | `EventPaymentUnapplied` (`core/internal/account/model.go:53`) | `core/internal/account/effects.go:117` |
+| `payment.applied` | account | `EventPaymentApplied` (`core/internal/account/model.go:52`) | `core/internal/account/effects.go:125` (the `outbox.Event{Type: typ, ...}` builder; the `typ := EventPaymentApplied` line is at 115) |
+| `payment.unapplied` | account | `EventPaymentUnapplied` (`core/internal/account/model.go:53`) | `core/internal/account/effects.go:125` (the `outbox.Event{Type: typ, ...}` builder; the `typ = EventPaymentUnapplied` line is at 117) |
 | `payment.refunded` | payment | `EventRefunded` (`core/internal/payment/service.go:274`) | `core/internal/payment/service.go:534` |
 | `payment.voided` | payment | `EventVoided` (`core/internal/payment/service.go:275`) | `core/internal/payment/service.go:456` |
 | `purchase_order.received` | purchase_order | `EventReceived` (`core/internal/purchase_order/service.go:44`) | `core/internal/purchase_order/service.go:1034` |
@@ -259,10 +262,10 @@ landed yet and their writers are not in the tree.
 | `staff.module_revoked` | staff | inline string `"staff.module_revoked"` | `core/internal/staff/service.go:360` |
 | `module.enabled` | staff | inline string `"module.enabled"` | `core/internal/staff/service.go:455` |
 | `module.disabled` | staff | inline string `"module.disabled"` | `core/internal/staff/service.go:453` |
-| `key.created` | techadmin | inline string `"key.created"` | `core/internal/techadmin/service.go:173` |
-| `key.revoked` | techadmin | inline string `"key.revoked"` | `core/internal/techadmin/service.go:281` |
-| `admin_settings.saved` | techadmin | inline string `"admin_settings.saved"` | `core/internal/techadmin/service.go:378`, `485` |
-| `admin_settings.deleted` | techadmin | inline string `"admin_settings.deleted"` | `core/internal/techadmin/service.go:418`, `522` |
+| `key.created` | techadmin | inline string `"key.created"` | `core/internal/techadmin/service.go:230` (`s.record(ctx, "key.created", "api_key", apiKey.ID, data, 0)`; the audit row's `Action: "key.created"` is at line 218) |
+| `key.revoked` | techadmin | inline string `"key.revoked"` | `core/internal/techadmin/service.go:351` (`s.record(ctx, "key.revoked", "api_key", id, ...)`; the audit row's `Action: "key.revoked"` is at line 343) |
+| `admin_settings.saved` | techadmin | inline string `"admin_settings.saved"` | `core/internal/techadmin/service.go:448` (the AI settings writer), `555` (the routing settings writer) |
+| `admin_settings.deleted` | techadmin | inline string `"admin_settings.deleted"` | `core/internal/techadmin/service.go:488` (the AI settings writer), `592` (the routing settings writer) |
 | `rfc.created` | governance | `EventCreated` (`core/internal/governance/service.go:48`) | `core/internal/governance/service.go` `record` |
 | `rfc.updated` | governance | `EventUpdated` (`core/internal/governance/service.go:49`) | `core/internal/governance/service.go` `record` |
 | `rfc.review` | governance | `EventReview` (`core/internal/governance/service.go:50`) | `core/internal/governance/service.go` `record` |
