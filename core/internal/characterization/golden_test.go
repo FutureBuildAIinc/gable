@@ -67,13 +67,15 @@ type normaliser struct {
 }
 
 var (
-	reUUID  = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	reJWT   = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
-	reTS    = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})`)
-	rePgTS  = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?(\+\d{2})?`)
-	reDate  = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
-	reKey   = regexp.MustCompile(`sk_live_[A-Za-z0-9_-]{2,}`)
-	rePDFDT = regexp.MustCompile(`D:\d{14}Z?`)
+	reUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	reJWT  = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
+	reTS   = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})`)
+	rePgTS = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?(\+\d{2})?`)
+	reDate = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+	// reWholeDate is a value that is a calendar date and nothing else.
+	reWholeDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	reKey       = regexp.MustCompile(`sk_live_[A-Za-z0-9_-]{2,}`)
+	rePDFDT     = regexp.MustCompile(`D:\d{14}Z?`)
 )
 
 // volatileNumberFields are response fields whose numeric values measure the
@@ -107,8 +109,9 @@ var volatileStringFields = map[string]string{
 // seedFixedDateFields carry fixed calendar dates in the demo seed's vehicle
 // fixture: hardcoded calendar values, unlike every other date in the seed,
 // which is drawn relative to the seed clock. A seed-day offset for them would
-// drift by one every day the calendar advances, so they normalise to the
-// plain timestamp placeholder (the shape check still applies).
+// drift by one every day the calendar advances, so they normalise to a plain
+// placeholder: <date> for a calendar date (the fleet columns are DATE) and
+// <ts> for a timestamp (the shape check still applies).
 //
 // The demo seed's drivers are the same kind of fixture: a hardcoded CDL expiry
 // and hire date each, which moved one day per calendar day against the seed
@@ -136,6 +139,9 @@ func (n *normaliser) value(v any, key string) any {
 	case string:
 		if ph, ok := volatileStringFields[key]; ok {
 			return ph
+		}
+		if seedFixedDateFields[key] && reWholeDate.MatchString(x) {
+			return "<date>"
 		}
 		if seedFixedDateFields[key] && (reTS.MatchString(x) || rePgTS.MatchString(x)) {
 			return "<ts>"
