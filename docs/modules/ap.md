@@ -376,7 +376,10 @@ refused `409 reversal_not_posted` naming the shape, nothing written. The
 net may stand as a credit or as a debit, and the refusals name a net
 amount standing in accounts payable, never a credit alone. A
 reversal insert that loses a race with a concurrent GL reverse meets
-the one reversal index and answers the same 409, never a 500.
+the one reversal index and answers the same 409, never a 500; the map
+is keyed on that index's own name (`ux_gl_entry_single_reversal`), so a
+later unique index on the entry tables is never misreported as a lost
+reversal race.
 
 ### Pay
 

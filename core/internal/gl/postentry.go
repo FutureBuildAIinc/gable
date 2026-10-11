@@ -12,6 +12,7 @@ import (
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Account codes the sales postings name (ADR 0005 section 8.1), beside the
@@ -124,10 +125,14 @@ func (s *Service) PostEntry(ctx context.Context, in PostingInput) (*JournalEntry
 		// one ran: the insert meets the one reversal index (a pre-check
 		// cannot see an uncommitted contender), and the loss maps to
 		// ErrAlreadyReversed so the caller answers the same refusal as the
-		// belt, never a 500 (review r4 P3-1).
+		// belt, never a 500 (review r4 P3-1). The map is keyed on the index's
+		// own name, not on the SQLSTATE alone (review r5 P3-3): today
+		// ux_gl_entry_single_reversal is the only unique index an entry
+		// insert can meet, and a later one must pass through unmapped rather
+		// than read as a lost reversal race.
 		if in.ReversesEntryID != nil {
-			var pg interface{ SQLState() string }
-			if errors.As(err, &pg) && pg.SQLState() == "23505" {
+			var pg *pgconn.PgError
+			if errors.As(err, &pg) && pg.Code == "23505" && pg.ConstraintName == "ux_gl_entry_single_reversal" {
 				return nil, fmt.Errorf("%w: another reversal of the entry committed first", ErrAlreadyReversed)
 			}
 		}
