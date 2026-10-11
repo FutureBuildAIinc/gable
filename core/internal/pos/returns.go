@@ -123,13 +123,21 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn) (*returnState, 
 		// before the return prices (ninth review P1-2): a card claim PENDING
 		// at the terminal may already have paid these goods back, so neither
 		// the drawer nor the account pays them a second time. The money
-		// transaction rechecks it under the sale row lock.
+		// transaction rechecks it under the sale row lock. A tender the sale's
+		// void already refunded (a partly resolved void) blocks every method
+		// the same way.
 		if in.RefundMethod != RefundCard {
 			if pending, err := s.repo.SaleHasPendingRefundIntent(ctx, original.ID); err != nil {
 				return nil, err
 			} else if pending {
 				return nil, conflict("refund_in_flight",
 					"a card refund of this sale is still in flight: settle it before refunding by any other method")
+			}
+			if doneVoid, err := s.repo.SaleHasVoidIntentDone(ctx, original.ID); err != nil {
+				return nil, err
+			} else if doneVoid {
+				return nil, conflict("void_refund_recorded",
+					"this sale's void already refunded a card tender at the terminal: reconcile the void before returning goods against this sale")
 			}
 		}
 		// A return that names the sale names its lines (third review P1-1):
@@ -656,6 +664,12 @@ func (s *Service) postReturn(ctx context.Context, st *returnState, claim *refund
 				} else if pending {
 					return conflict("refund_in_flight",
 						"a card refund of this sale is still in flight: settle it before refunding by any other method")
+				}
+				if doneVoid, err := s.repo.SaleHasVoidIntentDone(ctx, sale.ID); err != nil {
+					return err
+				} else if doneVoid {
+					return conflict("void_refund_recorded",
+						"this sale's void already refunded a card tender at the terminal: reconcile the void before returning goods against this sale")
 				}
 			}
 			// The cap, rechecked under the lock: a return that raced this one

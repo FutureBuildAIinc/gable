@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // VoidSale voids a completed counter sale while its till session is open,
@@ -420,4 +422,21 @@ func cardApplicationOf(ctx context.Context, s *Service, paymentID uuid.UUID) (uu
 		return uuid.Nil, fmt.Errorf("failed to read the card payment's application: %w", err)
 	}
 	return id, nil
+}
+
+// cardApplicationLive answers the payment's live application when one stands:
+// the per tender void resolution skips a tender whose leg an earlier
+// resolution already reversed.
+func cardApplicationLive(ctx context.Context, s *Service, paymentID uuid.UUID) (uuid.UUID, bool, error) {
+	var id uuid.UUID
+	err := s.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT id FROM ar_applications WHERE payment_id = $1 AND reversed_at IS NULL ORDER BY created_at, id LIMIT 1`,
+		paymentID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to read the card payment's application: %w", err)
+	}
+	return id, true, nil
 }

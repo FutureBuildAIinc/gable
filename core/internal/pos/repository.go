@@ -111,13 +111,21 @@ type Repository interface {
 	RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error)
 	SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error)
 	SessionHasPendingRefundIntent(ctx context.Context, sessionID uuid.UUID) (bool, error)
+	// PendingRefundIntentIDs lists the ids of the sale's standing claims (the
+	// per tender void resolution reads them to know when every tender is
+	// resolved); SaleHasVoidIntentDone answers whether the sale's void already
+	// booked a tender's refund (its goods were paid back at the terminal).
+	PendingRefundIntentIDs(ctx context.Context, saleID uuid.UUID) ([]uuid.UUID, error)
+	SaleHasVoidIntentDone(ctx context.Context, saleID uuid.UUID) (bool, error)
 	// MarkRefundIntentRefunded writes the gateway's own refund id onto the
 	// standing claim in its own committed write, the moment the terminal
-	// answers; GetRefundIntent reads one claim whole, and
+	// answers; GetRefundIntent reads one claim whole, LockRefundIntent reads
+	// one claim whole under its row lock (the resolution's transaction), and
 	// FailRefundIntentByID releases one claim by its id (the operator
 	// resolution's no refund leg).
 	MarkRefundIntentRefunded(ctx context.Context, saleID, tenderID uuid.UUID, refundTxID string) error
 	GetRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error)
+	LockRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error)
 	FailRefundIntentByID(ctx context.Context, id uuid.UUID) error
 	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
@@ -829,6 +837,64 @@ func (r *PostgresRepository) GetRefundIntent(ctx context.Context, id uuid.UUID) 
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the refund intent: %w", err)
+	}
+	rec.Request = request
+	return &rec, nil
+}
+
+// PendingRefundIntentIDs lists the ids of the sale's standing claims in
+// creation order: the per tender void resolution completes the sale's void
+// only when the list is empty.
+func (r *PostgresRepository) PendingRefundIntentIDs(ctx context.Context, saleID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.ex(ctx).Query(ctx,
+		`SELECT id FROM pos_refund_intents WHERE sale_id = $1 AND state = 'PENDING' ORDER BY created_at, id`, saleID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the sale's standing claims: %w", err)
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// SaleHasVoidIntentDone answers whether the sale's void already booked a
+// card tender's refund: the goods' money moved at the terminal, so no other
+// method may pay the goods back.
+func (r *PostgresRepository) SaleHasVoidIntentDone(ctx context.Context, saleID uuid.UUID) (bool, error) {
+	var done bool
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pos_refund_intents WHERE sale_id = $1 AND act = 'void' AND state = 'DONE')`, saleID).
+		Scan(&done)
+	if err != nil {
+		return false, fmt.Errorf("failed to read the sale's void claims: %w", err)
+	}
+	return done, nil
+}
+
+// LockRefundIntent reads one claim whole under its row lock: the operator
+// resolution's transaction re-reads the claim it is about to settle, so a
+// concurrent resolution of the same claim loses here instead of booking
+// beside it.
+func (r *PostgresRepository) LockRefundIntent(ctx context.Context, id uuid.UUID) (*RefundIntentRecord, error) {
+	var rec RefundIntentRecord
+	var request []byte
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT id, sale_id, tender_id, gateway_tx_id, ROUND(amount * 100)::bigint, act, state,
+			COALESCE(refund_tx_id, ''), request, created_at, updated_at
+		FROM pos_refund_intents WHERE id = $1 FOR UPDATE`, id).
+		Scan(&rec.ID, &rec.SaleID, &rec.TenderID, &rec.GatewayTxID, &rec.AmountCents, &rec.Act, &rec.State,
+			&rec.RefundTxID, &request, &rec.CreatedAt, &rec.ResolvedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, httpx.NotFound("refund claim not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock the refund intent: %w", err)
 	}
 	rec.Request = request
 	return &rec, nil
