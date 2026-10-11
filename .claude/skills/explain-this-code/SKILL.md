@@ -23,7 +23,7 @@ Give this once, at the start, tailored to what they care about.
 
 ```
 gable/
-  core/          Go 1.26 — one binary, ~41 domain modules (the "modular monolith")
+  core/          Go 1.26: one binary, 47 domain modules (the "modular monolith")
     cmd/core/       the one binary: `core serve` (wires every module
                     repo→service→handler→routes), `core worker` (background
                     jobs), `core migrate` (applies core/migrations/*.sql in
@@ -82,7 +82,7 @@ If a route isn't in `routes.ts`, it belongs to a **converted app** and is declar
 ### A backend behaviour
 
 ```bash
-ls core/internal/                          # the 41 modules
+ls core/internal/                          # the 47 domain modules and seven support directories
 grep -rn "func (s \*Service)" core/internal/order/service.go | head -20
 ```
 
