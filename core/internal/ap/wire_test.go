@@ -2092,7 +2092,7 @@ func TestWire_VoidRefusesCrossCurrencyReversedEntry(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
 	body := f.createBody("V-XCUR", "1", 200000) // 20.00
-	body["currency"] = "CAD"                     // the setting stays USD
+	body["currency"] = "CAD"                    // the setting stays USD
 	c := f.do("POST", "/api/v1/ap/invoices", body)
 	if c.status != http.StatusCreated {
 		t.Fatal(c.raw)
