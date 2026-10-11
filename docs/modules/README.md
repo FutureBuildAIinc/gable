@@ -54,7 +54,7 @@ The pages:
 | Charge codes | [charge-codes.md](charge-codes.md) | The fee master, the revenue account snapshot on a line, the seeded `FREIGHT`, `FUEL`, `RESTOCK`, `ADJUST`. | C2-2a. |
 | Accounts payable | [ap.md](ap.md) | The vendor bill, the approve and void transitions, the vendor payment, the AP aging by vendor, the GL postings (`2010` Accounts Payable, `1010` Cash) and the stated limits. | C4-1b. |
 | Locations and branches | [locations.md](locations.md) | The location and branch master, the branch tree, the user branch grants, and the branch wall on the by id reads and the location list. | C3-1. |
-| Drafts, links and confirm gated scopes | [drafts.md](drafts.md) | The proposed document, the SSE change feed, the promotion, the link resolver, the machine key scope grammar (read, write, propose, commit), the branch bound key, the confirm gate, and the audit rows. | C5-2a. |
+| Drafts, links and the confirm gated scopes | [drafts.md](drafts.md) | The proposed document, the SSE change feed, the promotion, the link resolver, the machine key scope grammar (read, write, propose, commit), the branch bound key, the confirm gate, and the audit rows. | C5-2a. |
 | Events feed | [events.md](events.md) | The `events_outbox` cursor read API (item R1-12), the `events.position` ordering guarantee, the `next_cursor` exception, the type filter, the event vocabulary by module on `refactor/v1`. | R1-12, R1-12b. |
 | Tech admin | [tech-admin.md](tech-admin.md) | Machine API keys, the AI and routing settings, the apps catalog and toggles, and the finer admin scopes of ADR 0009. | C5-1a. |
 | Staff roster and module grants | [staff.md](staff.md) | The dealer roster the integrations surface authenticates against, the per staff module grants, and the global module kill switches. | C5-1a. |
@@ -128,5 +128,5 @@ the page describes the wire rather than restating the SQL.
   and the rest) sit under the `internal/portal` package in the
   route census.
 - The accounts, GL, bank reconciliation, matching, purchase
-  order, deposit, document print, EDI, governance, accounting
+  order, deposit, document print, EDI, accounting
   and AI surfaces, which are not in the brief's list.

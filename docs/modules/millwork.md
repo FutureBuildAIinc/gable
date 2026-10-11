@@ -31,13 +31,14 @@ the option (a finish color, a hardware set, a glass spec).
 Every route is in `core/api/fragments/millwork.yaml` and the
 registered handles are in `core/internal/millwork/handler.go`. The
 route census (`core/api/ROUTES.txt`) lists each one under the
-`internal/millwork` package (the route census has a `package`
-column, not a module column).
+`internal/millwork` module, the third tab column of the census header
+line `method pattern module handler` (the column holds the registering
+package's directory, the convention every other module shares).
 
 | Method | Path | One line |
 |---|---|---|
 | GET | `/api/v1/millwork/options` | Cursor list of options of a category, newest first; category required. |
-| POST | `/api/v1/millwork/options` | Create an option, writes `millwork_option.created`. |
+| POST | `/api/v1/millwork/options` | Create an option, writes `millwork_option.created`; 201 carries `Location` and `ETag`. |
 | GET | `/api/v1/millwork/options/{id}` | Get one option with its revision as ETag. |
 
 All three routes sit behind the millwork app gate (a 404
@@ -54,27 +55,53 @@ All three routes sit behind the millwork app gate (a 404
 | `id` | UUID | The option id. |
 | `category` | text | 1 to 50 characters; the filter on the list route. |
 | `name` | text | 1 to 100 characters. |
-| `price_adjustment_cents` | int64 | A positive option adds to the configured price, a negative one discounts it. |
+| `price_adjustment_cents` | int64 | Bounded to the range `[-99999999999, 99999999999]`. A positive option adds to the configured price, a negative one discounts it. |
 | `attributes` | object, array, string, number, boolean, null | The JSON the create carried; null when it carried none. |
 | `revision` | int64 | Starts at 1; returned as ETag on the by-id read. |
 | `created_at`, `updated_at` | timestamp | RFC 3339 UTC. |
+
+`MillworkCreateOptionRequest` (see `core/api/fragments/millwork.yaml`
+`components.schemas.MillworkCreateOptionRequest`) is the body of
+`POST /api/v1/millwork/options`. `category`, `name` and
+`price_adjustment_cents` are required; `attributes` is optional,
+stored as sent and null when absent. Every field problem is collected
+into one 400 with a details entry per field; an unknown field is refused.
 
 ### Money and quantity conventions
 
 `price_adjustment_cents` is integer cents under the `_cents`
 convention. The list cursor is the keyset cursor of ADR 0001
-section 2; the list envelope is `{items, next_cursor, limit}`
+section 2, scoped `millwork_options.created_at_id_desc`
+(`core/internal/millwork/handler.go`); the list envelope is `{items, next_cursor, limit}`
 with `total` only under `include=total`. The `category` filter
 is required and exact match; a missing or repeated `category` is
 a 400.
+
+## Headers and error answers
+
+`POST /api/v1/millwork/options` carries the `Idempotency-Key` header
+(ADR 0001 section 9); the 201 answer carries the `Location` header
+(`/api/v1/millwork/options/{id}`) and the `ETag` header (the new
+revision in quotes). The error answers are 400 (validation or unknown
+field), 401 (no or invalid token), 403 (insufficient role), 404
+(`app_disabled` when the millwork app is off), 409 (wire conflict),
+413 (payload too large), 422 (unprocessable entity) and 500 (internal
+error).
+
+`GET /api/v1/millwork/options` answers 200 and the error answers are
+400 (strict query), 401, 403, 404 (`app_disabled`), 500.
+
+`GET /api/v1/millwork/options/{id}` answers 200 with the `ETag` header
+and the error answers are 400 (bad UUID), 401, 403, 404 (`not_found`
+for an unknown id, `app_disabled` when the millwork app is off), 500.
 
 ## Lifecycle and transitions
 
 An option has no lifecycle of its own. It is created through
 `POST` and read through `GET`; the create writes one
-`millwork_option.created` event and one `audit_log` row in the
-same transaction. The option is not branch scoped, so the
-revision is the only gate the by-id read uses.
+`millwork_option.created` event and one `millwork_option.created`
+`audit_log` row in the same transaction. The option is not branch
+scoped, so the revision is the only gate the by-id read uses.
 
 ## Events the module writes
 

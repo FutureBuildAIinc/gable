@@ -11,16 +11,18 @@
 | **Gable Green** | `#00FFA3` | Primary Actions, Success States, Active Glow |
 | **Deep Space** | `#0A0B10` | Global Background |
 | **Slate Steel** | `#161821` | Card Backgrounds, Sidebar, Modals |
+| **Surface 2** | `#1E2029` | Cards |
+| **Surface 3** | `#252836` | Modals |
 | **Safety Red** | `#F43F5E` | Errors, Stockouts, Credit Hold |
 | **Blueprint Blue** | `#38BDF8` | Technical Data, Dimensions, Links |
 
 ### Utilities
-- **Glass**: `rgba(255, 255, 255, 0.05)` with `backdrop-filter: blur(12px)`
+- **Glass**: `rgba(255, 255, 255, 0.05)` with `backdrop-filter: blur(24px)`
 - **Border**: `rgba(255, 255, 255, 0.1)`
 
 ## 2. Typography
 
-### UI Font: Inter
+### UI Font: Outfit
 Used for labels, headers, and body text.
 - **Weights**: 400 (Regular), 500 (Medium), 600 (Semi-Bold)
 
@@ -29,7 +31,7 @@ Used for **all** numerical data and identifiers.
 - **Usage**: SKUs, Prices, Quantities, Dimensions
 - **Why**: Monospaced fonts align vertically in grids, making rapid scanning of financial/inventory data easier
 
-## 3. Core Components (Shadcn/UI Base)
+## 3. Core Components
 
 ### Buttons
 - **Primary**: Solid Gable Green, Black Text. Hover: Glow Shadow
@@ -46,6 +48,6 @@ Used for **all** numerical data and identifiers.
 - **Focus**: Gable Green border glow
 
 ## 4. Micro-Animations
-- **Hover**: Lift `translateY(-2px)` with shadow
+- **Hover**: Lift `translateY(-4px)` with shadow
 - **Transitions**: All state changes `duration-200`
 - **Loading**: Skeleton loaders (pulsing blocks), never spinners for layouts
