@@ -12,10 +12,15 @@ the due date, the tax) and the priced lines (the goods or services, the
 quantity, the unit price, the GL account the line's money lands on). A
 payment names the bills it applies to (in the order the desk pays them)
 and locks that order on the database so concurrent payments cannot
-deadlock or both spend the same open amount (repeats are refused as
-`invoice_ids[i] (appears twice)` by `PayRequest.Parse`, and over-payment
-as `exceeds_open` by `PayVendor`). Both acts post one journal entry
-inside one transaction: a payment that posts `DR 2010 / CR 1010`, and an
+deadlock or both spend the same open amount (a repeated bill id in one
+payment's `invoice_ids` is refused as `invoice_ids[i] (appears twice)`
+by `PayRequest.Parse`, and over-payment as `exceeds_open` by
+`PayVendor`; a repeated payment, the same request sent twice, is a
+replay caught by the `Idempotency-Key`, not by these checks; a payment
+naming bills of two currencies is refused as `currency_mismatch`). Both
+acts post one journal entry
+inside one transaction: a payment that posts `DR 2010 / CR 1010` in the
+bills' currency, and an
 approve that builds the entry from the lines and credits the whole
 total to `2010`.
 
@@ -48,17 +53,41 @@ blocker; a chart of accounts code that is missing is the
 `entry_unbalanced` blocker.
 
 When the bill is wrong, the desk voids it through the same route with
-`to: "voided"` and a reason. A pending bill voids with nothing posted;
-an approved bill's entry is reversed whole through `gl.PostReversal`;
-the bill's `amount_open` drops to zero; a bill that prices to zero
-posted nothing and voids with nothing to reverse. A bill with money
-applied is refused with `has_payments` (the payments have to be undone
-first); a partial bill is refused there before the void reaches the
-linked-entry checks. An approved bill with a nonzero total and no
-linked entry is refused with `entry_not_linked`, and one whose linked
-entry does not balance with `entry_unbalanced`: both stay approved and
-payable until a later repair item (no route today links an entry to a
-bill). Both refusals write nothing.
+`to: "voided"` and a reason. A pending bill voids with nothing posted.
+A bill's credit is live exactly when the POSTED entries of its
+`VENDOR_INVOICE` entry and that entry's whole reversal chain leave a net
+amount on `2010`, and the void decides on that net, never on one step of
+the chain: a reversal that a later reversal put back leaves the credit
+live at any depth, and a chain whose POSTED entries cancel holds none.
+The net is summed per currency, never across two (the trial balance never
+sums across two), so a chain holding two currencies whose whole sums
+cancel still reads live in the currency that holds the amount, however
+the chain arose: legacy rows included. The net may stand as a credit or
+as a debit (a chain whose original entry was reversed and then voided
+holds the reversal's debit alone), and the refusals name a net amount
+standing in accounts payable, never a credit alone. A
+bill whose entry holds no live credit (one that prices to zero, or one
+the GL routes have already undone, linked or not) voids with nothing to
+reverse; a linked live entry with no reversal row is reversed whole
+through `gl.PostReversal`, in the entry's own currency. A bill with
+money applied is refused with `has_payments` (the payments have to be
+undone first); a partial bill is refused there before the void reaches
+the linked-entry checks. A bill holding a live entry it is not linked to
+is refused with `entry_not_linked` (the duplicate is named when the bill
+was posted twice), one whose linked entry does not balance with
+`entry_unbalanced`, and one whose linked entry is live while its one
+reversal row is already taken (the row is not posted, or the chain was
+reinstated behind it, so no new reversal can post) with
+`reversal_not_posted`: all stay approved and payable until a later
+repair item (no route today links an entry to a bill). Every refusal
+writes nothing, and a reversal insert that loses a race on the one
+reversal index answers the same `reversal_not_posted` 409, never a 500;
+so does a GL void of the linked entry that commits while the void runs
+(the entry is no longer POSTED, there is nothing left to reverse,
+nothing is written and the retry voids with nothing to reverse).
+The approve decides on the same liveness: a pending bill that already
+holds a live journal entry is refused `entry_not_linked` naming it,
+rather than posting a second credit no bill owes.
 
 Payments land as the desk cuts the checks. `POST /ap/payments` takes
 the vendor, the amount in cents, the method (`CHECK`, `ACH` or
@@ -68,8 +97,11 @@ on the same bill) and applies only to bills in `approved` or `partial`
 (a `pending`, `paid` or `voided` bill is the `invoice_not_approved`
 blocker). A bill of another vendor is a 400 naming `invoice_ids[i]`, a
 repeated id a 400 naming its index. More than the named bills still
-owe is the `exceeds_open` blocker and writes nothing. The applied sum
-posts `DR 2010 / CR 1010` inside the act's transaction. Each settled
+owe is the `exceeds_open` blocker and writes nothing. The named bills
+must share one currency: a payment spanning two is the
+`currency_mismatch` blocker naming the bills that differ, and writes
+nothing. The applied sum posts `DR 2010 / CR 1010` in the bills'
+currency inside the act's transaction. Each settled
 bill writes `vendor_invoice.partial` (when more is still owed) or
 `vendor_invoice.paid` (when this payment closes it).
 
@@ -121,7 +153,7 @@ scope.
 | `vendor_name` | text | Snapshot of the vendor name. |
 | `branch_id` | UUID | The branch the bill belongs to. |
 | `vendor_invoice_number` | text | The vendor's own number, 1 to 64 characters, unique per vendor. |
-| `currency` | ISO 4217 | The bill's currency; an omitted currency is `USD`. |
+| `currency` | ISO 4217 | The bill's currency; an omitted currency comes from the `currency.default` setting (`USD` where the setting is absent). |
 | `invoice_date` | date | YYYY-MM-DD. |
 | `due_date` | date | YYYY-MM-DD. |
 | `po_id` | UUID, nullable | The purchase order this bill was matched to (FK since migration 106). |
@@ -213,7 +245,9 @@ target is a 403 naming `branch_id`), `vendor_invoice_number` (1 to 64
 characters, unique per vendor; a duplicate is a 409 naming the field),
 `invoice_date`, `due_date` (both YYYY-MM-DD), optional `po_id`
 (an unknown PO is a 400 naming `po_id`), optional `currency`
-(an omitted currency is `USD`; a request's currency
+(an omitted currency comes from the `currency.default` setting, which
+the create's `resolve` reads (`USD` where the setting is absent); a
+request's currency
 must be an ISO 4217 code of three capital letters), `tax_cents`, `notes`
 (at most 2000 characters) and `lines` (at least one line, the same
 set of fields as the line schema minus `id`, `position` and
@@ -258,25 +292,41 @@ transaction:
 
 1. Lock the bill (`repo.Lock`); check the revision under the lock.
 2. Refuse `409 invoice_not_pending` if the bill is not `pending`.
-3. Load the lines with their account codes (`repo.LinesWithCodes`).
-4. Refuse `409 line_needs_account` if any line's code is empty, naming
+3. Refuse `409 has_paid_amount` if `amount_paid_cents` is not zero: a
+   payment applies only to an `approved` or `partial` bill, so a paid
+   amount on a `pending` bill is a legacy or hand edited row whose
+   `amount_open` sits where migration 106 clamped it, below the total;
+   the approve would post the whole total while `amount_open` stands
+   still, leaving money in `2010` no bill owes. The row is left for the
+   operator to mend by hand (a stated limit).
+4. Refuse `409 entry_not_linked` if the bill already holds a live
+   journal entry, naming it by its number and id: a legacy `pending`
+   row whose posting ran before the status moved (the base's sync could
+   post first; migration 106 links only `approved` or `partial`, so the
+   row carries its entry linked by hand or not at all) already leaves a
+   net amount standing in `2010` (as a credit or as a debit, whichever
+   way its chain nets), and the approve would post its own entry beside
+   it. Live is the chain net of the void (below), never one reversal
+   level; nothing is written.
+5. Load the lines with their account codes (`repo.LinesWithCodes`).
+6. Refuse `409 line_needs_account` if any line's code is empty, naming
    the line's position.
-5. Build the entry (`postInvoiceEntry`): a debit leg per line on the
+7. Build the entry (`postInvoiceEntry`): a debit leg per line on the
    line's account, the tax spread across the line accounts pro rata to
    their extensions with the last line taking the remainder
-   (`tax * line_total_cents / subtotal_cents`, the remainder accumulated
-   into the last line), the credit to `gl.AccountCodeAP = "2010"` for
-   the whole total.
-6. Post the entry through `gl.PostEntry` in the same transaction. The
+   (`tax_cents * line_total_cents / subtotal_cents`, the remainder accumulated
+   into the last line), the credit to `gl.AccountCodeAP = "2010"` for the
+   whole total.
+8. Post the entry through `gl.PostEntry` in the same transaction. The
    posting can raise `period_closed` (closed fiscal period),
    `account_missing` (chart of accounts code absent) or
    `entry_unbalanced` (debits and credits do not balance); each is
    mapped to a 409 by the module and fails the act (ADR 0008 7.4).
-7. Mark the bill approved with the linked `gl_entry_id` and the
+9. Mark the bill approved with the linked `gl_entry_id` and the
    approver (the caller's UUID when the actor is a parseable UUID,
    else nil for an in-process caller; `s.ApproveInvoice` passes the
    caller-given approver id).
-8. Write the audit row, then the event
+10. Write the audit row, then the event
    (`vendor_invoice.approved`) in the same transaction (ADR 0003
    section 2).
 
@@ -296,22 +346,40 @@ transaction:
    cents applied; the payments have to be undone first.
 4. Refuse `409 invalid_state_transition` if the bill's `from` does not
    allow `voided` (the `partial` and `paid` rows in the map).
-5. Refuse `409 entry_not_linked` if the bill is `approved` or `partial`,
-   has a nonzero `total_cents` and no `gl_entry_id`: a credit may stay
-   in `2010` with nothing to reverse, so the bill stays approved and
-   payable (a stated limit).
-6. If the bill has a `gl_entry_id`, post the reversal through
-   `gl.PostReversal` with the void time as `EntryDate` and the reason.
-   `PostReversal` can raise `period_closed` (mapped to 409) or
-   `entry_unbalanced` (the removed sync's one leg shape, mapped to 409
-   `entry_unbalanced`); the latter also stays approved and payable (a
+5. Refuse `409 entry_not_linked` if the bill holds a live
+   `VENDOR_INVOICE` journal entry it is not linked to (`repo
+   .HasPostedInvoiceEntry`, the predicate migration 106 links by, made
+   chain wide): a credit may stay in `2010` with nothing to reverse,
+   whatever the bill's `total_cents` says now (a hand edit may even have
+   zeroed the total after the approve), so the bill keeps its status (a
    stated limit).
+6. If the bill has a `gl_entry_id`, read the ledger through `repo
+   .LinkedEntryLedger` and post the reversal through `gl.PostReversal`
+   with the void time as `EntryDate` and the reason. `PostReversal` can
+   raise `period_closed` (mapped to 409) or `entry_unbalanced` (the
+   removed sync's one leg shape, mapped to 409 `entry_unbalanced`); the
+   latter also keeps its status (a stated limit).
 7. Mark the bill voided; write the audit row, then the event
    (`vendor_invoice.voided`) in the same transaction.
 
-A bill that prices to zero posted nothing and owes nothing: there is
-no `gl_entry_id`, the reversal block is skipped, and the void goes
-through with nothing to reverse.
+Liveness, for the linked and the unlinked arm alike, is the net the
+POSTED entries of the entry's whole reversal chain leave on `2010` (the
+trial balance's own lens): an entry whose chain nets nothing holds no
+credit and voids with nothing to reverse (a bill that prices to zero
+posted nothing, and a legacy bill whose posting was swallowed or whose
+entry the GL routes have already undone holds nothing to undo), a live
+entry with no reversal row is reversed whole in the entry's own
+currency, and a live entry whose one reversal row is already taken (the
+row is not posted, or a reversal of a reversal put the credit back
+behind it, so no new reversal can post under the one reversal index) is
+refused `409 reversal_not_posted` naming the shape, nothing written. The
+net may stand as a credit or as a debit, and the refusals name a net
+amount standing in accounts payable, never a credit alone. A
+reversal insert that loses a race with a concurrent GL reverse meets
+the one reversal index and answers the same 409, never a 500; the map
+is keyed on that index's own name (`ux_gl_entry_single_reversal`), so a
+later unique index on the entry tables is never misreported as a lost
+reversal race.
 
 ### Pay
 
@@ -374,7 +442,10 @@ posts only when `len(locked) > 0`.
 
 The void posts a reversal of the bill's `gl_entry_id` through
 `gl.PostReversal`, with `EntryDate: time.Now()` (the void time) and the
-call's `reason`. The bill's `gl_entry_id` stays set (the link is kept
+call's `reason`. The reversal carries the original entry's own currency
+(the entry priced its credit into that currency when it posted; the
+bill's current currency, which a hand edit may have changed, never
+moves it). The bill's `gl_entry_id` stays set (the link is kept
 for the audit trail).
 
 `AccountCodeAP = "2010"` (Accounts Payable) is declared at
@@ -434,20 +505,36 @@ only AP route with a payload branch. `POST /ap/payments` carries no
 outside the caller's wall is a 400 naming `invoice_ids[i]`,
 `LockForPayment` at `repository.go:307-319`). The branch resolves in
 three steps (`service.go:263-278`): the payload `branch_id`, the
-caller's context branch, or the `default_branch_id` setting. The
-`currency` is `Parse`'s `USD` on the route (input.go:117-122); the
-`currency.default` setting is not read on the create path.
+caller's context branch, or the `default_branch_id` setting. An omitted
+`currency` is left empty by `Parse` and the create's `resolve` reads the
+`currency.default` setting for it (`USD` where the setting is absent),
+on the route and in process alike.
 
 ## Stated limits
 
 These are limits the module lives with until a later repair item.
 
-- An `approved` or `partial` bill with a nonzero `total_cents` and no
-  linked `gl_entry_id` is refused a `to: "voided"` with `409
-  entry_not_linked`: the credit may stay in `2010` with nothing to
-  reverse, so the bill stays approved and payable. This is the legacy
-  unlinked bill (its posting was swallowed, or it holds the removed
-  sync's one leg credit).
+- A bill that holds a live `VENDOR_INVOICE` journal entry it is not
+  linked to is refused a `to: "voided"` with `409 entry_not_linked`: a
+  net amount may stay in `2010` with nothing to reverse, so the bill keeps
+  its status. This is the legacy unlinked bill (its posting was
+  swallowed, it holds the removed sync's one leg credit, or its total
+  was hand edited after the approve); live means the entry's whole
+  reversal chain nets a nonzero amount on `2010` over its POSTED
+  entries, per currency, as a credit or as a debit. A legacy bill with
+  no live entry at all voids with nothing to
+  reverse, owing nothing through the ledger.
+- A bill whose linked entry is live while its one reversal row is
+  already taken (the row is not posted, or a reversal of a reversal put
+  the credit back behind it) is refused the same void with `409
+  reversal_not_posted`: no new reversal can post under the one reversal
+  index, so the chain must be mended by hand first. The refusal names
+  the net amount standing in `2010`, as a credit or as a debit,
+  whichever way the chain nets.
+- A pending bill that already holds a live journal entry is refused the
+  approve with `409 entry_not_linked` naming it: the row already leaves
+  a net amount standing in `2010`, and mending the ledger by hand comes
+  before any approve.
 - A bill linked to an entry that does not balance (the removed sync's
   one leg shape, debit absent) is refused the same void with `409
   entry_unbalanced`. Its reversal would mirror the imbalance into
@@ -533,14 +620,15 @@ curl -X POST http://localhost:8080/api/v1/ap/invoices \
   -H 'X-Branch-Id: <seeded branch uuid>' \
   -H 'Idempotency-Key: 1' \
   -H 'Content-Type: application/json' \
-  -d @ap-invoice-create.json
+  -d '{"vendor_id":"<seeded vendor uuid>","vendor_invoice_number":"INV-1001","invoice_date":"<YYYY-MM-DD>","due_date":"<YYYY-MM-DD>","tax_cents":0,"lines":[{"description":"2x4x8 SPF","quantity":"100","unit_price_ten_thousandths":41250,"gl_account_id":"<seeded 5020 account uuid>"}]}'
 ```
 
-with a body that names the seeded vendor, the seeded branch, a
-1 to 64 character `vendor_invoice_number`, the two dates as
-YYYY-MM-DD, an ISO 4217 currency, `tax_cents`, optional `notes` and at
-least one line (`description`, `quantity` as a decimal string,
-`unit_price_ten_thousandths` int64 and the line's `gl_account_id`):
+The body names the seeded vendor, a 1 to 64 character
+`vendor_invoice_number`, the two dates as YYYY-MM-DD, optional `notes`
+and at least one line (`description`, `quantity` as a decimal string,
+`unit_price_ten_thousandths` int64 and the line's `gl_account_id`; the
+currency may be named and otherwise comes from the `currency.default`
+setting). The approve then follows:
 
 ```
 curl -X POST http://localhost:8080/api/v1/ap/invoices/<id>/transitions \

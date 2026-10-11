@@ -174,18 +174,52 @@ paths:
         posting failure fails the act (a closed period is a 409 blocker
         period_closed; a line with no account is a 409 blocker
         line_needs_account; a required chart of accounts code that is missing
-        is a 409 blocker account_missing naming it). To voided: from pending
-        (nothing posted) or
-        approved (the entry is reversed whole; a bill that prices to zero
-        posted nothing and voids with nothing to reverse); a reason is
+        is a 409 blocker account_missing naming it; a pending bill that
+        already carries a paid amount, a legacy or hand edited row no payment
+        of its own could write, is a 409 blocker has_paid_amount naming the
+        cents, and the row is left for the operator to mend by hand; a
+        pending bill that already holds a live journal entry, a legacy row
+        whose posting ran before the status moved with its entry linked by
+        hand or not at all, is a 409 blocker entry_not_linked naming the live
+        entry by its number and id, nothing written). To
+        voided: from pending or
+        approved; a bill's credit is live exactly when the POSTED entries of
+        its VENDOR_INVOICE entry and that entry's whole reversal chain leave
+        a net amount on Accounts Payable (a reversal of a reversal puts the
+        credit back, whatever depth the chain has reached; the net is summed
+        per currency, never across two, as the trial balance sums it, so a
+        chain holding two currencies whose whole sums cancel still reads
+        live in the currency that holds the amount, however the chain
+        arose; the net may stand as a credit or as a debit, and the
+        refusals name a net amount standing on Accounts Payable, never a
+        credit alone), and the void
+        decides on that net, never on one step of the chain: a bill whose
+        entry holds no live credit (one that prices to zero, a legacy bill
+        whose posting was swallowed, or an entry the GL routes have already
+        undone, linked or not) voids with nothing to reverse, a linked live
+        entry with no reversal row is reversed whole in the entry's own
+        currency, and a linked live entry whose one reversal row is already
+        taken (the row is not posted, or the chain was reinstated behind it,
+        so no new reversal can post) is refused with the
+        reversal_not_posted
+        blocker naming the shape; a
+        reason is
         required, a bill with money applied is refused with the has_payments
-        blocker, an approved or partial bill that owes but has no linked
-        journal entry (a legacy bill whose posting was swallowed, or one
-        holding the removed sync's one leg credit) with the entry_not_linked
+        blocker, a bill that holds a live journal entry it is not linked to
+        (a legacy bill whose posting was swallowed, one holding the removed
+        sync's one leg credit, one whose total was hand edited after its
+        approve, or one posted twice, the duplicate named) with the
+        entry_not_linked
         blocker, and a bill whose linked entry does not balance with the
-        entry_unbalanced blocker; nothing is written on either refusal. No
-        route links an entry to a bill yet: such a bill stays approved and
-        payable until a later repair item (a stated limit).
+        entry_unbalanced blocker; nothing is written on any refusal, and a
+        reversal insert that loses a race with a concurrent GL reverse on the
+        same entry answers the same reversal_not_posted 409, never a 500, and
+        so does a GL void of the linked entry that commits while the void
+        runs (the entry is no longer POSTED, there is nothing left to
+        reverse, nothing is written and the retry voids with nothing to
+        reverse). No
+        route links an entry to a bill yet: such a bill keeps its status
+        until a later repair item (a stated limit).
       parameters:
         - name: id
           in: path
@@ -282,8 +316,11 @@ paths:
         is a 409 blocker invoice_not_approved; a bill of another vendor is a
         400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400
         naming its index (appears twice); more than the named bills still owe
-        is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside
-        the act's transaction (DR Accounts Payable, CR Cash), and a posting
+        is a 409 blocker exceeds_open. The named bills must share one
+        currency: a payment spanning two is a 409 blocker currency_mismatch
+        naming the bills that differ. The entry posts through gl.PostEntry
+        inside the act's transaction in the bills' currency
+        (DR Accounts Payable, CR Cash), and a posting
         failure fails the act (a closed period is a 409 blocker period_closed;
         a missing chart of accounts code is a 409 blocker account_missing
         naming it).

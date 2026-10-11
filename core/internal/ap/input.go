@@ -115,11 +115,12 @@ func (req *CreateRequest) Parse() (*Input, error) {
 		}
 	}
 	currency := trim(req.Currency)
-	if currency == "" {
-		currency = "USD" // the service replaces this with the setting's default
+	if currency != "" {
+		v.Check(len(currency) == 3 && currency == strings.ToUpper(currency), "currency", "must be an ISO 4217 code of three capital letters")
+		in.Currency = currency
 	}
-	v.Check(len(currency) == 3 && currency == strings.ToUpper(currency), "currency", "must be an ISO 4217 code of three capital letters")
-	in.Currency = currency
+	// An omitted currency is left empty: the service's resolve reads the
+	// currency.default setting for it (USD where the setting is absent).
 	if n, ok := v.Int("tax_cents", req.TaxCents, false); ok {
 		v.Check(n >= 0, "tax_cents", "must not be negative")
 		v.Check(n <= maxBillCents, "tax_cents", "is more than a bill can hold")
@@ -162,7 +163,7 @@ func (req *CreateRequest) Parse() (*Input, error) {
 				line.ProductID = &id
 			}
 		}
-		if line.GLAccountID != nil && line.Quantity != 0 && line.UnitPrice >= 0 && line.UnitPrice <= maxUnitPriceTenThousandths {
+		if line.GLAccountID != nil && line.Quantity != 0 && line.UnitPrice >= 0 {
 			total, err := httpx.Extend(line.Quantity, 1, 1, line.UnitPrice)
 			switch {
 			case err != nil:
