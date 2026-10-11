@@ -673,5 +673,6 @@ func policyFacts(p *EscalationPolicy) map[string]any {
 	if p == nil {
 		return nil
 	}
-	return map[string]any{"policy": string(p.Policy), "threshold_percent": int64(p.ThresholdPercent), "agreement_ref": p.AgreementRef}
+	return map[string]any{"policy": string(p.Policy), "threshold_percent": int64(p.ThresholdPercent),
+		"agreement_signed_at": p.AgreementSignedAt, "agreement_ref": p.AgreementRef}
 }

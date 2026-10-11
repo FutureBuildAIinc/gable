@@ -3,13 +3,15 @@
 
 package serve
 
-// The coverage half of the WALLED claim (ADR 0007 section 5.5): the tests that
-// drive walled routes with a key bound to branch A mark every call they send
-// through the pin fixture's recorder, and TestKeyBranchPin_ZWalledRoutesAllHaveALeg
-// holds the route allowlist against the marks, so a WALLED entry no test
-// drives with a bound key fails by name. The recorder is per process: the
-// coverage test runs after the drivers (file order) and skips when a -run
-// filter kept one of them from running.
+// The coverage half of the WALLED claim (ADR 0007 section 5.5): the tests
+// that drive walled routes with a key bound to branch A mark the legs that
+// drive them against the foreign twin (or the reach and list legs that prove
+// the pin's confinement), and TestKeyBranchPin_ZWalledRoutesAllHaveALeg holds
+// the route allowlist against the marks, so a WALLED entry no foreign twin leg
+// drives fails by name. An A control alone covers nothing (round 10 P3-6):
+// the marks are explicit, on the driving leg, never on the control. The
+// recorder is per process: the coverage test runs after the drivers (file
+// order) and skips when a -run filter kept one of them from running.
 
 import (
 	"bytes"
@@ -37,12 +39,14 @@ var walledLegs = struct {
 	drivers map[string]bool
 }{seen: map[string]bool{}, drivers: map[string]bool{}}
 
-// record makes the fixture mark every call its bound keys send, from here on.
+// record makes the fixture count the twin legs its drivers mark, from here on.
 func (f *keyPinFixture) record() { f.recording = true }
 
-// mark notes one bound key call when the fixture records.
-func (f *keyPinFixture) mark(raw, method, path string) {
-	if !f.recording || (raw != f.bound && raw != f.bound2 && raw != f.boundFirst) {
+// twinLeg marks one route as driven by a foreign twin leg (or a reach or list
+// leg that proves the pin holds), for the coverage test. It is the driver's
+// explicit call on its driving leg, never the A control.
+func (f *keyPinFixture) twinLeg(method, path string) {
+	if !f.recording {
 		return
 	}
 	if i := strings.IndexByte(path, '?'); i >= 0 {
@@ -170,7 +174,6 @@ func (f *keyPinFixture) stream(t *testing.T, raw, path string, d time.Duration) 
 	}
 	defer res.Body.Close()
 	buf, _ := io.ReadAll(res.Body) // the deadline ends the stream; what arrived before it is the answer
-	f.mark(raw, "GET", path)
 	return res.StatusCode, string(buf)
 }
 

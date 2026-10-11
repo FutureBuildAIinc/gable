@@ -748,7 +748,6 @@ func (f *keyPinFixture) key(t *testing.T, raw, method, path, body string, hdr ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.mark(raw, method, path)
 	return res.StatusCode, buf
 }
 
@@ -824,6 +823,7 @@ func (f *keyPinFixture) refuseForeign(t *testing.T, method, path, body string, h
 	t.Helper()
 	before := f.auditRows(t)
 	status, buf := f.key(t, f.bound, method, path, body, hdr)
+	f.twinLeg(method, path)
 	if status != http.StatusForbidden {
 		t.Errorf("bound key %s %s: %d %s, want 403", method, path, status, buf)
 		return
@@ -1590,6 +1590,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	// The open till of the foreign register: no session answers, while the
 	// pin's own register answers its own.
 	_, buf := f.key(t, f.bound, "GET", "/api/v1/pos/till/current?register_id="+f.regB, "", nil)
+	f.twinLeg("GET", "/api/v1/pos/till/current")
 	if strings.Contains(string(buf), f.tillB.String()) {
 		t.Errorf("bound key till current of the foreign register answered the foreign session: %s", buf)
 	}
@@ -1603,6 +1604,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	// one; the pin's own session answers its report.
 	sMiss, _ := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/report", "", nil)
 	sB, bB := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+f.tillB.String()+"/report", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/till/"+f.tillB.String()+"/report")
 	if sB != sMiss || strings.Contains(string(bB), f.regB) {
 		t.Errorf("bound key foreign till report: %d %s, want the missing row answer (%d, no B data)", sB, bB, sMiss)
 	}
@@ -1612,6 +1614,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	// The foreign till cannot be closed: no session write, no Z report.
 	f.key(t, f.bound, "POST", "/api/v1/pos/till/"+f.tillB.String()+"/close",
 		`{"counted_by_method":{"CASH":50}}`, nil)
+	f.twinLeg("POST", "/api/v1/pos/till/"+f.tillB.String()+"/close")
 	if !tillOpen(f.tillB) {
 		t.Errorf("bound key closed the foreign till session")
 	}
@@ -1625,7 +1628,9 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/till/"+f.tillB.String()+"/zreport", "", nil); sB != sMiss {
 		t.Errorf("bound key foreign Z report: %d, want the missing row answer %d", sB, sMiss)
 	}
+	f.twinLeg("GET", "/api/v1/pos/till/"+f.tillB.String()+"/zreport")
 	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/zreports", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/zreports")
 	if strings.Contains(string(buf), f.zrB.String()) {
 		t.Errorf("bound key Z report list carries the foreign Z report: %s", buf)
 	}
@@ -1636,6 +1641,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	// The returns list carries the pin's own return and not the foreign one;
 	// the foreign return reads as missing, the own one answers.
 	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/returns", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/returns")
 	if strings.Contains(string(buf), f.retB.String()) {
 		t.Errorf("bound key returns list carries the foreign return: %s", buf)
 	}
@@ -1645,6 +1651,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/returns/"+f.retB.String(), "", nil); sB != http.StatusNotFound {
 		t.Errorf("bound key foreign return read: %d, want 404", sB)
 	}
+	f.twinLeg("GET", "/api/v1/pos/returns/"+f.retB.String())
 	f.allow(t, "unbound", "GET", "/api/v1/pos/returns/"+f.retB.String(), "", nil, http.StatusOK)
 	f.allow(t, "bound", "GET", "/api/v1/pos/returns/"+f.retA.String(), "", nil, http.StatusOK)
 
@@ -1654,13 +1661,16 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	if sB, _ := f.key(t, f.bound, "GET", "/api/v1/pos/transactions/"+f.txnB.String(), "", nil); sB != http.StatusNotFound {
 		t.Errorf("bound key foreign transaction read: %d, want 404", sB)
 	}
+	f.twinLeg("GET", "/api/v1/pos/transactions/"+f.txnB.String())
 	before := linesOn(f.txnB)
 	f.key(t, f.bound, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items",
 		fmt.Sprintf(`{"product_id":%q,"quantity":1,"uom":"EA"}`, f.posProd.String()), nil)
+	f.twinLeg("POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items")
 	if after := linesOn(f.txnB); after != before {
 		t.Errorf("bound key line insert on the foreign transaction wrote: %d rows then %d", before, after)
 	}
 	f.key(t, f.bound, "DELETE", "/api/v1/pos/transactions/"+f.txnB.String()+"/items/"+f.lineB.String(), "", nil)
+	f.twinLeg("DELETE", "/api/v1/pos/transactions/"+f.txnB.String()+"/items/"+f.lineB.String())
 	if after := linesOn(f.txnB); after != before {
 		t.Errorf("bound key line delete on the foreign transaction wrote: %d rows then %d", before, after)
 	}

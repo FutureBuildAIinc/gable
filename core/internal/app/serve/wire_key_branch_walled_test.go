@@ -550,6 +550,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 			// reach its module past the key's scopes, and (for a create that
 			// takes its branch from the caller) must land at the pin's branch.
 			status, buf := f.key(t, raw(l), l.method, pathFor(l, l.twin, l.twin2), bodyFor(l, l.twin), l.hdr)
+			f.twinLeg(l.method, pathFor(l, l.twin, l.twin2))
 			if !controlOK(status) && !(l.tolerate500 != "" && status == http.StatusInternalServerError) {
 				t.Errorf("bound key %s %s: %d %s, want the call to reach its module", l.method, l.path, status, buf)
 			}
@@ -574,6 +575,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		bPath := pathFor(l, l.twin, l.twin2)
 		mPath := pathFor(l, uuid.MustParse(missing), uuid.MustParse(missing))
 		sb, bb := f.key(t, raw(l), l.method, bPath, bodyFor(l, l.twin), l.hdr)
+		f.twinLeg(l.method, bPath)
 		sm, _ := f.key(t, raw(l), l.method, mPath, bodyFor(l, l.twin), l.hdr)
 		scopeRefusal := sb == http.StatusForbidden && strings.Contains(string(bb), "lacks required scope")
 		held := !scopeRefusal && (sb == http.StatusForbidden || sb == http.StatusNotFound ||
@@ -660,6 +662,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 			key = firstBound
 		}
 		sb, bb := f.key(t, key, "GET", l.path, "", nil)
+		f.twinLeg("GET", l.path)
 		if sb != http.StatusOK {
 			t.Errorf("bound key GET %s: %d %s, want 200", l.path, sb, bb)
 			continue
@@ -696,6 +699,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 			map[string]string{"X-Branch-Id": B}, http.StatusCreated)
 		own := f.madeWith(t, "bound", "drafts", "POST", "/api/v1/drafts/"+kind.module, fmt.Sprintf(kind.payload, f.custID.String()), nil, http.StatusCreated)
 		status, body := f.stream(t, f.bound, "/api/v1/drafts/"+kind.module+"/feed?cursor="+cursor0, 1500*time.Millisecond)
+		f.twinLeg("GET", "/api/v1/drafts/"+kind.module+"/feed")
 		if status != http.StatusOK {
 			t.Errorf("bound key GET /drafts/%s/feed: %d %s, want the stream open", kind.module, status, body)
 			continue
@@ -715,10 +719,12 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 	if sb, _ := f.key(t, f.bound, "GET", "/api/v1/branches/"+B+"/tree", "", nil); sb != http.StatusForbidden {
 		t.Errorf("bound key foreign branch tree: %d, want 403", sb)
 	}
+	f.twinLeg("GET", "/api/v1/branches/"+B+"/tree")
 	f.allow(t, "bound", "GET", "/api/v1/branches/"+A+"/tree", "", nil, http.StatusOK)
 	if sb, bb := f.key(t, f.bound, "GET", "/api/v1/locations/"+f.yardB.String(), "", nil); sb != http.StatusForbidden && sb != http.StatusNotFound {
 		t.Errorf("bound key foreign yard read: %d %s, want 403 or 404", sb, bb)
 	}
+	f.twinLeg("GET", "/api/v1/locations/"+f.yardB.String())
 	f.allow(t, "bound", "GET", "/api/v1/locations/"+f.yardA.String(), "", nil, http.StatusOK)
 
 	// The inventory adjust and transfer bodies name locations: the foreign
@@ -728,11 +734,13 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		fmt.Sprintf(`{"product_id":%q,"location_id":%q,"quantity":5,"reason":"pin"}`, f.posProd.String(), f.yardB.String()), nil); sb != http.StatusForbidden {
 		t.Errorf("bound key inventory adjust naming the foreign yard: %d %s, want 403", sb, bb)
 	}
+	f.twinLeg("POST", "/api/v1/inventory/adjust")
 	if sb, bb := f.key(t, f.bound, "POST", "/api/v1/inventory/transfer",
 		fmt.Sprintf(`{"product_id":%q,"from_location_id":%q,"to_location_id":%q,"quantity":1,"reason":"pin"}`,
 			f.posProd.String(), f.yardA.String(), f.yardB.String()), nil); sb != http.StatusForbidden {
 		t.Errorf("bound key inventory transfer into the foreign yard: %d %s, want 403", sb, bb)
 	}
+	f.twinLeg("POST", "/api/v1/inventory/transfer")
 	if changed := changedTables(beforeInv, f.twinState(t, w)); len(changed) > 0 {
 		t.Errorf("refused inventory writes changed rows that name branch B's twins: %v", changed)
 	}

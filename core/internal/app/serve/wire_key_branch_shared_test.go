@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -146,8 +147,17 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	// key without it is refused (TestKeyBranchPin_SharedRestrictedScope).
 	f.unbound = f.mintWithScopes(t, "pin scoped restricted", []string{"customers:read", "customers:write",
 		"ship-tos:read", "ship-tos:write", "contacts:read", "contacts:write", middleware.CustomerRestrictedScope}, nil)
-	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
+	// The customer is held by three branches, so the "also held by" refusal
+	// must name the lowest numbered other branch on every path that answers
+	// one (round 10 P3-3): the shared record rule here, and the exclusive
+	// pricing and exemption walls below.
+	s := seedSharedCustomer(t, f, f.branchA, f.branchB, f.branchC)
 	own := seedSharedCustomer(t, f, f.branchA)
+	lowestOther := f.branchB
+	if f.branchC.String() < lowestOther.String() {
+		lowestOther = f.branchC
+	}
+	named := "the customer is also held by branch " + lowestOther.String()
 	sh := "/api/v1/customers/" + s.id.String()
 	alone := "/api/v1/customers/" + own.id.String()
 
@@ -240,6 +250,14 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 			raw, _ := json.Marshal(map[string]any{"policy": "require_ack", "threshold_percent": fmt.Sprintf("%d.5", 1+n%40), "revision": cur["revision"]})
 			return f.send(t, who, "PUT", path+"/escalation-policy", string(raw), nil)
 		}},
+		{"salesperson_id", func(who, path string) (int, []byte) {
+			cur := f.readJSON(t, path)
+			var sp any = s.salesperson.String()
+			if cur["salesperson_id"] != nil {
+				sp = nil
+			}
+			return put(who, path, func(map[string]any) map[string]any { return map[string]any{"salesperson_id": sp} })
+		}},
 	}
 
 	// A branch local field passes on the shared customer for the bound key.
@@ -264,7 +282,7 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	for _, fld := range fields {
 		digest, rows := f.customerDigest(t, s.id), f.auditRows(t)
 		status, buf := fld.do("bound", sh)
-		if status != http.StatusForbidden || !strings.Contains(string(buf), "the customer is also held by branch "+f.branchB.String()) {
+		if status != http.StatusForbidden || !strings.Contains(string(buf), named) {
 			t.Errorf("bound key changing %s of the shared customer: %d %s, want a 403 naming branch B", fld.name, status, buf)
 		}
 		if after := f.auditRows(t); after != rows+1 {
@@ -362,7 +380,7 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	defaultAdd := `{"code":"pindef","name":"pin default","line1":"2 pin","is_default":true}`
 	before, rows := shipDigest(s.id), f.auditRows(t)
 	if status, buf := f.key(t, f.bound, "POST", sh+"/ship-tos", defaultAdd, nil); status != http.StatusForbidden ||
-		!strings.Contains(string(buf), "the customer is also held by branch "+f.branchB.String()) {
+		!strings.Contains(string(buf), named) {
 		t.Errorf("bound key adding a default ship-to to the shared customer: %d %s, want a 403 naming branch B", status, buf)
 	}
 	if after := f.auditRows(t); after != rows+1 {
@@ -407,7 +425,7 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 		before, rows := childState(), f.auditRows(t)
 		body, hdr := c.body()
 		status, buf := f.key(t, f.bound, c.method, c.path, body, hdr)
-		if status != http.StatusForbidden || !strings.Contains(string(buf), "the customer is also held by branch "+f.branchB.String()) {
+		if status != http.StatusForbidden || !strings.Contains(string(buf), named) {
 			t.Errorf("bound key %s of the shared customer: %d %s, want a 403 naming branch B", c.label, status, buf)
 		}
 		if after := f.auditRows(t); after != rows+1 {
@@ -415,6 +433,95 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 		}
 		if childState() != before {
 			t.Errorf("the refused %s still changed the record", c.label)
+		}
+	}
+
+	// The escalation audit carries the agreement's signature date beside its
+	// reference (round 10 P3-4): the before and after values are incomplete
+	// without it.
+	{
+		cur := f.readJSON(t, sh+"/escalation-policy")
+		raw, _ := json.Marshal(map[string]any{"policy": "require_ack", "threshold_percent": "9.5",
+			"agreement_ref": "PIN-AGMT", "agreement_signed_at": time.Now().UTC().Format(time.RFC3339),
+			"revision": cur["revision"]})
+		if status, buf := f.send(t, "unbound", "PUT", sh+"/escalation-policy", string(raw), nil); status != http.StatusOK {
+			t.Fatalf("scoped key setting the escalation agreement: %d %s, want 200", status, buf)
+		}
+		rows := f.sharedChangeRows(t, s.id)
+		last := rows[len(rows)-1]
+		esc, ok := last["escalation_policy"].(map[string]any)
+		if !ok {
+			t.Fatalf("the escalation audit row carries no policy facts: %v", last)
+		}
+		for _, side := range []string{"from", "to"} {
+			facts, ok := esc[side].(map[string]any)
+			if !ok {
+				t.Fatalf("the escalation audit's %s facts are not a map: %v", side, esc)
+			}
+			if _, has := facts["agreement_signed_at"]; !has {
+				t.Errorf("the escalation audit's %s carries no agreement_signed_at: %v", side, facts)
+			}
+			if _, has := facts["agreement_ref"]; !has {
+				t.Errorf("the escalation audit's %s carries no agreement_ref: %v", side, facts)
+			}
+		}
+	}
+
+	// The exclusive walls name the same lowest numbered other branch on the
+	// three branch customer (round 10 P3-3: the second query of the exclusive
+	// lookup, the shared customer pricing and exemption line).
+	{
+		pinned := f.mintWithScopes(t, "pin exclusive walls", []string{"tax:read", "tax:write"}, &f.branchA)
+		before := f.auditRows(t)
+		body := fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin three branch","certificate_number":"PIN-EXP-3","issuing_state":"WA"}`, s.id.String())
+		status, buf := f.key(t, pinned, "POST", "/api/v1/tax/exemptions", body, nil)
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") ||
+			!strings.Contains(string(buf), named) {
+			t.Errorf("bound key exemption on the three branch customer: %d %s, want the 403 naming the lowest other branch", status, buf)
+		}
+		if after := f.auditRowsFor(t, "no key"); after != 0 {
+			t.Fatal("unreachable")
+		}
+		var exemptions int
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM tax_exemptions WHERE customer_id = $1`, s.id).Scan(&exemptions); err != nil {
+			t.Fatal(err)
+		}
+		if exemptions != 0 {
+			t.Errorf("the refused exemption write left %d rows", exemptions)
+		}
+		if rows := f.auditRowsFor(t, "placeholder"); rows != 0 {
+			t.Fatal("unreachable")
+		}
+		_ = before
+	}
+
+	// A service level refusal names the call it refused: the row's method and
+	// path come from the mount's RecordRequest (round 10 P3-5).
+	{
+		digest, rows := f.customerDigest(t, s.id), f.auditRows(t)
+		nextTier := "gold"
+		if f.readJSON(t, sh)["tier"] == "gold" {
+			nextTier = "silver"
+		}
+		if status, buf := f.key(t, f.bound, "PUT", sh, f.customerReplace(t, s.id, map[string]any{"tier": nextTier}), nil); status != http.StatusForbidden {
+			t.Fatalf("bound key tier change on the shared customer: %d %s, want 403", status, buf)
+		}
+		if after := f.auditRows(t); after != rows+1 {
+			t.Fatalf("the refusal left no audit row")
+		}
+		var method, path string
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT changes->>'method', changes->>'path' FROM audit_log
+			 WHERE action = 'key.branch_refused' AND actor_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`,
+			f.boundKeyID).Scan(&method, &path); err != nil {
+			t.Fatal(err)
+		}
+		if method != "PUT" || path != sh {
+			t.Errorf("the refusal row names %s %s, want PUT %s", method, path, sh)
+		}
+		if f.customerDigest(t, s.id) != digest {
+			t.Errorf("the refused tier change still changed the shared customer's row")
 		}
 	}
 
