@@ -83,6 +83,10 @@ func newFixture(t *testing.T, db *database.DB) *fixture {
 		WithAuditLog(audit.NewLogger(db)).WithBranchGuard(middleware.NewBranchGuard(db))
 	mux := http.NewServeMux()
 	ap.NewHandler(f.svc).RegisterRoutes(mux)
+	// The GL routes ride the same server (unauthenticated, as the desk's stand
+	// in serves them to the fixture's administrator): the void tests reach the
+	// ledger through the public reverse and void routes, not hand SQL.
+	gl.NewHandler(f.glSvc).RegisterRoutes(mux)
 	wallMux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := &middleware.UserClaims{Role: "finance", Roles: []string{"finance"}}
 		claims.Subject = r.Header.Get("X-Test-Sub")
@@ -291,6 +295,44 @@ func (f *fixture) payHeaders(headers []string, cents int64, invoiceIDs ...string
 		"vendor_id": f.vendor.String(), "amount_cents": cents, "method": "CHECK",
 		"payment_date": "2026-01-15", "invoice_ids": invoiceIDs,
 	}, headers...)
+}
+
+// ---------------------------------------------------------------------------
+// Reaching the ledger through the public GL routes.
+// ---------------------------------------------------------------------------
+
+// glReverse runs the GL reverse route on an entry.
+func (f *fixture) glReverse(entry string) resp {
+	f.t.Helper()
+	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/reverse", map[string]any{"reason": "fixture reversal"})
+}
+
+// glVoidEntry runs the GL void route on an entry.
+func (f *fixture) glVoidEntry(entry string) resp {
+	f.t.Helper()
+	return f.do("POST", "/api/v1/gl/journal-entries/"+entry+"/void", nil)
+}
+
+// glEntryOf is the bill's linked entry id.
+func (f *fixture) glEntryOf(invoiceID string) string {
+	f.t.Helper()
+	var entry string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT gl_entry_id::text FROM vendor_invoices WHERE id = $1`, invoiceID).Scan(&entry); err != nil {
+		f.t.Fatal(err)
+	}
+	return entry
+}
+
+// glReversalOf is the id of the one reversal pointing at an entry.
+func (f *fixture) glReversalOf(entry string) string {
+	f.t.Helper()
+	var rev string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT id::text FROM gl_journal_entries WHERE reverses_entry_id = $1`, entry).Scan(&rev); err != nil {
+		f.t.Fatal(err)
+	}
+	return rev
 }
 
 // ---------------------------------------------------------------------------

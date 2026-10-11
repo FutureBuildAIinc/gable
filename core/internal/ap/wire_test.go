@@ -1151,6 +1151,67 @@ func TestWire_VoidHandEditedZeroTotalBill(t *testing.T) {
 	}
 }
 
+// RULE (review r2 P1-1): a reversal counts against a bill's credit only
+// while it is POSTED. The trial balance sums POSTED entries alone, so an
+// entry whose reversal was voided keeps its credit live in 2010, and a bill
+// that holds such an entry must not void with nothing reversed: the void is
+// refused entry_not_linked and nothing is written, whatever the reversal row
+// says. The shape is reachable with no hand SQL on the bill: the GL void
+// route voids any posted entry, a reversal included, and migration 106
+// leaves such a bill unlinked.
+func TestWire_VoidRefusesUnlinkedBillWhoseReversalIsVoid(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	id, r1 := f.enter("V-RVOID-1", "1", 500000) // 50.00
+	if a := f.approve(id, r1); a.status != http.StatusOK {
+		t.Fatal(a.raw)
+	}
+	entry := f.glEntryOf(id)
+	if rv := f.glReverse(entry); rv.status != http.StatusOK {
+		t.Fatalf("reverse the entry = %d: %s", rv.status, rv.raw)
+	}
+	if vv := f.glVoidEntry(f.glReversalOf(entry)); vv.status != http.StatusOK {
+		t.Fatalf("void the reversal = %d: %s", vv.status, vv.raw)
+	}
+	// The bill is the shape migration 106 leaves unlinked (its link predicate
+	// reads a reversal row of any status as an undo): the entry's credit
+	// stands live in 2010 while the bill still owes it.
+	mustExec(t, f.db, `UPDATE vendor_invoices SET gl_entry_id = NULL WHERE id = $1`, id)
+	control, open := f.controlBalance(), f.openSum()
+	if control != 5000 || open != 5000 {
+		t.Fatalf("control %d, open %d, want both 5000", control, open)
+	}
+	before := f.count(`SELECT count(*) FROM gl_journal_entries`)
+	v := f.void(id, 2, "wrong bill")
+	if v.status != http.StatusConflict {
+		t.Fatalf("void a bill whose entry's reversal is void = %d, want 409: %s", v.status, v.raw)
+	}
+	if code, blockers, _ := errorOf(t, v); code != "invalid_state_transition" || blockers[0] != "entry_not_linked" {
+		t.Errorf("void a bill whose entry's reversal is void = %q %v, want entry_not_linked", code, blockers)
+	}
+	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND status = 'APPROVED' AND revision = 2`, id); n != 1 {
+		t.Error("a refused void changed the bill")
+	}
+	if after := f.count(`SELECT count(*) FROM gl_journal_entries`); after != before {
+		t.Errorf("%d entries were written for a refused void", after-before)
+	}
+	if n := f.count(`SELECT count(*) FROM gl_journal_entries e
+		WHERE e.source = 'VENDOR_INVOICE' AND e.source_ref_id = $1
+		  AND e.status = 'POSTED' AND e.reverses_entry_id IS NULL
+		  AND NOT EXISTS (SELECT 1 FROM gl_journal_entries r WHERE r.reverses_entry_id = e.id AND r.status = 'POSTED')`, id); n != 1 {
+		t.Errorf("%d live credits stand for the bill, want 1", n)
+	}
+	if !f.balanced() {
+		t.Error("an entry does not balance")
+	}
+	if got, want := f.controlBalance(), control; got != want {
+		t.Errorf("after the refused void: control %d, want the untouched %d", got, want)
+	}
+	if got, want := f.openSum(), open; got != want {
+		t.Errorf("after the refused void: open %d, want the untouched %d", got, want)
+	}
+}
+
 // RULE (ADR 0008 section 11): the branch wall on every read and write. A
 // caller held to one branch finds another branch's bill a 404 on the by-id
 // routes and never in the list; a create naming a branch it may not target is
