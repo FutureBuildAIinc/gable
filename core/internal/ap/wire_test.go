@@ -713,11 +713,14 @@ func TestWire_ApproveRefusesLegacyPaidAmount(t *testing.T) {
 func TestWire_CreateCurrencyFromSetting(t *testing.T) {
 	testutil.LockOutboxTables(t)
 	f := newFixture(t, testutil.RequireDB(t))
-	mustExec(t, f.db, `INSERT INTO system_settings (key, value) VALUES ('currency.default', 'EUR')
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`)
-	t.Cleanup(func() {
-		mustExec(t, f.db, `DELETE FROM system_settings WHERE key = 'currency.default'`)
-	})
+	// Migration 091 seeds the row ('USD') and the whole base reads it, so the
+	// test borrows it briefly and puts it back; a parallel package's read
+	// (the order service's customer facts CROSS JOIN it) must never find it
+	// gone.
+	restore := `INSERT INTO system_settings (key, value) VALUES ('currency.default', 'USD')
+		ON CONFLICT (key) DO UPDATE SET value = 'USD'`
+	t.Cleanup(func() { mustExec(t, f.db, restore) })
+	mustExec(t, f.db, `UPDATE system_settings SET value = 'EUR' WHERE key = 'currency.default'`)
 
 	// An omitted currency takes the setting's value.
 	body := f.createBody("V-CUR-1", "1", 1000)
@@ -731,6 +734,7 @@ func TestWire_CreateCurrencyFromSetting(t *testing.T) {
 	if n := f.count(`SELECT count(*) FROM vendor_invoices WHERE id = $1 AND currency = 'EUR'`, str(t, r.body, "id")); n != 1 {
 		t.Error("the bill was not stored in the setting's currency")
 	}
+	mustExec(t, f.db, restore)
 
 	// A named currency still wins, and a bad one is still refused.
 	body2 := f.createBody("V-CUR-2", "1", 1000)
