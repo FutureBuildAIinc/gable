@@ -819,7 +819,11 @@ customer is also held by branch X", an unbound key without the scope reads
 "this key may not change a shared customer's restricted fields: the
 customer is also held by branch X", and a user without the finance or owner
 role reads "this role may not change a shared customer's restricted fields:
-the customer is also held by branch X". The refusal writes a
+the customer is also held by branch X". The exclusive walls (the customer
+scoped pricing rules, tax exemptions and category rules of the stricter
+line above) refuse a bound key in the same quoted lead in as the customer
+service's bound key refusal, so every shared customer refusal a bound key
+meets carries words this section quotes. The refusal writes a
 `customer.shared_restricted_refused`
 row for the customer, naming the actor, the refused fields, that branch and
 the method and path (the bound key's refusal keeps its `key.branch_refused`

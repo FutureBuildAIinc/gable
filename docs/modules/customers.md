@@ -187,7 +187,11 @@ until it is listed in `branchLocalFields` (`core/internal/customer/shared.go`).
 A restricted write is `403 forbidden` in the words "this key may act
 only on its own branch: the customer is also held by branch <id>" (the lowest
 numbered other branch), with the `key.branch_refused` row, and the record is
-untouched. A customer the key's branch holds alone and an unshared customer
+untouched. The customer scoped pricing rules, tax exemptions and category
+rules refuse a shared customer's bound key write in the same quoted lead in
+(`core/pkg/middleware/keybranch.go`), so every shared customer refusal a
+bound key meets carries words ADR 0007 section 5.5 quotes. A customer the
+key's branch holds alone and an unshared customer
 are unchanged for every caller. Who else may change a shared customer's
 restricted fields: a user only with the `finance` or `owner` role (a sales
 or admin user is refused with the lead in "this role may not change a shared

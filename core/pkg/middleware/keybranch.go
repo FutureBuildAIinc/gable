@@ -273,8 +273,12 @@ func (w *KeyBranchWall) CustomerRowBranch(customerOf func(ctx context.Context, i
 // sales to the customer too. A customer held by any branch outside the pin
 // is refused with a message naming that branch; a customer with no
 // customer_branches row holds no branch at all and is refused the same way
-// as by the read wall. A resolver failure answers 500 rather than failing
-// open, and a resolver may hand back ErrBodyRefused.
+// as by the read wall. The refusal's lead in is the one ADR 0007 section
+// 5.5 quotes for a bound key (item 57's caller specific lead ins; r17
+// P3-2), the same words the customer service's shared customer refusal
+// writes, so a reader of the section finds the wall's words. A resolver
+// failure answers 500 rather than failing open, and a resolver may hand
+// back ErrBodyRefused.
 func (w *KeyBranchWall) CustomerBranchExclusive(customersOf func(ctx context.Context, r *http.Request) ([]uuid.UUID, error)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -304,7 +308,7 @@ func (w *KeyBranchWall) CustomerBranchExclusive(customersOf func(ctx context.Con
 					if keyID, ok := KeyIDFromContext(r.Context()); ok && w.auditor != nil {
 						w.auditor.AuditKeyBranchRefusal(r.Context(), keyID, pin, r.Method, r.URL.Path)
 					}
-					message := "a branch bound key may act only on its own branch"
+					message := "this key may act only on its own branch"
 					if other != uuid.Nil {
 						message = message + ": the customer is also held by branch " + other.String()
 					}

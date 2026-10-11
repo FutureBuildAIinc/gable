@@ -828,7 +828,11 @@ func (f *keyPinFixture) refuseForeign(t *testing.T, method, path, body string, h
 		t.Errorf("bound key %s %s: %d %s, want 403", method, path, status, buf)
 		return
 	}
-	if !strings.Contains(string(buf), "a branch bound key may act only on its own branch") {
+	// The pin rule words the walls share: the route gate and the customer
+	// branch wall lead with "a branch bound key", the exclusive wall with
+	// "this key" (the ADR 0007 section 5.5 lead in, r17 P3-2); each wall's
+	// own lead in is asserted where its words matter.
+	if !strings.Contains(string(buf), "may act only on its own branch") {
 		t.Errorf("bound key %s %s: refusal body does not name the pin rule: %s", method, path, buf)
 	}
 	if after := f.auditRows(t); after != before+1 {

@@ -483,13 +483,15 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 
 	// The exclusive walls name the same lowest numbered other branch on the
 	// three branch customer (round 10 P3-3: the second query of the exclusive
-	// lookup, the shared customer pricing and exemption line).
+	// lookup, the shared customer pricing and exemption line), and their
+	// refusal carries the lead in ADR 0007 section 5.5 quotes for a bound
+	// key (r17 P3-2), so a reader of the section finds the wall's words.
 	{
 		pinned := f.mintWithScopes(t, "pin exclusive walls", []string{"tax:read", "tax:write"}, &f.branchA)
 		before := f.auditRows(t)
 		body := fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin three branch","certificate_number":"PIN-EXP-3","issuing_state":"WA"}`, s.id.String())
 		status, buf := f.key(t, pinned, "POST", "/api/v1/tax/exemptions", body, nil)
-		if status != http.StatusForbidden || !strings.Contains(string(buf), "a branch bound key may act only on its own branch") ||
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "this key may act only on its own branch") ||
 			!strings.Contains(string(buf), named) {
 			t.Errorf("bound key exemption on the three branch customer: %d %s, want the 403 naming the lowest other branch", status, buf)
 		}
