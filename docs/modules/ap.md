@@ -553,7 +553,7 @@ curl -X POST http://localhost:8080/api/v1/ap/invoices \
   -H 'X-Branch-Id: <seeded branch uuid>' \
   -H 'Idempotency-Key: 1' \
   -H 'Content-Type: application/json' \
-  -d '{"vendor_id":"<seeded vendor uuid>","vendor_invoice_number":"INV-1001","invoice_date":"2026-01-10","due_date":"2026-02-10","tax_cents":0,"lines":[{"description":"2x4x8 SPF","quantity":"100","unit_price_ten_thousandths":41250,"gl_account_id":"<seeded 5020 account uuid>"}]}'
+  -d '{"vendor_id":"<seeded vendor uuid>","vendor_invoice_number":"INV-1001","invoice_date":"<YYYY-MM-DD>","due_date":"<YYYY-MM-DD>","tax_cents":0,"lines":[{"description":"2x4x8 SPF","quantity":"100","unit_price_ten_thousandths":41250,"gl_account_id":"<seeded 5020 account uuid>"}]}'
 ```
 
 The body names the seeded vendor, a 1 to 64 character
