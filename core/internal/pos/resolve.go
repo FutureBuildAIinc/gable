@@ -60,6 +60,25 @@ func resolveAuditOf(rec *RefundIntentRecord, in ResolveIntentIn, actor string) a
 		}}
 }
 
+// IntentSaleBranch answers the branch of the claim's sale, for the resolution
+// route's branch hold (r12 P1-2): a caller whose context carries no branch
+// (multi_branch_enabled on, default_branch_required off, no X-Branch-Id
+// header) reads the sale through a repository filter that never fires, so
+// the route holds the sale's own branch to the caller's grants before either
+// leg is entered. A caller whose context names a branch the sale is outside
+// still finds the missing row here, as the sale read already answered.
+func (s *Service) IntentSaleBranch(ctx context.Context, intentID uuid.UUID) (uuid.UUID, error) {
+	rec, err := s.repo.GetRefundIntent(ctx, intentID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	sale, err := s.repo.GetSale(ctx, rec.SaleID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return sale.BranchID, nil
+}
+
 // ResolveRefundIntent resolves one PENDING claim (FROM-PRINCIPAL 41): the
 // operator records the terminal's actual outcome. A recorded refund (the
 // gateway's own refund id) books through the refund's money transaction with

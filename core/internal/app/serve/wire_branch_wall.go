@@ -141,9 +141,13 @@ func (w *branchWall) payments(mux *http.ServeMux, svc *payment.Service) {
 // stranded refund claim (the finance money mover) through the finance wall,
 // because the claim's sale is read through the caller's branch context, so a
 // finance user held to one branch finds another branch's claim a missing row
-// (ninth review P1-3, ADR 0007 section 2.3).
+// (ninth review P1-3, ADR 0007 section 2.3). The handler also holds the
+// claim's sale to the wall, which is what scopes a bound caller with no
+// context branch (default_branch_required=false, no header) to its grants;
+// the sale read's filter never fires for that caller (r12 P1-2), the same
+// record hold the document and purchase order routes carry.
 func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler) {
-	h.RegisterRoutes(mux, w.scoped("admin", "owner", "cashier"), w.scoped("finance", "owner"))
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "cashier"), w.scoped("finance", "owner"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

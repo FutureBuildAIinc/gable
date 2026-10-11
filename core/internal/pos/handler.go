@@ -4,7 +4,10 @@
 package pos
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -19,10 +22,55 @@ import (
 // and list envelopes (the recipe's handler step).
 type Handler struct {
 	service *Service
+	guard   BranchGuard // optional; see WithBranchGuard
 }
 
 // NewHandler creates the counter's handler.
 func NewHandler(service *Service) *Handler { return &Handler{service: service} }
+
+// BranchGuard holds the record the resolution acts on to the caller's
+// branch wall (ADR 0007 section 2.3). *middleware.BranchGuard satisfies it.
+type BranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+}
+
+// WithBranchGuard makes the resolution route hold the claim's sale to the
+// caller's wall. The sale read's repository filter stops a caller whose
+// context names a branch; the record check is what stops a bound caller
+// with no context branch (default_branch_required=false, no header), whose
+// grants the filter never sees. Without it that caller settles any branch's
+// claim, so serve always sets it.
+func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
+	h.guard = g
+	return h
+}
+
+// saleOfIntentHeld holds the claim's sale to the caller's wall (r12 P1-2):
+// a refusal is the same missing row the branch scoped read answers (404,
+// nothing moved), so a caller outside the sale's branch learns nothing of
+// the claim. It reports whether the request may proceed.
+func (h *Handler) saleOfIntentHeld(w http.ResponseWriter, r *http.Request, intentID uuid.UUID) bool {
+	if h.guard == nil {
+		return true
+	}
+	branch, err := h.service.IntentSaleBranch(r.Context(), intentID)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return false
+	}
+	if branch == uuid.Nil {
+		return true
+	}
+	if err := h.guard.CheckPayloadBranch(r.Context(), branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			httpx.WriteError(w, r, httpx.NotFound("refund claim not found"))
+			return false
+		}
+		httpx.WriteError(w, r, fmt.Errorf("branch grant lookup: %w", err))
+		return false
+	}
+	return true
+}
 
 // RegisterRoutes registers the counter's routes. roleGuard composes with
 // the branch middleware in serve.go; resolveGuard, when passed as the second
@@ -596,7 +644,9 @@ func (h *Handler) ListReturns(w http.ResponseWriter, r *http.Request) {
 // ResolveRefundIntent is POST /pos/refund-intents/{id}/resolve: the guarded
 // admin route that records a stranded claim's actual outcome at the terminal
 // and settles it. Finance and owner roles only; a machine key is refused
-// here, bound or not, whatever scopes it holds.
+// here, bound or not, whatever scopes it holds. The claim's sale is held to
+// the caller's branch wall before anything of it is read (r12 P1-2), so a
+// caller outside the branch, header or not, finds a missing row.
 func (h *Handler) ResolveRefundIntent(w http.ResponseWriter, r *http.Request) {
 	if refuseMachineKey(w, r, "a refund claim is resolved by a person, never a machine key") {
 		return
@@ -604,6 +654,9 @@ func (h *Handler) ResolveRefundIntent(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(r.PathValue("id"))
 	if err != nil {
 		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	if !h.saleOfIntentHeld(w, r, id) {
 		return
 	}
 	var req resolveIntentRequest

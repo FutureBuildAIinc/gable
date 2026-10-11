@@ -42,7 +42,7 @@ func TestTheResolutionStaysInsideTheCallersBranch(t *testing.T) {
 	t.Cleanup(func() {
 		setPosSetting(t, db, "multi_branch_enabled", "false")
 		setPosSetting(t, db, "default_branch_required", "true")
-		mustExecB(`DELETE FROM user_locations WHERE user_sub = 'pos-res-b' AND branch_id = $1`, branchB)
+		mustExecB(`DELETE FROM user_locations WHERE user_sub IN ('pos-res-b', 'pos-res-a')`)
 		mustExecB(`DELETE FROM locations WHERE id = $1`, branchB)
 	})
 
@@ -50,6 +50,9 @@ func TestTheResolutionStaysInsideTheCallersBranch(t *testing.T) {
 		refundErrs: []error{context.DeadlineExceeded}}
 	f := newFixture(t, db, func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
+		// the in branch control resolves through a user the sale's branch is
+		// granted: the route holds the sale to the caller's grants (r12 P1-2)
+		mustExecB(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pos-res-a', $1, TRUE, 'test')`, f.branchID)
 	})
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
@@ -94,10 +97,12 @@ func TestTheResolutionStaysInsideTheCallersBranch(t *testing.T) {
 		t.Errorf("card balance = %d, want 599 (nothing moved through the wall)", got)
 	}
 	f.assertARInvariants(t)
-	// the same claim resolves for a caller inside its own branch
-	rr := f.resolveOn(t, intentID, map[string]any{
+	// the same claim resolves for a caller inside its own branch: a finance
+	// user the sale's branch is granted, sending no header (the grants hold
+	// passes for the caller it covers)
+	rr := f.do("POST", "/api/v1/pos/refund-intents/"+intentID+"/resolve", map[string]any{
 		"outcome": "no_refund", "reconciliation_reference": "REC-A", "reason": "the terminal log shows no refund",
-	}, "finance")
+	}, "X-Test-Role", "finance", "X-Test-Sub", "pos-res-a")
 	if rr.status != http.StatusOK {
 		t.Fatalf("the in branch resolution = %d, want 200: %s", rr.status, rr.raw)
 	}

@@ -125,7 +125,10 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	}
 
 	mux := http.NewServeMux()
-	pos.NewHandler(f.service).RegisterRoutes(mux)
+	// the branch guard serve passes the counter (r12 P1-2): the resolution
+	// route holds the claim's sale to the caller's grants, so the fixture
+	// proves the same hold serve proves
+	pos.NewHandler(f.service).WithBranchGuard(middleware.NewBranchGuard(db)).RegisterRoutes(mux)
 	invoice.NewHandler(invoices).RegisterRoutes(mux)
 	// the payment route, as serve mounts it: the contention tests race real
 	// walk-in payments against the sales
