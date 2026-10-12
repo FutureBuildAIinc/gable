@@ -36,14 +36,14 @@ import (
 
 // Service is the AR core and the reads of the account module.
 type Service struct {
-	db         *database.DB
-	gl         *gl.Service
-	logger     *slog.Logger
-	now        func() time.Time
-	auditLog   *audit.Logger
-	events     EventRecorder
-	tx         TxRunner
-	applyGuard InvoiceApplyGuard
+	db                *database.DB
+	gl                *gl.Service
+	logger            *slog.Logger
+	now               func() time.Time
+	auditLog          *audit.Logger
+	events            EventRecorder
+	tx                TxRunner
+	applyGuard        InvoiceApplyGuard
 	tenderCreditGuard TenderCreditGuard
 }
 

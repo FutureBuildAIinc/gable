@@ -37,13 +37,13 @@ type PaybackIntentIn struct {
 // RefundIntentPaidBack is the payback's answer: the credit it paid, the
 // terminal's refund id, and the payback's own claim beside the void's.
 type RefundIntentPaidBack struct {
-	ID           uuid.UUID `json:"id"`
-	PaybackID    uuid.UUID `json:"payback_id"`
-	SaleID       uuid.UUID `json:"sale_id"`
-	TenderID     uuid.UUID `json:"tender_id"`
-	AmountCents  int64     `json:"amount_cents"`
-	RefundTxID   string    `json:"refund_tx_id"`
-	State        string    `json:"state"`
+	ID          uuid.UUID `json:"id"`
+	PaybackID   uuid.UUID `json:"payback_id"`
+	SaleID      uuid.UUID `json:"sale_id"`
+	TenderID    uuid.UUID `json:"tender_id"`
+	AmountCents int64     `json:"amount_cents"`
+	RefundTxID  string    `json:"refund_tx_id"`
+	State       string    `json:"state"`
 }
 
 // paybackAuditOf builds the audit row the payback writes, the resolve
@@ -257,7 +257,6 @@ func originOf(ctx context.Context, s *Service, claim RefundIntent) uuid.UUID {
 	}
 	return id
 }
-
 
 // unavailableTerminal answers the payback's own unconfigured terminal
 // refusal: the held credit's one rail is the counter terminal.

@@ -83,7 +83,10 @@ type TenderCreditGuard interface {
 
 // WithTenderCreditGuard sets the held credit guard. The counter's service
 // satisfies it; serve wires the two.
-func (s *Service) WithTenderCreditGuard(g TenderCreditGuard) *Service { s.tenderCreditGuard = g; return s }
+func (s *Service) WithTenderCreditGuard(g TenderCreditGuard) *Service {
+	s.tenderCreditGuard = g
+	return s
+}
 
 // RecordEvents writes the events of an act through the outbox, in order.
 // Owners of an act call it last inside the act's transaction.

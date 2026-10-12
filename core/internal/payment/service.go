@@ -84,7 +84,10 @@ func (s *Service) WithGateway(gw PaymentGateway, publicKey string) *Service {
 // satisfies it (C2-5, FROM-PRINCIPAL 60); serve wires the two, so a
 // payment whose unapplied cash is a counter tender's credit is refused
 // here before the online gateway is ever asked.
-func (s *Service) WithTenderCreditGuard(g account.TenderCreditGuard) *Service { s.tenderCreditGuard = g; return s }
+func (s *Service) WithTenderCreditGuard(g account.TenderCreditGuard) *Service {
+	s.tenderCreditGuard = g
+	return s
+}
 
 // WithBrainNotifier sets the FB Brain financial notifier and returns the service for chaining.
 // When set, successfully paid invoices will fire an async notification to Brain's 10bps engine.
