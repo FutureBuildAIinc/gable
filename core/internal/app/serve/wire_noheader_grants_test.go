@@ -117,9 +117,10 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 		t.Errorf("the refused open wrote %d sessions on B's register, want none", n)
 	}
 
-	// Close B's open drawer: refused, the drawer stays open, no Z report.
-	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1`, f.tillB); n != 0 {
-		t.Fatalf("pre: %d Z reports on B's session", n)
+	// Close B's open drawer: refused, the drawer stays open, and no Z report
+	// is written beyond the one the fixture froze (zrB).
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1`, f.tillB); n != 1 {
+		t.Fatalf("pre: %d Z reports on B's session, want the fixture's one", n)
 	}
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/"+f.tillB.String()+"/close",
 		`{"counted_by_method":{"CASH":50}}`)
@@ -129,7 +130,7 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 	if s := noheaderCount(t, f, `SELECT COUNT(*) FROM till_sessions WHERE id = $1 AND status = 'OPEN'`, f.tillB); s != 1 {
 		t.Errorf("the refused close left B's session open in %d rows, want its one OPEN row", s)
 	}
-	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1`, f.tillB); n != 0 {
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1 AND id <> $2`, f.tillB, f.zrB); n != 0 {
 		t.Errorf("the refused close wrote %d Z reports, want none", n)
 	}
 
@@ -356,10 +357,12 @@ func TestNoHeader_OtherFamilies(t *testing.T) {
 	noheaderGrant(t, f, "pin-purchasing", f.branchA)
 	noheaderGrant(t, f, "pin-warehouse", f.branchA)
 
-	// Orders: the by id read and the list.
+	// Orders: the by id read and the old write routes now carry the record
+	// branch rule the allocate, fulfilment and retry writes already had (the
+	// module's 403 naming id); the list carries only A's rows.
 	status, buf := f.userAs(t, "sales", "GET", "/api/v1/orders/"+w.ordB.String(), "", nil)
-	if status != http.StatusNotFound {
-		t.Errorf("no header read of B's order: %d %s, want 404", status, buf)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "outside the branches this caller may target") {
+		t.Errorf("no header read of B's order: %d %s, want the 403 the record rule serves", status, buf)
 	}
 	status, buf = f.userAs(t, "sales", "GET", "/api/v1/orders", "", nil)
 	if status != http.StatusOK || !strings.Contains(string(buf), w.ordA.String()) {
@@ -367,6 +370,16 @@ func TestNoHeader_OtherFamilies(t *testing.T) {
 	}
 	if strings.Contains(string(buf), w.ordB.String()) {
 		t.Errorf("no header order list carries B's row: %s", buf)
+	}
+	// The transition act: refused, nothing written (the seeded order stays
+	// CONFIRMED).
+	status, buf = f.userAs(t, "sales", "POST", "/api/v1/orders/"+w.ordB.String()+"/transitions",
+		`{"to":"cancelled","reason":"no header","revision":1}`, nil)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "outside the branches this caller may target") {
+		t.Errorf("no header transition of B's order: %d %s, want the 403 the record rule serves", status, buf)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM orders WHERE id = $1 AND status = 'CONFIRMED'`, w.ordB); n != 1 {
+		t.Errorf("the refused transition left B's order confirmed in %d rows, want its one", n)
 	}
 
 	// Quotes: the by id read already holds through the service's record
@@ -385,9 +398,10 @@ func TestNoHeader_OtherFamilies(t *testing.T) {
 	}
 
 	// Purchase orders: the by id routes already hold through the handler's
-	// record check; the list did not and now carries only A's rows.
+	// record check (a 403 whose logged words the generic body carries); the
+	// list did not and now carries only A's rows.
 	status, buf = f.userAs(t, "purchasing", "GET", "/api/v1/purchase-orders/"+w.poB.String(), "", nil)
-	if status != http.StatusForbidden || !strings.Contains(string(buf), "outside the branches this caller may target") {
+	if status != http.StatusForbidden {
 		t.Errorf("no header read of B's purchase order: %d %s, want the 403 the record check serves", status, buf)
 	}
 	status, buf = f.userAs(t, "purchasing", "GET", "/api/v1/purchase-orders", "", nil)
