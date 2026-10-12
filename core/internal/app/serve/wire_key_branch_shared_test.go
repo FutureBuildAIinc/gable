@@ -486,17 +486,37 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 	// lookup, the shared customer pricing and exemption line), and their
 	// refusal carries the lead in ADR 0007 section 5.5 quotes for a bound
 	// key (r17 P3-2), so a reader of the section finds the wall's words.
+	// The refusal also writes its row (r19 P3-2): one key.branch_refused row
+	// for the pinned key that drove it, naming the refused call's method,
+	// path and pin branch, with nothing written to the wall's own table.
 	{
 		pinned := f.mintWithScopes(t, "pin exclusive walls", []string{"tax:read", "tax:write"}, &f.branchA)
-		before := f.auditRows(t)
+		var pinnedID string
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT id FROM api_keys WHERE name = $1`, "pin exclusive walls").Scan(&pinnedID); err != nil {
+			t.Fatal(err)
+		}
+		before := f.auditRowsFor(t, pinnedID)
 		body := fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin three branch","certificate_number":"PIN-EXP-3","issuing_state":"WA"}`, s.id.String())
 		status, buf := f.key(t, pinned, "POST", "/api/v1/tax/exemptions", body, nil)
 		if status != http.StatusForbidden || !strings.Contains(string(buf), "this key may act only on its own branch") ||
 			!strings.Contains(string(buf), named) {
 			t.Errorf("bound key exemption on the three branch customer: %d %s, want the 403 naming the lowest other branch", status, buf)
 		}
-		if after := f.auditRowsFor(t, "no key"); after != 0 {
-			t.Fatal("unreachable")
+		if after := f.auditRowsFor(t, pinnedID); after != before+1 {
+			t.Errorf("the exclusive wall refusal wrote %d rows over the %d before it, want exactly one key.branch_refused row",
+				after-before, before)
+		}
+		var method, path, rowBranch string
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT changes->>'method', changes->>'path', changes->>'branch_id' FROM audit_log
+			 WHERE action = 'key.branch_refused' AND actor_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1`,
+			pinnedID).Scan(&method, &path, &rowBranch); err != nil {
+			t.Fatal(err)
+		}
+		if method != "POST" || path != "/api/v1/tax/exemptions" || rowBranch != f.branchA.String() {
+			t.Errorf("the exclusive wall's refusal row names %s %s at branch %s, want POST %s at the pin %s",
+				method, path, rowBranch, "/api/v1/tax/exemptions", f.branchA)
 		}
 		var exemptions int
 		if err := f.db.Pool.QueryRow(context.Background(),
@@ -506,10 +526,6 @@ func TestKeyBranchPin_SharedCustomerRecord(t *testing.T) {
 		if exemptions != 0 {
 			t.Errorf("the refused exemption write left %d rows", exemptions)
 		}
-		if rows := f.auditRowsFor(t, "placeholder"); rows != 0 {
-			t.Fatal("unreachable")
-		}
-		_ = before
 	}
 
 	// A service level refusal names the call it refused: the row's method and

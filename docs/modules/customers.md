@@ -190,7 +190,9 @@ numbered other branch), with the `key.branch_refused` row, and the record is
 untouched. The customer scoped pricing rules, tax exemptions and category
 rules refuse a shared customer's bound key write in the same quoted lead in
 (`core/pkg/middleware/keybranch.go`), so every shared customer refusal a
-bound key meets carries words ADR 0007 section 5.5 quotes. A customer the
+bound key meets carries words ADR 0007 section 5.5 quotes; each wall
+refusal writes its own `key.branch_refused` row naming the refused call's
+method, path and the pin branch, with nothing written to the wall's table. A customer the
 key's branch holds alone and an unshared customer
 are unchanged for every caller. Who else may change a shared customer's
 restricted fields: a user only with the `finance` or `owner` role (a sales
