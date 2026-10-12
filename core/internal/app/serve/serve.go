@@ -765,6 +765,8 @@ func Run() {
 		OrderSvc:      orderSvc,
 		DeliverySvc:   deliverySvc,
 		EventsOrg:     cfg.EventsOrg,
+		MW:            wall.mw,
+		Guard:         wall.guard,
 	})
 
 	// SMS Notification Service

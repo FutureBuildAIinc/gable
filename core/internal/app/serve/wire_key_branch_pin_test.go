@@ -393,6 +393,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		DB:         db,
 		Logger:     slog.Default(),
 		AuditLog:   audit.NewLogger(db),
+		MW:         wall.mw,
+		Guard:      wall.guard,
 	})
 
 	// The dealer wide modules exactly as serve registers them: the reporting
