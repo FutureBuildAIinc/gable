@@ -36,7 +36,7 @@ var entitySchemas = map[string]map[string]string{
 	"inventory": {
 		"id":           "inv.id",
 		"product_id":   "inv.product_id",
-		"product_name": "p.name",
+		"product_name": "p.description",
 		"quantity":     "inv.quantity",
 		"location_id":  "inv.location_id",
 	},

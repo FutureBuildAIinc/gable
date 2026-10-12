@@ -27,7 +27,8 @@ import (
 func noheaderGrant(t *testing.T, f *keyPinFixture, sub string, branch uuid.UUID) {
 	t.Helper()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'sec-noheader')`,
+		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'sec-noheader')
+		 ON CONFLICT DO NOTHING`,
 		sub, branch); err != nil {
 		t.Fatalf("grant %s: %v", sub, err)
 	}

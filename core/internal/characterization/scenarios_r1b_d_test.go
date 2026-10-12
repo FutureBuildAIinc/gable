@@ -174,12 +174,13 @@ func r1bDReportingGroups() []groupDef {
 					body: map[string]any{"entity_type": "orders", "format": "pdf", "definition": ordersDef}},
 				{name: "reporting.builder.export.bad_body", method: "POST",
 					path: "/api/v1/reporting/builder/export", body: "nope"},
-				// At this base every BI entity schema names a column that does not
-				// exist (i.invoice_number, o.order_number, p.name): all three
-				// well formed exports answer 500.
-				{name: "reporting.bi_export.invoices", method: "GET", path: "/api/v1/reporting/export/invoices"},
-				{name: "reporting.bi_export.orders", method: "GET", path: "/api/v1/reporting/export/orders"},
-				{name: "reporting.bi_export.inventory", method: "GET", path: "/api/v1/reporting/export/inventory"},
+				// The three well formed exports answer 200 (the entity schemas'
+				// column expressions were fixed to the real columns); the bodies
+				// are the seeded dealer's whole dumps, which move with the seed,
+				// so the steps pin status and content type with the body masked.
+				{name: "reporting.bi_export.invoices", method: "GET", path: "/api/v1/reporting/export/invoices", maskBody: true},
+				{name: "reporting.bi_export.orders", method: "GET", path: "/api/v1/reporting/export/orders", maskBody: true},
+				{name: "reporting.bi_export.inventory", method: "GET", path: "/api/v1/reporting/export/inventory", maskBody: true},
 				{name: "reporting.bi_export.invalid_entity", method: "GET", path: "/api/v1/reporting/export/no_such_entity"},
 			},
 		},
