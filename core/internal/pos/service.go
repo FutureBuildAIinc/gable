@@ -68,11 +68,13 @@ type Service struct {
 // what the caller may target while the context carries no branch, the
 // record act arm of the no header rule (SEC-NOHEADER-1): a caller that
 // sends the header keeps the repository's equality answer, an administrator
-// keeps its reach, and a record that does not exist is not held here (the
-// flow's own not found answer serves it). A record of no branch is refused
-// for a no header user, because no grant decides it (the same clause that
-// refuses a user with no grants at all); an administrator and a header
-// caller keep the reach the rule gives them.
+// keeps its reach, and a record that does not exist never reaches this
+// hold (the branch readers answer it separately, so the act serves the
+// module's 404 rather than a refusal naming a branch a missing record
+// cannot carry). A record of no branch is refused for a no header user,
+// because no grant decides it (the same clause that refuses a user with no
+// grants at all); an administrator and a header caller keep the reach the
+// rule gives them.
 func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uuid.UUID, id uuid.UUID) error {
 	if err := s.grants.CheckGrantsBranch(ctx, branch); err != nil {
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
@@ -87,11 +89,15 @@ func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uui
 // it runs. The branch is read with no wall, because the walled read a
 // no header user's grant hides the record with would answer before the
 // refusal could (a hidden record reads as missing, an unheld one must
-// refuse by name, SEC-NOHEADER-1).
+// refuse by name, SEC-NOHEADER-1). A sale that does not exist answers the
+// module's 404.
 func (s *Service) holdSaleBranch(ctx context.Context, txID uuid.UUID) error {
-	branch, err := s.repo.TransactionBranch(ctx, txID)
+	branch, found, err := s.repo.TransactionBranch(ctx, txID)
 	if err != nil {
 		return err
+	}
+	if !found {
+		return &MissingRecordError{What: "transaction", ID: txID}
 	}
 	return s.holdRecordBranch(ctx, "transaction", branch, txID)
 }

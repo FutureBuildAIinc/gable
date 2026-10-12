@@ -1009,6 +1009,18 @@ balances, pure books figures no branch fact can divide, are refused to a
 scoped caller (the columns and their in sync flags are absent from the
 row) and served to the wide callers.
 
+Two limits of this surface stand stated. A customer that two branches
+share has one subledger (`customer_transactions` carries no branch fact),
+so a statement or an account read of that customer shows the whole ledger
+to every branch that holds the customer, header or not; dividing it needs
+a branch fact on the subledger rows, which the schema does not carry.
+And the dashboard and report caches are keyed by the caller's reach (the
+branch and the grants sub together), not by the grant set itself, so a
+grant revoked or added within the cache's lifetime is served from the
+entry the earlier reach primed: both caches hold an entry for sixty
+seconds, read from `newCacheStore(60 * time.Second)` on the dashboard and
+the `60*time.Second` comparisons in the reporting service.
+
 The routes this closed, each stated in `docs/refactor/CONTRACT-CHANGES.md`
 under `SEC-NOHEADER-1`: the whole pos surface (the till open, close,
 current, report and Z report reads and lists, the sale create, read, list,

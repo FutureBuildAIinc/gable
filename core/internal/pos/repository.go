@@ -62,6 +62,20 @@ func (e *UnknownRegisterError) Error() string {
 	return fmt.Sprintf("register %s does not exist", e.RegisterID)
 }
 
+// MissingRecordError is the answer an act addressing a record that does not
+// exist gets (a void of a missing sale, a close of a missing session, r4
+// P3-1 and P3-2): the module's own 404, typed so the HTTP layer never
+// answers it with the record branch refusal's 403 (which would claim the
+// missing record belongs to another branch) nor a bare 500.
+type MissingRecordError struct {
+	What string
+	ID   uuid.UUID
+}
+
+func (e *MissingRecordError) Error() string {
+	return fmt.Sprintf("%s %s not found", e.What, e.ID)
+}
+
 // Repository handles POS data persistence.
 type Repository interface {
 	CreateTransaction(ctx context.Context, tx *POSTransaction) error
@@ -105,9 +119,12 @@ type Repository interface {
 
 	// TransactionBranch and TillSessionBranch read a record's own branch
 	// with no wall, for the act hold that must decide before the walled
-	// read hides the record from a caller held to the grants.
-	TransactionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
-	TillSessionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+	// read hides the record from a caller held to the grants. The second
+	// return tells a record that does not exist (found false) from one
+	// that carries no branch (found true, nil branch), so the act can
+	// answer the module's 404 rather than a branch refusal (r4 P3-1).
+	TransactionBranch(ctx context.Context, id uuid.UUID) (branch *uuid.UUID, found bool, err error)
+	TillSessionBranch(ctx context.Context, id uuid.UUID) (branch *uuid.UUID, found bool, err error)
 }
 
 // PostgresRepository implements Repository for PostgreSQL.
@@ -363,34 +380,36 @@ func (r *PostgresRepository) RemoveLineItem(ctx context.Context, itemID uuid.UUI
 
 // TransactionBranch reads a transaction's own branch with no wall, for the
 // act hold that must decide before the walled read hides the record. A
-// transaction that does not exist reads as no branch.
-func (r *PostgresRepository) TransactionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+// transaction that does not exist answers found false, and one that exists
+// with no branch answers found true and a nil branch.
+func (r *PostgresRepository) TransactionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, bool, error) {
 	var branch *uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT branch_id FROM pos_transactions WHERE id = $1`, id).Scan(&branch)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to read transaction branch: %w", err)
+		return nil, false, fmt.Errorf("failed to read transaction branch: %w", err)
 	}
-	return branch, nil
+	return branch, true, nil
 }
 
 // TillSessionBranch reads a till session's own branch with no wall, for the
 // act hold that must decide before the walled read hides the record. A
-// session that does not exist reads as no branch.
-func (r *PostgresRepository) TillSessionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+// session that does not exist answers found false, and one that exists with
+// no branch answers found true and a nil branch.
+func (r *PostgresRepository) TillSessionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, bool, error) {
 	var branch *uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT branch_id FROM till_sessions WHERE id = $1`, id).Scan(&branch)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("failed to read till session branch: %w", err)
+		return nil, false, fmt.Errorf("failed to read till session branch: %w", err)
 	}
-	return branch, nil
+	return branch, true, nil
 }
 
 func (r *PostgresRepository) GetLineItems(ctx context.Context, txID uuid.UUID) ([]POSLineItem, error) {

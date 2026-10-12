@@ -135,6 +135,19 @@ func refuseRecordBranch(w http.ResponseWriter, r *http.Request, err error) bool 
 	return true
 }
 
+// answerMissingRecord answers the request with the module's 404 when err is
+// the missing record verdict, reporting whether it answered: a record that
+// does not exist is missing for every caller alike, never a 403 claiming it
+// belongs to another branch (r4 P3-1) nor a bare 500 (r4 P3-2).
+func answerMissingRecord(w http.ResponseWriter, r *http.Request, err error) bool {
+	var missing *MissingRecordError
+	if !errors.As(err, &missing) {
+		return false
+	}
+	httputil.RespondError(w, r, missing.Error(), http.StatusNotFound, err)
+	return true
+}
+
 // CreateReturn records a merchandise return and issues the refund.
 func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
 	if refuseMachineKeyCashier(w, r) {
@@ -327,6 +340,9 @@ func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := h.service.CloseTill(r.Context(), id, counted, req.Notes)
 	if err != nil {
+		if answerMissingRecord(w, r, err) {
+			return
+		}
 		if refuseRecordBranch(w, r, err) {
 			return
 		}
@@ -494,6 +510,9 @@ func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.VoidTransaction(r.Context(), txID)
 	if err != nil {
+		if answerMissingRecord(w, r, err) {
+			return
+		}
 		if refuseRecordBranch(w, r, err) {
 			return
 		}

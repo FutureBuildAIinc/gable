@@ -156,10 +156,16 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 	// An act on a session of a branch outside the caller's grants is refused
 	// by name before anything runs (SEC-NOHEADER-1); the branch is read with
 	// no wall, because the walled read would hide the session before the
-	// refusal could name it.
-	if branch, err := s.repo.TillSessionBranch(ctx, sessionID); err != nil {
+	// refusal could name it. A session that does not exist answers the
+	// module's 404 (r4 P3-1), never the refusal.
+	branch, found, err := s.repo.TillSessionBranch(ctx, sessionID)
+	if err != nil {
 		return nil, err
-	} else if err := s.holdRecordBranch(ctx, "till session", branch, sessionID); err != nil {
+	}
+	if !found {
+		return nil, &MissingRecordError{What: "till session", ID: sessionID}
+	}
+	if err := s.holdRecordBranch(ctx, "till session", branch, sessionID); err != nil {
 		return nil, err
 	}
 	report, err := s.TillReport(ctx, sessionID)

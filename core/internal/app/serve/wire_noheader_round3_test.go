@@ -170,6 +170,35 @@ func TestNoHeader_ReportBuilderAndSavedRunFollowTheReach(t *testing.T) {
 	}
 }
 
+// TestNoHeader_PosMissingRecordIsNotFound is the pos record family (r4
+// P3-1 and P3-2): a void or a till close addressing a record that does not
+// exist answers the module's 404 for every caller, never a 403 claiming
+// the missing record belongs to another branch and never a bare 500.
+func TestNoHeader_PosMissingRecordIsNotFound(t *testing.T) {
+	f := newKeyPinFixture(t)
+	f.seedWalledTwins(t)
+	noheaderGrant(t, f, "pin-cashier", f.branchA)
+	missing := uuid.NewString()
+
+	for _, hdr := range []map[string]string{nil, headerA(f)} {
+		status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+missing+"/void", "", hdr)
+		if status != http.StatusNotFound {
+			t.Errorf("void of a missing sale (header %v): %d %s, want 404", hdr != nil, status, buf)
+		}
+		status, buf = f.userAs(t, "cashier", "POST", "/api/v1/pos/till/"+missing+"/close", `{"counted_by_method":{}}`, hdr)
+		if status != http.StatusNotFound {
+			t.Errorf("close of a missing till session (header %v): %d %s, want 404", hdr != nil, status, buf)
+		}
+	}
+
+	// The control: a record of another branch still answers the record
+	// refusal by name, not a 404.
+	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", "", nil)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "branch this caller may not target") {
+		t.Errorf("void of B's sale: %d %s, want the 403 record refusal", status, buf)
+	}
+}
+
 // TestNoHeader_CustomerAccountSurface is the customer account family (r4
 // P2-4, carried from r2 P3-2 and r3 P3-2): the account summary, its
 // subledger and the AR statement answer a customer outside the caller's
