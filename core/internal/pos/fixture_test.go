@@ -146,6 +146,9 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 	if f.paymentGateway != nil {
 		payments = payments.WithGateway(f.paymentGateway, "")
 	}
+	// the payment refund route holds a counter tender's credit to the
+	// terminal rail as serve wires it (C2-5, FROM-PRINCIPAL 60b)
+	payments = payments.WithTenderCreditGuard(f.service)
 	payment.NewHandler(payments).RegisterRoutes(mux)
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(roleClaims(middleware.NewBranchMiddleware(db).Handler(mux))))
 	t.Cleanup(func() {

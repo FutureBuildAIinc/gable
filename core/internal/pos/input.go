@@ -426,3 +426,24 @@ func (r *resolveIntentRequest) parse() (*ResolveIntentIn, error) {
 	}
 	return &out, nil
 }
+
+// paybackIntentRequest is POST /pos/refund-intents/{id}/payback: the
+// operator's record of why the credit went back to its card. The outcome is
+// the route's own (the terminal is asked for the credit), so only the
+// reason is sent; a bare payback is refused naming the field.
+type paybackIntentRequest struct {
+	Reason *string `json:"reason"`
+}
+
+func (r *paybackIntentRequest) parse() (*PaybackIntentIn, error) {
+	v := &httpx.Validator{}
+	out := PaybackIntentIn{}
+	if r.Reason != nil {
+		out.Reason = *r.Reason
+	}
+	v.Required("reason", out.Reason)
+	if err := v.Err(); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

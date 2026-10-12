@@ -30,8 +30,15 @@ import (
 // resolveOn posts one resolution of the claim with the finance role.
 func (f *fixture) resolveOn(t *testing.T, intentID string, body map[string]any, role string) resp {
 	t.Helper()
+	return f.resolveOnSub(t, intentID, body, role, mustUUID(t))
+}
+
+// resolveOnSub posts one resolution as a named subject (the branch wall
+// tests grant one).
+func (f *fixture) resolveOnSub(t *testing.T, intentID string, body map[string]any, role, sub string) resp {
+	t.Helper()
 	return f.do("POST", "/api/v1/pos/refund-intents/"+intentID+"/resolve", body,
-		"X-Test-Role", role, "X-Test-Sub", mustUUID(t))
+		"X-Test-Role", role, "X-Test-Sub", sub)
 }
 
 // pendingIntent reads the sale's standing claim row.

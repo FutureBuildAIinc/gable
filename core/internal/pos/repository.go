@@ -119,6 +119,9 @@ type Repository interface {
 	// tender's payment still carries the unapplied cents the completion
 	// reversed onto it.
 	HeldTenderCreditOfPayment(ctx context.Context, paymentID uuid.UUID) (TenderCreditFacts, bool, error)
+	// TenderPaymentFacts reads a tender's payment and its unapplied cents
+	// (the payback route's credit read).
+	TenderPaymentFacts(ctx context.Context, tenderID uuid.UUID) (uuid.UUID, int64, error)
 	SessionPendingRefundIntentIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error)
 	// PendingRefundIntentIDs lists the ids of the sale's standing claims (the
 	// per tender void resolution reads them to know when every tender is
@@ -1085,6 +1088,25 @@ func (r *PostgresRepository) HeldTenderCreditOfPayment(ctx context.Context, paym
 		return facts, false, fmt.Errorf("failed to read the payment's held tender credit: %w", err)
 	}
 	return facts, true, nil
+}
+
+// TenderPaymentFacts reads the tender's payment and the unapplied cents it
+// carries: the payback route's credit read, before any terminal call.
+func (r *PostgresRepository) TenderPaymentFacts(ctx context.Context, tenderID uuid.UUID) (uuid.UUID, int64, error) {
+	var paymentID uuid.UUID
+	var unapplied int64
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT d.payment_id, ROUND(p.amount_unapplied * 100)::bigint
+		FROM pos_tenders d JOIN payments p ON p.id = d.payment_id
+		WHERE d.id = $1 AND d.payment_id IS NOT NULL AND p.status = 'POSTED'`, tenderID).
+		Scan(&paymentID, &unapplied)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, 0, conflict("no_held_credit", "the tender names no posted payment: no credit is held on it")
+	}
+	if err != nil {
+		return uuid.Nil, 0, fmt.Errorf("failed to read the tender's payment: %w", err)
+	}
+	return paymentID, unapplied, nil
 }
 
 // PendingVoidClaimsOfInvoice lists the standing void claims of the sale that

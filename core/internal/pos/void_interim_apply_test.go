@@ -232,14 +232,20 @@ func TestAnotherWalkInCreditCannotApplyToAnInterimVoidInvoice(t *testing.T) {
 	if !containsClaim(r.raw, declined1["id"].(string)) {
 		t.Errorf("the refusal does not name the declined claim %s: %s", declined1["id"], r.raw)
 	}
-	// the credit is still on its own payment, payable back to its card
+	// the credit is still on its own payment, and its one way back is the
+	// counter terminal rail: the payback route pays it to the card while
+	// S2's claim still stands (the credit belongs to S1's completed void,
+	// not to the invoice it might have been spent on)
 	if got := f.unappliedOf(t, declined1["tender_id"].(string)); got != credit {
 		t.Errorf("S1's credit after the refused apply = %d, want %d (nothing was absorbed)", got, credit)
 	}
-	if r := f.do("POST", "/api/v1/payments/"+payID+"/refunds", map[string]any{
-		"amount_cents": credit, "reason": "the declined tender's credit back to its card", "revision": payRev,
-	}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK && r.status != http.StatusCreated {
+	if r := f.do("POST", "/api/v1/pos/refund-intents/"+declined1["id"].(string)+"/payback",
+		map[string]any{"reason": "the declined tender's credit back to its card"},
+		"X-Test-Role", "finance", "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK {
 		t.Fatalf("the credit's payback to its card = %d, want 200: %s", r.status, r.raw)
+	}
+	if got := f.unappliedOf(t, declined1["tender_id"].(string)); got != 0 {
+		t.Errorf("S1's credit after the payback = %d, want 0", got)
 	}
 	f.assertARInvariants(t)
 

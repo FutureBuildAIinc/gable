@@ -679,6 +679,9 @@ func Run() {
 	// FROM-PRINCIPAL 60).
 	accountSvc.WithInvoiceApplyGuard(posSvc)
 	accountSvc.WithTenderCreditGuard(posSvc)
+	// and the payment refund route holds the same credit to the counter's
+	// terminal rail: the online gateway is never the way back for it
+	paymentSvc.WithTenderCreditGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
 	wall.pos(mux, posHandler)
 

@@ -133,6 +133,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// review P1-3): the claim's sale is read through the caller's branch
 	// context, so another branch's claim is a missing row.
 	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/resolve", resolveMount(h.ResolveRefundIntent))
+
+	// The payback of a declined void tender's credit (FROM-PRINCIPAL 60b):
+	// the same mount, the same roles and the same wall as the resolve route,
+	// a small sibling of it keyed on the void's own released claim.
+	mux.HandleFunc("POST /api/v1/pos/refund-intents/{id}/payback", resolveMount(h.PaybackRefundIntent))
 }
 
 // resolveGuard wraps the resolution route: the finance and owner roles only
@@ -675,6 +680,43 @@ func (h *Handler) ResolveRefundIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resolved)
+}
+
+// PaybackRefundIntent is POST /pos/refund-intents/{id}/payback: the guarded
+// admin route that pays a declined void tender's credit back to its card
+// through the counter terminal rail, the credit's one way back. Finance and
+// owner roles only; a machine key is refused here, bound or not. The
+// claim's sale is held to the caller's branch wall exactly as the resolve
+// route holds it, so a caller outside the branch, header or not, finds a
+// missing row and the terminal is never asked.
+func (h *Handler) PaybackRefundIntent(w http.ResponseWriter, r *http.Request) {
+	if refuseMachineKey(w, r, "a held credit is paid back by a person, never a machine key") {
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	if !h.saleOfIntentHeld(w, r, id) {
+		return
+	}
+	var req paybackIntentRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	in, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	paid, err := h.service.PaybackRefundIntent(r.Context(), id, *in, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, paid)
 }
 
 // actorFrom reads the acting user's subject for audit rows.

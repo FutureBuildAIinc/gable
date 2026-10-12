@@ -250,6 +250,14 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 				return nil, err
 			}
 			return out, nil
+		case "payback":
+			// a stranded payback claim (its terminal call answered no
+			// verdict) books through the payback's own booking: the credit
+			// leaves the tender's payment under the terminal's own id
+			if _, err := s.runPaybackTx(ctx, rec.RefundIntent, in.RefundTxID, in.Reason, actor, &entry); err != nil {
+				return nil, err
+			}
+			return out, nil
 		case "return":
 			var stored storedReturnRequest
 			if err := json.Unmarshal(rec.Request, &stored); err != nil {

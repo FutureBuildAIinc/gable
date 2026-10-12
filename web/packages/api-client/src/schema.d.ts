@@ -4797,9 +4797,29 @@ export interface paths {
         put?: never;
         /**
          * Resolve a stranded card refund claim
-         * @description The guarded operator route for a refund claim that outlived its act (a lost terminal verdict, a crashed process, a transaction that refused after the terminal answered): finance reads the terminal and records its actual outcome. outcome refund carries the gateway's own refund id (the money moved) and books it through the refund's own money transaction with every cap and lock, completing the claim DONE; outcome no_refund carries the reconciliation reference finance filed, marks the claim FAILED and moves nothing. Both write one audit row naming the person, the intent, the outcome and the reason. A claim whose own terminal call has not answered is live, not stranded: while its in flight lease runs the resolve answers 409 refund_in_flight, and once the lease expires with no answer at all the claim is marked UNKNOWN and settles as recorded. Only the finance and owner roles; a machine key is refused in the route itself, bound or not. A bare resolve, a refund without its refund id and a no refund without its reference are 400s naming the field; a claim that is not PENDING is 409 intent_not_pending, a no refund over a claim carrying the terminal's refund id and a refund id that differs from it are 409s naming the conflict, and the claim's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404). In a configured deployment the actor is the JWT's subject; with authentication off (dev mode) the route runs with no subject and the audit row names nobody, which no configured deployment allows.
+         * @description The guarded operator route for a refund claim that outlived its act (a lost terminal verdict, a crashed process, a transaction that refused after the terminal answered): finance reads the terminal and records its actual outcome. outcome refund carries the gateway's own refund id (the money moved) and books it through the refund's own money transaction with every cap and lock, completing the claim DONE; outcome no_refund carries the reconciliation reference finance filed, marks the claim FAILED and moves nothing. A payback claim (a payback whose terminal call answered no verdict) settles the same way: a recorded refund books the credit out to its card, a no refund releases the claim and the credit stays held at the counter. Both write one audit row naming the person, the intent, the outcome and the reason. A claim whose own terminal call has not answered is live, not stranded: while its in flight lease runs the resolve answers 409 refund_in_flight, and once the lease expires with no answer at all the claim is marked UNKNOWN and settles as recorded. Only the finance and owner roles; a machine key is refused in the route itself, bound or not. A bare resolve, a refund without its refund id and a no refund without its reference are 400s naming the field; a claim that is not PENDING is 409 intent_not_pending, a no refund over a claim carrying the terminal's refund id and a refund id that differs from it are 409s naming the conflict, and the claim's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404). In a configured deployment the actor is the JWT's subject; with authentication off (dev mode) the route runs with no subject and the audit row names nobody, which no configured deployment allows.
          */
         post: operations["posRefundIntentResolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/refund-intents/{id}/payback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay a declined void tender's credit back to its card
+         * @description The one way back for a declined void tender's credit (FROM-PRINCIPAL 60): a tender whose refund the terminal declined keeps its charge as unapplied credit once the void completes, held to its own tender (it applies to no invoice, 409 tender_credit_held), and this route pays it back to that card through the counter terminal rail, the rail the charge came from. The route keys on the void's own released claim (the id the resolve route would key on): only a FAILED void claim of a voided sale whose tender's payment still carries the credit unapplied is paid back, exactly once. Its terminal call runs under the claim discipline every terminal refund runs under: one live claim per tender and the in flight lease, so a concurrent payback is 409 refund_in_flight and a hung call holds the drawer until it is resolved. Only the finance and owner roles; a machine key is refused in the route itself, bound or not. The claim's sale is read through the caller's branch context, so a caller outside the branch finds a missing row (404), header or not. A claim that is not FAILED (409 intent_not_failed), a claim of a sale whose void has not completed and a tender whose credit was already paid back (409 no_held_credit) are refused before the terminal is reached, so a refusal never moves money at the terminal; a terminal decline is 409 card_refund (nothing moved, the credit stays held and the counter may ask again), and a call that answers no verdict leaves the payback's own claim standing for the resolve route. The booking writes one pos.refund_intent.paid_back audit row naming the person, the void's claim, the outcome and the reason, the credit's unapplied cash falls to zero and the cash account moves by the refund. The payment refund route through the online gateway is never the way back for such a credit (409 tender_credit_held).
+         */
+        post: operations["posRefundIntentPayback"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11564,7 +11584,7 @@ export interface components {
             /** Format: uuid */
             tender_id: string;
             /** @enum {string} */
-            act: "void" | "return";
+            act: "void" | "return" | "payback";
             /**
              * @description DONE when a recorded refund booked
              * @enum {string}
@@ -11576,6 +11596,35 @@ export interface components {
             refund_tx_id?: string | null;
             /** @description The reference the operator filed. */
             reconciliation_reference?: string | null;
+        };
+        PosPaybackIntentRequest: {
+            /** @description Why the credit went back to its card */
+            reason: string;
+        };
+        PosRefundIntentPaidBack: {
+            /**
+             * Format: uuid
+             * @description The void's own released claim the route keyed on.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description The payback's own claim
+             */
+            payback_id: string;
+            /** Format: uuid */
+            sale_id: string;
+            /** Format: uuid */
+            tender_id: string;
+            /**
+             * Format: int64
+             * @description The credit paid back
+             */
+            amount_cents: number;
+            /** @description The terminal's own refund id for the payback. */
+            refund_tx_id: string;
+            /** @enum {string} */
+            state: "DONE";
         };
         PosReturnRequest: {
             /** @description Defaults REG-01. */
@@ -24298,6 +24347,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PosRefundIntentResolved"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posRefundIntentPayback: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosPaybackIntentRequest"];
+            };
+        };
+        responses: {
+            /** @description The credit paid back to its card. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRefundIntentPaidBack"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
