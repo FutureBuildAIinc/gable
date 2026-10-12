@@ -30,6 +30,7 @@ import (
 
 type call struct {
 	branch *uuid.UUID
+	sub    *string
 	args   []int
 }
 
@@ -49,8 +50,10 @@ type fakeRepo struct {
 	revenue  []RevenueTrendPoint
 
 	// perBranch lets a test return a different summary per branch so a
-	// cross-branch cache hit is detectable by value, not just by call count.
+	// cross-branch cache hit is detectable by value, not just by call count;
+	// perSub does the same per grants sub (a no header caller's reach).
 	perBranch map[uuid.UUID]*DashboardSummary
+	perSub    map[string]*DashboardSummary
 
 	err error
 }
@@ -60,6 +63,7 @@ func newFakeRepo() *fakeRepo {
 		summary:   &DashboardSummary{TodayRevenue: 1},
 		activity:  &OrderActivity{StatusBreakdown: map[string]int{}},
 		perBranch: map[uuid.UUID]*DashboardSummary{},
+		perSub:    map[string]*DashboardSummary{},
 	}
 }
 
@@ -70,12 +74,17 @@ func key(b *uuid.UUID) uuid.UUID {
 	return *b
 }
 
-func (f *fakeRepo) GetDashboardSummary(_ context.Context, branchID *uuid.UUID) (*DashboardSummary, error) {
+func (f *fakeRepo) GetDashboardSummary(_ context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.summaryCalls = append(f.summaryCalls, call{branch: branchID})
+	f.summaryCalls = append(f.summaryCalls, call{branch: branchID, sub: grantsSub})
 	if f.err != nil {
 		return nil, f.err
+	}
+	if grantsSub != nil {
+		if s, ok := f.perSub[*grantsSub]; ok {
+			return s, nil
+		}
 	}
 	if s, ok := f.perBranch[key(branchID)]; ok {
 		return s, nil
@@ -83,40 +92,40 @@ func (f *fakeRepo) GetDashboardSummary(_ context.Context, branchID *uuid.UUID) (
 	return f.summary, nil
 }
 
-func (f *fakeRepo) GetInventoryAlerts(_ context.Context, branchID *uuid.UUID, limit int) ([]InventoryAlert, error) {
+func (f *fakeRepo) GetInventoryAlerts(_ context.Context, branchID *uuid.UUID, grantsSub *string, limit int) ([]InventoryAlert, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.alertCalls = append(f.alertCalls, call{branch: branchID, args: []int{limit}})
+	f.alertCalls = append(f.alertCalls, call{branch: branchID, sub: grantsSub, args: []int{limit}})
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.alerts, nil
 }
 
-func (f *fakeRepo) GetTopCustomers(_ context.Context, branchID *uuid.UUID, limit, days int) ([]TopCustomer, error) {
+func (f *fakeRepo) GetTopCustomers(_ context.Context, branchID *uuid.UUID, grantsSub *string, limit, days int) ([]TopCustomer, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.customerCalls = append(f.customerCalls, call{branch: branchID, args: []int{limit, days}})
+	f.customerCalls = append(f.customerCalls, call{branch: branchID, sub: grantsSub, args: []int{limit, days}})
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.tops, nil
 }
 
-func (f *fakeRepo) GetOrderActivity(_ context.Context, branchID *uuid.UUID, limit int) (*OrderActivity, error) {
+func (f *fakeRepo) GetOrderActivity(_ context.Context, branchID *uuid.UUID, grantsSub *string, limit int) (*OrderActivity, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.activityCalls = append(f.activityCalls, call{branch: branchID, args: []int{limit}})
+	f.activityCalls = append(f.activityCalls, call{branch: branchID, sub: grantsSub, args: []int{limit}})
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.activity, nil
 }
 
-func (f *fakeRepo) GetRevenueTrend(_ context.Context, branchID *uuid.UUID, days int) ([]RevenueTrendPoint, error) {
+func (f *fakeRepo) GetRevenueTrend(_ context.Context, branchID *uuid.UUID, grantsSub *string, days int) ([]RevenueTrendPoint, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.revenueCalls = append(f.revenueCalls, call{branch: branchID, args: []int{days}})
+	f.revenueCalls = append(f.revenueCalls, call{branch: branchID, sub: grantsSub, args: []int{days}})
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -127,6 +136,12 @@ var _ Repository = (*fakeRepo)(nil)
 
 func branchCtx(id uuid.UUID) context.Context {
 	return branchctx.With(context.Background(), &branchctx.Context{BranchID: &id})
+}
+
+// grantsCtx is a user context with no branch: the reach is the user's
+// grants sub alone.
+func grantsCtx(sub string) context.Context {
+	return branchctx.With(context.Background(), &branchctx.Context{UserSub: sub})
 }
 
 // --- caching -------------------------------------------------------------
@@ -194,6 +209,46 @@ func TestCache_IsKeyedByBranch(t *testing.T) {
 	}
 	if len(repo.summaryCalls) != 3 {
 		t.Errorf("repository hit %d times, want 3 (one per distinct branch key; the 4th was a cache hit)", len(repo.summaryCalls))
+	}
+}
+
+// CORRECTNESS (security): the cache is keyed by reach, not by branch alone.
+// A no header administrator and a no header finance user both carry no
+// branch, so a branch-only key would hand the finance caller the
+// administrator's primed all branch figures. Asserts by VALUE.
+func TestCache_IsKeyedByReach(t *testing.T) {
+	repo := newFakeRepo()
+	repo.perBranch[uuid.Nil] = &DashboardSummary{TodayRevenue: 333333, ActiveOrders: 10}
+	repo.perSub["fin"] = &DashboardSummary{TodayRevenue: 444444, ActiveOrders: 4}
+	svc := NewService(repo)
+
+	// Warm the administrator's all branch entry, then read as finance.
+	all, err := svc.GetSummary(context.Background())
+	if err != nil {
+		t.Fatalf("GetSummary(all): %v", err)
+	}
+	fin, err := svc.GetSummary(grantsCtx("fin"))
+	if err != nil {
+		t.Fatalf("GetSummary(fin): %v", err)
+	}
+	if all.TodayRevenue != 333333 {
+		t.Errorf("the administrator got %+v, want the all branch figures", all)
+	}
+	if fin.TodayRevenue != 444444 {
+		t.Errorf("the finance caller was served the administrator's primed entry: %+v", fin)
+	}
+	if len(repo.summaryCalls) != 2 {
+		t.Errorf("repository hit %d times, want 2 (one per reach)", len(repo.summaryCalls))
+	}
+	// Two grants users key apart too, and the second read of each is a hit.
+	if _, err := svc.GetSummary(grantsCtx("sal")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.GetSummary(grantsCtx("sal")); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.summaryCalls) != 3 {
+		t.Errorf("repository hit %d times, want 3 (sal's second read a cache hit)", len(repo.summaryCalls))
 	}
 }
 
@@ -399,7 +454,7 @@ func TestCache_ExpiredEntryIsRefetched(t *testing.T) {
 
 	// Age the entry past the TTL.
 	svc.store.summary.mu.Lock()
-	svc.store.summary.entries[uuid.Nil].timestamp = time.Now().Add(-2 * svc.store.ttl)
+	svc.store.summary.entries[reachKey{}].timestamp = time.Now().Add(-2 * svc.store.ttl)
 	svc.store.summary.mu.Unlock()
 
 	if _, err := svc.GetSummary(ctx); err != nil {
