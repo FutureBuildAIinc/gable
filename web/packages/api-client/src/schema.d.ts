@@ -4669,7 +4669,7 @@ export interface paths {
         put?: never;
         /**
          * Close a till session
-         * @description Every service failure, such as a session not OPEN, answers 409.
+         * @description Every service failure, such as a session not OPEN, answers 409; a session that does not exist (or sits outside the caller's branches) answers 404.
          */
         post: operations["posTillClose"];
         delete?: never;
@@ -23711,6 +23711,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -23943,6 +23944,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];

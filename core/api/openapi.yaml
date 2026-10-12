@@ -10431,6 +10431,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
@@ -10634,7 +10636,8 @@ paths:
       tags:
         - pos
       summary: Close a till session
-      description: Every service failure, such as a session not OPEN, answers 409.
+      description: >-
+        Every service failure, such as a session not OPEN, answers 409; a session that does not exist (or sits outside the caller's branches) answers 404.
       parameters:
         - name: id
           in: path
@@ -10663,6 +10666,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/ConflictEither'
         '413':
