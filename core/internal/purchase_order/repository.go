@@ -107,16 +107,16 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 		return nil, fmt.Errorf("vendor_id required lookup")
 	}
 
-	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
 		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
 		FROM purchase_orders
 		WHERE vendor_id = $1 AND status = 'DRAFT'
-		  AND ($2::uuid IS NULL OR branch_id = $2)
+		  AND ` + middleware.Wall("", 2, 3) + `
 		LIMIT 1
 	`
 	var po PurchaseOrder
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID, branchID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(
 		&po.ID,
 		&po.VendorID,
 		&po.Status,
@@ -132,18 +132,18 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 }
 
 func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
-	branchID := middleware.BranchIDForQuery(ctx)
 	query := `
 		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
 		       COUNT(pol.id) AS line_count,
 		       COALESCE(SUM(pol.quantity * pol.cost), 0) AS total_cost
 		FROM purchase_orders po
 		LEFT JOIN purchase_order_lines pol ON pol.po_id = po.id
-		WHERE ($1::uuid IS NULL OR po.branch_id = $1)
+		WHERE ` + middleware.Wall("po", 1, 2) + `
 		GROUP BY po.id
 		ORDER BY po.created_at DESC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branchID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list POs: %w", err)
 	}

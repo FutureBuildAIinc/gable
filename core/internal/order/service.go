@@ -853,6 +853,9 @@ func (s *Service) updateCore(ctx context.Context, id uuid.UUID, d *Draft, pre Pr
 	if err != nil {
 		return nil, nil, notFound(err)
 	}
+	if err := s.checkOrderBranch(ctx, cur); err != nil {
+		return nil, nil, err
+	}
 	b, err := s.build(ctx, d, cur.BranchID, actor)
 	if err != nil {
 		return nil, nil, err
@@ -898,6 +901,14 @@ func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
 	o, err := s.repo.GetOrder(ctx, id)
 	if err != nil {
 		return nil, notFound(err)
+	}
+	// The record branch rule: with no branch in context a user is held to
+	// the user's grants (SEC-NOHEADER-1), the same rule the allocate,
+	// fulfilment and retry writes already carry; a caller that sends the
+	// header keeps the repository's wall answer (a hidden order reads as
+	// missing before this check runs).
+	if err := s.checkOrderBranch(ctx, o); err != nil {
+		return nil, err
 	}
 	return o, nil
 }
@@ -1037,6 +1048,9 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to OrderStatus, 
 		cur, err := s.repo.GetOrder(ctx, id)
 		if err != nil {
 			return notFound(err)
+		}
+		if err := s.checkOrderBranch(ctx, cur); err != nil {
+			return err
 		}
 		if pre != nil {
 			if err := pre.check(cur.Revision); err != nil {
