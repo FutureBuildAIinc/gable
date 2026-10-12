@@ -112,6 +112,13 @@ type Repository interface {
 	RefundIntentFacts(ctx context.Context, saleID, tenderID uuid.UUID) (RefundIntentFacts, error)
 	SaleHasPendingRefundIntent(ctx context.Context, saleID uuid.UUID) (bool, error)
 	PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid.UUID) ([]uuid.UUID, error)
+	// HeldTenderCreditOfPayment answers the declined void tender credit a
+	// payment still holds (the account core's held credit guard, C2-5,
+	// FROM-PRINCIPAL 60): the void completed, one of its card tenders' refund
+	// claims was released (declined or recorded as a no refund), and that
+	// tender's payment still carries the unapplied cents the completion
+	// reversed onto it.
+	HeldTenderCreditOfPayment(ctx context.Context, paymentID uuid.UUID) (TenderCreditFacts, bool, error)
 	SessionPendingRefundIntentIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error)
 	// PendingRefundIntentIDs lists the ids of the sale's standing claims (the
 	// per tender void resolution reads them to know when every tender is
@@ -1037,6 +1044,47 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 		return false, fmt.Errorf("failed to read the sale's refund intents: %w", err)
 	}
 	return pending, nil
+}
+
+// TenderCreditFacts is the declined void tender credit one payment still
+// holds: the origin names the void's sale and the claim the void released,
+// and Cents is what the payment still carries unapplied of it.
+type TenderCreditFacts struct {
+	IntentID   uuid.UUID
+	TenderID   uuid.UUID
+	SaleID     uuid.UUID
+	SaleNumber string
+	Cents      int64
+}
+
+// HeldTenderCreditOfPayment answers whether the payment's unapplied cash is
+// a credit held to one of the counter's card tenders (C2-5,
+// FROM-PRINCIPAL 60): the tender's sale was voided, the tender's own refund
+// claim was released by the terminal's decline (or a recorded no refund),
+// and the void's completion reversed the tender's application onto the
+// payment, where the cents wait for their one way back. A payment nothing
+// of the counter holds, or one whose credit was already paid back (its
+// unapplied cash is gone), answers false.
+func (r *PostgresRepository) HeldTenderCreditOfPayment(ctx context.Context, paymentID uuid.UUID) (TenderCreditFacts, bool, error) {
+	var facts TenderCreditFacts
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT i.id, i.tender_id, i.sale_id, t.number, ROUND(p.amount_unapplied * 100)::bigint
+		FROM payments p
+			JOIN pos_tenders d ON d.payment_id = p.id AND d.method = 'CARD'
+			JOIN pos_transactions t ON t.id = d.transaction_id AND t.status = 'VOIDED'
+			JOIN pos_refund_intents i ON i.sale_id = t.id AND i.tender_id = d.id
+				AND i.act = 'void' AND i.state = 'FAILED'
+		WHERE p.id = $1 AND p.status = 'POSTED' AND ROUND(p.amount_unapplied * 100)::bigint > 0
+		ORDER BY i.created_at, i.id
+		LIMIT 1`, paymentID).
+		Scan(&facts.IntentID, &facts.TenderID, &facts.SaleID, &facts.SaleNumber, &facts.Cents)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return facts, false, nil
+	}
+	if err != nil {
+		return facts, false, fmt.Errorf("failed to read the payment's held tender credit: %w", err)
+	}
+	return facts, true, nil
 }
 
 // PendingVoidClaimsOfInvoice lists the standing void claims of the sale that

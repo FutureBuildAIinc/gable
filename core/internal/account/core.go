@@ -44,6 +44,7 @@ type Service struct {
 	events     EventRecorder
 	tx         TxRunner
 	applyGuard InvoiceApplyGuard
+	tenderCreditGuard TenderCreditGuard
 }
 
 // NewService builds the AR core. glSvc may be nil in a unit test that posts no
@@ -408,6 +409,27 @@ func (s *Service) refuseHeldInvoice(ctx context.Context, invoiceID uuid.UUID) er
 	return conflict("void_claim_pending",
 		fmt.Sprintf("this invoice's sale has a void whose refund claims still stand (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before applying anything to the invoice",
 			strings.Join(ids, ", ")))
+}
+
+// refuseHeldTenderCredit refuses an application of a payment's unapplied
+// cash another module holds to one of its own tenders (C2-5,
+// FROM-PRINCIPAL 60): a completed void leaves a declined card tender's
+// charge as credit on the tender's payment, and that credit is payable
+// back only to its card, never spent on another invoice. The refusal names
+// the credit's origin, the void and the claim it released, and comes
+// before anything of the application is written. Without a guard nothing
+// changes.
+func (s *Service) refuseHeldTenderCredit(ctx context.Context, paymentID uuid.UUID) error {
+	if s.tenderCreditGuard == nil {
+		return nil
+	}
+	held, ok, err := s.tenderCreditGuard.HeldTenderCredit(ctx, paymentID)
+	if err != nil || !ok {
+		return err
+	}
+	return conflict("tender_credit_held",
+		fmt.Sprintf("the payment's unapplied cash is the credit of the card tender the void of sale %s holds (claim %s): a declined void tender's credit is held to its own tender and applies to no invoice, payable back only to its card",
+			held.SaleNumber, held.IntentID))
 }
 
 // insertApplication writes one application row.

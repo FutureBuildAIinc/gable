@@ -167,6 +167,15 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	if len(lines) == 0 {
 		return invalidField(prefix, "name at least one invoice")
 	}
+	// the counter's hold first (C2-5, FROM-PRINCIPAL 60): a payment whose
+	// unapplied cash is a declined void tender's credit applies to no
+	// invoice, whatever invoice the request names; the refusal names the
+	// origin and nothing of the application is written. Every path that
+	// applies a payment's unapplied cash (the apply route, a receipt's own
+	// applications, the deposit path) runs through here.
+	if err := s.refuseHeldTenderCredit(ctx, pay.ID); err != nil {
+		return err
+	}
 	ids := make([]uuid.UUID, len(lines))
 	seen := map[uuid.UUID]bool{}
 	var cash int64

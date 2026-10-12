@@ -111,8 +111,11 @@ func newFixture(t *testing.T, db *database.DB, opts ...func(*fixture)) *fixture 
 		WithInvoices(invoices).WithAR(acct).WithInventory(stock).WithLedger(glSvc).
 		WithAuditLog(audit.NewLogger(db)).WithOutbox(f.events).WithTxRunner(db)
 	// the counter guards the AR core's applications as serve wires it (C2-5):
-	// an invoice whose sale's void has standing claims takes no application
+	// an invoice whose sale's void has standing claims takes no application,
+	// and a payment whose unapplied cash is a declined void tender's credit
+	// applies to no invoice (held to its tender)
 	acct.WithInvoiceApplyGuard(f.service)
+	acct.WithTenderCreditGuard(f.service)
 	for _, o := range opts {
 		o(f)
 	}

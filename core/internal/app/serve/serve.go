@@ -673,8 +673,12 @@ func Run() {
 	// the Clover terminal gateway wires in.
 	// The counter also guards the AR core's applications: while a sale's void
 	// has standing refund claims, the sale's invoice takes no application
-	// (its open cents are the void's interim, C2-5).
+	// (its open cents are the void's interim, C2-5), and a payment whose
+	// unapplied cash is a declined void tender's credit applies to no invoice
+	// either (the credit is payable back only to its card, C2-5,
+	// FROM-PRINCIPAL 60).
 	accountSvc.WithInvoiceApplyGuard(posSvc)
+	accountSvc.WithTenderCreditGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
 	wall.pos(mux, posHandler)
 

@@ -158,6 +158,20 @@ func (s *Service) PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid
 	return s.repo.PendingVoidClaimsOfInvoice(ctx, invoiceID)
 }
 
+// HeldTenderCredit answers whether a payment's unapplied cash is a declined
+// void tender's credit the counter still holds (C2-5, FROM-PRINCIPAL 60),
+// so the AR core's held credit guard can refuse any application of it to an
+// invoice: the credit is payable back only to its card. The service
+// satisfies account.TenderCreditGuard; serve wires the two.
+func (s *Service) HeldTenderCredit(ctx context.Context, paymentID uuid.UUID) (account.HeldTenderCredit, bool, error) {
+	facts, ok, err := s.repo.HeldTenderCreditOfPayment(ctx, paymentID)
+	if err != nil || !ok {
+		return account.HeldTenderCredit{}, ok, err
+	}
+	return account.HeldTenderCredit{Cents: facts.Cents, SaleID: facts.SaleID, SaleNumber: facts.SaleNumber,
+		TenderID: facts.TenderID, IntentID: facts.IntentID}, true, nil
+}
+
 func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if s.tx != nil {
 		return s.tx.RunInTx(ctx, fn)

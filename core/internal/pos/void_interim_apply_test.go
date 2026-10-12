@@ -211,7 +211,10 @@ func TestAnotherWalkInCreditCannotApplyToAnInterimVoidInvoice(t *testing.T) {
 	}
 	f.assertARInvariants(t)
 
-	// S1's credit applied to S2's interim invoice: refused
+	// S1's credit applied to S2's interim invoice: refused, and by the
+	// payment's own hold first (FROM-PRINCIPAL 60a): the credit is held to
+	// its tender before any invoice is even read, so the refusal names the
+	// origin (S1's released claim), never S2's standing one
 	payID, payRev := f.paymentOfTender(t, declined1["tender_id"].(string))
 	r := f.do("POST", "/api/v1/payments/"+payID+"/applications", map[string]any{
 		"revision": payRev,
@@ -223,11 +226,11 @@ func TestAnotherWalkInCreditCannotApplyToAnInterimVoidInvoice(t *testing.T) {
 		t.Fatalf("the credit applied to the interim invoice = %d, want 409: %s", r.status, r.raw)
 	}
 	_, blockers, _ := errorOf(t, r)
-	if len(blockers) == 0 || blockers[0] != "void_claim_pending" {
-		t.Errorf("blockers = %v, want void_claim_pending", blockers)
+	if len(blockers) == 0 || blockers[0] != "tender_credit_held" {
+		t.Errorf("blockers = %v, want tender_credit_held (the credit is held to its own tender)", blockers)
 	}
-	if !containsClaim(r.raw, standing2["id"].(string)) {
-		t.Errorf("the refusal does not name S2's standing claim %s: %s", standing2["id"], r.raw)
+	if !containsClaim(r.raw, declined1["id"].(string)) {
+		t.Errorf("the refusal does not name the declined claim %s: %s", declined1["id"], r.raw)
 	}
 	// the credit is still on its own payment, payable back to its card
 	if got := f.unappliedOf(t, declined1["tender_id"].(string)); got != credit {
