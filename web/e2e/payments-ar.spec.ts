@@ -233,6 +233,13 @@ test.describe('Payments, unapplied cash and AR', () => {
     await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
     await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
 
+    // The desk stamps its selected branch on every call as X-Branch-Id, and the
+    // AR routes hold the customer wall whatever that header says, so a desk
+    // selected on another branch would be answered 404 for this customer. The
+    // seed draws fresh ids every run, so pin the desk to the customer's own
+    // branch; the full load below reads it.
+    await page.evaluate((id) => localStorage.setItem('gable_current_branch_id', id), kelbrookCustomer.primary_branch_id);
+
     // By customer first, then by job and by ship-to: the toggle re-reads the
     // aging and the group rows split.
     await page.goto('/reports/ar-aging');
