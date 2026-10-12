@@ -973,8 +973,10 @@ every branch:
 - a create whose body names no `branch_id` takes its branch from the
   user's grants, never the deployment default: exactly one granted branch
   writes there, several granted branches refuse with a 400 naming
-  `branch_id`, and none refuses fail closed (the payment family held its
-  resolved branch already; the quote, order and draft creates follow it).
+  `branch_id` (`primary_branch_id` on the customer create), and none
+  refuses fail closed (the payment family held its resolved branch
+  already; the quote, order, draft, customer, purchase order and AP bill
+  creates follow it).
 
 The sentence that keeps the other callers their reach is section 2.3's:
 "With no context branch, an administrator or owner may name any branch, as

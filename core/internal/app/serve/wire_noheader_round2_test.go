@@ -201,6 +201,22 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM vendor_invoices WHERE vendor_invoice_number LIKE 'PIN-NH3-%'`)
 	})
 
+	// The customer create (r4 P2-3) runs as the sales role its route guard
+	// admits; the body names no primary_branch_id, so the grants decide.
+	custRun := uuid.NewString()[:8]
+	custBody := `{"name":"pin noheader cust ` + custRun + `","account_number":"PIN-NH3-C` + custRun + `"}`
+	custCreate := func() (int, []byte) {
+		return f.userAs(t, "sales", "POST", "/api/v1/customers", custBody, nil)
+	}
+	custCount := func() int {
+		return noheaderCount(t, f, `SELECT COUNT(*) FROM customers WHERE account_number = $1`, "PIN-NH3-C"+custRun)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN
+			(SELECT id FROM customers WHERE account_number = $1)`, "PIN-NH3-C"+custRun)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM customers WHERE account_number = $1`, "PIN-NH3-C"+custRun)
+	})
+
 	// No grants at all: every create refuses, nothing lands anywhere.
 	for _, c := range creates {
 		before := countAt(c.table, def)
@@ -224,6 +240,13 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 		status, buf = billCreate()
 		if status != http.StatusForbidden || !strings.Contains(string(buf), "branch_id") {
 			t.Errorf("no grants AP bill: %d %s, want the 403 naming branch_id", status, buf)
+		}
+		status, buf = custCreate()
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "primary_branch_id") {
+			t.Errorf("no grants customer: %d %s, want the 403 naming primary_branch_id", status, buf)
+		}
+		if n := custCount(); n != 0 {
+			t.Errorf("no grants customer wrote %d rows, want none", n)
 		}
 	}
 
@@ -267,6 +290,13 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 		status, buf = billCreate()
 		if status != http.StatusBadRequest || !strings.Contains(string(buf), "branch_id") {
 			t.Errorf("two grants AP bill: %d %s, want the 400 naming branch_id", status, buf)
+		}
+		status, buf = custCreate()
+		if status != http.StatusBadRequest || !strings.Contains(string(buf), "primary_branch_id") {
+			t.Errorf("two grants customer: %d %s, want the 400 naming primary_branch_id", status, buf)
+		}
+		if n := custCount(); n != 0 {
+			t.Errorf("two grants customer wrote %d rows, want none", n)
 		}
 	}
 	// A create that names one of the two granted branches writes there: the
@@ -353,6 +383,31 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 		status, buf = f.userAs(t, "purchasing", "GET", "/api/v1/purchase-orders", "", nil)
 		if status != http.StatusOK {
 			t.Errorf("one grant PO read back: %d, want 200", status)
+		}
+	}
+	// The single grant customer create takes the grant and the creator
+	// reads it back (r4 P2-3: it answered 404 and rolled back before).
+	{
+		status, buf := custCreate()
+		if status != http.StatusCreated {
+			t.Errorf("one grant customer: %d %s, want 201 at the granted branch", status, buf)
+		} else {
+			var row struct {
+				PrimaryBranchID string `json:"primary_branch_id"`
+			}
+			if err := json.Unmarshal(buf, &row); err != nil {
+				t.Fatal(err)
+			}
+			if row.PrimaryBranchID != f.branchA.String() {
+				t.Errorf("one grant customer wrote at %s, want the granted %s", row.PrimaryBranchID, f.branchA)
+			}
+		}
+		if n := custCount(); n != 1 {
+			t.Errorf("one grant customer wrote %d rows, want one", n)
+		}
+		status, buf = f.userAs(t, "sales", "GET", "/api/v1/customers?limit=50", "", nil)
+		if status != http.StatusOK || !strings.Contains(string(buf), "PIN-NH3-C"+custRun) {
+			t.Errorf("one grant customer read back: %d %s, want the created row", status, buf)
 		}
 	}
 	// The single grant AP bill takes the grant: the refusal the default
