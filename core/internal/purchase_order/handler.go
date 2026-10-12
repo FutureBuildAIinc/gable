@@ -288,6 +288,14 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 	count, err := h.service.CreateReorders(r.Context())
 	if err != nil {
+		// The branch resolution's refusals (a 403 naming branch_id for a
+		// caller with no grants, a 400 naming it when several grants could
+		// decide) carry their own status.
+		var httpErr *httpx.Error
+		if errors.As(err, &httpErr) {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to create reorder purchase orders", http.StatusInternalServerError, err)
 		return
 	}

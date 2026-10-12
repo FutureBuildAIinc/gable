@@ -976,7 +976,10 @@ every branch:
   `branch_id` (`primary_branch_id` on the customer create), and none
   refuses fail closed (the payment family held its resolved branch
   already; the quote, order, draft, customer, purchase order and AP bill
-  creates follow it).
+  creates follow it, and so do the purchase order drafts no body drives:
+  the reorder run a purchasing caller starts and the special order draft
+  an accepted quote fires, while the reorder timer's system caller keeps
+  the default resolution it always had).
 
 The sentence that keeps the other callers their reach is section 2.3's:
 "With no context branch, an administrator or owner may name any branch, as

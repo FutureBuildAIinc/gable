@@ -157,12 +157,22 @@ func (s *Service) branchFor(ctx context.Context, branch *uuid.UUID) (*uuid.UUID,
 // reused rather than duplicated. Alerts with no vendor_id are bucketed under a
 // single "Unknown Vendor" row (upserted via vendor.EnsureVendorByName) so the
 // FK on purchase_orders.vendor_id is always satisfied.
+//
+// The run settles its branch the way every create does (SEC-NOHEADER-1): a
+// purchasing caller with no header and exactly one granted branch writes the
+// drafts there (never the deployment default), several grants answer the
+// choice refusal naming branch_id and none fail closed, while the cron
+// engine's system caller keeps the default resolution it always had.
 func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	if s.productSvc == nil {
 		return 0, fmt.Errorf("product service not configured")
 	}
 	if s.vendorSvc == nil {
 		return 0, fmt.Errorf("vendor service not configured")
+	}
+	resolved, err := s.branchFor(ctx, nil)
+	if err != nil {
+		return 0, err
 	}
 
 	alerts, err := s.productSvc.ListBelowReorder(ctx)
@@ -201,6 +211,9 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				VendorID: &vid,
 				Status:   StatusDraft,
 				Source:   SourceReorder,
+			}
+			if resolved != nil {
+				po.BranchID = *resolved
 			}
 			if err := s.repo.CreatePO(ctx, po); err != nil {
 				return createdCount, fmt.Errorf("create PO for vendor %s: %w", vid, err)
@@ -368,7 +381,20 @@ type CreatePOLineInput struct {
 // product, so the receipt puts the stock on hand and the order module's
 // release picks it up (ADR 0005 5.4). The header and the line are one
 // transaction: a line that cannot be linked leaves no empty header behind.
+// The draft settles its branch the way every create does
+// (SEC-NOHEADER-1): the context branch first (the header caller, the A2A
+// receiver's injected inbound branch), then, for a user context with no
+// branch, the user's grants (one writes there, several answer the choice
+// refusal, none fail closed), so an accepted quote's special order draft
+// never lands at the deployment default a no header creator holds no grant
+// on. The refusal is returned, not logged: the accept path's own fire and
+// forget policy decides what it does with it, and nothing is written either
+// way.
 func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
+	resolved, err := s.branchFor(ctx, nil)
+	if err != nil {
+		return err
+	}
 	return s.db.RunInTx(ctx, func(ctx context.Context) error {
 		var po *PurchaseOrder
 		var err error
@@ -383,6 +409,9 @@ func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, prod
 				VendorID: vendorId,
 				Status:   StatusDraft,
 				Source:   SourceSpecialOrder,
+			}
+			if resolved != nil {
+				newPO.BranchID = *resolved
 			}
 			if err := s.repo.CreatePO(ctx, newPO); err != nil {
 				return fmt.Errorf("failed to create PO: %w", err)
