@@ -1351,15 +1351,20 @@ claim also records its own terminal call: the call is bounded, every path it
 can take (the refund id's committed write, the decline release, the no
 verdict record, and an abandon stamp for a tender whose call was never
 reached) stamps the answer, and the claim carries an in flight lease from
-the moment it opens. While the terminal has not answered and the lease runs,
-the claim is live, not stranded: the resolve route and the till close refuse
-it (409 `refund_in_flight`), so a tender whose money has not answered cannot
-be released and then refunded twice; once the lease expires with no answer
-at all (a crashed or hung act) the claim is marked UNKNOWN and settles as
-the operator records. The terminal's refund id is written onto the claim
-whatever state it is in, and a recorded refund that never booked holds the
-tender against every later act, so a late answer behind an early release can
-never be paid twice. A
+the moment it opens, restamped in its own committed write immediately
+before each of its act's terminal calls, so a later tender's call in a
+sequence (a void's calls run one tender after another) never runs under a
+lease the earlier calls already spent. While the terminal has not answered
+and the lease runs, the claim is live, not stranded: the resolve route and
+the till close refuse it (409 `refund_in_flight`), so a tender whose money
+has not answered cannot be released and then refunded twice; once the lease
+expires with no answer at all (a crashed or hung act) the claim is marked
+UNKNOWN and settles as the operator records. The terminal's refund id is
+written onto the claim whatever state it is in, and a recorded refund that
+never booked holds the tender against every later act (the payback and
+every act on the credit, an application or the online refund route alike,
+refuse 409 `tender_refunded` until the claim is reconciled), so a late
+answer behind an early release can never be paid twice. A
 pending intent is resolved by one guarded admin route, for the finance and
 owner roles and never a machine key, inside the caller's branch (the claim's
 sale is read through the branch context, so a caller outside the branch
@@ -1406,7 +1411,13 @@ shared walk-in customer one card holder's credit must never pay another
 walk-in's invoice. The credit is paid back only to that card, through the
 counter terminal rail the charge came from, by the payback route beside
 the resolve route (`POST /api/v1/pos/refund-intents/{id}/payback`, finance
-and owner only, the branch wall, exactly one payback per tender, its
+and owner only, the branch wall, exactly one payback per tender, made
+structural by a partial unique index on the tender's payback claims
+(PENDING or DONE; a FAILED claim stays outside it so the counter may ask
+again after a decline), with the payback's claim opened in a transaction
+that locks the tender's payment row and rechecks the credit under that
+lock, so of any number of concurrent paybacks exactly one reaches the
+terminal and the card is never paid twice, its
 terminal call under the same claim discipline every terminal refund runs
 under); the payment refund route through the online gateway is never the
 way back for a counter tender and refuses the credit (409
