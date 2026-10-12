@@ -75,6 +75,41 @@ func (g *BranchGuard) CheckPayloadBranch(ctx context.Context, payload uuid.UUID)
 	return nil
 }
 
+// CheckGrantsBranch holds a branch the caller acts on, or a loaded record's
+// own branch, to the caller's grants when the request's branch context
+// carries no branch (SEC-NOHEADER-1, the act side of the same section 2.3
+// rule): it returns nil unless the context is a user context with no branch,
+// and then ErrPayloadBranchRefused unless the branch is among the user's
+// user_locations grants. A nil branch refuses, because no grant decides it,
+// so a user with no grants at all is refused everywhere; an administrator, an
+// owner, a caller with no user sub and a caller with no branch Context at
+// all (a route without the middleware, a context free test or job caller,
+// which every HTTP route's middleware makes impossible) keep the reach the
+// X-Branch-Id header rule already gives them, the same third arm Wall's
+// predicate carries. A context branch is not this helper's case: the caller's
+// own equality check governs it, so the answer for a caller that sends the
+// header is unchanged.
+func (g *BranchGuard) CheckGrantsBranch(ctx context.Context, branch *uuid.UUID) error {
+	bc := BranchFromContext(ctx)
+	if bc == nil {
+		return nil
+	}
+	if bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
+		return nil
+	}
+	if branch == nil {
+		return ErrPayloadBranchRefused
+	}
+	ok, err := g.m.userHasBranch(ctx, bc.UserSub, *branch)
+	if err != nil {
+		return fmt.Errorf("branch grant lookup: %w", err)
+	}
+	if !ok {
+		return ErrPayloadBranchRefused
+	}
+	return nil
+}
+
 // CheckPayloadLocation applies the same rule to a location id a body names
 // where the location stands for a branch (stock moves, receiving): the
 // location's own branch (its branch_id, or itself when it is a branch) must be

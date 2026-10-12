@@ -59,6 +59,31 @@ func GrantsSubForQuery(ctx context.Context) *string {
 	return &sub
 }
 
+// Wall is the branch predicate a branch scoped query carries, the read side
+// of the no header rule (SEC-NOHEADER-1, ADR 0007 section 2.3): with a
+// context branch the row must carry it; with none and a user, the row's
+// branch must be among the user's user_locations grants, so a list returns
+// only the granted branches' rows and a foreign record reads as missing; with
+// neither (an administrator or owner without a header, the single branch kill
+// switch, an unbound key, a route that mounts no branch middleware) every row
+// matches, the reach the X-Branch-Id header rule already gives those callers.
+// alias is the row's table alias, empty for an unaliased table; branch and
+// grants are the parameter positions of BranchIDForQuery and
+// GrantsSubForQuery, passed as the typed nils those return so the predicate's
+// IS NULL arms hold.
+func Wall(alias string, branch, grants int) string {
+	col := "branch_id"
+	if alias != "" {
+		col = alias + "." + col
+	}
+	return fmt.Sprintf(`(
+	    ($%[2]d::uuid IS NOT NULL AND %[1]s = $%[2]d)
+	    OR ($%[2]d::uuid IS NULL AND $%[3]d::text IS NOT NULL AND %[1]s IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $%[3]d))
+	    OR ($%[2]d::uuid IS NULL AND $%[3]d::text IS NULL)
+	  )`, col, branch, grants)
+}
+
 // defaultBranchCache stores the resolved system_settings.default_branch_id
 // for the lifetime of the process. Admins changing the default require a
 // restart, which matches the kill-switch behavior.
