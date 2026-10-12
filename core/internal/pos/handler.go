@@ -39,7 +39,9 @@ type BranchGuard interface {
 // context names a branch; the record check is what stops a bound caller
 // with no context branch (default_branch_required=false, no header), whose
 // grants the filter never sees. Without it that caller settles any branch's
-// claim, so serve always sets it.
+// claim, so serve always sets it, and a handler mounted without it refuses
+// (fail closed, the fifteenth review's P3-2) rather than settle a claim
+// nothing holds.
 func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
 	h.guard = g
 	return h
@@ -48,10 +50,14 @@ func (h *Handler) WithBranchGuard(g BranchGuard) *Handler {
 // saleOfIntentHeld holds the claim's sale to the caller's wall (r12 P1-2):
 // a refusal is the same missing row the branch scoped read answers (404,
 // nothing moved), so a caller outside the sale's branch learns nothing of
-// the claim. It reports whether the request may proceed.
+// the claim. It reports whether the request may proceed, and a handler
+// wired with no guard at all refuses: the claim routes fail closed (the
+// fifteenth review's P3-2).
 func (h *Handler) saleOfIntentHeld(w http.ResponseWriter, r *http.Request, intentID uuid.UUID) bool {
 	if h.guard == nil {
-		return true
+		httpx.WriteError(w, r, httpx.Unavailable(
+			"the branch wall is not wired on this handler: a refund claim is settled only inside the caller's branch, so the route refuses rather than settle a claim nothing holds"))
+		return false
 	}
 	branch, err := h.service.IntentSaleBranch(r.Context(), intentID)
 	if err != nil {

@@ -21,6 +21,7 @@ import (
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -112,6 +113,63 @@ func TestTheResolutionStaysInsideTheCallersBranch(t *testing.T) {
 	f.assertARInvariants(t)
 }
 
+// RULE: the claim routes fail closed when no branch guard is wired (the
+// fifteenth review's P3-2): a handler mounted without its wall refuses the
+// resolve and the payback rather than settle a claim nothing holds, and the
+// claim stands untouched with no audit row. Serve always wires the wall, so
+// no shipped behaviour moves.
+func TestTheClaimRoutesRefuseWhenNoBranchGuardIsWired(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()},
+		refundErrs: []error{context.DeadlineExceeded}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) {
+		f.service = f.service.WithGateway(gw)
+	})
+	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
+	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	if r := f.cardReturnOn(t, saleID, lineID, "1"); r.status != http.StatusInternalServerError {
+		t.Fatalf("the timed out card return = %d, want 500: %s", r.status, r.raw)
+	}
+	intentID, state, _, _ := pendingIntent(t, f, saleID)
+	if state != "PENDING" {
+		t.Fatalf("the stranded claim = %s, want PENDING", state)
+	}
+	// the handler mounted bare, the way a future mount that forgets the
+	// wall would be
+	mux := http.NewServeMux()
+	pos.NewHandler(f.service).RegisterRoutes(mux)
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	do := func(path string, payload string) int {
+		req, _ := http.NewRequest(http.MethodPost, server.URL+path, strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", "req-pos-bare-test")
+		req.Header.Set("X-Test-Role", "finance")
+		req.Header.Set("X-Test-Sub", mustUUID(t))
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res.StatusCode
+	}
+	if got := do("/api/v1/pos/refund-intents/"+intentID+"/resolve",
+		`{"outcome":"no_refund","reconciliation_reference":"R","reason":"w"}`); got != http.StatusServiceUnavailable {
+		t.Errorf("the resolve on a handler with no wall = %d, want 503 (the route fails closed, never settles a claim nothing holds)", got)
+	}
+	if got := do("/api/v1/pos/refund-intents/"+intentID+"/payback",
+		`{"reason":"w"}`); got != http.StatusServiceUnavailable {
+		t.Errorf("the payback on a handler with no wall = %d, want 503 (the route fails closed the same way)", got)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM pos_refund_intents WHERE id = $1 AND state = 'PENDING'`, intentID); got != 1 {
+		t.Errorf("the claim was settled on a handler with no wall: %d PENDING rows, want 1", got)
+	}
+	if got := countOf(t, f.db, `SELECT count(*) FROM audit_log WHERE action LIKE 'pos.refund_intent%' AND changes->>'intent_id' = $1`, intentID); got != 0 {
+		t.Errorf("%d claim audit rows on a handler with no wall, want 0", got)
+	}
+	f.assertARInvariants(t)
+}
+
 // RULE: the resolution route runs the guard serve passes it (ninth review
 // P1-3's probe: the route dropped the counter's guard and ran none of its
 // own but the role check). A counting guard stands in for the branch
@@ -137,9 +195,12 @@ func TestTheResolutionRouteRunsTheBranchGuardItIsGiven(t *testing.T) {
 			next.ServeHTTP(w, r)
 		})
 	}
+	// the handler carries the branch wall the way serve wires it (a bare
+	// mount now refuses: the claim routes fail closed), and the branch
+	// middleware settles the caller's context the way serve's stack does
 	mux := http.NewServeMux()
-	pos.NewHandler(f.service).RegisterRoutes(mux, nil, wall)
-	server := httptest.NewServer(mux)
+	pos.NewHandler(f.service).WithBranchGuard(middleware.NewBranchGuard(f.db)).RegisterRoutes(mux, nil, wall)
+	server := httptest.NewServer(roleClaims(middleware.NewBranchMiddleware(f.db).Handler(mux)))
 	t.Cleanup(server.Close)
 	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/v1/pos/refund-intents/"+intentID+"/resolve",
 		strings.NewReader(`{"outcome":"no_refund","reconciliation_reference":"R","reason":"w"}`))

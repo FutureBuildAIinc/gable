@@ -177,6 +177,42 @@ func TestAReceiptAtAYardWithNoRowCreatesItThere(t *testing.T) {
 	}
 }
 
+// RULE: a named location that holds no inventory row yet is still held to
+// the branch wall (the fifteenth review's P3-1): the row's absence must not
+// let a service caller seed a first row on another branch's yard, so the
+// read falls back to the location's own branch and refuses, and nothing is
+// created.
+func TestAnActOnAnotherBranchsYardWithNoRowIsRefused(t *testing.T) {
+	w, read := newLocWorld(t)
+	db := testutil.RequireDB(t)
+	freshOther := uuid.New()
+	if _, err := db.Pool.Exec(context.Background(),
+		`INSERT INTO locations (id, type, code, parent_id, branch_id) VALUES ($1, 'YARD', $2, $3, $3)`,
+		freshOther, "IL-FO-"+freshOther.String()[:6], w.otherBranch); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE location_id = $1`, freshOther)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, freshOther)
+	})
+	err := w.svc.AdjustStock(w.ctx, inventory.StockAdjustmentRequest{
+		ProductID: w.productID, LocationID: &freshOther, Quantity: 7})
+	if !errors.Is(err, inventory.ErrLocationOutsideBranch) {
+		t.Fatalf("an adjust on another branch's rowless yard = %v, want ErrLocationOutsideBranch (the handler's location guard covers the routes; the service caller needs the read's own hold)", err)
+	}
+	var n int
+	if err := db.Pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM inventory WHERE product_id = $1 AND location_id = $2`, w.productID, freshOther).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("%d rows were created on the other branch's rowless yard, want 0 (a refusal must not seed another branch)", n)
+	}
+	if got := w.qtyOf(t, read, w.yard1); got != "100.0000" {
+		t.Errorf("yard 1 after the refused adjust = %s, want 100.0000 (the caller's own rows stand untouched)", got)
+	}
+}
+
 // RULE: a request that names no location keeps the stated picks: an unbound
 // caller the legacy unassigned row, a branch scoped caller the branch's first
 // row by creation, never the largest quantity by accident.

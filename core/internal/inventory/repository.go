@@ -56,11 +56,16 @@ func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UU
 	// PR 44's review, restated by the fourteenth review): a request that names a
 	// location reads exactly that location's row, held to the caller's branch
 	// when the context carries one (a row on another branch is refused by
-	// ErrLocationOutsideBranch, never substituted); only a request that names
-	// no location lets the branch rule pick a row, and it takes the branch's
-	// first row by creation, a stated rule the stock routes document, never
-	// the largest quantity by accident; an unbound request that names no
-	// location keeps the legacy behaviour, the row with no location.
+	// ErrLocationOutsideBranch, never substituted), and a named location that
+	// holds no row yet is held the same way (the fifteenth review's P3-1): its
+	// branch is read from the location itself, so the row's absence cannot let
+	// a service caller seed a first row on another branch's yard (the HTTP
+	// routes reach the same refusal through the handler's location guard);
+	// only a request that names no location lets the branch rule pick a row,
+	// and it takes the branch's first row by creation, a stated rule the
+	// stock routes document, never the largest quantity by accident; an
+	// unbound request that names no location keeps the legacy behaviour, the
+	// row with no location.
 	branch := branchctx.IDForQuery(ctx)
 	var inv Inventory
 	var rowBranch *uuid.UUID
@@ -83,6 +88,17 @@ func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UU
 		)
 		if err != nil {
 			if err == pgx.ErrNoRows {
+				// no row to read the branch from: the named location's own
+				// branch answers the wall instead
+				if branch != nil {
+					locBranch, lbErr := r.LocationBranchID(ctx, *locationID)
+					if lbErr != nil {
+						return nil, fmt.Errorf("failed to get inventory: %w", lbErr)
+					}
+					if locBranch == nil || *locBranch != *branch {
+						return nil, ErrLocationOutsideBranch
+					}
+				}
 				return nil, nil
 			}
 			return nil, fmt.Errorf("failed to get inventory: %w", err)
