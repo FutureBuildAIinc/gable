@@ -93,12 +93,25 @@ func newScheduledReportFixture(t *testing.T, db *database.DB, cronExpr string) s
 		t.Fatalf("CreateSavedReport: %v", err)
 	}
 
+	// The schedule's creator: a sub granted the branch the invoices sit at,
+	// so the run resolves a real reach afresh from user_locations (the
+	// fail closed rule refuses a creator with no grants, and a schedule
+	// with no creator at all never runs).
+	creatorSub := "pin-sched-" + run[:8]
+	if _, err := db.Pool.Exec(ctx, `
+		INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by)
+		VALUES ($1, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), TRUE, 'scheduler test')`,
+		creatorSub); err != nil {
+		t.Fatalf("seed creator grant: %v", err)
+	}
+
 	schedule := &ReportSchedule{
 		ReportID:       report.ID,
 		CronExpression: cronExpr,
 		Recipients:     []string{"controller@example.com", "gm@example.com"},
 		Status:         ScheduleStatusActive,
 		Format:         "CSV",
+		CreatedBy:      creatorSub,
 	}
 	if err := svc.CreateReportSchedule(ctx, schedule); err != nil {
 		t.Fatalf("CreateReportSchedule: %v", err)
@@ -114,6 +127,7 @@ func newScheduledReportFixture(t *testing.T, db *database.DB, cronExpr string) s
 			{`DELETE FROM saved_reports WHERE id = $1`, []interface{}{report.ID}},
 			{`DELETE FROM invoices WHERE customer_id = $1`, []interface{}{customerID}},
 			{`DELETE FROM customers WHERE id = $1`, []interface{}{customerID}},
+			{`DELETE FROM user_locations WHERE user_sub = $1`, []interface{}{creatorSub}},
 		} {
 			if _, err := db.Pool.Exec(cleanupCtx, stmt.sql, stmt.args...); err != nil {
 				t.Errorf("cleanup %q: %v", stmt.sql, err)

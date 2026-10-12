@@ -420,6 +420,20 @@ func (h *Handler) HandleCreateReportSchedule(w http.ResponseWriter, r *http.Requ
 		schedule.Status = ScheduleStatusStored
 	}
 
+	// The schedule records its creator: the run resolves the creator's
+	// reach from it (the subject whose user_locations grants scope a
+	// finance creator, the recorded administrator or owner role that keeps
+	// the every branch view), and a schedule with no creator recorded never
+	// runs. A deployment with no caller identity (authentication disabled)
+	// therefore cannot create a runnable schedule; that is the fail closed
+	// rule, not an accident to paper over.
+	schedule.CreatedBy = ""
+	schedule.CreatorIsAdmin = false
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
+		schedule.CreatedBy = claims.Subject
+		schedule.CreatorIsAdmin = middleware.ClaimsHaveAnyRole(claims, "admin", "owner")
+	}
+
 	if err := h.service.CreateReportSchedule(r.Context(), &schedule); err != nil {
 		httputil.RespondError(w, r, "failed to create report schedule", http.StatusInternalServerError, err)
 		return

@@ -709,8 +709,12 @@ func Run() {
 	// than transmitted. The schedule API publishes that distinction itself
 	// (execution.enabled plus execution.delivery), derived from this executor,
 	// so wiring it here is what flips the API from "saved but never run" to
-	// "runs". Stops in step 3.6 of graceful shutdown, before the DB pool closes.
-	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc)
+	// "runs". Each run executes under its creator's recorded reach
+	// (SEC-NOHEADER-1), and a run the fail closed rule refuses (no creator
+	// recorded, a creator holding no grant) writes an audit row beside its
+	// log line. Stops in step 3.6 of graceful shutdown, before the DB pool
+	// closes.
+	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc).WithRefusalAudit(audit.NewLogger(db))
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		logger.Error("report scheduler failed to start", "error", err)
 	}

@@ -170,6 +170,15 @@ func (f *fakeRepo) DeleteReportSchedule(_ context.Context, id string) error {
 	return nil
 }
 
+// ScheduleCreatorGrants answers one grant for every sub: the scheduler's
+// fail closed leg, which the fake never drives with a real grants table.
+func (f *fakeRepo) ScheduleCreatorGrants(_ context.Context, sub string) (int, error) {
+	if sub == "" {
+		return 0, nil
+	}
+	return 1, nil
+}
+
 var _ Repository = (*fakeRepo)(nil)
 
 // --- date-window handling ------------------------------------------------

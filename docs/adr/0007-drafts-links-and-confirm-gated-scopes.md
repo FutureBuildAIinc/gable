@@ -989,8 +989,17 @@ that wants a finance person on every branch grants every branch, so nothing
 is lost by the rule. Every reporting or dashboard cache is keyed by the
 caller's reach (the branch and the grants scope together), never shared
 between reaches: a primed administrator entry never serves a finance
-caller. The reconciliation's currency ledger half reads the books, which
-carry no branch fact, and stays dealer wide, a stated limit.
+caller. A scheduled report runs under its creator's reach, resolved afresh
+at every run: the schedule records the creating caller's subject and
+whether that caller held the administrator or owner role when the schedule
+was made (the repository has no users table, so the role cannot be re-read
+later), the run of an administrator or owner creator keeps the every branch
+view, any other creator's run carries the granted branches' rows only, and
+a schedule with no creator recorded, or whose creator is not recorded as an
+administrator and holds no branch grant at all, does not run (it is logged
+and audited) until a caller with report access recreates it. The
+reconciliation's currency ledger half reads the books, which carry no
+branch fact, and stays dealer wide, a stated limit.
 
 The routes this closed, each stated in `docs/refactor/CONTRACT-CHANGES.md`
 under `SEC-NOHEADER-1`: the whole pos surface (the till open, close,

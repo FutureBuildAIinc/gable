@@ -197,6 +197,7 @@ func TestExecuteAndSendReport_MissingReportSendsNothing(t *testing.T) {
 
 	err := sched.ExecuteAndSendReport(context.Background(), ReportSchedule{
 		ID: "s1", ReportID: "gone", Recipients: []string{"a@example.com"},
+		CreatedBy: "pin-scheduler-test",
 	})
 	if err == nil {
 		t.Fatal("want an error when the saved report is missing")
@@ -236,6 +237,7 @@ func TestExecuteAndSendReport_DecodesTheSavedDefinition(t *testing.T) {
 
 	err := sched.ExecuteAndSendReport(context.Background(), ReportSchedule{
 		ID: "s1", ReportID: "r1", Recipients: []string{"finance@example.com"},
+		CreatedBy: "pin-scheduler-test",
 	})
 	if err == nil {
 		t.Fatal("want an error when the stored definition cannot be decoded")

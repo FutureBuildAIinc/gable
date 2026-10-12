@@ -25,8 +25,9 @@ var ErrCustomerNotVisible = errors.New("customer is outside the caller's branche
 // the principal's ruling on the reporting surface): the branch a header
 // names, or the user sub whose user_locations grants scope a no header
 // caller, both nil for the every branch view an administrator or owner
-// keeps. A scheduled report runs on a context free of the branch middleware
-// and reads every branch, as it always did.
+// keeps. A scheduled run builds the same reach from the schedule's
+// recorded creator before it reads anything (Scheduler.creatorRunContext),
+// so no report query here runs context free.
 func reach(ctx context.Context) (*uuid.UUID, *string) {
 	return branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)
 }
@@ -47,6 +48,11 @@ type Repository interface {
 	ListReportSchedules(ctx context.Context) ([]ReportSchedule, error)
 	UpdateReportScheduleNextRun(ctx context.Context, scheduleID string, nextRun time.Time) error
 	DeleteReportSchedule(ctx context.Context, id string) error
+	// ScheduleCreatorGrants counts the creator's user_locations grants, the
+	// fail closed check a scheduled run makes for a creator the schedule
+	// does not record as an administrator: the grants are read afresh at
+	// every run, so a revoked grant takes effect at the next one.
+	ScheduleCreatorGrants(ctx context.Context, sub string) (int, error)
 }
 
 type PostgresRepository struct {
@@ -389,12 +395,13 @@ func (r *PostgresRepository) DeleteSavedReport(ctx context.Context, id string) e
 // time in pgx, so the casts are load-bearing, not cosmetic.
 func (r *PostgresRepository) CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error {
 	query := `
-INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format, created_by, creator_is_admin)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status, schedule.Format).
+		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status, schedule.Format,
+		nullableText(schedule.CreatedBy), schedule.CreatorIsAdmin).
 		Scan(&schedule.ID, &schedule.CreatedAt, &schedule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create report schedule: %w", err)
@@ -402,10 +409,22 @@ RETURNING id, created_at::text, updated_at::text
 	return nil
 }
 
+// nullableText maps an absent creator to SQL NULL, the same mapping
+// nullableUUID makes for saved_reports.created_by: a schedule made where
+// no caller identity exists (authentication disabled) is a real state, and
+// a NULL creator is the row the run refuses to execute.
+func nullableText(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (r *PostgresRepository) ListReportSchedules(ctx context.Context) ([]ReportSchedule, error) {
 	query := `
 SELECT id, report_id, cron_expression, recipients, status, format,
-       last_run_at::text, next_run_at::text, created_at::text, updated_at::text
+       last_run_at::text, next_run_at::text, COALESCE(created_by, ''), creator_is_admin,
+       created_at::text, updated_at::text
 FROM report_schedules
 ORDER BY created_at DESC
 `
@@ -422,12 +441,26 @@ ORDER BY created_at DESC
 			&schedule.ID, &schedule.ReportID, &schedule.CronExpression,
 			&schedule.Recipients, &schedule.Status, &schedule.Format,
 			&schedule.LastRunAt, &schedule.NextRunAt,
+			&schedule.CreatedBy, &schedule.CreatorIsAdmin,
 			&schedule.CreatedAt, &schedule.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan report schedule: %w", err)
 		}
 		schedules = append(schedules, schedule)
 	}
-	return schedules, nil
+	return schedules, rows.Err()
+}
+
+// ScheduleCreatorGrants counts the sub's current user_locations grants. The
+// read carries no wall on purpose: it answers the scheduler's fail closed
+// question (does this creator still hold any branch grant), not a scoped
+// list, and the count itself is what the run resolves its reach from.
+func (r *PostgresRepository) ScheduleCreatorGrants(ctx context.Context, sub string) (int, error) {
+	var n int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_locations WHERE user_sub = $1`, sub).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to read the schedule creator's grants: %w", err)
+	}
+	return n, nil
 }
 
 func (r *PostgresRepository) DeleteReportSchedule(ctx context.Context, id string) error {

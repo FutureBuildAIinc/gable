@@ -13,6 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 )
 
@@ -69,11 +72,22 @@ type Scheduler struct {
 	emailSender EmailSender
 	cron        *cron.Cron
 
+	// refusalAudit, when wired, records every fail closed refusal a run
+	// makes as an audit row beside the log line, so an operator can find
+	// why a schedule stopped emailing. Nil (unit tests) skips the row.
+	refusalAudit *audit.Logger
+
 	// mu guards jobIDs. AddSchedule is called both from Start and, per request,
 	// from Handler.HandleCreateReportSchedule, so concurrent HTTP requests
 	// would otherwise race on the map.
 	mu     sync.Mutex
 	jobIDs map[string]cron.EntryID
+}
+
+// WithRefusalAudit wires the audit logger a refused run records through.
+func (s *Scheduler) WithRefusalAudit(l *audit.Logger) *Scheduler {
+	s.refusalAudit = l
+	return s
 }
 
 // cronDialect is the expression grammar this package accepts: SIX fields,
@@ -254,18 +268,83 @@ func (s *Scheduler) isRegistered(id string) bool {
 	return ok
 }
 
+// creatorRunContext resolves the branch context a scheduled run executes
+// under (SEC-NOHEADER-1, r4 P1-1): the schedule's creator's reach, resolved
+// afresh at every run so a revoked grant takes effect at the next one. An
+// administrator or owner creator (the role recorded at create, the only
+// durable record this repository keeps of it) keeps the every branch view;
+// any other creator runs over the granted branches only. Fail closed: a
+// schedule with no creator recorded (every row made before migration 112),
+// or whose creator is not recorded as an administrator and currently holds
+// no user_locations grant at all, does not run; the refusal is logged, an
+// audit row is written when a logger is wired, and the second return is
+// false. A creator whose role alone changed (a finance creator granted
+// every branch, say) cannot be told apart by a background job here, the
+// repository's stated limit: no table persists the role.
+func (s *Scheduler) creatorRunContext(ctx context.Context, schedule ReportSchedule) (context.Context, bool) {
+	if schedule.CreatedBy == "" {
+		s.refuseRun(ctx, schedule, "the schedule records no creator")
+		return nil, false
+	}
+	if !schedule.CreatorIsAdmin {
+		grants, err := s.service.ScheduleCreatorGrants(ctx, schedule.CreatedBy)
+		if err != nil {
+			log.Printf("reporting scheduler: schedule %s did not run: the creator's grants could not be read: %v",
+				schedule.ID, err)
+			return nil, false
+		}
+		if grants == 0 {
+			s.refuseRun(ctx, schedule, "the creator holds no branch grant")
+			return nil, false
+		}
+	}
+	return branchctx.With(ctx, &branchctx.Context{UserSub: schedule.CreatedBy, IsAdmin: schedule.CreatorIsAdmin}), true
+}
+
+// refuseRun records why a schedule did not run: a log line always, and an
+// audit row beside it when a logger is wired, so a schedule that stops
+// emailing is discoverable rather than silent.
+func (s *Scheduler) refuseRun(ctx context.Context, schedule ReportSchedule, reason string) {
+	log.Printf("reporting scheduler: schedule %s (report %s) did not run: %s",
+		schedule.ID, schedule.ReportID, reason)
+	if s.refusalAudit == nil {
+		return
+	}
+	entityID, err := uuid.Parse(schedule.ID)
+	if err != nil {
+		entityID = uuid.Nil
+	}
+	if err := s.refusalAudit.Log(ctx, audit.Entry{
+		Action:     "report_schedule.refused",
+		EntityType: "report_schedule",
+		EntityID:   entityID,
+		Changes: map[string]interface{}{
+			"reason": reason, "report_id": schedule.ReportID, "created_by": schedule.CreatedBy,
+		},
+	}); err != nil {
+		log.Printf("reporting scheduler: the refusal of schedule %s could not be audited: %v", schedule.ID, err)
+	}
+}
+
 // ExecuteAndSendReport runs the report and emails the rendered file to the
 // schedule's recipients.
 //
-// CSV and XLSX are rendered as requested. PDF is accepted by the API but has no
-// renderer in this package, so a PDF schedule is delivered as CSV — with a .csv
-// filename and a sentence in the email body saying why. The alternatives were
-// both worse: failing the run would be a silent failure on a timer, and
+// The run executes under the creator's reach (creatorRunContext), never on
+// the bare context the cron closure hands it, so a finance creator's run
+// reads the granted branches' rows only. CSV and XLSX are rendered as
+// requested. PDF is accepted by the API but has no renderer in this
+// package, so a PDF schedule is delivered as CSV — with a .csv filename
+// and a sentence in the email body saying why. The alternatives were both
+// worse: failing the run would be a silent failure on a timer, and
 // attaching CSV bytes under a .pdf name would produce a file the recipient
 // cannot open and cannot diagnose.
 func (s *Scheduler) ExecuteAndSendReport(ctx context.Context, schedule ReportSchedule) error {
+	runCtx, ok := s.creatorRunContext(ctx, schedule)
+	if !ok {
+		return errors.New("the schedule did not run: its creator's reach could not be resolved")
+	}
 	// 1. Fetch the saved report.
-	report, err := s.service.GetSavedReport(ctx, schedule.ReportID)
+	report, err := s.service.GetSavedReport(runCtx, schedule.ReportID)
 	if err != nil {
 		return fmt.Errorf("failed to get report definition: %w", err)
 	}
@@ -283,7 +362,7 @@ func (s *Scheduler) ExecuteAndSendReport(ctx context.Context, schedule ReportSch
 		return fmt.Errorf("failed to parse report definition for %s: %w", report.Name, err)
 	}
 
-	results, err := s.service.ExecuteReportDefinition(ctx, def, report.EntityType)
+	results, err := s.service.ExecuteReportDefinition(runCtx, def, report.EntityType)
 	if err != nil {
 		return fmt.Errorf("failed to execute report query: %w", err)
 	}
@@ -299,7 +378,7 @@ func (s *Scheduler) ExecuteAndSendReport(ctx context.Context, schedule ReportSch
 	body := fmt.Sprintf("Please find attached the latest run for report '%s'.%s", report.Name, note)
 	filename := fmt.Sprintf("%s_%s%s", sanitizeFilename(report.Name), time.Now().Format("2006-01-02"), ext)
 
-	if err := s.emailSender.SendEmailWithAttachment(ctx, schedule.Recipients, subject, body, filename, buf.Bytes()); err != nil {
+	if err := s.emailSender.SendEmailWithAttachment(runCtx, schedule.Recipients, subject, body, filename, buf.Bytes()); err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
 
@@ -307,7 +386,7 @@ func (s *Scheduler) ExecuteAndSendReport(ctx context.Context, schedule ReportSch
 	// is logged rather than returned — returning would make the caller retry a
 	// send that already happened.
 	if next, err := nextRunAfter(schedule.CronExpression, time.Now()); err == nil {
-		if err := s.service.UpdateReportScheduleNextRun(ctx, schedule.ID, next); err != nil {
+		if err := s.service.UpdateReportScheduleNextRun(runCtx, schedule.ID, next); err != nil {
 			log.Printf("reporting scheduler: report for schedule %s was sent but last_run_at/next_run_at could not be recorded: %v",
 				schedule.ID, err)
 		}

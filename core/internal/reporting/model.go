@@ -98,6 +98,16 @@ type ReportSchedule struct {
 	NextRunAt      *string  `json:"next_run_at,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
+
+	// CreatedBy is the creating caller's subject, the same text
+	// user_locations keys grants by, and CreatorIsAdmin records that the
+	// creator held the administrator or owner role when the schedule was
+	// made (the repository has no users table, so the role cannot be
+	// re-read at run time). The scheduled run resolves its reach from
+	// these two facts afresh at every run (SEC-NOHEADER-1): a schedule
+	// with no creator recorded never runs.
+	CreatedBy      string `json:"created_by,omitempty"`
+	CreatorIsAdmin bool   `json:"creator_is_admin"`
 }
 
 // ScheduleExecution tells a client whether stored schedules actually run, and

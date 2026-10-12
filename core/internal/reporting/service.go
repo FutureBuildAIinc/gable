@@ -225,6 +225,13 @@ func (s *Service) DeleteReportSchedule(ctx context.Context, id string) error {
 	return s.repo.DeleteReportSchedule(ctx, id)
 }
 
+// ScheduleCreatorGrants counts a schedule creator's current user_locations
+// grants: the fail closed check the scheduler makes at every run for a
+// creator the schedule does not record as an administrator.
+func (s *Service) ScheduleCreatorGrants(ctx context.Context, sub string) (int, error) {
+	return s.repo.ScheduleCreatorGrants(ctx, sub)
+}
+
 func (s *Service) ExecuteReportDefinition(ctx context.Context, def *ReportDefinition, entityType string) ([]map[string]interface{}, error) {
 	pgRepo, ok := s.repo.(*PostgresRepository)
 	if !ok {
