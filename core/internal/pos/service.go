@@ -21,6 +21,7 @@ import (
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // PriceCalculator resolves customer-specific pricing for a product.
@@ -100,6 +101,18 @@ func (s *Service) holdSaleBranch(ctx context.Context, txID uuid.UUID) error {
 		return &MissingRecordError{What: "transaction", ID: txID}
 	}
 	return s.holdRecordBranch(ctx, "transaction", branch, txID)
+}
+
+// getTransaction reads a sale for an act, answering a sale the caller's
+// wall hides exactly like one that does not exist: the module's 404, so a
+// hidden record is missing (never the record refusal's 403, which would
+// name a branch, and never the bare 500 a raw no rows error maps to).
+func (s *Service) getTransaction(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
+	tx, err := s.repo.GetTransaction(ctx, txID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, &MissingRecordError{What: "transaction", ID: txID}
+	}
+	return tx, err
 }
 
 // WithTillLedger wires GL posting of till drawer over/short at close.
@@ -195,7 +208,7 @@ func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRe
 	// branch context may not target (or a missing one) names nothing the
 	// caller may add to, and the line insert never happens (round 6 P1-2:
 	// the insert used to land and the recalculation fail after it).
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	tx, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +276,7 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 	// happen OUTSIDE the DB transaction: they're slow, non-transactional,
 	// and must not hold row locks. A post-charge DB failure is logged
 	// CRITICAL for manual reconciliation (same policy as payment.Service).
-	pre, err := s.repo.GetTransaction(ctx, txID)
+	pre, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -333,7 +346,7 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
 		// 1. Re-read inside the transaction
-		tx, err := s.repo.GetTransaction(ctx, txID)
+		tx, err := s.getTransaction(ctx, txID)
 		if err != nil {
 			return err
 		}
@@ -515,7 +528,7 @@ func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTran
 	}
 
 	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
-		tx, err := s.repo.GetTransaction(ctx, txID)
+		tx, err := s.getTransaction(ctx, txID)
 		if err != nil {
 			return err
 		}
@@ -579,7 +592,7 @@ func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTran
 
 // GetTransaction returns a full transaction with line items and tenders.
 func (s *Service) GetTransaction(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	tx, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -604,7 +617,7 @@ func (s *Service) SearchProducts(ctx context.Context, query string) ([]QuickSear
 
 // recalculateTotals sums line items and updates the transaction.
 func (s *Service) recalculateTotals(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	tx, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
