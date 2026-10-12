@@ -221,6 +221,10 @@ type Reconciliation struct {
 // Nothing repairs a difference: rows written before cycle 2 show here.
 func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 	out := &Reconciliation{Customers: []DriftRow{}, Currencies: []LedgerRow{}}
+	// The customer rows follow the caller's reach (the principal's ruling on
+	// the reporting surface): a customer whose branches sit outside it is not
+	// the caller's drift to see. The currency ledger half reads the books,
+	// which carry no branch fact, and stays dealer wide.
 	rows, err := s.ex(ctx).Query(ctx, `
 		WITH sub AS (
 			SELECT customer_id, currency, SUM(amount) AS cents FROM customer_transactions GROUP BY customer_id, currency
@@ -237,8 +241,17 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 		FROM keys k JOIN customers c ON c.id = k.customer_id
 		LEFT JOIN sub ON sub.customer_id = k.customer_id AND sub.currency = k.currency
 		LEFT JOIN docs ON docs.customer_id = k.customer_id AND docs.currency = k.currency
-		WHERE ROUND(c.balance_due * 100)::bigint <> COALESCE(sub.cents, 0) OR COALESCE(sub.cents, 0) <> COALESCE(docs.cents, 0)
-		ORDER BY c.name, c.id, k.currency`)
+		WHERE (
+		    ROUND(c.balance_due * 100)::bigint <> COALESCE(sub.cents, 0) OR COALESCE(sub.cents, 0) <> COALESCE(docs.cents, 0)
+		  )
+		  AND (
+		    ($1::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $1))
+		    OR ($1::uuid IS NULL AND $2::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $2)))
+		    OR ($1::uuid IS NULL AND $2::text IS NULL)
+		  )
+		ORDER BY c.name, c.id, k.currency`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to reconcile the customers: %w", err)
 	}

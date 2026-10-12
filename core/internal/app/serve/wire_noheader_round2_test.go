@@ -486,7 +486,7 @@ func TestNoHeader_CustomerFamily(t *testing.T) {
 func TestNoHeader_Reports(t *testing.T) {
 	f := newKeyPinFixture(t)
 	ctx := context.Background()
-	w := f.seedWalledTwins(t)
+	f.seedWalledTwins(t)
 	noheaderGrant(t, f, "pin-finance", f.branchA)
 	// A drift row per customer, so the reconciliation has one row per branch
 	// to hold.
@@ -590,19 +590,20 @@ func TestNoHeader_Reports(t *testing.T) {
 	}
 
 	// The BI export keeps the administrator's all branch view with no
-	// header, and a header administrator gets that branch's rows.
+	// header, and a header administrator gets that branch's rows. (The raw
+	// export encodes a uuid column as bytes, so the legs match the names.)
 	status, buf = f.userAs(t, "admin", "GET", "/api/v1/reporting/export/orders", "", nil)
 	if status != http.StatusOK {
 		t.Fatalf("admin no header orders export: %d %s", status, buf)
 	}
-	if !strings.Contains(string(buf), w.ordA.String()) || !strings.Contains(string(buf), w.ordB.String()) {
+	if !strings.Contains(string(buf), `"customer_name":"pin cust",`) || !strings.Contains(string(buf), `"customer_name":"pin cust B",`) {
 		t.Errorf("admin no header orders export misses a branch's order: %s", buf)
 	}
 	status, buf = f.userAs(t, "admin", "GET", "/api/v1/reporting/export/orders", "", headerA(f))
 	if status != http.StatusOK {
 		t.Fatalf("admin header A orders export: %d %s", status, buf)
 	}
-	if strings.Contains(string(buf), w.ordB.String()) || !strings.Contains(string(buf), w.ordA.String()) {
+	if strings.Contains(string(buf), "pin cust B") || !strings.Contains(string(buf), `"customer_name":"pin cust",`) {
 		t.Errorf("admin header A orders export carries B's order: %s", buf)
 	}
 

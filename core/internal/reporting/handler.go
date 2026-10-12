@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -137,6 +138,10 @@ func (h *Handler) HandleCustomerStatement(w http.ResponseWriter, r *http.Request
 	end := r.URL.Query().Get("end")
 	stmt, err := h.service.GetCustomerStatement(r.Context(), customerID, start, end)
 	if err != nil {
+		if errors.Is(err, ErrCustomerNotVisible) {
+			httputil.RespondError(w, r, "no such customer", http.StatusNotFound, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to get customer statement", http.StatusInternalServerError, err)
 		return
 	}

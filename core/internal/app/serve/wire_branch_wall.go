@@ -56,23 +56,30 @@ func newBranchWall(db *database.DB) *branchWall {
 	return w
 }
 
-// reporting mounts the reporting surface in its three registrations. Every
-// report spans every branch's rows, so a branch bound key is refused the
-// surface outright by the route allowlist gate (ADR 0007 section 5.5) and the
-// role guard alone serves everyone else. Three methods because serve builds
+// reporting mounts the reporting surface in its three registrations. The
+// reports follow the caller's reach (the principal's ruling on the reporting
+// surface): the branch middleware settles the context and each query carries
+// the wall, so a finance user with no header reads the granted branches'
+// figures only while an administrator or owner keeps the all branch view. A
+// branch bound key is still refused the surface outright by the route
+// allowlist gate (ADR 0007 section 5.5). Three methods because serve builds
 // the scheduler between the registrations.
 func (w *branchWall) reporting(mux *http.ServeMux, h *reporting.Handler) {
-	h.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	h.RegisterRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner", "finance"), w.mw))
 }
 
-// reportingSchedules is reporting over the builder and schedule routes.
+// reportingSchedules is reporting over the builder and schedule routes: the
+// builder's entity queries carry the same reach wall as the reports.
 func (w *branchWall) reportingSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor) {
-	wireReportSchedules(mux, h, executor)
+	wireReportSchedules(mux, h, executor, w.mw)
 }
 
-// reportingBIIntegration is reporting over the BI export routes.
+// reportingBIIntegration is reporting over the BI export routes. The export
+// entities carry the same reach wall as the reports (the branch middleware
+// settles it), so a header caller exports its branch's rows; an
+// administrator or owner with no header keeps every branch's.
 func (w *branchWall) reportingBIIntegration(mux *http.ServeMux, h *reporting.Handler) {
-	h.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
+	h.RegisterBIIntegrationRoutes(mux, middleware.Compose(middleware.RequireRole("admin", "owner"), w.mw))
 }
 
 // eventsFeed mounts the events feed: the outbox carries every branch's events

@@ -5,11 +5,31 @@ package reporting
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
+
+// ErrCustomerNotVisible is the customer statement's visibility refusal: the
+// customer's branches sit entirely outside the caller's reach, so the
+// statement reads as missing (the wall a header caller already met).
+var ErrCustomerNotVisible = errors.New("customer is outside the caller's branches")
+
+// reach is the caller's reach every report query carries (SEC-NOHEADER-1,
+// the principal's ruling on the reporting surface): the branch a header
+// names, or the user sub whose user_locations grants scope a no header
+// caller, both nil for the every branch view an administrator or owner
+// keeps. A scheduled report runs on a context free of the branch middleware
+// and reads every branch, as it always did.
+func reach(ctx context.Context) (*uuid.UUID, *string) {
+	return branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)
+}
 
 type Repository interface {
 	GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error)
@@ -41,15 +61,17 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 	// Truncate to day
 	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 	dayEnd := dayStart.Add(24 * time.Hour)
+	branch, grants := reach(ctx)
 
 	query := `
 		SELECT method, COALESCE(SUM(amount), 0), COUNT(*)
 		FROM payments
 		WHERE created_at >= $1 AND created_at < $2
+		  AND ` + middleware.Wall("", 3, 4) + `
 		GROUP BY method
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily till: %w", err)
 	}
@@ -82,14 +104,16 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		StartDate: start.Format("2006-01-02"),
 		EndDate:   end.Format("2006-01-02"),
 	}
+	branch, grants := reach(ctx)
 
 	// 1. Invoiced
 	queryInvoiced := `
 		SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
 		FROM invoices
 		WHERE created_at >= $1 AND created_at < $2 AND status != 'VOID'
+		  AND ` + middleware.Wall("", 3, 4) + `
 	`
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end).Scan(&report.TotalInvoiced, &report.InvoiceCount)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
@@ -99,8 +123,9 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		SELECT COALESCE(SUM(amount), 0)
 		FROM payments
 		WHERE created_at >= $1 AND created_at < $2
+		  AND ` + middleware.Wall("", 3, 4) + `
 	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end).Scan(&report.TotalCollected)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end, branch, grants).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
@@ -121,6 +146,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		SELECT COALESCE(SUM(total_amount), 0)
 		FROM invoices
 		WHERE created_at >= $1 AND created_at < $2 AND status IN ('UNPAID', 'PARTIAL')
+		  AND ` + middleware.Wall("", 3, 4) + `
 	`
 	// Note: accurate AR needs to subtract partial payments.
 	// Let's refine: Total Invoiced in Period - Total Payments applied to *those* invoices (even if payment is outside period? Mixed bag).
@@ -135,7 +161,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
 	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
 
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end).Scan(&report.OutstandingAR)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end, branch, grants).Scan(&report.OutstandingAR)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outstanding: %w", err)
 	}
@@ -144,6 +170,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 }
 
 func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingReport, error) {
+	branch, grants := reach(ctx)
 	query := `
 		SELECT
 			i.customer_id,
@@ -156,11 +183,12 @@ func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingRepo
 		FROM invoices i
 		LEFT JOIN customers c ON c.id = i.customer_id
 		WHERE i.status IN ('UNPAID', 'PARTIAL')
+		  AND ` + middleware.Wall("i", 1, 2) + `
 		GROUP BY i.customer_id, c.name
 		ORDER BY total DESC
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query AR aging: %w", err)
 	}
@@ -187,10 +215,23 @@ func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingRepo
 }
 
 func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerID string, start, end time.Time) (*CustomerStatement, error) {
-	// Get customer name
+	// The customer's visibility settles the whole statement: a customer whose
+	// branches sit outside the caller's reach reads as missing, the wall a
+	// header caller already met (the customer family's own wall shape).
+	branch, grants := reach(ctx)
 	var customerName string
-	nameQuery := `SELECT COALESCE(name, '') FROM customers WHERE id = $1`
-	_ = r.db.GetExecutor(ctx).QueryRow(ctx, nameQuery, customerID).Scan(&customerName)
+	nameQuery := `SELECT COALESCE(name, '') FROM customers c WHERE c.id = $1 AND (
+		    ($2::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $2))
+		    OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $3)))
+		    OR ($2::uuid IS NULL AND $3::text IS NULL)
+		  )`
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, nameQuery, customerID, branch, grants).Scan(&customerName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCustomerNotVisible
+		}
+		return nil, fmt.Errorf("failed to read the statement's customer: %w", err)
+	}
 
 	stmt := &CustomerStatement{
 		CustomerID:   customerID,
