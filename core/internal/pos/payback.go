@@ -109,6 +109,17 @@ func (s *Service) PaybackRefundIntent(ctx context.Context, intentID uuid.UUID, i
 		return nil, conflict("no_held_credit",
 			"the tender's payment holds no unapplied credit: the credit was already paid back to its card")
 	}
+	// A recorded refund that never booked holds the tender against every
+	// later act (the sixteenth review's P1-2): a released claim carrying the
+	// terminal's refund id is money that moved while the books refused, so
+	// the credit is already paid as far as the card is concerned and the
+	// payback refuses it, never a second terminal call.
+	if facts, err := s.repo.RefundIntentFacts(ctx, rec.SaleID, rec.TenderID); err != nil {
+		return nil, err
+	} else if facts.UnbookedRefundedCents > 0 {
+		return nil, conflict("tender_refunded",
+			"the terminal already refunded this tender under a recorded refund id that never booked: reconcile that claim before paying the credit again")
+	}
 	// The payback's own claim, committed before the terminal is reached (the
 	// same discipline every terminal refund runs under): its unique live
 	// (sale, tender) index refuses a concurrent payback, its lease holds
@@ -219,6 +230,16 @@ func (s *Service) runPaybackTx(ctx context.Context, claim RefundIntent, refundTx
 			return conflict("refund_tx_id_conflict",
 				fmt.Sprintf("the claim carries the terminal's refund id %s, not %s: record the terminal's own id",
 					held.RefundTxID, refundTxID))
+		}
+		// The unbooked refund restated under the sale lock: a recorded
+		// refund id that landed on a settled claim of this tender while the
+		// payback's own call was on the wire is money that already moved,
+		// and the booking refuses it as the route's guard does.
+		if facts, err := s.repo.RefundIntentFacts(ctx, claim.SaleID, claim.TenderID); err != nil {
+			return err
+		} else if facts.UnbookedRefundedCents > 0 {
+			return conflict("tender_refunded",
+				"the terminal already refunded this tender under a recorded refund id that never booked: reconcile that claim before paying the credit again")
 		}
 		tenders, err := s.repo.GetTenders(ctx, claim.SaleID)
 		if err != nil {

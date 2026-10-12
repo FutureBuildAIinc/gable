@@ -161,6 +161,23 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	// again until that is reconciled (fourth review P1-4).
 	var refunds []gatewayRefund
 	for i := range intents {
+		// The lease is stamped per call (the sixteenth review's P1-2): a
+		// committed write immediately before this claim's own terminal call
+		// renews answer_due_at to now plus the lease, so a later tender's
+		// call in this sequence never runs under a lease the earlier calls
+		// already spent, and the resolve route cannot release a claim whose
+		// call is still on the wire. A claim whose stamp fails is never
+		// called: it is abandoned exactly as the tenders after a refusal
+		// are, and the refunds already taken are recorded beside it.
+		if err := s.repo.RestampRefundIntentLease(ctx, intents[i].ID); err != nil {
+			for j := i; j < len(intents); j++ {
+				s.abandonRefundIntent(ctx, intents[j])
+			}
+			for _, r := range refunds {
+				s.recordOrphanRefund(ctx, r, err)
+			}
+			return nil, fmt.Errorf("failed to stamp the claim's in flight lease before its terminal call: %w", err)
+		}
 		// The call is bounded (fourteenth review P1-1): every path it can take ends inside
 		// the bound, so the claim it holds never sits in flight past its own
 		// settle path.

@@ -144,6 +144,9 @@ type Repository interface {
 	// (the resolution's transaction), and FailRefundIntentByID releases one
 	// claim by its id (the operator resolution's no refund leg).
 	MarkRefundIntentRefunded(ctx context.Context, intentID uuid.UUID, refundTxID string) error
+	// RestampRefundIntentLease renews one claim's lease immediately before
+	// its own terminal call (the void's sequential calls).
+	RestampRefundIntentLease(ctx context.Context, intentID uuid.UUID) error
 	StampRefundIntentAnswered(ctx context.Context, intentID uuid.UUID) error
 	MarkRefundIntentUnansweredUnknown(ctx context.Context, intentID uuid.UUID) error
 	AbandonRefundIntent(ctx context.Context, intentID uuid.UUID) error
@@ -854,6 +857,23 @@ func (r *PostgresRepository) MarkRefundIntentRefunded(ctx context.Context, inten
 	return nil
 }
 
+// RestampRefundIntentLease renews one claim's in flight lease to now plus
+// the stated timeout, in its own committed write immediately before the
+// claim's own terminal call: a void's calls run one after another, each
+// bounded at a third of the lease, so a later tender's call would otherwise
+// start after the common insert-time lease had run out and the resolve route
+// could release a claim whose call is still on the wire (the sixteenth
+// review's P1-2).
+func (r *PostgresRepository) RestampRefundIntentLease(ctx context.Context, intentID uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `
+		UPDATE pos_refund_intents SET answer_due_at = NOW() + make_interval(secs => $2), updated_at = NOW()
+		WHERE id = $1`, intentID, int64(refundAnswerLease.Seconds()))
+	if err != nil {
+		return fmt.Errorf("failed to restamp the claim's in flight lease: %w", mapWriteError(err))
+	}
+	return nil
+}
+
 // StampRefundIntentAnswered records that the claim's own terminal call came
 // back carrying no verdict (a transport error, a status that proves
 // nothing): the call is off the wire, so the claim is stranded and
@@ -1056,13 +1076,16 @@ func (r *PostgresRepository) SaleHasPendingRefundIntent(ctx context.Context, sal
 
 // TenderCreditFacts is the declined void tender credit one payment still
 // holds: the origin names the void's sale and the claim the void released,
-// and Cents is what the payment still carries unapplied of it.
+// and Cents is what the payment still carries unapplied of it. RefundTxID,
+// when set, is the terminal's own refund id on that claim: money that moved
+// at the terminal and never booked.
 type TenderCreditFacts struct {
 	IntentID   uuid.UUID
 	TenderID   uuid.UUID
 	SaleID     uuid.UUID
 	SaleNumber string
 	Cents      int64
+	RefundTxID string
 }
 
 // HeldTenderCreditOfPayment answers whether the payment's unapplied cash is
@@ -1072,11 +1095,16 @@ type TenderCreditFacts struct {
 // and the void's completion reversed the tender's application onto the
 // payment, where the cents wait for their one way back. A payment nothing
 // of the counter holds, or one whose credit was already paid back (its
-// unapplied cash is gone), answers false.
+// unapplied cash is gone), answers false. A credit whose released claim
+// carries the terminal's refund id (money that moved, never booked: the
+// sixteenth review's P1-2) answers false too, with the tender named: it is
+// already refunded as far as the card is concerned, never a held credit,
+// and every act on it (an application, the online refund route) is refused
+// 409 tender_refunded until it is reconciled.
 func (r *PostgresRepository) HeldTenderCreditOfPayment(ctx context.Context, paymentID uuid.UUID) (TenderCreditFacts, bool, error) {
 	var facts TenderCreditFacts
 	err := r.ex(ctx).QueryRow(ctx, `
-		SELECT i.id, i.tender_id, i.sale_id, t.number, ROUND(p.amount_unapplied * 100)::bigint
+		SELECT i.id, i.tender_id, i.sale_id, t.number, ROUND(p.amount_unapplied * 100)::bigint, COALESCE(i.refund_tx_id, '')
 		FROM payments p
 			JOIN pos_tenders d ON d.payment_id = p.id AND d.method = 'CARD'
 			JOIN pos_transactions t ON t.id = d.transaction_id AND t.status = 'VOIDED'
@@ -1085,12 +1113,16 @@ func (r *PostgresRepository) HeldTenderCreditOfPayment(ctx context.Context, paym
 		WHERE p.id = $1 AND p.status = 'POSTED' AND ROUND(p.amount_unapplied * 100)::bigint > 0
 		ORDER BY i.created_at, i.id
 		LIMIT 1`, paymentID).
-		Scan(&facts.IntentID, &facts.TenderID, &facts.SaleID, &facts.SaleNumber, &facts.Cents)
+		Scan(&facts.IntentID, &facts.TenderID, &facts.SaleID, &facts.SaleNumber, &facts.Cents, &facts.RefundTxID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return facts, false, nil
 	}
 	if err != nil {
 		return facts, false, fmt.Errorf("failed to read the payment's held tender credit: %w", err)
+	}
+	if facts.RefundTxID != "" {
+		return facts, false, conflict("tender_refunded",
+			"the terminal already refunded this tender under a recorded refund id that never booked: reconcile that claim before anything else is paid or spent on the tender")
 	}
 	return facts, true, nil
 }

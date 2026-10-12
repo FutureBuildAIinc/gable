@@ -36,12 +36,16 @@ const reversalTimeout = 30 * time.Second
 // hung connection would hold the tender's claim in flight forever.
 const refundCallTimeout = 30 * time.Second
 
-// refundAnswerLease is the stated in flight timeout the claim carries from
-// the moment it opens (fourteenth review P1-1): while it runs and the terminal has not
+// refundAnswerLease is the stated in flight timeout a claim's terminal
+// call carries (fourteenth review P1-1): while it runs and the terminal has not
 // answered, the resolve route and the drawer close refuse the claim; once it
 // expires with no answer at all (a crashed or hung act) the claim becomes
 // resolvable and records that the terminal never spoke. It exceeds the call
-// bound so a bounded call's error always lands inside the lease.
+// bound so a bounded call's error always lands inside the lease; that holds
+// for one call, so a void's sequential calls restamp each claim's lease in
+// a committed write immediately before its own call, and a later tender's
+// call never runs under a lease the earlier calls already spent (the
+// sixteenth review's P1-2).
 const refundAnswerLease = 90 * time.Second
 
 // gatewayRefund is one refund the counter made at the gateway before its
