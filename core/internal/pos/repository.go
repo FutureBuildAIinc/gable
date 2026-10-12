@@ -1316,14 +1316,23 @@ func (r *PostgresRepository) LockCustomerCredit(ctx context.Context, customerID 
 
 func (r *PostgresRepository) GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error) {
 	var branch *uuid.UUID
-	err := r.ex(ctx).QueryRow(ctx, `SELECT l.branch_id FROM pos_registers pr
+	err := r.ex(ctx).QueryRow(ctx, `SELECT COALESCE(l.branch_id, pr.branch_id) FROM pos_registers pr
 		LEFT JOIN locations l ON l.id = pr.location_id
-		WHERE pr.id = $1 AND ($2::uuid IS NULL OR l.branch_id = $2)`, registerID, branchctx.IDForQuery(ctx)).Scan(&branch)
+		WHERE pr.id = $1`, registerID).Scan(&branch)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("no such register")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve the register's branch: %w", err)
+	}
+	// The register is held to the caller's branch context (PR 83's round 7
+	// predicate): a register of another branch is refused by name, never a
+	// missing row, and nothing of the act is written.
+	if branch != nil {
+		if held := branchctx.IDForQuery(ctx); held != nil && *held != *branch {
+			return nil, httpx.Forbidden(
+				fmt.Sprintf("register %s belongs to a different branch than the request", registerID))
+		}
 	}
 	return branch, nil
 }

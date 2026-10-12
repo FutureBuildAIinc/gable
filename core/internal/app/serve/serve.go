@@ -278,7 +278,7 @@ func Run() {
 
 	// AI Parsing Module (Material List Intake)
 	parsingSvc := parsing.NewService(productRepo, aiClient)
-	parsingHandler := parsing.NewHandler(parsingSvc)
+	parsingHandler := parsing.NewHandler(parsingSvc).WithAuditLog(auditLog)
 	parsingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// PIM Module (AI-Powered Product Information Management) — text generation and
@@ -299,7 +299,7 @@ func Run() {
 		locationSvc,
 		locationUserRepo,
 		middleware.RequireRole("admin", "owner"),
-	)
+	).WithAuditLog(auditLog)
 	// Location routes run behind the branch middleware through
 	// branchWall.locations: POST /locations writes into a branch's tree, the
 	// by-id reads and the list are held to the caller's branches (the branch
@@ -319,10 +319,13 @@ func Run() {
 		WithAudit(customeraudit.New(auditLog))
 	wall.customers(mux, customerSvc)
 
-	// Sales Team Module
+	// Sales Team Module: the roster spans every branch, so a branch bound
+	// key is refused it outright by the route allowlist gate (ADR 0007
+	// section 5.5).
 	salesTeamRepo := salesteam.NewRepository(db)
 	salesTeamHandler := salesteam.NewHandler(salesTeamRepo)
-	salesTeamHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
+	salesTeamHandler.RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner", "sales"))
 
 	// CRM Module: on the wire contract, its writes in one transaction with
 	// their audit row and activity.* event, every route behind the branch
@@ -342,7 +345,9 @@ func Run() {
 		WithAudit(auditLog)
 	wall.quotes(mux, quoteSvc)
 
-	// GL Module (Full General Ledger)
+	// GL Module (Full General Ledger): the books span every branch, so a
+	// branch bound key is refused the whole surface outright by the route
+	// allowlist gate (ADR 0007 section 5.5).
 	glAdapter := glint.NewMockGLAdapter()
 	glRepo := gl.NewRepository(db)
 	glSvc := gl.NewService(glRepo, glAdapter, logger)
@@ -372,7 +377,7 @@ func Run() {
 		WithTxRunner(db).
 		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
-	pricingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -383,7 +388,7 @@ func Run() {
 		pricingSvc.WithCategoryPricing(catPricingSvc)
 
 		catPricingHandler := pricing.NewCategoryHandler(catPricingSvc, customerSvc)
-		catPricingHandler.RegisterCategoryRoutes(mux, middleware.RequireRole("admin", "owner"))
+		catPricingHandler.RegisterCategoryRoutes(mux, categoryRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 		logger.Info("Category-based pricing engine enabled")
 	} else {
@@ -510,8 +515,8 @@ func Run() {
 			func(ctx context.Context, keyID uuid.UUID) (bool, error) {
 				return techAdminSvc.KeyActive(ctx, keyID)
 			}))
-	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, scoped(quoteKind.Roles()...))
-	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, scoped(orderKind.Roles()...))
+	quote.RegisterDraftRoutes(mux, draftsHandler, quoteKind, wall.draftGuard(db, "quotes", quoteKind.Roles()...))
+	order.RegisterDraftRoutes(mux, draftsHandler, orderKind, wall.draftGuard(db, "orders", orderKind.Roles()...))
 
 	// The link resolver (ADR 0007 section 8): one literal route per entity
 	// and per draft kind, each behind the module's own read roles composed
@@ -601,7 +606,7 @@ func Run() {
 	}
 	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
@@ -683,7 +688,7 @@ func Run() {
 	// terminal rail: the online gateway is never the way back for it
 	paymentSvc.WithTenderCreditGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
-	wall.pos(mux, posHandler)
+	wall.pos(mux, posHandler, "admin", "owner", "cashier")
 
 	// Accounts Payable Module: the vendor invoice routes on the wire contract
 	// (C4-1b, ADR 0008 7.4). The bills carry a branch, so every route runs
@@ -702,7 +707,9 @@ func Run() {
 	matchingSvc := matching.NewService(db, matchingRepo, poSvc, apSvc, logger)
 	wall.matching(mux, matchingSvc)
 
-	// Bank Reconciliation Module
+	// Bank Reconciliation Module: bank reconciliation spans every branch, so
+	// a branch bound key is refused the whole surface outright by the route
+	// allowlist gate.
 	bankreconRepo := bankrecon.NewRepository(db)
 	bankreconSvc := bankrecon.NewService(db, bankreconRepo, glSvc, logger)
 	bankreconHandler := bankrecon.NewHandler(bankreconSvc)
@@ -712,7 +719,7 @@ func Run() {
 	reportingRepo := reporting.NewRepository(db)
 	reportingSvc := reporting.NewService(reportingRepo)
 	reportingHandler := reporting.NewHandler(reportingSvc)
-	reportingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	wall.reporting(mux, reportingHandler)
 
 	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
 	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
@@ -726,12 +733,12 @@ func Run() {
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		logger.Error("report scheduler failed to start", "error", err)
 	}
-	wireReportSchedules(mux, reportingHandler, reportScheduler)
+	wall.reportingSchedules(mux, reportingHandler, reportScheduler)
 	logger.Info("Scheduled report delivery enabled",
 		"cron_dialect", "six fields, seconds first",
 		"delivery", reportScheduler.DeliveryDescription())
 
-	reportingHandler.RegisterBIIntegrationRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.reportingBIIntegration(mux, reportingHandler)
 
 	// The idempotency retention purge no longer runs here: R1-4 moved it to
 	// the worker role (internal/app/worker), so `core worker` owns it.
@@ -824,7 +831,7 @@ func Run() {
 
 	// AI Vision Module (Sprint 19: Blueprint Verification Prototype)
 	visionSvc := vision.NewService()
-	visionHandler := vision.NewHandler(visionSvc)
+	visionHandler := vision.NewHandler(visionSvc).WithAuditLog(auditLog)
 	visionHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
 
 	// Governance App (converted — reference conversion #2)
@@ -860,9 +867,10 @@ func Run() {
 
 	// Events feed: the outbox read API (item R1-12), the one cursor-paginated
 	// feed of every domain event. Role gated admin/owner like the other admin
-	// reads; agents and integrations poll it with their own cursors.
+	// reads; agents and integrations poll it with their own cursors. The feed
+	// carries every branch's events, so a branch bound key is refused it.
 	eventsHandler := events.NewHandler(db)
-	eventsHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
+	wall.eventsFeed(mux, eventsHandler)
 
 	// Portal Module (Sovereign Dealer Portal)
 	// Resolve JWT secret: required in production, uses dev default in dev mode only.

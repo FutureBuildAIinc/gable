@@ -181,6 +181,19 @@ func notFound(err error) error {
 func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	v := &httpx.Validator{}
 
+	// A job the customer does not own is refused for every caller, as the
+	// credit memo create refuses it (round 11 P1-1): a foreign job's pricing
+	// rules would price the document.
+	if d.JobID != nil {
+		owned, err := s.repo.JobOwnedBy(ctx, *d.JobID, d.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			v.Check(false, "job_id", "is not a job of this customer")
+		}
+	}
+
 	var productIDs []uuid.UUID
 	for _, l := range d.Lines {
 		if l.ProductID != nil {

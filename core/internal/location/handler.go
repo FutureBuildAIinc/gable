@@ -9,10 +9,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -24,6 +26,34 @@ type Handler struct {
 	adminGuards []func(http.Handler) http.Handler // applied to admin-only routes
 	guard       LocationGuard                     // optional; see WithBranchWall
 	branchMw    func(http.Handler) http.Handler   // optional; see WithBranchWall
+	keyWall     *middleware.KeyBranchWall         // optional; see WithKeyBranchWall
+	auditLog    *audit.Logger                     // optional; see WithAuditLog
+}
+
+// WithAuditLog sets the audit logger the grant, revoke and home branch
+// writes record their row through (ADR 0007 section 5.5, the PD-5 ruling: a
+// shared user's grant, revoke and home branch for the pin branch is accepted
+// as confined and audited, the audit row naming whoever acted, a user or the
+// machine key).
+func (h *Handler) WithAuditLog(l *audit.Logger) *Handler {
+	h.auditLog = l
+	return h
+}
+
+// recordGrant audits one grant surface write; a missing logger or a failed
+// row never blocks the write (the mutation is already committed).
+func (h *Handler) recordGrant(ctx context.Context, action string, branch uuid.UUID, changes map[string]interface{}) {
+	if h.auditLog == nil {
+		return
+	}
+	if err := h.auditLog.Log(ctx, audit.Entry{
+		Action:     action,
+		EntityType: "user_branch",
+		EntityID:   branch,
+		Changes:    changes,
+	}); err != nil {
+		slog.Error("failed to audit the grant write", "action", action, "error", err)
+	}
 }
 
 // NewHandler constructs the location handler. userRepo and adminGuards may be
@@ -46,6 +76,21 @@ type LocationGuard interface {
 // owner only. Without it nothing is branch scoped, so serve always sets it.
 func (h *Handler) WithBranchWall(g LocationGuard, branchMw func(http.Handler) http.Handler) *Handler {
 	h.guard, h.branchMw = g, branchMw
+	return h
+}
+
+// WithKeyBranchWall puts the key branch wall on the routes that mount no
+// branch middleware (ADR 0007 section 5.5): the by id location writes, the
+// branch directory writes and the user grant routes hold a branch bound key
+// to its pin, refusing it another branch with the key.branch_refused row.
+// The branch reads the wall narrows are /branches/{id}/users (refused for
+// another branch) and /users/{sub}/branches (filtered to the pin). The
+// directory create and the known users list (/users, every branch's subs)
+// refuse a bound key outright through the route allowlist gate, which covers
+// every registration of these routes. Without it nothing changes, so serve
+// always sets it.
+func (h *Handler) WithKeyBranchWall(w *middleware.KeyBranchWall) *Handler {
+	h.keyWall = w
 	return h
 }
 
@@ -83,6 +128,24 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		return h2.ServeHTTP
 	}
 
+	// The key branch wall on the routes that mount no branch middleware: the
+	// by id location writes hold the row's branch to a bound key's pin, the
+	// branch directory writes and the branch users read hold the path branch
+	// to it, and the grant routes hold the body or path branch to it (ADR
+	// 0007 section 5.5). The directory create (POST /api/v1/branches) and the
+	// known users list (GET /api/v1/users) refuse a bound key outright, which
+	// the route allowlist gate does for every registration of these routes.
+	wall := func(mw func(http.Handler) http.Handler) func(http.HandlerFunc) http.HandlerFunc {
+		if mw == nil || h.keyWall == nil {
+			return func(hf http.HandlerFunc) http.HandlerFunc { return hf }
+		}
+		return func(hf http.HandlerFunc) http.HandlerFunc { return mw(hf).ServeHTTP }
+	}
+	locRowWall := wall(h.keyWall.LocationRowBranch())
+	branchIdWall := wall(h.keyWall.NamedBranch("id"))
+	bodyBranchWall := wall(h.keyWall.BodyBranch())
+	branchIdPathWall := wall(h.keyWall.NamedBranch("branch_id"))
+
 	// Legacy / shared location endpoints.
 	create := http.HandlerFunc(h.CreateLocation)
 	read := http.HandlerFunc(h.GetLocation)
@@ -95,15 +158,15 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("POST /api/v1/locations", guard(create))
 	mux.HandleFunc("GET /api/v1/locations", guard(list))
 	mux.HandleFunc("GET /api/v1/locations/{id}", guard(read))
-	mux.HandleFunc("PUT /api/v1/locations/{id}", adminGuard(h.UpdateLocation))
-	mux.HandleFunc("DELETE /api/v1/locations/{id}", adminGuard(h.DeleteLocation))
+	mux.HandleFunc("PUT /api/v1/locations/{id}", adminGuard(locRowWall(h.UpdateLocation)))
+	mux.HandleFunc("DELETE /api/v1/locations/{id}", adminGuard(locRowWall(h.DeleteLocation)))
 
 	// Branch CRUD.
 	mux.HandleFunc("GET /api/v1/branches", guard(h.ListBranches))
 	mux.HandleFunc("POST /api/v1/branches", adminGuard(h.CreateBranch))
 	mux.HandleFunc("GET /api/v1/branches/{id}", guard(h.GetBranch))
-	mux.HandleFunc("PUT /api/v1/branches/{id}", adminGuard(h.UpdateBranch))
-	mux.HandleFunc("DELETE /api/v1/branches/{id}", adminGuard(h.DeleteBranch))
+	mux.HandleFunc("PUT /api/v1/branches/{id}", adminGuard(branchIdWall(h.UpdateBranch)))
+	mux.HandleFunc("DELETE /api/v1/branches/{id}", adminGuard(branchIdWall(h.DeleteBranch)))
 	tree := http.HandlerFunc(h.GetBranchTree)
 	if h.branchMw != nil {
 		tree = h.branchMw(tree).ServeHTTP
@@ -115,10 +178,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 		mux.HandleFunc("GET /api/v1/me/branches", guard(h.ListMyBranches))
 		mux.HandleFunc("GET /api/v1/users", adminGuard(h.ListKnownUsers))
 		mux.HandleFunc("GET /api/v1/users/{sub}/branches", adminGuard(h.ListUserBranches))
-		mux.HandleFunc("POST /api/v1/users/{sub}/branches", adminGuard(h.GrantUserBranch))
-		mux.HandleFunc("DELETE /api/v1/users/{sub}/branches/{branch_id}", adminGuard(h.RevokeUserBranch))
-		mux.HandleFunc("PUT /api/v1/users/{sub}/home-branch", adminGuard(h.SetHomeBranch))
-		mux.HandleFunc("GET /api/v1/branches/{id}/users", adminGuard(h.ListBranchUsers))
+		mux.HandleFunc("POST /api/v1/users/{sub}/branches", adminGuard(bodyBranchWall(h.GrantUserBranch)))
+		mux.HandleFunc("DELETE /api/v1/users/{sub}/branches/{branch_id}", adminGuard(branchIdPathWall(h.RevokeUserBranch)))
+		mux.HandleFunc("PUT /api/v1/users/{sub}/home-branch", adminGuard(bodyBranchWall(h.SetHomeBranch)))
+		mux.HandleFunc("GET /api/v1/branches/{id}/users", adminGuard(branchIdWall(h.ListBranchUsers)))
 	}
 }
 
@@ -743,6 +806,17 @@ func (h *Handler) ListUserBranches(w http.ResponseWriter, r *http.Request) {
 	if branches == nil {
 		branches = []BranchSummary{}
 	}
+	// A branch bound key sees the pin's branch only (ADR 0007 section 5.5):
+	// the list is narrowed to it, as every list the key reaches is.
+	if pin, ok := middleware.KeyBranchPin(r.Context()); ok {
+		kept := make([]BranchSummary, 0, len(branches))
+		for _, b := range branches {
+			if b.ID == pin {
+				kept = append(kept, b)
+			}
+		}
+		branches = kept
+	}
 	writeJSON(w, http.StatusOK, branches)
 }
 
@@ -794,6 +868,7 @@ func (h *Handler) GrantUserBranch(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to grant", http.StatusInternalServerError, err)
 		return
 	}
+	h.recordGrant(r.Context(), "user.branch.granted", req.BranchID, map[string]interface{}{"sub": sub})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -812,6 +887,7 @@ func (h *Handler) RevokeUserBranch(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to revoke", http.StatusInternalServerError, err)
 		return
 	}
+	h.recordGrant(r.Context(), "user.branch.revoked", branchID, map[string]interface{}{"sub": sub})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -838,6 +914,7 @@ func (h *Handler) SetHomeBranch(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "failed to set home", http.StatusInternalServerError, err)
 		return
 	}
+	h.recordGrant(r.Context(), "user.home_branch.set", req.BranchID, map[string]interface{}{"sub": sub})
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -45,6 +45,10 @@ type Repository interface {
 	// branch wall; a create naming an invisible customer is a 404, the same
 	// answer reading that customer gives.
 	CustomerVisible(ctx context.Context, customerID uuid.UUID) (bool, error)
+	// ContactBelongsTo reports whether the contact belongs to the customer
+	// (round 11 P2-3): a foreign key alone would let one customer's activity
+	// point at another's contact.
+	ContactBelongsTo(ctx context.Context, contactID, customerID uuid.UUID) (bool, error)
 }
 
 // PostgresRepository implements Repository against Postgres.
@@ -226,6 +230,17 @@ func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+func (r *PostgresRepository) ContactBelongsTo(ctx context.Context, contactID, customerID uuid.UUID) (bool, error) {
+	var ok bool
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM customer_contacts WHERE id = $1 AND customer_id = $2)`,
+		contactID, customerID).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("failed to check the contact: %w", err)
+	}
+	return ok, nil
 }
 
 func (r *PostgresRepository) CustomerVisible(ctx context.Context, customerID uuid.UUID) (bool, error) {

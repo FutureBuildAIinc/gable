@@ -4,19 +4,47 @@
 package vision
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
-	service *Service
+	service  *Service
+	auditLog *audit.Logger
 }
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// WithAuditLog sets the audit logger every scan records its row through
+// (ADR 0007 section 5.5, the PD-6 ruling): the scan spends the dealer's AI
+// credit, so each call is audited with whoever spent it, a user or the
+// machine key.
+func (h *Handler) WithAuditLog(l *audit.Logger) *Handler {
+	h.auditLog = l
+	return h
+}
+
+// recordScan audits one scan; a missing logger or a failed row never blocks
+// the answer (the spend already happened when the service answered).
+func (h *Handler) recordScan(ctx context.Context) {
+	if h.auditLog == nil {
+		return
+	}
+	if err := h.auditLog.Log(ctx, audit.Entry{
+		Action:     "ai.vision.scan",
+		EntityType: "ai_spend",
+		EntityID:   uuid.Nil,
+	}); err != nil {
+		slog.Error("failed to audit the vision scan", "error", err)
+	}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
@@ -47,6 +75,7 @@ func (h *Handler) handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := h.service.ScanBlueprint(req)
+	h.recordScan(r.Context())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

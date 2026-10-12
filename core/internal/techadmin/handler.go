@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -77,6 +78,37 @@ func notFound(err error) error {
 	return err
 }
 
+// ownerGrantsRestricted refuses a mint carrying the customers:restricted
+// capability scope unless the caller is an owner (principal ruling item 48):
+// the admin role mints every other scope, but the admission to a shared
+// customer's restricted fields is an owner's deliberate act, audited by the
+// mint's own key.created row. Fail closed: no claims, no grant.
+func ownerGrantsRestricted(r *http.Request, scopes []string) error {
+	grants := false
+	for _, scope := range scopes {
+		if scope == middleware.CustomerRestrictedScope {
+			grants = true
+			break
+		}
+	}
+	if !grants {
+		return nil
+	}
+	claims := middleware.ClaimsFromContext(r.Context())
+	if claims == nil {
+		return httpx.Forbidden("the customers:restricted scope is granted only by an owner")
+	}
+	if claims.Role == "owner" {
+		return nil
+	}
+	for _, role := range claims.Roles {
+		if role == "owner" {
+			return nil
+		}
+	}
+	return httpx.Forbidden("the customers:restricted scope is granted only by an owner")
+}
+
 func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 	if err := noQuery(r); err != nil {
 		httpx.WriteError(w, r, err)
@@ -89,6 +121,10 @@ func (h *Handler) CreateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	name, scopes, branch, err := req.Parse()
 	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	if err := ownerGrantsRestricted(r, scopes); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}

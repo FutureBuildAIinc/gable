@@ -247,7 +247,7 @@ func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID 
 	var generatedAt time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, till_session_id, register_id, branch_id, ROUND(over_short * 100)::bigint, payload, generated_at
-		FROM till_z_reports WHERE till_session_id = $1`, sessionID).
+		FROM till_z_reports WHERE till_session_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`, sessionID, branchctx.IDForQuery(ctx)).
 		Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &z.OverShort, &z.Payload, &generatedAt)
 	z.GeneratedAt = httpx.TimestampOf(generatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {

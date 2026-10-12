@@ -66,8 +66,8 @@ type AuditSink = confirmgate.AuditSink
 //
 //	RequestLogger -> HTTPMetrics -> RequestID -> Recovery
 //	  -> RateLimit -> CORS -> Actor -> [Auth or MachineKeyAuth]
-//	  -> ConfirmGate -> MaxRequestSize -> Idempotency
-//	  -> CacheControl -> Mux
+//	  -> KeyBranchRouteGate -> ConfirmGate -> MaxRequestSize
+//	  -> Idempotency -> CacheControl -> Mux
 //
 // so the confirm gate sits INSIDE auth (the gate sees the key id the
 // machine-key core set, so ADR 0007 5.4 "keyed requests are governed by
@@ -102,6 +102,18 @@ func buildChain(d ChainDeps) http.Handler {
 
 	// Request size limit (10MB default).
 	finalHandler = middleware.MaxRequestSize(10 << 20)(finalHandler)
+
+	// The branch bound key's route allowlist gate (ADR 0007 section 5.5, deny
+	// by default): inside auth, so it reads the pin the machine key core set,
+	// and outside the confirm gate and idempotency, so a refused request
+	// claims nothing. It refuses a bound key every route the allowlist
+	// (pkg/middleware/keybranch_allow.go) does not admit, whatever the module
+	// mounts beneath it; a request with no pin passes untouched.
+	var branchAuditor middleware.BranchRefusalAuditor
+	if ba, ok := d.AuditLog.(middleware.BranchRefusalAuditor); ok {
+		branchAuditor = ba
+	}
+	finalHandler = middleware.KeyBranchRouteGate(d.Mux, branchAuditor)(finalHandler)
 
 	// Auth (JWT verification; a Bearer machine key dispatches to the
 	// machine-key core inside it). In AUTH_MODE=dev the JWT layer is off but

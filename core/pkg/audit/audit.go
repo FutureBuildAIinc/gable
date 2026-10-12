@@ -430,6 +430,56 @@ func (l *Logger) AuditKeyBranchRefusal(ctx context.Context, keyID string, branch
 	}
 }
 
+// AuditSharedCustomerChange records a dealer wide machine key's change to the
+// restricted fields of a customer held by more than one branch (principal
+// ruling 43): the row's entity is the customer, its changes carry the key as
+// the actor and the before and after value of every field. It implements the
+// middleware package's SharedAuditor seam and joins the caller's transaction,
+// so a failed row fails the change.
+func (l *Logger) AuditSharedCustomerChange(ctx context.Context, keyID string, customer uuid.UUID, changes map[string]any) error {
+	out := make(map[string]any, len(changes)+1)
+	for k, v := range changes {
+		out[k] = v
+	}
+	out["actor_key_id"] = keyID
+	return l.Log(ctx, Entry{
+		Action:     "customer.shared_restricted_changed",
+		EntityType: "customer",
+		EntityID:   customer,
+		Changes:    out,
+	})
+}
+
+// AuditSharedCustomerRefusal records a user's or an unbound key's refused
+// change to the restricted fields of a customer held by more than one branch
+// (ADR 0007 section 5.5): the row's entity is the customer, its changes name
+// the actor, the refused fields, the lowest numbered branch holding the
+// customer and the bounded method and path. It implements the middleware
+// package's SharedRefusalAuditor seam. A failure to write is logged and
+// swallowed: the refusal has already been served.
+func (l *Logger) AuditSharedCustomerRefusal(ctx context.Context, actorKind, actorID string, customer, branch uuid.UUID, fields []string, method, path string) {
+	storedPath, truncated := cutRunes(path, maxRefusalPathBytes)
+	changes := map[string]interface{}{
+		"actor_kind": actorKind,
+		"actor_id":   actorID,
+		"branch_id":  branch.String(),
+		"fields":     fields,
+		"method":     method,
+		"path":       storedPath,
+	}
+	if truncated {
+		changes["path_truncated"] = true
+	}
+	if err := l.Log(ctx, Entry{
+		Action:     "customer.shared_restricted_refused",
+		EntityType: "customer",
+		EntityID:   customer,
+		Changes:    changes,
+	}); err != nil {
+		slog.Error("audit: failed to write shared customer refusal", "customer_id", customer, "error", err)
+	}
+}
+
 // Drain is retained for graceful-shutdown callers: writes are synchronous
 // now, so there is never anything in flight to wait for.
 func (l *Logger) Drain() {}

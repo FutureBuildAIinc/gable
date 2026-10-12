@@ -6,6 +6,7 @@ package pos
 import (
 	"context"
 	"errors"
+	"net/http"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -47,6 +48,22 @@ type OfflineSyncResponse struct {
 // offline is never REJECTED for a tax provider failure: it stays pending in
 // the sync log and the next sync retries it (ADR 0005 section 3).
 func (s *Service) SyncOfflineTransactions(ctx context.Context, batch *OfflineSync, actor string) (*OfflineSyncResponse, error) {
+	// The batch register is held to the caller before any item runs and
+	// before the log row is written (PR 83's rounds 7 to 9): an empty or
+	// unknown register is 400, a register of another branch is the 403 the
+	// register rule answers, and a refused batch writes nothing at all.
+	if batch.RegisterID == "" {
+		return nil, httpx.BadRequest("one or more fields failed validation",
+			httpx.FieldError{Field: "register_id", Message: "the batch names no register"})
+	}
+	if _, err := s.repo.GetRegisterBranch(ctx, batch.RegisterID); err != nil {
+		var hx *httpx.Error
+		if errors.As(err, &hx) && hx.Status == http.StatusNotFound {
+			return nil, httpx.BadRequest("one or more fields failed validation",
+				httpx.FieldError{Field: "register_id", Message: "the batch names no register the counter knows"})
+		}
+		return nil, err
+	}
 	resp := &OfflineSyncResponse{BatchID: batch.BatchID, Errors: []SyncItemResult{}, Pending: []SyncItemResult{}}
 	log := LogBatch{BatchID: batch.BatchID, RegisterID: batch.RegisterID}
 	for i := range batch.Items {

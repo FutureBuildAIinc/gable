@@ -30,6 +30,9 @@ type fakeRepo struct {
 	seq      int
 	log      *[]string // shared call log with the recorder, to assert ordering
 	insErr   error
+	// jobOwner maps a job to the customer that owns it; a job absent from the
+	// map is owned by no customer the drafts name.
+	jobOwner map[uuid.UUID]uuid.UUID
 }
 
 func newFakeRepo() *fakeRepo {
@@ -38,6 +41,10 @@ func newFakeRepo() *fakeRepo {
 }
 
 func (f *fakeRepo) note(s string) { *f.log = append(*f.log, s) }
+
+func (f *fakeRepo) JobOwnedBy(_ context.Context, jobID, customerID uuid.UUID) (bool, error) {
+	return f.jobOwner[jobID] == customerID, nil
+}
 
 func (f *fakeRepo) NextNumber(context.Context) (string, error) {
 	f.seq++

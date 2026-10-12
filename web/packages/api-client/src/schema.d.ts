@@ -4593,7 +4593,7 @@ export interface paths {
         put?: never;
         /**
          * Replay a batch of offline sales
-         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits.
+         * @description Each sale in the batch is replayed through the same completion path (stock, invoice, payments, ledger, event) keyed by its client_id: a replayed sale is a duplicate, not an error. The batch register is read before any item runs and before the sync log row is written: a register_id that is empty or names no register the counter knows is a 400 for every caller, and a register of another branch is the branch wall's 403. A sale whose tax provider call fails is never rejected (the one exception to the provider rule, ADR 0005 section 3): it stays pending in the sync log and the sync retries it; errors lists what could not complete and pending what waits.
          */
         post: operations["posSyncOffline"];
         delete?: never;
@@ -4671,7 +4671,7 @@ export interface paths {
         };
         /**
          * The session's live report
-         * @description The X report: the session with its sales count, totals, change and the tendered and expected cash by method, expected being the sum of the session's cash payments (already net of change) plus the opening float less cash refunds.
+         * @description The X report: the session with its sales count, totals, change and the tendered and expected cash by method, expected being the sum of the session's cash payments (already net of change) plus the opening float less cash refunds. An unknown session, or a session the caller's branch context hides, answers 404 like the Z report read.
          */
         get: operations["posTillReport"];
         put?: never;
@@ -4711,7 +4711,7 @@ export interface paths {
         };
         /**
          * The session's frozen Z report
-         * @description The immutable snapshot written once at the close, its payload the frozen closing report. 404 before the session closed.
+         * @description The immutable snapshot written once at the close, its payload the frozen closing report. 404 before the session closed, and 404 for a session the caller's branch context hides, the read held to the caller's branch like the X report.
          */
         get: operations["posTillZReport"];
         put?: never;

@@ -5,7 +5,6 @@ package middleware
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -486,13 +485,23 @@ func AdmittedScopes(module string, class ScopeClass) []string {
 	return nil
 }
 
+// CustomerRestrictedScope is the customers module's capability scope
+// (principal ruling item 48): no route requires it, so holding the module's
+// read and write scopes never grants it and no default grant carries it; it
+// is minted on purpose, by an owner only, and the shared customer rule reads
+// it to admit an unbound key's change of a shared customer's restricted
+// fields.
+const CustomerRestrictedScope = "customers:restricted"
+
 // ValidScopeGrammar returns every scope a registered /api/v1 route can
 // require: the module read and write scopes, with the finer names (admin
 // areas, users:grants) in place of the coarse ones they replace, and the
 // propose and commit verbs of the confirm gated modules (ADR 0007 section
-// 5.1). The mint's validation (section 5.3) checks granted scopes against
-// this set; it is the one source, so the mint and the auth core cannot
-// disagree.
+// 5.1). The capability scope CustomerRestrictedScope rides with them: it is
+// grantable on purpose though no route requires it, so the mint and the
+// shared customer rule share the one source. The mint's validation (section
+// 5.3) checks granted scopes against this set; it is the one source, so the
+// mint and the auth core cannot disagree.
 func ValidScopeGrammar() []string {
 	var out []string
 	for module := range machineKeyModules {
@@ -507,6 +516,7 @@ func ValidScopeGrammar() []string {
 		out = append(out, module+scopeProposeSuffix, module+scopeCommitSuffix)
 	}
 	out = append(out, FinerAdminScopes()...)
+	out = append(out, CustomerRestrictedScope)
 	sort.Strings(out)
 	return out
 }
@@ -861,24 +871,5 @@ type authErrorBody struct {
 // verbatim (4xx only; this layer writes no 500 with detail), and the request
 // id so a client can quote one identifier for any response.
 func respondAuthError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
-	reqID := w.Header().Get("X-Request-ID")
-	if reqID == "" {
-		reqID = r.Header.Get("X-Request-ID")
-	}
-
-	var body authErrorBody
-	body.Error.Code = code
-	body.Error.Message = message
-	body.Meta.RequestID = reqID
-
-	slog.Warn("auth refusal",
-		"code", code,
-		"status", status,
-		"method", r.Method,
-		"path", r.URL.Path,
-		"request_id", reqID,
-	)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
+	writeAuthError(w, r, status, code, message, nil)
 }

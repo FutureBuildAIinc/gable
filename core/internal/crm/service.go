@@ -50,6 +50,27 @@ type Precondition struct {
 	Revision *int64
 }
 
+// SharedGuard applies the shared customer rule to an activity (principal
+// item 54). An activity carries no branch tag, so on a customer another branch
+// also holds every existing one is shared: a branch bound key may add but not
+// change or delete. The customer module owns the rule's words and its audit
+// row; serve adapts it here. A nil guard (unit tests) leaves every write open.
+type SharedGuard interface {
+	// CheckChild returns the refusal (a 403) for a bound key on a shared
+	// customer, nil for every other caller and customer.
+	CheckChild(ctx context.Context, customerID uuid.UUID, field string) error
+	// RecordRefusal writes the refusal's audit row, after the refused write's
+	// transaction has rolled back.
+	RecordRefusal(ctx context.Context)
+}
+
+// sharedRefused marks a refusal raised inside a write's transaction so the
+// outer method can write its audit row once the transaction is gone.
+type sharedRefused struct{ err error }
+
+func (e *sharedRefused) Error() string { return e.err.Error() }
+func (e *sharedRefused) Unwrap() error { return e.err }
+
 // Service is the activity module's behaviour: every mutation is one
 // transaction that writes the row, its audit row and its event, in that
 // order, with the event last (ADR 0003 section 2).
@@ -59,6 +80,7 @@ type Service struct {
 	events EventRecorder
 	tx     TxRunner
 	audit  AuditLogger
+	shared SharedGuard
 }
 
 func NewService(repo Repository) *Service {
@@ -73,6 +95,33 @@ func (s *Service) WithTxRunner(tx TxRunner) *Service { s.tx = tx; return s }
 
 // WithAudit wires the audit rows.
 func (s *Service) WithAudit(a AuditLogger) *Service { s.audit = a; return s }
+
+// WithSharedGuard wires the shared customer rule.
+func (s *Service) WithSharedGuard(g SharedGuard) *Service { s.shared = g; return s }
+
+// checkShared refuses a change or delete of an activity of a shared customer
+// for a branch bound key.
+func (s *Service) checkShared(ctx context.Context, customerID uuid.UUID) error {
+	if s.shared == nil {
+		return nil
+	}
+	if err := s.shared.CheckChild(ctx, customerID, "activity"); err != nil {
+		return &sharedRefused{err: err}
+	}
+	return nil
+}
+
+// sharedOutcome writes the refusal's audit row and unwraps the 403.
+func (s *Service) sharedOutcome(ctx context.Context, err error) error {
+	var ref *sharedRefused
+	if errors.As(err, &ref) {
+		if s.shared != nil {
+			s.shared.RecordRefusal(ctx)
+		}
+		return ref.err
+	}
+	return err
+}
 
 func (s *Service) inTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	if s.tx == nil {
@@ -93,9 +142,33 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
 	return a, nil
 }
 
+// notOwnedContact is the 400 an activity write gets for a contact its
+// customer does not own (round 11 P2-3), the order's words for the same
+// shape.
+func notOwnedContact() error {
+	return httpx.BadRequest("one or more fields failed validation",
+		httpx.FieldError{Field: "contact_id", Message: "is not a contact of this customer"})
+}
+
+// contactOwned refuses a contact the customer does not own; nil names none.
+func (s *Service) contactOwned(ctx context.Context, customerID uuid.UUID, contact *uuid.UUID) error {
+	if contact == nil {
+		return nil
+	}
+	ok, err := s.repo.ContactBelongsTo(ctx, *contact, customerID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return notOwnedContact()
+	}
+	return nil
+}
+
 // Create logs one activity for the customer the path names. The customer is
 // checked behind the caller's branch wall first, so a create on a customer
-// the caller cannot see is the same 404 as reading it.
+// the caller cannot see is the same 404 as reading it, and the contact must
+// be the customer's own.
 func (s *Service) Create(ctx context.Context, customerID uuid.UUID, d *Draft) (*Activity, error) {
 	var out *Activity
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -105,6 +178,9 @@ func (s *Service) Create(ctx context.Context, customerID uuid.UUID, d *Draft) (*
 		}
 		if !visible {
 			return httpx.NotFound("customer not found")
+		}
+		if err := s.contactOwned(ctx, customerID, d.ContactID); err != nil {
+			return err
 		}
 		now := httpx.TimestampOf(s.now().UTC())
 		a := &Activity{
@@ -152,6 +228,12 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
 			return err
 		}
+		if err := s.checkShared(ctx, cur.CustomerID); err != nil {
+			return err
+		}
+		if err := s.contactOwned(ctx, cur.CustomerID, d.ContactID); err != nil {
+			return err
+		}
 		next := *cur
 		next.ContactID, next.ActivityType = d.ContactID, d.ActivityType
 		next.Description, next.LoggedBy = d.Description, d.LoggedBy
@@ -174,7 +256,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		return s.record(ctx, out, EventUpdated)
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -185,7 +267,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, pre Precondition) er
 	if pre.IfMatch == "" && pre.Revision == nil {
 		return httpx.PreconditionRequired("this write needs If-Match")
 	}
-	return s.inTx(ctx, func(ctx context.Context) error {
+	return s.sharedOutcome(ctx, s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.Lock(ctx, id); err != nil {
 			return notFound(err)
 		}
@@ -194,6 +276,9 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, pre Precondition) er
 			return notFound(err)
 		}
 		if err := httpx.CheckRevision(cur.Revision, pre.IfMatch, pre.Revision); err != nil {
+			return err
+		}
+		if err := s.checkShared(ctx, cur.CustomerID); err != nil {
 			return err
 		}
 		if err := s.repo.Delete(ctx, id); err != nil {
@@ -206,7 +291,7 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID, pre Precondition) er
 			}
 		}
 		return s.record(ctx, cur, EventDeleted)
-	})
+	}))
 }
 
 // record writes the module's event as the transaction's last statement.

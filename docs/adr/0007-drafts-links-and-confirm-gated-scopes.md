@@ -684,9 +684,252 @@ null branch is today's behaviour. A bound key:
   `payload.branch_id`, by the branch rule of section 2.3, on draft routes
   and on the module's own create alike (PR 37's guard).
 
+A route that mounts no branch middleware is denied by default, not left to a
+per route wall: one allowlist, `pkg/middleware/keybranch_allow.go`,
+classifies every route a machine key can reach (method plus pattern, exactly
+as the route census `api/ROUTES.txt` names them) as exactly one of four
+classes. WALLED: the route runs behind the branch middleware, which honours
+the pin. CONFINED: the route mounts the key branch wall or the customer
+branch wall, which holds the request to the pin by the branch, customer, job
+or row it names. STATED LIMIT: the route is reachable unconfined by design,
+each entry with its one line reason. REFUSED: a bound key is answered 403
+`forbidden` with the `key.branch_refused` row. The one runtime check is
+`KeyBranchRouteGate`, mounted once in serve's chain inside auth and outside
+the confirm gate: it resolves the request's registered pattern against the
+serve mux and refuses a bound key every route the table does not admit,
+including a route the router resolves to no pattern, so a route a sweep
+missed, a route added without a class decision and a method no route
+registers all fail closed instead of open. A census test fails when a
+machine key reachable census route is unclassified or a table entry is
+stale, so a new route cannot appear without a class decision. Users and
+unbound keys keep exactly their reach on every route.
+
+A WALLED entry is a tested claim, not a label: its note names the column or
+join its module filters on (`quotes.branch_id`, a customer through
+`customer_branches`, a delivery through its order's branch, the dashboard
+and inventory through `locations.branch_id`), and a sweep drives the WALLED
+routes with the other branch's twin row as a bound key's target. Every write
+leg sends a body that passes the module's validation, shadowed by a control
+against the pin's own twin that must pass the same validation and reach the
+row (a leg whose control cannot finish in the harness says why in the test);
+the foreign leg must answer 403 or 404 and never a scope refusal; and a
+change is measured by a digest of every row that names the twin rows by id,
+never by table counts. A coverage test holds the allowlist against the legs
+and fails by name for any WALLED route no bound key leg drives; the legs it
+counts are the drivers' explicit twin marks (the foreign twin, the reach and
+list legs), never an A control, so a route driven only by its control
+fails by name. The routes
+that take their branch from the caller, and so name no foreign row to
+refuse, are driven once and must leave branch B's rows as they were and land
+the row they make at the pin's branch.
+
+A document write that names a customer in its body is held to the pin the
+same way a path customer is: the cash and card payment, the credit memo
+(create and update), the order and the quote (create and update, a document
+moved onto another customer included), the offline POS sync (the customer
+each replayed sale names, whose ACCOUNT tender invoices it, and the batch
+register itself, a batch naming another branch's register refused 403, or a
+batch register that is empty or names no register at all refused 400 for
+every caller, a register that does not exist being a bad request for
+anyone and not only a bound key, before any item runs and before the
+`pos_sync_log` row names it) and the draft
+promotions, which read the customer from the draft's stored payload, are
+refused a bound key whose pin does not hold that customer (403 naming
+`customer_id`, the `key.branch_refused` row, nothing written). Without it
+the payment and its GL entry, the credit, the order with the other
+customer's tax exemption, or the replayed register sale and its invoice
+landed on a customer the key could not see. The quote conversion rechecks
+the quote's stored customer under the same wall, as the draft promotions
+recheck their payload: a quote a caller moved onto another branch's
+customer must not become an order at the pin's branch. The intent create
+takes no customer, so it stands outside the wall and its own 400 unknown
+field answer serves every caller alike. An order or a quote names a job as
+well, so the body's `job_id` is held through the job's customer
+(`projects.customer_id`, the resolution the pricing rule write and the
+calculate read carry) on the creates and the updates alike. An order, for
+every caller, refuses a `ship_to_id`, an `ordered_by_contact_id` or a
+`job_id` its customer does not own (400 naming the field, as the credit
+memo create does), so a document can never carry another customer's
+address, contact, or job and its pricing rules; the quote's own build
+refuses the foreign job the same way, and a CRM activity refuses a
+`contact_id` its customer does not own for every caller with the same
+words. The order exposure gate and override read the order under the
+branch wall before they look up its source quote.
+
+The confinement contract the CONFINED routes hold: a body is read whole (a
+body that is not exactly one complete JSON value is refused, so the wall and
+the handler can never disagree about what a body names); a location row that
+names no branch is outside every pin and refused; a request that names
+customers is confined through their `customer_branches` (the tax exemption
+routes and the preview, the customer priced rules plain and category single
+and bulk, and the reads that name a customer in a path or query: the
+exemption read by its path customer, the category rule list by its
+`customer_id`, the rule audit by its row's customer, and resolve and
+calculate by their `customer_id`). A pricing rule names a customer through
+its `customer_id` or its `job_id` (a projects row belongs to exactly one
+customer, and a rule on the job prices that customer), and both are checked,
+on the write and on the calculation alike (the calculation resolves its
+`job_id` the same way). A tax preview that names a `ship_to_id` is confined
+through that ship to's customer. The account summary, the customer subledger
+and the AR statement name a customer in the path and are confined the same
+way; the AR reconciliation reads every branch's books and is REFUSED. A
+pricing rule that names neither a customer nor a job, and a category rule or
+bulk element whose target is not an account rule or that carries a tier,
+price every branch's customers and are refused; the handler keeps the same
+invariant on its own side, and migration 107 puts it on the table (an account
+rule carries no tier, a tier rule no customer, existing rows checked first
+and reported by a NOTICE, never rewritten, the constraint validated on add
+when none breaks it and NOT VALID when one does). A category rule that also
+names a customer while targeting a tier is refused however many branches of
+that customer hold the pin: it prices every branch's customers of the tier.
+
+The stricter line on shared customers: a bound key may READ a customer its
+branch shares with another (and the audit of that customer's category rules),
+but may not add or change a customer scoped pricing rule or tax exemption
+for it, because the write prices the other branch's sales to that customer
+too. Those writes are held to the customers the pin holds alone; the refusal
+names the other branch (the lowest numbered branch that is not the pin). A
+category rule whose target is not an account rule is dealer wide whether or
+not it also names a customer, so the legacy tier row migration 107 keeps NOT
+VALID cannot be deleted, singly or in bulk, by a bound key, and an update of
+such a row is refused for every caller with a 409 naming the single target
+invariant, where the database's revalidation on the write would otherwise
+surface as an internal error.
+
+The customer record follows the same rule, deny by default. On a customer
+held by the pin's branch and another, a bound key changes only the branch
+local fields; every other field of the record, and the salesperson and the
+escalation policy, is restricted, and a field added to the header write is
+restricted until it is listed as branch local. A restricted write is refused
+403 naming the other branch, with the `key.branch_refused`
+row and nothing changed. A customer the pin holds alone and an unshared
+customer are unchanged for every caller. Who may change a shared customer's
+restricted fields (the principal's ruling on the open question below): a
+user only with the finance or owner role, a machine key only when unbound
+and carrying the dedicated `customers:restricted` scope. The finance role
+reaches exactly the three routes that change those fields (the header
+write, the salesperson and the escalation policy) and the two reads those
+writes need, the record and its escalation policy (a caller that must send
+the revision as `If-Match` has to be able to read it; reads only, nothing
+else opens), and no other customer route: customer and contact create, the
+other reads and the other writes keep the
+roles they had before this section. A sales or admin user, and every
+unbound key without the scope, are refused with one shared clause naming
+the lowest numbered branch holding the customer behind a lead in that names
+the caller, words true for whoever reads them (the principal's item 57
+ruling): a bound key reads "this key may act only on its own branch: the
+customer is also held by branch X", an unbound key without the scope reads
+"this key may not change a shared customer's restricted fields: the
+customer is also held by branch X", and a user without the finance or owner
+role reads "this role may not change a shared customer's restricted fields:
+the customer is also held by branch X". The exclusive walls (the customer
+scoped pricing rules, tax exemptions and category rules of the stricter
+line above) refuse a bound key in the same quoted lead in as the customer
+service's bound key refusal, so every shared customer refusal a bound key
+meets carries words this section quotes. The refusal writes a
+`customer.shared_restricted_refused`
+row for the customer, naming the actor, the refused fields, that branch and
+the method and path (the bound key's refusal keeps its `key.branch_refused`
+row); a caller with no claims at all is refused fail closed; a bound key is
+refused even with the scope. The scope is in the grant grammar (ADR 0002 section 2) though no
+route requires it, so no module scope and no default grant carries it; only
+an owner may mint it, and the mint's `key.created` audit row names it. An
+allowed key's change is audited as `customer.shared_restricted_changed`
+with the key as the actor and the before and after value of each field; a
+user's change writes no row. Ship-tos and contacts carry no branch column,
+so for a shared customer every existing one is shared: a bound key reads
+them and may add new ones but may not change or delete any (the same
+refusal; CRM activities follow the same rule, because an activity carries no
+branch tag, so on a shared customer a bound key adds one and never changes
+or deletes one), and an add that names `is_default: true` is refused like a
+change, because naming a default clears the existing default, a shared
+ship to every branch's delivery orders default to; for a customer the pin
+holds alone all of it is allowed. The escalation audit's before and after
+values carry the agreement's signature date beside its reference. The
+fields:
+
+| Route | Field | Class | Reason |
+|---|---|---|---|
+| `PUT /customers/{id}` | `account_number` | RESTRICTED | the identifier every branch's documents and statements carry |
+| | `name` | RESTRICTED | printed on every branch's documents |
+| | `email` | BRANCH LOCAL | a contact channel of whoever deals with the customer |
+| | `phone` | BRANCH LOCAL | a contact channel of whoever deals with the customer |
+| | `address` | RESTRICTED | the billing address on every branch's invoices and statements |
+| | `tier` | RESTRICTED | prices every branch's sales |
+| | `is_active` | RESTRICTED | deactivates the customer for every branch |
+| | `price_level_id` | RESTRICTED | prices every branch's sales |
+| | `salesperson_id` | RESTRICTED | one salesperson per customer across branches; not plainly branch local |
+| | `credit_limit_cents` | RESTRICTED | the credit every branch's orders draw on |
+| | `currency` | RESTRICTED | the currency of every branch's documents |
+| | `payment_terms_id` | RESTRICTED | due dates and collections at every branch |
+| | `po_required` | RESTRICTED | a purchase order number required on every branch's orders |
+| | `primary_branch_id` | not changeable | 400 for every caller: it cannot be changed by an edit |
+| `PATCH /customers/{id}/salesperson` | `salesperson_id` | RESTRICTED | as above |
+| `PUT /customers/{id}/escalation-policy` | `policy`, `threshold_percent`, `agreement_signed_at`, `agreement_ref` | RESTRICTED | governs the repricing of every branch's quotes |
+| `POST /customers/{id}/ship-tos`, `/contacts` | a new record | allowed | adds; changes nothing shared |
+| `POST /customers/{id}/ship-tos` with `is_default: true` | the existing default | shared record | the add clears the shared default, so it is refused like a change (an add naming no default stays allowed) |
+| `PUT /ship-tos/{id}`, `PUT /contacts/{id}`, `DELETE /contacts/{id}` | an existing record | shared records | refused on a shared customer, allowed on a customer the pin holds alone |
+
+A branch integration that must price shared customers holds an unbound key an
+operator keeps. A shared user's grant, revoke and home branch for the pin branch is
+accepted as confined and audited: the writes record their audit rows
+(`user.branch.granted`, `user.branch.revoked`, `user.home_branch.set`) with
+the machine key named as the actor.
+
+The stated limit is a read, never a write: a bound key exists for a branch
+scoped integration and no dealer wide write is branch scoped, so every
+stated limit write is REFUSED and the reads stay stated limits, each with its
+one line reason in the table. The reads: the branch directory (`GET
+/api/v1/branches`, `GET /api/v1/branches/{id}`, reference data by the PR 39
+decision), the dealer wide reference data that carries no branch fact (the
+product catalogue and its PIM content, the unit catalogue, vendors, EDI
+partners and their catalogs, millwork and configurator options, governance
+rfcs, the product pricing categories, the rebate programs and their claims,
+the price level vocabulary, the market index history, the price escalation
+calculator, the match tolerances, the charge codes, the payment terms), the
+delivery fleet's vehicles, the AI settings and routing reads, the module and
+app switches' reads, and the two calculators that spend the dealer's AI
+credit (the parsing upload and the vision scan; each call is audited with
+the key that spent it, `ai.parsing.upload` and `ai.vision.scan`). The
+writes refused with them: the AI and routing settings (a bound key must not
+rewrite the provider key or the base URL every branch's AI traffic rides
+on), the module kill switches and app enablement, the match tolerances (a
+financial control), vendors, EDI partners and their catalog import, units,
+pricing categories, rebate programs, millwork options, governance rfcs and
+their transitions, the market index metadata, the product catalogue writes
+and the PIM writes (products, PIM content, margins, dimensions, lead time,
+kit components, unit sets; the PIM generate routes spend the dealer's AI
+credit), the charge codes and payment terms, and the reorder target refresh.
+The drivers are refused reads included: driver rows carry personal data and
+no branch column. REFUSED outright, whatever scope a key holds: the GL, AP
+and bank reconciliation surfaces (reads and writes alike), the AR
+reconciliation, every report and builder route, the events feed, the sales
+team roster, the staff roster and its module grants, the known users list,
+the exposure lists and the scan, the market index refresh and its preview,
+the branch directory create, and the unfiltered pricing lists above.
+
 One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A
 dealer that needs a key for two branches mints two.
+
+The demo seed's upsert on `REG-01` (the seed's own register, the one
+migrations 027 and 066 left in the database) fires only while the row is
+exactly as those migrations left it: the placeholder
+`00000000-0000-0000-0000-000000000000` and `branch_id` equal to
+`default_branch_id` as the seed read it before changing anything (the
+seed reads that setting once, at start of `Run`, before any section touches
+it). The `DO UPDATE` SET lists `location_id` and `branch_id` only, the
+conflict key is the register id, and `name` and `is_active` are never
+written, so the seed keeps every name, moves only that one register, and a
+rerun against the same database is a no-op. Two hand-built states still
+re-fire the upsert under `DEMO_SEED` and need naming; no route, import or
+other seed writes `default_branch_id`. An operator who hand-sets
+`system_settings.default_branch_id` to their own branch and leaves REG-01
+on the placeholder at that branch produces a row byte-for-byte the
+migrations' shape, so the seed moves it (r21 P3-1). After a run that found
+the setting changed or absent, the seed's section 1 rewrites it to
+Kelowna's id, so a later run moves REG-01's placeholder location to a row
+that exists, never an operator's re-pointed branch (r20 P3-1).
 
 ADR 0002's second known limit (finer `admin` and `users` scopes) is not
 taken up here. It is not a confirm gate question: no admin act is a draft.

@@ -114,22 +114,54 @@ is read (`pkg/middleware/machinekey.go`, the `principal.BranchID
 != nil` branch in `handle`), and the routes that mount no branch
 middleware (the user-only prefixes `/api/v1/admin/keys` and
 `/api/v1/me`) are JWT user routes, so a machine key cannot
-reach them, bound or not. The branch directory and user
-grant routes (`/api/v1/branches` and its children except
-`/tree`, `/api/v1/users` and its children) carry no branch
-wall: the pin does not narrow them, writes included. A
-bound key holding `users:grants` is limited by that scope
-only, and can grant a user any branch. The branch CRUD
-verbs (`GET`, `POST`, `PUT`, `DELETE` on `/api/v1/branches`
-and its by id children except `/tree`) are limited by the key's scope only (the role guard passes a scope checked machine key), so a branch bound key's pin does not
-confine those writes either; a bound key holding
-`branches:write` can write any branch. The
-`PUT /api/v1/locations/{id}` and `DELETE /api/v1/locations/{id}`
-routes are limited by the key's scope only (the role guard passes a scope checked machine key), so a bound key
-holding `locations:write` can write any location. An
-operator should not mint a branch bound key with
-`users:grants`, `branches:write` or `locations:write` until
-this gap is fixed (the pin narrows only the routes that mount the branch middleware; on the rest a key reaches whatever its scopes admit). An unbound key behaves as before.
+reach them, bound or not. A bound key is denied by default on the routes that mount no
+branch middleware: one allowlist
+(`core/pkg/middleware/keybranch_allow.go`) classifies every
+route a machine key can reach, method plus pattern as the
+route census names them, as WALLED (behind the branch
+middleware), CONFINED (held by the key branch wall of
+`core/pkg/middleware/keybranch.go` or the customer branch
+wall), a STATED LIMIT (reachable unconfined by design, with
+its reason) or REFUSED, and the one runtime check,
+`KeyBranchRouteGate` in serve's chain inside auth, refuses a
+bound key every route the table does not admit (a route the
+router resolves to no pattern included), with the 403
+`forbidden` of the wire envelope and the `key.branch_refused`
+row the header rule writes. A census test fails when a
+machine key reachable census route is unclassified, so a new
+route cannot appear without a class decision.
+
+On the CONFINED routes a bound key naming another branch in a
+body `branch_id` or a path id, or a row of another branch
+(`PUT` and `DELETE /api/v1/locations/{id}`), is that same 403
+naming the field; its own branch passes, and a body is read
+whole, so a body that is not exactly one complete JSON value
+(trailing data after the first value, or unparsable) is
+refused rather than passed for the handler to read only in
+part. A bound key holding `users:grants` grants, revokes and
+moves home only its own branch. A request that names
+customers is confined through their `customer_branches`: the
+tax exemption routes and the preview, the customer priced
+rules plain and category single and bulk, and the reads that
+name a customer in a path or query (the exemption read, the
+category rule list by its `customer_id`, the rule audit,
+resolve and calculate). A pricing rule names a customer
+through its `customer_id` or its `job_id` (the job's projects
+row belongs to one customer), and a rule or category rule
+that would be dealer wide (naming neither, or targeting a
+tier) is refused. REFUSED outright, whatever the scope: the
+branch directory create, the exposure scan and the two
+exposure lists, the market index refresh and its preview,
+the events feed (`GET /api/v1/events`), every reporting
+route, the GL, AP and bank reconciliation surfaces, the
+sales team reads, the staff roster, the known users list
+(`GET /api/v1/users`) and the unfiltered pricing lists
+(`GET /pricing/rules`, `GET /pricing/matrix`, the category
+rule list with no `customer_id`). The branch directory reads
+(`GET /api/v1/branches`, `GET /api/v1/branches/{id}`) stay
+reference data (the PR 39 decision), the stated limits with
+their reasons are listed in ADR 0007 section 5.5. An unbound
+key behaves as before.
 
 ## Routes
 
@@ -755,6 +787,13 @@ then up test (`TestMigration103_DownThenUpLosesNoRow` in
 `locations` and `api_keys` rows; it does not check the
 `drafts` or `draft_events` row counts, because the down
 drops those tables and the row loss is by design.
+
+The draft promotions recheck the customer: a draft's payload may name any
+customer when it is saved, but `POST /drafts/quotes/{id}/promote` and
+`POST /drafts/orders/{id}/promote` read the customer from the stored payload
+and refuse a branch bound key whose pin does not hold it (`403 forbidden`
+naming `customer_id`), so a draft written by a user or an earlier call cannot
+become a document on another branch's customer.
 
 ## ADRs that govern this module
 

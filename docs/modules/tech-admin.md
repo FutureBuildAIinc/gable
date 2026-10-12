@@ -111,9 +111,14 @@ there, at mint.
 (optional, array of text; stored verbatim, grammar validation at the
 mint is ADR 0007 section 5.3) and `branch_id` (nullable UUID; the
 branch bound key's pin per ADR 0007 section 5.5, set at mint and never
-edited). `AdminCreateKeyResponse` carries `api_key` (the raw key,
-`sk_live_` plus 43 URL safe base64 characters) and `key` (the saved
-`ApiKey` row, which also carries `branch_id`).
+edited). A mint naming no scopes grants none. One scope has its own
+gate: `customers:restricted` (the shared customer restricted fields
+admission, ADR 0007 section 5.5) is granted only by an owner, the admin
+role getting a `403 forbidden` that names the scope, and the mint's
+`key.created` audit row names every granted scope, that one included.
+`AdminCreateKeyResponse` carries `api_key` (the raw key, `sk_live_`
+plus 43 URL safe base64 characters) and `key` (the saved `ApiKey` row,
+which also carries `branch_id`).
 
 `AISettings` (`components.schemas.AISettings`) is the AI settings
 document: a singleton with a revision anchor in `admin_revisions`.
