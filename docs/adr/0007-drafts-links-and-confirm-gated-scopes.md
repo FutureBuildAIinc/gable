@@ -968,8 +968,13 @@ every branch:
 - an act on a register, till, sale, return or claim of a branch the user
   does not hold is 403 with nothing written;
 - where no grant decides it, the caller is refused: a user with no grants
-  at all reads nothing and writes nothing, and a record of no branch
-  reads as missing.
+  at all reads nothing and writes nothing, a record of no branch reads as
+  missing, and an act on one is the same 403 the record rule names;
+- a create whose body names no `branch_id` takes its branch from the
+  user's grants, never the deployment default: exactly one granted branch
+  writes there, several granted branches refuse with a 400 naming
+  `branch_id`, and none refuses fail closed (the payment family held its
+  resolved branch already; the quote, order and draft creates follow it).
 
 The sentence that keeps the other callers their reach is section 2.3's:
 "With no context branch, an administrator or owner may name any branch, as
@@ -977,18 +982,34 @@ the `X-Branch-Id` header already lets them". A caller that sends the
 header keeps the context branch rule unchanged; so does every caller while
 the single branch kill switch is off, an unbound key, and `AUTH_MODE=dev`.
 
+The reporting surface follows the same rule (the principal's ruling on it):
+a finance user with no context branch sees reports for the granted branches
+only, while an administrator and owner keep the all branch view; a dealer
+that wants a finance person on every branch grants every branch, so nothing
+is lost by the rule. Every reporting or dashboard cache is keyed by the
+caller's reach (the branch and the grants scope together), never shared
+between reaches: a primed administrator entry never serves a finance
+caller. The reconciliation's currency ledger half reads the books, which
+carry no branch fact, and stays dealer wide, a stated limit.
+
 The routes this closed, each stated in `docs/refactor/CONTRACT-CHANGES.md`
 under `SEC-NOHEADER-1`: the whole pos surface (the till open, close,
 current, report and Z report reads and lists, the sale create, read, list,
 line, complete and void acts, the return create, read and list, and the
 offline sync batch), the order read by id or number, list, count, update,
 transitions, exposure gate and override, fulfilment request queue and
-draft order promotion (the order module's own 403 words naming `id`), and
-the purchase order list and the draft by vendor lookup. The quote and
-purchase order by id routes, the invoice, payment, delivery and inventory
-reads, and the document print and email routes already held the record's
-branch to the grants (their wall, record check or guard carries the same
-arm), which the item's tests prove rather than change. One shared
+draft order promotion (the order module's own 403 words naming `id`), the
+purchase order list and the draft by vendor lookup, the quote, order and
+draft creates' branch, the dashboard's five routes, the quote exposure
+routes (which mount the branch middleware and hold the quote's branch), the
+customer family (the customer, contact, ship to and activity reads and
+writes through the customer's branches), and the reporting surface (the
+daily till, the sales summary, the AR aging, the customer statement, the
+reconciliation's customer rows, the report builder and the BI export). The
+quote and purchase order by id routes, the invoice, payment, delivery and
+inventory reads, and the document print and email routes already held the
+record's branch to the grants (their wall, record check or guard carries
+the same arm), which the item's tests prove rather than change. One shared
 predicate (`middleware.Wall`) and one shared hold
 (`BranchGuard.CheckGrantsBranch`) carry the rule, so no route family holds
 a private copy.

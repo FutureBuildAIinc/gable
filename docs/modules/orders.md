@@ -254,7 +254,11 @@ override, and the draft order promotion answer the module's `403
 forbidden` naming `id` ("order is outside the branches this caller may
 target") for an order of a branch the user does not hold, nothing
 written, and the order list and count and the fulfilment request queue
-carry only the granted branches' rows. The allocate, fulfilment and retry
+carry only the granted branches' rows. A create whose body names no
+`branch_id` takes its branch from the user's grants: exactly one granted
+branch writes there, several granted branches refuse with a `400
+validation_failed` naming `branch_id`, and a user with no grants is
+refused, never the deployment default. The allocate, fulfilment and retry
 writes already answered the same `403`; a caller that sends the header,
 and an administrator or owner without one, keep the answers they had.
 
