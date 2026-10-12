@@ -15574,15 +15574,33 @@ components:
         documents_cents: {type: integer, format: int64}
     ArLedgerRow:
       type: object
-      required: [currency, receivable_ledger_cents, balance_sum_cents, deposits_ledger_cents, unapplied_sum_cents, receivable_in_sync, deposits_in_sync]
+      description: >-
+        One currency's ledger comparison. For a scoped caller (a branch a header names, or a user whose grants scope a no header read) the two GL account balances and their in sync flags are absent: they are pure books figures no branch fact can divide, and the two sums cover the caller's reach only.
+      required: [currency, balance_sum_cents, unapplied_sum_cents]
       properties:
         currency: {type: string}
-        receivable_ledger_cents: {type: integer, format: int64}
-        balance_sum_cents: {type: integer, format: int64}
-        deposits_ledger_cents: {type: integer, format: int64}
-        unapplied_sum_cents: {type: integer, format: int64}
-        receivable_in_sync: {type: boolean}
-        deposits_in_sync: {type: boolean}
+        receivable_ledger_cents:
+          type: integer
+          format: int64
+          description: Account 1020's posted balance; absent for a scoped caller.
+        balance_sum_cents:
+          type: integer
+          format: int64
+          description: The sum of the customers' balance_due over the caller's reach.
+        deposits_ledger_cents:
+          type: integer
+          format: int64
+          description: Account 2200's posted balance; absent for a scoped caller.
+        unapplied_sum_cents:
+          type: integer
+          format: int64
+          description: The sum of posted unapplied cash over the caller's reach.
+        receivable_in_sync:
+          type: boolean
+          description: Whether 1020 equals the balance sum; absent for a scoped caller.
+        deposits_in_sync:
+          type: boolean
+          description: Whether 2200 equals the unapplied sum; absent for a scoped caller.
     ArReconciliation:
       type: object
       required: [customers, currencies]

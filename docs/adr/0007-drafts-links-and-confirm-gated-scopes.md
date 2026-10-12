@@ -998,8 +998,14 @@ view, any other creator's run carries the granted branches' rows only, and
 a schedule with no creator recorded, or whose creator is not recorded as an
 administrator and holds no branch grant at all, does not run (it is logged
 and audited) until a caller with report access recreates it. The
-reconciliation's currency ledger half reads the books, which carry no
-branch fact, and stays dealer wide, a stated limit.
+reconciliation's currency half follows the same reach (the principal's
+ruling under item 64): its two branch owned sums, the customers' balances
+through their customer_branches rows and the unapplied cash through the
+payments' own branches, cover the caller's reach for a scoped caller and
+stay dealer wide for an administrator or owner, while its two GL account
+balances, pure books figures no branch fact can divide, are refused to a
+scoped caller (the columns and their in sync flags are absent from the
+row) and served to the wide callers.
 
 The routes this closed, each stated in `docs/refactor/CONTRACT-CHANGES.md`
 under `SEC-NOHEADER-1`: the whole pos surface (the till open, close,

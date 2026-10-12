@@ -701,30 +701,72 @@ func TestNoHeader_Reports(t *testing.T) {
 	}
 
 	// The reconciliation's customer rows follow the reach; its currency
-	// ledger half reads the books and keeps answering.
-	status, buf = f.userAs(t, "finance", "GET", "/api/v1/ar/reconciliation", "", nil)
-	if status != http.StatusOK {
-		t.Fatalf("no header reconciliation: %d %s", status, buf)
+	// half's branch owned totals follow it too, and its pure GL columns are
+	// refused to a scoped caller (r4 P2-2, ruled under item 64).
+	reconRead := func(role string) (customers []string, rows []map[string]json.RawMessage) {
+		status, buf := f.userAs(t, role, "GET", "/api/v1/ar/reconciliation", "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("%s reconciliation: %d %s", role, status, buf)
+		}
+		var recon struct {
+			Customers []struct {
+				CustomerID string `json:"customer_id"`
+			} `json:"customers"`
+			Currencies []json.RawMessage `json:"currencies"`
+		}
+		if err := json.Unmarshal(buf, &recon); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range recon.Customers {
+			customers = append(customers, c.CustomerID)
+		}
+		for _, raw := range recon.Currencies {
+			var row map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &row); err != nil {
+				t.Fatal(err)
+			}
+			if string(row["currency"]) == `"USD"` {
+				rows = append(rows, row)
+			}
+		}
+		return customers, rows
 	}
-	var recon struct {
-		Customers []struct {
-			CustomerID string `json:"customer_id"`
-		} `json:"customers"`
-		Currencies []json.RawMessage `json:"currencies"`
-	}
-	if err := json.Unmarshal(buf, &recon); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range recon.Customers {
-		if c.CustomerID == f.custB.String() {
-			t.Errorf("no header reconciliation names B's customer: %s", buf)
+	financeCustomers, financeRows := reconRead("finance")
+	for _, c := range financeCustomers {
+		if c == f.custB.String() {
+			t.Errorf("no header reconciliation names B's customer")
 		}
 	}
-	if len(recon.Customers) != 1 || recon.Customers[0].CustomerID != f.custID.String() {
-		t.Errorf("no header reconciliation carries %d customer rows, want A's one", len(recon.Customers))
+	if len(financeCustomers) != 1 || financeCustomers[0] != f.custID.String() {
+		t.Errorf("no header reconciliation carries %d customer rows, want A's one", len(financeCustomers))
 	}
-	if len(recon.Currencies) == 0 {
-		t.Errorf("no header reconciliation lost the currency ledger half: %s", buf)
+	if len(financeRows) != 1 {
+		t.Fatalf("finance reconciliation carries %d USD rows, want one", len(financeRows))
+	}
+	for _, key := range []string{"receivable_ledger_cents", "deposits_ledger_cents", "receivable_in_sync", "deposits_in_sync"} {
+		if _, ok := financeRows[0][key]; ok {
+			t.Errorf("finance reconciliation carries the GL column %s, want it refused to a scoped caller", key)
+		}
+	}
+	financeBalance := string(financeRows[0]["balance_sum_cents"])
+	// r4's 777 shape: raising B's customer's balance must not move the
+	// finance caller's dealer figures.
+	if _, err := f.db.Pool.Exec(ctx, `UPDATE customers SET balance_due = balance_due + 777 WHERE id = $1`, f.custB); err != nil {
+		t.Fatal(err)
+	}
+	_, after := reconRead("finance")
+	if len(after) != 1 || string(after[0]["balance_sum_cents"]) != financeBalance {
+		t.Errorf("raising B's customer by 777 moved the finance balance_sum from %s to %s, want it unmoved",
+			financeBalance, after)
+	}
+	_, adminRows := reconRead("admin")
+	if len(adminRows) != 1 {
+		t.Fatalf("admin reconciliation carries %d USD rows, want one", len(adminRows))
+	}
+	for _, key := range []string{"receivable_ledger_cents", "deposits_ledger_cents", "receivable_in_sync", "deposits_in_sync"} {
+		if _, ok := adminRows[0][key]; !ok {
+			t.Errorf("admin reconciliation lost the GL column %s, want the wide caller to keep it", key)
+		}
 	}
 
 	// The BI export keeps the administrator's all branch view with no

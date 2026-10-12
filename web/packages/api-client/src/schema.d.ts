@@ -6919,18 +6919,33 @@ export interface components {
             /** Format: int64 */
             documents_cents: number;
         };
+        /** @description One currency's ledger comparison. For a scoped caller (a branch a header names, or a user whose grants scope a no header read) the two GL account balances and their in sync flags are absent: they are pure books figures no branch fact can divide, and the two sums cover the caller's reach only. */
         ArLedgerRow: {
             currency: string;
-            /** Format: int64 */
-            receivable_ledger_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account 1020's posted balance; absent for a scoped caller.
+             */
+            receivable_ledger_cents?: number;
+            /**
+             * Format: int64
+             * @description The sum of the customers' balance_due over the caller's reach.
+             */
             balance_sum_cents: number;
-            /** Format: int64 */
-            deposits_ledger_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account 2200's posted balance; absent for a scoped caller.
+             */
+            deposits_ledger_cents?: number;
+            /**
+             * Format: int64
+             * @description The sum of posted unapplied cash over the caller's reach.
+             */
             unapplied_sum_cents: number;
-            receivable_in_sync: boolean;
-            deposits_in_sync: boolean;
+            /** @description Whether 1020 equals the balance sum; absent for a scoped caller. */
+            receivable_in_sync?: boolean;
+            /** @description Whether 2200 equals the unapplied sum; absent for a scoped caller. */
+            deposits_in_sync?: boolean;
         };
         ArReconciliation: {
             customers: components["schemas"]["ArDriftRow"][];

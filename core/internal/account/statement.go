@@ -198,15 +198,19 @@ type DriftRow struct {
 
 // LedgerRow is the ledger side of one currency: the balance of 1020 against the
 // sum of the customers' balances, and the balance of 2200 against the sum of
-// unapplied cash.
+// unapplied cash. For a scoped caller (a branch a header names, or a user
+// whose grants scope a no header read) the two sums cover that reach only and
+// the two GL balances, which no branch fact can divide, are refused: the
+// columns and their in sync flags are absent rather than zero, because a zero
+// would claim the account itself balances at nothing.
 type LedgerRow struct {
-	Currency         string      `json:"currency"`
-	ReceivableLedger httpx.Cents `json:"receivable_ledger_cents"`
-	BalanceSum       httpx.Cents `json:"balance_sum_cents"`
-	DepositsLedger   httpx.Cents `json:"deposits_ledger_cents"`
-	UnappliedSum     httpx.Cents `json:"unapplied_sum_cents"`
-	ReceivableInSync bool        `json:"receivable_in_sync"`
-	DepositsInSync   bool        `json:"deposits_in_sync"`
+	Currency         string       `json:"currency"`
+	ReceivableLedger *httpx.Cents `json:"receivable_ledger_cents,omitempty"`
+	BalanceSum       httpx.Cents  `json:"balance_sum_cents"`
+	DepositsLedger   *httpx.Cents `json:"deposits_ledger_cents,omitempty"`
+	UnappliedSum     httpx.Cents  `json:"unapplied_sum_cents"`
+	ReceivableInSync *bool        `json:"receivable_in_sync,omitempty"`
+	DepositsInSync   *bool        `json:"deposits_in_sync,omitempty"`
 }
 
 // Reconciliation is GET /api/v1/ar/reconciliation.
@@ -219,12 +223,24 @@ type Reconciliation struct {
 // and document open amounts disagree, and for each currency whether the sum of
 // balances equals account 1020 and the unapplied cash equals account 2200.
 // Nothing repairs a difference: rows written before cycle 2 show here.
+//
+// The caller's reach rules the halves the principal's ruling names (item 64,
+// r4 P2-2): the customer rows and the two branch owned sums (the customers'
+// balances through customer_branches, the unapplied cash through the payment's
+// own branch) cover the reach only for a scoped caller, while an administrator
+// or owner keeps the dealer wide totals. The two GL account balances are pure
+// books figures no branch fact can divide, so they are refused to a scoped
+// caller (absent with their in sync flags) and served to the wide callers.
 func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 	out := &Reconciliation{Customers: []DriftRow{}, Currencies: []LedgerRow{}}
+	branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+	scoped := branch != nil || grants != nil
 	// The customer rows follow the caller's reach (the principal's ruling on
 	// the reporting surface): a customer whose branches sit outside it is not
-	// the caller's drift to see. The currency ledger half reads the books,
-	// which carry no branch fact, and stays dealer wide.
+	// the caller's drift to see. The currency half's two branch owned sums
+	// (the customers' balances and the unapplied cash) follow the reach the
+	// same way, while the two GL account balances, which no branch fact can
+	// divide, are served to the wide callers only.
 	rows, err := s.ex(ctx).Query(ctx, `
 		WITH sub AS (
 			SELECT customer_id, currency, SUM(amount) AS cents FROM customer_transactions GROUP BY customer_id, currency
@@ -251,7 +267,7 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 		    OR ($1::uuid IS NULL AND $2::text IS NULL)
 		  )
 		ORDER BY c.name, c.id, k.currency`,
-		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+		branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reconcile the customers: %w", err)
 	}
@@ -269,8 +285,39 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	led, err := s.ex(ctx).Query(ctx, `
-		WITH ar AS (
+	// The branch owned sums carry the reach's predicate on both arms (the
+	// both nil arm matches every row, so a wide caller keeps the dealer
+	// wide totals); the GL halves run only for a wide caller, where the
+	// columns are filled below, so a refused column's absence can never be
+	// read as an account balancing at zero.
+	customerReach := ` EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND (
+	    ($1::uuid IS NOT NULL AND cb.branch_id = $1)
+	    OR ($1::uuid IS NULL AND $2::text IS NOT NULL AND cb.branch_id IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $2))
+	    OR ($1::uuid IS NULL AND $2::text IS NULL)
+	  ))`
+	paymentReach := ` (` + wall("p", 1, 2) + `)`
+	ownedSums := `
+		WITH bal AS (
+			SELECT COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD') AS currency,
+			       SUM(ROUND(c.balance_due * 100)::bigint) AS cents FROM customers c
+			WHERE ` + customerReach + ` GROUP BY 1
+		), un AS (
+			SELECT p.currency, SUM(ROUND(p.amount_unapplied * 100)::bigint) AS cents FROM payments p
+			WHERE p.status = 'POSTED' AND ` + paymentReach + ` GROUP BY p.currency
+		)`
+	var led pgx.Rows
+	if scoped {
+		led, err = s.ex(ctx).Query(ctx, ownedSums+`,
+		cur AS (
+			SELECT currency FROM bal UNION SELECT currency FROM un
+		)
+		SELECT cur.currency, COALESCE(bal.cents, 0), COALESCE(un.cents, 0)
+		FROM cur LEFT JOIN bal USING (currency) LEFT JOIN un USING (currency)
+		ORDER BY cur.currency`, branch, grants)
+	} else {
+		led, err = s.ex(ctx).Query(ctx, ownedSums+`,
+		ar AS (
 			SELECT e.currency, ROUND(SUM(l.debit - l.credit) * 100)::bigint AS cents FROM gl_journal_lines l
 			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
 			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '1020' GROUP BY e.currency
@@ -278,29 +325,35 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 			SELECT e.currency, ROUND(SUM(l.credit - l.debit) * 100)::bigint AS cents FROM gl_journal_lines l
 			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.status = 'POSTED'
 			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '2200' GROUP BY e.currency
-		), bal AS (
-			SELECT COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD') AS currency,
-			       SUM(ROUND(c.balance_due * 100)::bigint) AS cents FROM customers c GROUP BY 1
-		), un AS (
-			SELECT p.currency, SUM(ROUND(p.amount_unapplied * 100)::bigint) AS cents FROM payments p WHERE p.status = 'POSTED' GROUP BY p.currency
 		), cur AS (
 			SELECT currency FROM ar UNION SELECT currency FROM dep UNION SELECT currency FROM bal UNION SELECT currency FROM un
 		)
 		SELECT cur.currency, COALESCE(ar.cents, 0), COALESCE(bal.cents, 0), COALESCE(dep.cents, 0), COALESCE(un.cents, 0)
 		FROM cur LEFT JOIN ar USING (currency) LEFT JOIN bal USING (currency) LEFT JOIN dep USING (currency) LEFT JOIN un USING (currency)
-		ORDER BY cur.currency`)
+		ORDER BY cur.currency`, branch, grants)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the ledger: %w", err)
 	}
 	defer led.Close()
 	for led.Next() {
 		var r LedgerRow
+		if scoped {
+			var bal, un int64
+			if err := led.Scan(&r.Currency, &bal, &un); err != nil {
+				return nil, err
+			}
+			r.BalanceSum, r.UnappliedSum = httpx.Cents(bal), httpx.Cents(un)
+			out.Currencies = append(out.Currencies, r)
+			continue
+		}
 		var ar, bal, dep, un int64
 		if err := led.Scan(&r.Currency, &ar, &bal, &dep, &un); err != nil {
 			return nil, err
 		}
-		r.ReceivableLedger, r.BalanceSum, r.DepositsLedger, r.UnappliedSum = httpx.Cents(ar), httpx.Cents(bal), httpx.Cents(dep), httpx.Cents(un)
-		r.ReceivableInSync, r.DepositsInSync = ar == bal, dep == un
+		receivable, deposits, inSyncAR, inSyncDep := httpx.Cents(ar), httpx.Cents(dep), ar == bal, dep == un
+		r.ReceivableLedger, r.BalanceSum, r.DepositsLedger, r.UnappliedSum = &receivable, httpx.Cents(bal), &deposits, httpx.Cents(un)
+		r.ReceivableInSync, r.DepositsInSync = &inSyncAR, &inSyncDep
 		out.Currencies = append(out.Currencies, r)
 	}
 	return out, led.Err()
