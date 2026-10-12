@@ -333,7 +333,7 @@ func (s *Scheduler) refuseRun(ctx context.Context, schedule ReportSchedule, reas
 // the bare context the cron closure hands it, so a finance creator's run
 // reads the granted branches' rows only. CSV and XLSX are rendered as
 // requested. PDF is accepted by the API but has no renderer in this
-// package, so a PDF schedule is delivered as CSV — with a .csv filename
+// package, so a PDF schedule is delivered as CSV, with a .csv filename
 // and a sentence in the email body saying why. The alternatives were both
 // worse: failing the run would be a silent failure on a timer, and
 // attaching CSV bytes under a .pdf name would produce a file the recipient
