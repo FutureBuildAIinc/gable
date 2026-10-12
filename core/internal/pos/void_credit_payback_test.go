@@ -196,7 +196,7 @@ func TestAPaybackWhoseCallAnswersNoVerdictSettlesThroughTheResolveRoute(t *testi
 		f.service = f.service.WithGateway(gw)
 	})
 	f.openTill(10000)
-	saleID, declined, credit := declinedCreditVoid(t, f, gw, mustUUID(t))
+	_, declined, credit := declinedCreditVoid(t, f, gw, mustUUID(t))
 
 	// the payback's own terminal call loses its verdict: the route answers
 	// the error and the payback claim stands PENDING, stamped answered
@@ -238,7 +238,6 @@ func TestAPaybackWhoseCallAnswersNoVerdictSettlesThroughTheResolveRoute(t *testi
 		t.Errorf("%d refund rows under the payback's terminal id, want 1", got)
 	}
 	f.assertARInvariants(t)
-	_ = saleID
 }
 
 // RULE: a payback the terminal declined releases its claim and moves
