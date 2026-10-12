@@ -53,8 +53,8 @@ func holdPaymentRow(t *testing.T, f *fixture, paymentID string) (waiters func(n 
 		deadline := time.Now().Add(requestDeadline)
 		for {
 			// The statistics snapshot a session builds (pg_stat_activity
-			// reads it) is cached for the transaction, and a poll every few
-			// milliseconds keeps reusing it, so a contender that connects
+			// reads it) is cached for the transaction, and a tight polling
+			// loop keeps reusing it, so a contender that connects
 			// after the first poll would stay invisible to the probe until
 			// the transaction ends. Discard it by hand before every read,
 			// so each poll sees the sessions as they stand.
