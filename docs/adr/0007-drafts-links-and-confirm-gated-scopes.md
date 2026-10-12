@@ -912,6 +912,25 @@ One branch per key, not a set: the repositories' branch idiom filters on one
 branch or none, and a set would need a second idiom in every module. A
 dealer that needs a key for two branches mints two.
 
+The demo seed's upsert on `REG-01` (the seed's own register, the one
+migrations 027 and 066 left in the database) fires only while the row is
+exactly as those migrations left it: the placeholder
+`00000000-0000-0000-0000-000000000000` and `branch_id` equal to
+`default_branch_id` as the seed read it before changing anything (the
+seed reads that setting once, at start of `Run`, before any section touches
+it). The `DO UPDATE` SET lists `location_id` and `branch_id` only, the
+conflict key is the register id, and `name` and `is_active` are never
+written, so the seed keeps every name, moves only that one register, and a
+rerun against the same database is a no-op. Two hand-built states still
+re-fire the upsert under `DEMO_SEED` and need naming; no route, import or
+other seed writes `default_branch_id`. An operator who hand-sets
+`system_settings.default_branch_id` to their own branch and leaves REG-01
+on the placeholder at that branch produces a row byte-for-byte the
+migrations' shape, so the seed moves it (r21 P3-1). After a run that found
+the setting changed or absent, the seed's section 1 rewrites it to
+Kelowna's id, so a later run moves REG-01's placeholder location to a row
+that exists, never an operator's re-pointed branch (r20 P3-1).
+
 ADR 0002's second known limit (finer `admin` and `users` scopes) is not
 taken up here. It is not a confirm gate question: no admin act is a draft.
 It belongs with the tech admin module's conversion in C5-1, on its own
