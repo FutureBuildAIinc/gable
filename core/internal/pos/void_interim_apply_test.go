@@ -9,7 +9,10 @@ package pos_test
 // would leave a live row the void's completion cannot reverse, stranding the
 // last claim and the drawer. The apply routes refuse with 409
 // void_claim_pending naming the standing claim, and the void always
-// completes.
+// completes. A declined tender's credit is refused one guard earlier (409
+// tender_credit_held, its own hold, before any invoice is read), so the
+// named customer's receipt is the shape that pins the invoice's own
+// refusal; the walk-in test below names its guard.
 
 import (
 	"context"
@@ -214,7 +217,10 @@ func TestAnotherWalkInCreditCannotApplyToAnInterimVoidInvoice(t *testing.T) {
 	// S1's credit applied to S2's interim invoice: refused, and by the
 	// payment's own hold first (FROM-PRINCIPAL 60a): the credit is held to
 	// its tender before any invoice is even read, so the refusal names the
-	// origin (S1's released claim), never S2's standing one
+	// origin (S1's released claim), never S2's standing one. The interim
+	// invoice's own guard (void_claim_pending) is never reached for this
+	// shape: it is pinned by the named customer's receipt test above, whose
+	// check is no held credit and so reaches the invoice's standing claims
 	payID, payRev := f.paymentOfTender(t, declined1["tender_id"].(string))
 	r := f.do("POST", "/api/v1/payments/"+payID+"/applications", map[string]any{
 		"revision": payRev,
@@ -227,7 +233,7 @@ func TestAnotherWalkInCreditCannotApplyToAnInterimVoidInvoice(t *testing.T) {
 	}
 	_, blockers, _ := errorOf(t, r)
 	if len(blockers) == 0 || blockers[0] != "tender_credit_held" {
-		t.Errorf("blockers = %v, want tender_credit_held (the credit is held to its own tender)", blockers)
+		t.Errorf("blockers = %v, want tender_credit_held (the credit's own hold answers before the interim invoice's guard is read)", blockers)
 	}
 	if !containsClaim(r.raw, declined1["id"].(string)) {
 		t.Errorf("the refusal does not name the declined claim %s: %s", declined1["id"], r.raw)

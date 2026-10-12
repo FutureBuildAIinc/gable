@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- Down of 107_refund_intent_in_flight_lease: drops the lease columns. The
+-- Down of 109_refund_intent_in_flight_lease: drops the lease columns. The
 -- up wrote no data beyond the columns themselves (every existing row's
 -- answer_state stays IN_FLIGHT and every lease expiry is recomputed by the
 -- default on a re-apply), so nothing of a dealer's data maps back.

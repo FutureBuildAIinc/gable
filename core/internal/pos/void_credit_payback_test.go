@@ -82,11 +82,15 @@ func gatewayRefundCalls(t *testing.T, gw *fakeGateway) int {
 // gateway is refused for such a credit (the wrong rail), red first.
 func TestADeclinedVoidTendersCreditIsPaidBackThroughTheCounterTerminal(t *testing.T) {
 	testutil.LockOutboxTables(t)
+	// the counter terminal and the online gateway are SEPARATE stubs (the
+	// sixteenth review's P3-2), each counting its own rail's refund calls,
+	// so the counts prove which rail was asked and which was never asked
 	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge(), approvedCharge()},
 		refundStatuses: []payment.GatewayStatus{payment.GatewayStatusRefunded, payment.GatewayStatusDeclined}}
+	online := &fakeGateway{}
 	f := newFixture(t, testutil.RequireDBMaxConns(t, 4), func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
-		f.paymentGateway = gw
+		f.paymentGateway = online
 	})
 	f.openTill(10000)
 	_, declined, credit := declinedCreditVoid(t, f, gw, mustUUID(t))
@@ -99,8 +103,8 @@ func TestADeclinedVoidTendersCreditIsPaidBackThroughTheCounterTerminal(t *testin
 
 	// the online gateway's payment refund route is never the way back for a
 	// counter tender: refused for the credit, and the online rail is never
-	// asked (the stub counts every refund call of both rails here, so the
-	// count proves no third call happened)
+	// asked (its own stub's count stays at zero, and the terminal's count
+	// stands still: neither rail moved)
 	r := f.do("POST", "/api/v1/payments/"+payID+"/refunds", map[string]any{
 		"amount_cents": credit, "reason": "the declined tender's credit back to its card", "revision": payRev,
 	}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
@@ -111,8 +115,11 @@ func TestADeclinedVoidTendersCreditIsPaidBackThroughTheCounterTerminal(t *testin
 	if len(blockers) == 0 || blockers[0] != "tender_credit_held" {
 		t.Errorf("blockers = %v, want tender_credit_held (a counter tender's credit rides the terminal rail, never the online gateway)", blockers)
 	}
+	if got := gatewayRefundCalls(t, online); got != 0 {
+		t.Errorf("%d online gateway refund calls after the refused online refund, want 0 (the online rail was never asked)", got)
+	}
 	if got := gatewayRefundCalls(t, gw); got != callsAfterVoid {
-		t.Errorf("%d refund calls after the refused online refund, want %d (the online rail was never asked)", got, callsAfterVoid)
+		t.Errorf("%d terminal refund calls after the refused online refund, want %d (the terminal stands still too)", got, callsAfterVoid)
 	}
 	if got := f.unappliedOf(t, declined["tender_id"].(string)); got != credit {
 		t.Errorf("the credit after the refused online refund = %d, want %d", got, credit)
@@ -132,9 +139,13 @@ func TestADeclinedVoidTendersCreditIsPaidBackThroughTheCounterTerminal(t *testin
 	if r.status != http.StatusOK {
 		t.Fatalf("the payback = %d, want 200: %s", r.status, r.raw)
 	}
-	// the terminal was asked exactly once for the credit, and the books took it
+	// the terminal was asked exactly once for the credit, the online rail
+	// never, and the books took it
 	if got := gatewayRefundCalls(t, gw); got != callsAfterVoid+1 {
 		t.Errorf("%d terminal refund calls after the payback, want %d (one payback call)", got, callsAfterVoid+1)
+	}
+	if got := gatewayRefundCalls(t, online); got != 0 {
+		t.Errorf("%d online gateway refund calls after the payback, want 0 (the payback rides the terminal rail alone)", got)
 	}
 	if got := f.unappliedOf(t, declined["tender_id"].(string)); got != 0 {
 		t.Errorf("the credit after the payback = %d, want 0 (paid back to the card)", got)
@@ -178,6 +189,9 @@ func TestADeclinedVoidTendersCreditIsPaidBackThroughTheCounterTerminal(t *testin
 	}
 	if got := gatewayRefundCalls(t, gw); got != callsAfterVoid+1 {
 		t.Errorf("%d terminal refund calls after the second payback, want %d (the terminal was not asked again)", got, callsAfterVoid+1)
+	}
+	if got := gatewayRefundCalls(t, online); got != 0 {
+		t.Errorf("%d online gateway refund calls after the second payback, want 0 (no rail was asked)", got)
 	}
 	f.assertARInvariants(t)
 }

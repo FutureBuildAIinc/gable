@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- 107: the refund claim's in flight lease (C2-5, the fourteenth review's
+-- 109: the refund claim's in flight lease (C2-5, the fourteenth review's
 -- P1-1). A claim is a tender held while its act's terminal refund runs; the
 -- resolve route and the drawer close must be able to tell a live claim (its
 -- call is on the wire, the terminal may still move the tender's money) from
