@@ -187,6 +187,12 @@ func Run() {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
 
+	// Read the default branch before anything below changes it: dedupeBranches
+	// may clear the setting and section 1 re-points it at Kelowna, while the
+	// register upsert in section 22 compares against the value the migrations
+	// left, the branch migration 066 stamped REG-01 with.
+	regMigrationBranch := preSeedDefaultBranch(db)
+
 	// The AR core: every invoice, payment and credit memo the seed writes moves
 	// AR through it, never through a raw balance_due or subledger write.
 	ar, err := newReceivables(dbURL)
@@ -1316,8 +1322,11 @@ func Run() {
 	// pos_registers, /api/v1/pos/transactions fails with "failed to resolve
 	// register branch". Migration 027 seeds REG-01 on a location that does not
 	// exist and migration 066 gives it the migration-time default branch, so
-	// the row is moved to Kelowna, the branch the seed makes the default.
-	db.Exec(posRegisterUpsertSQL, kelMainID.String())
+	// the row is moved to Kelowna, the branch the seed makes the default, but
+	// only while it is still exactly in that shape: a row an operator moved,
+	// by its location or by its branch alone, is not the seed's to move back
+	// (the shape condition on posRegisterUpsertSQL below).
+	db.Exec(posRegisterUpsertSQL, kelMainID.String(), regMigrationBranch)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
 		VALUES ('sync-batch-001', 'REG-01', 42, 0, 0, NOW() - interval '2 hours')`)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
@@ -1366,6 +1375,19 @@ const pricingRuleUpsertSQL = `
 		expires_at       = EXCLUDED.expires_at,
 		updated_at       = NOW()`
 
+// preSeedDefaultBranch reads system_settings.default_branch_id as it stands
+// before this seed run changes anything. Migration 059 records the setting and
+// migration 066 stamps every register with it, so that value is half of the
+// shape migrations 027 and 066 leave REG-01 in, and the register upsert below
+// fires only on that exact shape (r19 P2-1). A database holding no setting yet
+// reads NULL, which matches no row: the seed then leaves REG-01 where it is
+// rather than move a row it cannot prove is still the migrations' own.
+func preSeedDefaultBranch(db *sql.DB) sql.NullString {
+	var v sql.NullString
+	db.QueryRow(`SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&v)
+	return v
+}
+
 // posRegisterUpsertSQL moves the demo register REG-01 onto the location given
 // (Kelowna main, the branch the seed makes the default), as a package level
 // constant for the same reason as pricingRuleUpsertSQL: the behaviour worth
@@ -1375,18 +1397,24 @@ const pricingRuleUpsertSQL = `
 // The conflict is on the id, so the update can only ever touch the seed's own
 // REG-01 row; a register with any other id, created by a person, an import or
 // another seed, is never matched. Of that one row the seed owns the location
-// and the branch alone, and only while the row still sits on migration 027's
-// placeholder location: the row is born in migration 027 on every database,
-// so a REG-01 an operator re-pointed by hand is not the seed's to move back
-// (item 57's condition reads 027 as another seed; r16 P2), and the register's
-// name is an operator's to keep the same way. The update therefore fires only
-// under that placeholder, which also makes a second run a no-op: the row no
-// longer carries it.
+// and the branch alone, and only while the row is exactly as migrations 027
+// and 066 left it: the placeholder location, and the branch 066 gave it, the
+// default branch the seed reads before it changes anything. The placeholder
+// names no locations row, so while the register sits on it the register's
+// branch comes from pos_registers.branch_id alone on every pos read and write,
+// and an operator who re-points REG-01 by its branch alone has moved it as
+// completely as one who moves the location; the seed's to move is neither
+// (item 57 reads migration 027 as another seed; r16 P2, r19 P2-1), and the
+// register's name is an operator's to keep the same way. A database whose
+// default an operator changed then keeps REG-01 where it is, the safe side.
+// The shape condition also makes a second run a no-op: the row no longer
+// carries it.
 const posRegisterUpsertSQL = `
 	INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
 	VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
 	ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1
-		WHERE pos_registers.location_id = '00000000-0000-0000-0000-000000000000'`
+		WHERE pos_registers.location_id = '00000000-0000-0000-0000-000000000000'
+		AND pos_registers.branch_id = $2::uuid`
 
 // pricingRule is one row of the demo pricing_rules table.
 //
