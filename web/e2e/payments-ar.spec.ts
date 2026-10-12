@@ -233,13 +233,6 @@ test.describe('Payments, unapplied cash and AR', () => {
     await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[0], ship_to_id: shipTos[0].id });
     await billedInvoice(request, { id: kelbrook, name: kelbrookCustomer.name, primary_branch_id: kelbrookCustomer.primary_branch_id }, { job_id: jobIds[1], ship_to_id: shipTos[1].id });
 
-    // The desk stamps its selected branch on every call as X-Branch-Id, and the
-    // AR routes hold the customer wall whatever that header says, so a desk
-    // selected on another branch would be answered 404 for this customer. The
-    // seed draws fresh ids every run, so pin the desk to the customer's own
-    // branch; the full load below reads it.
-    await page.evaluate((id) => localStorage.setItem('gable_current_branch_id', id), kelbrookCustomer.primary_branch_id);
-
     // By customer first, then by job and by ship-to: the toggle re-reads the
     // aging and the group rows split.
     await page.goto('/reports/ar-aging');
@@ -262,10 +255,18 @@ test.describe('Payments, unapplied cash and AR', () => {
     await expect(page.getByTestId('aging-row').filter({ hasText: shipTos[1].code }).first()).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-ship-to.png'), fullPage: true });
 
-    // The statement on the new AR route: the seeded customer's activity.
+    // The statement on the new AR route. The AR routes hold the customer wall
+    // (customer_branches against the caller's reach, header or no header), and
+    // the seed writes customers with a primary branch but no customer_branches
+    // row, so a desk call for a seeded customer is answered 404 whatever
+    // branch it selects. The statement is read for a customer made through the
+    // API, which carries its branch row, with the desk selected on that branch.
+    const billed = await freshCustomer(request);
+    await billedInvoice(request, billed);
+    await page.evaluate((id) => localStorage.setItem('gable_current_branch_id', id), billed.primary_branch_id);
     await page.goto('/reports/customer-statement');
     await expect(page.getByRole('heading', { name: 'Customer Statement' })).toBeVisible();
-    await page.getByLabel('Customer ID').fill(kelbrook);
+    await page.getByLabel('Customer ID').fill(billed.id);
     await page.getByRole('button', { name: 'Generate' }).click();
     await expect(page.getByTestId('statement-currency')).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId('statement-currency')).toContainText('Opening Balance');
