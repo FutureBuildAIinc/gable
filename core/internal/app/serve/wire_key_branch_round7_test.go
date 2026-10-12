@@ -258,8 +258,9 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	}
 
 	// The return on another branch's register: 403, no return.
-	retBody := `{"register_id":"` + regB + `","refund_method":"CASH","lines":[{"product_id":"` +
-		f.posProd.String() + `","quantity":1,"unit_price":1}]}`
+	retBody := `{"register_id":"` + regB + `","refund_method":"cash","reason":"pin",` +
+		`"customer_id":"` + f.custID.String() + `","lines":[{"product_id":"` +
+		f.posProd.String() + `","quantity":"1","unit_price_ten_thousandths":10000,"restock":false}]}`
 	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/returns", retBody, hdr)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
 		t.Errorf("a user recording a return on another branch's register: %d %s, want the 403 naming the register rule", status, buf)
@@ -278,8 +279,9 @@ func TestKeyBranchPin_TillOpenAndReturnsHoldTheRequestBranch(t *testing.T) {
 	if status != http.StatusCreated || sess.BranchID == nil || *sess.BranchID != f.branchA {
 		t.Errorf("a user opening a till on its own register: %d %s, want 201 at branch A", status, buf)
 	}
-	retBody = `{"register_id":"` + regA + `","refund_method":"CASH","lines":[{"product_id":"` +
-		f.posProd.String() + `","quantity":1,"unit_price":1}]}`
+	retBody = `{"register_id":"` + regA + `","refund_method":"cash","reason":"pin",` +
+		`"customer_id":"` + f.custID.String() + `","lines":[{"product_id":"` +
+		f.posProd.String() + `","quantity":"1","unit_price_ten_thousandths":10000,"restock":false}]}`
 	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/returns", retBody, hdr)
 	var ret struct {
 		ID       uuid.UUID  `json:"id"`
@@ -302,6 +304,11 @@ func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 	ctx := context.Background()
 	client := uuid.New()
 	batch := "pin-r7-" + uuid.NewString()[:8]
+	// the control's sale completes, so the pin's product needs stock
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, NULL, '', 50)`, f.posProd); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, client)
@@ -311,7 +318,8 @@ func TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister(t *testing.T) {
 		return `{"batch_id":"` + batch + `","register_id":"` + batchRegister +
 			`","items":[{"client_id":"` + client.String() +
 			`","cashier_id":"` + uuid.NewString() + `","customer_id":"` + f.custID.String() +
-			`","items":[],"tenders":[],"client_created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}]}`
+			`","items":[{"product_id":"` + f.posProd.String() + `","quantity":"1"}],` +
+			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}]}`
 	}
 	logRows := func() (n int) {
 		if err := f.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM pos_sync_log WHERE batch_id = $1`, batch).Scan(&n); err != nil {

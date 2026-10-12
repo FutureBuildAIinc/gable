@@ -12,6 +12,7 @@ package pos_test
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -50,7 +51,8 @@ func TestTheBranchWallCoversTheFreeReturnAndTheTill(t *testing.T) {
 	// the B-cashier's headers: the branch middleware scopes them to branch B
 	scoped := []string{"X-Test-Role", "cashier", "X-Test-Sub", "pos-wall-b", "X-Branch-Id", branchB.String()}
 
-	// a free cash return on branch A's register: 404, not a payout
+	// a free cash return on branch A's register: the register rule's 403,
+	// never a payout
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "customer_id": f.customerID.String(), "refund_method": "cash",
 		"reason": "out of my branch", "lines": []map[string]any{{
@@ -58,8 +60,8 @@ func TestTheBranchWallCoversTheFreeReturnAndTheTill(t *testing.T) {
 			"unit_price_ten_thousandths": 55000, "restock": false,
 		}},
 	}, scoped...)
-	if r.status != http.StatusNotFound {
-		t.Errorf("free return on another branch's register = %d, want 404: %s", r.status, r.raw)
+	if r.status != http.StatusForbidden || !strings.Contains(string(r.raw), "belongs to a different branch than the request") {
+		t.Errorf("free return on another branch's register = %d, want the register rule's 403: %s", r.status, r.raw)
 	}
 	// branch A's till report: 404
 	r = f.do("GET", "/api/v1/pos/till/"+sessionID+"/report", nil, scoped...)
