@@ -933,7 +933,9 @@ func ResolveRecordID(raw string) (uuid.UUID, string, error) {
 }
 
 // GetOrderByIDOrNumber reads an order by its UUID or its document number
-// (section 7): both spellings answer exactly the same body, no redirect.
+// (section 7): both spellings answer exactly the same body, no redirect, and
+// both carry the record branch rule (the number arm is the quote module's
+// twin: the read is held to the caller's grants before it answers).
 func (s *Service) GetOrderByIDOrNumber(ctx context.Context, raw string) (*Order, error) {
 	id, number, err := ResolveRecordID(raw)
 	if err != nil {
@@ -943,6 +945,9 @@ func (s *Service) GetOrderByIDOrNumber(ctx context.Context, raw string) (*Order,
 		o, err := s.repo.GetOrderByNumber(ctx, number)
 		if err != nil {
 			return nil, notFound(err)
+		}
+		if err := s.checkOrderBranch(ctx, o); err != nil {
+			return nil, err
 		}
 		return o, nil
 	}

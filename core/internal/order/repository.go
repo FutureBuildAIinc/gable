@@ -393,7 +393,8 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 // GetOrderByNumber reads an order by its document number, behind the same
 // branch wall the id read carries, for the record URLs that name the number
 // (ADR 0007 section 7). It resolves the id and reads through GetOrder, so
-// both spellings answer exactly the same body.
+// both spellings answer exactly the same body; a caller with no context
+// branch is held by the service's record check, the quote module's twin.
 func (r *PostgresRepository) GetOrderByNumber(ctx context.Context, number string) (*Order, error) {
 	var id uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
