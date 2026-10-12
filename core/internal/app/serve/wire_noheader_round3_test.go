@@ -51,6 +51,125 @@ func (c *r3CaptureSender) last() string {
 	return c.sent[len(c.sent)-1]
 }
 
+// TestNoHeader_ReportBuilderAndSavedRunFollowTheReach is the report
+// builder family (r4 P2-1, and the builder legs of r3 P2-2): the preview,
+// the export and the on demand saved run carry the caller's reach on every
+// entity (orders, invoices, inventory), so a finance user granted only A
+// with no header never reads B's rows on any of the three surfaces, and the
+// administrator's primed entry and wide view stay wide. Each leg is red
+// when the builder's reach wall or the routes' branch middleware mount is
+// reverted alone.
+func TestNoHeader_ReportBuilderAndSavedRunFollowTheReach(t *testing.T) {
+	f := newKeyPinFixture(t)
+	f.seedWalledTwins(t)
+	noheaderGrant(t, f, "pin-finance", f.branchA)
+
+	ordersDef := `"definition":{"columns":[{"field":"customer_name","label":"Customer"},{"field":"id","label":"Docs","aggregation":"COUNT"}],` +
+		`"filters":[{"field":"customer_name","operator":"LIKE","value":"pin cust"}],"groupings":[{"field":"customer_name"}]}`
+	invoicesDef := ordersDef
+	// The inventory leg groups by product and sums the yards' quantities:
+	// the filter grammar cannot bind a uuid, so the wall is what the
+	// assertion reads (A's yard alone sums 7; both yards sum 16).
+	inventoryDef := `"definition":{"columns":[{"field":"quantity","label":"Qty","aggregation":"SUM"}],"groupings":[{"field":"product_id"}]}`
+
+	// The per entity preview legs. The administrator primes every entity
+	// first, so a shared reach or a missing mount would hand the finance
+	// caller the wide rows.
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"orders", `{"entity_type":"orders",` + ordersDef + `}`},
+		{"invoices", `{"entity_type":"invoices",` + invoicesDef + `}`},
+		{"inventory", `{"entity_type":"inventory",` + inventoryDef + `}`},
+	} {
+		status, adminBuf := f.userAs(t, "admin", "POST", "/api/v1/reporting/builder/preview", tc.body, nil)
+		if status != http.StatusOK {
+			t.Fatalf("admin prime %s preview: %d %s", tc.name, status, adminBuf)
+		}
+		status, buf := f.userAs(t, "finance", "POST", "/api/v1/reporting/builder/preview", tc.body, nil)
+		if status != http.StatusOK {
+			t.Fatalf("no header %s preview: %d %s", tc.name, status, buf)
+		}
+		if tc.name == "inventory" {
+			var rows []struct {
+				Qty float64 `json:"quantity"`
+			}
+			if err := json.Unmarshal(buf, &rows); err != nil {
+				t.Fatal(err)
+			}
+			var adminRows []struct {
+				Qty float64 `json:"quantity"`
+			}
+			if err := json.Unmarshal(adminBuf, &adminRows); err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].Qty != 7 {
+				t.Errorf("no header inventory preview sums %v over %d row(s), want A's yard alone (7 on one row)", rows, len(rows))
+			}
+			wide := false
+			for _, r := range adminRows {
+				if r.Qty == 16 {
+					wide = true
+				}
+			}
+			if !wide {
+				t.Errorf("admin inventory preview %v has no row summing both yards' 16", adminRows)
+			}
+			continue
+		}
+		if strings.Contains(string(buf), "pin cust B") || !strings.Contains(string(buf), "pin cust") {
+			t.Errorf("no header %s preview carries %s, want A's rows only", tc.name, buf)
+		}
+		if !strings.Contains(string(adminBuf), "pin cust B") {
+			t.Errorf("admin %s preview misses B's rows: %s", tc.name, adminBuf)
+		}
+	}
+
+	// The export leg, same definition, CSV bytes.
+	exportBody := `{"entity_type":"orders","format":"csv",` + ordersDef + `}`
+	status, adminBuf := f.userAs(t, "admin", "POST", "/api/v1/reporting/builder/export", exportBody, nil)
+	if status != http.StatusOK || !strings.Contains(string(adminBuf), "pin cust B") {
+		t.Fatalf("admin orders export: %d %s", status, adminBuf)
+	}
+	status, buf := f.userAs(t, "finance", "POST", "/api/v1/reporting/builder/export", exportBody, nil)
+	if status != http.StatusOK || strings.Contains(string(buf), "pin cust B") || !strings.Contains(string(buf), "pin cust") {
+		t.Errorf("no header orders export: %d %s, want A's rows only", status, buf)
+	}
+	status, buf = f.userAs(t, "finance", "POST", "/api/v1/reporting/builder/export", exportBody, headerA(f))
+	if status != http.StatusOK || strings.Contains(string(buf), "pin cust B") {
+		t.Errorf("header A orders export: %d %s, want A's rows only", status, buf)
+	}
+
+	// The on demand saved run leg: a report the administrator saves runs
+	// under the calling finance user's reach, not the saver's.
+	saveBody := `{"name":"pin builder reach r3","description":"pin","entity_type":"orders","definition_json":{` +
+		`"columns":[{"field":"customer_name","label":"Customer"},{"field":"id","label":"Docs","aggregation":"COUNT"}],` +
+		`"filters":[{"field":"customer_name","operator":"LIKE","value":"pin cust"}],"groupings":[{"field":"customer_name"}]}}`
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/reporting/save", saveBody, nil)
+	if status != http.StatusOK {
+		t.Fatalf("admin saved report: %d %s", status, buf)
+	}
+	var saved struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(buf, &saved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM report_schedules WHERE report_id = $1`, saved.ID)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM saved_reports WHERE id = $1`, saved.ID)
+	})
+	status, buf = f.userAs(t, "finance", "POST", "/api/v1/reporting/saved/"+saved.ID+"/run", "", nil)
+	if status != http.StatusOK || strings.Contains(string(buf), "pin cust B") || !strings.Contains(string(buf), "pin cust") {
+		t.Errorf("no header saved run: %d %s, want A's rows only", status, buf)
+	}
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/reporting/saved/"+saved.ID+"/run", "", nil)
+	if status != http.StatusOK || !strings.Contains(string(buf), "pin cust B") {
+		t.Errorf("admin saved run: %d %s, want the wide rows", status, buf)
+	}
+}
+
 // TestNoHeader_ReportScheduleRunsUnderCreatorReach is the scheduled report
 // family (r4 P1-1, r3 P2-1): a finance user granted only A saves a report
 // and schedules it, and the scheduled run delivers the granted branches'
