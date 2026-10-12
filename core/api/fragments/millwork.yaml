@@ -128,7 +128,16 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
-          $ref: "#/components/responses/AppDisabled"
+          description: >-
+            The millwork app is disabled on this instance (app_disabled,
+            written by the registry gate), or no option has this id
+            (not_found).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/AppsDisabledError"
+                  - $ref: "#/components/schemas/WireError"
         "500":
           $ref: "#/components/responses/InternalErrorEither"
 components:

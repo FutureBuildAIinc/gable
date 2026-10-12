@@ -519,7 +519,7 @@ export interface paths {
         put?: never;
         /**
          * Approve or void a vendor invoice
-         * @description Role guard admin, owner or finance, held to the caller's branch wall. Replaces the old /approve route. The body names the target status and carries the revision (or If-Match); a write with neither is 428, a mismatch 409 stale_revision. To approved: only from pending; the entry posts through gl.PostEntry inside the transition's transaction (a debit leg per line on the line's account, the tax spread across the line accounts pro rata, the credit to Accounts Payable), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a line with no account is a 409 blocker line_needs_account; a required chart of accounts code that is missing is a 409 blocker account_missing naming it). To voided: from pending (nothing posted) or approved (the entry is reversed whole; a bill that prices to zero posted nothing and voids with nothing to reverse); a reason is required, a bill with money applied is refused with the has_payments blocker, an approved or partial bill that owes but has no linked journal entry (a legacy bill whose posting was swallowed, or one holding the removed sync's one leg credit) with the entry_not_linked blocker, and a bill whose linked entry does not balance with the entry_unbalanced blocker; nothing is written on either refusal. No route links an entry to a bill yet: such a bill stays approved and payable until a later repair item (a stated limit).
+         * @description Role guard admin, owner or finance, held to the caller's branch wall. Replaces the old /approve route. The body names the target status and carries the revision (or If-Match); a write with neither is 428, a mismatch 409 stale_revision. To approved: only from pending; the entry posts through gl.PostEntry inside the transition's transaction (a debit leg per line on the line's account, the tax spread across the line accounts pro rata, the credit to Accounts Payable), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a line with no account is a 409 blocker line_needs_account; a required chart of accounts code that is missing is a 409 blocker account_missing naming it; a pending bill that already carries a paid amount, a legacy or hand edited row no payment of its own could write, is a 409 blocker has_paid_amount naming the cents, and the row is left for the operator to mend by hand; a pending bill that already holds a live journal entry, a legacy row whose posting ran before the status moved with its entry linked by hand or not at all, is a 409 blocker entry_not_linked naming the live entry by its number and id, nothing written). To voided: from pending or approved; a bill's credit is live exactly when the POSTED entries of its VENDOR_INVOICE entry and that entry's whole reversal chain leave a net amount on Accounts Payable (a reversal of a reversal puts the credit back, whatever depth the chain has reached; the net is summed per currency, never across two, as the trial balance sums it, so a chain holding two currencies whose whole sums cancel still reads live in the currency that holds the amount, however the chain arose; the net may stand as a credit or as a debit, and the refusals name a net amount standing on Accounts Payable, never a credit alone), and the void decides on that net, never on one step of the chain: a bill whose entry holds no live credit (one that prices to zero, a legacy bill whose posting was swallowed, or an entry the GL routes have already undone, linked or not) voids with nothing to reverse, a linked live entry with no reversal row is reversed whole in the entry's own currency, and a linked live entry whose one reversal row is already taken (the row is not posted, or the chain was reinstated behind it, so no new reversal can post) is refused with the reversal_not_posted blocker naming the shape; a reason is required, a bill with money applied is refused with the has_payments blocker, a bill that holds a live journal entry it is not linked to (a legacy bill whose posting was swallowed, one holding the removed sync's one leg credit, one whose total was hand edited after its approve, or one posted twice, the duplicate named) with the entry_not_linked blocker, and a bill whose linked entry does not balance with the entry_unbalanced blocker; nothing is written on any refusal, and a reversal insert that loses a race with a concurrent GL reverse on the same entry answers the same reversal_not_posted 409, never a 500, and so does a GL void of the linked entry that commits while the void runs (the entry is no longer POSTED, there is nothing left to reverse, nothing is written and the retry voids with nothing to reverse). No route links an entry to a bill yet: such a bill keeps its status until a later repair item (a stated limit).
          */
         post: operations["apInvoiceTransition"];
         delete?: never;
@@ -543,7 +543,7 @@ export interface paths {
         put?: never;
         /**
          * Pay a vendor
-         * @description Role guard admin, owner or finance. The request's money is int64 amount_cents (a decimal amount is a 400 naming it; the old float dollars amount is gone); the rest of the shape keeps its today form (uppercase methods) until the payment routes' own conversion. The payment locks the named bills in id order and applies only to bills in approved or partial (a pending, paid or voided bill is a 409 blocker invoice_not_approved; a bill of another vendor is a 400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400 naming its index (appears twice); more than the named bills still owe is a 409 blocker exceeds_open. The entry posts through gl.PostEntry inside the act's transaction (DR Accounts Payable, CR Cash), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a missing chart of accounts code is a 409 blocker account_missing naming it).
+         * @description Role guard admin, owner or finance. The request's money is int64 amount_cents (a decimal amount is a 400 naming it; the old float dollars amount is gone); the rest of the shape keeps its today form (uppercase methods) until the payment routes' own conversion. The payment locks the named bills in id order and applies only to bills in approved or partial (a pending, paid or voided bill is a 409 blocker invoice_not_approved; a bill of another vendor is a 400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400 naming its index (appears twice); more than the named bills still owe is a 409 blocker exceeds_open. The named bills must share one currency: a payment spanning two is a 409 blocker currency_mismatch naming the bills that differ. The entry posts through gl.PostEntry inside the act's transaction in the bills' currency (DR Accounts Payable, CR Cash), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a missing chart of accounts code is a 409 blocker account_missing naming it).
          */
         post: operations["apPaymentCreate"];
         delete?: never;
@@ -896,7 +896,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a set of selections against the rules
-         * @description The body is capped at 64 KiB; an oversized or malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. A malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
          */
         post: operations["configuratorValidate"];
         delete?: never;
@@ -916,7 +916,7 @@ export interface paths {
         put?: never;
         /**
          * Build a non stock SKU from selections
-         * @description The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
          */
         post: operations["configuratorBuildSku"];
         delete?: never;
@@ -2142,7 +2142,7 @@ export interface paths {
         put?: never;
         /**
          * Reverse a posted journal entry
-         * @description Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. Every refusal, including an unknown id, is a 400.
+         * @description Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. The reversal posts in the original entry's own currency (the entry priced its legs into that currency, so a reversal in the currency.default setting's code would leave the control account holding both halves of one undo in different currencies). Every refusal, including an unknown id, is a 400.
          */
         post: operations["glJournalEntryReverse"];
         delete?: never;
@@ -2852,7 +2852,7 @@ export interface paths {
         put?: never;
         /**
          * Write off part or all of an invoice's open amount
-         * @description Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice's revision. Refused with 409 exceeds_open_amount, invoice_not_open (invalid_state_transition) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.
+         * @description Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice's revision. Refused with 409 exceeds_open_amount, invalid_state_transition (the invoice is neither unpaid nor partial) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.
          */
         post: operations["invoiceWriteOff"];
         delete?: never;
@@ -13790,12 +13790,12 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The create body. The dimension defaults to count; the standard size is both halves or neither. is_system and revision are never accepted. */
+        /** @description The create body. The dimension is required; the standard size is both halves or neither. is_system and revision are never accepted. */
         UnitCreate: {
             code: string;
             name: string;
             /** @enum {string} */
-            dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            dimension: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
             std_unit_qty?: components["schemas"]["Quantity"];
             std_ref_qty?: components["schemas"]["Quantity"];
         };
@@ -21663,7 +21663,15 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
+            /** @description The millwork app is disabled on this instance (app_disabled, written by the registry gate), or no option has this id (not_found). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsDisabledError"] | components["schemas"]["WireError"];
+                };
+            };
             500: components["responses"]["InternalErrorEither"];
         };
     };

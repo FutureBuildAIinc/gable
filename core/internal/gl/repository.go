@@ -225,14 +225,14 @@ func (r *PostgresRepository) CreateJournalEntry(ctx context.Context, entry *Jour
 
 func (r *PostgresRepository) GetJournalEntry(ctx context.Context, id uuid.UUID) (*JournalEntry, error) {
 	queryHeader := `
-		SELECT id, entry_number, entry_date, memo, source, source_ref_id, status, COALESCE(posted_by, ''), created_at, updated_at
+		SELECT id, entry_number, entry_date, memo, source, source_ref_id, status, COALESCE(posted_by, ''), created_at, updated_at, currency
 		FROM gl_journal_entries
 		WHERE id = $1
 	`
 	var e JournalEntry
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryHeader, id).Scan(
 		&e.ID, &e.EntryNumber, &e.EntryDate, &e.Memo, &e.Source,
-		&e.SourceRefID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt,
+		&e.SourceRefID, &e.Status, &e.PostedBy, &e.CreatedAt, &e.UpdatedAt, &e.Currency,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {

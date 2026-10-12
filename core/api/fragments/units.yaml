@@ -231,9 +231,9 @@ components:
           format: date-time
     UnitCreate:
       type: object
-      required: [code, name]
+      required: [code, name, dimension]
       description: >-
-        The create body. The dimension defaults to count; the standard size
+        The create body. The dimension is required; the standard size
         is both halves or neither. is_system and revision are never accepted.
       properties:
         code:
