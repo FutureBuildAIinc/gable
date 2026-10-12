@@ -433,10 +433,30 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 // TestNoHeader_Dashboard is the dashboard family (r2 P1-3 and item 64): a
 // finance user granted only A, no header, sees A's figures only, and the
 // cache entry an administrator primes never serves the finance caller.
+// Every arm of the summary (the payments through their documents, the
+// active orders, the pending dispatch, the outstanding AR), the revenue
+// trend, the inventory alerts and the order status breakdown each carry a
+// leg, so no single wall can be reverted unseen (r3 P2-2).
 func TestNoHeader_Dashboard(t *testing.T) {
 	f := newKeyPinFixture(t)
 	w := f.seedWalledTwins(t)
 	noheaderGrant(t, f, "pin-finance", f.branchA)
+	// The payments arms read a payment through the invoice and the order it
+	// settles, so the twins' payments carry their invoices, and the alerts
+	// arm needs the product's reorder point above the yards' quantities.
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE payments SET invoice_id = (CASE id WHEN $1 THEN $3 WHEN $2 THEN $4 END)::uuid WHERE id IN ($1, $2)`,
+		w.payA, w.payB, w.invA, w.invB); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE products SET reorder_point = 10 WHERE id = $1`, f.posProd); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `UPDATE payments SET invoice_id = NULL WHERE id IN ($1, $2)`, w.payA, w.payB)
+		_, _ = f.db.Pool.Exec(context.Background(), `UPDATE products SET reorder_point = 0 WHERE id = $1`, f.posProd)
+	})
 
 	// The cache poison: an administrator with no header primes the all
 	// branch entries first, so a shared cache key would hand the finance
@@ -453,14 +473,46 @@ func TestNoHeader_Dashboard(t *testing.T) {
 		t.Fatalf("no header dashboard summary: %d %s", status, buf)
 	}
 	var sum struct {
-		ActiveOrders int `json:"active_orders"`
+		ActiveOrders    int   `json:"active_orders"`
+		PendingDispatch int   `json:"pending_dispatch"`
+		TodayRevenue    int64 `json:"today_revenue"`
+		OutstandingAR   int64 `json:"outstanding_ar"`
+		OutstandingCnt  int   `json:"outstanding_ar_count"`
 	}
 	if err := json.Unmarshal(buf, &sum); err != nil {
 		t.Fatal(err)
 	}
-	// A and B each hold one CONFIRMED order; the grants hold A only.
+	// A and B each hold one CONFIRMED order, one PENDING delivery on it,
+	// one UNPAID invoice of 10 and one settled payment of 5; the grants
+	// hold A only.
 	if sum.ActiveOrders != 1 {
 		t.Errorf("no header summary counts %d active orders, want A's one", sum.ActiveOrders)
+	}
+	if sum.PendingDispatch != 1 {
+		t.Errorf("no header summary counts %d pending dispatches, want A's one", sum.PendingDispatch)
+	}
+	if sum.TodayRevenue != 500 {
+		t.Errorf("no header summary collects %d today cents, want A's 500", sum.TodayRevenue)
+	}
+	if sum.OutstandingAR != 1000 || sum.OutstandingCnt != 1 {
+		t.Errorf("no header summary carries %d outstanding cents over %d invoices, want A's 1000 over one",
+			sum.OutstandingAR, sum.OutstandingCnt)
+	}
+	status, adminBuf := f.userAs(t, "admin", "GET", "/api/v1/dashboard/summary", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("admin summary: %d %s", status, adminBuf)
+	}
+	var adminSum struct {
+		ActiveOrders    int   `json:"active_orders"`
+		PendingDispatch int   `json:"pending_dispatch"`
+		TodayRevenue    int64 `json:"today_revenue"`
+	}
+	if err := json.Unmarshal(adminBuf, &adminSum); err != nil {
+		t.Fatal(err)
+	}
+	if adminSum.ActiveOrders < 2 || adminSum.PendingDispatch < 2 || adminSum.TodayRevenue < 1000 {
+		t.Errorf("admin summary counts %d orders, %d dispatches, %d today cents, want both branches' at least",
+			adminSum.ActiveOrders, adminSum.PendingDispatch, adminSum.TodayRevenue)
 	}
 	status, buf = f.userAs(t, "finance", "GET", "/api/v1/dashboard/order-activity", "", nil)
 	if status != http.StatusOK {
@@ -472,13 +524,64 @@ func TestNoHeader_Dashboard(t *testing.T) {
 	if !strings.Contains(string(buf), w.ordA.String()) {
 		t.Errorf("no header order activity misses A's order: %s", buf)
 	}
+	// The status breakdown arm: A's one CONFIRMED order only.
+	var activity struct {
+		StatusBreakdown map[string]int `json:"status_breakdown"`
+	}
+	if err := json.Unmarshal(buf, &activity); err != nil {
+		t.Fatal(err)
+	}
+	if activity.StatusBreakdown["CONFIRMED"] != 1 {
+		t.Errorf("no header status breakdown counts %d CONFIRMED, want A's one: %v", activity.StatusBreakdown["CONFIRMED"], activity.StatusBreakdown)
+	}
 	status, buf = f.userAs(t, "finance", "GET", "/api/v1/dashboard/top-customers", "", nil)
 	if status != http.StatusOK || strings.Contains(string(buf), f.custB.String()) {
 		t.Errorf("no header top customers names B's customer: %d %s", status, buf)
 	}
+	// The revenue trend arm: A's payment only, by its figure (the trend
+	// carries no customer names to match on).
 	status, buf = f.userAs(t, "finance", "GET", "/api/v1/dashboard/revenue-trend", "", nil)
-	if status != http.StatusOK || strings.Contains(string(buf), "pin cust B") {
-		t.Errorf("no header revenue trend carries B: %d %s", status, buf)
+	if status != http.StatusOK {
+		t.Fatalf("no header revenue trend: %d %s", status, buf)
+	}
+	var trend []struct {
+		Revenue int64 `json:"revenue"`
+	}
+	if err := json.Unmarshal(buf, &trend); err != nil {
+		t.Fatal(err)
+	}
+	var trendTotal int64
+	for _, p := range trend {
+		trendTotal += p.Revenue
+	}
+	if trendTotal != 500 {
+		t.Errorf("no header revenue trend sums %d cents, want A's 500", trendTotal)
+	}
+	// The inventory alerts arm: A's yard row only, through the stocking
+	// location's branch.
+	status, buf = f.userAs(t, "finance", "GET", "/api/v1/dashboard/inventory-alerts", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("no header inventory alerts: %d %s", status, buf)
+	}
+	var alerts []struct {
+		ProductID  string `json:"product_id"`
+		CurrentQty int    `json:"current_qty"`
+		LocationID string `json:"location_id"`
+	}
+	if err := json.Unmarshal(buf, &alerts); err != nil {
+		t.Fatal(err)
+	}
+	rows := 0
+	for _, a := range alerts {
+		if a.ProductID == f.posProd.String() {
+			rows++
+			if a.LocationID != f.yardA.String() {
+				t.Errorf("no header inventory alert for the product sits at %s, want A's yard", a.LocationID)
+			}
+		}
+	}
+	if rows != 1 {
+		t.Errorf("no header inventory alerts carry %d rows for the product, want A's yard alone", rows)
 	}
 
 	// The control: the administrator's own read still carries every branch.
@@ -545,12 +648,56 @@ func TestNoHeader_ExposureOnAnotherBranchQuote(t *testing.T) {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM sales_team WHERE id = $1`, sp)
 	})
 	noheaderGrant(t, f, sp.String(), f.branchA)
+	noheaderGrant(t, f, "pin-sales", f.branchA)
 	status, buf := f.userSubAs(t, sp.String(), "sales", "GET", "/api/v1/quotes/exposure", "", nil)
 	if status != http.StatusOK || !strings.Contains(string(buf), f.quoteA.String()) {
 		t.Errorf("no header exposure list misses A's quote: %d %s", status, buf)
 	}
 	if strings.Contains(string(buf), f.quoteB.String()) {
 		t.Errorf("no header exposure list carries B's quote: %s", buf)
+	}
+	// The portfolio rollup by salesperson carries the same wall (r3 P2-2):
+	// the shared salesperson's row counts the granted branch's quote only,
+	// and the owner's wide rollup counts both. The rollup runs for a caller
+	// whose subject is not a salesperson id, so the caller is the non UUID
+	// subject the rollup branch takes.
+	status, buf = f.userAs(t, "sales", "GET", "/api/v1/reports/exposure", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("no header exposure rollup: %d %s", status, buf)
+	}
+	var bySp struct {
+		BySalesperson []struct {
+			SalespersonID string `json:"salesperson_id"`
+			QuoteCount    int    `json:"quote_count"`
+		} `json:"by_salesperson"`
+	}
+	if err := json.Unmarshal(buf, &bySp); err != nil {
+		t.Fatal(err)
+	}
+	spCount := 0
+	for _, row := range bySp.BySalesperson {
+		if row.SalespersonID == sp.String() {
+			spCount = row.QuoteCount
+		}
+	}
+	if spCount != 1 {
+		t.Errorf("no header rollup counts %d quotes for the shared salesperson, want A's one: %s", spCount, buf)
+	}
+	status, buf = f.userAs(t, "owner", "GET", "/api/v1/reports/exposure", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("owner exposure rollup: %d %s", status, buf)
+	}
+	if err := json.Unmarshal(buf, &bySp); err != nil {
+		t.Fatal(err)
+	}
+	spCount = 0
+	for _, row := range bySp.BySalesperson {
+		if row.SalespersonID == sp.String() {
+			spCount = row.QuoteCount
+		}
+	}
+	if spCount != 2 {
+		t.Errorf("owner rollup counts %d quotes for the shared salesperson, want both branches' two: %s", spCount, buf)
 	}
 	status, buf = f.userAs(t, "sales", "GET", "/api/v1/reports/exposure?summary=true", "", nil)
 	if status != http.StatusOK {
@@ -737,12 +884,18 @@ func TestNoHeader_Reports(t *testing.T) {
 	var summary struct {
 		InvoiceCount int     `json:"invoice_count"`
 		Collected    float64 `json:"total_collected"`
+		Outstanding  float64 `json:"outstanding_ar"`
 	}
 	if err := json.Unmarshal(buf, &summary); err != nil {
 		t.Fatal(err)
 	}
 	if summary.InvoiceCount != 1 || summary.Collected != 5 {
 		t.Errorf("no header sales summary counts %d invoices and %v collected, want A's 1 and 5", summary.InvoiceCount, summary.Collected)
+	}
+	// The outstanding AR arm carries its own wall (r3 P2-2): A's open
+	// invoice only, not both branches'.
+	if summary.Outstanding != 10 {
+		t.Errorf("no header sales summary carries %v outstanding AR, want A's 10", summary.Outstanding)
 	}
 
 	// The customer statement of B's customer reads as missing.

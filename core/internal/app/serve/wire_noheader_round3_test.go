@@ -170,6 +170,42 @@ func TestNoHeader_ReportBuilderAndSavedRunFollowTheReach(t *testing.T) {
 	}
 }
 
+// TestNoHeader_FulfilmentQueueFollowsTheReach is the fulfilment queue leg
+// (r3 P2-2): the queue lists only the granted branches' requests for a no
+// header caller, and the administrator keeps both branches'.
+func TestNoHeader_FulfilmentQueueFollowsTheReach(t *testing.T) {
+	f := newKeyPinFixture(t)
+	w := f.seedWalledTwins(t)
+	noheaderGrant(t, f, "pin-finance", f.branchA)
+	ctx := context.Background()
+	for _, q := range []struct{ delivery, order uuid.UUID }{
+		{w.delA, w.ordA}, {w.delB, w.ordB},
+	} {
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO order_fulfillment_requests (delivery_id, order_id) VALUES ($1, $2)`, q.delivery, q.order); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM order_fulfillment_requests WHERE order_id IN ($1, $2)`, w.ordA, w.ordB)
+	})
+
+	status, buf := f.userAs(t, "finance", "GET", "/api/v1/orders/fulfillment-requests", "", nil)
+	if status != http.StatusOK {
+		t.Fatalf("no header fulfilment queue: %d %s", status, buf)
+	}
+	if strings.Contains(string(buf), w.ordB.String()) {
+		t.Errorf("no header fulfilment queue carries B's request: %s", buf)
+	}
+	if !strings.Contains(string(buf), w.ordA.String()) {
+		t.Errorf("no header fulfilment queue misses A's request: %s", buf)
+	}
+	status, buf = f.userAs(t, "admin", "GET", "/api/v1/orders/fulfillment-requests", "", nil)
+	if status != http.StatusOK || !strings.Contains(string(buf), w.ordB.String()) {
+		t.Errorf("admin fulfilment queue misses B's request: %d %s", status, buf)
+	}
+}
+
 // TestNoHeader_PosMissingRecordIsNotFound is the pos record family (r4
 // P3-1 and P3-2): a void or a till close addressing a record that does not
 // exist answers the module's 404 for every caller, never a 403 claiming
