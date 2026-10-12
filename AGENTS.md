@@ -225,8 +225,9 @@ customer's open invoices and open credit memos (negative), less its unapplied ca
 unbilled remainder of its other confirmed, backordered and on hold orders. At confirm the order
 being checked adds its own total (over the limit parks it `ON_HOLD`); at fulfil it adds its own
 unbilled remainder (total less its non-void invoices) and over the limit answers 409
-`credit_limit`. The gate runs at confirm and fulfil, not at create, and only for a customer
-with a credit limit.
+`credit_limit`; the delivery completion caller (the in process fulfil the delivery queue serves, `order.Service.fulfilChecks`)
+skips the credit check and only audits it. The gate runs at confirm and fulfil, not at create, and only
+for a customer with a credit limit.
 
 The `balance_due` column **is** written, but only as a secondary subledger figure. The
 `account` package is its single writer: `PostInvoice`, `PostCreditMemo`, `Apply`, `WriteOff`,
@@ -310,7 +311,7 @@ this repository's history. Each is cited by the artifact you can actually inspec
 
 **C. Pick-list workflow.** Insert a `PICKED` status between `CONFIRMED` and `FULFILLED`, generate printable/scannable pick lists from confirmed orders, add warehouse pick endpoints. Yard module exists but skips the pick step. Unblocks the existing yard/warehouse mobile app route tree (`/yard/*`).
 
-**D. Customer credit hold enforcement.** `customer.credit_limit` exists with a known `float64` TODO around money. Order-create path doesn't hard-block when `current_balance + order_total > credit_limit`. Needs: blocking check in `order.Service.Create`, manual override with audit-log entry (`pkg/audit.Logger`), AR aging integration so the balance is real, and a UI surface on the order page. Direct AR-risk reduction for dealers.
+**D. ~~Customer credit hold enforcement.~~ Done; the create-time block is by design skipped.** The credit-limit gate (`OpenReceivableCents` in the order repository) parks the order `ON_HOLD` at confirm (`order.Service.confirm`, writing an `order.hold` audit row with `hold_reason: credit_limit`) and answers 409 `credit_limit` at fulfil (`order.Service.fulfilChecks`); the manual override is the release (the `on_hold` to `confirmed` transition in `order.Service.applyTransition`, admin, owner and finance) writing an `order.hold_released` audit row through `pkg/audit.Logger`; the balance is real because the gate reads documents, not `customers.balance_due` (and `core/internal/account/aging.go` reads the same documents); the UI surface is the hold banner and Release button on the order page (`web/apps/desk/src/pages/orders/OrderDetail.ts`, through `OrderService.releaseHold`). The create-time block is deliberately skipped, per ADR 0005 5.3 (gate at confirm and fulfil, not at create, see the AR balance paragraph above).
 
 ### Cross-cutting / lower-priority backlog
 - Migrate `customer.credit_limit`, order/invoice money fields from `float64` to `int64` cents per the convention in `Key Conventions → Database`. Many call-sites; do as a focused refactor sprint.
