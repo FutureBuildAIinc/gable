@@ -157,6 +157,36 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 		t.Errorf("no header Z report list carries B's row: %s", buf)
 	}
 
+	// A session of no branch: no grant decides it, so the no header close is
+	// refused with the record rule's 403 (the drawer stays open, no Z
+	// report), while an administrator closes it.
+	nullSess := uuid.New()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO till_sessions (id, register_id, branch_id, cashier_id, status, opening_float)
+		 VALUES ($1, $2, NULL, $3, 'OPEN', 10)`, nullSess, regNA, uuid.New()); err != nil {
+		t.Fatalf("seed null branch session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM till_z_reports WHERE till_session_id = $1`, nullSess)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM till_sessions WHERE id = $1`, nullSess)
+	})
+	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/"+nullSess.String()+"/close",
+		`{"counted_by_method":{"CASH":10}}`)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a branch this caller may not target") {
+		t.Errorf("no header close of a NULL branch session: %d %s, want the 403 the record rule names", status, buf)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM till_sessions WHERE id = $1 AND status = 'OPEN'`, nullSess); n != 1 {
+		t.Errorf("the refused close left the NULL branch session open in %d rows, want its one", n)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1`, nullSess); n != 0 {
+		t.Errorf("the refused close wrote %d Z reports on the NULL branch session, want none", n)
+	}
+	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/"+nullSess.String()+"/close",
+		`{"counted_by_method":{"CASH":10}}`, nil)
+	if status != http.StatusOK {
+		t.Errorf("admin close of a NULL branch session: %d %s, want 200", status, buf)
+	}
+
 	// The controls on A: the open lands, and the reads answer.
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/open",
 		`{"register_id":"`+regNA+`","opening_float":10}`)
@@ -225,6 +255,18 @@ func TestNoHeader_Sales(t *testing.T) {
 	}
 	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_line_items WHERE id = $1`, f.lineB); n != 1 {
 		t.Errorf("the refused remove left B's line in %d rows, want its one", n)
+	}
+
+	// B's line named under A's sale: the hold checks the path's sale, so the
+	// removal wall is the line's own guard. A later edit cannot drop it
+	// unseen: without the wall the line deletes under a sale the caller
+	// holds.
+	status, buf = f.cashierNoHeader(t, "DELETE", "/api/v1/pos/transactions/"+f.txnA.String()+"/items/"+f.lineB.String(), "")
+	if status >= 500 {
+		t.Errorf("no header remove of B's line under A's sale: %d %s, want the wall's silent miss", status, buf)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_line_items WHERE id = $1`, f.lineB); n != 1 {
+		t.Errorf("the walled remove deleted B's line under A's sale: %d rows, want its one", n)
 	}
 
 	// Complete B's sale: refused, no tender, the sale stays open.
@@ -380,6 +422,13 @@ func TestNoHeader_OtherFamilies(t *testing.T) {
 	}
 	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM orders WHERE id = $1 AND status = 'CONFIRMED'`, w.ordB); n != 1 {
 		t.Errorf("the refused transition left B's order confirmed in %d rows, want its one", n)
+	}
+	// The update act: the same record check answers the module's 403 before
+	// the draft status rule can (without it the refusal was a later 409).
+	status, buf = f.userAs(t, "sales", "PUT", "/api/v1/orders/"+w.ordB.String(),
+		`{"customer_id":"`+f.custB.String()+`","delivery_type":"pickup","revision":1,"lines":[]}`, nil)
+	if status != http.StatusForbidden || !strings.Contains(string(buf), "outside the branches this caller may target") {
+		t.Errorf("no header update of B's order: %d %s, want the 403 the record rule serves", status, buf)
 	}
 
 	// Quotes: the by id read already holds through the service's record

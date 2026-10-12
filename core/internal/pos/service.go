@@ -69,11 +69,11 @@ type Service struct {
 // record act arm of the no header rule (SEC-NOHEADER-1): a caller that
 // sends the header keeps the repository's equality answer, an administrator
 // keeps its reach, and a record that does not exist is not held here (the
-// flow's own not found answer serves it).
+// flow's own not found answer serves it). A record of no branch is refused
+// for a no header user, because no grant decides it (the same clause that
+// refuses a user with no grants at all); an administrator and a header
+// caller keep the reach the rule gives them.
 func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uuid.UUID, id uuid.UUID) error {
-	if branch == nil {
-		return nil
-	}
 	if err := s.grants.CheckGrantsBranch(ctx, branch); err != nil {
 		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
 			return &RecordBranchRefusedError{What: what, ID: id}

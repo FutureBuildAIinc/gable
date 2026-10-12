@@ -107,3 +107,55 @@ func TestCheckPayloadLocation(t *testing.T) {
 		}
 	}
 }
+
+// The act side of the no header rule (SEC-NOHEADER-1): CheckGrantsBranch
+// holds a branch, or a record's own branch, to the caller's grants when the
+// context carries no branch, and a nil branch refuses, because no grant
+// decides it.
+func TestCheckGrantsBranch(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	guard := middleware.NewBranchGuard(db)
+
+	own, other := uuid.New(), uuid.New()
+	for _, id := range []uuid.UUID{own, other} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, id, "gb-"+id.String()[:8]); err != nil {
+			t.Fatalf("seed branch: %v", err)
+		}
+	}
+	sub := "user-" + uuid.NewString()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, sub, own); err != nil {
+		t.Fatalf("seed grant: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = $1`, sub)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, own, other)
+	})
+
+	with := func(bc *branchctx.Context) context.Context { return branchctx.With(ctx, bc) }
+	ownPtr, otherPtr := own, other
+	cases := []struct {
+		name    string
+		ctx     context.Context
+		branch  *uuid.UUID
+		refused bool
+	}{
+		{"user, no context branch, granted branch", with(&branchctx.Context{UserSub: sub}), &ownPtr, false},
+		{"user, no context branch, ungranted branch", with(&branchctx.Context{UserSub: sub}), &otherPtr, true},
+		{"user, no context branch, nil branch: no grant decides it", with(&branchctx.Context{UserSub: sub}), nil, true},
+		{"user with no grants at all, any branch", with(&branchctx.Context{UserSub: "user-" + uuid.NewString()}), &ownPtr, true},
+		{"administrator, no context branch, nil branch", with(&branchctx.Context{UserSub: "a", IsAdmin: true}), nil, false},
+		{"context branch: the caller's own equality check governs", with(&branchctx.Context{UserSub: sub, BranchID: &other}), &ownPtr, false},
+		{"no branch middleware on the path", ctx, &otherPtr, false},
+		{"unbound machine key (no sub)", with(&branchctx.Context{}), nil, false},
+	}
+	for _, c := range cases {
+		err := guard.CheckGrantsBranch(c.ctx, c.branch)
+		if c.refused != errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			t.Errorf("%s: refused=%v, want %v (err %v)", c.name, errors.Is(err, middleware.ErrPayloadBranchRefused), c.refused, err)
+		}
+		if !c.refused && err != nil {
+			t.Errorf("%s: unexpected error %v", c.name, err)
+		}
+	}
+}
