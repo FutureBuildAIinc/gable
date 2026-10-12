@@ -935,6 +935,45 @@ known limit. Moving its quote creation to `quotes:propose` drafts is a later
 item. Every statement in this record that the gate is enforced "for keys"
 means keys on `/api/v1`.
 
+#### 5.7 A user with no branch in context (SEC-NOHEADER-1)
+
+A user who sends no `X-Branch-Id` while the multi branch switch is on and
+`default_branch_required` is off reaches a module with no branch in the
+branch context. Section 2.3 already held such a user to the user's
+`user_locations` grants for a branch a body names; this section holds the
+user's reads and acts the same way, so no branch in context never means
+every branch:
+
+- a read by id answers 404 when the record's branch is not among the
+  user's grants, and a list returns only rows of the granted branches;
+- an act on a register, till, sale, return or claim of a branch the user
+  does not hold is 403 with nothing written;
+- where no grant decides it, the caller is refused: a user with no grants
+  at all reads nothing and writes nothing, and a record of no branch
+  reads as missing.
+
+The sentence that keeps the other callers their reach is section 2.3's:
+"With no context branch, an administrator or owner may name any branch, as
+the `X-Branch-Id` header already lets them". A caller that sends the
+header keeps the context branch rule unchanged; so does every caller while
+the single branch kill switch is off, an unbound key, and `AUTH_MODE=dev`.
+
+The routes this closed, each stated in `docs/refactor/CONTRACT-CHANGES.md`
+under `SEC-NOHEADER-1`: the whole pos surface (the till open, close,
+current, report and Z report reads and lists, the sale create, read, list,
+line, complete and void acts, the return create, read and list, and the
+offline sync batch), the order read by id or number, list, count, update,
+transitions, exposure gate and override, fulfilment request queue and
+draft order promotion (the order module's own 403 words naming `id`), and
+the purchase order list and the draft by vendor lookup. The quote and
+purchase order by id routes, the invoice, payment, delivery and inventory
+reads, and the document print and email routes already held the record's
+branch to the grants (their wall, record check or guard carries the same
+arm), which the item's tests prove rather than change. One shared
+predicate (`middleware.Wall`) and one shared hold
+(`BranchGuard.CheckGrantsBranch`) carry the rule, so no route family holds
+a private copy.
+
 ### 6. Agent identity, in all of it
 
 The actor object on the wire, in draft events, in outbox data and in the
