@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Get account summary
-         * @description The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404.
+         * @description The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404, and so is a customer outside the caller's branches (customer_branches held to the reach, header or no header).
          */
         get: operations["accountSummary"];
         put?: never;
@@ -53,7 +53,7 @@ export interface paths {
         };
         /**
          * List account transactions
-         * @description The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope.
+         * @description The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope. A customer outside the caller's branches is 404, header or no header.
          */
         get: operations["accountTransactions"];
         put?: never;
@@ -113,7 +113,7 @@ export interface paths {
         };
         /**
          * Customer statement
-         * @description Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today.
+         * @description Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today. A customer outside the caller's branches is 404, header or no header.
          */
         get: operations["arStatement"];
         put?: never;

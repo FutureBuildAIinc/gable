@@ -88,9 +88,12 @@ ORDER BY t.currency, t.created_at, t.id`
 // Statement answers the customer's statement: per currency the opening balance
 // (the rows before From), every row in range (filtered to the job through the
 // source document when given), the closing balance, and the open documents.
+// The customer carries the family's wall (r4 P2-4): outside the caller's reach
+// the statement reads as missing, header or no header alike.
 func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, error) {
 	out := &Statement{CustomerID: q.CustomerID, From: date(q.From), To: date(q.To), JobID: q.JobID, Currencies: []StatementCurrency{}}
-	err := s.ex(ctx).QueryRow(ctx, `SELECT name FROM customers WHERE id = $1`, q.CustomerID).Scan(&out.CustomerName)
+	err := s.ex(ctx).QueryRow(ctx, `SELECT c.name FROM customers c WHERE c.id = $1 AND `+customerWall(2, 3),
+		q.CustomerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&out.CustomerName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("account not found")
 	}

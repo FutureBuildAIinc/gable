@@ -170,6 +170,51 @@ func TestNoHeader_ReportBuilderAndSavedRunFollowTheReach(t *testing.T) {
 	}
 }
 
+// TestNoHeader_CustomerAccountSurface is the customer account family (r4
+// P2-4, carried from r2 P3-2 and r3 P3-2): the account summary, its
+// subledger and the AR statement answer a customer outside the caller's
+// reach as missing, the same 404 /customers/{id} serves, with or without
+// the header.
+func TestNoHeader_CustomerAccountSurface(t *testing.T) {
+	f := newKeyPinFixture(t)
+	f.seedWalledTwins(t)
+	noheaderGrant(t, f, "pin-sales", f.branchA)
+	noheaderGrant(t, f, "pin-finance", f.branchA)
+
+	paths := []string{
+		"/api/v1/accounts/" + f.custB.String(),
+		"/api/v1/accounts/" + f.custB.String() + "/transactions",
+		"/api/v1/ar/customers/" + f.custB.String() + "/statement",
+	}
+	for _, role := range []string{"sales", "finance"} {
+		for _, hdr := range []map[string]string{nil, headerA(f)} {
+			for _, p := range paths {
+				status, buf := f.userAs(t, role, "GET", p, "", hdr)
+				if status != http.StatusNotFound {
+					t.Errorf("%s no header %t read of B's %s: %d %s, want 404", role, hdr != nil, p, status, buf)
+				}
+			}
+		}
+	}
+
+	// The controls: A's customer answers every route, and an owner with no
+	// header keeps B.
+	for _, p := range []string{
+		"/api/v1/accounts/" + f.custID.String(),
+		"/api/v1/accounts/" + f.custID.String() + "/transactions",
+		"/api/v1/ar/customers/" + f.custID.String() + "/statement",
+	} {
+		status, buf := f.userAs(t, "finance", "GET", p, "", nil)
+		if status != http.StatusOK {
+			t.Errorf("no header read of A's %s: %d %s, want 200", p, status, buf)
+		}
+	}
+	status, buf := f.userAs(t, "owner", "GET", "/api/v1/ar/customers/"+f.custB.String()+"/statement", "", nil)
+	if status != http.StatusOK {
+		t.Errorf("owner no header statement of B's customer: %d %s, want 200", status, buf)
+	}
+}
+
 // TestNoHeader_ReportScheduleRunsUnderCreatorReach is the scheduled report
 // family (r4 P1-1, r3 P2-1): a finance user granted only A saves a report
 // and schedules it, and the scheduled run delivers the granted branches'
