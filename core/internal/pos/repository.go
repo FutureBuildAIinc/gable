@@ -122,6 +122,11 @@ type Repository interface {
 	// TenderPaymentFacts reads a tender's payment and its unapplied cents
 	// (the payback route's credit read).
 	TenderPaymentFacts(ctx context.Context, tenderID uuid.UUID) (uuid.UUID, int64, error)
+	// LockTenderPaymentFacts is that read under the payment row's lock (the
+	// payback's claim transaction rechecks the credit there); TenderHasDonePayback
+	// answers whether the tender's credit was already paid back.
+	LockTenderPaymentFacts(ctx context.Context, tenderID uuid.UUID) (uuid.UUID, int64, error)
+	TenderHasDonePayback(ctx context.Context, tenderID uuid.UUID) (bool, error)
 	SessionPendingRefundIntentIDs(ctx context.Context, sessionID uuid.UUID) ([]uuid.UUID, error)
 	// PendingRefundIntentIDs lists the ids of the sale's standing claims (the
 	// per tender void resolution reads them to know when every tender is
@@ -1107,6 +1112,44 @@ func (r *PostgresRepository) TenderPaymentFacts(ctx context.Context, tenderID uu
 		return uuid.Nil, 0, fmt.Errorf("failed to read the tender's payment: %w", err)
 	}
 	return paymentID, unapplied, nil
+}
+
+// LockTenderPaymentFacts is TenderPaymentFacts under the payment row's lock,
+// for the payback's claim transaction: the credit is rechecked on the row
+// the money transaction books it out of, so a payback whose earlier read saw
+// the credit standing opens no claim beside a first payback's booking (the
+// sixteenth review's P1-1). Runs through the caller's transaction.
+func (r *PostgresRepository) LockTenderPaymentFacts(ctx context.Context, tenderID uuid.UUID) (uuid.UUID, int64, error) {
+	var paymentID uuid.UUID
+	var unapplied int64
+	err := r.ex(ctx).QueryRow(ctx, `
+		SELECT d.payment_id, ROUND(p.amount_unapplied * 100)::bigint
+		FROM pos_tenders d JOIN payments p ON p.id = d.payment_id
+		WHERE d.id = $1 AND d.payment_id IS NOT NULL AND p.status = 'POSTED'
+		FOR UPDATE OF p`, tenderID).
+		Scan(&paymentID, &unapplied)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, 0, conflict("no_held_credit", "the tender names no posted payment: no credit is held on it")
+	}
+	if err != nil {
+		return uuid.Nil, 0, fmt.Errorf("failed to lock the tender's payment: %w", err)
+	}
+	return paymentID, unapplied, nil
+}
+
+// TenderHasDonePayback answers whether the tender's credit was already paid
+// back: a DONE payback claim stands on it. The payback's claim transaction
+// rechecks this under the payment row's lock, and migration 111's partial
+// unique index makes the same rule structural.
+func (r *PostgresRepository) TenderHasDonePayback(ctx context.Context, tenderID uuid.UUID) (bool, error) {
+	var done bool
+	err := r.ex(ctx).QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pos_refund_intents WHERE tender_id = $1 AND act = 'payback' AND state = 'DONE')`, tenderID).
+		Scan(&done)
+	if err != nil {
+		return false, fmt.Errorf("failed to read the tender's payback claims: %w", err)
+	}
+	return done, nil
 }
 
 // PendingVoidClaimsOfInvoice lists the standing void claims of the sale that

@@ -12,12 +12,14 @@ package pos
 // sibling of the resolve route, keyed on the void's own released claim,
 // finance and owner only, and it runs its terminal call under the same
 // claim discipline every terminal refund runs under: a committed payback
-// claim per tender opened before the call (one live claim per tender, the
-// in flight lease), the terminal's refund id written in its own committed
-// write the moment it answers, and the money transaction booking the
-// credit out only under the claim's row lock. A payback whose call answers
-// no verdict stands PENDING like any act and settles through the resolve
-// route.
+// claim per tender opened before the call, under the tender's payment row
+// lock with the credit rechecked there (one live claim per tender, the in
+// flight lease, and exactly one payback per tender ever, made structural
+// by migration 111's index), the terminal's refund id written in its own
+// committed write the moment it answers, and the money transaction booking
+// the credit out only under the claim's row lock. A payback whose call
+// answers no verdict stands PENDING like any act and settles through the
+// resolve route.
 
 import (
 	"context"
@@ -109,11 +111,40 @@ func (s *Service) PaybackRefundIntent(ctx context.Context, intentID uuid.UUID, i
 	}
 	// The payback's own claim, committed before the terminal is reached (the
 	// same discipline every terminal refund runs under): its unique live
-	// (sale, tender) index refuses a concurrent payback, and its lease holds
-	// the resolve route and the drawer close while the call is on the wire.
+	// (sale, tender) index refuses a concurrent payback, its lease holds
+	// the resolve route and the drawer close while the call is on the wire,
+	// and exactly one payback per tender is structural (migration 111's
+	// partial unique index on the tender's payback claims PENDING or DONE).
+	// The claim opens in a transaction that locks the sale row and the
+	// tender's payment row, in the money transaction's own order, and
+	// rechecks the credit under that lock (the sixteenth review's P1-1): a
+	// contender whose earlier read saw the credit standing cannot open a
+	// second claim beside the first payback's booking, because the first's
+	// booking holds the payment row the contender rechecks on, and a tender
+	// whose payback already booked answers no credit here.
 	claim := RefundIntent{ID: uuid.New(), SaleID: rec.SaleID, TenderID: rec.TenderID, GatewayTxID: rec.GatewayTxID,
 		AmountCents: unapplied, Act: "payback"}
 	if err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockSale(ctx, rec.SaleID); err != nil {
+			return err
+		}
+		_, locked, err := s.repo.LockTenderPaymentFacts(ctx, rec.TenderID)
+		if err != nil {
+			return err
+		}
+		if locked <= 0 {
+			return conflict("no_held_credit",
+				"the tender's payment holds no unapplied credit: the credit was already paid back to its card")
+		}
+		done, err := s.repo.TenderHasDonePayback(ctx, rec.TenderID)
+		if err != nil {
+			return err
+		}
+		if done {
+			return conflict("no_held_credit",
+				"the tender's credit was already paid back to its card: exactly one payback runs per tender")
+		}
+		claim.AmountCents = locked
 		return s.repo.InsertRefundIntent(ctx, claim)
 	}); err != nil {
 		return nil, err
