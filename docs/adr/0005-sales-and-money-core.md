@@ -1394,19 +1394,24 @@ interim invoice while the void's claims stand: every application path (a
 receipt's applications, the apply route, a credit memo, a write off) refuses
 with 409 `void_claim_pending` naming the claims, so the void is always
 completable and a credit that might have been absorbed stays on its own
-payment, payable back whence it came. The tenders whose refunds
-were declined keep their charge as unapplied credit owed to the customer,
-payable back to the card through the payment's own refund route (capped at
-the unapplied cents): that route is the way back. The payment apply route
-is deliberately not refused for that credit, a stated limit: unapplied
-cash on one payment is fungible (a genuine overpayment and a void's
-reversal mix on the same row, so no refusal can be drawn at the cent level,
-and refusing the row would refuse the overpayment too), and the apply rule
-is the account core's own, per customer, with no origin to read. On the
-shared walk-in customer the limit shows: a later walk-in invoice could
-absorb an earlier walk-in's declined tender credit through that route, so
-the dealer's duty is to refund the card, and the counter's own routes
-never apply the credit.
+payment. The tenders whose refunds were declined, or were recorded as a no
+refund, keep their charge as unapplied credit owed to the customer, and
+that credit is held to its own tender: it applies to no invoice, whatever
+the customer. The account core asks the counter through a guard (the
+origin is readable through `pos_tenders.payment_id`, which the account
+core alone cannot read), and the refusal names the origin, the void and
+the claim it released; a counter card tender is exactly its cents, so the
+unapplied cash on its payment can only be the void's reversal, and on the
+shared walk-in customer one card holder's credit must never pay another
+walk-in's invoice. The credit is paid back only to that card, through the
+counter terminal rail the charge came from, by the payback route beside
+the resolve route (`POST /api/v1/pos/refund-intents/{id}/payback`, finance
+and owner only, the branch wall, exactly one payback per tender, its
+terminal call under the same claim discipline every terminal refund runs
+under); the payment refund route through the online gateway is never the
+way back for a counter tender and refuses the credit (409
+`tender_credit_held`). Until the card is paid back the credit stays held:
+nothing else can spend it.
 
 ### 12. Events
 
