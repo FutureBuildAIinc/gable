@@ -121,6 +121,20 @@ func refuseMachineKeyCashier(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// refuseRecordBranch answers the request with the record branch refusal's
+// 403 and words when err is that refusal, reporting whether it answered: an
+// act on a record of a branch outside the grants a caller with no branch in
+// context is held to (SEC-NOHEADER-1) is refused by name, nothing written.
+func refuseRecordBranch(w http.ResponseWriter, r *http.Request, err error) bool {
+	var refused *RecordBranchRefusedError
+	if !errors.As(err, &refused) {
+		return false
+	}
+	writePosRefusal(w, r, refused.Error(), "record_id", refused.ID, "what", refused.What,
+		"reason", "record of a branch this caller may not target")
+	return true
+}
+
 // CreateReturn records a merchandise return and issues the refund.
 func (h *Handler) CreateReturn(w http.ResponseWriter, r *http.Request) {
 	if refuseMachineKeyCashier(w, r) {
@@ -313,6 +327,9 @@ func (h *Handler) CloseTill(w http.ResponseWriter, r *http.Request) {
 	}
 	report, err := h.service.CloseTill(r.Context(), id, counted, req.Notes)
 	if err != nil {
+		if refuseRecordBranch(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, err.Error(), http.StatusConflict, err)
 		return
 	}
@@ -400,6 +417,9 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.AddItem(r.Context(), txID, req)
 	if err != nil {
+		if refuseRecordBranch(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to add item", http.StatusInternalServerError, err)
 		return
 	}
@@ -423,6 +443,9 @@ func (h *Handler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.RemoveItem(r.Context(), txID, itemID)
 	if err != nil {
+		if refuseRecordBranch(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to remove item", http.StatusInternalServerError, err)
 		return
 	}
@@ -451,6 +474,9 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.CompleteTransaction(r.Context(), txID, req.Tenders)
 	if err != nil {
+		if refuseRecordBranch(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to complete transaction", http.StatusUnprocessableEntity, err)
 		return
 	}
@@ -468,6 +494,9 @@ func (h *Handler) VoidTransaction(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.VoidTransaction(r.Context(), txID)
 	if err != nil {
+		if refuseRecordBranch(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to void transaction", http.StatusInternalServerError, err)
 		return
 	}

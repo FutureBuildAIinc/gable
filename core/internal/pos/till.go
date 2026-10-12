@@ -153,6 +153,15 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 // CloseTill closes the session: computes expected per method from the
 // session's completed sales, records counted amounts, and stores over/short.
 func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByMethodCents map[string]int64, notes string) (*TillReport, error) {
+	// An act on a session of a branch outside the caller's grants is refused
+	// by name before anything runs (SEC-NOHEADER-1); the branch is read with
+	// no wall, because the walled read would hide the session before the
+	// refusal could name it.
+	if branch, err := s.repo.TillSessionBranch(ctx, sessionID); err != nil {
+		return nil, err
+	} else if err := s.holdRecordBranch(ctx, "till session", branch, sessionID); err != nil {
+		return nil, err
+	}
 	report, err := s.TillReport(ctx, sessionID)
 	if err != nil {
 		return nil, err

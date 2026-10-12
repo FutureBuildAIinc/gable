@@ -6,24 +6,42 @@ package pos
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // RegisterBranchRefusedError is the refusal a write answers when the caller's
-// branch context disagrees with the register's own branch. It is a typed error
-// so the HTTP layer can answer it 403 instead of the 500 a plain service
-// error maps to, nothing written either way.
+// branch context disagrees with the register's own branch, or when the
+// register's branch is outside the grants a caller with no branch in context
+// is held to (SEC-NOHEADER-1). It is a typed error so the HTTP layer can
+// answer it 403 instead of the 500 a plain service error maps to, nothing
+// written either way.
 type RegisterBranchRefusedError struct {
 	RegisterID string
 }
 
 func (e *RegisterBranchRefusedError) Error() string {
 	return fmt.Sprintf("register %s belongs to a different branch than the request", e.RegisterID)
+}
+
+// RecordBranchRefusedError is the refusal an act on an existing record (a
+// till session, a sale) answers when the record's own branch is outside the
+// grants a caller with no branch in context is held to (SEC-NOHEADER-1).
+// It is a typed error so the HTTP layer can answer it 403, nothing written.
+type RecordBranchRefusedError struct {
+	What string
+	ID   uuid.UUID
+}
+
+func (e *RecordBranchRefusedError) Error() string {
+	return fmt.Sprintf("%s %s belongs to a branch this caller may not target", e.What, e.ID)
 }
 
 // UnknownRegisterError is the refusal a write answers when the register it
@@ -84,16 +102,37 @@ type Repository interface {
 	TransactionExists(ctx context.Context, id uuid.UUID) (bool, error)
 	GetProductCatalog(ctx context.Context) ([]CatalogProduct, error)
 	LogSyncBatch(ctx context.Context, batchID, registerID string, synced, duplicates, errors int, errorDetails []SyncError) error
+
+	// TransactionBranch and TillSessionBranch read a record's own branch
+	// with no wall, for the act hold that must decide before the walled
+	// read hides the record from a caller held to the grants.
+	TransactionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+	TillSessionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 }
 
 // PostgresRepository implements Repository for PostgreSQL.
 type PostgresRepository struct {
-	db *database.DB
+	db     *database.DB
+	grants *middleware.BranchGuard
 }
 
 // NewRepository creates a new POS repository.
 func NewRepository(db *database.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+	return &PostgresRepository{db: db, grants: middleware.NewBranchGuard(db)}
+}
+
+// holdRegisterBranch holds the register's branch to the caller's grants when
+// the context carries no branch (SEC-NOHEADER-1): a caller that sends the
+// header keeps the equality check the caller already ran, and an
+// administrator keeps its reach, so only a no header user is held.
+func (r *PostgresRepository) holdRegisterBranch(ctx context.Context, registerID string, branch *uuid.UUID) error {
+	if err := r.grants.CheckGrantsBranch(ctx, branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return &RegisterBranchRefusedError{RegisterID: registerID}
+		}
+		return err
+	}
+	return nil
 }
 
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTransaction) error {
@@ -116,6 +155,10 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	// Reject if the caller's branch context disagrees with the register's branch.
 	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
 		return &RegisterBranchRefusedError{RegisterID: tx.RegisterID}
+	}
+	// A caller with no branch in context is held to the caller's grants.
+	if err := r.holdRegisterBranch(ctx, tx.RegisterID, registerBranch); err != nil {
+		return err
 	}
 
 	query := `
@@ -206,11 +249,11 @@ func (r *PostgresRepository) GetTransaction(ctx context.Context, id uuid.UUID) (
 		SELECT id, register_id, cashier_id, customer_id, subtotal, tax_amount, total, change_due, till_session_id, status, completed_at, created_at, branch_id
 		FROM pos_transactions
 		WHERE id = $1
-		  AND ($2::uuid IS NULL OR branch_id = $2)
+		  AND ` + middleware.Wall("", 2, 3) + `
 	`
 	var tx POSTransaction
 	var subtotal, taxAmount, total, changeDue float64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchctx.IDForQuery(ctx)).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(
 		&tx.ID, &tx.RegisterID, &tx.CashierID, &tx.CustomerID,
 		&subtotal, &taxAmount, &total, &changeDue, &tx.TillSessionID,
 		&tx.Status, &tx.CompletedAt, &tx.CreatedAt, &tx.BranchID,
@@ -230,13 +273,14 @@ func (r *PostgresRepository) UpdateTransaction(ctx context.Context, tx *POSTrans
 		UPDATE pos_transactions
 		SET subtotal = $2, tax_amount = $3, total = $4, status = $5, completed_at = $6, customer_id = $7, change_due = $9
 		WHERE id = $1
-		  AND ($8::uuid IS NULL OR branch_id = $8)
+		  AND ` + middleware.Wall("", 8, 10) + `
 	`
 	_, err := r.db.GetExecutor(ctx).Exec(ctx, query,
 		tx.ID,
 		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CompletedAt, tx.CustomerID, branchctx.IDForQuery(ctx),
+		tx.Status, tx.CompletedAt, tx.CustomerID, middleware.BranchIDForQuery(ctx),
 		float64(tx.ChangeDue)/100.0,
+		middleware.GrantsSubForQuery(ctx),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update POS transaction: %w", err)
@@ -251,13 +295,14 @@ func (r *PostgresRepository) ListTransactions(ctx context.Context, registerID st
 		FROM pos_transactions t
 		WHERE ($1 = '' OR t.register_id = $1)
 		  AND t.created_at >= $2 AND t.created_at < $3
-		  AND ($4::uuid IS NULL OR t.branch_id = $4)
+		  AND ` + middleware.Wall("t", 4, 5) + `
 		ORDER BY t.created_at DESC
 	`
 	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 	endOfDay := startOfDay.Add(24 * time.Hour)
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, registerID, startOfDay, endOfDay, branchctx.IDForQuery(ctx))
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, registerID, startOfDay, endOfDay,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list POS transactions: %w", err)
 	}
@@ -307,13 +352,45 @@ func (r *PostgresRepository) RemoveLineItem(ctx context.Context, itemID uuid.UUI
 		USING pos_transactions t
 		WHERE li.id = $1
 		  AND t.id = li.transaction_id
-		  AND ($2::uuid IS NULL OR t.branch_id = $2)
+		  AND ` + middleware.Wall("t", 2, 3) + `
 	`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID, branchctx.IDForQuery(ctx))
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to remove POS line item: %w", err)
 	}
 	return nil
+}
+
+// TransactionBranch reads a transaction's own branch with no wall, for the
+// act hold that must decide before the walled read hides the record. A
+// transaction that does not exist reads as no branch.
+func (r *PostgresRepository) TransactionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	var branch *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT branch_id FROM pos_transactions WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transaction branch: %w", err)
+	}
+	return branch, nil
+}
+
+// TillSessionBranch reads a till session's own branch with no wall, for the
+// act hold that must decide before the walled read hides the record. A
+// session that does not exist reads as no branch.
+func (r *PostgresRepository) TillSessionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	var branch *uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT branch_id FROM till_sessions WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read till session branch: %w", err)
+	}
+	return branch, nil
 }
 
 func (r *PostgresRepository) GetLineItems(ctx context.Context, txID uuid.UUID) ([]POSLineItem, error) {

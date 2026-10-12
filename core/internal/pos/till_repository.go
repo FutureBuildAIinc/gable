@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,9 +43,13 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 			return fmt.Errorf("failed to resolve register branch for till: %w", err)
 		}
 		// Hold the caller's branch context against the register's branch the
-		// way the sale does: nothing is written on a mismatch.
+		// way the sale does: nothing is written on a mismatch, and a caller
+		// with no branch in context is held to the caller's grants.
 		if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
 			return &RegisterBranchRefusedError{RegisterID: s.RegisterID}
+		}
+		if err := r.holdRegisterBranch(ctx, s.RegisterID, registerBranch); err != nil {
+			return err
 		}
 		s.BranchID = registerBranch
 	}
@@ -99,8 +104,8 @@ const tillSessionColumns = `id, register_id, branch_id, cashier_id, status, open
 
 func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT `+tillSessionColumns+` FROM till_sessions WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
-		id, branchctx.IDForQuery(ctx))
+		`SELECT `+tillSessionColumns+` FROM till_sessions WHERE id = $1 AND `+middleware.Wall("", 2, 3),
+		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	s, err := r.scanTillSession(row)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get till session: %w", err)
@@ -109,13 +114,14 @@ func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (
 }
 
 // GetOpenTillSession returns the register's OPEN session, or (nil, nil). A
-// session of a branch the caller's branch context may not target reads as
-// none (the branch predicate the transaction reads carry).
+// session of a branch the caller's branch context may not target, or of a
+// branch outside the grants a caller with no branch in context is held to,
+// reads as none (the branch predicate the transaction reads carry).
 func (r *PostgresRepository) GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT `+tillSessionColumns+` FROM till_sessions
-		 WHERE register_id = $1 AND status = 'OPEN' AND ($2::uuid IS NULL OR branch_id = $2)`,
-		registerID, branchctx.IDForQuery(ctx))
+		 WHERE register_id = $1 AND status = 'OPEN' AND `+middleware.Wall("", 2, 3),
+		registerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	s, err := r.scanTillSession(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -242,8 +248,8 @@ const zReportColumns = `id, till_session_id, register_id, branch_id, over_short,
 func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT `+zReportColumns+` FROM till_z_reports
-		 WHERE till_session_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
-		sessionID, branchctx.IDForQuery(ctx))
+		 WHERE till_session_id = $1 AND `+middleware.Wall("", 2, 3),
+		sessionID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	z, err := r.scanZReport(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -255,13 +261,12 @@ func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID 
 }
 
 func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
-	branch := branchctx.IDForQuery(ctx)
 	q := `SELECT ` + zReportColumns + ` FROM till_z_reports
-		WHERE ($1 = '' OR register_id = $1) AND ($2::uuid IS NULL OR branch_id = $2)`
-	args := []any{registerID, branch}
+		WHERE ($1 = '' OR register_id = $1) AND ` + middleware.Wall("", 2, 3)
+	args := []any{registerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
 	if !date.IsZero() {
 		start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-		q += ` AND generated_at >= $3 AND generated_at < $4`
+		q += ` AND generated_at >= $4 AND generated_at < $5`
 		args = append(args, start, start.Add(24*time.Hour))
 	}
 	q += ` ORDER BY generated_at DESC`
