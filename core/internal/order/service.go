@@ -37,6 +37,7 @@ type TxRunner interface {
 // BranchGuard applies the payload branch rule (ADR 0007 section 2.3).
 type BranchGuard interface {
 	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
 // PriceEngine prices a stocked product line for a customer and quantity
@@ -796,13 +797,34 @@ func (s *Service) createCore(ctx context.Context, d *Draft, actor string) (*Orde
 }
 
 // branchFor resolves the order's branch: the body's, the caller's context,
-// then the deployment default.
+// then, for a user context with no branch, the user's grants (exactly one
+// granted branch: that one; several: the request must name one; none: fail
+// closed), never the deployment default, which no grant of the creator holds
+// (SEC-NOHEADER-1). Callers the grants never hold (an administrator, an
+// owner, a key, a system caller) keep the deployment default.
 func (s *Service) branchFor(ctx context.Context, branch *uuid.UUID) (uuid.UUID, error) {
 	if branch != nil && *branch != uuid.Nil {
 		return *branch, nil
 	}
 	if bid := middleware.BranchIDForQuery(ctx); bid != nil {
 		return *bid, nil
+	}
+	if s.branches != nil {
+		granted, err := s.branches.GrantsForCreate(ctx)
+		switch {
+		case err == nil && granted != nil:
+			return *granted, nil
+		case err == nil:
+		case errors.Is(err, middleware.ErrCreateBranchChoice):
+			return uuid.Nil, httpx.BadRequest("branch_id is required: this caller holds more than one branch grant",
+				httpx.FieldError{Field: "branch_id", Message: "is required: name one of the caller's granted branches"})
+		case errors.Is(err, middleware.ErrPayloadBranchRefused):
+			return uuid.Nil, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+				Message: "branch_id is outside the branches this caller may target",
+				Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+		default:
+			return uuid.Nil, err
+		}
 	}
 	return s.repo.DefaultBranchID(ctx)
 }

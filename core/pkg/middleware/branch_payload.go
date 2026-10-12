@@ -110,6 +110,54 @@ func (g *BranchGuard) CheckGrantsBranch(ctx context.Context, branch *uuid.UUID) 
 	return nil
 }
 
+// ErrCreateBranchChoice is the verdict GrantsForCreate returns when a user
+// context with no branch holds more than one granted branch: no grant alone
+// decides the branch a create would write at, so the request must name one
+// (the module maps this to its 400 naming branch_id).
+var ErrCreateBranchChoice = errors.New("the caller holds more than one branch grant; the request must name branch_id")
+
+// GrantsForCreate settles the branch a create writes at for a caller whose
+// context carries no branch (SEC-NOHEADER-1): a user's create takes its
+// branch from the user's user_locations grants, never the deployment
+// default, so the record is one its own grants let the creator read back.
+// Exactly one granted branch answers it; several answer
+// ErrCreateBranchChoice (the request must name one); none answer
+// ErrPayloadBranchRefused (fail closed, the same refusal CheckGrantsBranch
+// serves). A caller the grants never hold (a context branch, an
+// administrator, an owner, the single branch switch, an unbound key, a
+// system caller) answers (nil, nil) and keeps its own default resolution.
+func (g *BranchGuard) GrantsForCreate(ctx context.Context) (*uuid.UUID, error) {
+	bc := BranchFromContext(ctx)
+	if bc == nil || bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
+		return nil, nil
+	}
+	rows, err := g.m.db.GetExecutor(ctx).Query(ctx,
+		`SELECT branch_id FROM user_locations WHERE user_sub = $1`, bc.UserSub)
+	if err != nil {
+		return nil, fmt.Errorf("branch grant lookup: %w", err)
+	}
+	defer rows.Close()
+	var branches []uuid.UUID
+	for rows.Next() {
+		var b uuid.UUID
+		if err := rows.Scan(&b); err != nil {
+			return nil, fmt.Errorf("branch grant lookup: %w", err)
+		}
+		branches = append(branches, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("branch grant lookup: %w", err)
+	}
+	switch len(branches) {
+	case 0:
+		return nil, ErrPayloadBranchRefused
+	case 1:
+		return &branches[0], nil
+	default:
+		return nil, ErrCreateBranchChoice
+	}
+}
+
 // CheckPayloadLocation applies the same rule to a location id a body names
 // where the location stands for a branch (stock moves, receiving): the
 // location's own branch (its branch_id, or itself when it is a branch) must be
