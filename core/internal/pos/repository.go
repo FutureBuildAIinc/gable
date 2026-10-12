@@ -27,8 +27,9 @@ func (e *RegisterBranchRefusedError) Error() string {
 }
 
 // UnknownRegisterError is the refusal a write answers when the register it
-// names does not exist. It is a typed error so the HTTP layer can answer it
-// 400 instead of the 500 a plain service error maps to; the offline sync
+// names does not exist, an empty register_id included, which names no register
+// either (r19 P3-1). It is a typed error so the HTTP layer can answer it 400
+// instead of the 500 a plain service error maps to; the offline sync
 // refuses a batch whose register does not resolve before any item runs and
 // before the log row, so the log never names a register nobody made (r17
 // P3-3).
@@ -37,6 +38,9 @@ type UnknownRegisterError struct {
 }
 
 func (e *UnknownRegisterError) Error() string {
+	if e.RegisterID == "" {
+		return "the batch register_id is empty and names no register"
+	}
 	return fmt.Sprintf("register %s does not exist", e.RegisterID)
 }
 

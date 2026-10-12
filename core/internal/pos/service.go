@@ -637,18 +637,21 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, req OfflineSyncRe
 	// register for a caller held to one branch. A batch register that does
 	// not resolve is refused the same way (r17 P3-3): a log row under a
 	// register nobody made is never written, and a lookup failure answers an
-	// error rather than skipping the hold.
-	if req.RegisterID != "" {
-		branch, err := s.repo.GetRegisterBranch(ctx, req.RegisterID)
-		if err != nil {
-			return nil, fmt.Errorf("sync: register branch lookup: %w", err)
-		}
-		if branch == nil {
-			return nil, &UnknownRegisterError{RegisterID: req.RegisterID}
-		}
-		if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
-			return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
-		}
+	// error rather than skipping the hold. An empty register_id names no
+	// register either (r19 P3-1), so it is refused the same 400 rather than
+	// logged under a register nobody made.
+	if req.RegisterID == "" {
+		return nil, &UnknownRegisterError{RegisterID: req.RegisterID}
+	}
+	branch, err := s.repo.GetRegisterBranch(ctx, req.RegisterID)
+	if err != nil {
+		return nil, fmt.Errorf("sync: register branch lookup: %w", err)
+	}
+	if branch == nil {
+		return nil, &UnknownRegisterError{RegisterID: req.RegisterID}
+	}
+	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
+		return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
 	}
 
 	syncTag := "offline-v1"

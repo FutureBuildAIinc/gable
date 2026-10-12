@@ -77,6 +77,20 @@ func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 		t.Errorf("the refused sync wrote %d transactions, want none", n)
 	}
 
+	// The empty batch register names no register either (r19 P3-1), so it is
+	// refused the same 400, before any item runs and before a log row is
+	// written under a register nobody made.
+	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody(""), nil)
+	if status != http.StatusBadRequest {
+		t.Errorf("bound key sync with an empty batch register: %d %s, want the 400 refusing the batch", status, buf)
+	}
+	if n := logRows(); n != 0 {
+		t.Errorf("the empty register sync wrote %d pos_sync_log rows, want none", n)
+	}
+	if n := f.transactionsWithID(t, client); n != 0 {
+		t.Errorf("the empty register sync wrote %d transactions, want none", n)
+	}
+
 	// The control: the pin's own register as the batch register still passes.
 	status, buf = f.key(t, first.raw, "POST", "/api/v1/pos/sync", syncBody(f.regA), nil)
 	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {

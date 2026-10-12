@@ -729,8 +729,10 @@ same way a path customer is: the cash and card payment, the credit memo
 moved onto another customer included), the offline POS sync (the customer
 each replayed sale names, whose ACCOUNT tender invoices it, and the batch
 register itself, a batch naming another branch's register refused 403, or a
-batch register naming no register at all refused 400, before any item runs
-and before the `pos_sync_log` row names it) and the draft
+batch register that is empty or names no register at all refused 400 for
+every caller, a register that does not exist being a bad request for
+anyone and not only a bound key, before any item runs and before the
+`pos_sync_log` row names it) and the draft
 promotions, which read the customer from the draft's stored payload, are
 refused a bound key whose pin does not hold that customer (403 naming
 `customer_id`, the `key.branch_refused` row, nothing written). Without it
