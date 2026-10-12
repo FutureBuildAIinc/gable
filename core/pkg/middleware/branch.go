@@ -51,12 +51,7 @@ func BranchIDForQuery(ctx context.Context) *uuid.UUID {
 // branch-scoped query joins both: "$1 is not null AND branch_id = $1", else
 // branch_id in the sub's grants, else (both nil) every branch.
 func GrantsSubForQuery(ctx context.Context) *string {
-	bc := BranchFromContext(ctx)
-	if bc == nil || bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
-		return nil
-	}
-	sub := bc.UserSub
-	return &sub
+	return branchctx.GrantsSubForQuery(ctx)
 }
 
 // Wall is the branch predicate a branch scoped query carries, the read side

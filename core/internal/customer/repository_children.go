@@ -217,7 +217,7 @@ func (r *PostgresRepository) InsertShipTo(ctx context.Context, s *ShipTo) error 
 func (r *PostgresRepository) GetShipTo(ctx context.Context, id uuid.UUID) (*ShipTo, error) {
 	s := &ShipTo{}
 	err := scanShipTo(r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+shipToColumns+shipToJoin+`
-		WHERE s.id = $1 AND `+wall("c", 2), id, branchctx.IDForQuery(ctx)), s)
+		WHERE s.id = $1 AND `+wall("c", 2, 3), id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)), s)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrShipToNotFound
 	}
@@ -230,7 +230,7 @@ func (r *PostgresRepository) GetShipTo(ctx context.Context, id uuid.UUID) (*Ship
 func (r *PostgresRepository) LockShipTo(ctx context.Context, id uuid.UUID) error {
 	var locked uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT s.id`+shipToJoin+`
-		WHERE s.id = $1 AND `+wall("c", 2)+` FOR UPDATE OF s`, id, branchctx.IDForQuery(ctx)).Scan(&locked)
+		WHERE s.id = $1 AND `+wall("c", 2, 3)+` FOR UPDATE OF s`, id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrShipToNotFound
 	}
@@ -278,8 +278,8 @@ func (r *PostgresRepository) CountShipTos(ctx context.Context, customerID uuid.U
 }
 
 func shipToWhere(ctx context.Context, customerID uuid.UUID, f ChildFilter, withCursor bool) (string, []any) {
-	args := []any{customerID, branchctx.IDForQuery(ctx)}
-	conds := []string{"s.customer_id = $1", wall("c", 2)}
+	args := []any{customerID, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)}
+	conds := []string{"s.customer_id = $1", wall("c", 2, 3)}
 	if f.IsActive != nil {
 		args = append(args, *f.IsActive)
 		conds = append(conds, fmt.Sprintf("s.is_active = $%d", len(args)))
@@ -374,7 +374,7 @@ func (r *PostgresRepository) InsertContact(ctx context.Context, c *Contact) erro
 func (r *PostgresRepository) GetContact(ctx context.Context, id uuid.UUID) (*Contact, error) {
 	c := &Contact{}
 	err := scanContact(r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+contactColumns+contactJoin+`
-		WHERE cc.id = $1 AND `+wall("c", 2), id, branchctx.IDForQuery(ctx)), c)
+		WHERE cc.id = $1 AND `+wall("c", 2, 3), id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)), c)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrContactNotFound
 	}
@@ -387,7 +387,7 @@ func (r *PostgresRepository) GetContact(ctx context.Context, id uuid.UUID) (*Con
 func (r *PostgresRepository) LockContact(ctx context.Context, id uuid.UUID) error {
 	var locked uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT cc.id`+contactJoin+`
-		WHERE cc.id = $1 AND `+wall("c", 2)+` FOR UPDATE OF cc`, id, branchctx.IDForQuery(ctx)).Scan(&locked)
+		WHERE cc.id = $1 AND `+wall("c", 2, 3)+` FOR UPDATE OF cc`, id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrContactNotFound
 	}
@@ -419,8 +419,8 @@ func (r *PostgresRepository) DeleteContact(ctx context.Context, id uuid.UUID) er
 }
 
 func contactWhere(ctx context.Context, customerID uuid.UUID, f ChildFilter, withCursor bool) (string, []any) {
-	args := []any{customerID, branchctx.IDForQuery(ctx)}
-	conds := []string{"cc.customer_id = $1", wall("c", 2)}
+	args := []any{customerID, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)}
+	conds := []string{"cc.customer_id = $1", wall("c", 2, 3)}
 	if f.IsActive != nil {
 		args = append(args, *f.IsActive)
 		conds = append(conds, fmt.Sprintf("COALESCE(cc.is_active, TRUE) = $%d", len(args)))
