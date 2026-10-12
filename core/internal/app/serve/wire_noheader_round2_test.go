@@ -112,11 +112,18 @@ func TestNoHeader_OrderByNumber(t *testing.T) {
 func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 	f := newKeyPinFixture(t)
 	ctx := context.Background()
-	f.seedWalledTwins(t)
+	w := f.seedWalledTwins(t)
 	var def string
 	if err := f.db.Pool.QueryRow(ctx, `SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&def); err != nil {
 		t.Fatal(err)
 	}
+	// The manual purchase orders this test creates on the twins' vendor,
+	// outside the twins' own two rows.
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id IN
+			(SELECT id FROM purchase_orders WHERE vendor_id = $1 AND id NOT IN ($2, $3))`, w.vendor, w.poA, w.poB)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE vendor_id = $1 AND id NOT IN ($2, $3)`, w.vendor, w.poA, w.poB)
+	})
 	// The order create needs a tax answer that needs no branch rate: an
 	// exemption on the customer (the resolver's first arm).
 	if _, err := f.db.Pool.Exec(ctx,
@@ -151,6 +158,7 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 	line := `{"sku":"` + sku + `","description":"pin noheader","quantity":"1","uom":"EA","unit_price_ten_thousandths":10000}`
 	quoteBody := `{"customer_id":"` + f.custID.String() + `","lines":[` + line + `]}`
 	orderBody := `{"customer_id":"` + f.custID.String() + `","delivery_type":"pickup","lines":[` + line + `]}`
+	poBody := `{"vendor_id":"` + w.vendor.String() + `","lines":[]}`
 	creates := []struct {
 		path  string
 		body  string
@@ -165,6 +173,33 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 	countAt := func(table, branch string) int {
 		return noheaderCount(t, f, `SELECT COUNT(*) FROM `+table+` WHERE branch_id = $1`, branch)
 	}
+	// The manual purchase order create (r4 P1-2, r3 P2-3) runs as the
+	// purchasing role its route guard admits.
+	poCreate := func(body string) (int, []byte) {
+		return f.userAs(t, "purchasing", "POST", "/api/v1/purchase-orders", body, nil)
+	}
+	// The AP bill create (r4 P3-5) runs as the finance role its route guard
+	// admits, on the twins' vendor and the seeded 5020 expense account.
+	var expense string
+	if err := f.db.Pool.QueryRow(ctx, `SELECT id FROM gl_accounts WHERE code = '5020'`).Scan(&expense); err != nil {
+		t.Fatal(err)
+	}
+	billRun := uuid.NewString()[:8]
+	billBody := `{"vendor_id":"` + w.vendor.String() + `","vendor_invoice_number":"PIN-NH3-` + billRun +
+		`","invoice_date":"2026-01-10","due_date":"2026-02-10","lines":[{"description":"pin noheader","quantity":"1",` +
+		`"unit_price_ten_thousandths":10000,"gl_account_id":"` + expense + `"}]}`
+	billCreate := func() (int, []byte) {
+		return f.userAs(t, "finance", "POST", "/api/v1/ap/invoices", billBody, nil)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'vendor_invoice'
+			AND entity_id IN (SELECT id::text FROM vendor_invoices WHERE vendor_invoice_number LIKE 'PIN-NH3-%')`)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_type = 'vendor_invoice'
+			AND entity_id IN (SELECT id FROM vendor_invoices WHERE vendor_invoice_number LIKE 'PIN-NH3-%')`)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM vendor_invoice_lines WHERE invoice_id IN
+			(SELECT id FROM vendor_invoices WHERE vendor_invoice_number LIKE 'PIN-NH3-%')`)
+		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM vendor_invoices WHERE vendor_invoice_number LIKE 'PIN-NH3-%'`)
+	})
 
 	// No grants at all: every create refuses, nothing lands anywhere.
 	for _, c := range creates {
@@ -177,15 +212,39 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 			t.Errorf("no grants %s wrote %d rows at the default branch, want none", c.path, after-before)
 		}
 	}
+	{
+		before := countAt("purchase_orders", def)
+		status, buf := poCreate(poBody)
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "branch_id") {
+			t.Errorf("no grants PO: %d %s, want the 403 naming branch_id", status, buf)
+		}
+		if after := countAt("purchase_orders", def); after != before {
+			t.Errorf("no grants PO wrote %d rows at the default branch, want none", after-before)
+		}
+		status, buf = billCreate()
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "branch_id") {
+			t.Errorf("no grants AP bill: %d %s, want the 403 naming branch_id", status, buf)
+		}
+	}
 
 	// Several granted branches: the create cannot pick one, so it refuses
 	// with a 400 naming branch_id, nothing written. The second grant is not
 	// a home branch (one home per user).
 	noheaderGrant(t, f, "pin-sales", f.branchA)
+	noheaderGrant(t, f, "pin-purchasing", f.branchA)
 	if _, err := f.db.Pool.Exec(ctx,
 		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pin-sales', $1, FALSE, 'sec-noheader')`, f.branchC); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pin-purchasing', $1, FALSE, 'sec-noheader')`, f.branchC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pin-finance', $1, FALSE, 'sec-noheader')`, f.branchC); err != nil {
+		t.Fatal(err)
+	}
+	noheaderGrant(t, f, "pin-finance", f.branchA)
 	for _, c := range creates {
 		before := countAt(c.table, def)
 		status, buf := f.userAs(t, "sales", "POST", c.path, c.body, nil)
@@ -196,7 +255,44 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 			t.Errorf("two grants %s wrote %d rows at the default branch, want none", c.path, after-before)
 		}
 	}
+	{
+		before := countAt("purchase_orders", def)
+		status, buf := poCreate(poBody)
+		if status != http.StatusBadRequest || !strings.Contains(string(buf), "branch_id") {
+			t.Errorf("two grants PO: %d %s, want the 400 naming branch_id", status, buf)
+		}
+		if after := countAt("purchase_orders", def); after != before {
+			t.Errorf("two grants PO wrote %d rows at the default branch, want none", after-before)
+		}
+		status, buf = billCreate()
+		if status != http.StatusBadRequest || !strings.Contains(string(buf), "branch_id") {
+			t.Errorf("two grants AP bill: %d %s, want the 400 naming branch_id", status, buf)
+		}
+	}
+	// A create that names one of the two granted branches writes there: the
+	// manual purchase order is the family that gains the body branch.
+	poNamingA := `{"vendor_id":"` + w.vendor.String() + `","branch_id":"` + f.branchA.String() + `","lines":[]}`
+	status, buf := poCreate(poNamingA)
+	if status != http.StatusCreated {
+		t.Errorf("two grants PO naming branch_id: %d %s, want 201 at the named branch", status, buf)
+	} else {
+		var row struct {
+			BranchID string `json:"branch_id"`
+		}
+		if err := json.Unmarshal(buf, &row); err != nil {
+			t.Fatal(err)
+		}
+		if row.BranchID != f.branchA.String() {
+			t.Errorf("two grants PO naming branch_id wrote at %s, want the named %s", row.BranchID, f.branchA)
+		}
+	}
 	if _, err := f.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'pin-sales' AND branch_id = $1`, f.branchC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'pin-purchasing' AND branch_id = $1`, f.branchC); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'pin-finance' AND branch_id = $1`, f.branchC); err != nil {
 		t.Fatal(err)
 	}
 
@@ -233,6 +329,48 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 		status, buf = f.userAs(t, "sales", "GET", c.read, "", nil)
 		if status != http.StatusOK {
 			t.Errorf("one grant read back %s: %d, want 200", c.read, status)
+		}
+	}
+	{
+		before := countAt("purchase_orders", def)
+		status, buf := poCreate(poBody)
+		if status != http.StatusCreated {
+			t.Errorf("one grant PO: %d %s, want 201 at the granted branch", status, buf)
+		} else {
+			var row struct {
+				BranchID string `json:"branch_id"`
+			}
+			if err := json.Unmarshal(buf, &row); err != nil {
+				t.Fatal(err)
+			}
+			if row.BranchID != f.branchA.String() {
+				t.Errorf("one grant PO wrote at branch %s, want the granted %s", row.BranchID, f.branchA)
+			}
+			if after := countAt("purchase_orders", def); after != before {
+				t.Errorf("one grant PO wrote %d rows at the default branch, want none", after-before)
+			}
+		}
+		status, buf = f.userAs(t, "purchasing", "GET", "/api/v1/purchase-orders", "", nil)
+		if status != http.StatusOK {
+			t.Errorf("one grant PO read back: %d, want 200", status)
+		}
+	}
+	// The single grant AP bill takes the grant: the refusal the default
+	// fallback used to serve (r4 P3-5) is gone.
+	{
+		status, buf := billCreate()
+		if status != http.StatusCreated {
+			t.Errorf("one grant AP bill: %d %s, want 201 at the granted branch", status, buf)
+		} else {
+			var row struct {
+				BranchID string `json:"branch_id"`
+			}
+			if err := json.Unmarshal(buf, &row); err != nil {
+				t.Fatal(err)
+			}
+			if row.BranchID != f.branchA.String() {
+				t.Errorf("one grant AP bill wrote at %s, want the granted %s", row.BranchID, f.branchA)
+			}
 		}
 	}
 }

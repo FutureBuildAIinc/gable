@@ -431,6 +431,7 @@ func Run() {
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(aiClient)
+	poSvc.WithBranchGuard(wall.guard)
 	// The receive writes purchase_order.received in its transaction (ADR 0005 5.4).
 	poSvc.WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
 	velocityRepo := purchase_order.NewVelocityRepository(db)

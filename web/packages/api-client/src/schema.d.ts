@@ -5603,7 +5603,7 @@ export interface paths {
         put?: never;
         /**
          * Create a manual purchase order
-         * @description Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400. Any service failure (unknown vendor, bad line product id) is a 500.
+         * @description Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400, and so is a branch_id that is not a UUID. With no X-Branch-Id the branch comes from the caller's grants (one granted branch writes there; several answer a 400 naming branch_id; none answer a 403 naming branch_id, SEC-NOHEADER-1), never the deployment default; a body branch_id the caller may not target is a 403 naming branch_id. Any other service failure (unknown vendor, bad line product id) is a 500.
          */
         post: operations["purchaseOrderCreate"];
         delete?: never;
@@ -12807,6 +12807,11 @@ export interface components {
              * @description Required in effect; a non UUID value is a 400.
              */
             vendor_id?: string;
+            /**
+             * Format: uuid
+             * @description The branch the order is bought for. Required in effect for a caller whose grants hold several branches and sends no X-Branch-Id; with no branch anywhere the caller's grants decide (one grant writes there, none is a 403), never the deployment default.
+             */
+            branch_id?: string;
             lines?: components["schemas"]["PurchaseOrderCreateLine"][];
         };
         PurchaseOrderCreateLine: {
@@ -13311,7 +13316,7 @@ export interface components {
             /** @description CSV, XLSX or PDF, case insensitive; empty means CSV. */
             format?: string;
         };
-        /** @description reporting.ReportSchedule. The timestamps are Postgres ::text strings. */
+        /** @description reporting.ReportSchedule. The timestamps are Postgres ::text strings. created_by and creator_is_admin record the creating caller the run resolves its reach from (SEC-NOHEADER-1): a schedule with no creator never runs. */
         ReportingSchedule: {
             /** Format: uuid */
             id: string;
@@ -13327,6 +13332,10 @@ export interface components {
             last_run_at?: string;
             /** @description Absent until the first run. Postgres timestamptz text. */
             next_run_at?: string;
+            /** @description The creating caller's subject, the same text user_locations keys grants by; empty when no caller identity was recorded (the run refuses such a schedule). */
+            created_by?: string;
+            /** @description True when the creator held the administrator or owner role when the schedule was made, whose run keeps the every branch view. */
+            creator_is_admin: boolean;
             /** @description Postgres timestamptz text. */
             created_at: string;
             /** @description Postgres timestamptz text. */

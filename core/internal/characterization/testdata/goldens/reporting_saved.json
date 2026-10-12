@@ -295,6 +295,7 @@
         },
         "schedule": {
           "created_at": "<ts+0d>",
+          "creator_is_admin": false,
           "cron_expression": "0 30 6 * * *",
           "format": "XLSX",
           "id": "<id-6>",

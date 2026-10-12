@@ -737,8 +737,12 @@ components:
           description: CSV, XLSX or PDF, case insensitive; empty means CSV.
     ReportingSchedule:
       type: object
-      description: reporting.ReportSchedule. The timestamps are Postgres ::text strings.
-      required: [id, report_id, cron_expression, recipients, status, format, created_at, updated_at]
+      description: >-
+        reporting.ReportSchedule. The timestamps are Postgres ::text strings.
+        created_by and creator_is_admin record the creating caller the run
+        resolves its reach from (SEC-NOHEADER-1): a schedule with no creator
+        never runs.
+      required: [id, report_id, cron_expression, recipients, status, format, creator_is_admin, created_at, updated_at]
       properties:
         id:
           type: string
@@ -764,6 +768,17 @@ components:
         next_run_at:
           type: string
           description: Absent until the first run. Postgres timestamptz text.
+        created_by:
+          type: string
+          description: >-
+            The creating caller's subject, the same text user_locations keys
+            grants by; empty when no caller identity was recorded (the run
+            refuses such a schedule).
+        creator_is_admin:
+          type: boolean
+          description: >-
+            True when the creator held the administrator or owner role when
+            the schedule was made, whose run keeps the every branch view.
         created_at:
           type: string
           description: Postgres timestamptz text.
