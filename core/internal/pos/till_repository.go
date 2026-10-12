@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -33,12 +34,17 @@ func (r *PostgresRepository) CreateTillSession(ctx context.Context, s *TillSessi
 	if s.BranchID == nil {
 		var registerBranch *uuid.UUID
 		err := r.db.GetExecutor(ctx).QueryRow(ctx,
-			`SELECT l.branch_id
+			`SELECT COALESCE(l.branch_id, r.branch_id)
 			 FROM pos_registers r
 			 LEFT JOIN locations l ON l.id = r.location_id
 			 WHERE r.id = $1`, s.RegisterID).Scan(&registerBranch)
 		if err != nil {
 			return fmt.Errorf("failed to resolve register branch for till: %w", err)
+		}
+		// Hold the caller's branch context against the register's branch the
+		// way the sale does: nothing is written on a mismatch.
+		if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
+			return &RegisterBranchRefusedError{RegisterID: s.RegisterID}
 		}
 		s.BranchID = registerBranch
 	}
@@ -93,7 +99,8 @@ const tillSessionColumns = `id, register_id, branch_id, cashier_id, status, open
 
 func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT `+tillSessionColumns+` FROM till_sessions WHERE id = $1`, id)
+		`SELECT `+tillSessionColumns+` FROM till_sessions WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
+		id, branchctx.IDForQuery(ctx))
 	s, err := r.scanTillSession(row)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get till session: %w", err)
@@ -101,10 +108,14 @@ func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (
 	return s, nil
 }
 
-// GetOpenTillSession returns the register's OPEN session, or (nil, nil).
+// GetOpenTillSession returns the register's OPEN session, or (nil, nil). A
+// session of a branch the caller's branch context may not target reads as
+// none (the branch predicate the transaction reads carry).
 func (r *PostgresRepository) GetOpenTillSession(ctx context.Context, registerID string) (*TillSession, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT `+tillSessionColumns+` FROM till_sessions WHERE register_id = $1 AND status = 'OPEN'`, registerID)
+		`SELECT `+tillSessionColumns+` FROM till_sessions
+		 WHERE register_id = $1 AND status = 'OPEN' AND ($2::uuid IS NULL OR branch_id = $2)`,
+		registerID, branchctx.IDForQuery(ctx))
 	s, err := r.scanTillSession(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -230,7 +241,9 @@ const zReportColumns = `id, till_session_id, register_id, branch_id, over_short,
 
 func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {
 	row := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT `+zReportColumns+` FROM till_z_reports WHERE till_session_id = $1`, sessionID)
+		`SELECT `+zReportColumns+` FROM till_z_reports
+		 WHERE till_session_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`,
+		sessionID, branchctx.IDForQuery(ctx))
 	z, err := r.scanZReport(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -242,11 +255,13 @@ func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID 
 }
 
 func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
-	q := `SELECT ` + zReportColumns + ` FROM till_z_reports WHERE ($1 = '' OR register_id = $1)`
-	args := []any{registerID}
+	branch := branchctx.IDForQuery(ctx)
+	q := `SELECT ` + zReportColumns + ` FROM till_z_reports
+		WHERE ($1 = '' OR register_id = $1) AND ($2::uuid IS NULL OR branch_id = $2)`
+	args := []any{registerID, branch}
 	if !date.IsZero() {
 		start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-		q += ` AND generated_at >= $2 AND generated_at < $3`
+		q += ` AND generated_at >= $3 AND generated_at < $4`
 		args = append(args, start, start.Add(24*time.Hour))
 	}
 	q += ` ORDER BY generated_at DESC`

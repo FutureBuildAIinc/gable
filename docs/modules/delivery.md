@@ -413,8 +413,12 @@ and `driver` and to the branches the user is granted.
 
 A branch bound key (ADR 0007 section 5.5) is pinned to its branch:
 the machine key core puts that branch into the request's branch
-context before the module runs, so lists, reads and writes on these routes see that
-branch only. A key
+context before the module runs, so lists, reads and writes on the stop and
+route routes see that branch only. The fleet rows carry no branch column:
+the vehicle reads stay stated limits (dealer wide reference data), every
+vehicle write is refused to a bound key, and the driver routes are refused
+outright, reads included (driver rows carry personal data and no branch
+column). A key
 bound to no branch behaves as today's claims-less caller: it reads
 and writes across branches, scoped only by its `delivery:read` or
 `delivery:write` scope.

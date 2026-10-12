@@ -279,6 +279,11 @@ invoices segment. The user guard at the serve layer is
 key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
 
+A key bound to one branch (ADR 0007 section 5.5) may create or update a
+credit memo (`POST /credit-memos`, `PUT /credit-memos/{id}`) only for a
+customer its branch holds: `403 forbidden` naming `customer_id`, nothing
+written.
+
 ## ADRs that govern this module
 
 - [`docs/adr/0001-wire-contract.md`](../adr/0001-wire-contract.md) sections 1, 2, 3, 6, 7, 7a, 8, 9, 11, 12.

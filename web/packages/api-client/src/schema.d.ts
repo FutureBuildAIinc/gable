@@ -4575,7 +4575,7 @@ export interface paths {
         put?: never;
         /**
          * Replay offline transactions
-         * @description A missing batch_id or an empty items list answers 400.
+         * @description A missing batch_id, an empty items list, or a register_id that is empty or names no register answers 400 for every caller.
          */
         post: operations["posSync"];
         delete?: never;
@@ -4647,7 +4647,7 @@ export interface paths {
         };
         /**
          * Live X report of a session
-         * @description An unknown session answers 500.
+         * @description An unknown session, or a session the caller's branch context hides, answers 404 like the Z report read.
          */
         get: operations["posTillReport"];
         put?: never;
@@ -23883,6 +23883,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };

@@ -143,6 +143,15 @@ func (s *Service) StartTransaction(ctx context.Context, registerID string, cashi
 
 // AddItem adds a product to the transaction cart.
 func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRequest) (*POSTransaction, error) {
+	// The transaction must be visible before anything is written: the read
+	// carries the branch predicate, so a transaction of a branch the caller's
+	// branch context may not target (or a missing one) names nothing the
+	// caller may add to, and the line insert never happens (round 6 P1-2:
+	// the insert used to land and the recalculation fail after it).
+	tx, err := s.repo.GetTransaction(ctx, txID)
+	if err != nil {
+		return nil, err
+	}
 	// Get the product to populate description and pricing
 	prod, err := s.productSvc.GetProduct(ctx, req.ProductID)
 	if err != nil {
@@ -151,13 +160,9 @@ func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRe
 
 	// Resolve effective price (customer-specific if available)
 	effectivePrice := prod.BasePrice
-	if s.priceCalc != nil {
-		// Get the transaction to check for customer association
-		tx, txErr := s.repo.GetTransaction(ctx, txID)
-		if txErr == nil && tx.CustomerID != nil {
-			if resolved, pErr := s.priceCalc.CalculateItemPrice(ctx, *tx.CustomerID, req.ProductID, prod.BasePrice, req.Quantity); pErr == nil {
-				effectivePrice = resolved
-			}
+	if s.priceCalc != nil && tx.CustomerID != nil {
+		if resolved, pErr := s.priceCalc.CalculateItemPrice(ctx, *tx.CustomerID, req.ProductID, prod.BasePrice, req.Quantity); pErr == nil {
+			effectivePrice = resolved
 		}
 	}
 
@@ -623,6 +628,30 @@ func (s *Service) calculateTax(ctx context.Context, tx *POSTransaction, items []
 func (s *Service) SyncOfflineTransactions(ctx context.Context, req OfflineSyncRequest) (*OfflineSyncResponse, error) {
 	resp := &OfflineSyncResponse{
 		BatchID: req.BatchID,
+	}
+
+	// The batch register is the register the client says the batch ran on,
+	// and the log row names it: hold it to the caller's branch context the
+	// way each replayed create is held, before any item runs and before the
+	// batch is logged, so neither the log nor a replay names another branch's
+	// register for a caller held to one branch. A batch register that does
+	// not resolve is refused the same way (r17 P3-3): a log row under a
+	// register nobody made is never written, and a lookup failure answers an
+	// error rather than skipping the hold. An empty register_id names no
+	// register either (r19 P3-1), so it is refused the same 400 rather than
+	// logged under a register nobody made.
+	if req.RegisterID == "" {
+		return nil, &UnknownRegisterError{RegisterID: req.RegisterID}
+	}
+	branch, err := s.repo.GetRegisterBranch(ctx, req.RegisterID)
+	if err != nil {
+		return nil, fmt.Errorf("sync: register branch lookup: %w", err)
+	}
+	if branch == nil {
+		return nil, &UnknownRegisterError{RegisterID: req.RegisterID}
+	}
+	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
+		return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
 	}
 
 	syncTag := "offline-v1"

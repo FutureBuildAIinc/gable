@@ -14,6 +14,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// RegisterBranchRefusedError is the refusal a write answers when the caller's
+// branch context disagrees with the register's own branch. It is a typed error
+// so the HTTP layer can answer it 403 instead of the 500 a plain service
+// error maps to, nothing written either way.
+type RegisterBranchRefusedError struct {
+	RegisterID string
+}
+
+func (e *RegisterBranchRefusedError) Error() string {
+	return fmt.Sprintf("register %s belongs to a different branch than the request", e.RegisterID)
+}
+
+// UnknownRegisterError is the refusal a write answers when the register it
+// names does not exist, an empty register_id included, which names no register
+// either (r19 P3-1). It is a typed error so the HTTP layer can answer it 400
+// instead of the 500 a plain service error maps to; the offline sync
+// refuses a batch whose register does not resolve before any item runs and
+// before the log row, so the log never names a register nobody made (r17
+// P3-3).
+type UnknownRegisterError struct {
+	RegisterID string
+}
+
+func (e *UnknownRegisterError) Error() string {
+	if e.RegisterID == "" {
+		return "the batch register_id is empty and names no register"
+	}
+	return fmt.Sprintf("register %s does not exist", e.RegisterID)
+}
+
 // Repository handles POS data persistence.
 type Repository interface {
 	CreateTransaction(ctx context.Context, tx *POSTransaction) error
@@ -72,10 +102,10 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	}
 	tx.CreatedAt = time.Now()
 
-	// Derive the register's branch_id (via its assigned location).
+	// Derive the register's branch_id (its location's branch, else its own pos_registers.branch_id).
 	var registerBranch *uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT l.branch_id
+		`SELECT COALESCE(l.branch_id, r.branch_id)
 		 FROM pos_registers r
 		 LEFT JOIN locations l ON l.id = r.location_id
 		 WHERE r.id = $1`, tx.RegisterID).Scan(&registerBranch)
@@ -85,7 +115,7 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 
 	// Reject if the caller's branch context disagrees with the register's branch.
 	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && registerBranch != nil && *reqBranch != *registerBranch {
-		return fmt.Errorf("register %s belongs to a different branch than the request", tx.RegisterID)
+		return &RegisterBranchRefusedError{RegisterID: tx.RegisterID}
 	}
 
 	query := `
@@ -268,9 +298,18 @@ func (r *PostgresRepository) AddLineItem(ctx context.Context, item *POSLineItem)
 	return nil
 }
 
+// RemoveLineItem deletes a line through its transaction's branch: a bound
+// key's branch context (or a user's grants) hides a transaction of another
+// branch, so its line deletes as missing and nothing is written.
 func (r *PostgresRepository) RemoveLineItem(ctx context.Context, itemID uuid.UUID) error {
-	query := `DELETE FROM pos_line_items WHERE id = $1`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID)
+	query := `
+		DELETE FROM pos_line_items li
+		USING pos_transactions t
+		WHERE li.id = $1
+		  AND t.id = li.transaction_id
+		  AND ($2::uuid IS NULL OR t.branch_id = $2)
+	`
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, itemID, branchctx.IDForQuery(ctx))
 	if err != nil {
 		return fmt.Errorf("failed to remove POS line item: %w", err)
 	}

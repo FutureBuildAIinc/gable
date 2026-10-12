@@ -64,6 +64,18 @@ interpretation), and an exact vocabulary keeps every granted scope auditable
 as written. Should a migration ever arrive with wildcard-carrying keys, that
 is a listed contract change decided then.
 
+One capability scope rides with the vocabulary outside the route rule:
+`customers:restricted`, which no route requires and which the shared
+customer rule of ADR 0007 section 5.5 reads (a shared customer's restricted
+fields change only for an unbound key carrying it, beside the finance or
+owner role a user needs). Because no route requires it, holding the
+customers module's read and write scopes never grants it and no default
+grant carries it; it is minted on purpose, by an owner only (the admin role
+is refused with a 403 naming the scope), and the mint's `key.created` audit
+row names it. Migration 103's report predates it and still names a stored
+key carrying it as outside its own grammar, which is why the report's pin
+keeps it on the reported side.
+
 ### 3. Where a key is a principal
 
 A machine key is a principal on declared `/api/v1` module routes only.

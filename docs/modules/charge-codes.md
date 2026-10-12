@@ -62,7 +62,10 @@ handler is `core/internal/chargecode/handler.go`; the route census
 | PUT | `/api/v1/charge-codes/{id}` | Replace the name, revenue account, taxable flag, default price and `is_active`; `code` is never accepted (a 400); the revision precondition applies (`If-Match` and `revision`); `Idempotency-Key` rides the standard header. |
 
 The rows are dealer wide: `charge_codes` carries no `branch_id` and
-no row is filtered by branch. The routes still run behind the branch
+no row is filtered by branch. The reads are stated limits of the branch
+bound key's allowlist (ADR 0007 section 5.5); the writes are dealer wide
+writes and are refused to a branch bound key outright, whatever scope it
+holds. The routes still run behind the branch
 middleware, so with branches switched on a non admin caller names a
 branch the user holds in `X-Branch-Id`, as on other scoped routes. The
 `include_inactive` flag is the only filter; nothing else narrows the

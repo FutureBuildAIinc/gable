@@ -32,6 +32,10 @@ type fakeRepo struct {
 
 func newFakeRepo() *fakeRepo { return &fakeRepo{visible: true, stored: map[uuid.UUID]*Activity{}} }
 
+func (f *fakeRepo) ContactBelongsTo(_ context.Context, _, _ uuid.UUID) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeRepo) note(call string) {
 	f.calls = append(f.calls, call)
 	if f.orderRef != nil {

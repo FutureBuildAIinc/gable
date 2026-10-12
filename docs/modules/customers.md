@@ -166,12 +166,74 @@ segment is the first path segment under `/api/v1/`). Ship-tos need
 `contacts:read` or `contacts:write`; payment terms need
 `payment-terms:read` or `payment-terms:write`; price levels need
 `price_levels:read`. The user guard at the serve layer is
-`admin`, `owner`, `sales` for customer reads and writes, with
-`admin`, `owner`, `finance` taking the narrower payment terms writes;
-the exact guard is composed in
+`admin`, `owner` and `sales` for customer reads and writes, with
+`admin`, `owner`, `finance` taking the narrower payment terms writes and
+`finance` added on exactly the three routes that change a customer's
+restricted fields (`PUT /customers/{id}`, `PATCH /customers/{id}/salesperson`
+and `PUT /customers/{id}/escalation-policy`; the shared customer rule below
+hears its role there) and on the two reads those writes need
+(`GET /customers/{id}` and `GET /customers/{id}/escalation-policy`: a caller
+that must send the revision as `If-Match` has to be able to read it; reads
+only), and on no other customer route; the exact guard is composed in
 `core/internal/app/serve/wire_branch_wall.go` at `wall.customers`.
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
+
+A key bound to one branch (ADR 0007 section 5.5) reads a customer its
+branch shares with another, and changes a shared customer's record only on
+the branch local fields. The rule is deny by default: any header field not
+listed as branch local is restricted, so a field added later is restricted
+until it is listed in `branchLocalFields` (`core/internal/customer/shared.go`).
+A restricted write is `403 forbidden` in the words "this key may act
+only on its own branch: the customer is also held by branch <id>" (the lowest
+numbered other branch), with the `key.branch_refused` row, and the record is
+untouched. The customer scoped pricing rules, tax exemptions and category
+rules refuse a shared customer's bound key write in the same quoted lead in
+(`core/pkg/middleware/keybranch.go`), so every shared customer refusal a
+bound key meets carries words ADR 0007 section 5.5 quotes; each wall
+refusal writes its own `key.branch_refused` row naming the refused call's
+method, path and the pin branch, with nothing written to the wall's table. A customer the
+key's branch holds alone and an unshared customer
+are unchanged for every caller. Who else may change a shared customer's
+restricted fields: a user only with the `finance` or `owner` role (a sales
+or admin user is refused with the lead in "this role may not change a shared
+customer's restricted fields" naming the lowest
+numbered branch that holds the customer, and a caller with no claims at all
+is refused fail closed), and a dealer wide key only while it carries the
+dedicated `customers:restricted` scope; every other unbound key is refused
+with the lead in "this key may not change a shared customer's restricted
+fields" over the same clause (the lead in names the caller, so the words are
+true for whoever reads them). A refusal of a user or an unbound key writes a
+`customer.shared_restricted_refused` audit row for the customer naming the
+actor, the refused fields, that branch and the method and path. A branch
+bound key is refused even with the scope. The scope is in the grant grammar
+but no route requires it, so no module scope and no default grant carries
+it; only an owner may mint it, and the mint's `key.created` audit row names
+it. An allowed key's change writes a `customer.shared_restricted_changed`
+audit row naming the key and the before and after value of every field; a
+user's change writes none.
+
+| Route | Field | Class | Reason |
+|---|---|---|---|
+| `PUT /customers/{id}` | `account_number`, `name`, `address` | RESTRICTED | the identity and billing address every branch's documents carry |
+| | `email`, `phone` | BRANCH LOCAL | contact channels of whoever deals with the customer |
+| | `tier`, `price_level_id` | RESTRICTED | price every branch's sales |
+| | `is_active` | RESTRICTED | deactivates the customer for every branch |
+| | `credit_limit_cents`, `currency`, `payment_terms_id`, `po_required` | RESTRICTED | credit, currency, terms and the purchase order rule at every branch |
+| | `salesperson_id` | RESTRICTED | one salesperson per customer across branches |
+| `PATCH /customers/{id}/salesperson` | `salesperson_id` | RESTRICTED | as above |
+| `PUT /customers/{id}/escalation-policy` | policy, threshold, agreement | RESTRICTED | governs the repricing of every branch's quotes |
+| `POST /customers/{id}/ship-tos` with `is_default: true` | the existing default | shared record | the add clears the shared default ship to, so it is refused like a change; an add naming no default is allowed |
+
+Ship-tos and contacts carry no branch column, so on a shared customer every
+existing one is shared: a bound key reads them and may add a new one with
+`POST`, and is refused `PUT /ship-tos/{id}`, `PUT /contacts/{id}` and
+`DELETE /contacts/{id}` in the bound key's words. A ship-to add that names
+`is_default: true` is refused the same way, because naming a default
+clears the customer's existing default, which on a shared customer is a
+shared ship to every branch's delivery orders default to; an add that
+names no default stays allowed. On a customer the key's branch
+holds alone, all of it is allowed.
 
 ## ADRs that govern this module
 

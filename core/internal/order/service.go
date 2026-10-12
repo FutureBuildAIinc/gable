@@ -186,6 +186,28 @@ func (s *Service) build(ctx context.Context, d *Draft, branchID uuid.UUID, actor
 			Details: []httpx.FieldError{{Field: "customer_id", Message: "no such customer"}}}
 	}
 
+	// A ship-to, a contact or a job the customer does not own is refused for
+	// every caller, as the credit memo create refuses it (round 9 P1-2, round
+	// 11 P1-1): the snapshot would carry another customer's address, and a
+	// foreign job's rules would price the document.
+	shipOK, contactOK, jobOK, err := s.repo.OwnedBy(ctx, d.CustomerID, d.ShipToID, d.OrderedByContactID, d.JobID)
+	if err != nil {
+		return nil, err
+	}
+	var notOwned []httpx.FieldError
+	if !shipOK {
+		notOwned = append(notOwned, httpx.FieldError{Field: "ship_to_id", Message: "is not a ship-to of this customer"})
+	}
+	if !contactOK {
+		notOwned = append(notOwned, httpx.FieldError{Field: "ordered_by_contact_id", Message: "is not a contact of this customer"})
+	}
+	if !jobOK {
+		notOwned = append(notOwned, httpx.FieldError{Field: "job_id", Message: "is not a job of this customer"})
+	}
+	if len(notOwned) > 0 {
+		return nil, validationFailed("one or more fields failed validation", notOwned...)
+	}
+
 	o := Order{}
 	o.ID = uuid.New()
 	o.BranchID = branchID
@@ -1529,6 +1551,13 @@ func (s *Service) writeEvent(ctx context.Context, ev *outbox.Event) error {
 // CheckExposureGate reports whether the order is currently blocked by the
 // pre-ship gate.
 func (s *Service) CheckExposureGate(ctx context.Context, id uuid.UUID) error {
+	// The exposure lookups read the order's source quote by id alone, so the
+	// order is read under the caller's branch wall first: a key bound to one
+	// branch finds another branch's order a 404 and learns nothing about its
+	// quote.
+	if _, err := s.GetOrder(ctx, id); err != nil {
+		return err
+	}
 	if s.exposure == nil {
 		return nil
 	}
@@ -1537,6 +1566,12 @@ func (s *Service) CheckExposureGate(ctx context.Context, id uuid.UUID) error {
 
 // OverrideExposure records an explicit owner override of the pre-ship gate.
 func (s *Service) OverrideExposure(ctx context.Context, id uuid.UUID, notes, actor, role string) error {
+	// The override clears the exposure of the order's source quote, found by
+	// the order id alone: read the order under the caller's branch wall first,
+	// so a key bound to one branch cannot clear another branch's quote.
+	if _, err := s.GetOrder(ctx, id); err != nil {
+		return err
+	}
 	if s.overrider == nil {
 		return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed,
 			Message: "exposure override not available"}
@@ -1712,6 +1747,17 @@ func (s *Service) buildFromQuote(ctx context.Context, src *QuoteSource, branchID
 		return nil, &httpx.Error{Status: 400, Code: httpx.CodeValidationFailed,
 			Message: "a referenced record does not exist",
 			Details: []httpx.FieldError{{Field: "customer_id", Message: "no such customer"}}}
+	}
+	// The quote's stored job is rechecked against the quote's customer here:
+	// a row that predates the job ownership rule (or a cross branch write the
+	// convert wall refuses a bound key) must not price the converted order.
+	if src.JobID != nil {
+		if _, _, jobOK, err := s.repo.OwnedBy(ctx, src.CustomerID, nil, nil, src.JobID); err != nil {
+			return nil, err
+		} else if !jobOK {
+			return nil, validationFailed("one or more fields failed validation",
+				httpx.FieldError{Field: "job_id", Message: "is not a job of this customer"})
+		}
 	}
 
 	o := Order{}

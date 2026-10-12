@@ -80,6 +80,10 @@ func (s ProductUnitSet) Row(uom string) (ProductUnitRow, bool) {
 type Repository interface {
 	NextNumber(ctx context.Context) (string, error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductRef, error)
+	// JobOwnedBy checks that the job a draft names belongs to its customer:
+	// the foreign key alone would accept another customer's project, whose job
+	// pricing rules would then price the document (round 11 P1-1).
+	JobOwnedBy(ctx context.Context, jobID, customerID uuid.UUID) (bool, error)
 	// The unit resolution reads of C3-2A-units (ADR 0006 sections 3.3, 3.4
 	// and 4): the products' unit sets and the unit catalogue.
 	LookupProductUnits(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductUnitSet, error)
@@ -112,6 +116,15 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // so a create that rolls back abandons it (ADR 0001 section 8).
 func (r *PostgresRepository) NextNumber(ctx context.Context) (string, error) {
 	return httpx.NextDocumentNumber(ctx, r.db.GetExecutor(ctx), "quote_number_seq", "Q", httpx.DefaultDocNumberWidth)
+}
+
+func (r *PostgresRepository) JobOwnedBy(ctx context.Context, jobID, customerID uuid.UUID) (bool, error) {
+	var ok bool
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM projects WHERE id = $1 AND customer_id = $2)`, jobID, customerID).Scan(&ok); err != nil {
+		return false, fmt.Errorf("failed to check the job: %w", err)
+	}
+	return ok, nil
 }
 
 func (r *PostgresRepository) LookupProducts(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]ProductRef, error) {

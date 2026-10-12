@@ -232,6 +232,13 @@ func TestMigration103_ReportMatchesTheGoGrammar(t *testing.T) {
 		if strings.HasSuffix(scope, ":propose") || strings.HasSuffix(scope, ":commit") {
 			continue
 		}
+		// The customers:restricted capability scope (ruling item 48) joined
+		// the Go grammar after migration 103 froze its SQL side, so 103's
+		// report still names a key carrying it; it rides with the reported
+		// side below, keeping the pin exact for 103's own list.
+		if scope == middleware.CustomerRestrictedScope {
+			continue
+		}
 		scopes = append(scopes, scope)
 	}
 	sort.Strings(scopes)
@@ -243,7 +250,7 @@ func TestMigration103_ReportMatchesTheGoGrammar(t *testing.T) {
 	for i, scope := range scopes {
 		rows = append(rows, fmt.Sprintf(`(gen_random_uuid(), 'grammar %d', 'x$y', 'g_%03d', '{"%s"}')`, i, i, scope))
 	}
-	offGrammar := []string{"deposits:read", "deposits:write", "users:write"}
+	offGrammar := []string{"deposits:read", "deposits:write", "users:write", middleware.CustomerRestrictedScope}
 	for i, scope := range offGrammar {
 		rows = append(rows, fmt.Sprintf(`(gen_random_uuid(), 'off grammar %d', 'x$y', 'x_%03d', '{"%s"}')`, i, i, scope))
 	}

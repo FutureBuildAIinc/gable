@@ -5,6 +5,7 @@ package parsing
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,18 +15,46 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/httputil"
+	"github.com/google/uuid"
 	"github.com/xuri/excelize/v2"
 )
 
 // Handler manages HTTP requests for material list parsing.
 type Handler struct {
-	service *Service
+	service  *Service
+	auditLog *audit.Logger
 }
 
 // NewHandler creates a new parsing Handler.
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
+}
+
+// WithAuditLog sets the audit logger every upload records its row through
+// (ADR 0007 section 5.5, the PD-6 ruling): the parse spends the dealer's AI
+// credit, so each call is audited with whoever spent it, a user or the
+// machine key.
+func (h *Handler) WithAuditLog(l *audit.Logger) *Handler {
+	h.auditLog = l
+	return h
+}
+
+// recordUpload audits one upload; a missing logger or a failed row never
+// blocks the answer.
+func (h *Handler) recordUpload(ctx context.Context, filename string) {
+	if h.auditLog == nil {
+		return
+	}
+	if err := h.auditLog.Log(ctx, audit.Entry{
+		Action:     "ai.parsing.upload",
+		EntityType: "ai_spend",
+		EntityID:   uuid.Nil,
+		Changes:    map[string]interface{}{"filename": filename},
+	}); err != nil {
+		slog.Error("failed to audit the parsing upload", "error", err)
+	}
 }
 
 // RegisterRoutes adds parsing handlers to the mux.
@@ -99,6 +128,11 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		aiBytes = []byte(textContent)
 		aiContentType = "text/plain"
 	}
+
+	// The spend is audited before the extractor runs, so a failure after the
+	// AI call (the product match, the response) still leaves the row that
+	// names who spent the credit.
+	h.recordUpload(r.Context(), header.Filename)
 
 	// Extract items. synthetic==true means the AI extractor was unavailable
 	// and `extracted` is the canned demo list rather than anything read out

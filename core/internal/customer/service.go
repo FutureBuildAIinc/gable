@@ -74,6 +74,7 @@ type Service struct {
 	tx       TxRunner      // optional; nil runs each method unwrapped (unit tests)
 	audit    AuditLogger   // optional; nil writes no audit rows (unit tests)
 	branches BranchGuard   // optional; nil leaves a payload branch unchecked (unit tests)
+	shared   SharedGuard   // optional; nil leaves a shared customer's fields unrestricted (unit tests)
 	now      func() time.Time
 }
 
@@ -328,6 +329,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		next.UpdatedAt = httpx.TimestampOf(s.now().UTC())
 
 		changed := diffCustomer(cur, &next)
+		if err := s.checkRestricted(ctx, id, headerChanges(cur, &next, restrictedFields(changed))); err != nil {
+			return err
+		}
 		if contains(changed, "currency") {
 			if err := s.checkCurrency(ctx, next.Currency); err != nil {
 				return err
@@ -364,7 +368,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 		return s.record(ctx, out, EventUpdated, part, map[string]any{"changed": nonNil(changed)})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -453,6 +457,11 @@ func (s *Service) SetSalesperson(ctx context.Context, id uuid.UUID, d *Salespers
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if !eqID(cur.SalespersonID, d.SalespersonID) {
+			if err := s.checkRestricted(ctx, id, map[string]any{"salesperson_id": map[string]any{"from": cur.SalespersonID, "to": d.SalespersonID}}); err != nil {
+				return err
+			}
+		}
 		if err := s.repo.SetSalesperson(ctx, id, d.SalespersonID); err != nil {
 			return err
 		}
@@ -462,7 +471,7 @@ func (s *Service) SetSalesperson(ctx context.Context, id uuid.UUID, d *Salespers
 		return s.record(ctx, out, EventUpdated, PartHeader, map[string]any{"changed": []string{"salesperson_id"}})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -503,6 +512,14 @@ func (s *Service) SetEscalationPolicy(ctx context.Context, id uuid.UUID, d *Poli
 			now := httpx.TimestampOf(s.now().UTC())
 			p.AgreementSignedAt = &now
 		}
+		before, err := s.repo.GetEscalationPolicy(ctx, id)
+		if err != nil {
+			return notFound(err)
+		}
+		if err := s.checkRestricted(ctx, id, map[string]any{"escalation_policy": map[string]any{
+			"from": policyFacts(before), "to": policyFacts(p)}}); err != nil {
+			return err
+		}
 		if err := s.repo.SetEscalationPolicy(ctx, p); err != nil {
 			return err
 		}
@@ -516,7 +533,7 @@ func (s *Service) SetEscalationPolicy(ctx context.Context, id uuid.UUID, d *Poli
 		return s.record(ctx, updated, EventUpdated, PartEscalationPolicy, nil)
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -608,4 +625,54 @@ func centsPtrValue(c *httpx.Cents) any {
 		return nil
 	}
 	return int64(*c)
+}
+
+// headerChanges is the before and after value of every restricted field a
+// header write changes, the body of the audit row a dealer wide key's change
+// to a shared customer leaves.
+func headerChanges(cur, next *Customer, fields []string) map[string]any {
+	if len(fields) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(fields))
+	for _, f := range fields {
+		out[f] = map[string]any{"from": headerValue(cur, f), "to": headerValue(next, f)}
+	}
+	return out
+}
+
+func headerValue(c *Customer, field string) any {
+	switch field {
+	case "account_number":
+		return c.AccountNumber
+	case "name":
+		return c.Name
+	case "address":
+		return c.Address
+	case "tier":
+		return string(c.Tier)
+	case "is_active":
+		return c.IsActive
+	case "price_level_id":
+		return c.PriceLevelID
+	case "salesperson_id":
+		return c.SalespersonID
+	case "credit_limit_cents":
+		return centsPtrValue(c.CreditLimitCents)
+	case "currency":
+		return c.Currency
+	case "payment_terms_id":
+		return c.PaymentTermsID
+	case "po_required":
+		return c.POrequired
+	}
+	return nil
+}
+
+func policyFacts(p *EscalationPolicy) map[string]any {
+	if p == nil {
+		return nil
+	}
+	return map[string]any{"policy": string(p.Policy), "threshold_percent": int64(p.ThresholdPercent),
+		"agreement_signed_at": p.AgreementSignedAt, "agreement_ref": p.AgreementRef}
 }
