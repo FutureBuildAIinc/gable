@@ -155,6 +155,12 @@ func mapWriteError(err error, what string) error {
 // carry the context branch and the no header user's grants sub; both nil
 // (an administrator or owner without a header, an unbound key) is no wall.
 func wall(alias string, branch, grants int) string {
+	return Wall(alias, branch, grants)
+}
+
+// Wall is the same predicate for a caller outside the package (the tax
+// exemption routes hold the customer they name to it).
+func Wall(alias string, branch, grants int) string {
 	return fmt.Sprintf(`(
 		    ($%[2]d::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = %[1]s.id AND cb.branch_id = $%[2]d))
 		    OR ($%[2]d::uuid IS NULL AND $%[3]d::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb

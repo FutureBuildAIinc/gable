@@ -979,7 +979,13 @@ every branch:
   creates follow it, and so do the purchase order drafts no body drives:
   the reorder run a purchasing caller starts and the special order draft
   an accepted quote fires, while the reorder timer's system caller keeps
-  the default resolution it always had).
+  the default resolution it always had);
+- the tax exemption routes and the tax preview hold the customer they name
+  (path, body, the exemption's own row, the preview's customer and ship to)
+  to the customer family's wall: a customer outside the reach reads as
+  missing (404) on the read and the delete, and is refused 403 naming
+  `customer_id` on the create and the preview, with or without the header,
+  a user with no grants included.
 
 The sentence that keeps the other callers their reach is section 2.3's:
 "With no context branch, an administrator or owner may name any branch, as

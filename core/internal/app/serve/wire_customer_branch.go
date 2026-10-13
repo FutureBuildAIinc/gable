@@ -26,7 +26,10 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -515,16 +518,77 @@ func exemptionRowCustomers(db *database.DB) func(ctx context.Context, r *http.Re
 	}
 }
 
+// userCustomerWall holds the customers a request names to the user's reach
+// (SEC-NOHEADER-1, ADR 0007 section 5.7), the user side of the key wall
+// above: with a context branch the customer must hold that branch among its
+// customer_branches rows, with none and a user the customer must hold one of
+// the user's granted branches, and with neither (an administrator or owner
+// with no header, the single branch switch, the dev caller) every customer
+// passes, exactly the predicate /customers/{id} reads under. A customer the
+// wall hides answers like a missing one: 404 when the path or the row names
+// it, 403 naming customer_id when the body does. A bound key keeps its own
+// wall and is not held here. A body that does not decode passes to the
+// handler's 400, which writes nothing.
+func userCustomerWall(db *database.DB, resolve func(ctx context.Context, r *http.Request) ([]uuid.UUID, error), body bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			if _, bound := branchctx.KeyBranchFromContext(ctx); bound {
+				next.ServeHTTP(w, r)
+				return
+			}
+			branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+			if branch == nil && grants == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			customers, err := resolve(ctx, r)
+			if errors.Is(err, middleware.ErrBodyRefused) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if err != nil {
+				httpx.WriteError(w, r, fmt.Errorf("customer branch lookup: %w", err))
+				return
+			}
+			for _, id := range customers {
+				var held bool
+				if err := db.GetExecutor(ctx).QueryRow(ctx,
+					`SELECT EXISTS (SELECT 1 FROM customers c WHERE c.id = $1 AND `+customer.Wall("c", 2, 3)+`)`,
+					id, branch, grants).Scan(&held); err != nil {
+					httpx.WriteError(w, r, fmt.Errorf("customer branch lookup: %w", err))
+					return
+				}
+				if held {
+					continue
+				}
+				if body {
+					httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+						Message: "customer_id is outside the branches this caller may reach",
+						Details: []httpx.FieldError{{Field: "customer_id", Code: httpx.CodeForbidden, Message: "not a customer this caller may reach"}}})
+					return
+				}
+				httpx.WriteError(w, r, httpx.NotFound("customer not found"))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // taxCustomerWall composes the tax role guard with the customer branch wall:
 // the exemption create's body names the customer, the delete's row belongs
 // to one, the read's path names one, and the preview's body names one when
-// it names any.
-func taxCustomerWall(keyWall *middleware.KeyBranchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
+// it names any. Every route runs behind the branch middleware, so a user is
+// held to the customer's branches whether or not a header is sent
+// (userCustomerWall) and a bound key to its pin (the key wall).
+func taxCustomerWall(wall *branchWall, db *database.DB, roles ...string) func(http.Handler) http.Handler {
 	role := middleware.RequireRole(roles...)
-	create := middleware.Compose(role, keyWall.CustomerBranchExclusive(exemptionBodyCustomers()))
-	remove := middleware.Compose(role, keyWall.CustomerBranchExclusive(exemptionRowCustomers(db)))
-	read := middleware.Compose(role, keyWall.CustomerBranch(exemptionCustomerPathOf()))
-	preview := middleware.Compose(role, keyWall.CustomerBranch(previewCustomerOf(db)))
+	keyWall := wall.keyWall
+	create := middleware.Compose(role, wall.mw, userCustomerWall(db, exemptionBodyCustomers(), true), keyWall.CustomerBranchExclusive(exemptionBodyCustomers()))
+	remove := middleware.Compose(role, wall.mw, userCustomerWall(db, exemptionRowCustomers(db), false), keyWall.CustomerBranchExclusive(exemptionRowCustomers(db)))
+	read := middleware.Compose(role, wall.mw, userCustomerWall(db, exemptionCustomerPathOf(), false), keyWall.CustomerBranch(exemptionCustomerPathOf()))
+	preview := middleware.Compose(role, wall.mw, userCustomerWall(db, previewCustomerOf(db), true), keyWall.CustomerBranch(previewCustomerOf(db)))
 	return func(next http.Handler) http.Handler {
 		createHandler, removeHandler, readHandler, previewHandler, roleHandler :=
 			create(next), remove(next), read(next), preview(next), role(next)

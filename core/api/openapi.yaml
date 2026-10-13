@@ -14405,7 +14405,7 @@ paths:
       tags: [tax]
       summary: Create a tax exemption
       description: >-
-        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500.
+        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -14434,7 +14434,7 @@ paths:
       tags: [tax]
       summary: List a customer's tax exemptions
       description: >-
-        Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer.
+        Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer. A user whose reach does not hold the customer (the context branch, or the granted branches when no header is sent) gets 404, as the customer's own route answers.
       parameters:
         - name: customerID
           in: path
@@ -14454,6 +14454,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/exemptions/{id}:
     delete:
@@ -14461,7 +14462,7 @@ paths:
       tags: [tax]
       summary: Delete a tax exemption
       description: >-
-        Roles admin, owner, finance. A hard delete. An unknown id still answers 204.
+        Roles admin, owner, finance. A hard delete. An unknown id still answers 204. An exemption whose customer is outside the user's reach answers 404 and is not deleted.
       parameters:
         - name: id
           in: path
@@ -14475,6 +14476,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/preview:
     post:
@@ -14482,7 +14484,7 @@ paths:
       tags: [tax]
       summary: Preview tax on a cart or invoice
       description: >-
-        Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents.
+        Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents. A customer_id, or a ship_to_id of a customer, outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:

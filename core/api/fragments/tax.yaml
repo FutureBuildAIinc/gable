@@ -8,7 +8,9 @@
 # {id} for the DELETE), exactly as registered; delete answers 204 for an
 # unknown id; a bad expiry_date is a 500, not a 400; effective_date is
 # serialized as a full timestamp. Roles admin, owner and finance guard
-# every route; there is no branch middleware.
+# every route; the branch middleware runs too, and a user's reach holds the
+# customer a request names (404 on the read and the delete, 403 naming
+# customer_id on the create and the preview).
 paths:
   /api/v1/tax/exemptions:
     post:
@@ -18,7 +20,8 @@ paths:
       description: >-
         Roles admin, owner, finance. customer_id and exempt_reason are
         required (400). The exemption is created active and effective now.
-        expiry_date is a YYYY-MM-DD string; any other format is a 500.
+        expiry_date is a YYYY-MM-DD string; any other format is a 500. A
+        customer outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -49,7 +52,9 @@ paths:
       description: >-
         Roles admin, owner, finance. Every exemption of the customer, active
         or not, newest first; an array that is empty, never null, for an
-        unknown customer.
+        unknown customer. A user whose reach does not hold the customer
+        (the context branch, or the granted branches when no header is sent)
+        gets 404, as the customer's own route answers.
       parameters:
         - name: customerID
           in: path
@@ -69,6 +74,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/tax/exemptions/{id}:
     delete:
@@ -77,7 +83,8 @@ paths:
       summary: Delete a tax exemption
       description: >-
         Roles admin, owner, finance. A hard delete. An unknown id still
-        answers 204.
+        answers 204. An exemption whose customer is outside the user's
+        reach answers 404 and is not deleted.
       parameters:
         - name: id
           in: path
@@ -91,6 +98,7 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
   /api/v1/tax/preview:
     post:
@@ -102,7 +110,8 @@ paths:
         document_type defaults to SalesInvoice. An exempt customer gets a
         zero tax result; otherwise Avalara is used when configured and a
         flat rate estimate (is_estimate true) when not. Amounts are int64
-        cents.
+        cents. A customer_id, or a ship_to_id of a customer, outside the
+        user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
