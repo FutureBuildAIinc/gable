@@ -265,3 +265,16 @@ describe('the popover stays inside the screen', () => {
     expect(pop.style.left).toBe('8px')
   })
 })
+
+describe('the field follows its host surface', () => {
+  it('dark tokens by default', async () => {
+    const el = await mount<GableDateField>(TAG)
+    expect(input(el).className).toContain('text-white')
+  })
+  it('readable on a light card with tone light', async () => {
+    const el = await mount<GableDateField>(TAG, { tone: 'light' } as Partial<GableDateField>)
+    expect(input(el).className).toContain('text-zinc-900')
+    expect(input(el).className).not.toContain('text-white')
+    expect(input(el).className).toContain('border-zinc-300')
+  })
+})
