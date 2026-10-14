@@ -255,9 +255,14 @@ test.describe('Payments, unapplied cash and AR', () => {
     await expect(page.getByTestId('aging-row').filter({ hasText: shipTos[1].code }).first()).toBeVisible({ timeout: 15000 });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-ship-to.png'), fullPage: true });
 
-    // The statement on the new AR route: the seeded customer's activity.
-    // The account page's Statement link lands here with the customer preselected,
-    // and the page runs the statement for that customer.
+    // The statement on the new AR route: the seeded customer's activity. The
+    // AR routes hold the customer wall (customer_branches against the caller's
+    // reach, header or no header) and the seed writes the customer's branch
+    // row beside the customer, so the desk, pinned to the customer's own
+    // branch, reads the seeded customer like any other. The account page's
+    // Statement link lands here with the customer preselected, and the page
+    // runs the statement for that customer.
+    await page.evaluate((id) => localStorage.setItem('gable_current_branch_id', id), kelbrookCustomer.primary_branch_id);
     await page.goto(`/reports/customer-statement?customer=${kelbrook}`);
     await expect(page.getByRole('heading', { name: 'Customer Statement' })).toBeVisible();
     await expect(page.getByTestId('statement-currency')).toBeVisible({ timeout: 15000 });

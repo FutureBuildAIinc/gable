@@ -194,10 +194,11 @@ type poCall struct {
 	quantity  float64
 	unitCost  float64
 	lineID    uuid.UUID
+	branch    uuid.UUID
 }
 
-func (f *fakePO) CreatePOFromSpecialOrderLine(_ context.Context, productID *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID) error {
-	f.calls = append(f.calls, poCall{productID, qty, unitCost, lineID})
+func (f *fakePO) CreatePOFromSpecialOrderLine(_ context.Context, productID *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID) error {
+	f.calls = append(f.calls, poCall{productID, qty, unitCost, lineID, branch})
 	return f.err
 }
 
@@ -524,6 +525,9 @@ func TestTransition_AutoPOOnlyForCostedLines(t *testing.T) {
 	if got.productID != nil || got.quantity != 3 || got.unitCost != 88.25 || got.lineID != special.ID {
 		t.Errorf("PO call = %+v, want the plain accept's inert line (no product) at 3 and 88.25", got)
 	}
+	if got.branch != q.BranchID {
+		t.Errorf("PO call branch = %s, want the quote's own branch %s, never one resolved from the caller's grants", got.branch, q.BranchID)
+	}
 }
 
 func TestTransition_AutoPOFailureDoesNotBlockAcceptance(t *testing.T) {
@@ -580,6 +584,9 @@ type fakeOrderCreator struct {
 	created  []*order.Order
 	existing bool
 	failWith error
+	// specialLines makes each order line a special order line linked to its
+	// quote line, so the auto purchase order has something to raise.
+	specialLines bool
 }
 
 func (f *fakeOrderCreator) PrepareQuoteTax(context.Context, *order.QuoteSource) (*order.ProviderTax, error) {
@@ -598,6 +605,15 @@ func (f *fakeOrderCreator) CreateFromQuote(_ context.Context, src *order.QuoteSo
 	o.QuoteID = &src.QuoteID
 	o.Number = "SO-000001"
 	o.Status = order.StatusDraft
+	if f.specialLines {
+		for _, l := range src.Lines {
+			qlid := l.QuoteLineID
+			ol := order.OrderLine{QuoteLineID: &qlid}
+			ol.ID = uuid.New()
+			ol.IsSpecialOrder = true
+			o.Lines = append(o.Lines, ol)
+		}
+	}
 	f.created = append(f.created, o)
 	return o, nil
 }
@@ -637,6 +653,80 @@ func TestConvert_HandsTheLinesToTheOrderCreator(t *testing.T) {
 	}
 	if after, err := svc.GetQuote(context.Background(), q.ID); err != nil || after.Status != QuoteStateAccepted {
 		t.Errorf("quote after convert = %v (%v), want accepted", after.Status, err)
+	}
+}
+
+// A quote accepted first (on the desk or by the customer) still converts: the
+// convert keeps it accepted, hands the order module its lines, moves no
+// revision, records no second quote.accepted and runs no second auto purchase
+// order (the accept already did); the one order per quote rule still guards
+// it (TestConvert_RefusesAnAlreadyConvertedQuote, and the database contention
+// test TestConvert_AcceptedQuoteConvertsOnceUnderContention).
+func TestConvert_AnAcceptedQuoteConverts(t *testing.T) {
+	svc, repo, rec := newTestService()
+	pid := uuid.New()
+	special := QuoteLine{
+		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "PCS",
+		UOMQty: one, PriceUOMQty: one, UnitPrice: 26667, UnitCost: 15000,
+	}
+	q := repo.seed(QuoteStateAccepted, special)
+	before := q.Revision
+	creator := &fakeOrderCreator{specialLines: true}
+	svc.WithOrderCreator(creator)
+	po := &fakePO{}
+	svc.WithAutoPO(po)
+
+	rev := before
+	o, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
+	if err != nil {
+		t.Fatalf("convert of an accepted quote: %v, want the order", err)
+	}
+	if o == nil || o.QuoteID == nil || *o.QuoteID != q.ID || len(creator.sources) != 1 {
+		t.Fatalf("convert returned %+v with %d sources, want one order of the quote", o, len(creator.sources))
+	}
+	after, err := svc.GetQuote(context.Background(), q.ID)
+	if err != nil || after.Status != QuoteStateAccepted {
+		t.Fatalf("quote after convert = %v (%v), want accepted", after.Status, err)
+	}
+	if after.Revision != before {
+		t.Errorf("the convert moved the accepted quote's revision from %d to %d", before, after.Revision)
+	}
+	for _, ev := range rec.events {
+		if ev.Type == EventAccepted {
+			t.Errorf("the convert recorded a second %s", EventAccepted)
+		}
+	}
+	if len(po.calls) != 0 {
+		t.Errorf("the convert ran the auto purchase order %d time(s) for a quote the accept already handled", len(po.calls))
+	}
+}
+
+// A quote not yet accepted keeps the convert's acceptance and its auto
+// purchase order: the special order line raises one (the control for the
+// test above).
+func TestConvert_ASentQuoteStillAcceptsAndRunsTheAutoPO(t *testing.T) {
+	svc, repo, rec := newTestService()
+	pid := uuid.New()
+	special := QuoteLine{
+		ID: uuid.New(), ProductID: &pid, Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "PCS",
+		UOMQty: one, PriceUOMQty: one, UnitPrice: 26667, UnitCost: 15000,
+	}
+	q := repo.seed(QuoteStateSent, special)
+	svc.WithOrderCreator(&fakeOrderCreator{specialLines: true})
+	po := &fakePO{}
+	svc.WithAutoPO(po)
+	rev := q.Revision
+	if _, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev}); err != nil {
+		t.Fatal(err)
+	}
+	accepted := 0
+	for _, ev := range rec.events {
+		if ev.Type == EventAccepted {
+			accepted++
+		}
+	}
+	if accepted != 1 || len(po.calls) != 1 {
+		t.Errorf("a sent quote's convert: %d %s event(s) and %d auto purchase order(s), want one each", accepted, EventAccepted, len(po.calls))
 	}
 }
 

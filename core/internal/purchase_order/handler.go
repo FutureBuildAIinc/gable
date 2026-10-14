@@ -10,7 +10,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -113,6 +115,10 @@ func (h *Handler) HandleListPOs(w http.ResponseWriter, r *http.Request) {
 type CreatePORequest struct {
 	VendorID string         `json:"vendor_id"`
 	Lines    []CreatePOLine `json:"lines"`
+	// BranchID names the branch the order is bought for. Required in effect
+	// for a caller whose grants hold several branches and sends no header;
+	// the grants decide it for a single grant caller (SEC-NOHEADER-1).
+	BranchID string `json:"branch_id"`
 }
 
 type CreatePOLine struct {
@@ -135,6 +141,16 @@ func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var branchID *uuid.UUID
+	if strings.TrimSpace(req.BranchID) != "" {
+		parsed, err := uuid.Parse(strings.TrimSpace(req.BranchID))
+		if err != nil {
+			httputil.RespondError(w, r, "Invalid branch_id", http.StatusBadRequest, err)
+			return
+		}
+		branchID = &parsed
+	}
+
 	lines := make([]CreatePOLineInput, len(req.Lines))
 	for i, l := range req.Lines {
 		lines[i] = CreatePOLineInput{
@@ -145,8 +161,16 @@ func (h *Handler) HandleCreatePO(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	po, err := h.service.CreateManualPOFromHandler(r.Context(), vendorID, lines, SourceManual)
+	po, err := h.service.CreateManualPOAt(r.Context(), vendorID, lines, SourceManual, branchID)
 	if err != nil {
+		// The branch resolution's refusals (a 403 naming branch_id for a
+		// branch outside the caller's grants, a 400 naming it when several
+		// grants could decide) carry their own status.
+		var httpErr *httpx.Error
+		if errors.As(err, &httpErr) {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to create purchase order", http.StatusInternalServerError, err)
 		return
 	}
@@ -264,6 +288,14 @@ func (h *Handler) HandleReceivePO(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) HandleCreateReorders(w http.ResponseWriter, r *http.Request) {
 	count, err := h.service.CreateReorders(r.Context())
 	if err != nil {
+		// The branch resolution's refusals (a 403 naming branch_id for a
+		// caller with no grants, a 400 naming it when several grants could
+		// decide) carry their own status.
+		var httpErr *httpx.Error
+		if errors.As(err, &httpErr) {
+			httpx.WriteError(w, r, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to create reorder purchase orders", http.StatusInternalServerError, err)
 		return
 	}

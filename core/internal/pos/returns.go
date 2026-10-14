@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -148,10 +150,17 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, req Retur
 	// Resolve the register's branch (for tax and stamping); best-effort. The
 	// caller's branch context is held against it the way the sale does, so a
 	// request for another branch's register is refused before anything is
-	// written.
+	// written, and a caller with no branch in context is held to the
+	// caller's grants (SEC-NOHEADER-1).
 	branchID, _ := s.repo.GetRegisterBranch(ctx, req.RegisterID)
 	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && branchID != nil && *reqBranch != *branchID {
 		return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
+	}
+	if err := s.grants.CheckGrantsBranch(ctx, branchID); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
+		}
+		return nil, err
 	}
 
 	// Tax mirrors the sale path so a full return refunds the tax the sale

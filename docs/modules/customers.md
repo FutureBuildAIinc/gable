@@ -179,6 +179,14 @@ only), and on no other customer route; the exact guard is composed in
 A key without the scope is `403 forbidden`; the audit row carries the
 refused scope.
 
+A user who sends no `X-Branch-Id` while `default_branch_required` is off
+is held to the user's own grants through the customer's branches (ADR 0007
+section 5.7): every read, lock, list and child route of the family, the
+contacts, the ship tos and the CRM activities alike, holds the customer's
+`customer_branches` rows to the caller's grants, so a no header user meets
+the same 404 a header caller meets for a customer outside the reach, and
+the writes are refused with nothing written.
+
 A key bound to one branch (ADR 0007 section 5.5) reads a customer its
 branch shares with another, and changes a shared customer's record only on
 the branch local fields. The rule is deny by default: any header field not

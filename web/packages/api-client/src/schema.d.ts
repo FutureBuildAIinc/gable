@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Get account summary
-         * @description The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404.
+         * @description The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404, and so is a customer outside the caller's branches (customer_branches held to the reach, header or no header).
          */
         get: operations["accountSummary"];
         put?: never;
@@ -53,7 +53,7 @@ export interface paths {
         };
         /**
          * List account transactions
-         * @description The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope.
+         * @description The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope. A customer outside the caller's branches is 404, header or no header.
          */
         get: operations["accountTransactions"];
         put?: never;
@@ -113,7 +113,7 @@ export interface paths {
         };
         /**
          * Customer statement
-         * @description Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today.
+         * @description Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today. A customer outside the caller's branches is 404, header or no header.
          */
         get: operations["arStatement"];
         put?: never;
@@ -4485,7 +4485,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Add a line item */
+        /**
+         * Add a line item
+         * @description A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both; nothing is written. A caller with no branch in context who holds no grant for the transaction's branch is refused 403 by name.
+         */
         post: operations["posTransactionAddItem"];
         delete?: never;
         options?: never;
@@ -4503,7 +4506,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Remove a line item */
+        /**
+         * Remove a line item
+         * @description A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both, and no line is removed.
+         */
         delete: operations["posTransactionRemoveItem"];
         options?: never;
         head?: never;
@@ -4521,7 +4527,7 @@ export interface paths {
         put?: never;
         /**
          * Complete a transaction with tenders
-         * @description An empty tenders list answers 400. Every service failure (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
+         * @description An empty tenders list answers 400. A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both. Every other service failure (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
          */
         post: operations["posTransactionComplete"];
         delete?: never;
@@ -4539,7 +4545,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Void a transaction */
+        /**
+         * Void a transaction
+         * @description A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both; nothing is written.
+         */
         post: operations["posTransactionVoid"];
         delete?: never;
         options?: never;
@@ -4669,7 +4678,7 @@ export interface paths {
         put?: never;
         /**
          * Close a till session
-         * @description Every service failure, such as a session not OPEN, answers 409.
+         * @description Every service failure, such as a session not OPEN, answers 409; a session that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both; nothing is written. A caller with no branch in context who holds no grant for the session's branch is refused 403 by name.
          */
         post: operations["posTillClose"];
         delete?: never;
@@ -5603,7 +5612,7 @@ export interface paths {
         put?: never;
         /**
          * Create a manual purchase order
-         * @description Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400. Any service failure (unknown vendor, bad line product id) is a 500.
+         * @description Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400, and so is a branch_id that is not a UUID. With no X-Branch-Id the branch comes from the caller's grants (one granted branch writes there; several answer a 400 naming branch_id; none answer a 403 naming branch_id, SEC-NOHEADER-1), never the deployment default; a body branch_id the caller may not target is a 403 naming branch_id. Any other service failure (unknown vendor, bad line product id) is a 500.
          */
         post: operations["purchaseOrderCreate"];
         delete?: never;
@@ -5909,7 +5918,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the quote and create its order in one act
-         * @description A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. Events: quote.accepted, then order.created.
+         * @description A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. A quote already accepted (on the desk or by the customer) converts as it is, with no second transition and no second quote.accepted. Events: quote.accepted (unless the quote was already accepted), then order.created.
          */
         post: operations["quoteConvertToOrder"];
         delete?: never;
@@ -6219,7 +6228,7 @@ export interface paths {
         put?: never;
         /**
          * Schedule a saved report for emailed delivery
-         * @description Roles admin, owner, finance. report_id, cron_expression and at least one recipient are required (400 otherwise). format defaults to CSV and is case insensitive; anything outside CSV, XLSX and PDF is a 400. The cron expression is six fields with seconds first; a five field expression is a 400. The status in the request is ignored: the row is ACTIVE when a scheduler is attached (the shipped server) and STORED otherwise. A report_id that is not a saved report violates the foreign key and is a 500, as is a scheduler that cannot register the row (the row stays saved).
+         * @description Roles admin, owner, finance. report_id, cron_expression and at least one recipient are required (400 otherwise). format defaults to CSV and is case insensitive; anything outside CSV, XLSX and PDF is a 400. The cron expression is six fields with seconds first; a five field expression is a 400. The status in the request is ignored: the row is ACTIVE when a scheduler is attached (the shipped server) and STORED otherwise. A report_id that is not a saved report violates the foreign key and is a 500, as is a scheduler that cannot register the row (the row stays saved). The schedule records its creator from the caller's token subject (created_by and creator_is_admin in a body are ignored); a caller with no identity (an unbound key, the dev caller, a token with an empty subject) is a 409 naming the missing caller identity, because a schedule with no creator recorded can never run. A run the fail closed rule refuses pauses the schedule (status PAUSED) and writes one audit row.
          */
         post: operations["reportingCreateSchedule"];
         delete?: never;
@@ -6393,7 +6402,7 @@ export interface paths {
         put?: never;
         /**
          * Create a tax exemption
-         * @description Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500.
+         * @description Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
          */
         post: operations["taxExemptionCreate"];
         delete?: never;
@@ -6411,7 +6420,7 @@ export interface paths {
         };
         /**
          * List a customer's tax exemptions
-         * @description Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer.
+         * @description Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer. A user whose reach does not hold the customer (the context branch, or the granted branches when no header is sent) gets 404, as the customer's own route answers.
          */
         get: operations["taxExemptionList"];
         put?: never;
@@ -6434,7 +6443,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a tax exemption
-         * @description Roles admin, owner, finance. A hard delete. An unknown id still answers 204.
+         * @description Roles admin, owner, finance. A hard delete. An unknown id still answers 204. An exemption whose customer is outside the user's reach answers 404 and is not deleted.
          */
         delete: operations["taxExemptionDelete"];
         options?: never;
@@ -6453,7 +6462,7 @@ export interface paths {
         put?: never;
         /**
          * Preview tax on a cart or invoice
-         * @description Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents.
+         * @description Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents. A customer_id, or a ship_to_id of a customer, outside the user's reach is refused 403 naming customer_id.
          */
         post: operations["taxPreview"];
         delete?: never;
@@ -6919,18 +6928,33 @@ export interface components {
             /** Format: int64 */
             documents_cents: number;
         };
+        /** @description One currency's ledger comparison. For a scoped caller (a branch a header names, or a user whose grants scope a no header read) the two GL account balances and their in sync flags are absent: they are pure books figures no branch fact can divide, and the two sums cover the caller's reach only. */
         ArLedgerRow: {
             currency: string;
-            /** Format: int64 */
-            receivable_ledger_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account 1020's posted balance; absent for a scoped caller.
+             */
+            receivable_ledger_cents?: number;
+            /**
+             * Format: int64
+             * @description The sum of the customers' balance_due over the caller's reach.
+             */
             balance_sum_cents: number;
-            /** Format: int64 */
-            deposits_ledger_cents: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Account 2200's posted balance; absent for a scoped caller.
+             */
+            deposits_ledger_cents?: number;
+            /**
+             * Format: int64
+             * @description The sum of posted unapplied cash over the caller's reach.
+             */
             unapplied_sum_cents: number;
-            receivable_in_sync: boolean;
-            deposits_in_sync: boolean;
+            /** @description Whether 1020 equals the balance sum; absent for a scoped caller. */
+            receivable_in_sync?: boolean;
+            /** @description Whether 2200 equals the unapplied sum; absent for a scoped caller. */
+            deposits_in_sync?: boolean;
         };
         ArReconciliation: {
             customers: components["schemas"]["ArDriftRow"][];
@@ -12807,6 +12831,11 @@ export interface components {
              * @description Required in effect; a non UUID value is a 400.
              */
             vendor_id?: string;
+            /**
+             * Format: uuid
+             * @description The branch the order is bought for. Required in effect for a caller whose grants hold several branches and sends no X-Branch-Id; with no branch anywhere the caller's grants decide (one grant writes there, none is a 403), never the deployment default.
+             */
+            branch_id?: string;
             lines?: components["schemas"]["PurchaseOrderCreateLine"][];
         };
         PurchaseOrderCreateLine: {
@@ -13311,7 +13340,7 @@ export interface components {
             /** @description CSV, XLSX or PDF, case insensitive; empty means CSV. */
             format?: string;
         };
-        /** @description reporting.ReportSchedule. The timestamps are Postgres ::text strings. */
+        /** @description reporting.ReportSchedule. The timestamps are Postgres ::text strings. created_by and creator_is_admin record the creating caller the run resolves its reach from (SEC-NOHEADER-1): a schedule with no creator never runs. */
         ReportingSchedule: {
             /** Format: uuid */
             id: string;
@@ -13319,7 +13348,7 @@ export interface components {
             report_id: string;
             cron_expression: string;
             recipients: string[];
-            /** @description ACTIVE when a scheduler is attached, STORED when none is. */
+            /** @description ACTIVE when a scheduler is attached, STORED when none is, PAUSED once a run was refused for its creator's reach, after which it no longer fires. */
             status: string;
             /** @enum {string} */
             format: "CSV" | "XLSX" | "PDF";
@@ -13327,6 +13356,10 @@ export interface components {
             last_run_at?: string;
             /** @description Absent until the first run. Postgres timestamptz text. */
             next_run_at?: string;
+            /** @description The creating caller's subject, the same text user_locations keys grants by; empty when no caller identity was recorded (the run refuses such a schedule). */
+            created_by?: string;
+            /** @description True when the creator held the administrator or owner role when the schedule was made, whose run keeps the every branch view. */
+            creator_is_admin: boolean;
             /** @description Postgres timestamptz text. */
             created_at: string;
             /** @description Postgres timestamptz text. */
@@ -23578,6 +23611,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -23611,6 +23645,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -23646,6 +23681,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             /** @description The completion failed (under-tendered sale, declined card, transaction not OPEN; the standard error envelope), or the Idempotency-Key was reused with a different request (the ADR 0001 envelope). */
@@ -23687,6 +23723,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -23919,6 +23956,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
@@ -27413,6 +27451,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -27437,6 +27476,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
