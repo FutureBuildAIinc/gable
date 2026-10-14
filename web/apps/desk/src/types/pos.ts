@@ -79,8 +79,31 @@ export interface Sale {
     invoice_id: string | null;
     completed_at: string | null;
     created_at: string;
+    /** The purchase order and job a charge sale names (null until named). */
+    customer_po: string | null;
+    job_id: string | null;
     lines: SaleLine[];
     tenders: Tender[];
+}
+
+export type AccountStanding = 'good' | 'no_limit' | 'no_credit' | 'over_limit';
+
+export interface CounterJob {
+    id: string;
+    name: string;
+}
+
+/** A customer as the counter's lookup shows it, the account's standing beside it. */
+export interface CounterCustomer {
+    id: string;
+    account_number: string;
+    name: string;
+    po_required: boolean;
+    credit_limit_cents: number | null;
+    open_receivable_cents: number;
+    available_credit_cents: number | null;
+    standing: AccountStanding;
+    jobs: CounterJob[];
 }
 
 export interface SaleSummary {

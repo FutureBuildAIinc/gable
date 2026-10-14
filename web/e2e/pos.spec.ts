@@ -127,3 +127,80 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   expect(sales.items.some((s) => s.status === 'voided')).toBe(true);
   expect(sales.items.some((s) => s.status === 'completed')).toBe(true);
 });
+
+/** An account with the credit terms the counter must respect. */
+async function makeAccount(request: APIRequestContext, tag: string, extra: Record<string, unknown>) {
+  const run = Date.now().toString(36).toUpperCase();
+  const res = await request.post('/api/v1/customers', {
+    data: { account_number: `E2E-POS-${tag}-${run}`, name: `E2E Counter ${tag} ${run}`, ...extra },
+  });
+  expect(res.status(), await res.text()).toBe(201);
+  return (await res.json()) as { id: string; name: string; account_number: string };
+}
+
+test('the counter: a charge sale to an account that asks for a purchase order', async ({ page, request }) => {
+  const account = await makeAccount(request, 'PO', { credit_limit_cents: 5000000, po_required: true });
+  const held = await makeAccount(request, 'HOLD', { credit_limit_cents: 0 });
+  await signIn(page, 'POS Account E2E');
+  const product = await stockedProduct(request);
+
+  await page.goto('/pos');
+  await expect(page.getByRole('heading', { name: 'POS Terminal' })).toBeVisible();
+  const noTill = page.getByText('NO TILL');
+  if (await noTill.isVisible()) {
+    await page.getByRole('button', { name: 'Open Till' }).click();
+    await page.getByPlaceholder('200.00').fill('100.00');
+    await page.getByRole('button', { name: 'Open Till' }).last().click();
+  }
+  await expect(page.getByText(/TILL OPEN/)).toBeVisible();
+
+  // The walk-in sale cannot be charged: the account button is off and says why.
+  await expect(page.getByTestId('pos-customer')).toContainText('Walk-in sale');
+
+  // An account on hold shows in words, and a sale is not charged to it.
+  const search = page.locator('#pos-customer-search');
+  await search.fill(held.account_number);
+  await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(held.account_number) }).click();
+  await expect(page.getByTestId('pos-customer-standing')).toHaveText('On hold: this account has no credit');
+  await addOne(page, product.sku);
+  const charge = page.getByRole('button', { name: 'Charge to account' });
+  await expect(charge).toBeDisabled();
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-account-on-hold.png'), fullPage: true });
+
+  // A new sale for the account with credit: its standing in words, the PO asked.
+  await page.getByRole('button', { name: 'New Sale', exact: true }).click();
+  await expect(page.getByTestId('pos-customer')).toContainText('Walk-in sale');
+  await page.locator('#pos-customer-search').fill(account.name);
+  await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(account.account_number) }).click();
+  await expect(page.getByTestId('pos-customer-name')).toHaveText(account.name);
+  await expect(page.getByTestId('pos-customer-standing')).toContainText('Credit available $50,000.00 of $50,000.00');
+  await addOne(page, product.sku);
+  await expect(page.getByRole('button', { name: 'Charge to account' })).toBeDisabled();
+  await page.getByLabel(/Purchase order/).fill('PO-E2E-4471');
+  await page.getByLabel(/Purchase order/).blur();
+  await expect(page.getByRole('button', { name: 'Charge to account' })).toBeEnabled();
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-account-charge.png'), fullPage: true });
+
+  await page.getByRole('button', { name: 'Charge to account' }).click();
+  await page.getByRole('button', { name: /Add Tender/ }).click();
+  await page.getByRole('button', { name: /Complete Sale/ }).click();
+  await expect(page.getByText(/POS-\d+ complete/)).toBeVisible({ timeout: 15000 });
+  await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-account-charged.png'), fullPage: true });
+
+  // The books: the sale is the account's, the invoice is open on it with the
+  // purchase order, and the account's balance carries the charge.
+  const sales = (await (await request.get('/api/v1/pos/transactions?register_id=REG-01')).json()) as {
+    items: { id: string; customer_id: string | null; status: string; invoice_id: string | null; total_cents: number }[];
+  };
+  const sale = sales.items.find((s) => s.customer_id === account.id);
+  expect(sale, 'the charge sale is listed for the account').toBeTruthy();
+  expect(sale!.status).toBe('completed');
+  const full = (await (await request.get(`/api/v1/pos/transactions/${sale!.id}`)).json()) as {
+    customer_po: string | null;
+    tenders: { method: string; amount_cents: number }[];
+  };
+  expect(full.customer_po).toBe('PO-E2E-4471');
+  expect(full.tenders.map((t) => t.method)).toEqual(['account']);
+  const summary = (await (await request.get(`/api/v1/accounts/${account.id}`)).json()) as { balance_cents: number };
+  expect(summary.balance_cents).toBe(sale!.total_cents);
+});

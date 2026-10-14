@@ -4,7 +4,8 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
-import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod } from '../../types/pos';
+import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer } from '../../types/pos';
+import { chargeRefusal, standingOf, money } from './standing';
 import '../../components/BarcodeScanner.ts';
 
 const REGISTER_ID = 'REG-01';
@@ -35,6 +36,14 @@ export class POSTerminal extends LitElement {
   @state() private _success: string | null = null;
   @state() private _isScanning = false;
 
+  // The sale's customer: the lookup, the account's standing and what a charge
+  // to the account carries (the purchase order and the job).
+  @state() private _customer: CounterCustomer | null = null;
+  @state() private _custQuery = '';
+  @state() private _custResults: CounterCustomer[] = [];
+  @state() private _poText = '';
+  @state() private _jobId = '';
+
   // The completed sale offered for a return or a void.
   @state() private _completed: Sale | null = null;
   @state() private _showReturn = false;
@@ -57,6 +66,7 @@ export class POSTerminal extends LitElement {
   private _newTxTimer: ReturnType<typeof setTimeout> | null = null;
   private _errorTimer: ReturnType<typeof setTimeout> | null = null;
   private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
+  private _custDebounce: ReturnType<typeof setTimeout> | null = null;
 
   connectedCallback() {
     super.connectedCallback();
@@ -138,11 +148,15 @@ export class POSTerminal extends LitElement {
     if (this._newTxTimer) clearTimeout(this._newTxTimer);
     if (this._errorTimer) clearTimeout(this._errorTimer);
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
+    if (this._custDebounce) clearTimeout(this._custDebounce);
   }
 
   updated(changed: Map<string, unknown>) {
     if (changed.has('_searchQuery')) {
       this._debounceSearch();
+    }
+    if (changed.has('_custQuery')) {
+      this._debounceCustomers();
     }
   }
 
@@ -182,6 +196,148 @@ export class POSTerminal extends LitElement {
     }, 200);
   }
 
+  /* ---- The sale's customer ---- */
+
+  private _debounceCustomers() {
+    if (this._custDebounce) clearTimeout(this._custDebounce);
+    if (this._custQuery.trim().length < 2) {
+      this._custResults = [];
+      return;
+    }
+    this._custDebounce = setTimeout(async () => {
+      try {
+        this._custResults = await posService.findCustomers(this._custQuery);
+      } catch {
+        this._custResults = [];
+      }
+    }, 200);
+  }
+
+  /** Names the customer on the open sale; the lines then price for them. */
+  private async _chooseCustomer(c: CounterCustomer) {
+    if (!this._sale) return;
+    try {
+      this._error = null;
+      this._sale = await posService.attachCustomer(this._sale.id, { customer_id: c.id });
+      this._customer = c;
+      this._custQuery = '';
+      this._custResults = [];
+      this._poText = '';
+      this._jobId = '';
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to name the customer';
+    }
+  }
+
+  /** Back to a walk-in sale (only before the first line). */
+  private async _clearCustomer() {
+    if (!this._sale) return;
+    try {
+      this._error = null;
+      this._sale = await posService.attachCustomer(this._sale.id, { customer_id: null });
+      this._customer = null;
+      this._poText = '';
+      this._jobId = '';
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to clear the customer';
+    }
+  }
+
+  /** Saves the purchase order and the job the charge will carry. */
+  private async _saveAccountRefs() {
+    if (!this._sale || !this._customer) return;
+    try {
+      this._error = null;
+      this._sale = await posService.attachCustomer(this._sale.id, {
+        customer_id: this._customer.id,
+        customer_po: this._poText.trim() || null,
+        job_id: this._jobId || null,
+      });
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to save the purchase order';
+    }
+  }
+
+  /** Why the charge to the account is not offered, or null when it is. */
+  private get _accountRefusal(): string | null {
+    // What is left to charge once the cash, check or card tenders are taken.
+    const owed = (this._sale?.total_cents ?? 0) - this._tenderedSoFar;
+    return chargeRefusal(this._customer, Math.max(owed, 0), this._poText);
+  }
+
+  private _renderCustomerPanel() {
+    const sale = this._sale;
+    const hasLines = (sale?.lines.length ?? 0) > 0;
+    const c = this._customer;
+    const toneClass = (tone: string) =>
+      tone === 'stop' ? 'text-safety-red' : tone === 'warn' ? 'text-amber-400' : 'text-gable-green';
+    if (c) {
+      const st = standingOf(c);
+      return html`
+        <div id="pos-customer" class="mb-4 rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="text-sm font-semibold text-white" data-testid="pos-customer-name">${c.name}</div>
+              <div class="font-mono text-xs text-slate-400">${c.account_number}</div>
+            </div>
+            <button
+              @click=${() => this._clearCustomer()}
+              ?disabled=${hasLines || this._loading}
+              title=${hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
+              class="rounded border border-white/10 px-2 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >Change</button>
+          </div>
+          <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
+          ${c.standing === 'good' || c.standing === 'over_limit' ? html`
+            <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
+          <label class="mt-3 block text-xs text-slate-400" for="pos-po">
+            Purchase order${c.po_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}
+          </label>
+          <input id="pos-po" type="text" maxlength="100" .value=${this._poText}
+            @input=${(e: Event) => { this._poText = (e.target as HTMLInputElement).value; }}
+            @change=${() => this._saveAccountRefs()}
+            class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none"
+            placeholder="PO number" />
+          ${c.jobs.length > 0 ? html`
+            <label class="mt-3 block text-xs text-slate-400" for="pos-job">Job</label>
+            <select id="pos-job" .value=${this._jobId}
+              @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
+              class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none">
+              <option value="">No job</option>
+              ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
+            </select>` : nothing}
+        </div>`;
+    }
+    return html`
+      <div id="pos-customer" class="mb-4 rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Customer</span>
+          <span class="text-xs text-slate-400">Walk-in sale</span>
+        </div>
+        <input id="pos-customer-search" type="text" autocomplete="off"
+          placeholder="Find by name or account number"
+          aria-label="Find a customer by name or account number"
+          .value=${this._custQuery}
+          ?disabled=${hasLines}
+          @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
+          class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:opacity-40" />
+        ${hasLines ? html`<div class="mt-1 text-xs text-slate-400">Name the customer before the first line.</div>` : nothing}
+        ${this._custResults.length > 0 ? html`
+          <div class="mt-2 max-h-56 overflow-y-auto rounded border border-white/10" data-testid="pos-customer-results">
+            ${this._custResults.map((r) => {
+              const st = standingOf(r);
+              return html`
+                <button @click=${() => this._chooseCustomer(r)}
+                  class="block w-full border-b border-white/10 bg-slate-steel px-3 py-2 text-left last:border-b-0 hover:bg-white/5">
+                  <span class="text-sm text-white">${r.name}</span>
+                  <span class="ml-2 font-mono text-xs text-slate-400">${r.account_number}</span>
+                  <span class="mt-0.5 block text-xs ${toneClass(st.tone)}">${st.text}</span>
+                </button>`;
+            })}
+          </div>` : nothing}
+      </div>`;
+  }
+
   /* ---- Sale management ---- */
 
   private async _startNewSale() {
@@ -190,6 +346,11 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._success = null;
       this._pendingTenders = [];
+      this._customer = null;
+      this._custQuery = '';
+      this._custResults = [];
+      this._poText = '';
+      this._jobId = '';
       // The last completed sale stays offerable for a void or a return
       // until the next completion replaces it.
       const sale = await posService.startSale(REGISTER_ID);
@@ -236,6 +397,13 @@ export class POSTerminal extends LitElement {
 
   private _handleTender(method: TenderMethod) {
     if (!this._sale) return;
+    if (method === 'account') {
+      const refusal = this._accountRefusal;
+      if (refusal) {
+        this._error = refusal;
+        return;
+      }
+    }
     this._tenderMethod = method;
     const remaining = this._sale.total_cents - this._tenderedSoFar;
     this._tenderAmount = (Math.max(remaining, 0) / 100).toFixed(2);
@@ -629,7 +797,8 @@ export class POSTerminal extends LitElement {
           </div>
 
           <!-- Right: Totals + Tenders -->
-          <div style="width:360px;display:flex;flex-direction:column;background:#161b22;padding:24px">
+          <div style="width:360px;display:flex;flex-direction:column;background:#161b22;padding:24px;overflow-y:auto">
+            ${this._renderCustomerPanel()}
             <div style="margin-bottom:24px">
               <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#8b949e">
                 <span>Subtotal</span>
@@ -662,8 +831,8 @@ export class POSTerminal extends LitElement {
             ${!this._showTender && this._pendingTenders.length === 0 ? html`
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1">
                 ${METHODS.map(m => html`
-                  <button @click=${() => this._handleTender(m)} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center;text-transform:capitalize" ?disabled=${productLines.length === 0 || sale?.status !== 'open'}>
-                    ${m}
+                  <button @click=${() => this._handleTender(m)} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center;text-transform:capitalize" ?disabled=${productLines.length === 0 || sale?.status !== 'open' || (m === 'account' && this._accountRefusal !== null)} title=${m === 'account' ? (this._accountRefusal ?? 'Charge the sale to the customer\u2019s account') : ''}>
+                    ${m === 'account' ? 'Charge to account' : m}
                   </button>
                 `)}
               </div>
@@ -697,7 +866,7 @@ export class POSTerminal extends LitElement {
               <div style="display:flex;flex-direction:column;gap:12px;flex:1">
                 <div style="font-size:14px;color:#8b949e;text-align:center">Tenders taken against $${totalDollars}</div>
                 ${METHODS.map(m => html`
-                  <button @click=${() => this._handleTender(m)} style="padding:12px;background:#21262d;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;font-weight:600;cursor:pointer;text-transform:capitalize" ?disabled=${remaining <= 0 && m !== 'cash'}>
+                  <button @click=${() => this._handleTender(m)} style="padding:12px;background:#21262d;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;font-weight:600;cursor:pointer;text-transform:capitalize" ?disabled=${(remaining <= 0 && m !== 'cash') || (m === 'account' && this._accountRefusal !== null)} title=${m === 'account' ? (this._accountRefusal ?? '') : ''}>
                     Add ${m}
                   </button>
                 `)}

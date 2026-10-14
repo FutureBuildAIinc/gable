@@ -16,6 +16,7 @@ import type {
     RefundMethod,
     TillSession,
     TillReport,
+    CounterCustomer,
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
@@ -134,6 +135,34 @@ export const posService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/products/search?q=${encodeURIComponent(query)}`),
             'Failed to search products',
+        );
+        return response.json();
+    },
+
+    // --- The counter's customer ---
+
+    /** Customers by name or account number, each with the account's standing. */
+    async findCustomers(query: string): Promise<CounterCustomer[]> {
+        if (query.trim().length < 2) return [];
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/customers?q=${encodeURIComponent(query.trim())}`),
+            'Failed to look up customers',
+        );
+        return response.json();
+    },
+
+    /** Names the sale's customer (before the first line), purchase order and job. */
+    async attachCustomer(
+        saleId: string,
+        input: { customer_id: string | null; customer_po?: string | null; job_id?: string | null },
+    ): Promise<Sale> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/customer`, {
+                method: 'PUT',
+                headers: JSON_HEADERS,
+                body: JSON.stringify(input),
+            }),
+            'Failed to name the customer',
         );
         return response.json();
     },
