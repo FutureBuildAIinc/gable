@@ -1,0 +1,173 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# Market check (FROM-PRINCIPAL item 112 c): our walk in prices against a live
+# competitor store, read through an FB Connect pricing flow by its webhook. The
+# webhook id is a secret: it is sealed at rest and never answered. The flow's
+# request and answer are documented in docs/integrations/MARKET-CHECK-FLOW.md.
+# Component schemas are prefixed MarketCheck.
+paths:
+  /api/v1/admin/market-check/settings:
+    get:
+      operationId: marketCheckGetSettings
+      tags: [pricing]
+      summary: Show the Market check settings
+      description: >-
+        Admin or owner. The FB Connect address, whether a webhook id is saved
+        (never the id), the flow's name, the comparison store's label, id and
+        ZIP, the band percent and the margin floor percent. configured is true
+        when the address and the id are both saved.
+      responses:
+        "200":
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketCheckSettings"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+    put:
+      operationId: marketCheckSaveSettings
+      tags: [pricing]
+      summary: Save the Market check settings
+      description: >-
+        Admin or owner. A field left out keeps what is saved. webhook_id absent
+        keeps the saved id, an empty string clears it; a new id is sealed with
+        the vault (refused in words when no vault key is configured). The
+        address is https://host[:port] with no user info, path, query or
+        fragment (http only for a loopback host). Answers the GET shape.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketCheckSettingsRequest"
+      responses:
+        "200":
+          description: The settings after the save.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketCheckSettings"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/pricing/market-check:
+    post:
+      operationId: marketCheckRun
+      tags: [pricing]
+      summary: Check picked products against the live store
+      description: >-
+        Admin or owner. Runs the FB Connect pricing flow for one to twelve
+        distinct products in batches of three. Per product: our walk in price,
+        the competitor's matched title and price, the difference and position
+        recomputed from our own figures, and a suggested price that keeps the
+        margin floor. A batch that fails marks only its own items error. 409
+        not_configured when the address or the webhook id is not saved. Cost
+        is never in the answer and is never sent to the flow.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarketCheckRunRequest"
+      responses:
+        "200":
+          description: One row per picked product, in request order.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketCheckResult"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/WireConflict" }
+        "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+components:
+  schemas:
+    MarketCheckSettings:
+      type: object
+      required: [connect_url, webhook_id_saved, flow_name, store_label, store_id, store_zip, band_pct, margin_floor_pct, configured]
+      properties:
+        connect_url: {type: string}
+        webhook_id_saved: {type: boolean}
+        flow_name: {type: string}
+        store_label: {type: string}
+        store_id: {type: string}
+        store_zip: {type: string}
+        band_pct: {type: string, description: A decimal percent from 0 to 50.}
+        margin_floor_pct: {type: string, description: A decimal percent from 0 to 90.}
+        configured: {type: boolean}
+    MarketCheckSettingsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        connect_url: {type: string}
+        webhook_id: {type: string, description: Write only. Absent keeps the saved id; an empty string clears it.}
+        flow_name: {type: string}
+        store_label: {type: string}
+        store_id: {type: string}
+        store_zip: {type: string}
+        band_pct: {type: string}
+        margin_floor_pct: {type: string}
+    MarketCheckRunRequest:
+      type: object
+      additionalProperties: false
+      required: [product_ids]
+      properties:
+        product_ids:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: {type: string, format: uuid}
+    MarketCheckCompetitor:
+      type: object
+      required: [title, price_cents, listed_price_cents, link, confidence, unit_note]
+      properties:
+        title: {type: string}
+        price_cents: {type: integer, format: int64}
+        listed_price_cents: {type: integer, format: int64}
+        link: {type: string, description: Kept only when it starts with https://www.homedepot.com/, else empty.}
+        confidence: {type: integer, minimum: 0, maximum: 100}
+        unit_note: {type: string}
+    MarketCheckRow:
+      type: object
+      required: [product_id, sku, description, uom, our_price_cents, cost_known, status, competitor, diff_pct, position, suggested_price_cents, reason, note]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        description: {type: string}
+        uom: {type: string}
+        our_price_cents: {type: integer, format: int64}
+        cost_known: {type: boolean}
+        status: {type: string, enum: [matched, unmatched, error]}
+        competitor:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/MarketCheckCompetitor"
+        diff_pct: {type: number, nullable: true}
+        position: {type: string, enum: ["", above, below, in_line]}
+        suggested_price_cents: {type: integer, format: int64, nullable: true}
+        reason: {type: string, enum: ["", lower_to_band, raise_to_band, held_at_floor, keep, no_cost]}
+        note: {type: string}
+    MarketCheckResult:
+      type: object
+      required: [flow_name, store_label, store_seen, band_pct, margin_floor_pct, rows]
+      properties:
+        flow_name: {type: string}
+        store_label: {type: string}
+        store_seen: {type: string, nullable: true}
+        band_pct: {type: string}
+        margin_floor_pct: {type: string}
+        rows:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketCheckRow"

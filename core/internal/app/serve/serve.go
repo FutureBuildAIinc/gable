@@ -58,6 +58,7 @@ import (
 	"github.com/gablelbm/gable/internal/pim"
 	"github.com/gablelbm/gable/internal/portal"
 	"github.com/gablelbm/gable/internal/pos"
+	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/project"
@@ -400,6 +401,16 @@ func Run() {
 		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
 	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+
+	// Market check: our prices against a live store through an FB Connect
+	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
+	// the pricing rules' walls.
+	marketCheckSvc := marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
+		WithVault(aiVault).WithTxRunner(db).WithLogger(logger).
+		WithAudit(marketcheck.AuditRecorder{L: auditLog})
+	marketcheck.NewHandler(marketCheckSvc).RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner"),
+		pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {

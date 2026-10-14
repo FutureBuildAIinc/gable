@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -301,13 +302,22 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		}
 	}
 	apply := func(ctx context.Context) error {
-		for k, v := range writes {
-			if err := s.store.Write(ctx, k, v); err != nil {
-				return err
-			}
+		// One fixed key order, so two saves at once lock rows in the same
+		// order and never deadlock.
+		keys := make([]string, 0, len(writes)+len(deletes))
+		for k := range writes {
+			keys = append(keys, k)
 		}
-		for _, k := range deletes {
-			if err := s.store.Delete(ctx, k); err != nil {
+		keys = append(keys, deletes...)
+		sort.Strings(keys)
+		for _, k := range keys {
+			var err error
+			if v, ok := writes[k]; ok {
+				err = s.store.Write(ctx, k, v)
+			} else {
+				err = s.store.Delete(ctx, k)
+			}
+			if err != nil {
 				return err
 			}
 		}
