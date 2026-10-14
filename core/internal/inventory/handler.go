@@ -97,7 +97,7 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, ErrCountNeedsLocation) {
 			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "location_required",
-				Message: "This product is held in more than one location here. Count each location and name the one you counted."})
+				Message: "Name the location you counted or adjusted. A count or adjustment with no location is not written here, because this product may be held in more than one location or the caller is not working in one yard."})
 			return
 		}
 		if errors.Is(err, ErrWouldGoNegative) {

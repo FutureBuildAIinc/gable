@@ -69,10 +69,12 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 	// the product sits in more than one location in the caller's reach (it
 	// would overwrite the oldest row). The reach is the read that applies the
 	// caller's branch or grants.
+	if req.LocationID == nil && branchctx.IDForQuery(ctx) == nil {
+		// A count or a delta with no location and no branch context would
+		// create a row with no location: stock in no yard.
+		return ErrCountNeedsLocation
+	}
 	if req.LocationID == nil && !req.IsDelta {
-		if branchctx.IDForQuery(ctx) == nil {
-			return ErrCountNeedsLocation
-		}
 		rows, err := s.repo.ListInventoryByProduct(ctx, req.ProductID)
 		if err != nil {
 			return err
@@ -81,6 +83,13 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 			return ErrCountNeedsLocation
 		}
 	}
+	return s.adjustStock(ctx, req)
+}
+
+// adjustStock is the write itself, with no caller guard: MoveStock's legs call
+// it (a move names its endpoints, and a move out of the unassigned legacy row
+// has no source location by design).
+func (s *Service) adjustStock(ctx context.Context, req StockAdjustmentRequest) error {
 	// 1. Check if inventory record exists
 	inv, err := s.repo.GetInventory(ctx, req.ProductID, req.LocationID)
 	if err != nil {
@@ -168,7 +177,7 @@ func (s *Service) MoveStock(ctx context.Context, req StockMovementRequest) error
 
 	return s.repo.ExecuteInTx(ctx, func(ctx context.Context) error {
 		// Subtract from source
-		err := s.AdjustStock(ctx, StockAdjustmentRequest{
+		err := s.adjustStock(ctx, StockAdjustmentRequest{
 			ProductID:  req.ProductID,
 			LocationID: req.FromLocationID,
 			Quantity:   -req.Quantity,
@@ -180,7 +189,7 @@ func (s *Service) MoveStock(ctx context.Context, req StockMovementRequest) error
 		}
 
 		// Add to dest
-		err = s.AdjustStock(ctx, StockAdjustmentRequest{
+		err = s.adjustStock(ctx, StockAdjustmentRequest{
 			ProductID:  req.ProductID,
 			LocationID: &req.ToLocationID,
 			Quantity:   req.Quantity,

@@ -256,24 +256,25 @@ func TestAnAdjustWithNoLocationTakesTheStatedRow(t *testing.T) {
 	if got := w.qtyOf(t, read, w.yard1); got != "100.0000" {
 		t.Errorf("yard 1 after the refused counts = %s, want 100.0000", got)
 	}
-	// a delta with no location keeps the stated picks. An unbound caller: the
-	// legacy unassigned row
+	// a delta with no location from an unbound caller is refused too: it
+	// would write a row with no location (round 3); the legacy row stands
 	if err := w.svc.AdjustStock(context.Background(), inventory.StockAdjustmentRequest{
-		ProductID: w.productID, Quantity: 1, IsDelta: true}); err != nil {
-		t.Fatalf("unbound delta with no location: %v", err)
+		ProductID: w.productID, Quantity: 1, IsDelta: true}); !errors.Is(err, inventory.ErrCountNeedsLocation) {
+		t.Fatalf("unbound delta with no location = %v, want ErrCountNeedsLocation", err)
 	}
 	var legacy string
 	if err := db.Pool.QueryRow(context.Background(),
 		`SELECT quantity::text FROM inventory WHERE product_id = $1 AND location_id IS NULL`, w.productID).Scan(&legacy); err != nil {
 		t.Fatal(err)
 	}
-	if legacy != "41.0000" {
-		t.Errorf("the unassigned row = %s, want 41.0000 (the unbound caller's legacy row)", legacy)
+	if legacy != "40.0000" {
+		t.Errorf("the unassigned row = %s, want 40.0000 untouched", legacy)
 	}
 	if got := w.qtyOf(t, read, w.yard1); got != "100.0000" {
 		t.Errorf("yard 1 after the unbound delta = %s, want 100.0000", got)
 	}
-	// a branch scoped caller: the branch's first row by creation (yard 1,
+	// a delta with no location keeps the stated picks for a branch scoped caller:
+	// the branch's first row by creation (yard 1,
 	// created before yard 2 and the new yard), though the new yard holds the
 	// most: the pick follows creation order, never quantity
 	if err := w.svc.AdjustStock(w.ctx, inventory.StockAdjustmentRequest{
