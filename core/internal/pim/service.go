@@ -380,12 +380,43 @@ func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, styl
 				return
 			}
 			dataURI, model = svgURI, svgModel
+		} else if vetted, vErr := vetPhotoDataURI(dataURI); vErr != nil {
+			slog.Error("the photo model's image was refused", "media_id", mediaID, "error", vErr)
+			_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
+			return
+		} else {
+			dataURI = vetted
 		}
 	}
 
 	if err := s.repo.UpdateMediaResult(context.Background(), mediaID, dataURI, model, style, "ready"); err != nil {
 		slog.Error("failed to persist generated image", "media_id", mediaID, "error", err)
 	}
+}
+
+// vetPhotoDataURI holds the photo model to what the desk may store: a base64
+// raster (png, jpeg, webp, gif) as it is, or an SVG only after SanitizeSVG,
+// re-encoded from the sanitised bytes. Anything else is refused.
+func vetPhotoDataURI(uri string) (string, error) {
+	const svgPrefix = "data:image/svg+xml;base64,"
+	switch {
+	case strings.HasPrefix(uri, svgPrefix):
+		raw, err := base64.StdEncoding.DecodeString(uri[len(svgPrefix):])
+		if err != nil {
+			return "", fmt.Errorf("the image is not valid base64")
+		}
+		clean, err := SanitizeSVG(raw)
+		if err != nil {
+			return "", err
+		}
+		return svgPrefix + base64Encode(clean), nil
+	}
+	for _, t := range []string{"png", "jpeg", "webp", "gif"} {
+		if strings.HasPrefix(uri, "data:image/"+t+";base64,") {
+			return uri, nil
+		}
+	}
+	return "", fmt.Errorf("the image type is not allowed")
 }
 
 // illustrationSystemPrompt states the house style of the drawn catalog set.

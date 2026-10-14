@@ -244,3 +244,65 @@ func TestWire_PIMImageUnderOpenRouterCallsThePhotoModel(t *testing.T) {
 		t.Errorf("Anthropic received %d requests, want 0", n)
 	}
 }
+
+func svgDataURI(svg string) string {
+	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString([]byte(svg))
+}
+
+// photoModelAnswering runs a fake OpenRouter whose photo model answers with
+// the given image URL, and returns the finalize the route produced.
+func photoModelAnswering(t *testing.T, url string) mediaUpdate {
+	t.Helper()
+	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"model": "photo-model-sentinel",
+			"choices": []any{map[string]any{"message": map[string]any{
+				"images": []any{map[string]any{"image_url": map[string]any{"url": url}}},
+			}}},
+		})
+	}))
+	defer or.Close()
+	repo := newChanRepo()
+	mux := http.NewServeMux()
+	NewHandler(newPIMTestService(repo, ai.NewClient("or-test-key-not-real").WithBaseURL(or.URL))).RegisterRoutes(mux)
+	rec := postJSON(mux, "/api/v1/products/"+uuid.New().String()+"/pim/generate/image", `{}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body)
+	}
+	return repo.wait(t)
+}
+
+// The photo model is not trusted with SVG: a script in its SVG answer is
+// never stored, and a clean one is stored only as re-serialised bytes.
+func TestWire_PIMPhotoPathNeverStoresUnsanitisedSVG(t *testing.T) {
+	bad := `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><script>alert(1)</script><rect width="9" height="9"/></svg>`
+	u := photoModelAnswering(t, svgDataURI(bad))
+	if u.status != "failed" || u.url != "" {
+		t.Errorf("script svg: finalize = %+v, want failed with no url", u)
+	}
+
+	u = photoModelAnswering(t, svgDataURI(illustrationWithExtras))
+	if u.status != "ready" {
+		t.Fatalf("clean svg: status = %q", u.status)
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(u.url, "data:image/svg+xml;base64,"))
+	if err != nil || strings.Contains(string(raw), "<title") || strings.Contains(string(raw), `width="400"`) {
+		t.Errorf("clean svg stored as the model sent it: %v %s", err, raw)
+	}
+}
+
+// Only the raster types are accepted from the photo model as they are.
+func TestWire_PIMPhotoPathAcceptsOnlyRasterOrSanitisedSVG(t *testing.T) {
+	for _, ok := range []string{"png", "jpeg", "webp", "gif"} {
+		u := photoModelAnswering(t, "data:image/"+ok+";base64,AAAA")
+		if u.status != "ready" || u.url != "data:image/"+ok+";base64,AAAA" {
+			t.Errorf("%s: finalize = %+v", ok, u)
+		}
+	}
+	for _, bad := range []string{"data:image/svg+xml;utf8,<svg/>", "data:image/x-icon;base64,AAAA", "data:image/svg+xml;base64,!!!", "data:text/html;base64,AAAA"} {
+		u := photoModelAnswering(t, bad)
+		if u.status != "failed" || u.url != "" {
+			t.Errorf("%q: finalize = %+v, want failed", bad, u)
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -609,12 +610,16 @@ func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (strin
 		model = wantModel
 	}
 	for _, img := range resp.Choices[0].Message.Images {
-		if strings.HasPrefix(img.ImageURL.URL, "data:image/") {
+		if photoDataURIRE.MatchString(img.ImageURL.URL) {
 			return img.ImageURL.URL, model, nil
 		}
 	}
 	return "", "", fmt.Errorf("image model %q returned no image data", model)
 }
+
+// photoDataURIRE is what the photo model may answer with: a raster image, or
+// an SVG (which the caller must sanitise before storing it).
+var photoDataURIRE = regexp.MustCompile(`^data:image/(png|jpeg|webp|gif|svg\+xml);base64,`)
 
 // FreightInvoiceResult holds the extracted freight invoice data.
 type FreightInvoiceResult struct {
@@ -802,6 +807,6 @@ func buildFileContent(fileBytes []byte, contentType, instruction string) ([]cont
 		}, nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("unsupported content type: %s", rawType)
+		return nil, nil, &UnsupportedTypeError{Message: fmt.Sprintf("This file type (%s) cannot be read. Use a picture, a PDF or a plain text or CSV file.", rawType)}
 	}
 }
