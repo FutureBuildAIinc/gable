@@ -256,10 +256,10 @@ test.describe('Payments, unapplied cash and AR', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'aging-by-ship-to.png'), fullPage: true });
 
     // The statement on the new AR route: the seeded customer's activity.
-    await page.goto('/reports/customer-statement');
+    // The account page's Statement link lands here with the customer preselected,
+    // and the page runs the statement for that customer.
+    await page.goto(`/reports/customer-statement?customer=${kelbrook}`);
     await expect(page.getByRole('heading', { name: 'Customer Statement' })).toBeVisible();
-    await page.getByLabel('Customer ID').fill(kelbrook);
-    await page.getByRole('button', { name: 'Generate' }).click();
     await expect(page.getByTestId('statement-currency')).toBeVisible({ timeout: 15000 });
     await expect(page.getByTestId('statement-currency')).toContainText('Opening Balance');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'customer-statement.png'), fullPage: true });
