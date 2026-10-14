@@ -102,10 +102,10 @@ export class GableKPICard extends LitElement {
         return html`
             <a
                 href=${this.href}
-                aria-label=${this.linkLabel ?? this.cardTitle}
                 class="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
             >
                 ${card}
+                <span class="sr-only">${this.linkLabel ?? this.cardTitle}</span>
             </a>
         `;
     }

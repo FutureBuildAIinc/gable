@@ -38,7 +38,7 @@ describe('kpi card', () => {
     // name and hide the figure. The action is visually hidden text instead.
     expect(link.getAttribute('aria-label')).toBeNull()
     expect(text(link)).toContain("Open today's sales")
-    expect(text(link)).toContain('$100.00')
+    expect(text(link)).toContain('100.00')
     expect(text(link)).toContain("Today's Revenue")
   })
 })

@@ -133,23 +133,26 @@ export class GableAppShell extends LitElement {
         </button>
         ${this._userMenuOpen ? html`
           <div
-            role="menu"
-            aria-label="Account"
-            @keydown=${this._handleUserMenuKeydown}
             class="absolute right-0 top-full mt-2 w-64 rounded-xl border border-white/10 bg-slate-steel shadow-xl z-50 overflow-hidden"
           >
             <div class="px-4 py-3 border-b border-white/5">
               ${name !== '' ? html`<div class="text-sm font-medium text-white">${name}</div>` : nothing}
               <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${roleWords}</div>
             </div>
-            <button
-              role="menuitem"
-              @click=${() => this._handleSignOut()}
-              class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+            <div
+              role="menu"
+              aria-label="Account"
+              @keydown=${this._handleUserMenuKeydown}
             >
-              ${icon(LogOut, 16, 'w-4 h-4')}
-              Sign out
-            </button>
+              <button
+                role="menuitem"
+                @click=${() => this._handleSignOut()}
+                class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+              >
+                ${icon(LogOut, 16, 'w-4 h-4')}
+                Sign out
+              </button>
+            </div>
           </div>
         ` : nothing}
       </div>

@@ -3,6 +3,7 @@
 
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { router } from '../../lib/router.ts';
 import type { TopCustomer } from '../../types/dashboard.ts';
 
 @customElement('gable-top-customers-table')
@@ -11,6 +12,13 @@ export class GableTopCustomersTable extends LitElement {
 
     @property({ attribute: false }) customers: TopCustomer[] = [];
     @property({ type: Boolean }) loading = false;
+
+    /** A click anywhere on the row follows the row's link; a click on the
+     *  link itself is the router's anchor interception, which navigates. */
+    private _openAccount(e: Event, customerId: string) {
+        if ((e.target as HTMLElement).closest('a')) return;
+        router.navigate(`/accounts/${customerId}`);
+    }
 
     render() {
         if (this.loading) {
@@ -61,7 +69,10 @@ export class GableTopCustomersTable extends LitElement {
                                         </tr>
                                     `
                                     : this.customers.map((customer) => html`
-                                        <tr class="group hover:bg-white/5 transition-colors">
+                                        <tr
+                                            class="group hover:bg-white/5 transition-colors cursor-pointer"
+                                            @click=${(e: Event) => this._openAccount(e, customer.customer_id)}
+                                        >
                                             <td class="px-6 py-3 font-medium text-white">
                                                 <a
                                                     href=${`/accounts/${customer.customer_id}`}

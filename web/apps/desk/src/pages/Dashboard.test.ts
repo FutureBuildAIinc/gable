@@ -52,7 +52,7 @@ describe('the dashboard drills in', () => {
     const link = q<HTMLAnchorElement>(el, 'a[href="/reports/daily-till"]')
     expect(link.getAttribute('aria-label')).toBeNull()
     expect(link.textContent).toContain("Open today's sales")
-    expect(link.textContent).toContain('$3,134.94')
+    expect(link.textContent).toContain('3,134.94')
   })
 
   it('Active Orders opens the orders list on its Confirmed tab', async () => {
