@@ -131,4 +131,24 @@ describe('the counter as the Panels layout', () => {
     expect(pay.textContent).toContain('Still owed $76.50');
     expect(svc.completeSale).not.toHaveBeenCalled();
   });
+
+  it('sends only the corrected entry after a refused Pay, never the first attempt again', async () => {
+    svc.completeSale
+      .mockRejectedValueOnce(new Error('only a cash tender can give change'))
+      .mockResolvedValueOnce(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    await typeInto(el, '100.00');
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.completeSale).toHaveBeenCalledTimes(1);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 10000 }]);
+    await typeInto(el, '86.50');
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledTimes(2);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+  });
 });

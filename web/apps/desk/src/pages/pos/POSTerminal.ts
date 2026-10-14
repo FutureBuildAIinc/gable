@@ -454,16 +454,19 @@ export class POSTerminal extends LitElement {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
       return;
     }
-    this._pendingTenders = plan.tenders;
-    await this._completeSale();
+    await this._completeSale(plan.tenders);
   }
 
-  private async _completeSale() {
-    if (!this._sale || this._pendingTenders.length === 0) return;
+  /**
+   * Sends the tenders it is given and clears the added list only when the sale
+   * completes, so a refused Pay leaves no stale tender behind.
+   */
+  private async _completeSale(tenders: TenderIn[]) {
+    if (!this._sale || tenders.length === 0) return;
     try {
       this._loading = true;
       this._error = null;
-      const completed = await posService.completeSale(this._sale.id, this._sale.revision, this._pendingTenders);
+      const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
       this._sale = completed;
       this._completed = completed;
       const change = completed.change_cents || 0;
