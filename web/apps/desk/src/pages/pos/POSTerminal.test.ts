@@ -78,15 +78,13 @@ async function mount(s: Sale): Promise<POSTerminal> {
   return el;
 }
 const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement;
-// A tender is never assumed; where a leg is about the amount, not the choice,
-// the cashier presses cash first.
+// A tender is never assumed: a leg that is about the amount presses its tender
+// itself, with chooseCash or the tender's own button.
 const chooseCash = async (el: POSTerminal) => {
   q(el, 'tender-cash').click();
   await el.updateComplete;
 };
 const typeInto = async (el: POSTerminal, v: string) => {
-  const anyPressed = el.querySelector('[data-testid^="tender-"][aria-pressed="true"]');
-  if (!anyPressed) await chooseCash(el);
   const input = el.querySelector('#pos-tender-amount') as HTMLInputElement;
   input.value = v;
   input.dispatchEvent(new Event('input'));
@@ -123,6 +121,7 @@ describe('the counter as the Panels layout', () => {
   it('pays in cash with the tendered amount, sending one cash tender on the sale revision', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed', change_cents: 1350 }));
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '100.00');
     expect(q(el, 'pos-change').textContent).toContain('$13.50');
     q(el, 'pos-pay').click();
@@ -133,6 +132,7 @@ describe('the counter as the Panels layout', () => {
   it('takes a split between two tenders as the added tender plus the entry', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '50.00');
     q(el, 'pos-add-tender').click();
     await el.updateComplete;
@@ -167,6 +167,7 @@ describe('the counter as the Panels layout', () => {
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
     (el as unknown as { _sale: Sale })._sale = sale();
     await el.updateComplete;
+    await chooseCash(el);
     await typeInto(el, '10.00');
     const pay = q(el, 'pos-pay') as HTMLButtonElement;
     expect(pay.disabled).toBe(true);
@@ -342,6 +343,7 @@ describe('the counter as the Panels layout', () => {
   it('does not start a second sale over the one the cashier began after a completion', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '100.00');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -443,6 +445,7 @@ describe('the counter as the Panels layout', () => {
     it('draws Void as a plain secondary action, never a red outline', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '100.00');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -461,6 +464,7 @@ describe('the counter as the Panels layout', () => {
     it('leaves the completion to the card: no green band over the page, so nothing shifts', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000002', total_cents: 13810, change_cents: 0 }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '86.50');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -640,6 +644,7 @@ describe('the Panels board', () => {
 
   it('shows the payment value on a done Payment panel and the review on Summary', async () => {
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '100.00');
     q(el, 'pos-next-summary').click();
     await el.updateComplete;
@@ -674,6 +679,7 @@ describe('the Panels board', () => {
     expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
     expect(q(el, 'pos-order-summary').textContent).toContain('Item a');
     expect(q(el, 'pos-order-summary').textContent).toContain('1 EA at $50.00');
+    await chooseCash(el);
     await typeInto(el, '100.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
     const done = await mount(sale({ status: 'completed' }));
@@ -1193,6 +1199,7 @@ describe('the account customer after a charge', () => {
     const el = await mount(sale({ customer_id: 'cu1' }));
     (el as unknown as Inner)._customer = account;
     await el.updateComplete;
+    await chooseCash(el);
     await typeInto(el, '100.00');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -1536,6 +1543,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
     async function completeOne(): Promise<POSTerminal> {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '100.00');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -1546,6 +1554,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
     it('stays on screen past the old timer, with its band, Void and Return', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '100.00');
       // fake timers go in before Pay, so a timer the completion arms is one
       // this test advances
@@ -1664,6 +1673,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       const el = await mount(sale({ customer_id: 'cu1' }));
       (el as unknown as { _customer: CounterCustomer | null })._customer = withJob;
       await el.updateComplete;
+      await chooseCash(el);
       await typeInto(el, '100.00');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
