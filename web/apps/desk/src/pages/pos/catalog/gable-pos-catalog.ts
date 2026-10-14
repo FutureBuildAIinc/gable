@@ -344,10 +344,11 @@ export class GablePosCatalog extends LitElement {
             <div class="mt-3 flex gap-2">
                 <input data-testid="catalog-search" type="text" autocomplete="off" placeholder="Search by name, SKU or scan"
                     aria-label="Search by name, SKU or scan" .value=${this._query}
+                    ?disabled=${this.disabled}
                     @input=${this._onSearch} @keydown=${(e: KeyboardEvent) => this._onKey(e, true)}
                     class="min-w-0 flex-1 rounded border border-white/10 bg-deep-space px-3 py-2 text-sm text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40" />
                 <input data-testid="catalog-qty" type="text" inputmode="decimal" autocomplete="off" aria-label="Quantity"
-                    .value=${this._qty}
+                    .value=${this._qty} ?disabled=${this.disabled}
                     aria-invalid=${this._qtyValid ? 'false' : 'true'}
                     @input=${this._onQty} @keydown=${(e: KeyboardEvent) => this._onKey(e, false)}
                     class="w-16 rounded border border-white/10 bg-deep-space px-2 py-2 text-center font-mono text-sm text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40 aria-[invalid=true]:border-safety-red" />
