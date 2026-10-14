@@ -115,6 +115,7 @@ export class GableAppShell extends LitElement {
           @keydown=${this._handleUserChipKeydown}
           aria-haspopup="menu"
           aria-expanded=${this._userMenuOpen ? 'true' : 'false'}
+          aria-label="Account menu"
           class="flex items-center gap-2 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
         >
           <div class="hidden lg:flex items-center gap-2">
