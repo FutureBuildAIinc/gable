@@ -232,6 +232,32 @@ describe('gable-app-dialog in the top layer', () => {
   })
 })
 
+describe('gable-app-dialog panel clicks', () => {
+  it('keeps a typed prompt open when the click lands on the panel itself', async () => {
+    const result = promptDialog({ title: 'Void this sale', label: 'Reason', required: true })
+    await settleDialog()
+    await typeIntoPrompt('entered by mistake')
+    const el = dialogEl()
+    const dlg = q<HTMLElement>(el, 'dialog')
+    // The padding lives on the panel, the dialog's own box carries none, so a
+    // click on the panel's edge is a content click, never a backdrop click.
+    expect(dlg.className).toContain('p-0')
+    q<HTMLElement>(dlg, 'div').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await flush()
+    expect(dialogElSafe()).not.toBeNull()
+    expect(q<HTMLInputElement>(el, 'input').value).toBe('entered by mistake')
+    clickCancel()
+    await expect(result).resolves.toBeNull()
+  })
+
+  it('a click on the dialog element itself is the backdrop and cancels', async () => {
+    const result = confirmDialog({ title: 'Confirm this order?' })
+    await settleDialog()
+    q<HTMLElement>(dialogEl(), 'dialog').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await expect(result).resolves.toBe(false)
+  })
+})
+
 describe('gable-app-dialog promptDialog', () => {
   it('resolves the typed text on Confirm', async () => {
     const result = promptDialog({ title: 'Cancel this order', label: 'Reason' })
