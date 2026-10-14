@@ -236,6 +236,15 @@ func TestDealerProfileLocale(t *testing.T) {
 		t.Errorf("the refusal does not name the field: %s", d)
 	}
 
+	// A tag the column's shape check refuses (the likeliest typo: an
+	// underscore) must be refused in words, never answered 500.
+	for _, bad := range []string{"en_US", "i-klingon", "en-u-ca-gregory", "en-CA-x-yard", "root", "und", "qaa", "x-whatever"} {
+		r = f.put(strings.Replace(withLocale, `"en-CA"`, `"`+bad+`"`, 1), "If-Match", `"`+strconv.FormatInt(f.revision(), 10)+`"`)
+		if r.status != http.StatusBadRequest {
+			t.Errorf("locale %q: %d %s, want 400 in words", bad, r.status, r.raw)
+		}
+	}
+
 	// A write without the field (a caller from before it existed) keeps en-CA.
 	r = f.put(goodBody, "If-Match", `"`+strconv.FormatInt(f.revision(), 10)+`"`)
 	if r.status != http.StatusOK || r.body["locale"] != "en-CA" {
