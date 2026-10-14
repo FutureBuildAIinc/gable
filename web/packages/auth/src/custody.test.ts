@@ -224,6 +224,106 @@ describe('custody — dev sign-in', () => {
   })
 })
 
+describe('custody — dev sign-in with a persona', () => {
+  it('stores the persona on the session and exposes it through the getters', () => {
+    authConfig.devMode = true
+    const store = memoryStorage()
+    const c = new AuthCustody(store)
+    const s = c.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    expect(s).toEqual({ kind: 'dev', name: 'Jordan Pike', role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    expect(c.displayName).toBe('Jordan Pike')
+    expect(c.personaRole).toBe('cashier')
+    expect(c.personaHomeYardCode).toBe('KEL-MAIN')
+    const rec = JSON.parse(store.written.get(SESSION_HANDOFF_KEY) as string)
+    expect(rec).toEqual({
+      v: 1, kind: 'dev', name: 'Jordan Pike', role: 'cashier', homeYardCode: 'KEL-MAIN',
+    })
+  })
+
+  it('reads the persona back through the handoff on a fresh custody (the desk booting)', () => {
+    authConfig.devMode = true
+    const store = memoryStorage()
+    new AuthCustody(store).signInDev('Avery Brooks', { role: 'sales', homeYardCode: 'KEL-MAIN' })
+
+    const desk = new AuthCustody(store)
+    expect(desk.personaRole).toBe('sales')
+    expect(desk.personaHomeYardCode).toBe('KEL-MAIN')
+  })
+
+  it('treats an absent persona as no role and no home yard', () => {
+    authConfig.devMode = true
+    const c = new AuthCustody(memoryStorage())
+    c.signInDev('Local')
+    expect(c.personaRole).toBeNull()
+    expect(c.personaHomeYardCode).toBeNull()
+  })
+
+  it('drops an empty persona field on the way through the handoff', () => {
+    authConfig.devMode = true
+    const store = memoryStorage({
+      [SESSION_HANDOFF_KEY]: JSON.stringify({
+        v: 1, kind: 'dev', name: 'Avery Brooks', role: '', homeYardCode: '',
+      }),
+    })
+    const c = new AuthCustody(store)
+    expect(c.personaRole).toBeNull()
+    expect(c.personaHomeYardCode).toBeNull()
+  })
+
+  it('drops a non-string persona field rather than trust the caller', () => {
+    authConfig.devMode = true
+    const store = memoryStorage({
+      [SESSION_HANDOFF_KEY]: JSON.stringify({
+        v: 1, kind: 'dev', name: 'Avery Brooks', role: 7, homeYardCode: null,
+      }),
+    })
+    const c = new AuthCustody(store)
+    expect(c.personaRole).toBeNull()
+    expect(c.personaHomeYardCode).toBeNull()
+  })
+
+  it('clears the persona when the user signs out', () => {
+    authConfig.devMode = true
+    const store = memoryStorage()
+    const c = new AuthCustody(store)
+    c.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    c.signOut()
+    expect(c.personaRole).toBeNull()
+    expect(c.personaHomeYardCode).toBeNull()
+    expect(store.written.has(SESSION_HANDOFF_KEY)).toBe(false)
+  })
+
+  it('clears the persona on a 401 (onUnauthorized)', () => {
+    authConfig.devMode = true
+    const store = memoryStorage()
+    const c = new AuthCustody(store)
+    c.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    c.onUnauthorized()
+    expect(c.personaRole).toBeNull()
+    expect(c.personaHomeYardCode).toBeNull()
+  })
+
+  it('refuses a persona sign-in in a non-dev build', () => {
+    authConfig.devMode = false
+    const c = new AuthCustody(memoryStorage())
+    expect(() => c.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' }))
+      .toThrow(DevModeDisabledError)
+  })
+
+  it('refuses an empty display name even when a persona is given', () => {
+    authConfig.devMode = true
+    const c = new AuthCustody(memoryStorage())
+    expect(() => c.signInDev('   ', { role: 'cashier' })).toThrow(InvalidTokenError)
+  })
+
+  it('returns no persona role or yard for a token session', () => {
+    const c = new AuthCustody(memoryStorage())
+    c.signInWithToken(TOKEN)
+    expect(c.personaRole).toBeNull()
+    expect(c.personaHomeYardCode).toBeNull()
+  })
+})
+
 describe('custody — hostile storage degrades to memory', () => {
   it('sign-in still works when the storage accessor throws', () => {
     const hostile = {

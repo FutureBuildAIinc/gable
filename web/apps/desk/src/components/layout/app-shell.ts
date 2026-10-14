@@ -15,11 +15,26 @@ import { cn } from '../../lib/utils.ts';
 import { router } from '../../lib/router.ts';
 import { workspace, menuForKey, activeMenuPath, type WorkspaceTab } from '../../lib/workspace.ts';
 import '@gable/design-system';
+import { authCustody } from '@gable/auth';
 import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
 import './branch-switcher.ts';
 import { icon } from '../../lib/icons.ts';
 import { Search, X, Plus } from 'lucide';
+
+/** Initials for a display name (the same rule the door uses). */
+function initialsFor(name: string): string {
+  const parts = name.trim().split(/[\s@.]+/).filter(Boolean);
+  if (parts.length === 0) return '??';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+}
+
+/** Capitalise a role slug (cashier -> Cashier). Same map the door uses. */
+function roleInWords(role: string): string {
+  if (role.length === 0) return '';
+  return role[0].toUpperCase() + role.slice(1);
+}
 
 @customElement('gable-app-shell')
 export class GableAppShell extends LitElement {
@@ -64,6 +79,41 @@ export class GableAppShell extends LitElement {
       e.preventDefault();
       this._shortcutsOpen = true;
     }
+  }
+
+  /**
+   * The signed in user's initials, name and role, read from the auth session.
+   * A persona card sets the role and home yard; a token session uses the
+   * email/name from the claims. When nothing is signed in this renders the
+   * empty state (the existing header avatar is gone — there is no signed in
+   * user to show).
+   */
+  private _renderUser() {
+    const session = authCustody.session;
+    if (session === null) return nothing;
+    const name = authCustody.displayName ?? '';
+    const personaRole = authCustody.personaRole;
+    const tokenRoles = authCustody.roles;
+    const roleWords = personaRole !== null
+      ? roleInWords(personaRole)
+      : tokenRoles.length > 0
+        ? tokenRoles.map(roleInWords).join(' · ')
+        : 'local development';
+    const initials = name === '' ? '??' : initialsFor(name);
+    return html`
+      <div class="hidden lg:flex items-center gap-2">
+        <div class="h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow">
+          ${initials}
+        </div>
+        <div class="leading-tight">
+          ${name !== '' ? html`<div class="text-sm font-medium text-white">${name}</div>` : nothing}
+          <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${roleWords}</div>
+        </div>
+      </div>
+      <div class="lg:hidden h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow">
+        ${initials}
+      </div>
+    `;
   }
 
   private _tab(tab: WorkspaceTab) {
@@ -166,9 +216,7 @@ export class GableAppShell extends LitElement {
             <div class="text-xs text-zinc-500 font-medium hidden lg:block bg-white/5 px-2 py-1 rounded border border-white/5">
               ⌘K
             </div>
-            <div class="h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow cursor-pointer hover:scale-105 transition-transform">
-              AD
-            </div>
+            ${this._renderUser()}
           </div>
         </header>
 

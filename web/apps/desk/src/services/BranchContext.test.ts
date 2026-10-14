@@ -18,6 +18,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { branchContext, type BranchChangedDetail } from './BranchContext'
 import { fetchWithAuth } from './fetchClient'
 import { jsonResponse } from '../test/dom'
+import { authConfig, authCustody } from '@gable/auth'
 import type { BranchSummary } from '../types/location'
 
 const STORAGE_KEY = 'gable_current_branch_id'
@@ -53,11 +54,16 @@ function reinit(): Promise<void> {
 
 beforeEach(() => {
   localStorage.clear()
+  sessionStorage.clear()
+  authCustody.signOut()
+  authConfig.devMode = false
   serve([])
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  authConfig.devMode = false
+  authCustody.signOut()
 })
 
 describe('BranchContext — initial selection', () => {
@@ -284,5 +290,96 @@ describe('BranchContext — the X-Branch-Id contract with fetchClient', () => {
 
     const init = fetchMock.mock.calls.at(-1)![1] as RequestInit
     expect((init.headers as Headers).get('X-Branch-Id')).toBe('b-ver')
+  })
+})
+
+/**
+ * Dev build with a persona card (the demo night walk): when the door signs
+ * the user in as a persona, the desk opens on the persona's home yard, by
+ * code (the seed's yards.code), not by id. The persona role is irrelevant
+ * here; the yard's selection is independent.
+ */
+describe('BranchContext — persona home yard (dev mode)', () => {
+  /** A branch whose `code` matches a persona's homeYardCode. */
+  const KEL_HOME = branch('b-kel-main', 'KEL-MAIN')
+  const WK = branch('b-wk', 'WK')
+  const LK = branch('b-lk', 'LK')
+
+  it('selects the branch whose code matches the persona home yard', async () => {
+    authConfig.devMode = true
+    authCustody.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    serve([KEL_HOME, WK, LK])
+
+    await reinit()
+
+    expect(branchContext.currentId).toBe('b-kel-main')
+    expect(branchContext.current?.code).toBe('KEL-MAIN')
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('b-kel-main')
+  })
+
+  it('prefers the persona home yard over the user-marked home branch', async () => {
+    authConfig.devMode = true
+    // The persona wants WK; the seed marked KEL-MAIN as the home branch.
+    const KEL_HOME = branch('b-kel-main', 'KEL-MAIN', true)
+    authCustody.signInDev('Taylor Reed', { role: 'sales', homeYardCode: 'WK' })
+    serve([KEL_HOME, WK, LK])
+
+    await reinit()
+
+    expect(branchContext.currentId).toBe('b-wk')
+  })
+
+  it('falls back to the user home when the persona yard is not granted', async () => {
+    // A persona card for a yard they aren't actually granted: silent
+    // fallback. Storing a yard the user can't see would stamp X-Branch-Id
+    // with a branch the server will reject on every call.
+    authConfig.devMode = true
+    const KEL_HOME = branch('b-kel-main', 'KEL-MAIN', true)
+    authCustody.signInDev('Avery Brooks', { role: 'sales', homeYardCode: 'NOPE' })
+    serve([KEL_HOME, WK])
+
+    await reinit()
+
+    expect(branchContext.currentId).toBe('b-kel-main')
+  })
+
+  it('does NOT use the persona yard in a production build (no dev mode)', async () => {
+    // In a non-dev build signInDev refuses outright, so no persona is ever
+    // held: BranchContext falls back to the user-marked home branch even if
+    // a stale dev flag and persona snuck through elsewhere.
+    authConfig.devMode = false
+    expect(() => authCustody.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'WK' }))
+      .toThrow()
+    expect(authCustody.session).toBeNull()
+    const KEL_HOME = branch('b-kel-main', 'KEL-MAIN', true)
+    serve([KEL_HOME, WK])
+
+    await reinit()
+
+    expect(branchContext.currentId).toBe('b-kel-main')
+  })
+
+  it('a stored branch wins over the persona home yard (the user already picked)', async () => {
+    authConfig.devMode = true
+    const KEL_HOME = branch('b-kel-main', 'KEL-MAIN')
+    authCustody.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    localStorage.setItem(STORAGE_KEY, 'b-wk')
+    serve([KEL_HOME, WK])
+
+    await reinit()
+
+    expect(branchContext.currentId).toBe('b-wk')
+  })
+
+  it('carries the persona home yard onto the very first page fetch', async () => {
+    authConfig.devMode = true
+    authCustody.signInDev('Drew Patel', { role: 'cashier', homeYardCode: 'LK' })
+    serve([KEL_HOME, WK, LK])
+    await reinit()
+
+    await fetchWithAuth('/api/v1/pos/open')
+
+    const init = fetchMock.mock.calls.at(-1)![1] as RequestInit
+    expect((init.headers as Headers).get('X-Branch-Id')).toBe('b-lk')
   })
 })

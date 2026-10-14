@@ -17,6 +17,7 @@ export {
   DevModeDisabledError,
   InvalidTokenError,
   type AuthSession,
+  type DevPersona,
   type StorageLike,
 } from './custody.ts';
 export {

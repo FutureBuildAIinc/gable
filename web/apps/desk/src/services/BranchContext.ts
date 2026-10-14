@@ -14,6 +14,7 @@
  * avoid a circular import between the two modules.
  */
 import type { BranchSummary } from '../types/location';
+import { authConfig, authCustody } from '@gable/auth';
 import { LocationService } from './LocationService';
 
 const STORAGE_KEY = 'gable_current_branch_id';
@@ -55,9 +56,18 @@ class BranchContextService extends EventTarget {
     if (restored) {
       this._currentId = stored;
     } else {
+      // Dev build with a persona card: open on the persona's home yard so
+      // the demo lands where the walk expects it. The match is by `code` (the
+      // seed's yards.code, carried through the handoff), not by id. A persona
+      // card for a yard the user wasn't granted silently falls through to
+      // the home/first fallback; we never store a yard the user can't see.
+      const personaYardCode = authConfig.devMode ? authCustody.personaHomeYardCode : null;
+      const personaYard = personaYardCode !== null
+        ? this._branches.find((b) => b.code === personaYardCode) ?? null
+        : null;
       const home = this._branches.find((b) => b.is_home);
       const first = this._branches[0];
-      const pick = home ?? first ?? null;
+      const pick = personaYard ?? home ?? first ?? null;
       this._currentId = pick ? pick.id : null;
       if (this._currentId) {
         localStorage.setItem(STORAGE_KEY, this._currentId);
