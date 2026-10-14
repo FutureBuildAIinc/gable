@@ -4,13 +4,14 @@
 package serve
 
 // The counter's customer through the wire (round 21 of the counter's pull
-// request): a customer is named at the create and in the offline sync by the
-// same rule the lookup and the attach follow, the customer branch wall. A
-// cashier granted only A, with no header, who names B's customer is answered
-// like a missing customer and nothing is written; a branch bound key keeps its
-// pin on both routes.
+// request, with ruling A): a customer is named at the create, in the offline
+// sync and at the completion by the one rule the lookup and the attach follow.
+// A cashier reaches every customer, whatever the cashier's grants or header;
+// a branch bound key keeps its pin and is refused, with nothing written.
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,7 +21,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestNoHeader_CounterNamesACustomerThroughTheWall(t *testing.T) {
+func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 	f := newKeyPinFixture(t)
 	noheaderGrant(t, f, "pin-cashier", f.branchA)
 	noheaderTaxRate(t, f, f.branchA)
@@ -33,11 +34,11 @@ func TestNoHeader_CounterNamesACustomerThroughTheWall(t *testing.T) {
 	foreignBefore := named(f.custB)
 	status, buf := f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions",
 		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNA, f.custB.String()))
-	if status != http.StatusNotFound {
-		t.Errorf("no header create naming B's customer: %d %s, want 404", status, buf)
+	if status != http.StatusCreated {
+		t.Errorf("no header create naming B's customer: %d %s, want 201 (ruling A)", status, buf)
 	}
-	if after := named(f.custB); after != foreignBefore {
-		t.Errorf("the refused create wrote %d sales naming B's customer", after-foreignBefore)
+	if after := named(f.custB); after != foreignBefore+1 {
+		t.Errorf("the served create wrote %d sales naming B's customer, want 1", after-foreignBefore)
 	}
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions",
 		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNA, f.custID.String()))
@@ -45,30 +46,32 @@ func TestNoHeader_CounterNamesACustomerThroughTheWall(t *testing.T) {
 		t.Errorf("no header create naming A's customer: %d %s, want 201", status, buf)
 	}
 
-	// The offline sync: the item naming B's customer is an error, written
-	// nowhere; the item naming A's customer syncs.
+	// The offline sync: both items sync (ruling A), and B's customer's
+	// invoice posts at the selling yard.
 	sync := func(customer uuid.UUID) (string, string) {
+		// B's customer holds a tax exemption, so its sale totals the 100 untaxed
+		cents := 105
+		if customer == f.custB {
+			cents = 100
+		}
 		client := uuid.NewString()
 		return client, fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
 			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
-			`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
+			`"tenders":[{"method":"account","amount_cents":%d}],"client_created_at":%q}]}`,
 			uuid.NewString()[:8], regNA, client, uuid.NewString(), customer.String(),
-			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
+			f.posProd.String(), cents, time.Now().UTC().Format(time.RFC3339))
 	}
-	invoicesBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1`, f.custB)
+	invoicesBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, f.custB, f.branchA)
 	client, req := sync(f.custB)
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", req)
-	if status != http.StatusOK && status != http.StatusForbidden {
-		t.Errorf("no header sync naming B's customer: %d %s", status, buf)
+	if status != http.StatusOK || !strings.Contains(string(buf), `"synced_count":1`) {
+		t.Errorf("no header sync of B's customer: %d %s, want the sale synced", status, buf)
 	}
-	if strings.Contains(string(buf), `"synced_count":1`) {
-		t.Errorf("no header sync of B's customer synced: %s", buf)
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1`, client); n != 1 {
+		t.Errorf("the synced sale was not written")
 	}
-	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1`, client); n != 0 {
-		t.Errorf("the refused sync item wrote its sale")
-	}
-	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1`, f.custB); after != invoicesBefore {
-		t.Errorf("the refused sync item posted %d invoices to B's customer", after-invoicesBefore)
+	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, f.custB, f.branchA); after != invoicesBefore+1 {
+		t.Errorf("the synced item posted %d invoices at A for B's customer, want 1", after-invoicesBefore)
 	}
 	_, req = sync(f.custID)
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/sync", req)
@@ -91,5 +94,96 @@ func TestNoHeader_CounterNamesACustomerThroughTheWall(t *testing.T) {
 	keyStatus, keyBuf = f.key(t, f.bound, "POST", "/api/v1/pos/sync", req, nil)
 	if keyStatus != http.StatusForbidden {
 		t.Errorf("bound key sync naming B's customer: %d %s, want 403", keyStatus, keyBuf)
+	}
+}
+
+// The composition of ruling A and the one naming rule, through the wire: a
+// cashier held to B's grants, with no header and with B's header, creates a
+// sale naming A's customer and completes it with an account tender (200, one
+// invoice at B, the selling yard); a key bound to B naming A's customer at the
+// create, the sync and the completion is refused with nothing written.
+func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testing.T) {
+	f := newKeyPinFixture(t)
+	noheaderGrant(t, f, "pin-cashier", f.branchB)
+	noheaderTaxRate(t, f, f.branchB)
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100, 0)`,
+		f.posProd, f.yardB); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
+	regNB := noheaderRegister(t, f, f.branchB, f.yardB)
+	boundB := f.mintWithScopes(t, "pos-key-b", pinKeyScopes, &f.branchB)
+
+	invoicesAtB := func() int {
+		return noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, f.custID, f.branchB)
+	}
+	for _, hdr := range []map[string]string{nil, {"X-Branch-Id": f.branchB.String()}} {
+		label := "no header"
+		if hdr != nil {
+			label = "header B"
+		}
+		before := invoicesAtB()
+		status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions",
+			fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNB, f.custID.String()), hdr)
+		if status != http.StatusCreated {
+			t.Fatalf("%s create naming A's customer: %d %s, want 201", label, status, buf)
+		}
+		var sale struct {
+			ID       string `json:"id"`
+			Revision int64  `json:"revision"`
+		}
+		if err := json.Unmarshal(buf, &sale); err != nil {
+			t.Fatal(err)
+		}
+		status, buf = f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+sale.ID+"/items",
+			`{"line":`+f.productLine()+`}`, hdr)
+		if status != http.StatusOK {
+			t.Fatalf("%s add line: %d %s", label, status, buf)
+		}
+		var cur struct {
+			Total    int64 `json:"total_cents"`
+			Revision int64 `json:"revision"`
+		}
+		if err := json.Unmarshal(buf, &cur); err != nil {
+			t.Fatal(err)
+		}
+		status, buf = f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+sale.ID+"/complete",
+			fmt.Sprintf(`{"tenders":[{"method":"account","amount_cents":%d}],"revision":%d}`, cur.Total, cur.Revision), hdr)
+		if status != http.StatusOK {
+			t.Fatalf("%s completion naming A's customer: %d %s, want 200", label, status, buf)
+		}
+		if got := invoicesAtB() - before; got != 1 {
+			t.Errorf("%s: %d invoices at B for A's customer, want 1", label, got)
+		}
+	}
+
+	// The key bound to B: A's customer is refused at the create, the sync
+	// and the completion, and nothing is written.
+	salesBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID)
+	invBefore := invoicesAtB()
+	keyStatus, keyBuf := f.key(t, boundB, "POST", "/api/v1/pos/transactions",
+		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNB, f.custID.String()), nil)
+	if keyStatus != http.StatusForbidden && keyStatus != http.StatusNotFound {
+		t.Errorf("key bound to B, create naming A's customer: %d %s, want refused", keyStatus, keyBuf)
+	}
+	client := uuid.NewString()
+	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/sync", fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+		`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
+		`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
+		uuid.NewString()[:8], regNB, client, uuid.NewString(), f.custID.String(),
+		f.posProd.String(), time.Now().UTC().Format(time.RFC3339)), nil)
+	if keyStatus != http.StatusForbidden && strings.Contains(string(keyBuf), `"synced_count":1`) {
+		t.Errorf("key bound to B, sync naming A's customer: %d %s, want refused", keyStatus, keyBuf)
+	}
+	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/transactions/"+uuid.NewString()+"/complete",
+		`{"tenders":[{"method":"account","amount_cents":105}]}`, nil)
+	if keyStatus == http.StatusOK {
+		t.Errorf("key bound to B, completion: %d %s, want refused", keyStatus, keyBuf)
+	}
+	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID); after != salesBefore {
+		t.Errorf("the bound key's legs wrote %d sales naming A's customer", after-salesBefore)
+	}
+	if after := invoicesAtB(); after != invBefore {
+		t.Errorf("the bound key's legs posted %d invoices", after-invBefore)
 	}
 }
