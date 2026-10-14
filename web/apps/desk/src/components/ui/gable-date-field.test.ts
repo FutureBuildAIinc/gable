@@ -219,17 +219,20 @@ describe('min and max', () => {
     expect(el.value).toBe('2026-10-15')
   })
 
-  it('grid days outside the bounds are disabled', async () => {
+  it('grid days outside the bounds are disabled and the keys clamp to them', async () => {
     const el = await mount<GableDateField>(TAG, { value: '2026-10-14', min: '2026-10-10', max: '2026-10-20' })
     await openCalendar(el)
     const days = gridDays(el)
     expect(days.find((b) => b.textContent === '9')?.disabled).toBe(true)
     expect(days.find((b) => b.textContent === '21')?.disabled).toBe(true)
     expect(days.find((b) => b.textContent === '14')?.disabled).toBe(false)
-    // Enter on the focus moved out of bounds does not pick.
+    // The keys never land on a disabled day: two weeks up from the 14th
+    // clamps to the 10th, and Enter picks it.
     await key(el, 'ArrowUp')
     await key(el, 'ArrowUp')
+    const focused = gridDays(el).find((b) => b.tabIndex === 0)
+    expect(focused?.textContent).toBe('10')
     await key(el, 'Enter')
-    expect(el.value).toBe('2026-10-14')
+    expect(el.value).toBe('2026-10-10')
   })
 })

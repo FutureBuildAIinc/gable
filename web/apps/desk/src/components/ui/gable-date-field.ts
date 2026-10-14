@@ -42,6 +42,10 @@ export class GableDateField extends LitElement {
     @state() private _focusDay = '';
 
     private _id = `gable-date-field-${++nextId}`;
+    // True while the grid holds the keyboard focus, so a re-render that
+    // replaces the focused cell's node (the month turned) knows to give the
+    // focus to the day the move landed on.
+    private _gridFocus = false;
     private _outside = (e: MouseEvent) => {
         if (this._open && !this.contains(e.target as Node)) this._close();
     };
@@ -155,10 +159,13 @@ export class GableDateField extends LitElement {
         } else {
             date = new Date(y, m - 1, d + deltaDays);
         }
-        const next = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        let next = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        // The focus never sits on a disabled day: clamp to the bounds.
+        if (this.min && next < this.min) next = this.min;
+        if (this.max && next > this.max) next = this.max;
         this._focusDay = next;
-        this._viewYear = date.getFullYear();
-        this._viewMonth = date.getMonth() + 1;
+        this._viewYear = Number(next.slice(0, 4));
+        this._viewMonth = Number(next.slice(5, 7));
     }
 
     private _onGridKeydown(e: KeyboardEvent) {
@@ -196,7 +203,12 @@ export class GableDateField extends LitElement {
         this._viewMonth = d.getMonth() + 1;
         const day = Number(this._focusDay.slice(8, 10));
         const last = new Date(this._viewYear, this._viewMonth, 0).getDate();
-        this._focusDay = `${this._viewYear}-${String(this._viewMonth).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`;
+        let next = `${this._viewYear}-${String(this._viewMonth).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`;
+        if (this.min && next < this.min) next = this.min;
+        if (this.max && next > this.max) next = this.max;
+        this._focusDay = next;
+        this._viewYear = Number(next.slice(0, 4));
+        this._viewMonth = Number(next.slice(5, 7));
     }
 
     /** The visible month's days: leading blanks, then each day. */
@@ -279,6 +291,11 @@ export class GableDateField extends LitElement {
                     role="grid"
                     aria-label=${monthName(this._viewMonth, this._viewYear)}
                     @keydown=${this._onGridKeydown}
+                    @focusin=${() => { this._gridFocus = true; }}
+                    @focusout=${(e: FocusEvent) => {
+                        const to = e.relatedTarget as Node | null;
+                        if (!to || !this.querySelector('[role="grid"]')?.contains(to)) this._gridFocus = false;
+                    }}
                     class="grid grid-cols-7 gap-1"
                 >
                     ${names.map((n) => html`
@@ -323,9 +340,14 @@ export class GableDateField extends LitElement {
     updated() {
         if (this._open) {
             const btn = this.querySelector(`#${this._id}-grid button[tabindex="0"]`) as HTMLElement | null;
-            if (btn && document.activeElement !== btn && this.contains(document.activeElement)) {
+            // Pull focus to the landed day when the grid had it before the
+            // render (the month turned and the old node went away), or when
+            // the calendar just opened from the field.
+            if (btn && document.activeElement !== btn && (this._gridFocus || this.contains(document.activeElement))) {
                 btn.focus();
             }
+        } else {
+            this._gridFocus = false;
         }
     }
 }
