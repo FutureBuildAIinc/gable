@@ -1926,3 +1926,85 @@ describe('a quantity on each counter line', () => {
     el.remove();
   });
 });
+
+describe('the counter hotkeys and their pinned legend', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const key = async (el: POSTerminal, k: string, mods: KeyboardEventInit = {}) => {
+    const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...mods });
+    document.dispatchEvent(ev);
+    await el.updateComplete;
+    return ev;
+  };
+  const pressed = (el: Element) => ['cash', 'check', 'card', 'account']
+    .filter((m) => q(el, `tender-${m}`)?.getAttribute('aria-pressed') === 'true');
+
+  it('pins a legend above the counter showing each key and its action', async () => {
+    const el = await mount(sale());
+    const legend = q(el, 'pos-hotkey-legend');
+    expect(legend).toBeTruthy();
+    expect(legend.compareDocumentPosition(q(el, 'pos-body')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(legend.textContent).toContain('F12');
+    expect(legend.textContent).toContain('Pay');
+    expect(legend.querySelectorAll('[data-action]').length).toBe(14);
+    el.remove();
+  });
+
+  it('chooses a tender and pays from the keys', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await key(el, 'F12');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    await key(el, 'F8');
+    expect(pressed(el)).toEqual(['card']);
+    const ev = await key(el, 'F12');
+    expect(ev.defaultPrevented).toBe(true);
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    el.remove();
+  });
+
+  it('moves between the panels with Next and Back', async () => {
+    const el = await mount(sale());
+    expect(q(el, 'panel-customer-body').hasAttribute('hidden')).toBe(false);
+    await key(el, 'F4');
+    expect(q(el, 'panel-payment-body').hasAttribute('hidden')).toBe(false);
+    await key(el, 'F4', { shiftKey: true });
+    expect(q(el, 'panel-customer-body').hasAttribute('hidden')).toBe(false);
+    el.remove();
+  });
+
+  it('focuses the search, the customer lookup and the selected line\'s quantity', async () => {
+    const el = await mount(sale());
+    await key(el, 'F2');
+    expect(document.activeElement).toBe(q(el, 'catalog-search'));
+    await key(el, 'F3');
+    expect(document.activeElement).toBe(el.querySelector('#pos-customer-search'));
+    await key(el, 'q', { altKey: true });
+    expect(document.activeElement).toBe(el.querySelector('[aria-label="Quantity of Item b"]'));
+    el.remove();
+  });
+
+  it('never fires while a dialog of the app is open, and a bare letter is only typing', async () => {
+    const el = await mount(sale());
+    (el as unknown as { _showTillOpen: boolean })._showTillOpen = true;
+    await el.updateComplete;
+    const ev = await key(el, 'F6');
+    expect(pressed(el)).toEqual([]);
+    expect(ev.defaultPrevented).toBe(false);
+    (el as unknown as { _showTillOpen: boolean })._showTillOpen = false;
+    await el.updateComplete;
+    const typed = await key(el, 'c');
+    expect(pressed(el)).toEqual([]);
+    expect(typed.defaultPrevented).toBe(false);
+    el.remove();
+  });
+
+  it('leaves a key the counter does not claim to the browser', async () => {
+    const el = await mount(sale());
+    const ev = await key(el, 'F5');
+    expect(ev.defaultPrevented).toBe(false);
+    el.remove();
+  });
+});
