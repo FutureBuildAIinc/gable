@@ -58,7 +58,7 @@ export class GableRecentOrdersFeed extends LitElement {
                         ${this.orders.length === 0
                             ? html`<div class="p-6 text-center text-zinc-500">No recent orders</div>`
                             : this.orders.map((order) => html`
-                                <div class="p-4 hover:bg-white/5 transition-colors group">
+                                <a href="/orders/${order.order_id}" class="block p-4 hover:bg-white/5 transition-colors group">
                                     <div class="flex justify-between items-start mb-1">
                                         <div class="font-medium text-white group-hover:text-gable-green transition-colors">
                                             ${order.customer_name}
@@ -68,12 +68,12 @@ export class GableRecentOrdersFeed extends LitElement {
                                         </span>
                                     </div>
                                     <div class="flex justify-between items-center text-xs text-zinc-500">
-                                        <div class="font-mono">${order.order_id.substring(0, 8)}...</div>
+                                        <div class="font-mono">${new Date(order.created_at).toLocaleDateString()}</div>
                                         <div class="font-mono text-zinc-400">
                                             $${(order.total_amount / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                         </div>
                                     </div>
-                                </div>
+                                </a>
                             `)
                         }
                     </div>

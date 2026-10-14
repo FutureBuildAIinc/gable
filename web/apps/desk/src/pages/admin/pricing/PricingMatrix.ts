@@ -28,6 +28,8 @@ export class GablePricingMatrix extends LitElement {
   @state() private _matrix: MatrixResponse | null = null;
   @state() private _loading = true;
   @state() private _error: string | null = null;
+  /** The server runs without the category pricing engine (its routes answer 404). */
+  @state() private _switchedOff = false;
   @state() private _selectedCategory: string | null = null;
 
   @state() private _drawerOpen = false;
@@ -57,6 +59,12 @@ export class GablePricingMatrix extends LitElement {
       const data = await categoryPricingService.getMatrix();
       this._matrix = data;
     } catch (err) {
+      // The engine is switched off on this server (CATEGORY_PRICING_ENABLED unset): its
+      // routes are not mounted, so the matrix answers 404. That is a setting, not a failure.
+      if (err instanceof ApiError && err.status === 404) {
+        this._switchedOff = true;
+        return;
+      }
       console.error('Failed to load pricing matrix:', err);
       this._error = apiErrorMessage(err, 'Failed to load pricing matrix');
     } finally {
@@ -269,6 +277,24 @@ export class GablePricingMatrix extends LitElement {
   }
 
   render() {
+    if (this._switchedOff) {
+      return html`
+        <div class="min-h-screen bg-deep-space p-8 space-y-6">
+          <h1 class="text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+            ${icon(LayoutGrid, 32, 'w-8 h-8 text-gable-green')}
+            Pricing Matrix
+          </h1>
+          <div class="bg-slate-steel border border-white/10 rounded-lg px-6 py-5 max-w-2xl">
+            <p class="text-white font-medium">Category pricing is off on this server</p>
+            <p class="text-sm text-slate-400 mt-1">
+              Prices come from the price lists and customer prices. A dealer that prices by product category turns
+              the engine on with <code class="font-mono text-blueprint-blue">CATEGORY_PRICING_ENABLED=true</code> on
+              the server.
+            </p>
+          </div>
+        </div>
+      `;
+    }
     return html`
       <div class="min-h-screen bg-deep-space p-8 space-y-6">
         <!-- Header -->

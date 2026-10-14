@@ -42,7 +42,7 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 		INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id)
 		VALUES ($1, $2, $3, $4,
 			COALESCE($5::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')))
-		RETURNING created_at, updated_at, branch_id
+		RETURNING number, created_at, updated_at, branch_id
 	`
 	return r.db.GetExecutor(ctx).QueryRow(ctx, query,
 		po.ID,
@@ -50,7 +50,7 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 		po.Status,
 		po.Source,
 		branchArg,
-	).Scan(&po.CreatedAt, &po.UpdatedAt, &po.BranchID)
+	).Scan(&po.Number, &po.CreatedAt, &po.UpdatedAt, &po.BranchID)
 }
 
 func (r *Repository) AddPOLine(ctx context.Context, line *PurchaseOrderLine) error {
@@ -108,7 +108,7 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 	}
 
 	query := `
-		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
+		SELECT id, number, vendor_id, status, source, created_at, updated_at, branch_id
 		FROM purchase_orders
 		WHERE vendor_id = $1 AND status = 'DRAFT'
 		  AND ` + middleware.Wall("", 2, 3) + `
@@ -118,6 +118,7 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, vendorID,
 		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(
 		&po.ID,
+		&po.Number,
 		&po.VendorID,
 		&po.Status,
 		&po.Source,
@@ -151,7 +152,7 @@ func (r *Repository) GetDraftPOByVendorAt(ctx context.Context, vendorID, branch 
 
 func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 	query := `
-		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
+		SELECT po.id, po.number, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
 		       COUNT(pol.id) AS line_count,
 		       COALESCE(SUM(pol.quantity * pol.cost), 0) AS total_cost
 		FROM purchase_orders po
@@ -172,6 +173,7 @@ func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 		var po PurchaseOrder
 		if err := rows.Scan(
 			&po.ID,
+			&po.Number,
 			&po.VendorID,
 			&po.Status,
 			&po.Source,
@@ -212,10 +214,11 @@ func (r *Repository) GetSourceSummary(ctx context.Context) (map[string]int, erro
 
 func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
 	branchID := middleware.BranchIDForQuery(ctx)
-	query := `SELECT id, vendor_id, status, source, created_at, updated_at, branch_id FROM purchase_orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`
+	query := `SELECT id, number, vendor_id, status, source, created_at, updated_at, branch_id FROM purchase_orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`
 	var po PurchaseOrder
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchID).Scan(
 		&po.ID,
+		&po.Number,
 		&po.VendorID,
 		&po.Status,
 		&po.Source,
