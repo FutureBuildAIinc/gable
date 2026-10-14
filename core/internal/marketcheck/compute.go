@@ -75,7 +75,7 @@ func Suggest(ours, theirs, cost, bandBP, floorBP int64) Suggestion {
 		target := theirs * (10000 - bandBP) / 10000
 		s.SuggestedCents, s.Reason = target, ReasonRaiseToBand
 		if target < floor {
-			s.SuggestedCents = floor
+			s.SuggestedCents, s.Reason = floor, ReasonHeldAtFloor
 		}
 	default:
 		s.SuggestedCents, s.Reason = ours, ReasonKeep

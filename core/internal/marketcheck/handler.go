@@ -6,16 +6,31 @@ package marketcheck
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
 // Handler serves the settings and the run.
-type Handler struct{ svc *Service }
+type Handler struct {
+	svc      *Service
+	mu       sync.Mutex
+	inflight map[string]bool // callers with a run in progress
+}
 
 // NewHandler builds the handler.
-func NewHandler(s *Service) *Handler { return &Handler{svc: s} }
+func NewHandler(s *Service) *Handler { return &Handler{svc: s, inflight: map[string]bool{}} }
+
+// callerKey names the caller for the one run at a time rule.
+func callerKey(r *http.Request) string {
+	if c := middleware.ClaimsFromContext(r.Context()); c != nil && c.Subject != "" {
+		return "user:" + c.Subject
+	}
+	return "anonymous"
+}
 
 // RegisterRoutes mounts the three routes. settingsGuard walls the Tech Admin
 // settings; runGuard walls the run (the pricing rules' walls).
@@ -91,6 +106,23 @@ func (h *Handler) run(w http.ResponseWriter, r *http.Request) {
 		}
 		ids = append(ids, id)
 	}
+	// The run waits on the flow up to one batch timeout, longer than the
+	// server's own write timeout: this one response gets a deadline past it.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(h.svc.BatchTimeout() + 10*time.Second))
+	key := callerKey(r)
+	h.mu.Lock()
+	if h.inflight[key] {
+		h.mu.Unlock()
+		httpx.WriteError(w, r, httpx.RateLimited("A market check is already running for you; wait for it to finish"))
+		return
+	}
+	h.inflight[key] = true
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.inflight, key)
+		h.mu.Unlock()
+	}()
 	out, err := h.svc.Run(r.Context(), ids)
 	if err != nil {
 		httpx.WriteError(w, r, err)

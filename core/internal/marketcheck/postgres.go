@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -47,8 +48,8 @@ func (p *PostgresStore) Delete(ctx context.Context, key string) error {
 }
 
 // PostgresCatalog reads the yard and the products. Our price is the product's
-// base price in cents, exactly the figure the counter's search answers as
-// unit_price_cents (pos SearchProducts), and our cost its average unit cost.
+// walk in price in cents through the counter's own expression
+// (pos.WalkInPriceCentsSQL), and our cost its average unit cost.
 type PostgresCatalog struct{ db *database.DB }
 
 // NewPostgresCatalog builds the catalogue reader.
@@ -85,11 +86,11 @@ func (c *PostgresCatalog) Yard(ctx context.Context) (Yard, error) {
 // Products reads the picked products.
 func (c *PostgresCatalog) Products(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]Product, error) {
 	rows, err := c.db.GetExecutor(ctx).Query(ctx, `
-		SELECT id, COALESCE(sku, ''), COALESCE(description, ''), COALESCE(category, ''),
-		       COALESCE(uom_primary::text, 'EA'),
-		       COALESCE(ROUND(base_price * 100)::bigint, 0),
-		       COALESCE(ROUND(average_unit_cost * 100)::bigint, 0)
-		FROM products WHERE id = ANY($1)`, ids)
+		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(p.category, ''),
+		       COALESCE(p.uom_primary::text, 'EA'),
+		       `+pos.WalkInPriceCentsSQL+`,
+		       COALESCE(ROUND(p.average_unit_cost * 100)::bigint, 0)
+		FROM products p WHERE p.id = ANY($1)`, ids)
 	if err != nil {
 		return nil, err
 	}

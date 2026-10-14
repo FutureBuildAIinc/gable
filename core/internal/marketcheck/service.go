@@ -12,7 +12,6 @@ package marketcheck
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"time"
 
 	"github.com/gablelbm/gable/internal/ai"
@@ -75,7 +74,6 @@ type Service struct {
 	tx      TxRunner
 	audit   Auditor
 	log     *slog.Logger
-	client  *http.Client
 	timeout time.Duration
 }
 
@@ -83,10 +81,6 @@ type Service struct {
 func NewService(store Store, catalog Catalog) *Service {
 	return &Service{
 		store: store, catalog: catalog, log: slog.Default(), timeout: 30 * time.Second,
-		client: &http.Client{
-			// A redirect is never followed: the answer is the 3xx itself, a failed batch.
-			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-		},
 	}
 }
 
@@ -106,6 +100,9 @@ func (s *Service) WithLogger(l *slog.Logger) *Service {
 	}
 	return s
 }
+
+// BatchTimeout is the longest one batch may wait for the flow.
+func (s *Service) BatchTimeout() time.Duration { return s.timeout }
 
 // WithBatchTimeout shortens the per batch context timeout (tests).
 func (s *Service) WithBatchTimeout(d time.Duration) *Service { s.timeout = d; return s }

@@ -57,6 +57,9 @@ type Settings struct {
 	BandPct        string `json:"band_pct"`
 	MarginFloorPct string `json:"margin_floor_pct"`
 	Configured     bool   `json:"configured"`
+	// Notice is a plain sentence about the saved state when it needs the admin's
+	// attention (an id to enter again); empty otherwise.
+	Notice string `json:"notice"`
 }
 
 // SettingsInput is the body of the settings write. A nil field keeps what is
@@ -214,10 +217,51 @@ func (s *Service) load(ctx context.Context) (loaded, error) {
 	return l, nil
 }
 
-// Settings answers the saved settings, never the webhook id.
+const (
+	noticeNewAddress = "Enter the webhook id again for the new address"
+	noticeUnreadable = "The saved webhook id cannot be read; enter it again"
+	noticeBadAddress = "The saved FB Connect address is not valid; enter it again"
+)
+
+// usable re-validates what is stored, whatever path wrote it: the address
+// with the save time parser, the id sealed (never a legacy plain value), opened
+// and in the id's pattern. It answers the opened id and the canonical address,
+// or a notice when the saved state cannot be used.
+func (s *Service) usable(l loaded) (hook, base, notice string) {
+	if l.ConnectURL != "" {
+		canon, err := parseConnectURL(l.ConnectURL)
+		if err != nil || canon == "" || canon != l.ConnectURL {
+			return "", "", noticeBadAddress
+		}
+		base = canon
+	}
+	if l.sealedID == "" {
+		if base != "" {
+			return "", base, noticeNewAddress
+		}
+		return "", base, ""
+	}
+	if !ai.IsSealedValue(l.sealedID) {
+		return "", base, noticeUnreadable
+	}
+	id, err := ai.OpenValue(s.vault, l.sealedID)
+	if err != nil || !webhookIDPattern.MatchString(id) {
+		return "", base, noticeUnreadable
+	}
+	return id, base, ""
+}
+
+// Settings answers the saved settings, never the webhook id. Configured is
+// true only when the address and the id are both saved and usable.
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	l, err := s.load(ctx)
-	return l.Settings, err
+	if err != nil {
+		return Settings{}, err
+	}
+	hook, base, notice := s.usable(l)
+	l.Configured = hook != "" && base != ""
+	l.Notice = notice
+	return l.Settings, nil
 }
 
 // SaveSettings validates the whole input, then writes it in one transaction.
@@ -302,6 +346,17 @@ func (s *Service) SaveSettings(ctx context.Context, in SettingsInput) (Settings,
 		}
 	}
 	apply := func(ctx context.Context) error {
+		// A changed address does not carry the saved id to the new host: it is
+		// cleared unless this same request brings a new one.
+		if newURL, ok := writes[keyConnectURL]; ok && in.WebhookID == nil {
+			old, _, err := s.store.Read(ctx, keyConnectURL)
+			if err != nil {
+				return err
+			}
+			if old != newURL {
+				deletes = append(deletes, keyWebhookID)
+			}
+		}
 		// One fixed key order, so two saves at once lock rows in the same
 		// order and never deadlock.
 		keys := make([]string, 0, len(writes)+len(deletes))

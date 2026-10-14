@@ -17,7 +17,6 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/gablelbm/gable/internal/ai"
 	"github.com/google/uuid"
 )
 
@@ -35,6 +34,7 @@ const (
 	noteNoProduct    = "This product was not found"
 
 	allowedLinkPrefix = "https://www.homedepot.com/"
+	maxLinkLength     = 2048
 )
 
 // Competitor is the flow's match for one item, cleaned.
@@ -160,14 +160,13 @@ func (s *Service) Run(ctx context.Context, productIDs []uuid.UUID) (*Result, err
 	if err != nil {
 		return nil, err
 	}
-	if !cfg.Configured {
+	hook, base, _ := s.usable(cfg)
+	if hook == "" || base == "" {
 		return nil, ErrNotConfigured
 	}
-	hook, err := ai.OpenValue(s.vault, cfg.sealedID)
-	if err != nil || hook == "" {
-		// Saved but unreadable (the vault key changed): treat as not configured.
-		return nil, ErrNotConfigured
-	}
+	cfg.ConnectURL = base
+	client := newGuardedClient(allowPrivateFor(hostnameOf(base)))
+	defer client.CloseIdleConnections()
 	bandBP, _, err := parsePercent("band_pct", cfg.BandPct, 50)
 	if err != nil {
 		return nil, err
@@ -232,8 +231,8 @@ func (s *Service) Run(ctx context.Context, productIDs []uuid.UUID) (*Result, err
 			}
 			req := flowRequest{Source: "gable", Yard: flowYard{Name: yard.Name, Town: yard.Town},
 				Store:       flowStore{ID: cfg.StoreID, Zip: cfg.StoreZip, Label: cfg.StoreLabel},
-				BandPercent: json.Number(cfg.BandPct), Items: items}
-			outcomes[bi] = s.callBatch(ctx, cfg.ConnectURL, hook, req)
+				BandPercent: json.Number(formatBP(bandBP)), Items: items}
+			outcomes[bi] = s.callBatch(ctx, client, cfg.ConnectURL, hook, req)
 		}(bi)
 	}
 	wg.Wait()
@@ -289,7 +288,7 @@ func applyRow(row *Row, fr flowRow, bandBP, floorBP, cost int64) {
 		Confidence: int(math.Round(math.Min(100, math.Max(0, m.Confidence)))),
 		UnitNote:   cleanText(m.NormNote, 300),
 	}
-	if strings.HasPrefix(m.Link, allowedLinkPrefix) {
+	if len(m.Link) <= maxLinkLength && strings.HasPrefix(m.Link, allowedLinkPrefix) {
 		if u, err := url.Parse(m.Link); err == nil && u.Host == "www.homedepot.com" {
 			c.Link = m.Link
 		}
@@ -317,7 +316,7 @@ func validPrice(p float64) bool {
 
 // callBatch posts one batch. Its failures are fixed words: the transport's
 // own error text holds the address, so it is never kept, logged or answered.
-func (s *Service) callBatch(ctx context.Context, base, hook string, body flowRequest) batchOutcome {
+func (s *Service) callBatch(ctx context.Context, client *http.Client, base, hook string, body flowRequest) batchOutcome {
 	host := hostOf(base)
 	fail := func(note, kind string) batchOutcome {
 		s.log.Warn("market check batch failed", "host", host, "kind", kind, "items", len(body.Items))
@@ -334,8 +333,11 @@ func (s *Service) callBatch(ctx context.Context, base, hook string, body flowReq
 		return fail(noteDidNotAnswer, "request")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := s.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
+		if errors.Is(err, errDialRefused) {
+			return fail(noteDidNotAnswer, "blocked_address")
+		}
 		if errors.Is(cctx.Err(), context.DeadlineExceeded) {
 			return fail(noteTimedOut, "timeout")
 		}
@@ -382,6 +384,14 @@ func (s *Service) callBatch(ctx context.Context, base, hook string, body flowReq
 	}
 	s.log.Info("market check batch answered", "host", host, "items", len(body.Items), "rows", len(out.rows))
 	return out
+}
+
+func hostnameOf(base string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	return u.Hostname()
 }
 
 func hostOf(base string) string {
