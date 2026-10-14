@@ -35,6 +35,7 @@ import { Save, Send, Printer, Calculator, AlertCircle, TrendingUp, Truck, Packag
 
 // Side-effect imports: register child custom elements
 import './quotes/QuoteList.ts';
+import '../components/ProductThumb.ts';
 import '../components/customers/CustomerSelect.ts';
 import '../components/quotes/MaterialIntake.ts';
 import '../components/quotes/LineItemEditor.ts';
@@ -543,19 +544,32 @@ export class GableQuoteBuilder extends LitElement {
         `;
     }
 
+    /** The picture path of a line's product, from the catalogue the builder loaded (null when it has none). */
+    private pictureOf(line: LineWithEscalator): string | null {
+        if (!line.product_id) return null;
+        return this.products.find(p => p.id === line.product_id)?.image_url ?? null;
+    }
+
     private renderLineRow(line: LineWithEscalator, idx: number) {
         const err = this.lineErrors[idx];
+        // Room for a thumb on every line only while some line carries a picture.
+        const reserve = this.lines.some(l => this.pictureOf(l) !== null);
         return html`
             <tr data-testid="quote-line" class="group hover:bg-white/5 transition-colors align-top">
                 <td class="px-4 py-3">
-                    <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
-                    <div class="text-zinc-400 text-xs">${line.description}</div>
-                    ${err ? html`<div class="text-[10px] text-rose-400 mt-1">${err}</div>` : nothing}
-                    <gable-escalator-toggle
-                        .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
-                        .escalator=${line.escalator}
-                        @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
-                    ></gable-escalator-toggle>
+                    <div class="flex items-start gap-3">
+                        <gable-product-thumb .src=${this.pictureOf(line)} .size=${40} ?reserve=${reserve}></gable-product-thumb>
+                        <div class="min-w-0 flex-1">
+                            <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
+                            <div class="text-zinc-400 text-xs">${line.description}</div>
+                            ${err ? html`<div class="text-[10px] text-rose-400 mt-1">${err}</div>` : nothing}
+                            <gable-escalator-toggle
+                                .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
+                                .escalator=${line.escalator}
+                                @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
+                            ></gable-escalator-toggle>
+                        </div>
+                    </div>
                 </td>
                 <td class="px-2 py-3">
                     <div class="inline-flex items-center rounded-md border border-white/10 bg-deep-space">

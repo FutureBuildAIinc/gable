@@ -9,6 +9,7 @@ import type { Product } from '../../types/product';
 import { resolveLinePrice } from '../../lib/line-price';
 import type { CalculatedPrice } from '../../types/pricing';
 import { ToastService } from '../../lib/toast-service';
+import '../ProductThumb';
 import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput, floatDollarsToTenThousandths } from '../../lib/money';
 
 @customElement('gable-line-item-editor')
@@ -95,6 +96,8 @@ export class GableLineItemEditor extends LitElement {
   }
 
   render() {
+    // Room for a thumb on every result only while some product carries a picture.
+    const pictures = this.products.some(p => !!p.image_url);
     return html`
       <div class="bg-[#161821] border border-white/10 p-4 rounded-lg mb-4">
         <h3 class="text-sm font-medium text-gray-400 mb-3 uppercase tracking-wider">Add Line Item</h3>
@@ -119,14 +122,17 @@ export class GableLineItemEditor extends LitElement {
                 <div class="absolute z-50 w-full mt-1 bg-[#0A0B10] border border-white/10 rounded shadow-xl max-h-48 overflow-auto">
                   ${this._filteredProducts.map(p => html`
                     <div
-                      class="px-3 py-2 hover:bg-[#00FFA3]/10 cursor-pointer text-sm"
+                      class="px-3 py-2 hover:bg-[#00FFA3]/10 cursor-pointer text-sm flex items-center gap-3"
                       @click=${() => this._handleSelectProduct(p)}
                     >
-                      <div class="flex justify-between">
-                        <span class="text-white font-mono">${p.sku}</span>
-                        <span class="text-gray-500 text-xs">${p.stock_uom}</span>
+                      <gable-product-thumb .src=${p.image_url} .size=${24} ?reserve=${pictures}></gable-product-thumb>
+                      <div class="min-w-0 flex-1">
+                        <div class="flex justify-between">
+                          <span class="text-white font-mono">${p.sku}</span>
+                          <span class="text-gray-500 text-xs">${p.stock_uom}</span>
+                        </div>
+                        <div class="text-gray-400 text-xs truncate">${p.description}</div>
                       </div>
-                      <div class="text-gray-400 text-xs truncate">${p.description}</div>
                     </div>
                   `)}
                 </div>

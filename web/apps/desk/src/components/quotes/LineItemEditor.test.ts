@@ -142,3 +142,19 @@ describe('LineItemEditor', () => {
     expect(price.value).toBe('4.675')
   })
 })
+
+describe('LineItemEditor search result pictures', () => {
+  it('shows a thumb beside a result whose product has a picture', async () => {
+    const withPic = { ...PRODUCT, id: 'p-pic', sku: 'PIC-1', image_url: '/catalog-illustrations/a.svg' }
+    const noPic = { ...PRODUCT, id: 'p-none', sku: 'PIC-2', image_url: null }
+    const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [withPic, noPic] })
+    const input = q<HTMLInputElement>(el, 'input[type="text"]')
+    input.value = 'PIC'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    const results = Array.from(el.querySelectorAll('.cursor-pointer'))
+    expect(results.length).toBe(2)
+    expect(results[0].querySelector('gable-product-thumb img')?.getAttribute('src')).toBe('/catalog-illustrations/a.svg')
+    expect(results[1].querySelector('gable-product-thumb img')).toBeNull()
+  })
+})
