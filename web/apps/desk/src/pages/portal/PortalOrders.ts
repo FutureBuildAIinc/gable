@@ -8,6 +8,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ShoppingCart, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalOrder } from '../../types/portal';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -122,7 +123,7 @@ export class PortalOrders extends LitElement {
                                         <div class="flex items-center gap-4">
                                             <div
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center"
-                                                style="background-color: rgba(56,189,248,0.1)"
+                                                style="background-color: ${cssVarColor('blueprint-blue', 0.1)}"
                                             >
                                                 ${icon(ShoppingCart, 18, 'text-blue-400')}
                                             </div>
