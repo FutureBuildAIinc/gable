@@ -64,6 +64,14 @@ export interface MarketCheckResult {
     rows: MarketCheckRow[];
 }
 
+/**
+ * A run can take a while: the server reads in batches of up to 30 seconds each, and a cold FB Connect
+ * run takes longer than the fetch client's default 10 seconds, so the run opts into a longer budget.
+ */
+export const RUN_TIMEOUT_MS = 90_000;
+
+export const TOO_SLOW_WORDS = 'FB Connect took too long to answer; try again';
+
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
 export const marketCheckService = {
@@ -84,11 +92,21 @@ export const marketCheckService = {
     },
 
     async run(productIds: string[]): Promise<MarketCheckResult> {
-        const response = await fetchWithAuth(`${API_URL}/api/v1/pricing/market-check`, {
-            method: 'POST',
-            headers: JSON_HEADERS,
-            body: JSON.stringify({ product_ids: productIds }),
-        });
+        let response: Response;
+        try {
+            response = await fetchWithAuth(`${API_URL}/api/v1/pricing/market-check`, {
+                method: 'POST',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ product_ids: productIds }),
+                timeout: RUN_TIMEOUT_MS,
+            });
+        } catch (err) {
+            // The fetch client aborts at its timeout; an abort reads in words, not as "signal is aborted".
+            if (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) {
+                throw new Error(TOO_SLOW_WORDS);
+            }
+            throw err;
+        }
         if (!response.ok) throw await parseApiError(response, 'The market check could not run');
         return response.json();
     },
