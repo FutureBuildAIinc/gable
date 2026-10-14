@@ -76,7 +76,8 @@ export class PurchaseOrderList extends LitElement {
                 PurchaseOrderService.getSourceSummary().catch(() => ({} as POSourceSummary)),
                 VendorService.listVendors().catch(() => []),
             ]);
-            this.vendorNames = Object.fromEntries((vendors || []).map((v) => [v.id, v.name]));
+            // The vendor list names each order's vendor; a missing or odd answer names none.
+            this.vendorNames = Object.fromEntries((Array.isArray(vendors) ? vendors : []).map((v) => [v.id, v.name]));
             this.pos = poData || [];
             this.alerts = alertData || [];
             this.sourceSummary = summary || {};
