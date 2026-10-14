@@ -78,7 +78,15 @@ async function mount(s: Sale): Promise<POSTerminal> {
   return el;
 }
 const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement;
+// A tender is never assumed; where a leg is about the amount, not the choice,
+// the cashier presses cash first.
+const chooseCash = async (el: POSTerminal) => {
+  q(el, 'tender-cash').click();
+  await el.updateComplete;
+};
 const typeInto = async (el: POSTerminal, v: string) => {
+  const anyPressed = el.querySelector('[data-testid^="tender-"][aria-pressed="true"]');
+  if (!anyPressed) await chooseCash(el);
   const input = el.querySelector('#pos-tender-amount') as HTMLInputElement;
   input.value = v;
   input.dispatchEvent(new Event('input'));
@@ -104,6 +112,7 @@ describe('the counter as the Panels layout', () => {
     expect(q(el, 'panel-payment')).toBeTruthy();
     expect(q(el, 'panel-summary')).toBeTruthy();
     for (const n of ['customer', 'payment', 'summary']) expect(q(el, `progress-${n}`)).toBeTruthy();
+    await chooseCash(el);
     const pay = q(el, 'pos-pay');
     expect(el.querySelectorAll('[data-testid="pos-pay"]').length).toBe(1);
     expect(q(el, 'summary-total').textContent?.trim()).toBe('$86.50');
@@ -210,7 +219,7 @@ describe('the counter as the Panels layout', () => {
         expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
         inner(el)._chooseMethod('account');
         await el.updateComplete;
-        expect(inner(el)._tenderMethod).toBe('cash');
+        expect(inner(el)._tenderMethod).toBeNull();
         expect(el.querySelector('[role="alert"]')).toBeTruthy();
         expect(svc.completeSale).not.toHaveBeenCalled();
       });
@@ -363,6 +372,7 @@ describe('the counter as the Panels layout', () => {
 
     it('with a till open and a payable sale, Pay is the one primary', async () => {
       const el = await mount(sale());
+      await chooseCash(el);
       const primaries = filled(el);
       expect(primaries.length).toBe(1);
       expect(primaries[0]).toBe(q(el, 'pos-pay'));
@@ -641,6 +651,7 @@ describe('the Panels board', () => {
 
   it('changes no money when a panel opens or closes', async () => {
     const el = await mount(sale());
+    await chooseCash(el);
     for (const key of ['payment', 'summary', 'customer', 'customer', 'payment']) {
       toggle(el, key).click();
       await el.updateComplete;
