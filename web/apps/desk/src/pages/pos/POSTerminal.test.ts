@@ -1025,9 +1025,16 @@ describe('the counter before the till opens, and after a sale completes', () => 
     }
 
     it('stays on screen past the old timer, with its band, Void and Return', async () => {
-      const el = await completeOne();
+      svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
+      const el = await mount(sale());
+      await typeInto(el, '100.00');
+      // fake timers go in before Pay, so a timer the completion arms is one
+      // this test advances
       vi.useFakeTimers({ toFake: ['setTimeout'] });
       try {
+        q(el, 'pos-pay').click();
+        await vi.advanceTimersByTimeAsync(0);
+        await el.updateComplete;
         await vi.advanceTimersByTimeAsync(5000);
         await el.updateComplete;
         expect(svc.startSale).toHaveBeenCalledTimes(1);

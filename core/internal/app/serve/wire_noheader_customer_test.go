@@ -96,7 +96,7 @@ func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM credit_memos WHERE customer_id = $1`, f.custB); after != memosBefore+1 {
 		t.Errorf("the return wrote %d credit memos to B's customer, want 1", after-memosBefore)
 	}
-	if keyStatus, keyBuf := f.key(t, f.bound, "POST", "/api/v1/pos/returns", retBody(f.custB), nil); keyStatus != http.StatusForbidden {
+	if keyStatus, keyBuf := f.key(t, f.bound, "POST", "/api/v1/pos/returns", retBody(noheaderLoneCustomer(t, f, f.branchB)), nil); keyStatus != http.StatusForbidden {
 		t.Errorf("bound key return naming B's customer: %d %s, want 403", keyStatus, keyBuf)
 	}
 	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_returns WHERE register_id = $1`, regNA); n != 1 {
@@ -105,16 +105,20 @@ func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 
 	// The bound key keeps its pin: a machine key is no cashier, and the
 	// foreign customer is held at the wall besides; nothing is written.
-	foreignBefore = named(f.custB)
+	// The legs above link B's customer to A (the link follows the first
+	// document at the yard), so the key legs name a customer of B that has
+	// never traded at A.
+	lone := noheaderLoneCustomer(t, f, f.branchB)
+	foreignBefore = named(lone)
 	keyStatus, keyBuf := f.key(t, f.bound, "POST", "/api/v1/pos/transactions",
-		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNA, f.custB.String()), nil)
+		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNA, lone.String()), nil)
 	if keyStatus != http.StatusForbidden {
 		t.Errorf("bound key create naming B's customer: %d %s, want 403", keyStatus, keyBuf)
 	}
-	if after := named(f.custB); after != foreignBefore {
+	if after := named(lone); after != foreignBefore {
 		t.Errorf("the bound key's create wrote %d sales naming B's customer", after-foreignBefore)
 	}
-	_, req = sync(f.custB)
+	_, req = sync(lone)
 	keyStatus, keyBuf = f.key(t, f.bound, "POST", "/api/v1/pos/sync", req, nil)
 	if keyStatus != http.StatusForbidden {
 		t.Errorf("bound key sync naming B's customer: %d %s, want 403", keyStatus, keyBuf)
@@ -183,10 +187,13 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 
 	// The key bound to B: A's customer is refused at the create, the sync
 	// and the completion, and nothing is written.
-	salesBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID)
-	invBefore := invoicesAtB()
+	// The legs above link A's customer to B, so the key legs name a customer
+	// of A that has never traded at B.
+	lone := noheaderLoneCustomer(t, f, f.branchA)
+	salesBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, lone)
+	invBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, lone, f.branchB)
 	keyStatus, keyBuf := f.key(t, boundB, "POST", "/api/v1/pos/transactions",
-		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNB, f.custID.String()), nil)
+		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNB, lone.String()), nil)
 	if keyStatus != http.StatusForbidden && keyStatus != http.StatusNotFound {
 		t.Errorf("key bound to B, create naming A's customer: %d %s, want refused", keyStatus, keyBuf)
 	}
@@ -194,7 +201,7 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/sync", fmt.Sprintf(`{"batch_id":"cw-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
 		`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
 		`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
-		uuid.NewString()[:8], regNB, client, uuid.NewString(), f.custID.String(),
+		uuid.NewString()[:8], regNB, client, uuid.NewString(), lone.String(),
 		f.posProd.String(), time.Now().UTC().Format(time.RFC3339)), nil)
 	if keyStatus != http.StatusForbidden {
 		t.Errorf("key bound to B, sync naming A's customer: %d %s, want 403", keyStatus, keyBuf)
@@ -202,8 +209,10 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 	// The completion leg is a real sale a cashier opened at B naming A's
 	// customer, completed by the key bound to B: the pin is what refuses it
 	// (404 "customer not found"), the sale stays open and nothing is posted.
+	// The sale is made walk-in and the customer set in the row, so naming it
+	// writes no link and the pin is what the key meets.
 	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions",
-		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNB, f.custID.String()), nil)
+		fmt.Sprintf(`{"register_id":%q}`, regNB), nil)
 	if status != http.StatusCreated {
 		t.Fatalf("cashier create for the key's completion leg: %d %s", status, buf)
 	}
@@ -225,7 +234,11 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 	if err := json.Unmarshal(buf, &keyCur); err != nil {
 		t.Fatal(err)
 	}
-	salesBefore = noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID)
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE pos_transactions SET customer_id = $1 WHERE id = $2`, lone, keySale.ID); err != nil {
+		t.Fatalf("name the customer on the sale: %v", err)
+	}
+	salesBefore = noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, lone)
 	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/transactions/"+keySale.ID+"/complete",
 		fmt.Sprintf(`{"tenders":[{"method":"account","amount_cents":%d}],"revision":%d}`, keyCur.Total, keyCur.Revision), nil)
 	if keyStatus != http.StatusNotFound || !strings.Contains(string(keyBuf), "customer not found") {
@@ -234,10 +247,27 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1 AND status = 'OPEN'`, keySale.ID); n != 1 {
 		t.Errorf("the sale is no longer open after the key's refused completion")
 	}
-	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID); after != salesBefore {
+	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, lone); after != salesBefore {
 		t.Errorf("the bound key's legs wrote %d sales naming A's customer", after-salesBefore)
 	}
-	if after := invoicesAtB(); after != invBefore {
+	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM invoices WHERE customer_id = $1 AND branch_id = $2`, lone, f.branchB); after != invBefore {
 		t.Errorf("the bound key's legs posted %d invoices", after-invBefore)
 	}
+}
+
+// noheaderLoneCustomer makes a customer held at one branch that has never
+// traded anywhere, so no earlier leg has linked it to another yard.
+func noheaderLoneCustomer(t *testing.T, f *keyPinFixture, branch uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	ctx := context.Background()
+	if _, err := f.db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
+		VALUES ($1, 'pin cust lone', $2, $3)`, id, "PINL-"+id.String()[:8], branch); err != nil {
+		t.Fatalf("seed lone customer: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, id, branch); err != nil {
+		t.Fatalf("seed lone customer branch: %v", err)
+	}
+	return id
 }
