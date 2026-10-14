@@ -63,7 +63,7 @@ function statement(customerId: string) {
         closing_balance_cents: 0,
         lines: [],
         open_documents: [],
-        unapplied_payments: [],
+        unapplied_payments: [] as { id: string; number: string; received_on: string; unapplied_cents: number }[],
         unapplied_cents: 0,
         net_balance_cents: 0,
       },
