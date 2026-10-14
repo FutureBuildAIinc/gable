@@ -151,7 +151,7 @@ func (h *Handler) HandleTransactions(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	if _, err := h.svc.GetSummary(r.Context(), id); err != nil {
+	if err := h.svc.CustomerInWall(r.Context(), id); err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
