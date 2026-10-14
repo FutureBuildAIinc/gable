@@ -43,6 +43,7 @@ type walledTwins struct {
 	poA, poB, poLineA, poLineB, freightA, freightB uuid.UUID
 	appA, appB                                     uuid.UUID
 	shipA, shipB                                   uuid.UUID
+	dlvA, dlvB                                     uuid.UUID
 	vendor                                         uuid.UUID
 }
 
@@ -58,7 +59,7 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		draftQA: uuid.New(), draftQB: uuid.New(), draftOA: uuid.New(), draftOB: uuid.New(),
 		poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
 		freightA: uuid.New(), freightB: uuid.New(), appA: uuid.New(), appB: uuid.New(),
-		shipA: uuid.New(), shipB: uuid.New(),
+		shipA: uuid.New(), shipB: uuid.New(), dlvA: uuid.New(), dlvB: uuid.New(),
 	}
 	vendor := uuid.New()
 	w.vendor = vendor
@@ -186,10 +187,18 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 			t.Fatalf("seed application: %v", err)
 		}
 	}
+	for _, d := range []struct{ id, branch uuid.UUID }{{w.dlvA, f.branchA}, {w.dlvB, f.branchB}} {
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO email_deliveries (id, branch_id, recipient, subject, document_type, status)
+			 VALUES ($1, $2, 'pin@example.test', 'pin twin', 'invoice', 'sent')`, d.id, d.branch); err != nil {
+			t.Fatalf("seed email delivery: %v", err)
+		}
+	}
 	t.Cleanup(func() {
 		exec := func(stmt string, args ...any) {
 			_, _ = f.db.Pool.Exec(ctx, stmt, args...)
 		}
+		exec(`DELETE FROM email_deliveries WHERE id IN ($1, $2) OR document_id IN ($3, $4)`, w.dlvA, w.dlvB, f.quoteA, f.quoteB)
 		exec(`DELETE FROM inventory WHERE product_id = $1 AND location_id IN ($2, $3)`, f.posProd, f.yardA, f.yardB)
 		exec(`DELETE FROM ar_applications WHERE id IN ($1, $2)`, w.appA, w.appB)
 		exec(`DELETE FROM po_freight_charges WHERE po_id IN ($1, $2)`, w.poA, w.poB)
@@ -288,8 +297,8 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 	// the fixture's.
 	txnA2 := uuid.New()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id)
-		 SELECT $1, register_id, cashier_id, 'OPEN', branch_id, till_session_id FROM pos_transactions WHERE id = $2`, txnA2, f.txnA); err != nil {
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id, currency)
+		 SELECT $1, register_id, cashier_id, 'OPEN', branch_id, till_session_id, currency FROM pos_transactions WHERE id = $2`, txnA2, f.txnA); err != nil {
 		t.Fatalf("seed the second open transaction: %v", err)
 	}
 	if _, err := f.db.Pool.Exec(context.Background(),
@@ -332,17 +341,21 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		}
 		return f.regA
 	}
-	posTender := fixed(`{"tenders":[{"method":"CASH","amount":5}]}`)
+	posTender := fixed(`{"tenders":[{"method":"cash","amount_cents":500}]}`)
 	posReturn := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"register_id":%q,"refund_method":"CASH","reason":"pin","lines":[{"product_id":%q,"quantity":1,"unit_price":1}]}`, regOf(row), f.posProd.String())
+		return fmt.Sprintf(`{"register_id":%q,"refund_method":"cash","reason":"pin","customer_id":%q,`+
+			`"lines":[{"product_id":%q,"quantity":"1","unit_price_ten_thousandths":10000,"restock":false}]}`,
+			regOf(row), f.custID.String(), f.posProd.String())
 	}
 	posSync := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"register_id":%q,"cashier_id":%q,`+
-			`"items":[{"product_id":%q,"quantity":1,"uom":"EA"}],"tenders":[{"method":"CASH","amount":5}],"client_created_at":%q}]}`,
-			uuid.NewString()[:8], regOf(row), uuid.NewString(), regOf(row), uuid.NewString(), f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
+		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
+			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":%q}]}`,
+			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), f.custID.String(),
+			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
 	}
 	posOpen := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"register_id":%q,"opening_float":10}`, regOf(row))
+		return fmt.Sprintf(`{"register_id":%q,"opening_float_cents":1000}`, regOf(row))
 	}
 	posStart := func(row uuid.UUID) string {
 		return fmt.Sprintf(`{"register_id":%q,"cashier_id":%q}`, regOf(row), uuid.NewString())
@@ -400,6 +413,9 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/invoices/%s/write-offs", body: fixed(`{"amount_cents":1,"reason":"pin","revision":1}`), twin: w.invB, own: w.invA},
 		{method: "GET", path: "/api/v1/documents/print/invoice/%s", twin: w.invB, own: w.invA},
 		{method: "GET", path: "/api/v1/documents/print/pickticket/%s", twin: w.ordB, own: w.ordA},
+		{method: "GET", path: "/api/v1/documents/print/quote/%s", twin: f.quoteB, own: f.quoteA},
+		{method: "POST", path: "/api/v1/quotes/%s/email", twin: f.quoteB, own: f.quoteA},
+		{method: "GET", path: "/api/v1/documents/print/purchase-order/%s", twin: w.poB, own: w.poA},
 		{method: "GET", path: "/api/v1/payments/%s", twin: w.payB, own: w.payA},
 		{method: "POST", path: "/api/v1/payments/%s/applications", twin: w.payB, own: w.payA,
 			body: func(uuid.UUID) string {
@@ -483,7 +499,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		// the wall (it answers a missing one 500).
 		{method: "POST", path: "/api/v1/pos/transactions/%s/complete", body: posTender, twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true,
 			noControl: "the completion deducts stock from a location this fixture does not stock, so the control answers 422 past the body and the transaction read"},
-		{method: "POST", path: "/api/v1/pos/transactions/%s/void", twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
+		{method: "POST", path: "/api/v1/pos/transactions/%s/void", body: fixed(`{"reason":"pin"}`), twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
 		// The sync is held by the module itself now: a batch whose register
 		// names another branch is refused before any item runs (round 7), so
 		// the foreign leg is a held leg and the control on the pin's own
@@ -637,6 +653,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{path: "/api/v1/drafts/quotes", absent: []string{w.draftQB.String()}, present: []string{w.draftQA.String()}},
 		{path: "/api/v1/drafts/orders", absent: []string{w.draftOB.String()}, present: []string{w.draftOA.String()}},
 		{path: "/api/v1/purchase-orders", absent: []string{w.poB.String()}, present: []string{w.poA.String()}},
+		{path: "/api/v1/email-deliveries?limit=200", absent: []string{w.dlvB.String()}, present: []string{w.dlvA.String()}},
 		{path: "/api/v1/purchase-orders/recommendations", absent: []string{}, present: nil},
 		{path: "/api/v1/purchase-orders/reorder-runs", absent: []string{}, present: nil},
 		{path: "/api/v1/purchase-orders/source-summary", absent: []string{}, present: nil},

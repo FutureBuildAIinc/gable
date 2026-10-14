@@ -33,6 +33,6 @@ cat "$log"
 
 [ "$status" -eq 0 ] || { echo "smoke: FAIL: the app exited with status $status (124 means it timed out)" >&2; exit 1; }
 grep -q '^gable-desk: page loaded url=' "$log" || { echo "smoke: FAIL: no page load line" >&2; exit 1; }
-grep -qF 'gable-desk: document title=GableLBM | Front Door' "$log" || { echo "smoke: FAIL: the front door's title never arrived" >&2; exit 1; }
+grep -qxF 'gable-desk: document title=Gable' "$log" || { echo "smoke: FAIL: the front door's title never arrived" >&2; exit 1; }
 grep -q '^gable-desk: smoke ok$' "$log" || { echo "smoke: FAIL: no clean exit line" >&2; exit 1; }
 echo "smoke: OK"

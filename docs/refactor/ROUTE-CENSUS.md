@@ -100,11 +100,11 @@ rejected for two reasons.
 
 ## The counts
 
-345 distinct routes. By prefix:
+346 distinct routes. By prefix:
 
 | Prefix | Routes |
 |---|---|
-| `/api/v1` (excluding `/api/v1/a2a`) | 288 |
+| `/api/v1` (excluding `/api/v1/a2a`) | 289 |
 | `/api/portal/v1` | 38 |
 | `/api/integration` | 10 |
 | `/api/v1/a2a` | 1 |
@@ -112,16 +112,16 @@ rejected for two reasons.
 | `/health`, `/healthz/live`, `/healthz/ready` | 3 |
 | `/metrics` | 1 |
 | `/uploads/` (no method prefix, answers every method) | 1 |
-| Total | 345 |
+| Total | 346 |
 
-By method: GET 164, POST 125, PUT 29, DELETE 21, PATCH 5, and the one
+By method: GET 164, POST 126, PUT 29, DELETE 21, PATCH 5, and the one
 method-less `/uploads/` pattern.
 
 40 packages register routes: 38 packages under `internal/`, plus `pkg/apps`
 (the Apps API platform surface) and the serve package, reported under its
 historical `cmd/server` label (health, metrics, uploads, the A2A
 receiver). The largest modules are pricing and portal with
-34 routes each, then delivery 25 and pos 19.
+34 routes each, then delivery 25 and pos 20.
 
 ### Conditional registrations
 

@@ -191,6 +191,14 @@ func TestMigration113_BackfillsThePrimaryBranchRow(t *testing.T) {
 	balances := scalar113[int64](t, conn, `SELECT SUM(ROUND(balance_due * 100))::bigint FROM customers`)
 	digest := customersDigest()
 	rowTotal := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`)
+	// The three planted customers, and any customer the migrated schema
+	// itself holds with a primary branch and no row (the counter's walk-in
+	// customer, migration 105): the migration sets a row on each.
+	pending := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customers c WHERE c.primary_branch_id IS NOT NULL
+		AND NOT EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = c.primary_branch_id)`)
+	if pending < 3 {
+		t.Fatalf("%d customers lack their primary branch row, want at least the three planted", pending)
+	}
 
 	// 1. The first run sets the row on the rowless customers and the one
 	// shared with the other branch, and reports the customer with no branch.
@@ -205,14 +213,14 @@ func TestMigration113_BackfillsThePrimaryBranchRow(t *testing.T) {
 	if len(rowsOf(held)) != 1 || len(rowsOf(noBranch)) != 0 {
 		t.Errorf("a customer that needed nothing changed: held %v, no branch %v", rowsOf(held), rowsOf(noBranch))
 	}
-	if n := notice113(*notices, "set the customer_branches row for its primary branch on 3 customer(s)"); n == "" {
-		t.Errorf("no NOTICE counts the three customers set; notices: %v", *notices)
+	if n := notice113(*notices, fmt.Sprintf("set the customer_branches row for its primary branch on %d customer(s)", pending)); n == "" {
+		t.Errorf("no NOTICE counts the rowless customers set; notices: %v", *notices)
 	}
 	if n := notice113(*notices, "1 customer(s) have no primary branch and were left as they are"); n == "" {
 		t.Errorf("no NOTICE reports the one customer with no primary branch; notices: %v", *notices)
 	}
-	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+3 {
-		t.Errorf("customer_branches holds %d rows, want %d (three added, none deleted)", got, rowTotal+3)
+	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+pending {
+		t.Errorf("customer_branches holds %d rows, want %d (the rowless customers added, none deleted)", got, rowTotal+pending)
 	}
 	if customersDigest() != digest {
 		t.Errorf("the migration changed a customers row")
@@ -224,8 +232,8 @@ func TestMigration113_BackfillsThePrimaryBranchRow(t *testing.T) {
 	// 2. A second run changes nothing and says so.
 	*notices = nil
 	applyFile113(t, conn, target)
-	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+3 {
-		t.Errorf("a second run changed the row count to %d, want %d", got, rowTotal+3)
+	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+pending {
+		t.Errorf("a second run changed the row count to %d, want %d", got, rowTotal+pending)
 	}
 	if n := notice113(*notices, "on 0 customer(s)"); n == "" {
 		t.Errorf("the second run does not report zero customers set; notices: %v", *notices)
@@ -237,11 +245,11 @@ func TestMigration113_BackfillsThePrimaryBranchRow(t *testing.T) {
 		t.Fatalf("migration 113 down file: %v %v", down, err)
 	}
 	applyFile113(t, conn, down[0])
-	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+3 {
-		t.Errorf("the down file changed the row count to %d, want %d (it removes nothing)", got, rowTotal+3)
+	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+pending {
+		t.Errorf("the down file changed the row count to %d, want %d (it removes nothing)", got, rowTotal+pending)
 	}
 	applyFile113(t, conn, target)
-	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+3 {
-		t.Errorf("up after down changed the row count to %d, want %d", got, rowTotal+3)
+	if got := scalar113[int64](t, conn, `SELECT COUNT(*) FROM customer_branches`); got != rowTotal+pending {
+		t.Errorf("up after down changed the row count to %d, want %d", got, rowTotal+pending)
 	}
 }

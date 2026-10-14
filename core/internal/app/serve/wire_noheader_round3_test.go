@@ -217,7 +217,7 @@ func TestNoHeader_PosMissingRecordIsNotFound(t *testing.T) {
 	missing := uuid.NewString()
 
 	for _, hdr := range []map[string]string{nil, headerA(f)} {
-		status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+missing+"/void", "", hdr)
+		status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+missing+"/void", `{"reason":"pin"}`, hdr)
 		if status != http.StatusNotFound {
 			t.Errorf("void of a missing sale (header %v): %d %s, want 404", hdr != nil, status, buf)
 		}
@@ -229,7 +229,7 @@ func TestNoHeader_PosMissingRecordIsNotFound(t *testing.T) {
 
 	// The control: a record of another branch still answers the record
 	// refusal by name, not a 404.
-	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", "", nil)
+	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", `{"reason":"pin"}`, nil)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "branch this caller may not target") {
 		t.Errorf("void of B's sale: %d %s, want the 403 record refusal", status, buf)
 	}

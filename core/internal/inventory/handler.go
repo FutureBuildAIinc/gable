@@ -90,6 +90,10 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.AdjustStock(r.Context(), req); err != nil {
+		if errors.Is(err, ErrLocationOutsideBranch) {
+			httputil.RespondError(w, r, "location_id is in a branch this caller may not target", http.StatusForbidden, err)
+			return
+		}
 		slog.Error("AdjustStock failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return
@@ -112,6 +116,10 @@ func (h *Handler) MoveStock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.MoveStock(r.Context(), req); err != nil {
+		if errors.Is(err, ErrLocationOutsideBranch) {
+			httputil.RespondError(w, r, "from_location_id or to_location_id is in a branch this caller may not target", http.StatusForbidden, err)
+			return
+		}
 		slog.Error("MoveStock failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return

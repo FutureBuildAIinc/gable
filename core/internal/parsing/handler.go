@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/gablelbm/gable/internal/ai"
 	"io"
 	"log/slog"
 	"net/http"
@@ -166,7 +167,11 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 		Synthetic:   synthetic,
 	}
 	if synthetic {
-		resp.SyntheticReason = "AI extraction is unavailable (OPENROUTER_API_KEY unset or the call failed). " +
+		reason := "AI extraction failed. "
+		if h.service.AIOff(r.Context()) {
+			reason = ai.AIOffMessage + " "
+		}
+		resp.SyntheticReason = reason +
 			"These line items are a fixed demo list, not the contents of the uploaded file. Do not quote them as-is."
 		slog.Warn("Returning synthetic material list for upload",
 			"filename", header.Filename, "item_count", len(items))

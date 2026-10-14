@@ -67,7 +67,7 @@ export class GableLocalTestHub extends LitElement {
   render() {
     const isDemo = import.meta.env.VITE_DEMO_MODE === 'true';
     const eyebrow = isDemo ? 'Public Demo' : 'Local Dev Hub';
-    const backendLabel = isDemo ? 'the GableLBM demo backend' : 'the local backend';
+    const backendLabel = isDemo ? 'the Gable demo backend' : 'the local backend';
     return html`
       <div class="min-h-screen bg-deep-space text-white font-sans">
         <div class="max-w-6xl mx-auto px-6 py-12">

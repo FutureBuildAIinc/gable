@@ -192,11 +192,11 @@ func TestMigration108_BackfillsTheBranchFromTheRegister(t *testing.T) {
 			('%[5]s', '%[2]s', '%[11]s', NULL, -1.25, '{"legacy":true}'),
 			('%[6]s', '%[3]s', '%[10]s', '%[13]s', 0, '{"set":true}'),
 			('%[7]s', '%[1]s', '%[12]s', NULL, 2.50, '{"stuck":true}');
-		INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, subtotal, tax_amount, total, refund_method, status) VALUES
-			('%[8]s', '%[10]s', NULL, '%[14]s', 10.11, 0.99, 11.10, 'CASH', 'COMPLETED'),
-			('%[9]s', '%[11]s', NULL, '%[14]s', 20.22, 1.98, 22.20, 'CARD', 'COMPLETED'),
-			('%[15]s', '%[10]s', '%[13]s', '%[14]s', 5.00, 0.45, 5.45, 'CASH', 'COMPLETED'),
-			('%[16]s', '%[12]s', NULL, '%[14]s', 1.00, 0.09, 1.09, 'CASH', 'COMPLETED');
+		INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, subtotal, tax_amount, total, refund_method, status, currency, number) VALUES
+			('%[8]s', '%[10]s', NULL, '%[14]s', 10.11, 0.99, 11.10, 'CASH', 'COMPLETED', 'USD', 'RTNM108-1'),
+			('%[9]s', '%[11]s', NULL, '%[14]s', 20.22, 1.98, 22.20, 'CARD', 'COMPLETED', 'USD', 'RTNM108-2'),
+			('%[15]s', '%[10]s', '%[13]s', '%[14]s', 5.00, 0.45, 5.45, 'CASH', 'COMPLETED', 'USD', 'RTNM108-3'),
+			('%[16]s', '%[12]s', NULL, '%[14]s', 1.00, 0.09, 1.09, 'CASH', 'COMPLETED', 'USD', 'RTNM108-4');
 	`, openSess, closedSess, setSess, stuckSess, zrLegacy, zrSet, zrStuck,
 		retNoLoc, retYard, regNoLoc, regYard, gone, branchY, cashier, retSet, retStuck)
 	if _, err := conn.Exec(ctx, plant); err != nil {

@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Save, Loader2 } from 'lucide';
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { apiErrorMessage } from '../../../services/apiError';
 import type { PIMContent } from '../../../types/pim.ts';
 
 const TONES = ['professional', 'casual', 'technical', 'persuasive'];
@@ -47,7 +48,7 @@ export class GableProductContentTab extends LitElement {
             this.dispatchEvent(new CustomEvent('content-update', { detail: result, bubbles: true, composed: true }));
         } catch (err) {
             console.error('Generate failed:', err);
-            ToastService.show('Failed to generate content', 'error');
+            ToastService.show(apiErrorMessage(err, 'Failed to generate content'), 'error');
         } finally {
             this.generating = false;
         }

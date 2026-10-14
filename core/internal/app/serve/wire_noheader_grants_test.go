@@ -110,7 +110,7 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 		t.Fatalf("pre: %d sessions on the B register", n)
 	}
 	status, buf := f.cashierNoHeader(t, "POST", "/api/v1/pos/till/open",
-		`{"register_id":"`+regNB+`","opening_float":10}`)
+		`{"register_id":"`+regNB+`","opening_float_cents":1000}`)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a different branch than the request") {
 		t.Errorf("no header open on B's register: %d %s, want the 403 naming the register rule", status, buf)
 	}
@@ -124,7 +124,7 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 		t.Fatalf("pre: %d Z reports on B's session, want the fixture's one", n)
 	}
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/"+f.tillB.String()+"/close",
-		`{"counted_by_method":{"CASH":50}}`)
+		`{"counted_by_method":{"cash":5000}}`)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a branch this caller may not target") {
 		t.Errorf("no header close of B's session: %d %s, want the 403 naming the record rule", status, buf)
 	}
@@ -137,8 +137,8 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 
 	// Current, report and Z report on B's drawer read as none or missing.
 	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/till/current?register_id="+f.regB, "")
-	if status != http.StatusOK || strings.Contains(string(buf), `"session":{`) {
-		t.Errorf("no header current till on B's register: %d %s, want no session", status, buf)
+	if status != http.StatusNotFound {
+		t.Errorf("no header current till on B's register: %d %s, want 404 (no open session)", status, buf)
 	}
 	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/till/"+f.tillB.String()+"/report", "")
 	if status != http.StatusNotFound {
@@ -150,7 +150,7 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 	}
 
 	// The Z report list carries A's rows only.
-	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/zreports", "")
+	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/zreports?date="+time.Now().UTC().Format("2006-01-02"), "")
 	if status != http.StatusOK || !strings.Contains(string(buf), f.zrA.String()) {
 		t.Errorf("no header Z report list: %d %s, want A's row", status, buf)
 	}
@@ -172,7 +172,7 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM till_sessions WHERE id = $1`, nullSess)
 	})
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/"+nullSess.String()+"/close",
-		`{"counted_by_method":{"CASH":10}}`)
+		`{"counted_by_method":{"cash":1000}}`)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a branch this caller may not target") {
 		t.Errorf("no header close of a NULL branch session: %d %s, want the 403 the record rule names", status, buf)
 	}
@@ -183,19 +183,19 @@ func TestNoHeader_RegistersAndTills(t *testing.T) {
 		t.Errorf("the refused close wrote %d Z reports on the NULL branch session, want none", n)
 	}
 	status, buf = f.userAs(t, "admin", "POST", "/api/v1/pos/till/"+nullSess.String()+"/close",
-		`{"counted_by_method":{"CASH":10}}`, nil)
+		`{"counted_by_method":{"cash":1000}}`, nil)
 	if status != http.StatusOK {
 		t.Errorf("admin close of a NULL branch session: %d %s, want 200", status, buf)
 	}
 
 	// The controls on A: the open lands, and the reads answer.
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/open",
-		`{"register_id":"`+regNA+`","opening_float":10}`)
+		`{"register_id":"`+regNA+`","opening_float_cents":1000}`)
 	if status != http.StatusCreated {
 		t.Errorf("no header open on A's register: %d %s, want 201", status, buf)
 	}
 	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/till/current?register_id="+f.regA, "")
-	if status != http.StatusOK || !strings.Contains(string(buf), `"session":{`) {
+	if status != http.StatusOK || !strings.Contains(string(buf), f.tillA.String()) {
 		t.Errorf("no header current till on A's register: %d %s, want the session", status, buf)
 	}
 	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/till/"+f.tillA.String()+"/report", "")
@@ -241,7 +241,7 @@ func TestNoHeader_Sales(t *testing.T) {
 		t.Fatalf("pre: %d lines on B's sale", n)
 	}
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items",
-		`{"product_id":"`+f.posProd.String()+`","quantity":1}`)
+		`{"line":{"product_id":"`+f.posProd.String()+`","quantity":"1"}}`)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a branch this caller may not target") {
 		t.Errorf("no header add item to B's sale: %d %s, want the 403 naming the record rule", status, buf)
 	}
@@ -272,7 +272,7 @@ func TestNoHeader_Sales(t *testing.T) {
 
 	// Complete B's sale: refused, no tender, the sale stays open.
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/complete",
-		`{"tenders":[{"method":"CASH","amount":0}]}`)
+		`{"tenders":[{"method":"cash","amount_cents":100}]}`)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a branch this caller may not target") {
 		t.Errorf("no header complete of B's sale: %d %s, want the 403 naming the record rule", status, buf)
 	}
@@ -284,7 +284,7 @@ func TestNoHeader_Sales(t *testing.T) {
 	}
 
 	// Void B's sale: refused, the sale stays open.
-	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", "")
+	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", `{"reason":"pin"}`)
 	if status != http.StatusForbidden || !strings.Contains(string(buf), "belongs to a branch this caller may not target") {
 		t.Errorf("no header void of B's sale: %d %s, want the 403 naming the record rule", status, buf)
 	}
@@ -303,6 +303,29 @@ func TestNoHeader_Sales(t *testing.T) {
 	}
 }
 
+// noheaderStock holds stock of the POS product in A's yard: a synced sale
+// issues it and a return restocks it (the fixture's cleanup removes the
+// product's inventory rows).
+func noheaderStock(t *testing.T, f *keyPinFixture) {
+	t.Helper()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'Y', 100, 0)`,
+		f.posProd, f.yardA); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
+}
+
+// noheaderTaxRate gives the branch a default tax rate: a return or a sale
+// completion refuses without one (tax_rate_not_configured), and the fixture's
+// branches carry none.
+func noheaderTaxRate(t *testing.T, f *keyPinFixture, branch uuid.UUID) {
+	t.Helper()
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`UPDATE locations SET default_tax_rate = 0.05 WHERE id = $1`, branch); err != nil {
+		t.Fatalf("set the branch tax rate: %v", err)
+	}
+}
+
 // TestNoHeader_Returns is the returns family: recording a return on B's
 // register, reading and listing B's return. The create writes nothing and
 // answers the register refusal; the reads answer missing; the list carries
@@ -313,10 +336,14 @@ func TestNoHeader_Returns(t *testing.T) {
 	regNB := noheaderRegister(t, f, f.branchB, f.yardB)
 	regNA := noheaderRegister(t, f, f.branchA, f.yardA)
 	noheaderPurgeReturn(t, f, regNA)
+	// A cash return pays out of an open drawer: A's seeded register holds one.
+	noheaderPurgeReturn(t, f, f.regA)
+	noheaderTaxRate(t, f, f.branchA)
+	noheaderStock(t, f)
 
 	body := func(register string) string {
-		return `{"register_id":"` + register + `","refund_method":"CASH","lines":[{"product_id":"` +
-			f.posProd.String() + `","quantity":1,"unit_price":1.00}]}`
+		return `{"register_id":"` + register + `","refund_method":"cash","reason":"pin","lines":[{"product_id":"` +
+			f.posProd.String() + `","quantity":"1","unit_price_ten_thousandths":10000}]}`
 	}
 
 	// Create on B's register: refused, no return written.
@@ -342,7 +369,7 @@ func TestNoHeader_Returns(t *testing.T) {
 	}
 
 	// The control on A: the return lands.
-	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/returns", body(regNA))
+	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/returns", body(f.regA))
 	if status != http.StatusCreated {
 		t.Errorf("no header return on A's register: %d %s, want 201", status, buf)
 	}
@@ -355,6 +382,8 @@ func TestNoHeader_Sync(t *testing.T) {
 	f := newKeyPinFixture(t)
 	ctx := context.Background()
 	noheaderGrant(t, f, "pin-cashier", f.branchA)
+	noheaderTaxRate(t, f, f.branchA)
+	noheaderStock(t, f)
 	batch := "nh-" + uuid.NewString()[:8]
 	clientB, clientA := uuid.New(), uuid.New()
 	t.Cleanup(func() {
@@ -364,8 +393,9 @@ func TestNoHeader_Sync(t *testing.T) {
 	})
 	body := func(register string, client uuid.UUID) string {
 		return `{"batch_id":"` + batch + `","register_id":"` + register +
-			`","items":[{"client_id":"` + client.String() + `","register_id":"` + register +
-			`","cashier_id":"` + uuid.NewString() + `","items":[],"tenders":[],"client_created_at":"` +
+			`","items":[{"client_id":"` + client.String() +
+			`","cashier_id":"` + uuid.NewString() + `","items":[{"product_id":"` + f.posProd.String() +
+			`","quantity":"1"}],"tenders":[{"method":"cash","amount_cents":100000}],"client_created_at":"` +
 			time.Now().UTC().Format(time.RFC3339) + `"}]}`
 	}
 
@@ -494,8 +524,8 @@ func TestNoHeader_UserWithNoGrants(t *testing.T) {
 	regNA := noheaderRegister(t, f, f.branchA, f.yardA)
 
 	status, buf := f.cashierNoHeader(t, "GET", "/api/v1/pos/till/current?register_id="+f.regA, "")
-	if status != http.StatusOK || strings.Contains(string(buf), `"session":{`) {
-		t.Errorf("grants-less current till on A's register: %d %s, want no session", status, buf)
+	if status != http.StatusNotFound {
+		t.Errorf("grants-less current till on A's register: %d %s, want 404 (no open session)", status, buf)
 	}
 	status, buf = f.cashierNoHeader(t, "GET", "/api/v1/pos/transactions/"+f.txnA.String(), "")
 	if status != http.StatusNotFound {
@@ -506,7 +536,7 @@ func TestNoHeader_UserWithNoGrants(t *testing.T) {
 		t.Errorf("grants-less sale list: %d %s, want no rows", status, buf)
 	}
 	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/till/open",
-		`{"register_id":"`+regNA+`","opening_float":10}`)
+		`{"register_id":"`+regNA+`","opening_float_cents":1000}`)
 	if status != http.StatusForbidden {
 		t.Errorf("grants-less open on A's register: %d %s, want 403", status, buf)
 	}
@@ -528,7 +558,7 @@ func TestNoHeader_AdminKeepsReach(t *testing.T) {
 		t.Errorf("admin no header read of B's sale: %d %s, want 200", status, buf)
 	}
 	status, buf = f.userAs(t, "admin", "GET", "/api/v1/pos/till/current?register_id="+f.regB, "", nil)
-	if status != http.StatusOK || !strings.Contains(string(buf), `"session":{`) {
+	if status != http.StatusOK || !strings.Contains(string(buf), f.tillB.String()) {
 		t.Errorf("admin no header current till on B's register: %d %s, want the session", status, buf)
 	}
 	status, buf = f.userAs(t, "admin", "GET", "/api/v1/pos/transactions", "", nil)

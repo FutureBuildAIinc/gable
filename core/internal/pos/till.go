@@ -5,81 +5,41 @@ package pos
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 )
 
-// TillSessionStatus is the drawer lifecycle state.
-type TillSessionStatus string
-
-const (
-	TillSessionOpen   TillSessionStatus = "OPEN"
-	TillSessionClosed TillSessionStatus = "CLOSED"
-)
-
-// TillSession is one drawer shift on a register: opened with a float,
-// accumulates completed-sale tenders, closed with counted totals and an
-// over/short figure.
-type TillSession struct {
-	ID           uuid.UUID         `json:"id" db:"id"`
-	RegisterID   string            `json:"register_id" db:"register_id"`
-	BranchID     *uuid.UUID        `json:"branch_id,omitempty" db:"branch_id"`
-	CashierID    uuid.UUID         `json:"cashier_id" db:"cashier_id"`
-	Status       TillSessionStatus `json:"status" db:"status"`
-	OpeningFloat int64             `json:"opening_float" db:"opening_float"` // Cents
-	OpenedAt     time.Time         `json:"opened_at" db:"opened_at"`
-	ClosedAt     *time.Time        `json:"closed_at,omitempty" db:"closed_at"`
-
-	// Set at close (cents keyed by tender method):
-	ExpectedByMethod map[string]int64 `json:"expected_by_method,omitempty"`
-	CountedByMethod  map[string]int64 `json:"counted_by_method,omitempty"`
-	OverShort        *int64           `json:"over_short,omitempty"` // Cents; negative = short
-	GLEntryID        *uuid.UUID       `json:"gl_entry_id,omitempty"`
-	Notes            string           `json:"notes"`
-}
-
-// TillReport is the live (X) or closing (Z) summary for a session.
-type TillReport struct {
-	Session          TillSession      `json:"session"`
-	SaleCount        int              `json:"sale_count"`
-	SalesTotal       int64            `json:"sales_total"`        // Cents (completed sales)
-	TaxTotal         int64            `json:"tax_total"`          // Cents
-	ChangeGiven      int64            `json:"change_given"`       // Cents
-	TenderedByMethod map[string]int64 `json:"tendered_by_method"` // Cents, raw tenders
-	ExpectedByMethod map[string]int64 `json:"expected_by_method"` // Cents, drawer expectation
-}
-
-// OpenTillRequest opens a drawer on a register.
-type OpenTillRequest struct {
-	RegisterID   string  `json:"register_id"`
-	OpeningFloat float64 `json:"opening_float"` // Dollars (wire convention matches tenders)
-}
-
-// CloseTillRequest closes the session with counted amounts.
-type CloseTillRequest struct {
-	CountedByMethod map[string]float64 `json:"counted_by_method"` // Dollars by method
-	Notes           string             `json:"notes"`
-}
-
-// expectedFromTenders computes what the drawer should hold per method:
-// CASH expectation = opening float + cash tendered − change given (change is
-// assumed returned from the cash drawer); other methods are informational
-// pass-throughs of what was tendered. Pure function for testability.
-func expectedFromTenders(openingFloat int64, tendered map[string]int64, changeGiven int64) map[string]int64 {
+// expectedFromPayments computes what the drawer should hold per method: the
+// CASH expectation is the opening float plus the session's cash payments
+// (already net of change; change is never subtracted a second time) less
+// cash refunds; the CARD figure, informational (cards are not counted into
+// the drawer), names what the session net collected on cards, its still
+// completed sales' card tenders less the void refunds a resolution booked
+// (r12 P3-2), the same net the CASH figure carries for returns; the other
+// methods are the pass-through of what the session's sales collected (ADR
+// 0005 section 14.2 C2-5). Pure function for testability.
+func expectedFromPayments(openingFloat httpx.Cents, tendered map[string]int64, cashRefunds, cardRefunds int64) map[string]int64 {
 	expected := make(map[string]int64, len(tendered)+1)
 	for m, v := range tendered {
 		expected[m] = v
 	}
-	expected["CASH"] = openingFloat + tendered["CASH"] - changeGiven
+	expected["CASH"] = int64(openingFloat) + tendered["CASH"] - cashRefunds
+	// The CARD figure is written only where the session collected on cards:
+	// a cash only session's report carries no card figure, as before (a
+	// booked card refund always implies the tender that was collected).
+	if cardTendered, ok := tendered["CARD"]; ok {
+		expected["CARD"] = cardTendered - cardRefunds
+	}
 	return expected
 }
 
-// overShortTotal sums counted − expected across the methods that were
+// overShortTotal sums counted less expected across the methods that were
 // counted. Methods not counted are skipped (a dealer may only count cash).
 func overShortTotal(expected, counted map[string]int64) int64 {
 	var total int64
@@ -89,44 +49,51 @@ func overShortTotal(expected, counted map[string]int64) int64 {
 	return total
 }
 
-// OpenTill opens a drawer session for a register.
-func (s *Service) OpenTill(ctx context.Context, registerID string, cashierID uuid.UUID, openingFloatCents int64) (*TillSession, error) {
-	if registerID == "" {
-		return nil, fmt.Errorf("register_id is required")
-	}
-	if openingFloatCents < 0 {
-		return nil, fmt.Errorf("opening float cannot be negative")
-	}
+// OpenTill opens a drawer session on a register.
+func (s *Service) OpenTill(ctx context.Context, registerID string, cashierID uuid.UUID, openingFloat httpx.Cents, actor string) (*TillSession, error) {
 	if existing, err := s.repo.GetOpenTillSession(ctx, registerID); err == nil && existing != nil {
-		return nil, fmt.Errorf("register %s already has an open till session (opened %s)", registerID, existing.OpenedAt.Format(time.RFC3339))
+		return nil, conflict("till_open", fmt.Sprintf("register %s already has an open till session", registerID))
 	}
-
-	session := &TillSession{
-		RegisterID:   registerID,
-		CashierID:    cashierID,
-		Status:       TillSessionOpen,
-		OpeningFloat: openingFloatCents,
-	}
-	if err := s.repo.CreateTillSession(ctx, session); err != nil {
+	var out *TillSession
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		branch, err := s.repo.GetRegisterBranch(ctx, registerID)
+		if err != nil {
+			return err
+		}
+		session := &TillSession{RegisterID: registerID, BranchID: branch, CashierID: cashierID,
+			Status: TillOpen, OpeningFloat: openingFloat,
+			ExpectedByMethod: map[string]int64{}, CountedByMethod: map[string]int64{}}
+		if err := s.repo.CreateTillSession(ctx, session); err != nil {
+			return err
+		}
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: "pos.till.opened", EntityType: "till_session", EntityID: session.ID, UserID: actor,
+				Changes: map[string]any{"register_id": registerID, "opening_float_cents": int64(openingFloat)},
+			}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
+		}
+		if session.BranchID != nil {
+			branch := *session.BranchID
+			if err := s.recordEvent(ctx, outbox.Event{Type: EventTillOpened, EntityType: "till_session",
+				EntityID: session.ID, BranchID: &branch, Data: eventJSON(map[string]any{
+					"register_id": registerID, "status": TillOpen.Status(),
+					"opening_float_cents": int64(openingFloat), "cashier_id": cashierID,
+				})}); err != nil {
+				return err
+			}
+		}
+		out = session
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "pos.till.opened",
-			EntityType: "till_session",
-			EntityID:   session.ID,
-			Changes: map[string]interface{}{
-				"register_id":         registerID,
-				"opening_float_cents": openingFloatCents,
-			},
-		})
-	}
-	s.logger.Info("till opened", "register", registerID, "session", session.ID, "float_cents", openingFloatCents)
-	return session, nil
+	return out, nil
 }
 
-// CurrentTill returns the open session for a register, or nil.
+// CurrentTill returns the register's open session, or nil.
 func (s *Service) CurrentTill(ctx context.Context, registerID string) (*TillSession, error) {
 	return s.repo.GetOpenTillSession(ctx, registerID)
 }
@@ -144,95 +111,126 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 	return &TillReport{
 		Session:          *session,
 		SaleCount:        agg.SaleCount,
-		SalesTotal:       agg.SalesTotal,
-		TaxTotal:         agg.TaxTotal,
-		ChangeGiven:      agg.ChangeGiven,
+		SalesTotalCents:  httpx.Cents(agg.SalesTotalCents),
+		TaxTotalCents:    httpx.Cents(agg.TaxTotalCents),
+		ChangeCents:      httpx.Cents(agg.ChangeCents),
 		TenderedByMethod: agg.TenderedByMethod,
-		ExpectedByMethod: expectedFromTenders(session.OpeningFloat, agg.TenderedByMethod, agg.ChangeGiven),
+		ExpectedByMethod: expectedFromPayments(session.OpeningFloat, agg.TenderedByMethod, agg.CashRefundsCents, agg.CardRefundsCents),
 	}, nil
 }
 
-// CloseTill closes the session: computes expected per method from the
-// session's completed sales, records counted amounts, and stores over/short.
-func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByMethodCents map[string]int64, notes string) (*TillReport, error) {
+// CloseTill closes the session: computes the expected per method from the
+// session's payments, records the counted amounts, and posts the over/short
+// entry inside the close's own transaction (the money rule: no GL entry
+// outside the act that causes it).
+func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByMethod map[string]int64, notes, actor string) (*TillReport, error) {
 	// An act on a session of a branch outside the caller's grants is refused
-	// by name before anything runs (SEC-NOHEADER-1); the branch is read with
-	// no wall, because the walled read would hide the session before the
-	// refusal could name it. A session that does not exist answers the
-	// module's 404 (r4 P3-1), never the refusal.
-	branch, found, err := s.repo.TillSessionBranch(ctx, sessionID)
-	if err != nil {
+	// by name before anything runs (SEC-NOHEADER-1); a session that does not
+	// exist, or that the caller's branch context hides, answers the 404.
+	if err := s.holdTillBranch(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	if !found {
-		return nil, &MissingRecordError{What: "till session", ID: sessionID}
-	}
-	if err := s.holdRecordBranch(ctx, "till session", branch, sessionID); err != nil {
-		return nil, err
-	}
-	report, err := s.TillReport(ctx, sessionID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The walled read hides a session outside the caller's branch
-		// context: it is missing for this caller, the module's 404.
-		return nil, &MissingRecordError{What: "till session", ID: sessionID}
-	}
-	if err != nil {
-		return nil, err
-	}
-	if report.Session.Status != TillSessionOpen {
-		return nil, fmt.Errorf("till session is not open (status: %s)", report.Session.Status)
-	}
-
-	overShort := overShortTotal(report.ExpectedByMethod, countedByMethodCents)
-	now := time.Now()
-	session := report.Session
-	session.Status = TillSessionClosed
-	session.ClosedAt = &now
-	session.ExpectedByMethod = report.ExpectedByMethod
-	session.CountedByMethod = countedByMethodCents
-	session.OverShort = &overShort
-	session.Notes = notes
-
-	if err := s.repo.CloseTillSession(ctx, &session); err != nil {
-		return nil, err
-	}
-	report.Session = session
-
-	// Post the drawer variance to the GL (best-effort, post-close): a GL
-	// hiccup must not block a completed count. A nonzero over/short books a
-	// balanced Cash Over/Short entry; the entry is linked back onto the
-	// session so the ledger and the till reconcile.
-	if s.tillLedger != nil && overShort != 0 {
-		if glID, err := s.tillLedger.PostTillOverShort(ctx, sessionID, overShort); err != nil {
-			s.logger.Error("CRITICAL: till closed but over/short GL posting failed — reconcile manually",
-				"session", sessionID, "over_short_cents", overShort, "error", err)
-		} else if glID != uuid.Nil {
-			if err := s.repo.SetTillSessionGLEntry(ctx, sessionID, glID); err != nil {
-				s.logger.Error("till over/short posted to GL but session link update failed",
-					"session", sessionID, "gl_entry_id", glID, "error", err)
-			} else {
+	var out *TillReport
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		// The session row first, FOR UPDATE: a completion or a void holding
+		// it FOR SHARE waits here, so the aggregate below counts every sale
+		// that landed and no sale lands while the drawer is being counted.
+		if err := s.repo.LockTillSession(ctx, sessionID, true); err != nil {
+			return err
+		}
+		report, err := s.TillReport(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if report.Session.Status != TillOpen {
+			return httpx.InvalidStateTransition("the till session is not open")
+		}
+		// A card refund claim of one of the session's sales still standing
+		// refuses the close (eighth review P2-2): its terminal call may still
+		// move money after the drawer was counted, and the void or return
+		// behind it would then be refused session_closed with the card
+		// already refunded. Under the session lock, before anything is
+		// counted.
+		claims, err := s.repo.SessionPendingRefundIntentIDs(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if len(claims) > 0 {
+			ids := make([]string, 0, len(claims))
+			for _, id := range claims {
+				ids = append(ids, id.String())
+			}
+			return conflict("refund_in_flight",
+				fmt.Sprintf("a card refund claim of one of this session's sales is still in flight (claims %s): settle each at POST /api/v1/pos/refund-intents/{id}/resolve before closing the drawer",
+					strings.Join(ids, ", ")))
+		}
+		overShort := overShortTotal(report.ExpectedByMethod, countedByMethod)
+		now := time.Now()
+		session := report.Session
+		session.Status = TillClosed
+		session.ClosedAt = httpx.PtrTimestamp(&now)
+		session.ExpectedByMethod = report.ExpectedByMethod
+		session.CountedByMethod = countedByMethod
+		cents := httpx.Cents(overShort)
+		session.OverShort = &cents
+		session.Notes = notes
+		// The over/short entry, inside the close's transaction, linked back
+		// onto the session.
+		if s.ledger != nil && overShort != 0 {
+			glID, err := s.ledger.PostTillOverShort(ctx, sessionID, overShort)
+			if err != nil {
+				return fmt.Errorf("failed to post the drawer variance: %w", err)
+			}
+			if glID != uuid.Nil {
 				session.GLEntryID = &glID
-				report.Session = session
 			}
 		}
+		if err := s.repo.CloseTillSession(ctx, &session); err != nil {
+			return err
+		}
+		report.Session = session
+		// The frozen Z snapshot, in the same transaction.
+		if err := s.generateZReport(ctx, report); err != nil {
+			return err
+		}
+		if s.auditLog != nil {
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: "pos.till.closed", EntityType: "till_session", EntityID: sessionID, UserID: actor,
+				Changes: map[string]any{
+					"register_id": session.RegisterID, "over_short_cents": overShort,
+					"sales_total_cents": aggSales(report), "sale_count": report.SaleCount,
+				}}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
+		}
+		if session.BranchID != nil {
+			branch := *session.BranchID
+			if err := s.recordEvent(ctx, outbox.Event{Type: EventTillClosed, EntityType: "till_session",
+				EntityID: sessionID, BranchID: &branch, Data: eventJSON(map[string]any{
+					"register_id": session.RegisterID, "status": TillClosed.Status(),
+					"from_status": TillOpen.Status(), "over_short_cents": overShort,
+					"sale_count": report.SaleCount,
+				})}); err != nil {
+				return err
+			}
+		}
+		out = report
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
+	return out, nil
+}
 
-	// Freeze the sovereign Z-report snapshot (generate-once, never recomputed).
-	s.generateZReport(ctx, report)
+func aggSales(r *TillReport) int64 { return int64(r.SalesTotalCents) }
 
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, audit.Entry{
-			Action:     "pos.till.closed",
-			EntityType: "till_session",
-			EntityID:   sessionID,
-			Changes: map[string]interface{}{
-				"register_id":      session.RegisterID,
-				"over_short_cents": overShort,
-				"sales_total":      report.SalesTotal,
-				"sale_count":       report.SaleCount,
-			},
-		})
-	}
-	s.logger.Info("till closed", "session", sessionID, "over_short_cents", overShort)
-	return report, nil
+// GetZReport returns the frozen Z snapshot for a session.
+func (s *Service) GetZReport(ctx context.Context, sessionID uuid.UUID) (*ZReport, error) {
+	return s.repo.GetZReportBySession(ctx, sessionID)
+}
+
+// ListZReports lists Z snapshots for a register on a date.
+func (s *Service) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
+	return s.repo.ListZReports(ctx, registerID, date)
 }

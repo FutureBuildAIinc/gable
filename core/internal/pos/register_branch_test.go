@@ -5,9 +5,9 @@ package pos_test
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -55,15 +55,14 @@ func pinnedTo(branch uuid.UUID) context.Context {
 // A register with no branched location still belongs to the branch its own
 // pos_registers.branch_id names: a caller pinned to another branch is refused
 // and nothing is written, and the register's own branch writes there.
-func TestCreateTransactionUsesTheRegistersOwnBranch(t *testing.T) {
+func TestCreateSaleUsesTheRegistersOwnBranch(t *testing.T) {
 	repo, register, own, other := registerBranchFixture(t)
-	now := time.Now()
-	mk := func() *pos.POSTransaction {
-		return &pos.POSTransaction{RegisterID: register, CashierID: uuid.New(), Status: pos.TransactionStatusOpen, ClientCreatedAt: &now}
+	mk := func() *pos.Sale {
+		return &pos.Sale{RegisterID: register, CashierID: uuid.New(), Currency: "USD"}
 	}
 
 	refused := mk()
-	err := repo.CreateTransaction(pinnedTo(other), refused)
+	err := repo.CreateSale(pinnedTo(other), refused)
 	if err == nil || !strings.Contains(err.Error(), "different branch") {
 		t.Fatalf("a caller pinned to another branch: err = %v, want the different branch refusal", err)
 	}
@@ -74,11 +73,11 @@ func TestCreateTransactionUsesTheRegistersOwnBranch(t *testing.T) {
 	}
 
 	ok := mk()
-	if err := repo.CreateTransaction(pinnedTo(own), ok); err != nil {
+	if err := repo.CreateSale(pinnedTo(own), ok); err != nil {
 		t.Fatalf("a caller on the register's own branch: %v", err)
 	}
 	if ok.BranchID != own {
-		t.Errorf("the transaction landed at %s, want the register's branch %s", ok.BranchID, own)
+		t.Errorf("the sale landed at %s, want the register's branch %s", ok.BranchID, own)
 	}
 }
 
@@ -93,13 +92,14 @@ func TestGetRegisterBranchFallsBackToTheRegistersOwnBranch(t *testing.T) {
 	}
 }
 
-func TestCreateTillSessionStampsTheRegistersOwnBranch(t *testing.T) {
+func TestOpenTillStampsTheRegistersOwnBranch(t *testing.T) {
 	repo, register, own, _ := registerBranchFixture(t)
-	s := &pos.TillSession{RegisterID: register, CashierID: uuid.New(), Status: pos.TillSessionOpen, OpeningFloat: 5000}
-	if err := repo.CreateTillSession(context.Background(), s); err != nil {
-		t.Fatalf("CreateTillSession: %v", err)
+	svc := pos.NewService(testutil.RequireDB(t), repo, slog.Default())
+	session, err := svc.OpenTill(context.Background(), register, uuid.New(), 5000, "u-test")
+	if err != nil {
+		t.Fatalf("OpenTill: %v", err)
 	}
-	if s.BranchID == nil || *s.BranchID != own {
-		t.Errorf("the till session branch = %v, want the register's branch %s", s.BranchID, own)
+	if session.BranchID == nil || *session.BranchID != own {
+		t.Errorf("the till session branch = %v, want the register's branch %s", session.BranchID, own)
 	}
 }

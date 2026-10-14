@@ -1085,6 +1085,14 @@ repository, through `branchctx.CustomerReadBranchForQuery`):
 | key bound to a branch | the customers that hold the pin | unchanged: the customers that hold the pin |
 | key bound to no branch | every customer | every customer |
 
+The customer record's standing goes dealer wide with the record: `balance_cents`
+and `credit_limit_cents` on the customer read and the list answer for every
+customer to every caller above, because a seller at a second yard needs the
+account's standing to sell on account. The finance documents behind the
+standing (the account ledger, the statement, invoices, aging, the
+reconciliation and the reports) keep following grants, so the same user still
+meets the module's 404 for them.
+
 The writes and locks of the family, the CRM activities and the tax exemption
 routes keep the walls 5.5 and 5.7 settled; restricted customer fields keep
 the shared customer rule (a bound key changes only the branch local fields).

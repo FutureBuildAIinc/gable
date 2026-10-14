@@ -8,7 +8,11 @@
 # Any lookup failure (invoice, order or customer, whatever the underlying
 # error) is a 404; a non UUID id is a 400; a render failure is a 500. The
 # invoice email route registered by the same handler (POST
-# /api/v1/invoices/{id}/email) is not described here.
+# /api/v1/invoices/{id}/email) is described with the invoices. Item M3 put
+# the dealer's name and logo, the issuing yard's name and address and (on
+# invoices and statements) the remit to on every form, and added the
+# statement, quote and purchase order forms; the new routes answer the ADR
+# 0001 error envelope.
 paths:
   /api/v1/documents/print/invoice/{id}:
     get:
@@ -90,4 +94,227 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "500": { $ref: "#/components/responses/InternalError" }
-components: {}
+  /api/v1/documents/print/statement/{id}:
+    get:
+      operationId: documentsPrintStatement
+      tags: [documents]
+      summary: Print a customer statement as PDF
+      description: >-
+        Renders the customer's account statement, as GET
+        /api/v1/ar/customers/{id}/statement computes it for the same from, to
+        and job_id, under the identity of the customer's primary yard. {id} is
+        the customer. from and to are YYYY-MM-DD business dates in the primary
+        branch's time zone (to defaults to today, from to a month before to).
+        Role gated admin, owner, sales and finance; a branch bound machine key
+        reaches it only while the customer holds its pin. A customer the
+        caller may not see (the customer read is the wall) is a 404; a role
+        refusal is a 403.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: job_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The statement as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=statement.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/ar/customers/{id}/statement/email:
+    post:
+      operationId: arStatementEmail
+      tags: [documents]
+      summary: Email a customer statement
+      description: >-
+        Renders the statement as the print route does and sends it to the
+        customer's email address from a background task, answering 202 at once.
+        The send is recorded in email_deliveries (GET
+        /api/v1/email-deliveries) with the sender's answer or its error. A
+        customer with no email address is a 400 naming customer. Same
+        parameters, roles and branch rules as the print route.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: job_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: The email was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEmailQueued"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/documents/print/quote/{id}:
+    get:
+      operationId: documentsPrintQuote
+      tags: [documents]
+      summary: Print a quote as PDF
+      description: >-
+        Renders the quote and its customer under the identity of the quote's
+        yard. Role gated admin, owner, sales and finance. A quote of another
+        branch is the quote module's own 404 under the branch wall.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The quote as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=quote.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/quotes/{id}/email:
+    post:
+      operationId: quoteEmail
+      tags: [documents]
+      summary: Email a quote to its customer
+      description: >-
+        Renders the quote as the print route does and sends it to the
+        customer's email address from a background task, answering 202 at once.
+        The send is recorded in email_deliveries. A customer with no email
+        address is a 400 naming customer.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: The email was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEmailQueued"
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+  /api/v1/documents/print/purchase-order/{id}:
+    get:
+      operationId: documentsPrintPurchaseOrder
+      tags: [documents]
+      summary: Print a purchase order as PDF
+      description: >-
+        Renders the purchase order under the identity of the yard that placed
+        it. Role gated admin, owner and purchasing. The number printed is PO-
+        followed by the first block of the id, upper case, until the purchase
+        order carries a number of its own.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The purchase order as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=purchase-order.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": { $ref: "#/components/responses/WireBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/WireNotFound" }
+        "500": { $ref: "#/components/responses/WireInternalError" }
+components:
+  schemas:
+    DocumentEmailQueued:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [queued]

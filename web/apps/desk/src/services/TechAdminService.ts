@@ -33,6 +33,16 @@ export interface AISettings {
     key_hint: string | null;
     base_url: string | null;
     revision: number;
+    provider: 'openrouter' | 'anthropic';
+    model: string;
+    anthropic_configured: boolean;
+    anthropic_key_hint: string | null;
+    vault_present: boolean;
+}
+
+export interface AITestResult {
+    ok: boolean;
+    message: string;
 }
 
 export interface RoutingSettings {
@@ -177,6 +187,33 @@ export const techAdminService = {
             await failOn(response);
             return;
         }
+    },
+
+    /**
+     * Saves the provider choice, the Anthropic model and, when typed, the
+     * Anthropic key (sealed at rest by the server, never read back).
+     */
+    async saveAIProvider(provider: 'openrouter' | 'anthropic', model: string, anthropicKey?: string): Promise<void> {
+        const body: { provider: string; model?: string; anthropic_api_key?: string } = { provider };
+        if (model) body.model = model;
+        if (anthropicKey) body.anthropic_api_key = anthropicKey;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const current = await this.getAISettings();
+            const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', 'If-Match': `"${current.revision}"` },
+                body: JSON.stringify(body),
+            });
+            if (response.status === 409 && attempt === 0) continue;
+            await failOn(response);
+            return;
+        }
+    },
+
+    async testAIConnection(): Promise<AITestResult> {
+        const response = await fetchWithAuth(`${API_URL}/api/v1/admin/settings/ai/test`, { method: 'POST' });
+        await failOn(response);
+        return response.json();
     },
 
     async deleteAIKey(): Promise<void> {

@@ -399,7 +399,7 @@ paths:
       tags:
       - product
       summary: Generate PIM collateral
-      description: Answers 500 when no AI client is configured.
+      description: Answers 409 with code ai_off when AI is off.
       parameters:
       - name: id
         in: path
@@ -429,7 +429,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -442,7 +442,7 @@ paths:
       tags:
       - product
       summary: Generate PIM descriptions
-      description: Answers 500 when no AI client is configured.
+      description: Answers 409 with code ai_off when AI is off.
       parameters:
       - name: id
         in: path
@@ -472,7 +472,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -515,7 +515,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -528,7 +528,7 @@ paths:
       tags:
       - product
       summary: Generate PIM SEO content
-      description: Answers 500 when no AI client is configured.
+      description: Answers 409 with code ai_off when AI is off.
       parameters:
       - name: id
         in: path
@@ -558,7 +558,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
