@@ -11,6 +11,7 @@ import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { keyed } from 'lit/directives/keyed.js';
 import { AccountService } from '../../services/AccountService.ts';
+import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import type { Customer, CustomerRequest, CustomerUpdateRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
@@ -35,6 +36,8 @@ export class GableAccountDetail extends LitElement {
     @state() private summary: AccountSummary | null = null;
     @state() private transactions: CustomerTransaction[] = [];
     @state() private txnCursor: string | null = null;
+    /** Set when the subledger answers 404 for a customer kept at another yard: shown in the ledger's place. */
+    @state() private ledgerNote = '';
     @state() private txnLoadingMore = false;
     @state() private unappliedPayments: Payment[] = [];
     @state() private openInvoices: { id: string; number: string; open_cents: number }[] = [];
@@ -74,17 +77,32 @@ export class GableAccountDetail extends LitElement {
 
     private async loadData(customerId: string) {
         try {
-            const [cust, summ, txnPage] = await Promise.all([
+            // The subledger keeps its yard's wall: for a customer kept at
+            // another yard it answers 404, which is not a failure of the page.
+            const ledger = AccountService.getTransactions(customerId).then(
+                page => ({ page, outside: false as const }),
+                (err: unknown) => {
+                    if (err instanceof LedgerOutsideYardError) return { page: null, outside: true as const };
+                    throw err;
+                });
+            const [cust, summ, led] = await Promise.all([
                 CustomerService.getCustomer(customerId),
                 AccountService.getAccountSummary(customerId),
-                AccountService.getTransactions(customerId)
+                ledger
             ]);
             this.customer = cust;
             this.summary = summ;
-            // The ledger's list envelope; the cursor walks it ("Load more"
-            // follows when the account outgrows one page).
-            this.transactions = txnPage.items;
-            this.txnCursor = txnPage.next_cursor;
+            if (led.page) {
+                // The ledger's list envelope; the cursor walks it ("Load more"
+                // follows when the account outgrows one page).
+                this.ledgerNote = '';
+                this.transactions = led.page.items;
+                this.txnCursor = led.page.next_cursor;
+            } else {
+                this.ledgerNote = ledgerYardNote(cust.branch_ids);
+                this.transactions = [];
+                this.txnCursor = null;
+            }
             if (cust.salesperson_id) {
                 try {
                     const sp = await SalesTeamService.getSalesPerson(cust.salesperson_id);
@@ -575,7 +593,9 @@ export class GableAccountDetail extends LitElement {
                     </div>
 
                     <div class="min-h-[400px]">
-                        ${this.activeTab === 'ledger' ? html`
+                        ${this.activeTab === 'ledger' && this.ledgerNote ? html`
+                            <div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="ledger-yard-note">${this.ledgerNote}</div>
+                        ` : this.activeTab === 'ledger' ? html`
                             <div class="border border-white/5 rounded-lg overflow-hidden bg-slate-steel/20">
                                 <table class="w-full text-sm">
                                     <thead class="bg-white/5 text-zinc-400 font-medium border-b border-white/5">

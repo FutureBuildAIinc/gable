@@ -5,6 +5,7 @@ import type { AccountSummary, CustomerTransactionPage } from '../types/account';
 import type { Payment } from '../types/payment';
 import { walkCursor } from '../lib/cursorWalk';
 import { fetchWithAuth } from './fetchClient';
+import { LedgerOutsideYardError } from '../lib/ledgerYards';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
@@ -21,6 +22,9 @@ export const AccountService = {
     getTransactions: async (customerId: string, cursor?: string): Promise<CustomerTransactionPage> => {
         const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
         const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/accounts/${customerId}/transactions${qs}`);
+        if (response.status === 404) {
+            throw new LedgerOutsideYardError();
+        }
         if (!response.ok) {
             throw new Error('Failed to fetch transactions');
         }

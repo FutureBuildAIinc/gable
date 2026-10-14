@@ -8,6 +8,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
+import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
 import { FileText, Search } from 'lucide';
@@ -26,6 +27,8 @@ export class CustomerStatementPage extends LitElement {
     @state() private endDate = '';
     @state() private statement: ArStatement | null = null;
     @state() private loading = false;
+    /** Set when the statement answers 404 for a customer whose ledger is kept at another yard. */
+    @state() private yardNote = '';
     private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
     connectedCallback() {
@@ -97,9 +100,15 @@ export class CustomerStatementPage extends LitElement {
             return;
         }
         this.loading = true;
+        this.yardNote = '';
         try {
             this.statement = await ArService.statement(this.customerId.trim(), this.startDate || undefined, this.endDate || undefined);
         } catch (err) {
+            if (err instanceof LedgerOutsideYardError) {
+                this.statement = null;
+                this.yardNote = ledgerYardNote(this.selectedCustomer?.branch_ids ?? []);
+                return;
+            }
             console.error(err);
             ToastService.show('Failed to load statement', 'error');
         } finally {
@@ -205,6 +214,7 @@ export class CustomerStatementPage extends LitElement {
                 </div>
             </div>
 
+            ${this.yardNote ? html`<div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="statement-yard-note">${this.yardNote}</div>` : nothing}
             ${this.statement ? this.statement.currencies.map(cur => this._renderCurrency(cur)) : nothing}
         `;
     }
