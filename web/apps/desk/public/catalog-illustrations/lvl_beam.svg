@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>LVL engineered beam</title>
+  <defs><style>
+    .face{fill:#c89868}
+    .faceHi{fill:#d8ad7c}
+    .faceShade{fill:#a87a4e}
+    .veneer{stroke:#8a5e34;fill:none;stroke-linecap:round}
+    .endGrain{fill:#9a6e44}
+    .endShade{fill:#7a5230}
+    .endDeep{fill:#5a3a1e}
+    .stamp{fill:#3a2410}
+    .stampHi{fill:#5a3a1e}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="104" ry="8" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="face" x="22" y="98" width="212" height="100"/>
+    <rect class="faceHi" x="22" y="98" width="212" height="4"/>
+    <rect class="faceShade" x="22" y="190" width="212" height="8" opacity="0.6"/>
+    <line class="veneer" x1="24" y1="116" x2="232" y2="116" stroke-width="0.5" opacity="0.55"/>
+    <line class="veneer" x1="22" y1="130" x2="232" y2="130" stroke-width="0.6" opacity="0.5"/>
+    <line class="veneer" x1="24" y1="146" x2="232" y2="146" stroke-width="0.5" opacity="0.55"/>
+    <line class="veneer" x1="22" y1="162" x2="232" y2="162" stroke-width="0.6" opacity="0.5"/>
+    <line class="veneer" x1="24" y1="176" x2="232" y2="176" stroke-width="0.5" opacity="0.55"/>
+  </g>
+  <g>
+    <rect class="endGrain" x="22" y="98" width="18" height="100"/>
+    <rect class="endShade" x="22" y="186" width="18" height="12"/>
+    <line x1="22" y1="104" x2="40" y2="104" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="110" x2="40" y2="110" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="116" x2="40" y2="116" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="122" x2="40" y2="122" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="128" x2="40" y2="128" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="134" x2="40" y2="134" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="140" x2="40" y2="140" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="146" x2="40" y2="146" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="152" x2="40" y2="152" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="158" x2="40" y2="158" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="164" x2="40" y2="164" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="170" x2="40" y2="170" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="176" x2="40" y2="176" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="182" x2="40" y2="182" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <line x1="22" y1="188" x2="40" y2="188" stroke="#7a5230" stroke-width="0.6" opacity="0.7"/>
+    <rect class="endDeep" x="22" y="98" width="2" height="100"/>
+  </g>
+  <g>
+    <rect class="stamp" x="74" y="132" width="108" height="34" rx="2"/>
+    <rect class="stampHi" x="74" y="132" width="108" height="3" rx="1"/>
+    
+    <text x="128" y="160" font-family="Verdana,Arial,sans-serif" font-size="5" font-weight="600" letter-spacing="1.5" fill="#e0d0a0" text-anchor="middle">LVL 1.75 x 11.875 x 22</text>
+  </g>
+</svg>

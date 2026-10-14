@@ -260,9 +260,9 @@ func Run() {
 		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
 		middleware.RequireRole("admin", "owner"))
 
-	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
-	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
-	// product image generation. Base URL and per-task model slugs are admin-overridable.
+	// Unified AI client: the chosen provider's key (DB-first via system_settings,
+	// env fallback for OpenRouter) powers all AI features: material-list/freight
+	// OCR, PIM content, and product image (photo) or illustration generation. Base URL and per-task model slugs are admin-overridable.
 	//
 	// The provider (OpenRouter or the native Anthropic one) is chosen in Tech
 	// Admin. AI keys are sealed at rest with the same vault key the payment
@@ -294,9 +294,9 @@ func Run() {
 		logger.Info("sealed stored AI keys at rest", "count", n)
 	}
 	if cfg.OpenRouterAPIKey != "" {
-		logger.Info("AI initialized via OpenRouter (env key present, admin can override via Tech Admin > AI Settings)")
+		logger.Info("AI initialized (OpenRouter env key present; the provider and keys are chosen in Tech Admin > AI Settings)")
 	} else {
-		logger.Info("AI initialized via OpenRouter (no env key — admin can configure via Tech Admin > AI Settings)")
+		logger.Info("AI initialized (no env key; the provider and its key are chosen in Tech Admin > AI Settings)")
 	}
 
 	// AI Parsing Module (Material List Intake)
@@ -305,7 +305,7 @@ func Run() {
 	parsingHandler.RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "sales"))
 
 	// PIM Module (AI-Powered Product Information Management) — text generation and
-	// image generation both run through the unified OpenRouter client.
+	// image generation both run through the unified AI client, on the chosen provider.
 	pimRepo := pim.NewRepository(db)
 	pimSvc := pim.NewService(pimRepo, productSvc)
 	pimSvc.WithAI(aiClient)
@@ -734,6 +734,7 @@ func Run() {
 	paymentSvc.WithTenderCreditGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
 	wall.pos(mux, posHandler, "admin", "owner", "cashier")
+	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
 
 	// Accounts Payable Module: the vendor invoice routes on the wire contract
 	// (C4-1b, ADR 0008 7.4). The bills carry a branch, so every route runs

@@ -40,3 +40,25 @@ func OffMessage(err error) (string, bool) {
 	}
 	return "", false
 }
+
+// ErrUnsupportedType is the sentinel for an upload the chosen provider cannot
+// read (for example a BMP under Anthropic). The concrete error carries the
+// words a person reads (see UnsupportedTypeMessage); nothing answers a canned
+// result for it.
+var ErrUnsupportedType = errors.New("unsupported file type")
+
+// UnsupportedTypeError is an unsupported type with its own plain message.
+type UnsupportedTypeError struct{ Message string }
+
+func (e *UnsupportedTypeError) Error() string        { return e.Message }
+func (e *UnsupportedTypeError) Is(target error) bool { return target == ErrUnsupportedType }
+
+// UnsupportedTypeMessage reports whether err is an unsupported type answer
+// and the sentence to show. A wrapped error is found through errors.As.
+func UnsupportedTypeMessage(err error) (string, bool) {
+	var ue *UnsupportedTypeError
+	if errors.As(err, &ue) {
+		return ue.Message, true
+	}
+	return "", false
+}

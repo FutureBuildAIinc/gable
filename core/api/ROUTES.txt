@@ -311,6 +311,7 @@ GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
+GET	/api/v1/pos/tiles	internal/pos	h.ListTiles
 GET	/api/v1/pos/till/current	internal/pos	h.CurrentTill
 POST	/api/v1/pos/till/open	internal/pos	h.OpenTill
 POST	/api/v1/pos/till/{id}/close	internal/pos	h.CloseTill
@@ -323,6 +324,8 @@ POST	/api/v1/pos/transactions/{id}/complete	internal/pos	h.CompleteTransaction
 PUT	/api/v1/pos/transactions/{id}/customer	internal/pos	h.AttachCustomer
 POST	/api/v1/pos/transactions/{id}/items	internal/pos	h.AddItem
 DELETE	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.RemoveItem
+GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleReceipt
+POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
 POST	/api/v1/pos/transactions/{id}/void	internal/pos	h.VoidTransaction
 GET	/api/v1/pos/zreports	internal/pos	h.ListZReports
 GET	/api/v1/price_levels	internal/customer	h.HandleListPriceLevels

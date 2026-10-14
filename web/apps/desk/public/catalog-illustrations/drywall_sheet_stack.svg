@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Stack of drywall sheets 4x8</title>
+  <defs>
+    <style>
+      .sheetMain{fill:#f4ecd8}
+      .sheetShade{fill:#d8c8a8}
+      .sheetEdge{fill:#a89878}
+      .paperEdge{fill:#dcd0b8}
+      .paperHi{fill:#faf3e0}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="108" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="sheetEdge" points="28,72 222,72 234,86 40,86"/>
+    <polygon class="sheetMain" points="28,72 222,72 222,82 28,82"/>
+    <polygon class="sheetShade" points="222,72 234,86 234,96 222,82"/>
+    <rect class="paperEdge" x="28" y="86" width="194" height="6"/>
+  </g>
+  <g>
+    <rect class="sheetMain" x="22" y="92" width="212" height="124"/>
+    <rect class="paperHi" x="22" y="92" width="212" height="4" opacity="0.6"/>
+    <rect class="sheetShade" x="226" y="92" width="8" height="124" opacity="0.5"/>
+    <rect class="sheetShade" x="22" y="200" width="212" height="16" opacity="0.4"/>
+  </g>
+  <g opacity="0.4">
+    <line x1="34" y1="110" x2="222" y2="110" stroke="#a89878" stroke-width="0.5"/>
+    <line x1="34" y1="130" x2="222" y2="130" stroke="#a89878" stroke-width="0.5"/>
+    <line x1="34" y1="150" x2="222" y2="150" stroke="#a89878" stroke-width="0.5"/>
+    <line x1="34" y1="170" x2="222" y2="170" stroke="#a89878" stroke-width="0.5"/>
+    <line x1="34" y1="190" x2="222" y2="190" stroke="#a89878" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="sheetMain" x="36" y="216" width="184" height="6" opacity="0.95"/>
+    <rect class="paperHi" x="36" y="216" width="184" height="2" opacity="0.7"/>
+    <rect class="sheetMain" x="36" y="222" width="184" height="6" opacity="0.9"/>
+  </g>
+</svg>

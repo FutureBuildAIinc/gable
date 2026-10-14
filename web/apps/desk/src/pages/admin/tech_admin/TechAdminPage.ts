@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
+import { aiHeadline, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
@@ -573,11 +574,14 @@ export class TechAdminPage extends LitElement {
     private _renderAISettingsPanel() {
         if (this.aiLoading) return html`<div class="text-slate-400 p-8">Loading AI settings...</div>`;
 
+        const imageGen = imageWords(this.aiSettings?.provider);
+        const savedProvider = this.aiSettings?.provider ?? 'openrouter';
+        const isAnthropic = savedProvider === 'anthropic';
         const features = [
             { name: 'Material List Parsing', description: 'Upload photos/PDFs/spreadsheets of material lists and auto-build quotes', iconData: Sparkles },
             { name: 'Freight Invoice OCR', description: 'Extract carrier, total, and invoice number from uploaded freight invoices', iconData: Sparkles },
             { name: 'PIM Content Generation', description: 'AI-generated product descriptions, SEO, and marketing copy', iconData: Sparkles },
-            { name: 'Product Image Generation', description: 'Generate professional product images for your catalog', iconData: ImageIcon },
+            { name: imageGen.feature, description: imageGen.featureDescription, iconData: ImageIcon },
         ];
 
         return html`
@@ -587,7 +591,8 @@ export class TechAdminPage extends LitElement {
                         ${icon(Sparkles, 20, 'w-5 h-5 text-violet-400')}
                         AI Provider
                     </h2>
-                    <p class="text-slate-400 text-sm mt-1">Choose the provider and enter its key; one key powers all AI features across the ERP. OpenRouter can point at a self-hosted, OpenAI-compatible endpoint.</p>
+                    <p class="text-slate-400 text-sm mt-1">Choose the provider and enter its key; the chosen provider's key powers all AI features across the ERP. OpenRouter can point at a self-hosted, OpenAI-compatible endpoint.</p>
+                    <p class="text-sm text-slate-300 mt-2" data-testid="ai-status-line">${aiStatusLine(this.aiSettings)}</p>
                 </div>
 
                 ${this._renderProviderCard()}
@@ -600,30 +605,31 @@ export class TechAdminPage extends LitElement {
                             </div>
                             <div>
                                 <h3 class="text-white font-medium">
-                                    ${this.aiSettings?.configured ? 'AI Features Active' : 'AI Features Inactive'}
+                                    ${aiHeadline(this.aiSettings)}
                                 </h3>
                                 ${this.aiSettings?.configured ? html`
                                     <div class="text-sm text-slate-400 mt-1 space-y-1">
-                                        <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.key_hint}</code></p>
+                                        <p>Provider: <span class="text-white">${providerLabel(savedProvider)}</span>${isAnthropic ? html`, model <span class="text-white">${modelLabel(this.aiSettings.model)}</span>` : nothing}</p>
+                                        <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${isAnthropic ? this.aiSettings.anthropic_key_hint : this.aiSettings.key_hint}</code></p>
                                         <p>Source: <span class="${cn('text-xs font-medium px-2 py-0.5 rounded', this.aiSettings.source === 'admin' ? 'bg-violet-500/15 text-violet-400' : 'bg-zinc-500/15 text-zinc-400')}">${this.aiSettings.source === 'admin' ? 'Admin configured' : 'Environment variable'}</span></p>
-                                        ${this.aiSettings.base_url ? html`<p>Base URL: <code class="text-blueprint-blue bg-blueprint-blue/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.base_url}</code></p>` : nothing}
+                                        ${this.aiSettings.base_url && !isAnthropic ? html`<p>Base URL: <code class="text-blueprint-blue bg-blueprint-blue/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.base_url}</code></p>` : nothing}
                                     </div>
-                                ` : html`<p class="text-sm text-slate-400 mt-1">Enter your OpenRouter API key to enable AI-powered features.</p>`}
+                                ` : html`<p class="text-sm text-slate-400 mt-1">${aiStatusLine(this.aiSettings)}</p>`}
                             </div>
                         </div>
                         <div class="flex gap-2">
-                            ${this.aiSettings?.source === 'admin' ? html`
+                            ${isAnthropic ? nothing : html`${this.aiSettings?.source === 'admin' ? html`
                                 <button @click=${this._handleDeleteAIKey} class="px-4 py-2 border border-red-500/30 text-red-400 rounded hover:bg-red-500/10 transition-colors inline-flex items-center gap-2">
                                     ${icon(Trash2, 14)} Remove
                                 </button>
                             ` : nothing}
                             <button @click=${() => { this.aiShowInput = true; this.aiNewBaseUrl = this.aiSettings?.base_url ?? ''; }} ?disabled=${this.aiShowInput} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                 ${this.aiSettings?.configured ? 'Update Key' : 'Add Key'}
-                            </button>
+                            </button>`}
                         </div>
                     </div>
 
-                    ${this.aiShowInput ? html`
+                    ${this.aiShowInput && !isAnthropic ? html`
                         <div class="mt-6 pt-6 border-t border-white/5 overflow-hidden space-y-3">
                             <div class="relative">
                                 ${icon(Shield, 16, 'absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500')}

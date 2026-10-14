@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Copper 1/2 inch 90 degree elbow with two pipe ends</title>
+  <defs>
+    <style>
+      .pipeMain{fill:#c8744a}
+      .pipeHi{fill:#e89a6c}
+      .pipeMid{fill:#a8603a}
+      .pipeShade{fill:#8a4a2c}
+      .jointHi{fill:#cc8a64}
+      .jointRing{fill:#7a3818}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="pipeMain" x="34" y="120" width="74" height="22"/>
+    <rect class="pipeHi" x="34" y="120" width="74" height="3" opacity="0.7"/>
+    <rect class="pipeShade" x="34" y="139" width="74" height="3" opacity="0.6"/>
+    <ellipse cx="34" cy="131" rx="6" ry="11" fill="#8a4a2c"/>
+    <ellipse cx="32" cy="131" rx="3" ry="6" fill="#5a2a14"/>
+  </g>
+  <g>
+    <rect class="pipeMain" x="120" y="34" width="22" height="86"/>
+    <rect class="pipeHi" x="120" y="34" width="3" height="86" opacity="0.7"/>
+    <rect class="pipeShade" x="139" y="34" width="3" height="86" opacity="0.6"/>
+    <ellipse cx="131" cy="34" rx="11" ry="5" fill="#e89a6c"/>
+    <ellipse cx="131" cy="32" rx="6" ry="2.5" fill="#3a1a08"/>
+  </g>
+  <g>
+    <path class="pipeMain" d="M 108 120 Q 108 102 131 102 Q 142 102 142 120 L 142 130 L 108 130 Z"/>
+    <path class="pipeHi" d="M 108 120 Q 108 102 131 102 Q 142 102 142 120 L 142 124 L 108 124 Z" opacity="0.7"/>
+  </g>
+  <g>
+    <circle class="pipeMain" cx="131" cy="131" r="32"/>
+    <circle class="pipeMid" cx="131" cy="131" r="32" fill="none" stroke="#a8603a" stroke-width="1.5" opacity="0.6"/>
+    <circle class="pipeShade" cx="131" cy="131" r="22" opacity="0.6"/>
+    <circle class="pipeMain" cx="131" cy="131" r="22"/>
+    <ellipse class="pipeHi" cx="131" cy="123" rx="20" ry="3" opacity="0.8"/>
+    <circle class="pipeMid" cx="131" cy="131" r="22" fill="none" stroke="#a8603a" stroke-width="2" opacity="0.6"/>
+    <circle class="jointHi" cx="131" cy="131" r="26" fill="none" stroke="#cc8a64" stroke-width="1" opacity="0.5"/>
+  </g>
+</svg>

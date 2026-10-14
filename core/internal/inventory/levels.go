@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,9 @@ type ProductSummary struct {
 	SKU         string    `json:"sku"`
 	Description string    `json:"description"`
 	StockUOM    string    `json:"stock_uom"`
+	// ImageURL is the picture path while catalog.product_images is on; null
+	// when it is off or the product has none.
+	ImageURL *string `json:"image_url"`
 }
 
 // LevelFilters are the levels list's declared filters; nil is no filter.
@@ -84,6 +88,7 @@ func (r *PostgresRepository) ListLevelsPage(ctx context.Context, filters LevelFi
 		       COALESCE(NULLIF(l.path, ''), i.location, '') AS location_name,
 		       i.quantity::text, i.allocated::text, (i.quantity - i.allocated)::text,
 		       p.uom_primary::text, p.sku, p.description,
+		       ` + pictures.ImageSQL("p") + `,
 		       i.created_at, i.updated_at
 		  FROM inventory i
 		  LEFT JOIN locations l ON l.id = i.location_id
@@ -145,10 +150,10 @@ func (r *PostgresRepository) CountLevels(ctx context.Context, filters LevelFilte
 func scanLevel(rows pgx.Rows) (*Level, error) {
 	var lv Level
 	var quantity, allocated, available string
-	var sku, description *string
+	var sku, description, image *string
 	var created, updated time.Time
 	if err := rows.Scan(&lv.ID, &lv.ProductID, &lv.LocationID, &lv.LocationName,
-		&quantity, &allocated, &available, &lv.UOM, &sku, &description,
+		&quantity, &allocated, &available, &lv.UOM, &sku, &description, &image,
 		&created, &updated); err != nil {
 		return nil, fmt.Errorf("scan inventory level: %w", err)
 	}
@@ -163,7 +168,7 @@ func scanLevel(rows pgx.Rows) (*Level, error) {
 		return nil, fmt.Errorf("read inventory available: %w", err)
 	}
 	lv.CreatedAt, lv.UpdatedAt = httpx.TimestampOf(created), httpx.TimestampOf(updated)
-	lv.Product = &ProductSummary{ID: lv.ProductID, StockUOM: lv.UOM}
+	lv.Product = &ProductSummary{ID: lv.ProductID, StockUOM: lv.UOM, ImageURL: image}
 	if sku != nil {
 		lv.Product.SKU = *sku
 	}

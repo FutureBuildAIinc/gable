@@ -52,7 +52,6 @@ import (
 	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
-	"github.com/gablelbm/gable/internal/notification"
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/parsing"
 	"github.com/gablelbm/gable/internal/payment"
@@ -129,6 +128,7 @@ type keyPinFixture struct {
 	boundFirst  string             // the first mint's bound key, kept when a test swaps in the second
 	recording   bool               // mark every bound key call for the walled route coverage test
 	keys        *techadmin.Service // the mint the fixture's keys validate against
+	mail        *recordingMailer   // the sender the document routes send through
 }
 
 // mintWithScopes mints a key with the scopes given, through the same service
@@ -200,7 +200,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	db := testutil.RequireDB(t)
 	t.Setenv("AUTH_MODE", "dev")
 	ctx := context.Background()
-	f := &keyPinFixture{t: t, db: db,
+	f := &keyPinFixture{t: t, db: db, mail: &recordingMailer{},
 		branchA: uuid.New(), branchB: uuid.New(), branchC: uuid.New(), branchC2: uuid.New(),
 		yardA: uuid.New(), yardB: uuid.New(), quoteA: uuid.New(), quoteB: uuid.New(), custID: uuid.New(),
 		custB: uuid.New(), category: uuid.New(), catRuleA: uuid.New(), catRuleB: uuid.New(), taxExempt: uuid.New(),
@@ -534,11 +534,13 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	docStore := document.NewStore(db)
 	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
 	deliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
-	wall.documents(mux, document.NewHandler(
+	docHandler := document.NewHandler(
 		document.NewService(product.NewRepository(db)).
 			WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc),
-		orderSvc, invoiceSvc, customerSvc, notification.NewLogEmailService(slog.Default())).
-		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc))
+		orderSvc, invoiceSvc, customerSvc, f.mail).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc)
+	wall.documents(mux, docHandler)
+	wall.posReceipts(mux, docHandler, posSvc, "admin", "owner", "cashier")
 	wall.emailDeliveries(mux, emaildelivery.NewHandler(deliverySvc))
 	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
 	quoteKind := quote.NewDraftKind(quoteSvc)
@@ -1656,6 +1658,14 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 		t.Errorf("bound key register list does not carry the pin's own register: %s", buf)
 	}
 
+	// The counter's tiles read answers for the pin's yard (a bound key keeps
+	// its pin, no foreign history); the twin leg proves the same wire.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/tiles?limit=3", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/tiles?limit=3")
+	if !strings.Contains(string(buf), `"items"`) || !strings.Contains(string(buf), `"categories"`) {
+		t.Errorf("bound key tiles read has no chips or tiles: %s", buf)
+	}
+
 	// The Z report of the foreign session answers what a missing one answers;
 	// the list carries the pin's own Z report and not the foreign one.
 	sMiss, _ = f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/zreport", "", nil)
@@ -1696,6 +1706,16 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 		t.Errorf("bound key foreign transaction read: %d, want 404", sB)
 	}
 	f.twinLeg("GET", "/api/v1/pos/transactions/"+f.txnB.String())
+	// The counter's receipt pair reads the sale as that read does: the
+	// foreign sale is missing, and the pin's own open sale reaches the route
+	// (no receipt yet).
+	for _, c := range []struct{ method, tail string }{{"GET", "/receipt"}, {"POST", "/receipt/email"}} {
+		if sB, _ := f.key(t, f.bound, c.method, "/api/v1/pos/transactions/"+f.txnB.String()+c.tail, "", nil); sB != http.StatusNotFound {
+			t.Errorf("bound key foreign sale %s %s: %d, want 404", c.method, c.tail, sB)
+		}
+		f.twinLeg(c.method, "/api/v1/pos/transactions/"+f.txnB.String()+c.tail)
+		f.allow(t, "bound", c.method, "/api/v1/pos/transactions/"+f.txnA.String()+c.tail, "", nil, http.StatusConflict)
+	}
 	before := linesOn(f.txnB)
 	f.key(t, f.bound, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items",
 		fmt.Sprintf(`{"line":{"product_id":%q,"quantity":"1"}}`, f.posProd.String()), nil)

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>galvanized hurricane tie</title>
+  <defs>
+    <style>
+      .steelMain{fill:#a8a8a8}
+      .steelHi{fill:#cdcdcd}
+      .steelShade{fill:#5a5a5a}
+      .steelDark{fill:#3a3a3a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="86" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="steelMain" points="48,64 208,64 188,124 48,124"/>
+    <polygon class="steelHi" points="48,64 208,64 204,72 52,72" opacity="0.6"/>
+    <polygon class="steelShade" points="48,124 188,124 198,118 60,118" opacity="0.7"/>
+    <polygon class="steelMain" points="48,124 188,124 168,184 70,184"/>
+    <polygon class="steelHi" points="48,124 188,124 184,128 70,128" opacity="0.6"/>
+    <polygon class="steelShade" points="70,184 168,184 158,180 80,180" opacity="0.7"/>
+  </g>
+  <g>
+    <circle cx="76" cy="84" r="6" fill="#3a3a3a"/>
+    <circle cx="76" cy="84" r="4" fill="#7a7a7a"/>
+    <circle cx="180" cy="84" r="6" fill="#3a3a3a"/>
+    <circle cx="180" cy="84" r="4" fill="#7a7a7a"/>
+    <circle cx="76" cy="148" r="6" fill="#3a3a3a"/>
+    <circle cx="76" cy="148" r="4" fill="#7a7a7a"/>
+    <circle cx="180" cy="148" r="6" fill="#3a3a3a"/>
+    <circle cx="180" cy="148" r="4" fill="#7a7a7a"/>
+    <circle cx="92" cy="170" r="6" fill="#3a3a3a"/>
+    <circle cx="92" cy="170" r="4" fill="#7a7a7a"/>
+    <circle cx="148" cy="170" r="6" fill="#3a3a3a"/>
+    <circle cx="148" cy="170" r="4" fill="#7a7a7a"/>
+  </g>
+  <g>
+    <rect class="steelShade" x="120" y="100" width="36" height="20" fill="none" stroke="#5a5a5a" stroke-width="0.6" opacity="0.5"/>
+    
+  </g>
+</svg>

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ai"
@@ -50,5 +51,42 @@ func TestWire_UploadSampleReasonSaysAIOff(t *testing.T) {
 	}
 	if !strings.Contains(r, "AI is off") || !strings.Contains(r, "Tech Admin") {
 		t.Errorf("reason = %q", r)
+	}
+}
+
+// Under Anthropic a picture type Claude cannot read is refused in words
+// (415), never answered with the canned demo list.
+func TestWire_UploadUnreadableTypeIsRefusedInWords(t *testing.T) {
+	var hits int32
+	an := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer an.Close()
+	client := ai.NewClient("").WithProvider(ai.ProviderAnthropic).
+		WithAnthropicKey("test-" + "key-not-real").WithAnthropicBaseURL(an.URL)
+	h := NewHandler(NewService(&mockProductRepo{}, client))
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "list.bmp")
+	_, _ = fw.Write(append([]byte("BM"), make([]byte, 64)...))
+	_ = mw.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/parsing/upload", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rec := httptest.NewRecorder()
+	h.HandleUpload(rec, req)
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "Claude reads JPEG, PNG, GIF or WebP pictures and PDF files") {
+		t.Errorf("body lacks the words: %s", rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "synthetic") {
+		t.Errorf("a canned list was answered: %s", rec.Body)
+	}
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Error("the provider was called for a type it cannot read")
 	}
 }

@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pallet of grey concrete masonry blocks 8x8x16</title>
+  <defs>
+    <style>
+      .palletMain{fill:#a8784c}
+      .palletShade{fill:#7a4e22}
+      .blockMain{fill:#9a9a9a}
+      .blockHi{fill:#cdcdcd}
+      .blockShade{fill:#6a6a6a}
+      .blockDark{fill:#3a3a3a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="100" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="palletMain" x="34" y="200" width="188" height="22"/>
+    <rect class="palletShade" x="34" y="216" width="188" height="6" opacity="0.6"/>
+    <rect class="palletMain" x="40" y="246" width="14" height="20" transform="translate(0 -28)"/>
+  </g>
+  <g>
+    <g>
+      <rect class="blockMain" x="38" y="148" width="56" height="52"/>
+      <rect class="blockHi" x="38" y="148" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="38" y="196" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="56" cy="174" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="78" cy="174" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="98" y="148" width="56" height="52"/>
+      <rect class="blockHi" x="98" y="148" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="98" y="196" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="116" cy="174" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="138" cy="174" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="158" y="148" width="56" height="52"/>
+      <rect class="blockHi" x="158" y="148" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="158" y="196" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="176" cy="174" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="198" cy="174" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="38" y="92" width="56" height="52"/>
+      <rect class="blockHi" x="38" y="92" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="38" y="140" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="56" cy="118" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="78" cy="118" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="98" y="92" width="56" height="52"/>
+      <rect class="blockHi" x="98" y="92" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="98" y="140" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="116" cy="118" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="138" cy="118" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="158" y="92" width="56" height="52"/>
+      <rect class="blockHi" x="158" y="92" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="158" y="140" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="176" cy="118" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="198" cy="118" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="38" y="36" width="56" height="52"/>
+      <rect class="blockHi" x="38" y="36" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="38" y="84" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="56" cy="62" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="78" cy="62" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="98" y="36" width="56" height="52"/>
+      <rect class="blockHi" x="98" y="36" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="98" y="84" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="116" cy="62" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="138" cy="62" rx="6" ry="6"/>
+    </g>
+    <g>
+      <rect class="blockMain" x="158" y="36" width="56" height="52"/>
+      <rect class="blockHi" x="158" y="36" width="56" height="3" opacity="0.5"/>
+      <rect class="blockShade" x="158" y="84" width="56" height="4" opacity="0.6"/>
+      <ellipse class="blockDark" cx="176" cy="62" rx="6" ry="6"/>
+      <ellipse class="blockDark" cx="198" cy="62" rx="6" ry="6"/>
+    </g>
+  </g>
+</svg>

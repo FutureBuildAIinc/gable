@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pack of carriage bolts with nuts and washers</title>
+  <defs>
+    <style>
+      .bagMain{fill:#b8884d}
+      .bagSide{fill:#8e5e2a}
+      .bagTop{fill:#cc9a5a}
+      .bagRim{fill:#7a4e22}
+      .boltShaft{fill:#7a7a7a}
+      .boltShaftShade{fill:#4a4a4a}
+      .boltHead{fill:#9a9a9a}
+      .boltHeadShade{fill:#5a5a5a}
+      .nut{fill:#8a8a8a}
+      .nutShade{fill:#5a5a5a}
+      .washer{fill:#6a6a6a}
+      .washerShade{fill:#3a3a3a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:1.5px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="bagTop" points="46,80 210,80 218,94 54,94"/>
+    <rect class="bagRim" x="46" y="78" width="164" height="3"/>
+    <polygon class="bagSide" points="210,80 218,94 218,206 210,192"/>
+    <rect class="bagMain" x="46" y="80" width="164" height="112"/>
+    <rect class="bagRim" x="46" y="190" width="164" height="2" opacity="0.6"/>
+  </g>
+  
+  <rect x="58" y="124" width="140" height="1" fill="#3a2410" opacity="0.6"/>
+  <text class="textSub" x="128" y="142" font-size="9" fill="#3a2410" text-anchor="middle">CARRIAGE BOLTS</text>
+  <text class="textSub" x="128" y="156" font-size="6.5" fill="#3a2410" text-anchor="middle" opacity="0.7">3/8 IN  6 IN  QTY 25</text>
+  <g>
+    <rect class="boltShaft" x="60" y="170" width="42" height="10" rx="2"/>
+    <ellipse class="boltHead" cx="60" cy="175" rx="9" ry="6"/>
+    <ellipse class="boltHeadShade" cx="60" cy="178" rx="9" ry="2" opacity="0.6"/>
+    <rect class="boltShaftShade" x="92" y="175" width="6" height="5" opacity="0.7"/>
+    <ellipse class="washer" cx="110" cy="175" rx="6" ry="9"/>
+    <ellipse class="washerShade" cx="110" cy="178" rx="4" ry="3" opacity="0.6"/>
+    <polygon class="nut" points="120,170 130,170 134,175 130,180 120,180 116,175"/>
+    <polygon class="nutShade" points="116,175 134,175 134,180 116,180" opacity="0.5"/>
+    <circle cx="125" cy="170" r="2" fill="#3a3a3a"/>
+  </g>
+  <g transform="translate(60 14)">
+    <rect class="boltShaft" x="0" y="0" width="34" height="6" rx="1.5"/>
+    <ellipse class="boltHead" cx="0" cy="3" rx="6" ry="4"/>
+  </g>
+  <g transform="translate(112 12)">
+    <rect class="boltShaft" x="0" y="0" width="34" height="6" rx="1.5"/>
+    <ellipse class="boltHead" cx="0" cy="3" rx="6" ry="4"/>
+  </g>
+</svg>

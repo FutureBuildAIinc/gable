@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>26 inch 5 drawer tool chest</title>
+  <defs><style>
+    .body{fill:#c84a2e}
+    .bodyHi{fill:#e0685a}
+    .bodyShade{fill:#8a3024}
+    .bodyDeep{fill:#5a2418}
+    .top{fill:#a83820}
+    .topHi{fill:#c85838}
+    .drawer{fill:#c84a2e}
+    .drawerHi{fill:#e0685a}
+    .drawerShade{fill:#8a3024}
+    .drawerEdge{fill:#7a2a1e}
+    .handle{fill:#5a5e64}
+    .handleHi{fill:#a8acb2}
+    .lock{fill:#3a3530}
+    .lockHi{fill:#5a524a}
+    .wheel{fill:#1a1d22}
+    .wheelHub{fill:#5a5e64}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="108" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <rect class="topShade" x="20" y="50" width="216" height="22" rx="3"/>
+    <rect class="top" x="20" y="50" width="216" height="22" rx="3"/>
+    <rect class="topHi" x="20" y="50" width="216" height="4" rx="2"/>
+    <rect class="bodyDeep" x="20" y="68" width="216" height="6"/>
+  </g>
+  <g>
+    <rect class="bodyShade" x="20" y="74" width="216" height="132"/>
+    <rect class="body" x="20" y="74" width="216" height="132"/>
+    <rect class="bodyHi" x="20" y="74" width="216" height="3"/>
+  </g>
+  <g>
+    <rect class="drawerShade" x="32" y="86" width="192" height="22" rx="2"/>
+    <rect class="drawer" x="32" y="86" width="192" height="22" rx="2"/>
+    <rect class="drawerHi" x="32" y="86" width="192" height="3" rx="2"/>
+    <rect class="handle" x="98" y="92" width="60" height="10" rx="2"/>
+    <rect class="handleHi" x="98" y="92" width="60" height="3" rx="2"/>
+  </g>
+  <g>
+    <rect class="drawerShade" x="32" y="112" width="192" height="22" rx="2"/>
+    <rect class="drawer" x="32" y="112" width="192" height="22" rx="2"/>
+    <rect class="drawerHi" x="32" y="112" width="192" height="3" rx="2"/>
+    <rect class="handle" x="98" y="118" width="60" height="10" rx="2"/>
+    <rect class="handleHi" x="98" y="118" width="60" height="3" rx="2"/>
+  </g>
+  <g>
+    <rect class="drawerShade" x="32" y="138" width="92" height="34" rx="2"/>
+    <rect class="drawer" x="32" y="138" width="92" height="34" rx="2"/>
+    <rect class="drawerHi" x="32" y="138" width="92" height="3" rx="2"/>
+    <rect class="handle" x="58" y="152" width="40" height="6" rx="2"/>
+    <rect class="handleHi" x="58" y="152" width="40" height="2" opacity="0.7"/>
+    <rect class="drawerShade" x="132" y="138" width="92" height="34" rx="2"/>
+    <rect class="drawer" x="132" y="138" width="92" height="34" rx="2"/>
+    <rect class="drawerHi" x="132" y="138" width="92" height="3" rx="2"/>
+    <rect class="handle" x="158" y="152" width="40" height="6" rx="2"/>
+    <rect class="handleHi" x="158" y="152" width="40" height="2" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="drawerShade" x="32" y="176" width="192" height="22" rx="2"/>
+    <rect class="drawer" x="32" y="176" width="192" height="22" rx="2"/>
+    <rect class="drawerHi" x="32" y="176" width="192" height="3" rx="2"/>
+    <rect class="handle" x="98" y="182" width="60" height="10" rx="2"/>
+    <rect class="handleHi" x="98" y="182" width="60" height="3" rx="2"/>
+  </g>
+  <g>
+    <rect class="lock" x="118" y="62" width="20" height="14" rx="1"/>
+    <rect class="lockHi" x="118" y="62" width="20" height="3" rx="1"/>
+    <circle class="handle" cx="114" cy="68" r="2"/>
+  </g>
+  <g>
+    <text class="textBrand" x="128" y="32" font-size="10" font-weight="700" fill="#3a3530" text-anchor="middle">5 DRAWER</text>
+  </g>
+</svg>

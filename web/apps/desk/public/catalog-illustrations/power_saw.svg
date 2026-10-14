@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>corded circular saw</title>
+  <defs><style>
+    .body{fill:#c84a2e}
+    .bodyHi{fill:#e0685a}
+    .bodyShade{fill:#8a3024}
+    .bodyDeep{fill:#5a2418}
+    .motor{fill:#2a2e34}
+    .motorHi{fill:#5a5e64}
+    .motorShade{fill:#1a1d22}
+    .base{fill:#a8acb2}
+    .baseHi{fill:#e0e4ea}
+    .baseShade{fill:#5a5e64}
+    .grip{fill:#1a1d24}
+    .gripShade{fill:#3a3d44}
+    .gripHi{fill:#5a5d66}
+    .blade{fill:#5a5e64}
+    .bladeHi{fill:#a8acb2}
+    .bladeShade{fill:#2a2e34}
+    .guard{fill:#a8acb2}
+    .guardShade{fill:#5a5e64}
+    .guardHi{fill:#e0e4ea}
+    .cable{fill:#1a1d22}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="104" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <ellipse class="baseShade" cx="128" cy="200" rx="92" ry="14"/>
+    <ellipse class="base" cx="128" cy="198" rx="88" ry="12"/>
+    <ellipse class="baseHi" cx="128" cy="194" rx="80" ry="3" opacity="0.6"/>
+    <rect class="baseShade" x="40" y="198" width="176" height="2"/>
+  </g>
+  <g>
+    <ellipse class="bladeShade" cx="128" cy="156" rx="68" ry="68"/>
+    <ellipse class="blade" cx="128" cy="156" rx="64" ry="64"/>
+    <circle class="bladeHi" cx="128" cy="156" r="14"/>
+    <circle class="bladeShade" cx="128" cy="156" r="6"/>
+    <g opacity="0.6">
+      <line x1="128" y1="92" x2="128" y2="220" stroke="#2a2e34" stroke-width="0.8"/>
+      <line x1="64" y1="156" x2="192" y2="156" stroke="#2a2e34" stroke-width="0.8"/>
+      <line x1="83" y1="111" x2="173" y2="201" stroke="#2a2e34" stroke-width="0.6"/>
+      <line x1="83" y1="201" x2="173" y2="111" stroke="#2a2e34" stroke-width="0.6"/>
+      <line x1="100" y1="98" x2="156" y2="214" stroke="#2a2e34" stroke-width="0.5"/>
+      <line x1="100" y1="214" x2="156" y2="98" stroke="#2a2e34" stroke-width="0.5"/>
+    </g>
+    <g>
+      <polygon class="blade" points="124,98 132,98 134,108 122,108"/>
+      <polygon class="blade" points="124,214 132,214 122,204 134,204"/>
+      <polygon class="blade" points="64,152 64,160 74,162 74,150"/>
+      <polygon class="blade" points="192,152 192,160 182,162 182,150"/>
+      <polygon class="blade" points="86,116 92,110 100,118 94,124"/>
+      <polygon class="blade" points="170,116 164,110 156,118 162,124"/>
+      <polygon class="blade" points="86,196 92,202 100,194 94,188"/>
+      <polygon class="blade" points="170,196 164,202 156,194 162,188"/>
+    </g>
+  </g>
+  <g>
+    <path class="guard" d="M 56 158 L 200 158 L 200 196 L 56 196 Z"/>
+    <path class="guardShade" d="M 56 158 L 200 158 L 200 168 L 56 168 Z"/>
+    <path class="guardHi" d="M 56 158 L 200 158 L 200 162 L 56 162 Z" opacity="0.7"/>
+    <line x1="80" y1="166" x2="80" y2="190" stroke="#5a5e64" stroke-width="0.5" opacity="0.6"/>
+    <line x1="120" y1="166" x2="120" y2="190" stroke="#5a5e64" stroke-width="0.5" opacity="0.6"/>
+    <line x1="160" y1="166" x2="160" y2="190" stroke="#5a5e64" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    <path class="body" d="M 76 78 L 184 78 L 196 158 L 64 158 Z"/>
+    <path class="bodyHi" d="M 76 78 L 184 78 L 184 86 L 76 86 Z"/>
+    <path class="bodyShade" d="M 64 154 L 196 154 L 196 158 L 64 158 Z"/>
+    <rect class="bodyDeep" x="80" y="100" width="100" height="34"/>
+    
+    <line x1="86" y1="98" x2="174" y2="98" stroke="#5a2418" stroke-width="0.5"/>
+    <line x1="86" y1="138" x2="174" y2="138" stroke="#5a2418" stroke-width="0.5"/>
+  </g>
+  <g>
+    <path class="grip" d="M 60 78 L 100 78 L 100 158 L 60 158 Z"/>
+    <path class="gripShade" d="M 60 78 L 100 78 L 100 86 L 60 86 Z"/>
+    <rect class="grip" x="50" y="86" width="14" height="76" rx="2"/>
+    <rect class="gripShade" x="50" y="86" width="14" height="6" rx="2"/>
+    <line x1="56" y1="100" x2="56" y2="156" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="60" y1="100" x2="60" y2="156" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="64" y1="100" x2="64" y2="156" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="68" y1="100" x2="68" y2="156" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="72" y1="100" x2="72" y2="156" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="76" y1="100" x2="76" y2="156" stroke="#5a5d66" stroke-width="0.6"/>
+  </g>
+  <g>
+    <rect class="trigger" x="68" y="116" width="14" height="6" fill="#2a2e34" rx="1"/>
+  </g>
+  <g>
+    <rect class="motor" x="160" y="50" width="44" height="32" rx="4"/>
+    <rect class="motorShade" x="160" y="76" width="44" height="6"/>
+    <rect class="motorHi" x="160" y="50" width="44" height="4" rx="2"/>
+    <line x1="166" y1="60" x2="200" y2="60" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <line x1="166" y1="66" x2="200" y2="66" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <line x1="166" y1="72" x2="200" y2="72" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <rect class="cable" x="200" y="60" width="60" height="6" rx="3"/>
+    <ellipse class="cable" cx="262" cy="63" rx="4" ry="3"/>
+  </g>
+</svg>

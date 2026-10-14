@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Bag of ice melt 50 lb</title>
+  <defs>
+    <style>
+      .bagMain{fill:#3a6cb0}
+      .bagShade{fill:#1a3a6e}
+      .bagHi{fill:#5a8acc}
+      .bagRim{fill:#1a3a6e}
+      .label{fill:#faf3e0}
+      .labelBand{fill:#faf3e0}
+      .labelDark{fill:#1a3a6e}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+      .textWt{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="92" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="bagMain" points="58,42 198,42 214,72 198,220 58,220 42,72"/>
+    <polygon class="bagHi" points="58,42 198,42 196,48 60,48"/>
+    <polygon class="bagShade" points="198,42 214,72 210,222 198,220" opacity="0.7"/>
+    <polygon class="bagShade" points="58,42 42,72 46,222 58,220" opacity="0.7"/>
+    <polygon class="bagRim" points="58,42 198,42 214,72 42,72" opacity="0.5"/>
+    <polygon class="bagShade" points="86,42 170,42 178,72 78,72" opacity="0.4"/>
+  </g>
+  <g>
+    <rect class="label" x="62" y="86" width="132" height="124"/>
+    <rect class="label" x="62" y="86" width="132" height="124" fill="none" stroke="#1a3a6e" stroke-width="0.6"/>
+    <rect class="labelDark" x="62" y="86" width="132" height="22"/>
+    
+    <rect class="labelDark" x="62" y="200" width="132" height="10"/>
+    <text class="textSub" x="128" y="124" font-size="11" fill="#1a3a6e" text-anchor="middle">ICE MELT</text>
+    <text class="textSub" x="128" y="142" font-size="7" fill="#1a3a6e" text-anchor="middle" opacity="0.7">ROCK SALT BLEND</text>
+    <g transform="translate(80 156)">
+      <polygon points="6,0 12,0 9,8 3,8" fill="#faf3e0"/>
+      <line x1="6" y1="2" x2="9" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+      <line x1="7" y1="2" x2="10" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+      <line x1="8" y1="2" x2="11" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+    </g>
+    <g transform="translate(96 156)">
+      <polygon points="6,0 12,0 9,8 3,8" fill="#faf3e0"/>
+      <line x1="6" y1="2" x2="9" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+      <line x1="7" y1="2" x2="10" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+      <line x1="8" y1="2" x2="11" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+    </g>
+    <g transform="translate(112 156)">
+      <polygon points="6,0 12,0 9,8 3,8" fill="#faf3e0"/>
+      <line x1="6" y1="2" x2="9" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+      <line x1="7" y1="2" x2="10" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+      <line x1="8" y1="2" x2="11" y2="6" stroke="#1a3a6e" stroke-width="0.4"/>
+    </g>
+    <rect x="78" y="190" width="36" height="14" fill="#c84a3d"/>
+    <text class="textWt" x="96" y="200" font-size="9" fill="#faf3e0" text-anchor="middle">50 LB</text>
+  </g>
+</svg>

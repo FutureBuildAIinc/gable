@@ -9,6 +9,7 @@ import { router } from '../../lib/router';
 import type { Product } from '../../types/product';
 import { formatPrice4 } from '../../lib/utils';
 import { formatQuantity } from '../../lib/money';
+import { isDrawablePath } from '../ProductThumb';
 
 @customElement('gable-inventory-table')
 export class GableInventoryTable extends LitElement {
@@ -36,12 +37,15 @@ export class GableInventoryTable extends LitElement {
   }
 
   render() {
+    // A picture column only while some product has a picture: with the setting off the list is as it was.
+    const pictures = this.products.some((p) => isDrawablePath(p.image_url));
     return html`
       <div class="w-full overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-left text-sm" aria-label="Inventory products">
             <thead>
               <tr class="border-b border-white/5 text-zinc-400 text-xs uppercase tracking-wider font-medium">
+                ${pictures ? html`<th class="pl-6 pr-0 py-4 w-10"><span class="sr-only">Picture</span></th>` : nothing}
                 <th class="px-6 py-4">SKU / UPC</th>
                 <th class="px-6 py-4">Category / Desc</th>
                 <th class="px-6 py-4">Vendor</th>
@@ -57,7 +61,7 @@ export class GableInventoryTable extends LitElement {
               ${this.products.length === 0
                 ? html`
                   <tr>
-                    <td colspan="8" class="px-6 py-12 text-center text-zinc-500">
+                    <td colspan="10" class="px-6 py-12 text-center text-zinc-500">
                       <div class="flex flex-col items-center gap-3">
                         <div class="h-12 w-12 rounded-full bg-zinc-800/50 flex items-center justify-center">
                           ${icon(Package, 24, 'text-zinc-600')}
@@ -73,6 +77,9 @@ export class GableInventoryTable extends LitElement {
 
                     return html`
                       <tr class="group hover:bg-white/5 transition-colors cursor-pointer" @click=${() => this._navigateToProduct(p.id)}>
+                        ${pictures ? html`<td class="pl-6 pr-0 py-3 w-10">
+                          <gable-product-thumb .src=${p.image_url} .size=${40} reserve></gable-product-thumb>
+                        </td>` : nothing}
                         <td class="px-6 py-4">
                           <div class="flex flex-col">
                             <span class="font-mono font-bold text-white group-hover:text-gable-green transition-colors">

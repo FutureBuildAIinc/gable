@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>OSB sheathing panel stack</title>
+  <defs><style>
+    .backFace{fill:#b88a5e}
+    .backEdge{fill:#8e6a44}
+    .frontEdgeTop{fill:#a87a4e}
+    .frontEdgeSide{fill:#8b6f4e}
+    .flakeA{fill:#a07a4e}
+    .flakeB{fill:#9a6e44}
+    .flakeC{fill:#b88a5e}
+    .flakeD{fill:#8b6f4e}
+    .stamp{fill:#3a2410}
+    .stampText{fill:#f0e0c0}
+  </style>
+    <pattern id="osbtexture" x="0" y="0" width="22" height="22" patternUnits="userSpaceOnUse">
+      <rect width="22" height="22" fill="#c89868"/>
+      <rect class="flakeA" x="2" y="2" width="7" height="2.4" transform="rotate(18 5.5 3.2)"/>
+      <rect class="flakeB" x="11" y="3" width="5" height="2" transform="rotate(-22 13.5 4)"/>
+      <rect class="flakeC" x="3" y="7" width="8" height="2.6" transform="rotate(35 7 8.3)"/>
+      <rect class="flakeD" x="13" y="9" width="6" height="2.2" transform="rotate(-12 16 10.1)"/>
+      <rect class="flakeA" x="1" y="12" width="6" height="2" transform="rotate(48 4 13)"/>
+      <rect class="flakeB" x="9" y="13" width="7" height="2.4" transform="rotate(-30 12.5 14.2)"/>
+      <rect class="flakeC" x="16" y="14" width="5" height="2" transform="rotate(15 18.5 15)"/>
+      <rect class="flakeA" x="4" y="17" width="7" height="2.4" transform="rotate(-40 7.5 18.2)"/>
+      <rect class="flakeB" x="12" y="18" width="6" height="2" transform="rotate(22 15 19)"/>
+    </pattern>
+  </defs>
+  <ellipse cx="128" cy="232" rx="108" ry="8" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="backFace" points="56,82 220,76 224,196 60,202"/>
+    <polygon class="backEdge" points="220,76 224,196 222,200 222,76"/>
+    <polygon class="backEdge" points="56,82 220,76 220,80 56,86"/>
+  </g>
+  <g>
+    <polygon class="frontEdgeTop" points="44,102 224,96 224,102 44,108"/>
+    <polygon class="frontEdgeSide" points="224,96 240,98 232,220 224,220"/>
+    <polygon points="44,102 224,96 232,220 50,224" fill="url(#osbtexture)"/>
+    <line x1="44" y1="108" x2="224" y2="102" stroke="#6a4e2c" stroke-width="0.6" opacity="0.5"/>
+  </g>
+  <polygon points="44,102 224,96 232,220 50,224" fill="none" stroke="#7a5a36" stroke-width="0.6" opacity="0.5"/>
+  <g opacity="0.55">
+    <rect x="80" y="120" width="14" height="3" fill="#a07a4e" transform="rotate(8 87 121)"/>
+    <rect x="120" y="128" width="12" height="2.5" fill="#9a6e44" transform="rotate(-15 126 129)"/>
+    <rect x="160" y="135" width="14" height="3" fill="#a07a4e" transform="rotate(20 167 136)"/>
+    <rect x="100" y="150" width="12" height="2.5" fill="#8b6f4e" transform="rotate(-25 106 151)"/>
+    <rect x="140" y="160" width="14" height="3" fill="#a07a4e" transform="rotate(12 147 161)"/>
+    <rect x="70" y="170" width="12" height="2.5" fill="#9a6e44" transform="rotate(-18 76 171)"/>
+    <rect x="170" y="180" width="12" height="3" fill="#a07a4e" transform="rotate(30 176 181)"/>
+    <rect x="110" y="190" width="14" height="2.5" fill="#8b6f4e" transform="rotate(-10 117 191)"/>
+    <rect x="184" y="200" width="10" height="2.5" fill="#a07a4e" transform="rotate(-25 189 201)"/>
+    <rect x="60" y="148" width="10" height="2.5" fill="#9a6e44" transform="rotate(20 65 149)"/>
+  </g>
+  <g>
+    <rect class="stamp" x="80" y="142" width="92" height="28" rx="2" opacity="0.9"/>
+    
+    <text class="stampText" x="126" y="166" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="1" text-anchor="middle" opacity="0.85">7/16 OSB 4x8</text>
+  </g>
+</svg>

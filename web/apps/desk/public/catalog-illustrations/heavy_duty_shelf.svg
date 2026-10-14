@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>48 inch heavy duty utility shelf</title>
+  <defs>
+    <style>
+      .postMain{fill:#3a3d44}
+      .postShade{fill:#1a1d24}
+      .postHi{fill:#5a5d66}
+      .shelfMain{fill:#cdcdcd}
+      .shelfShade{fill:#7a7a7a}
+      .shelfHi{fill:#e0e0e0}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="106" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="postMain" x="38" y="36" width="6" height="186"/>
+    <rect class="postShade" x="38" y="36" width="2" height="186" opacity="0.6"/>
+    <rect class="postMain" x="212" y="36" width="6" height="186"/>
+    <rect class="postShade" x="212" y="36" width="2" height="186" opacity="0.6"/>
+    <g opacity="0.7">
+      <line x1="40" y1="56" x2="42" y2="56" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="72" x2="42" y2="72" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="88" x2="42" y2="88" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="104" x2="42" y2="104" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="120" x2="42" y2="120" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="136" x2="42" y2="136" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="152" x2="42" y2="152" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="168" x2="42" y2="168" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="184" x2="42" y2="184" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="40" y1="200" x2="42" y2="200" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="56" x2="216" y2="56" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="72" x2="216" y2="72" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="88" x2="216" y2="88" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="104" x2="216" y2="104" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="120" x2="216" y2="120" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="136" x2="216" y2="136" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="152" x2="216" y2="152" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="168" x2="216" y2="168" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="184" x2="216" y2="184" stroke="#5a5d66" stroke-width="0.5"/>
+      <line x1="214" y1="200" x2="216" y2="200" stroke="#5a5d66" stroke-width="0.5"/>
+    </g>
+  </g>
+  <g>
+    <rect class="shelfMain" x="40" y="62" width="174" height="6"/>
+    <rect class="shelfHi" x="40" y="62" width="174" height="2" opacity="0.6"/>
+    <rect class="shelfShade" x="40" y="66" width="174" height="2" opacity="0.6"/>
+    <rect class="shelfMain" x="40" y="118" width="174" height="6"/>
+    <rect class="shelfHi" x="40" y="118" width="174" height="2" opacity="0.6"/>
+    <rect class="shelfShade" x="40" y="122" width="174" height="2" opacity="0.6"/>
+    <rect class="shelfMain" x="40" y="174" width="174" height="6"/>
+    <rect class="shelfHi" x="40" y="174" width="174" height="2" opacity="0.6"/>
+    <rect class="shelfShade" x="40" y="178" width="174" height="2" opacity="0.6"/>
+  </g>
+</svg>

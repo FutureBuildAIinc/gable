@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Engineered I joist with flanges and OSB web, end and length view</title>
+  <defs>
+    <style>
+      .woodTop{fill:#c4a878}
+      .woodFace{fill:#a88858}
+      .woodShade{fill:#7a5c38}
+      .webMain{fill:#b8946a}
+      .webShade{fill:#8c6c44}
+      .grainLine{fill:none;stroke:#7a5c38;stroke-linecap:round}
+      .endGrain{fill:#6a4c2c}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="108" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="woodFace" x="34" y="74" width="188" height="22"/>
+    <rect class="woodShade" x="34" y="90" width="188" height="6" opacity="0.6"/>
+    <rect class="woodTop" x="34" y="74" width="188" height="3" opacity="0.7"/>
+    <g opacity="0.5">
+        <line x1="40" y1="82" x2="220" y2="82" stroke="#7a5c38" stroke-width="0.5"/>
+        <line x1="40" y1="86" x2="220" y2="86" stroke="#7a5c38" stroke-width="0.5"/>
+      </g>
+  </g>
+  <g>
+    <polygon class="webMain" points="74,96 182,96 178,180 78,180"/>
+    <polygon class="webShade" points="74,96 182,96 178,100 78,100" opacity="0.5"/>
+    <g opacity="0.45">
+      <line x1="80" y1="106" x2="176" y2="106" stroke="#7a5c38" stroke-width="0.4"/>
+      <line x1="80" y1="118" x2="176" y2="118" stroke="#7a5c38" stroke-width="0.4"/>
+      <line x1="80" y1="130" x2="176" y2="130" stroke="#7a5c38" stroke-width="0.4"/>
+      <line x1="80" y1="142" x2="176" y2="142" stroke="#7a5c38" stroke-width="0.4"/>
+      <line x1="80" y1="154" x2="176" y2="154" stroke="#7a5c38" stroke-width="0.4"/>
+      <line x1="80" y1="166" x2="176" y2="166" stroke="#7a5c38" stroke-width="0.4"/>
+    </g>
+    <ellipse cx="84" cy="110" rx="1.2" ry="1" fill="#5a3a1c" opacity="0.6"/>
+    <ellipse cx="120" cy="118" rx="1.2" ry="1" fill="#5a3a1c" opacity="0.6"/>
+    <ellipse cx="160" cy="124" rx="1.2" ry="1" fill="#5a3a1c" opacity="0.6"/>
+    <ellipse cx="100" cy="140" rx="1.2" ry="1" fill="#5a3a1c" opacity="0.6"/>
+    <ellipse cx="140" cy="146" rx="1.2" ry="1" fill="#5a3a1c" opacity="0.6"/>
+    <ellipse cx="172" cy="156" rx="1.2" ry="1" fill="#5a3a1c" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="woodFace" x="34" y="180" width="188" height="22"/>
+    <rect class="woodTop" x="34" y="180" width="188" height="3" opacity="0.7"/>
+    <rect class="woodShade" x="34" y="196" width="188" height="6" opacity="0.6"/>
+    <g opacity="0.5">
+        <line x1="40" y1="188" x2="220" y2="188" stroke="#7a5c38" stroke-width="0.5"/>
+        <line x1="40" y1="192" x2="220" y2="192" stroke="#7a5c38" stroke-width="0.5"/>
+      </g>
+  </g>
+  <g>
+    <ellipse class="endGrain" cx="34" cy="138" rx="6" ry="64"/>
+    <ellipse fill="none" cx="34" cy="138" rx="3.5" ry="58" stroke="#4a2c0c" stroke-width="0.4" opacity="0.7"/>
+  </g>
+</svg>

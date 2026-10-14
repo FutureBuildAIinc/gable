@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -76,14 +77,15 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // and quantity columns read as text so the scan is exact (ADR 0001 section
 // 7: never through float64). The unit set columns of ADR 0006 section 3.1
 // (C3-2A-units) ride at the end.
-const productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::text, p.vendor, p.vendor_id, p.upc,
+var productColumns = `p.id, p.sku, p.description, p.uom_primary, p.base_price::text, p.vendor, p.vendor_id, p.upc,
 		       COALESCE(p.weight_lbs, 0)::text,
 		       p.length_in, p.width_in, p.height_in, p.stackable, p.geometry_source,
 		       COALESCE(p.reorder_point, 0)::text, COALESCE(p.reorder_qty, 0)::text,
 		       p.lead_time_days, p.revision, p.created_at, p.updated_at,
 		       COALESCE(p.average_unit_cost, 0)::text, COALESCE(p.target_margin, 0), COALESCE(p.commission_rate, 0),
 		       p.sale_uom, p.price_uom, p.purchase_uom,
-		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length`
+		       p.board_thickness_in::text, p.board_width_in::text, p.board_length_ft::text, p.random_length,
+		       ` + pictures.ImageSQL("p")
 
 // stockColumns and stockJoin read a product's stock totals in the same
 // statement as the product, in the stocking unit (ADR 0006 7.1): one
@@ -131,6 +133,7 @@ func scanProductWith(scanner interface{ Scan(dest ...any) error }, withStock boo
 		&avgCost, &p.TargetMargin, &p.CommissionRate,
 		&p.SaleUOM, &p.PriceUOM, &p.PurchaseUOM,
 		&boardThick, &boardWidth, &boardLength, &p.RandomLength,
+		&p.ImageURL,
 	}
 	if withStock {
 		dest = append(dest, &onHand, &allocated)

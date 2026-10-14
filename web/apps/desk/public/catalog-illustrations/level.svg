@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>48 inch aluminum box level</title>
+  <defs>
+    <style>
+      .bodyMain{fill:#dcdcd0}
+      .bodyHi{fill:#f4f4ea}
+      .bodyShade{fill:#9a968a}
+      .vialMain{fill:#a8e8c8}
+      .vialHi{fill:#e0f4e8}
+      .vialShade{fill:#5a8a6a}
+      .bubble{fill:#3a3a3a}
+      .markMain{fill:#3a3d44}
+      .markHi{fill:#7a7a72}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="106" ry="5" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="bodyMain" x="22" y="100" width="212" height="56" rx="3"/>
+    <rect class="bodyHi" x="22" y="100" width="212" height="3" opacity="0.7"/>
+    <rect class="bodyShade" x="22" y="153" width="212" height="3" opacity="0.6"/>
+    <rect class="bodyShade" x="22" y="100" width="3" height="56" opacity="0.4"/>
+    <rect class="bodyShade" x="231" y="100" width="3" height="56" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="bodyShade" x="22" y="120" width="212" height="2" opacity="0.5"/>
+    <rect class="bodyShade" x="22" y="138" width="212" height="2" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="vialMain" x="34" y="120" width="44" height="16" rx="2"/>
+    <rect class="vialShade" x="34" y="132" width="44" height="4" rx="2" opacity="0.6"/>
+    <ellipse class="vialHi" cx="56" cy="124" rx="14" ry="2" opacity="0.7"/>
+    <ellipse class="bubble" cx="62" cy="128" rx="4" ry="3"/>
+  </g>
+  <g>
+    <rect class="vialMain" x="106" y="100" width="44" height="56" rx="2"/>
+    <rect class="vialShade" x="106" y="148" width="44" height="8" rx="2" opacity="0.6"/>
+    <ellipse class="vialHi" cx="110" cy="116" rx="2" ry="14" opacity="0.7"/>
+    <ellipse class="bubble" cx="128" cy="116" rx="3" ry="4"/>
+  </g>
+  <g>
+    <rect class="vialMain" x="178" y="120" width="44" height="16" rx="2"/>
+    <rect class="vialShade" x="178" y="132" width="44" height="4" rx="2" opacity="0.6"/>
+    <ellipse class="vialHi" cx="200" cy="124" rx="14" ry="2" opacity="0.7"/>
+    <ellipse class="bubble" cx="200" cy="128" rx="3" ry="3"/>
+  </g>
+  <g>
+    <line x1="38" y1="116" x2="38" y2="142" stroke="#7a7a72" stroke-width="0.5" opacity="0.6"/>
+    <line x1="74" y1="116" x2="74" y2="142" stroke="#7a7a72" stroke-width="0.5" opacity="0.6"/>
+    <line x1="118" y1="100" x2="118" y2="156" stroke="#7a7a72" stroke-width="0.5" opacity="0.6"/>
+    <line x1="138" y1="100" x2="138" y2="156" stroke="#7a7a72" stroke-width="0.5" opacity="0.6"/>
+    <line x1="182" y1="116" x2="182" y2="142" stroke="#7a7a72" stroke-width="0.5" opacity="0.6"/>
+    <line x1="218" y1="116" x2="218" y2="142" stroke="#7a7a72" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    
+  </g>
+</svg>

@@ -9082,6 +9082,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedType"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/partner/v1/dashboard:
@@ -10773,6 +10774,72 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/receipt:
+    get:
+      operationId: posTransactionReceipt
+      tags: [pos]
+      summary: Print the sale's receipt
+      description: >-
+        The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The sale's invoice as a PDF document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/receipt/email:
+    post:
+      operationId: posTransactionReceiptEmail
+      tags: [pos]
+      summary: Email the sale's receipt
+      description: >-
+        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Email queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEmailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/customers:
     get:
       operationId: posCustomerFind
@@ -11071,6 +11138,42 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/PosSearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/tiles:
+    get:
+      operationId: posTileList
+      tags: [pos]
+      summary: The counter's catalogue tiles
+      description: >-
+        The counter's catalogue for the caller's yard (its branch context, as the product search takes it): up to eight category chips, the yard's categories by units sold, then by product count, then by name, and the product tiles. With neither category nor q the tiles are the yard's top sellers by quantity sold (completed counter sale lines and the lines of invoices at the yard that are not void; a counter sale's own invoice, origin POS, is not counted), then by description; category keeps one category's products in that order; q (two characters or more, sku or description) puts an exact sku first. unit_price_cents and in_stock mean what the product search answers. image_url is null unless the catalog.product_images setting is on and the product has a picture; images is that setting. Never null arrays.
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema: {type: string}
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, minLength: 2}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 48, default: 24}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The chips and the tiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTileSet"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
@@ -12901,6 +13004,8 @@ paths:
       tags:
         - product
       summary: Generate PIM image
+      description: >-
+        Starts product image generation and answers 202 with a media row in status generating. With the OpenRouter provider chosen the row becomes a photo; with the Anthropic provider chosen it becomes an SVG illustration drawn by Claude, stored only after a strict sanitiser has re-serialised it (a drawing it refuses settles the row as failed).
       parameters:
         - name: id
           in: path
@@ -13761,6 +13866,7 @@ paths:
         "403": {$ref: "#/components/responses/ForbiddenEither"}
         "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedType"}
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500": {$ref: "#/components/responses/InternalError"}
@@ -15685,9 +15791,16 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/WireError"
+    UnsupportedType:
+      description: >-
+        The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     AIOffEither:
       description: >-
-        AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer (image generation under the Anthropic provider). The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope.
+        AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer. The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope.
       content:
         application/json:
           schema:
@@ -20314,6 +20427,7 @@ components:
         - sku
         - description
         - stock_uom
+        - image_url
       properties:
         id:
           type: string
@@ -20324,6 +20438,10 @@ components:
           type: string
         stock_uom:
           $ref: '#/components/schemas/UOM'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none.
     InventoryLevelPage:
       type: object
       required: [items, next_cursor, limit]
@@ -24659,6 +24777,35 @@ components:
             - $ref: "#/components/schemas/PosTillReport"
           description: The frozen closing report, a JSON object.
         generated_at: {type: string, format: date-time}
+    PosTileSet:
+      type: object
+      required: [categories, items, images]
+      properties:
+        categories:
+          type: array
+          items: {$ref: "#/components/schemas/PosTileCategory"}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosTile"}
+        images: {type: boolean, description: "The catalog.product_images setting."}
+    PosTileCategory:
+      type: object
+      required: [name, count]
+      properties:
+        name: {type: string}
+        count: {type: integer, format: int64}
+    PosTile:
+      type: object
+      required: [product_id, sku, description, uom, unit_price_cents, in_stock, category, image_url]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        description: {type: string}
+        uom: {type: string}
+        unit_price_cents: {type: integer, format: int64}
+        in_stock: {type: string, description: "A decimal string of the yard's on hand quantity."}
+        category: {type: string}
+        image_url: {type: [string, "null"]}
     PosSearchResult:
       type: object
       required: [product_id, sku, description, unit_price_cents, uom, in_stock]
@@ -25329,7 +25476,7 @@ components:
       type: object
       description: >-
         The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
-      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units]
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url]
       properties:
         id:
           type: string
@@ -25417,6 +25564,10 @@ components:
           description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
           items:
             $ref: '#/components/schemas/UnitSetRow'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none.
         created_at:
           type: string
           format: date-time

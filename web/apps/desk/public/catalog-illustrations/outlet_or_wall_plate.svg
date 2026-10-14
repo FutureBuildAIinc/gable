@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Decorator wall plate, white plastic</title>
+  <defs><style>
+    .plate{fill:#f4f0e8}
+    .plateHi{fill:#fbf7ee}
+    .plateShade{fill:#c8c2b4}
+    .plateDeep{fill:#9a9488}
+    .screw{fill:#8a8474}
+    .screwSlot{fill:#3a3530}
+    .cutout{fill:#e8e4d8}
+    .cutoutShade{fill:#b8b2a4}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="plateShade" x="48" y="50" width="160" height="160" rx="10"/>
+    <rect class="plate" x="44" y="46" width="160" height="160" rx="10"/>
+    <rect class="plateHi" x="44" y="46" width="160" height="4" rx="2"/>
+    <rect class="plateShade" x="44" y="200" width="160" height="6" rx="2"/>
+    <line x1="48" y1="50" x2="48" y2="206" stroke="#fbf7ee" stroke-width="0.6" opacity="0.6"/>
+    <line x1="200" y1="50" x2="200" y2="206" stroke="#9a9488" stroke-width="0.6" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="cutoutShade" x="86" y="86" width="76" height="116" rx="6"/>
+    <rect class="cutout" x="84" y="84" width="76" height="116" rx="6"/>
+    <rect class="plateShade" x="84" y="196" width="76" height="4" rx="2" opacity="0.7"/>
+    <line x1="86" y1="86" x2="86" y2="200" stroke="#b8b2a4" stroke-width="0.5" opacity="0.7"/>
+    <rect class="plateShade" x="118" y="86" width="6" height="114" rx="1" opacity="0.4"/>
+    <rect class="plateHi" x="86" y="86" width="74" height="2" opacity="0.7"/>
+  </g>
+  <g>
+    <circle class="screw" cx="60" cy="62" r="4"/>
+    <circle class="plateHi" cx="59" cy="61" r="2" opacity="0.6"/>
+    <line x1="57" y1="62" x2="63" y2="62" stroke="#3a3530" stroke-width="1"/>
+    <circle class="screw" cx="188" cy="62" r="4"/>
+    <circle class="plateHi" cx="187" cy="61" r="2" opacity="0.6"/>
+    <line x1="185" y1="62" x2="191" y2="62" stroke="#3a3530" stroke-width="1"/>
+    <circle class="screw" cx="60" cy="190" r="4"/>
+    <circle class="plateHi" cx="59" cy="189" r="2" opacity="0.6"/>
+    <line x1="57" y1="190" x2="63" y2="190" stroke="#3a3530" stroke-width="1"/>
+    <circle class="screw" cx="188" cy="190" r="4"/>
+    <circle class="plateHi" cx="187" cy="189" r="2" opacity="0.6"/>
+    <line x1="185" y1="190" x2="191" y2="190" stroke="#3a3530" stroke-width="1"/>
+  </g>
+  <g opacity="0.6">
+    <rect x="96" y="120" width="6" height="6" rx="1" fill="#3a3530"/>
+    <rect x="146" y="120" width="6" height="6" rx="1" fill="#3a3530"/>
+    <rect x="98" y="156" width="14" height="3" rx="1" fill="#3a3530"/>
+    <rect x="132" y="156" width="14" height="3" rx="1" fill="#3a3530"/>
+  </g>
+</svg>

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>20 lb propane tank</title>
+  <defs><style>
+    .tankBody{fill:#aab0b8}
+    .tankBodyShade{fill:#7a7e84}
+    .tankBodyHi{fill:#d0d4da}
+    .tankTop{fill:#5a5e64}
+    .tankTopShade{fill:#3a3e44}
+    .valve{fill:#5a3a1e}
+    .handle{fill:#2a2e34}
+    .collar{fill:#3a3e44}
+    .foot{fill:#2a2e34}
+    .footRing{fill:#5a5e64}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="60" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <ellipse class="foot" cx="128" cy="208" rx="34" ry="6"/>
+    <ellipse class="foot" cx="128" cy="206" rx="30" ry="4"/>
+    <ellipse class="footRing" cx="128" cy="204" rx="22" ry="3" opacity="0.6"/>
+    <path class="tankBody" d="M 96 80 L 160 80 L 162 204 L 94 204 Z"/>
+    <ellipse class="tankBodyHi" cx="128" cy="82" rx="32" ry="3"/>
+    <rect class="tankBodyHi" x="100" y="84" width="6" height="118" opacity="0.5"/>
+    <rect class="tankBodyShade" x="150" y="84" width="10" height="118" opacity="0.55"/>
+    <ellipse class="tankBody" cx="128" cy="204" rx="34" ry="6"/>
+    <ellipse class="tankBodyShade" cx="128" cy="204" rx="34" ry="6" opacity="0.5"/>
+  </g>
+  <g>
+    <ellipse class="tankTop" cx="128" cy="80" rx="32" ry="6"/>
+    <ellipse class="tankTopShade" cx="128" cy="80" rx="22" ry="4" opacity="0.7"/>
+    <rect class="collar" x="118" y="62" width="20" height="20"/>
+    <rect class="collar" x="116" y="58" width="24" height="6" rx="1"/>
+    <path class="handle" d="M 96 58 Q 96 44 128 44 Q 160 44 160 58 L 156 58 Q 156 50 128 50 Q 100 50 100 58 Z"/>
+    <rect class="tankTop" x="123" y="38" width="10" height="10"/>
+    <rect class="valve" x="121" y="30" width="14" height="10" rx="1"/>
+    <rect class="valve" x="118" y="28" width="20" height="4" rx="1"/>
+    <ellipse class="tankTopShade" cx="128" cy="28" rx="10" ry="2" opacity="0.6"/>
+  </g>
+  <g opacity="0.7">
+    <rect class="tankBodyShade" x="120" y="118" width="16" height="40" rx="1"/>
+    <rect x="124" y="124" width="8" height="28" fill="#5a5e64"/>
+    <text x="128" y="138" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="700" letter-spacing="0.5" fill="#faf3e0" text-anchor="middle">LPG</text>
+    <text x="128" y="148" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="0.5" fill="#faf3e0" text-anchor="middle">20 LB</text>
+  </g>
+</svg>

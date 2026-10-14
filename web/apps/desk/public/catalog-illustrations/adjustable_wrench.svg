@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>10 inch adjustable wrench with open jaw head and worm screw</title>
+  <defs>
+    <style>
+      .handleMain{fill:#3a3d44}
+      .handleHi{fill:#5a5d66}
+      .handleShade{fill:#1a1d24}
+      .gripMain{fill:#d96a2e}
+      .gripHi{fill:#f4a06c}
+      .gripShade{fill:#a8521e}
+      .jawMain{fill:#c8ccd2}
+      .jawHi{fill:#e8ebee}
+      .jawShade{fill:#7a7d86}
+      .jawDark{fill:#3a3d44}
+      .knurl{fill:#7a7d86}
+      .knurlDark{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="100" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g transform="rotate(-40 128 128)">
+    <rect class="handleMain" x="118" y="120" width="22" height="100" rx="4"/>
+    <rect class="handleHi" x="118" y="120" width="4" height="100" opacity="0.6"/>
+    <rect class="handleShade" x="138" y="120" width="4" height="100" opacity="0.7"/>
+  </g>
+  <g transform="rotate(-40 128 128)">
+    <rect class="gripMain" x="116" y="208" width="26" height="18" rx="3"/>
+    <rect class="gripHi" x="116" y="208" width="26" height="3" opacity="0.6"/>
+    <rect class="gripShade" x="116" y="222" width="26" height="4" opacity="0.7"/>
+    <g opacity="0.7">
+      <rect fill="#3a3d44" x="120" y="212" width="2" height="10"/>
+      <rect fill="#3a3d44" x="124" y="212" width="2" height="10"/>
+      <rect fill="#3a3d44" x="128" y="212" width="2" height="10"/>
+      <rect fill="#3a3d44" x="132" y="212" width="2" height="10"/>
+      <rect fill="#3a3d44" x="136" y="212" width="2" height="10"/>
+    </g>
+  </g>
+  <g transform="rotate(-40 128 128)">
+    <g>
+      <path class="jawMain" d="M 88 64 L 168 64 L 168 124 L 88 124 L 92 116 L 108 116 L 108 84 L 92 84 Z"/>
+      <path class="jawHi" d="M 88 64 L 168 64 L 168 68 L 88 68 Z"/>
+      <path class="jawShade" d="M 88 120 L 168 120 L 168 124 L 88 124 Z" opacity="0.7"/>
+      <path class="jawShade" d="M 100 84 L 92 84 L 92 116 L 100 116 Z" opacity="0.5"/>
+      <path class="jawDark" d="M 88 84 L 108 84 L 108 86 L 88 86 Z"/>
+      <path class="jawDark" d="M 88 114 L 108 114 L 108 116 L 88 116 Z"/>
+    </g>
+    <g>
+      <ellipse class="jawMain" cx="120" cy="80" rx="10" ry="14"/>
+      <ellipse class="jawShade" cx="120" cy="80" rx="8" ry="11" opacity="0.5"/>
+      <ellipse class="jawHi" cx="120" cy="76" rx="6" ry="3" opacity="0.7"/>
+      <ellipse fill="#3a3d44" cx="120" cy="80" rx="3" ry="4"/>
+      <ellipse fill="#1a1a1a" cx="120" cy="80" rx="1.5" ry="2"/>
+    </g>
+    <g>
+      <g>
+        <rect class="knurl" x="148" y="98" width="14" height="2"/>
+        <rect class="knurlDark" x="148" y="98" width="14" height="0.6"/>
+      </g>
+    </g>
+  </g>
+</svg>

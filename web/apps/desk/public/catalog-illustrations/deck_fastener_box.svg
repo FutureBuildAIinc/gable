@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Box of hidden deck fasteners with star drive screws</title>
+  <defs>
+    <style>
+      .boxFront{fill:#3a5a7a}
+      .boxSide{fill:#2a4a6a}
+      .boxTop{fill:#4a6a8a}
+      .boxRim{fill:#1a3a5a}
+      .screwShaft{fill:#a8a8a8}
+      .screwShaftShade{fill:#5a5a5a}
+      .screwHead{fill:#7a7a7a}
+      .screwDrive{fill:#1a1a1a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="100" ry="7" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="boxTop" points="38,84 198,84 210,98 50,98"/>
+    <rect class="boxRim" x="38" y="82" width="160" height="3"/>
+    <rect class="boxSide" x="198" y="84" width="12" height="120"/>
+    <rect class="boxFront" x="38" y="84" width="160" height="120"/>
+    <rect class="boxRim" x="38" y="200" width="158" height="4" opacity="0.6"/>
+  </g>
+  
+  <rect x="54" y="124" width="128" height="1" fill="#faf3e0" opacity="0.6"/>
+  <text class="textSub" x="118" y="144" font-size="8" fill="#faf3e0" text-anchor="middle">HIDDEN DECK</text>
+  <text class="textSub" x="118" y="156" font-size="8" fill="#faf3e0" text-anchor="middle">FASTENERS</text>
+  <rect x="100" y="170" width="36" height="14" fill="#1a1a1a"/>
+  <text x="118" y="180.5" font-family="Verdana,Arial,sans-serif" font-weight="700" font-size="8" fill="#faf3e0" text-anchor="middle">SQ 100</text>
+  <g>
+    <rect class="screwShaft" x="80" y="56" width="4" height="32" rx="1"/>
+    <ellipse class="screwHead" cx="82" cy="56" rx="6" ry="2.5"/>
+    <path class="screwDrive" d="M 78 56 L 86 56 M 82 52 L 82 60" stroke="#1a1a1a" stroke-width="0.8" fill="none"/>
+    <rect class="screwShaftShade" x="82" y="58" width="2" height="30" opacity="0.7"/>
+    <rect class="screwShaft" x="120" y="50" width="4" height="38" rx="1"/>
+    <ellipse class="screwHead" cx="122" cy="50" rx="6" ry="2.5"/>
+    <path class="screwDrive" d="M 118 50 L 126 50 M 122 46 L 122 54" stroke="#1a1a1a" stroke-width="0.8" fill="none"/>
+    <rect class="screwShaftShade" x="122" y="52" width="2" height="36" opacity="0.7"/>
+    <rect class="screwShaft" x="160" y="56" width="4" height="32" rx="1" transform="rotate(8 162 72)"/>
+    <ellipse class="screwHead" cx="162" cy="56" rx="6" ry="2.5" transform="rotate(8 162 56)"/>
+  </g>
+</svg>

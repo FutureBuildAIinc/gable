@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>50 lb box of roofing nails</title>
+  <defs><style>
+    .boxFront{fill:#b8884d}
+    .boxSide{fill:#8e5e2a}
+    .boxTop{fill:#cc9a5a}
+    .boxRim{fill:#7a4e22}
+    .nailShaft{fill:#5a5e64}
+    .nailShaftHi{fill:#8a8e94}
+    .nailHead{fill:#3a3e44}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1px}
+    .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+    .textWt{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="96" ry="8" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="boxTop" points="46,86 198,86 210,98 58,98"/>
+    <rect class="boxRim" x="46" y="84" width="152" height="3"/>
+    <polygon class="boxSide" points="198,86 210,98 210,202 198,190"/>
+    <rect class="boxFront" x="46" y="86" width="152" height="104"/>
+    <polygon points="46,86 198,86 210,98 58,98" fill="none" stroke="#5a3a1e" stroke-width="0.5" opacity="0.5"/>
+    <polygon points="198,86 210,98 210,202 198,190" fill="none" stroke="#5a3a1e" stroke-width="0.5" opacity="0.5"/>
+    <rect x="46" y="86" width="152" height="104" fill="none" stroke="#5a3a1e" stroke-width="0.5" opacity="0.5"/>
+    <rect class="boxRim" x="46" y="187" width="152" height="3" opacity="0.6"/>
+  </g>
+  
+  <rect x="62" y="124" width="120" height="1" fill="#3a2210" opacity="0.6"/>
+  <text class="textSub" x="122" y="142" font-size="9" fill="#3a2210" text-anchor="middle">ROOFING NAILS</text>
+  <text class="textSub" x="122" y="156" font-size="6" fill="#3a2210" text-anchor="middle" opacity="0.7">GALVANIZED  HOT DIPPED</text>
+  <text class="textSub" x="122" y="166" font-size="5" fill="#3a2210" text-anchor="middle" opacity="0.6">1.25 IN  11 GAUGE</text>
+  <rect x="56" y="172" width="32" height="14" fill="#3a2210"/>
+  <text class="textWt" x="72" y="182.5" font-size="8" fill="#e8d4a8" text-anchor="middle">50 LB</text>
+  <g>
+    <g transform="rotate(20 116 70)">
+      <rect class="nailShaft" x="114" y="48" width="4" height="32" rx="0.5"/>
+      <rect class="nailShaftHi" x="115" y="50" width="1" height="30" opacity="0.7"/>
+      <ellipse class="nailHead" cx="116" cy="48" rx="6" ry="2"/>
+    </g>
+    <g transform="rotate(-15 130 70)">
+      <rect class="nailShaft" x="128" y="56" width="4" height="28" rx="0.5"/>
+      <rect class="nailShaftHi" x="129" y="58" width="1" height="26" opacity="0.7"/>
+      <ellipse class="nailHead" cx="130" cy="56" rx="5" ry="2"/>
+    </g>
+    <g transform="rotate(8 144 70)">
+      <rect class="nailShaft" x="142" y="52" width="4" height="30" rx="0.5"/>
+      <rect class="nailShaftHi" x="143" y="54" width="1" height="28" opacity="0.7"/>
+      <ellipse class="nailHead" cx="144" cy="52" rx="5" ry="2"/>
+    </g>
+    <g transform="rotate(-20 92 70)">
+      <rect class="nailShaft" x="90" y="58" width="4" height="26" rx="0.5"/>
+      <rect class="nailShaftHi" x="91" y="60" width="1" height="24" opacity="0.7"/>
+      <ellipse class="nailHead" cx="92" cy="58" rx="5" ry="2"/>
+    </g>
+  </g>
+</svg>

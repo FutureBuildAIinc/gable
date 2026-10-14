@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pressure treated 6x6 post lying at an angle, greenish with incising marks and square end grain</title>
+  <defs>
+    <style>
+      .faceA{fill:#7a8c5a}
+      .faceB{fill:#5e7044}
+      .faceHi{fill:#9caa74}
+      .faceShade{fill:#4a5a30}
+      .sideFace{fill:#6a7c50}
+      .sideFaceShade{fill:#4a5a30}
+      .sideFaceHi{fill:#8a9c64}
+      .endGrain{fill:#5a4824}
+      .endGrainShade{fill:#3a2e18}
+      .endGrainHi{fill:#7a6234}
+      .grain{stroke:#3a4a28;fill:none;stroke-linecap:round}
+      .incise{fill:#3a4a28}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g transform="rotate(-22 128 128)">
+    <polygon class="faceA" points="50,86 226,76 226,150 50,160"/>
+    <polygon class="sideFace" points="226,76 240,88 240,160 226,150"/>
+    <polygon class="sideFaceShade" points="226,76 240,88 234,88 226,80"/>
+    <polygon class="faceHi" points="50,86 226,76 226,80 50,90"/>
+    <line class="grain" x1="50" y1="96" x2="226" y2="86" stroke-width="0.6" opacity="0.55"/>
+    <line class="grain" x1="50" y1="106" x2="226" y2="96" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="50" y1="116" x2="226" y2="106" stroke-width="0.6" opacity="0.55"/>
+    <line class="grain" x1="50" y1="126" x2="226" y2="116" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="50" y1="138" x2="226" y2="128" stroke-width="0.6" opacity="0.55"/>
+    <line class="grain" x1="50" y1="148" x2="226" y2="138" stroke-width="0.5" opacity="0.5"/>
+    <g opacity="0.7">
+      <circle class="incise" cx="68" cy="94" r="1"/>
+      <circle class="incise" cx="84" cy="92" r="1"/>
+      <circle class="incise" cx="100" cy="90" r="1"/>
+      <circle class="incise" cx="116" cy="88" r="1"/>
+      <circle class="incise" cx="132" cy="86" r="1"/>
+      <circle class="incise" cx="148" cy="84" r="1"/>
+      <circle class="incise" cx="164" cy="82" r="1"/>
+      <circle class="incise" cx="180" cy="80" r="1"/>
+      <circle class="incise" cx="196" cy="78" r="1"/>
+      <circle class="incise" cx="74" cy="106" r="1"/>
+      <circle class="incise" cx="90" cy="104" r="1"/>
+      <circle class="incise" cx="106" cy="102" r="1"/>
+      <circle class="incise" cx="122" cy="100" r="1"/>
+      <circle class="incise" cx="138" cy="98" r="1"/>
+      <circle class="incise" cx="154" cy="96" r="1"/>
+      <circle class="incise" cx="170" cy="94" r="1"/>
+      <circle class="incise" cx="186" cy="92" r="1"/>
+      <circle class="incise" cx="202" cy="90" r="1"/>
+      <circle class="incise" cx="80" cy="118" r="1"/>
+      <circle class="incise" cx="96" cy="116" r="1"/>
+      <circle class="incise" cx="112" cy="114" r="1"/>
+      <circle class="incise" cx="128" cy="112" r="1"/>
+      <circle class="incise" cx="144" cy="110" r="1"/>
+      <circle class="incise" cx="160" cy="108" r="1"/>
+      <circle class="incise" cx="176" cy="106" r="1"/>
+      <circle class="incise" cx="192" cy="104" r="1"/>
+      <circle class="incise" cx="208" cy="102" r="1"/>
+      <circle class="incise" cx="86" cy="132" r="1"/>
+      <circle class="incise" cx="102" cy="130" r="1"/>
+      <circle class="incise" cx="118" cy="128" r="1"/>
+      <circle class="incise" cx="134" cy="126" r="1"/>
+      <circle class="incise" cx="150" cy="124" r="1"/>
+      <circle class="incise" cx="166" cy="122" r="1"/>
+      <circle class="incise" cx="182" cy="120" r="1"/>
+      <circle class="incise" cx="198" cy="118" r="1"/>
+      <circle class="incise" cx="92" cy="146" r="1"/>
+      <circle class="incise" cx="108" cy="144" r="1"/>
+      <circle class="incise" cx="124" cy="142" r="1"/>
+      <circle class="incise" cx="140" cy="140" r="1"/>
+      <circle class="incise" cx="156" cy="138" r="1"/>
+      <circle class="incise" cx="172" cy="136" r="1"/>
+      <circle class="incise" cx="188" cy="134" r="1"/>
+      <circle class="incise" cx="204" cy="132" r="1"/>
+      <circle class="incise" cx="100" cy="158" r="1"/>
+      <circle class="incise" cx="116" cy="156" r="1"/>
+      <circle class="incise" cx="132" cy="154" r="1"/>
+      <circle class="incise" cx="148" cy="152" r="1"/>
+      <circle class="incise" cx="164" cy="150" r="1"/>
+      <circle class="incise" cx="180" cy="148" r="1"/>
+      <circle class="incise" cx="196" cy="146" r="1"/>
+    </g>
+  </g>
+  <g transform="rotate(-22 128 128)">
+    <polygon class="endGrain" points="50,86 50,160 26,154 26,80"/>
+    <rect class="endGrainShade" x="26" y="92" width="24" height="2"/>
+    <rect class="endGrainShade" x="26" y="104" width="24" height="2"/>
+    <rect class="endGrainShade" x="26" y="116" width="24" height="2"/>
+    <rect class="endGrainShade" x="26" y="128" width="24" height="2"/>
+    <rect class="endGrainShade" x="26" y="140" width="24" height="2"/>
+    <rect class="endGrainShade" x="26" y="152" width="24" height="2"/>
+    <polygon class="endGrainHi" points="50,86 50,90 28,90 28,86"/>
+  </g>
+  <g transform="rotate(-22 128 128)">
+    <polygon class="endGrain" points="226,76 226,150 250,142 250,80"/>
+    <rect class="endGrainShade" x="226" y="86" width="24" height="2"/>
+    <rect class="endGrainShade" x="226" y="98" width="24" height="2"/>
+    <rect class="endGrainShade" x="226" y="110" width="24" height="2"/>
+    <rect class="endGrainShade" x="226" y="122" width="24" height="2"/>
+    <rect class="endGrainShade" x="226" y="134" width="24" height="2"/>
+  </g>
+</svg>

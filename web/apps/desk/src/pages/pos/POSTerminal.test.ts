@@ -18,6 +18,8 @@ const svc = vi.hoisted(() => ({
   openTill: vi.fn(),
   tillReport: vi.fn(),
   closeTill: vi.fn(),
+  printReceipt: vi.fn(),
+  emailReceipt: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -85,6 +87,16 @@ const typeInto = async (el: POSTerminal, v: string) => {
 
 describe('the counter as the Panels layout', () => {
   beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('mounts without setting state while its first update completes', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const el = await mount(sale());
+    await el.updateComplete;
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    expect(messages.filter((m) => m.includes('gable-pos-terminal scheduled an update'))).toEqual([]);
+    warn.mockRestore();
+    el.remove();
+  });
 
   it('shows the three panels and Pay as the one primary action carrying the summary total', async () => {
     const el = await mount(sale());
@@ -256,50 +268,33 @@ describe('the counter as the Panels layout', () => {
   });
 
   describe('a quantity on a line', () => {
-    const result = { product_id: 'p-2x4', sku: '2X4-8', description: '2x4 8ft', uom: 'EA', unit_price_cents: 350, in_stock: 100 };
-    type Inner = { _searchResults: unknown[]; _searchQuery: string };
-    const setResults = async (el: POSTerminal) => {
-      (el as unknown as Inner)._searchResults = [result];
-      await el.updateComplete;
-    };
-    const setQty = async (el: POSTerminal, v: string) => {
-      const input = el.querySelector('#pos-qty') as HTMLInputElement;
-      input.value = v;
-      input.dispatchEvent(new Event('input'));
-      await el.updateComplete;
-    };
+    const result = { product_id: 'p-2x4', sku: '2X4-8', description: '2x4 8ft', uom: 'EA', unit_price_cents: 350, in_stock: '100' };
+    const add = (el: Element, qty: string, over: object = {}) =>
+      el.dispatchEvent(new CustomEvent('pos-catalog-add', { detail: { product: { ...result, ...over }, qty }, bubbles: true, composed: true }));
     const flush = async (el: POSTerminal) => { await new Promise((r) => setTimeout(r, 0)); await el.updateComplete; };
 
     it('adds a result with the typed quantity as one line with its total', async () => {
       const twelve = { ...line('x', 4200), quantity: '12', unit_price_ten_thousandths: 35000 };
       svc.addItem.mockResolvedValue(sale({ lines: [twelve as never], subtotal_cents: 4200, total_cents: 4200 }));
       const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '12');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '12');
       await flush(el);
       expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '12', 'EA');
-      expect(el.querySelectorAll('[data-testid="pos-lines"] tbody tr').length).toBe(1);
+      expect(el.querySelectorAll('[data-testid="pos-lines"] li').length).toBe(1);
       expect(el.querySelector('[data-testid="pos-lines"]')?.textContent).toContain('$42.00');
     });
 
-    it('allows a decimal quantity for a length unit and defaults to one', async () => {
+    it('allows a decimal quantity for a length unit', async () => {
       svc.addItem.mockResolvedValue(sale());
       const el = await mount(sale({ lines: [] }));
-      expect((el.querySelector('#pos-qty') as HTMLInputElement).value).toBe('1');
-      (el as unknown as Inner)._searchResults = [{ ...result, product_id: 'p-trim', sku: 'TRIM-LF', uom: 'LF' }];
-      await el.updateComplete;
-      await setQty(el, '2.5');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '2.5', { product_id: 'p-trim', sku: 'TRIM-LF', uom: 'LF' });
       await flush(el);
       expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-trim', '2.5', 'LF');
     });
 
     it('refuses a decimal quantity for a unit counted whole and sends nothing', async () => {
       const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '2.5');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '2.5');
       await flush(el);
       expect(el.querySelector('[role="alert"]')?.textContent).toContain('EA is counted in whole units');
       expect(svc.addItem).not.toHaveBeenCalled();
@@ -308,89 +303,19 @@ describe('the counter as the Panels layout', () => {
     it('adds a whole quantity of a unit counted whole, written with a zero fraction', async () => {
       svc.addItem.mockResolvedValue(sale());
       const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '3.0');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '3.0');
       await flush(el);
       expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '3', 'EA');
-    });
-
-    it('on Enter right after typing, adds a result of the current query, never the earlier one', async () => {
-      svc.addItem.mockResolvedValue(sale());
-      const ten = { ...result, product_id: 'p-10', sku: '2X4-10' };
-      // The search answers "2X4-8" with the longer board first and the exact SKU second.
-      svc.searchProducts.mockResolvedValue([ten, result]);
-      const el = await mount(sale({ lines: [] }));
-      (el as unknown as Inner)._searchResults = [ten, result];
-      await el.updateComplete;
-      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-      input.value = '2X4-8';
-      input.dispatchEvent(new Event('input'));
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      await flush(el);
-      expect(svc.searchProducts).toHaveBeenCalledWith('2X4-8');
-      expect(svc.addItem).toHaveBeenCalledTimes(1);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '1', 'EA');
-    });
-
-    it('on Enter with no exact SKU match, adds the top result of the current search', async () => {
-      svc.addItem.mockResolvedValue(sale());
-      const board = { ...result, product_id: 'p-board', sku: 'STUD-92' };
-      svc.searchProducts.mockResolvedValue([board]);
-      const el = await mount(sale({ lines: [] }));
-      (el as unknown as Inner)._searchResults = [result];
-      await el.updateComplete;
-      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-      input.value = 'stud';
-      input.dispatchEvent(new Event('input'));
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      await flush(el);
-      expect(svc.addItem).toHaveBeenCalledTimes(1);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-board', '1', 'EA');
-    });
-
-    it('drops a search answer that arrives after a newer query', async () => {
-      let late: (v: unknown) => void = () => {};
-      svc.searchProducts
-        .mockImplementationOnce(() => new Promise((r) => { late = r; }))
-        .mockResolvedValueOnce([result]);
-      const el = await mount(sale({ lines: [] }));
-      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-      input.value = 'old';
-      input.dispatchEvent(new Event('input'));
-      await el.updateComplete;
-      await new Promise((r) => setTimeout(r, 250));
-      input.value = '2X4-8';
-      input.dispatchEvent(new Event('input'));
-      await el.updateComplete;
-      await new Promise((r) => setTimeout(r, 250));
-      late([{ ...result, product_id: 'p-old', sku: 'OLD-1' }]);
-      await flush(el);
-      const shown = el.querySelector('[data-testid="pos-results"]')?.textContent ?? '';
-      expect(shown).toContain('2X4-8');
-      expect(shown).not.toContain('OLD-1');
     });
 
     it('refuses a zero or negative quantity and adds nothing', async () => {
       const el = await mount(sale({ lines: [] }));
       for (const v of ['0', '-3', '']) {
-        await setResults(el);
-        await setQty(el, v);
-        (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+        add(el, v);
         await flush(el);
         expect(el.querySelector('[role="alert"]')?.textContent).toContain('quantity');
       }
       expect(svc.addItem).not.toHaveBeenCalled();
-    });
-
-    it('adds the highlighted result when Enter is pressed in the quantity field', async () => {
-      svc.addItem.mockResolvedValue(sale());
-      const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '4');
-      (el.querySelector('#pos-qty') as HTMLInputElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      await flush(el);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '4', 'EA');
     });
   });
 
@@ -420,7 +345,9 @@ describe('the counter as the Panels layout', () => {
   });
 
   describe('the visual review', () => {
-    const filled = (el: Element) => [...el.querySelectorAll('button')].filter((b) => b.className.includes('bg-gable-green'));
+    // a catalogue chip is a selection, not an action
+    const filled = (el: Element) => [...el.querySelectorAll('button')]
+      .filter((b) => b.className.includes('bg-gable-green') && b.getAttribute('data-testid') !== 'catalog-chip');
 
     it('before a till is open, Pay is a disabled neutral button and Open Till the one primary', async () => {
       const el = await mount(sale());
@@ -453,36 +380,54 @@ describe('the counter as the Panels layout', () => {
       expect(input.value).toBe('150.50');
     });
 
-    it('lets the whole counter scroll below the desktop width, so no panel is clipped by a capped column', async () => {
+    it('flows the right column with the page: one scroller, no sticky column, no inner region, no pinned block', async () => {
       const el = await mount(sale());
       const body = q(el, 'pos-body');
       expect(body.className).toMatch(/(^|\s)overflow-y-auto(\s|$)/);
-      expect(body.className).toContain('xl:overflow-visible');
-      const column = q(el, 'pos-panels');
-      expect(column.className).not.toMatch(/max-h-/);
-      expect(column.className).not.toMatch(/(^|\s)overflow-y-auto(\s|$)/);
-      expect(column.className).toContain('xl:overflow-y-auto');
-      expect(body.contains(q(el, 'panel-customer'))).toBe(true);
-      expect(body.contains(q(el, 'pos-pay'))).toBe(true);
+      expect(body.className).not.toContain('overflow-hidden');
+      for (const id of ['pos-panels', 'pos-items']) {
+        const n = q(el, id);
+        expect(n.className).not.toMatch(/sticky|overflow-y-auto|overflow-auto|overflow-hidden|max-h-/);
+      }
+      for (const n of q(el, 'pos-panels').querySelectorAll('*')) {
+        expect(n.className.toString()).not.toMatch(/sticky|overflow-y-auto|overflow-auto|max-h-/);
+      }
     });
 
-    it('keeps the right column as one scrolling region holding Payment, with Summary and Pay at its foot', async () => {
+    it('keeps the order summary as one card holding the lines, the totals, Pay and Clear sale', async () => {
       const el = await mount(sale());
-      const column = q(el, 'pos-panels');
-      const scrollers = [...column.querySelectorAll('*')].filter((n) => n.className.toString().includes('overflow-y-auto'));
-      expect(scrollers.length + (column.className.includes('xl:overflow-y-auto') ? 1 : 0)).toBe(1);
-      const region = column.className.includes('xl:overflow-y-auto') ? column : scrollers[0];
-      expect(region.contains(q(el, 'panel-payment'))).toBe(true);
-      expect(region.contains(q(el, 'pos-pay'))).toBe(true);
-      const foot = q(el, 'pos-panel-foot');
-      expect(foot.className).toContain('sticky');
-      expect(foot.textContent).toContain('Void');
-      expect(foot.textContent).toContain('Return');
+      const card = q(el, 'pos-order-summary');
+      expect(card.tagName).toBe('SECTION');
+      for (const id of ['pos-lines', 'summary-total', 'pos-pay', 'pos-clear-sale']) expect(card.contains(q(el, id))).toBe(true);
+      expect(card.parentElement).toBe(q(el, 'pos-panels'));
+      expect(q(el, 'pos-order-footer')).toBeNull();
+      expect(q(el, 'pos-order-lines')).toBeNull();
     });
 
-    it('leaves the items area room for four lines below the desktop width', async () => {
+    it('holds Payment and the order summary with Pay in the one right column', async () => {
       const el = await mount(sale());
-      expect(q(el, 'pos-items').className).toMatch(/min-h-\[2[0-9]rem\]/);
+      const column = q(el, 'pos-panels');
+      expect(column.contains(q(el, 'panel-payment'))).toBe(true);
+      expect(column.contains(q(el, 'pos-order-summary'))).toBe(true);
+      expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
+    });
+
+    it('keeps two columns down to 900 pixels and stacks the order summary and Pay first below that', async () => {
+      const el = await mount(sale());
+      expect(q(el, 'pos-body').className).toContain('min-[900px]:flex-row');
+      expect(q(el, 'pos-items').className).toMatch(/min-\[900px\]:w-\[/);
+      expect(q(el, 'pos-panels').className).toContain('order-first');
+      expect(q(el, 'pos-panels').className).toContain('min-[900px]:order-none');
+      expect(q(el, 'pos-order-summary').className).toContain('order-first');
+      expect(q(el, 'pos-order-summary').className).toContain('min-[900px]:order-none');
+    });
+
+    it('lists every line of the order summary, never in a clipped scroller', async () => {
+      const el = await mount(sale());
+      const list = q(el, 'pos-lines');
+      expect(list.className).not.toMatch(/max-h-/);
+      expect(list.className).not.toContain('overflow-y-auto');
+      expect(list.querySelectorAll('li').length).toBe(2);
     });
 
     it('draws Void as a plain secondary action, never a red outline', async () => {
@@ -497,21 +442,24 @@ describe('the counter as the Panels layout', () => {
       expect(voidBtn.className).not.toContain('safety-red');
     });
 
-    it('shows no live remove control on a completed sale', async () => {
+    it('shows no remove control at all on a completed sale', async () => {
       const el = await mount(sale({ status: 'completed' }));
-      const removes = [...el.querySelectorAll('[data-testid="pos-lines"] button[aria-label^="Remove"]')] as HTMLButtonElement[];
-      expect(removes.length).toBe(2);
-      for (const b of removes) expect(b.disabled).toBe(true);
+      expect(el.querySelectorAll('[data-testid="pos-lines"] li').length).toBe(2);
+      expect(el.querySelectorAll('[data-testid="pos-lines"] button[aria-label^="Remove"]').length).toBe(0);
     });
 
-    it('words the completion band with a colon', async () => {
+    it('leaves the completion to the card: no green band over the page, so nothing shifts', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000002', total_cents: 13810, change_cents: 0 }));
       const el = await mount(sale());
       await typeInto(el, '86.50');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
       await el.updateComplete;
-      expect(el.querySelector('[role="status"]')?.textContent?.trim()).toBe('Sale POS-000002 complete: $138.10');
+      expect(el.querySelector('div[role="status"]')).toBeNull();
+      expect(q(el, 'pos-complete').textContent).toContain('Sale complete');
+      expect(q(el, 'pos-complete').textContent).toContain('POS-000002');
+      expect(q(el, 'pos-complete').textContent).toContain('$138.10');
+      expect(q(el, 'pos-complete').getAttribute('aria-live')).toBe('polite');
     });
 
     it('gives the line remove control a 44 pixel touch target', async () => {
@@ -531,6 +479,586 @@ describe('the counter as the Panels layout', () => {
     const el = await mount(sale());
     expect(q(el, 'tender-account').textContent?.trim()).toBe('Charge to account');
     expect(q(el, 'tender-account').className).not.toContain('capitalize');
+  });
+});
+
+describe('the Panels board', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+  type Inner = {
+    _customer: CounterCustomer | null; _sale: Sale; _chooseCustomer(c: CounterCustomer): Promise<void>;
+    _till: unknown;
+  };
+  const toggle = (el: Element, key: string) => q(el, `panel-${key}-toggle`) as HTMLButtonElement;
+  const expanded = (el: Element, key: string) => toggle(el, key).getAttribute('aria-expanded');
+  const flush = async (el: POSTerminal) => { await new Promise((r) => setTimeout(r, 0)); await el.updateComplete; };
+  const product = { product_id: 'p-z', sku: 'SKU-z', description: 'Item z', uom: 'EA', unit_price_cents: 700, in_stock: '5' };
+
+  it('opens one panel at a time and starts on Customer', async () => {
+    const el = await mount(sale());
+    expect(expanded(el, 'customer')).toBe('true');
+    expect(expanded(el, 'payment')).toBe('false');
+    expect(expanded(el, 'summary')).toBe('false');
+    toggle(el, 'payment').click();
+    await el.updateComplete;
+    expect(expanded(el, 'customer')).toBe('false');
+    expect(expanded(el, 'payment')).toBe('true');
+    expect(q(el, 'panel-customer-body').hasAttribute('hidden')).toBe(true);
+    expect(q(el, 'panel-payment-body').hasAttribute('hidden')).toBe(false);
+    toggle(el, 'summary').click();
+    await el.updateComplete;
+    expect(expanded(el, 'payment')).toBe('false');
+    expect(expanded(el, 'summary')).toBe('true');
+    el.remove();
+  });
+
+  it('keeps Customer open on an account customer, showing the standing, PO and job, and collapses on Next: Payment', async () => {
+    svc.attachCustomer.mockResolvedValue(sale({ customer_id: 'cu1' }));
+    const el = await mount(sale());
+    await (el as unknown as Inner)._chooseCustomer(account);
+    await el.updateComplete;
+    expect(expanded(el, 'customer')).toBe('true');
+    expect(expanded(el, 'payment')).toBe('false');
+    expect(q(el, 'pos-customer-name').textContent).toBe('Test Builders');
+    expect(q(el, 'pos-customer-standing').textContent).toContain('Credit available');
+    expect(el.querySelector('#pos-po')).toBeTruthy();
+    expect((q(el, 'pos-next-payment') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-next-payment').click();
+    await el.updateComplete;
+    const head = toggle(el, 'customer');
+    expect(head.textContent).toContain('Test Builders');
+    expect(head.textContent).toContain('Change');
+    expect(head.getAttribute('aria-expanded')).toBe('false');
+    expect(expanded(el, 'payment')).toBe('true');
+    head.click();
+    await el.updateComplete;
+    expect(expanded(el, 'customer')).toBe('true');
+    expect(expanded(el, 'payment')).toBe('false');
+    expect((el as unknown as Inner)._customer?.id).toBe('cu1');
+    expect(q(el, 'pos-customer-name').textContent).toBe('Test Builders');
+    expect(svc.attachCustomer).toHaveBeenCalledTimes(1);
+    el.remove();
+  });
+
+  it('asks for items before Next: Payment when the sale has no line yet, and keeps the chips with the panel', async () => {
+    svc.attachCustomer.mockResolvedValue(sale({ customer_id: 'cu1', lines: [] }));
+    const el = await mount(sale({ lines: [] }));
+    await (el as unknown as Inner)._chooseCustomer(account);
+    await el.updateComplete;
+    expect(expanded(el, 'customer')).toBe('true');
+    expect((q(el, 'pos-next-payment') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'panel-customer-body').textContent).toContain('Add items to continue');
+    expect(q(el, 'progress-customer').getAttribute('data-state')).toBe('current');
+    el.remove();
+  });
+
+  it('labels the control that clears the customer Walk-in sale and returns to a walk in', async () => {
+    svc.attachCustomer
+      .mockResolvedValueOnce(sale({ customer_id: 'cu1', lines: [] }))
+      .mockResolvedValueOnce(sale({ customer_id: null, lines: [] }));
+    const el = await mount(sale({ lines: [] }));
+    await (el as unknown as Inner)._chooseCustomer(account);
+    await el.updateComplete;
+    const buttons = [...q(el, 'pos-customer').querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(buttons).toContain('Walk-in sale');
+    expect(buttons).not.toContain('Change');
+    ([...q(el, 'pos-customer').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Walk-in sale') as HTMLElement).click();
+    await flush(el);
+    expect(svc.attachCustomer).toHaveBeenLastCalledWith('s1', { customer_id: null });
+    expect((el as unknown as Inner)._customer).toBeNull();
+    el.remove();
+  });
+
+  it('cannot reach Pay on account for a PO required customer until the PO is entered', async () => {
+    svc.attachCustomer.mockResolvedValue(sale({ customer_id: 'cu1' }));
+    const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const el = await mount(sale());
+    await (el as unknown as Inner)._chooseCustomer(needsPO);
+    await el.updateComplete;
+    q(el, 'pos-next-payment').click();
+    await el.updateComplete;
+    expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('moves to Payment on a walk in once the sale has a line, and keeps Customer open before one', async () => {
+    const el = await mount(sale());
+    q(el, 'pos-walk-in').click();
+    await flush(el);
+    expect(toggle(el, 'customer').textContent).toContain('Walk-in sale');
+    expect(expanded(el, 'payment')).toBe('true');
+    const empty = await mount(sale({ lines: [] }));
+    q(empty, 'pos-walk-in').click();
+    await flush(empty);
+    expect(expanded(empty, 'payment')).toBe('false');
+    expect(expanded(empty, 'customer')).toBe('false');
+    el.remove();
+    empty.remove();
+  });
+
+  it('opens Payment when the first line lands on a sale whose customer is settled', async () => {
+    svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
+    const el = await mount(sale({ lines: [] }));
+    q(el, 'pos-walk-in').click();
+    await flush(el);
+    expect(expanded(el, 'payment')).toBe('false');
+    await (el as unknown as { _addItem(p: unknown, q: string): Promise<void> })._addItem(product, '1');
+    await el.updateComplete;
+    expect(expanded(el, 'payment')).toBe('true');
+    el.remove();
+  });
+
+  it('has the step chips follow the panels', async () => {
+    const el = await mount(sale());
+    const states = () => ['customer', 'payment', 'summary'].map((n) => q(el, `progress-${n}`).getAttribute('data-state'));
+    expect(states()).toEqual(['current', 'upcoming', 'upcoming']);
+    q(el, 'pos-walk-in').click();
+    await flush(el);
+    expect(states()).toEqual(['done', 'current', 'upcoming']);
+    q(el, 'pos-next-summary').click();
+    await el.updateComplete;
+    expect(states()).toEqual(['done', 'done', 'current']);
+    expect(expanded(el, 'summary')).toBe('true');
+    q(el, 'pos-summary-back').click();
+    await el.updateComplete;
+    expect(states()).toEqual(['done', 'current', 'upcoming']);
+    q(el, 'pos-payment-back').click();
+    await el.updateComplete;
+    expect(states()).toEqual(['current', 'upcoming', 'upcoming']);
+    el.remove();
+  });
+
+  it('shows the payment value on a done Payment panel and the review on Summary', async () => {
+    const el = await mount(sale());
+    await typeInto(el, '100.00');
+    q(el, 'pos-next-summary').click();
+    await el.updateComplete;
+    expect(toggle(el, 'payment').textContent).toContain('Cash $100.00');
+    expect(q(el, 'panel-summary-body').textContent).toContain('$86.50');
+    expect(q(el, 'panel-summary-body').textContent).toContain('2');
+    el.remove();
+  });
+
+  it('changes no money when a panel opens or closes', async () => {
+    const el = await mount(sale());
+    for (const key of ['payment', 'summary', 'customer', 'customer', 'payment']) {
+      toggle(el, key).click();
+      await el.updateComplete;
+    }
+    q(el, 'pos-next-summary').click();
+    await el.updateComplete;
+    q(el, 'pos-summary-back').click();
+    await el.updateComplete;
+    for (const m of ['completeSale', 'addItem', 'removeItem', 'attachCustomer', 'startSale']) {
+      if (m === 'startSale') expect(svc[m as 'startSale']).toHaveBeenCalledTimes(1);
+      else expect(svc[m as 'completeSale']).not.toHaveBeenCalled();
+    }
+    expect(q(el, 'summary-total').textContent?.trim()).toBe('$86.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('puts Pay in the order summary, off on a sale that is not open', async () => {
+    const el = await mount(sale());
+    expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
+    expect(q(el, 'pos-order-summary').textContent).toContain('Item a');
+    expect(q(el, 'pos-order-summary').textContent).toContain('1 EA at $50.00');
+    await typeInto(el, '100.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    const done = await mount(sale({ status: 'completed' }));
+    expect((q(done, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+    done.remove();
+  });
+
+  describe('Clear sale', () => {
+    it('is off with no lines and not offered on a completed sale', async () => {
+      const el = await mount(sale({ lines: [] }));
+      expect((q(el, 'pos-clear-sale') as HTMLButtonElement).disabled).toBe(true);
+      const done = await mount(sale({ status: 'completed' }));
+      expect(q(done, 'pos-clear-sale')).toBeNull();
+      el.remove();
+      done.remove();
+    });
+
+    it('asks first, and declining removes nothing', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+      const el = await mount(sale());
+      q(el, 'pos-clear-sale').click();
+      await flush(el);
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(svc.removeItem).not.toHaveBeenCalled();
+      confirm.mockRestore();
+      el.remove();
+    });
+
+    it('removes every line through the line removal once confirmed', async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      svc.removeItem
+        .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
+        .mockResolvedValueOnce(sale({ lines: [] }));
+      const el = await mount(sale());
+      q(el, 'pos-clear-sale').click();
+      await flush(el);
+      await flush(el);
+      expect(svc.removeItem.mock.calls).toEqual([['s1', 'a'], ['s1', 'b']]);
+      expect(q(el, 'pos-lines')).toBeNull();
+      confirm.mockRestore();
+      el.remove();
+    });
+  });
+
+  describe('the catalogue add event', () => {
+    const fire = (el: Element, quantity: string, over: object = {}) =>
+      el.dispatchEvent(new CustomEvent('pos-catalog-add', { detail: { product: { ...product, ...over }, qty: quantity }, bubbles: true, composed: true }));
+
+    it('mounts the catalogue open with a till, locked without, keyed on the yard register', async () => {
+      const el = await mount(sale());
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { disabled: boolean; yardKey: string };
+      expect(cat.disabled).toBe(false);
+      expect(cat.yardKey).toBe('REG-01');
+      (el as unknown as Inner)._till = null;
+      await el.updateComplete;
+      expect(cat.disabled).toBe(true);
+      el.remove();
+    });
+
+    it('adds through the add path with its quantity', async () => {
+      svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const el = await mount(sale({ lines: [] }));
+      fire(el, '3');
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-z', '3', 'EA');
+      expect(svc.startSale).toHaveBeenCalledTimes(1);
+      el.remove();
+    });
+
+    it('starts one sale for two quick adds over a completed one', async () => {
+      const el = await mount(sale({ status: 'completed' }));
+      svc.startSale.mockClear();
+      svc.startSale.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [] }));
+      svc.addItem.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      fire(el, '1');
+      fire(el, '1');
+      await flush(el);
+      await flush(el);
+      expect(svc.startSale).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledWith('s2', 'p-z', '1', 'EA');
+      el.remove();
+    });
+
+    it('resets the card once an add is accepted, and leaves it as typed when the add is refused', async () => {
+      svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const el = await mount(sale({ lines: [] }));
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { resetQuantity(): void };
+      const reset = vi.spyOn(cat, 'resetQuantity');
+      // refused: a decimal on a counted unit
+      fire(el, '1.5');
+      await flush(el);
+      expect(svc.addItem).not.toHaveBeenCalled();
+      expect(reset).not.toHaveBeenCalled();
+      // refused: the server turns the add away
+      svc.addItem.mockRejectedValueOnce(new Error('stale revision'));
+      fire(el, '2');
+      await flush(el);
+      expect(reset).not.toHaveBeenCalled();
+      // accepted
+      el.dispatchEvent(new CustomEvent('pos-catalog-add', { detail: { product, qty: '3', query: 'pav' }, bubbles: true, composed: true }));
+      await flush(el);
+      expect(svc.addItem).toHaveBeenLastCalledWith('s1', 'p-z', '3', 'EA');
+      expect(reset).toHaveBeenCalledTimes(1);
+      expect(reset).toHaveBeenCalledWith({ qty: '3', query: 'pav' });
+      el.remove();
+    });
+
+    it('does not reset the card for an add made with no till', async () => {
+      const el = await mount(sale());
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { resetQuantity(): void };
+      const reset = vi.spyOn(cat, 'resetQuantity');
+      (el as unknown as Inner)._till = null;
+      await el.updateComplete;
+      fire(el, '1');
+      await flush(el);
+      expect(reset).not.toHaveBeenCalled();
+      el.remove();
+    });
+
+    it('answers with no till and adds nothing', async () => {
+      const el = await mount(sale());
+      (el as unknown as Inner)._till = null;
+      await el.updateComplete;
+      fire(el, '1');
+      await flush(el);
+      expect(svc.addItem).not.toHaveBeenCalled();
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('Open the till to start a sale');
+      el.remove();
+    });
+
+    it('shows the picture the catalogue gave on the order summary line', async () => {
+      svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const el = await mount(sale({ lines: [] }));
+      fire(el, '1', { image_url: '/catalog-illustrations/pavers.svg' });
+      await flush(el);
+      const img = q(el, 'pos-lines').querySelector('img') as HTMLImageElement;
+      expect(img.getAttribute('src')).toBe('/catalog-illustrations/pavers.svg');
+      el.remove();
+    });
+
+    it('draws the no picture mark for a line with no known picture', async () => {
+      const el = await mount(sale());
+      expect(q(el, 'pos-lines').querySelector('img')).toBeNull();
+      expect(q(el, 'pos-lines').querySelectorAll('[data-testid="pos-line-thumb"]').length).toBe(2);
+      el.remove();
+    });
+  });
+
+  describe('the account refusal in words', () => {
+    const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const onHold = { ...account, standing: 'no_credit', available_credit_cents: 0 } as unknown as CounterCustomer;
+    const withCustomer = async (c: CounterCustomer) => {
+      const el = await mount(sale({ customer_id: c.id }));
+      (el as unknown as Inner)._customer = c;
+      await el.updateComplete;
+      return el;
+    };
+
+    it('prints the reason under the tenders, not only as a tooltip, with the way on for a missing PO', async () => {
+      const el = await withCustomer(needsPO);
+      const note = q(el, 'pos-account-refusal');
+      expect(note.textContent).toContain('purchase order');
+      expect(q(el, 'panel-payment-body').contains(note)).toBe(true);
+      toggle(el, 'payment').click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('false');
+      q(el, 'pos-refusal-customer').click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('true');
+      expect(expanded(el, 'payment')).toBe('false');
+      el.remove();
+    });
+
+    it('offers the purchase order way on only when the purchase order is the reason', async () => {
+      // over the available credit AND a PO required and empty: the words are the credit's
+      const both = { ...needsPO, available_credit_cents: 5000 } as unknown as CounterCustomer;
+      const el = await withCustomer(both);
+      expect(q(el, 'pos-account-refusal').textContent).toContain('over the available credit');
+      expect(q(el, 'pos-refusal-customer')).toBeNull();
+      el.remove();
+    });
+
+    it('says an account on hold in words with no way on, and says nothing for a walk in', async () => {
+      const held = await withCustomer(onHold);
+      expect(q(held, 'pos-account-refusal').textContent).toContain('no credit');
+      expect(q(held, 'pos-refusal-customer')).toBeNull();
+      const walk = await mount(sale());
+      expect(q(walk, 'pos-account-refusal')).toBeNull();
+      held.remove();
+      walk.remove();
+    });
+
+    it('drops the words once the purchase order is entered', async () => {
+      const el = await withCustomer(needsPO);
+      (el as unknown as { _poText: string })._poText = 'PO-7';
+      await el.updateComplete;
+      expect(q(el, 'pos-account-refusal')).toBeNull();
+      el.remove();
+    });
+  });
+
+  it('ends the order summary at Paid in full, with no Clear sale on a completed sale', async () => {
+    const done = await mount(sale({ status: 'completed' }));
+    expect(q(done, 'pos-pay').textContent?.trim()).toBe('Paid in full');
+    expect(q(done, 'pos-clear-sale')).toBeNull();
+    const open = await mount(sale());
+    expect(q(open, 'pos-clear-sale')).toBeTruthy();
+    done.remove();
+    open.remove();
+  });
+
+  it('dims Clear sale with no lines as Pay is dimmed', async () => {
+    const el = await mount(sale({ lines: [] }));
+    const clear = q(el, 'pos-clear-sale') as HTMLButtonElement;
+    expect(clear.disabled).toBe(true);
+    expect(clear.className).toContain('opacity-40');
+    expect(clear.className).toContain('text-slate-400');
+    el.remove();
+  });
+
+  it('puts the next sale note in the card\'s own header row, only once a sale is complete', async () => {
+    const open = await mount(sale());
+    const catOpen = open.querySelector('gable-pos-catalog') as HTMLElement & { note: string; disabled: boolean };
+    expect(catOpen.note).toBe('');
+    expect(q(open, 'pos-next-sale-note')).toBeNull();
+    const done = await mount(sale({ status: 'completed' }));
+    const cat = done.querySelector('gable-pos-catalog') as HTMLElement & { note: string; disabled: boolean };
+    expect(cat.note).toBe('Add a product to start the next sale');
+    expect(cat.disabled).toBe(false);
+    open.remove();
+    done.remove();
+  });
+
+  describe('the receipt choices', () => {
+    const done = (over: Partial<Sale> = {}) => sale({ status: 'completed', number: 'POS-000009', ...over });
+
+    it('shows Print and Email for a completed sale that has an invoice and a named customer', async () => {
+      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      const card = q(el, 'pos-complete');
+      expect(card.textContent).toContain('Sale complete');
+      expect(card.textContent).toContain('POS-000009');
+      expect(q(el, 'pos-receipt-print')).toBeTruthy();
+      expect(q(el, 'pos-receipt-email')).toBeTruthy();
+      el.remove();
+    });
+
+    it('shows Print alone for a walk in sale and no receipt choice without an invoice', async () => {
+      const walk = await mount(done({ invoice_id: 'inv-2', customer_id: null }));
+      expect(q(walk, 'pos-receipt-print')).toBeTruthy();
+      expect(q(walk, 'pos-receipt-email')).toBeNull();
+      walk.remove();
+      const bare = await mount(done({ invoice_id: null }));
+      expect(q(bare, 'pos-receipt-print')).toBeNull();
+      expect(q(bare, 'pos-receipt-email')).toBeNull();
+      bare.remove();
+    });
+
+    it('prints through the counter\'s own receipt route with the sale\'s id', async () => {
+      svc.printReceipt.mockResolvedValue(undefined);
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-print').click();
+      await flush(el);
+      expect(svc.printReceipt).toHaveBeenCalledWith('sale-9');
+      el.remove();
+    });
+
+    it('says in words beside Print receipt when the tab is blocked and offers the document to download', async () => {
+      svc.printReceipt.mockResolvedValue({ url: 'blob:receipt-9', blocked: true });
+      const el = await mount(done({ number: 'POS-000009', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-print').click();
+      await flush(el);
+      expect(q(el, 'pos-receipt-note').textContent).toContain('Allow pop ups for this page to print the receipt');
+      const link = q(el, 'pos-receipt-download') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('blob:receipt-9');
+      expect(link.hasAttribute('download')).toBe(true);
+      expect(q(el, 'pos-complete').contains(link)).toBe(true);
+      el.remove();
+    });
+
+    it('shows no download link when the tab opened', async () => {
+      svc.printReceipt.mockResolvedValue({ url: 'blob:receipt-9', blocked: false });
+      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-print').click();
+      await flush(el);
+      expect(q(el, 'pos-receipt-download')).toBeNull();
+      el.remove();
+    });
+
+    it('says in words beside Print receipt when the receipt cannot be fetched', async () => {
+      svc.printReceipt.mockRejectedValue(new Error('this sale has no receipt'));
+      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-print').click();
+      await flush(el);
+      expect(q(el, 'pos-receipt-note').textContent).toContain('no receipt');
+      expect(q(el, 'pos-complete').contains(q(el, 'pos-receipt-note'))).toBe(true);
+      el.remove();
+    });
+
+    it('sends the email once per click: Email receipt is off while its request is in flight', async () => {
+      let finish: () => void = () => {};
+      svc.emailReceipt.mockImplementation(() => new Promise<void>((r) => { finish = r; }));
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      const btn = q(el, 'pos-receipt-email') as HTMLButtonElement;
+      btn.click();
+      btn.click();
+      await el.updateComplete;
+      expect(svc.emailReceipt).toHaveBeenCalledTimes(1);
+      expect((q(el, 'pos-receipt-email') as HTMLButtonElement).disabled).toBe(true);
+      finish();
+      await flush(el);
+      expect((q(el, 'pos-receipt-email') as HTMLButtonElement).disabled).toBe(false);
+      el.remove();
+    });
+
+    it('sends the invoice for Email and says so, or says why not', async () => {
+      svc.emailReceipt.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('This account has no email address on file'));
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-email').click();
+      await flush(el);
+      expect(svc.emailReceipt).toHaveBeenCalledWith('sale-9');
+      expect(q(el, 'pos-receipt-note').textContent).toContain('sent');
+      q(el, 'pos-receipt-email').click();
+      await flush(el);
+      // the words sit beside Email receipt, not in the page band
+      expect(q(el, 'pos-receipt-note').textContent).toContain('no email address');
+      expect(q(el, 'pos-complete').contains(q(el, 'pos-receipt-note'))).toBe(true);
+      el.remove();
+    });
+
+    it('draws Void and Return smaller and quieter than the receipt choices, with the contact line beside Email', async () => {
+      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      const print = q(el, 'pos-receipt-print');
+      for (const b of [q(el, 'pos-void'), [...q(el, 'pos-complete').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Return') as HTMLElement]) {
+        expect(b.className).toContain('text-xs');
+        expect(b.className).not.toContain('text-sm');
+        // a text button, not the same outlined box as Print and Email
+        // a small outlined secondary button, at least 36 pixels high, in the quieter text colour
+        expect(b.className).toContain('min-h-9');
+        expect(b.className).toContain('border-white/10');
+        expect(b.className).toContain('text-slate-400');
+        expect(b.className).not.toContain('underline');
+      }
+      expect(print.className).toContain('text-sm');
+      expect(q(el, 'pos-receipt-contact').textContent).toContain('contact on the account');
+      el.remove();
+      const walk = await mount(done({ invoice_id: 'inv-2', customer_id: null }));
+      expect(q(walk, 'pos-receipt-contact')).toBeNull();
+      walk.remove();
+    });
+
+    it('shows how it was paid on the order summary, with the change given', async () => {
+      const tenders = [{ id: 't1', sale_id: 's1', method: 'cash', amount_cents: 10000 }] as unknown as Sale['tenders'];
+      const el = await mount(done({ tenders, change_cents: 1350 }));
+      const text = q(el, 'pos-order-summary').textContent ?? '';
+      expect(text).toContain('Paid by cash');
+      expect(text).toContain('$100.00');
+      expect(text).toContain('Change given');
+      expect(text).toContain('$13.50');
+      el.remove();
+    });
+  });
+
+  it('keeps the header to one row from 900 pixels, with the sale number beside the title and short till and cashier words', async () => {
+    const el = await mount(sale());
+    const header = q(el, 'pos-header');
+    expect(header.className).toContain('min-[900px]:flex-nowrap');
+    expect(q(el, 'pos-title-row').textContent).toContain('S-1');
+    expect(q(el, 'pos-till-state').textContent?.trim()).toBe('Till open');
+    expect(q(el, 'pos-till-state').getAttribute('title')).toContain('$200.00');
+    expect(q(el, 'pos-cashier').textContent).not.toContain('Cashier');
+    el.remove();
+  });
+
+  it('shows the yard and register beneath New sale, and the till controls on the right', async () => {
+    const el = await mount(sale());
+    const header = q(el, 'pos-header');
+    expect(header.querySelector('h1')?.textContent?.trim()).toBe('New sale');
+    expect(q(el, 'pos-yard-register').textContent).toContain('REG-01');
+    expect(header.textContent).toContain('Close Till');
+    el.remove();
+  });
+
+  it('dims the Items card and numbers a collapsed Customer panel before the till opens', async () => {
+    svc.listRegisters.mockResolvedValue([REG_01]);
+    svc.currentTill.mockResolvedValue(null);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(q(el, 'pos-items').className).toContain('opacity-60');
+    expect(q(el, 'catalog-closed').textContent?.trim()).toBe('Open the till to start a sale');
+    expect(expanded(el, 'customer')).toBe('false');
+    expect(toggle(el, 'customer').textContent).toContain('1');
+    expect(toggle(el, 'customer').disabled).toBe(true);
+    el.remove();
   });
 });
 
@@ -730,7 +1258,7 @@ describe('the register and the sale when the cashier moves', () => {
     await settle(el);
     lateTill({ id: 'lk-till', register_id: 'REG-LK', cashier_id: 'c', status: 'open', opening_float_cents: 99900 });
     await settle(el);
-    expect(q(el, 'pos-till-state').textContent).toContain('$50.00');
+    expect(q(el, 'pos-till-state').getAttribute('title')).toContain('$50.00');
     expect(q(el, 'pos-register').textContent).toContain('REG-WK');
     el.remove();
   });
@@ -911,9 +1439,9 @@ describe('the register and the sale when the cashier moves', () => {
     newSale.click();
     await settle(el);
     expect(q(el, 'pos-header').textContent).toContain('open');
-    expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(true);
-    const ret = [...q(el, 'pos-panel-foot').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
-    expect(ret.disabled).toBe(true);
+    // the new open sale offers neither: they live on the completed sale's card
+    expect(q(el, 'pos-complete')).toBeNull();
+    expect(q(el, 'pos-void')).toBeNull();
     el.remove();
   });
 });
@@ -945,20 +1473,21 @@ describe('the counter before the till opens, and after a sale completes', () => 
 
   it('says the till must be open in the empty state', async () => {
     const el = await mountNoTill();
-    expect(q(el, 'pos-empty').textContent?.trim()).toBe('Open the till to start a sale');
+    expect(q(el, 'catalog-closed').textContent?.trim()).toBe('Open the till to start a sale');
     el.remove();
   });
 
-  it('locks and dims the search, quantity, Scan, customer find and Payment card with no till', async () => {
+  it('locks and dims the catalogue, customer find and Payment card with no till', async () => {
     const el = await mountNoTill();
-    for (const sel of ['#pos-search-input', '#pos-qty', '#pos-customer-search']) {
-      expect((el.querySelector(sel) as HTMLInputElement).disabled).toBe(true);
+    expect((el.querySelector('#pos-customer-search') as HTMLInputElement).disabled).toBe(true);
+    for (const id of ['catalog-search', 'catalog-qty', 'catalog-add']) {
+      expect((q(el, id) as HTMLInputElement).disabled).toBe(true);
     }
-    const scan = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Scan') as HTMLButtonElement;
-    expect(scan.disabled).toBe(true);
+    expect(q(el, 'pos-items').className).toContain('opacity-60');
     expect(q(el, 'panel-payment').className).toContain('opacity-50');
     expect(q(el, 'panel-customer').textContent).not.toContain('Open the till to start a sale');
-    expect((q(el, 'pos-void') as HTMLButtonElement).className).toContain('text-slate-400');
+    // Void and Return belong to a completed sale only: with no sale done, neither is offered
+    expect(q(el, 'pos-void')).toBeNull();
     el.remove();
   });
 
@@ -967,27 +1496,6 @@ describe('the counter before the till opens, and after a sale completes', () => 
     await (el as unknown as { _addItem(p: unknown, q: string): Promise<void> })._addItem(
       { product_id: 'p1', sku: 'SKU-1', description: 'Item 1', uom: 'EA', unit_price_cents: 500, in_stock: '9' }, '1');
     await el.updateComplete;
-    answered(el);
-    el.remove();
-  });
-
-  it('answers Enter on the search with no till', async () => {
-    const el = await mountNoTill();
-    const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-    input.value = 'SKU-1';
-    input.dispatchEvent(new Event('input'));
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await new Promise((r) => setTimeout(r, 0));
-    await el.updateComplete;
-    answered(el);
-    el.remove();
-  });
-
-  it('answers a scan with no till', async () => {
-    const el = await mountNoTill();
-    await (el as unknown as { _handleScan(b: string): Promise<void> })._handleScan('SKU-1');
-    await el.updateComplete;
-    await new Promise((r) => setTimeout(r, 0));
     answered(el);
     el.remove();
   });
@@ -1002,11 +1510,11 @@ describe('the counter before the till opens, and after a sale completes', () => 
 
   it('dims Void and Return as the locked tenders are, and shows the tender unselected with no till', async () => {
     const el = await mountNoTill();
-    for (const b of [q(el, 'pos-void'), q(el, 'pos-pay')]) {
-      expect(b.className).toContain('opacity-40');
-      expect(b.className).toContain('border-white/10');
-      expect(b.className).not.toContain('hover:');
-    }
+    expect(q(el, 'pos-void')).toBeNull();
+    const pay = q(el, 'pos-pay');
+    expect(pay.className).toContain('opacity-40');
+    expect(pay.className).toContain('border-white/10');
+    expect(pay.className).not.toContain('hover:');
     expect(q(el, 'tender-cash').className).not.toContain('border-gable-green');
     expect(q(el, 'tender-cash').getAttribute('aria-pressed')).toBe('false');
     expect(el.textContent?.split('Open the till to start a sale').length).toBe(2);
@@ -1038,11 +1546,11 @@ describe('the counter before the till opens, and after a sale completes', () => 
         await vi.advanceTimersByTimeAsync(5000);
         await el.updateComplete;
         expect(svc.startSale).toHaveBeenCalledTimes(1);
-        expect(el.querySelector('[role="status"]')?.textContent).toContain('Sale POS-000001 complete');
-        expect(el.querySelector('[role="status"]')?.textContent).toContain('CHANGE DUE $13.50');
+        expect(q(el, 'pos-complete').textContent).toContain('POS-000001');
+        expect(q(el, 'pos-complete').textContent).toContain('change $13.50');
         expect(q(el, 'pos-header').textContent).toContain('completed');
         expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(false);
-        const ret = [...q(el, 'pos-panel-foot').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
+        const ret = [...q(el, 'pos-complete').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
         expect(ret.disabled).toBe(false);
         ret.click();
         await el.updateComplete;
@@ -1054,20 +1562,32 @@ describe('the counter before the till opens, and after a sale completes', () => 
       }
     });
 
-    it('marks New Sale the one primary, lights Summary and locks Change, purchase order and job', async () => {
+    const toggle = (el: Element, key: string) => q(el, `panel-${key}-toggle`) as HTMLButtonElement;
+
+    it('makes the card\'s New sale the one primary, marks every step done and locks Change, purchase order and job', async () => {
       const el = await completeOne();
       const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
-      expect(newSale.className).toContain('bg-gable-green');
+      expect(newSale.className).not.toContain('bg-gable-green');
+      const cardNew = [...q(el, 'pos-complete').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New sale') as HTMLElement;
+      expect(cardNew.className).toContain('bg-gable-green');
       const closeTill = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Close Till') as HTMLElement;
       expect(closeTill.className).not.toContain('bg-gable-green');
-      expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('current');
-      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Change') as HTMLButtonElement | undefined;
+      expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('done');
+      expect(q(el, 'progress-summary').textContent).toContain('\u2713');
+      expect(toggle(el, 'summary').textContent).toContain('\u2713');
+      // a finished sale's done lines show the check and the value, no Change
+      for (const key of ['customer', 'payment', 'summary']) {
+        expect(toggle(el, key).textContent).not.toContain('Change');
+        expect(toggle(el, key).disabled).toBe(true);
+      }
+      // the clear control only exists once a customer is named; a walk in's own button is the choice
+      const change = [...q(el, 'pos-customer').querySelectorAll('button:not([data-testid="pos-walk-in"])')].find((x) => x.textContent?.trim() === 'Walk-in sale') as HTMLButtonElement | undefined;
       if (change) expect(change.disabled).toBe(true);
       const po = el.querySelector('#pos-po') as HTMLInputElement | null;
       if (po) expect(po.disabled).toBe(true);
       const job = el.querySelector('#pos-job') as HTMLSelectElement | null;
       if (job) expect(job.disabled).toBe(true);
-      expect(q(el, 'pos-panel-foot').className).toContain('xl:static');
+      expect(q(el, 'pos-complete')).toBeTruthy();
       el.remove();
     });
 
@@ -1127,7 +1647,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       el.remove();
     });
 
-    it('locks Change, purchase order and job on a completed account sale', async () => {
+    it('locks the walk-in control, purchase order and job on a completed account sale', async () => {
       const withJob = { ...account, jobs: [{ id: 'j1', name: 'Back patio' }] } as unknown as CounterCustomer;
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', customer_id: 'cu1' }));
       const el = await mount(sale({ customer_id: 'cu1' }));
@@ -1137,7 +1657,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
       await el.updateComplete;
-      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Change') as HTMLButtonElement;
+      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Walk-in sale') as HTMLButtonElement;
       expect(change.disabled).toBe(true);
       expect(change.title).toBe('Start a new sale to change the customer');
       expect((el.querySelector('#pos-po') as HTMLInputElement).disabled).toBe(true);
@@ -1195,7 +1715,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       expect(svc.addItem).toHaveBeenCalledWith('s2', 'p-z', '1', 'EA');
       expect(q(el, 'pos-header').textContent).toContain('S-2');
       expect(q(el, 'pos-lines').textContent).toContain('Item z');
-      expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(true);
+      expect(q(el, 'pos-void')).toBeNull();
       el.remove();
     });
 
