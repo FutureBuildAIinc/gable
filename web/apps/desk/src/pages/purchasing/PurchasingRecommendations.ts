@@ -44,7 +44,8 @@ export class GablePurchasingRecommendations extends LitElement {
     }
 
     private get filteredItems(): PurchaseRecommendation[] {
-        return this.summary?.items.filter(
+        // The route answers `items: null` when nothing needs reordering.
+        return this.summary?.items?.filter(
             (item) => this.filter === 'ALL' || item.urgency === this.filter
         ) ?? [];
     }
