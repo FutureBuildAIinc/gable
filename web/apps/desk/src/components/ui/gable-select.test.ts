@@ -169,6 +169,14 @@ describe('gable-select', () => {
     expect(list.style.bottom).toBe(`${window.innerHeight - 680}px`)
   })
 
+  it('reads as required and as invalid when the page marks it', async () => {
+    const el = await mountSelect({ required: true } as Partial<GableSelect>)
+    expect(buttonOf(el).getAttribute('aria-required')).toBe('true')
+    await update(el, { invalid: true } as Partial<GableSelect>)
+    expect(buttonOf(el).getAttribute('aria-invalid')).toBe('true')
+    expect(buttonOf(el).className).toContain('border-safety-red')
+  })
+
   it('Escape closes without choosing and returns focus to the button', async () => {
     const el = await mountSelect()
     const onChange = vi.fn()
