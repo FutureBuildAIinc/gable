@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -461,7 +462,75 @@ func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 	if hasBase {
 		out.BaseURL = &baseURL
 	}
+	if err := s.readAITest(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// aiTestRow is the stored last test of the saved key.
+type aiTestRow struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// readAITest fills the document's test status from the stored last test:
+// "none" when no key is saved for the chosen provider, "untested" when one is
+// saved and was never tested, else the stored result.
+func (s *Service) readAITest(ctx context.Context, out *AISettings) error {
+	out.TestStatus, out.TestMessage = AITestNone, ""
+	if !out.Configured {
+		return nil
+	}
+	out.TestStatus = AITestUntested
+	raw, ok, err := s.repo.ReadSetting(ctx, settingAITest)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	var row aiTestRow
+	if json.Unmarshal([]byte(raw), &row) != nil {
+		return nil
+	}
+	switch row.Status {
+	case AITestPassed, AITestRefused, AITestFailed:
+		out.TestStatus, out.TestMessage = row.Status, row.Message
+	}
+	return nil
+}
+
+// runAITest calls the provider once and stores the result for the settings
+// document. A provider failure is an answer, not an error; only a storage
+// failure is returned. The message is the provider's refusal in words, never
+// the key.
+func (s *Service) runAITest(ctx context.Context) (TestResult, error) {
+	res := TestResult{OK: true, Status: AITestPassed, Message: "The provider answered."}
+	switch {
+	case s.aiTester == nil:
+		res = TestResult{Status: AITestFailed, Message: "AI is off: the AI client is not available on this server"}
+	default:
+		if err := s.aiTester.TestConnection(ctx); err != nil {
+			if words, refused := ai.RefusedMessage(err); refused {
+				res = TestResult{Status: AITestRefused, Message: words}
+			} else {
+				res = TestResult{Status: AITestFailed, Message: err.Error()}
+			}
+		}
+	}
+	if s.aiTester == nil || s.repo == nil {
+		return res, nil
+	}
+	stored := aiTestRow{Status: res.Status, Message: res.Message}
+	if res.Status == AITestPassed {
+		stored.Message = ""
+	}
+	row, err := json.Marshal(stored)
+	if err != nil {
+		return res, err
+	}
+	return res, s.repo.WriteSetting(ctx, settingAITest, string(row))
 }
 
 // SaveAISettings writes the OpenRouter key and, when the body names it, the
@@ -574,19 +643,27 @@ func (s *Service) SaveAISettingsFull(ctx context.Context, in AISave, pre Precond
 		return nil, err
 	}
 	s.invalidateAI()
+	// Saving a key tests it with the provider (N7), so the document the
+	// admin reads says whether the key works, not only that one is saved. The
+	// test is the provider's answer, never a reason to refuse the save.
+	if out.Configured && s.aiTester != nil {
+		if _, terr := s.runAITest(ctx); terr != nil {
+			return nil, terr
+		}
+		return s.GetAISettings(ctx)
+	}
 	return out, nil
 }
 
-// TestAIConnection runs the test connection action. A provider failure is an
-// answer (ok false and its words), not an error.
+// TestAIConnection runs the test connection action and stores its result as
+// the last test of the saved key. A provider failure is an answer (ok false
+// and its words), not an error.
 func (s *Service) TestAIConnection(ctx context.Context) TestResult {
-	if s.aiTester == nil {
-		return TestResult{OK: false, Message: "AI is off: the AI client is not available on this server"}
+	res, err := s.runAITest(ctx)
+	if err != nil {
+		slog.Error("failed to store the AI test result", "error", err)
 	}
-	if err := s.aiTester.TestConnection(ctx); err != nil {
-		return TestResult{OK: false, Message: err.Error()}
-	}
-	return TestResult{OK: true, Message: "The provider answered."}
+	return res
 }
 
 // SealLegacySettings seals any AI key row still stored in plain text, the
@@ -635,7 +712,7 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		if err := s.repo.DeleteSetting(ctx, settingAIBaseURL); err != nil {
 			return err
 		}
-		for _, k := range []string{ai.SettingAnthropicKey, ai.SettingProvider, ai.SettingAnthropicModel} {
+		for _, k := range []string{ai.SettingAnthropicKey, ai.SettingProvider, ai.SettingAnthropicModel, settingAITest} {
 			if err := s.repo.DeleteSetting(ctx, k); err != nil {
 				return err
 			}

@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -351,15 +352,25 @@ func (h *harness) startServer(t *testing.T, dbURL, buildDir string, extraEnv map
 		t.Fatalf("create server log: %v", err)
 	}
 
+	// Saving an AI key tests it with the provider (item 130, N7), so the
+	// server's provider is a local stand-in that answers every call: the
+	// goldens never reach the network and never depend on its answer.
+	aiStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"stub","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	t.Cleanup(aiStub.Close)
+
 	cmd := exec.Command(filepath.Join(buildDir, "core"), "serve")
 	cmd.Dir = srvDir
 	env := map[string]string{
-		"PORT":           strconv.Itoa(port),
-		"DATABASE_URL":   dbURL,
-		"AUTH_MODE":      "dev",
-		"LOG_LEVEL":      "ERROR",
-		"EDI_OUTPUT_DIR": filepath.Join(srvDir, "edi_out"),
-		"TZ":             "Etc/UTC",
+		"OPENROUTER_BASE_URL": aiStub.URL,
+		"PORT":                strconv.Itoa(port),
+		"DATABASE_URL":        dbURL,
+		"AUTH_MODE":           "dev",
+		"LOG_LEVEL":           "ERROR",
+		"EDI_OUTPUT_DIR":      filepath.Join(srvDir, "edi_out"),
+		"TZ":                  "Etc/UTC",
 		// The harness client is the loopback peer and rotates
 		// X-Forwarded-For (see do()), so loopback is its trusted proxy.
 		"TRUSTED_PROXIES": "127.0.0.1/32,::1/128",

@@ -18,6 +18,7 @@
         "provider": "openrouter",
         "revision": 1,
         "source": "none",
+        "test_status": "none",
         "vault_present": false
       }
     }
@@ -172,6 +173,7 @@
         "provider": "openrouter",
         "revision": 1,
         "source": "none",
+        "test_status": "none",
         "vault_present": false
       }
     }
@@ -201,6 +203,7 @@
         "provider": "openrouter",
         "revision": 2,
         "source": "admin",
+        "test_status": "passed",
         "vault_present": false
       }
     }
@@ -224,6 +227,7 @@
         "provider": "openrouter",
         "revision": 2,
         "source": "admin",
+        "test_status": "passed",
         "vault_present": false
       }
     }
@@ -284,6 +288,7 @@
         "provider": "openrouter",
         "revision": 3,
         "source": "none",
+        "test_status": "none",
         "vault_present": false
       }
     }

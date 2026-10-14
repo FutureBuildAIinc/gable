@@ -79,8 +79,9 @@ func TestWire_SaveTakesEffectAtOnce(t *testing.T) {
 	if r.body["ok"] != true {
 		t.Fatalf("test right after the save = %s", r.raw)
 	}
-	if n := atomic.LoadInt32(&hits); n != 1 {
-		t.Errorf("the Anthropic server received %d calls, want 1", n)
+	// The save tested the key itself (N7) and the press tested it again.
+	if n := atomic.LoadInt32(&hits); n != 2 {
+		t.Errorf("the Anthropic server received %d calls, want 2", n)
 	}
 
 	// A delete takes effect at once too: the old key is not used again.
@@ -93,7 +94,7 @@ func TestWire_SaveTakesEffectAtOnce(t *testing.T) {
 	if r.body["ok"] != false {
 		t.Errorf("test after delete = %s", r.raw)
 	}
-	if n := atomic.LoadInt32(&hits); n != 1 {
+	if n := atomic.LoadInt32(&hits); n != 2 {
 		t.Errorf("a deleted key still reached the server (%d calls)", n)
 	}
 }
