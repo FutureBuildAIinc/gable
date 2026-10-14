@@ -6,8 +6,6 @@ package document
 import (
 	"context"
 	"fmt"
-	_ "image/jpeg" // registers the decoder the logo check uses
-	_ "image/png"  // registers the decoder the logo check uses
 	"log/slog"
 	"strings"
 	"time"

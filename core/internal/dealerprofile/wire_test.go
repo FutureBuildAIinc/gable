@@ -12,9 +12,13 @@ package dealerprofile_test
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
@@ -279,6 +283,53 @@ func TestDealerProfileLogoRefusals(t *testing.T) {
 	}
 	if r := put(good); r.status != http.StatusOK {
 		t.Errorf("a clean image: %d %s", r.status, r.raw)
+	}
+
+	// An interlaced PNG: Go cannot encode one, so the header's interlace
+	// byte is patched and the chunk's CRC fixed, which still decodes.
+	inter := append([]byte{}, good...)
+	inter[28] = 1
+	binary.BigEndian.PutUint32(inter[29:33], crc32.ChecksumIEEE(inter[12:29]))
+	if r := put(inter); r.status != http.StatusBadRequest {
+		t.Errorf("interlaced png: %d %s", r.status, r.raw)
+	}
+}
+
+// progressiveJPEG is a 24 by 16 progressive JPEG (ten scans), which Go's
+// encoder cannot write.
+const progressiveJPEG = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wgARCAAQABgDASIAAhEBAxEB/8QAFwAAAwEAAAAAAAAAAAAAAAAAAAUGBP/EABYBAQEBAAAAAAAAAAAAAAAAAAQCBf/aAAwDAQACEAMQAAABldzlkQ6Eqyt3/8QAGRAAAgMBAAAAAAAAAAAAAAAAAAIBAwQR/9oACAEBAAEFAloFzi5xKBM5FPD/xAAYEQACAwAAAAAAAAAAAAAAAAAABAEDEv/aAAgBAwEBPwFZ8rfnJ//EABsRAAIBBQAAAAAAAAAAAAAAAAACAQMEERMh/9oACAECAQE/Aab7Bnt1nDT0/8QAFhAAAwAAAAAAAAAAAAAAAAAAACAx/9oACAEBAAY/Alh//8QAFxABAQEBAAAAAAAAAAAAAAAAAGEBIf/aAAgBAQABPyGaSaKDLnrX/9oADAMBAAIAAwAAABCnD//EABcRAQEBAQAAAAAAAAAAAAAAAAEAESH/2gAIAQMBAT8Qwzs0I3//xAAYEQEAAwEAAAAAAAAAAAAAAAABACExsf/aAAgBAgEBPxCBVXbS8Gf/xAAZEAEBAQEBAQAAAAAAAAAAAAARAMEBQXH/2gAIAQEAAT8QQqGZTMxmYzdLnweeX//Z"
+
+// TestDealerProfileLogoJPEGEnd: a JPEG is whole only when the EOI that
+// follows its last scan is its last two bytes. A payload followed by FF D9
+// is not (the end marker is no proof of the end), a progressive JPEG with
+// several scans still is.
+func TestDealerProfileLogoJPEGEnd(t *testing.T) {
+	f := newFixture(t, 0)
+	put := func(b []byte) resp {
+		return f.do("PUT", "/api/v1/dealer-profile/logo", bytes.NewReader(b), "Content-Type", "image/jpeg",
+			"If-Match", `"`+strconv.FormatInt(f.revision(), 10)+`"`)
+	}
+
+	var plain bytes.Buffer
+	if err := jpeg.Encode(&plain, image.NewRGBA(image.Rect(0, 0, 16, 16)), nil); err != nil {
+		t.Fatal(err)
+	}
+	polyglot := append(append(append([]byte{}, plain.Bytes()...), []byte("PK\x03\x04 <script>x</script> payload")...), 0xff, 0xd9)
+	if r := put(polyglot); r.status != http.StatusBadRequest {
+		t.Errorf("jpeg, payload, FF D9: %d %s", r.status, r.raw)
+	}
+	if r := put(append(append([]byte{}, plain.Bytes()...), 0x00)); r.status != http.StatusBadRequest {
+		t.Errorf("jpeg and one byte: %d %s", r.status, r.raw)
+	}
+	prog, err := base64.StdEncoding.DecodeString(progressiveJPEG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := put(prog); r.status != http.StatusOK {
+		t.Errorf("a progressive jpeg: %d %s", r.status, r.raw)
+	}
+	if r := put(plain.Bytes()); r.status != http.StatusOK {
+		t.Errorf("a clean jpeg: %d %s", r.status, r.raw)
 	}
 }
 

@@ -6,8 +6,6 @@ package dealerprofile
 import (
 	"encoding/json"
 	"errors"
-	_ "image/jpeg" // registers the decoder the logo check uses
-	_ "image/png"  // registers the decoder the logo check uses
 	"io"
 	"net/http"
 	"net/mail"

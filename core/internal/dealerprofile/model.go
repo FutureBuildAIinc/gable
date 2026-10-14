@@ -87,12 +87,42 @@ func (e *LogoSizeError) Error() string {
 		e.Width, e.Height, MaxLogoSide, MaxLogoPixels)
 }
 
+// logoFormat names the format a logo's first bytes declare, "png" or "jpeg",
+// or "" for anything else. The logo accepts only those two, so they are
+// decoded by their own packages and never through the image registry, whose
+// other decoders (WebP, TIFF, BMP, GIF) a logo has no business reaching.
+func logoFormat(raw []byte) string {
+	switch {
+	case bytes.HasPrefix(raw, []byte("\x89PNG\r\n\x1a\n")):
+		return "png"
+	case bytes.HasPrefix(raw, []byte{0xff, 0xd8, 0xff}):
+		return "jpeg"
+	}
+	return ""
+}
+
+// logoConfig reads a logo's header with the decoder of its sniffed format.
+func logoConfig(raw []byte) (image.Config, string, error) {
+	format := logoFormat(raw)
+	var cfg image.Config
+	var err error
+	switch format {
+	case "png":
+		cfg, err = png.DecodeConfig(bytes.NewReader(raw))
+	case "jpeg":
+		cfg, err = jpeg.DecodeConfig(bytes.NewReader(raw))
+	default:
+		err = errors.New("the logo must be a png or a jpeg image")
+	}
+	return cfg, format, err
+}
+
 // LogoEmbeddable reports whether the form renderer can embed raw: a PNG or
 // JPEG within the dimension cap, and for a PNG not 16 bit and not interlaced
 // (the PDF writer refuses both, which would fail every form). Only headers
 // are read.
 func LogoEmbeddable(raw []byte) bool {
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	cfg, format, err := logoConfig(raw)
 	if err != nil {
 		return false
 	}
@@ -112,9 +142,10 @@ func LogoEmbeddable(raw []byte) bool {
 // CheckLogoImage accepts raw only when it is one whole image of the named
 // format ("png" or "jpeg") within the dimension cap: the header is read and
 // the size checked before any pixel is decoded, then the whole image is
-// decoded, and bytes after the image's end are refused.
+// decoded, and bytes after the image's end are refused. The stored bytes are
+// the uploaded ones; nothing is re-encoded.
 func CheckLogoImage(raw []byte, format string) error {
-	cfg, got, err := image.DecodeConfig(bytes.NewReader(raw))
+	cfg, got, err := logoConfig(raw)
 	if err != nil {
 		return err
 	}
@@ -130,8 +161,8 @@ func CheckLogoImage(raw []byte, format string) error {
 	rd := bytes.NewReader(raw)
 	switch format {
 	case "png":
-		// png.Decode on the bare reader, not image.Decode, which buffers
-		// ahead and would hide what follows the image.
+		// The decoder reads the bare reader, so what follows the image
+		// stays unread and shows as bytes left.
 		if _, err := png.Decode(rd); err != nil {
 			return err
 		}
@@ -142,10 +173,79 @@ func CheckLogoImage(raw []byte, format string) error {
 		if _, err := jpeg.Decode(rd); err != nil {
 			return err
 		}
-		// The JPEG decoder reads ahead, so the end marker is the check.
-		if !bytes.HasSuffix(raw, []byte{0xff, 0xd9}) {
+		// The JPEG decoder reads ahead, so the image's own end is found by
+		// walking its segments, not by looking for FF D9 at the tail.
+		if end, ok := jpegEnd(raw); !ok || end != len(raw) {
 			return errors.New("bytes follow the end of the image")
 		}
 	}
 	return nil
+}
+
+// jpegEnd walks a JPEG's segments and returns the offset just past the EOI
+// that follows its last scan. It reads marker segments by their lengths up to
+// each SOS, then the entropy coded data to the next marker that is not a
+// stuffed FF 00 or a restart marker, and continues through further scans
+// (progressive files have many). ok is false for a structure it cannot walk.
+func jpegEnd(raw []byte) (end int, ok bool) {
+	n := len(raw)
+	if n < 4 || raw[0] != 0xff || raw[1] != 0xd8 {
+		return 0, false
+	}
+	i := 2
+	for i < n {
+		// A marker: FF, any fill FFs, then the marker code.
+		if raw[i] != 0xff {
+			return 0, false
+		}
+		for i < n && raw[i] == 0xff {
+			i++
+		}
+		if i >= n {
+			return 0, false
+		}
+		m := raw[i]
+		i++
+		switch {
+		case m == 0xd9:
+			return i, true
+		case m == 0x01 || (m >= 0xd0 && m <= 0xd8):
+			continue // standalone markers carry no length
+		case m == 0x00:
+			return 0, false
+		}
+		if i+2 > n {
+			return 0, false
+		}
+		l := int(raw[i])<<8 | int(raw[i+1])
+		if l < 2 || i+l > n {
+			return 0, false
+		}
+		i += l
+		if m != 0xda {
+			continue
+		}
+		// Entropy coded data: runs to a marker that is neither a stuffed
+		// zero nor a restart marker.
+		for i < n {
+			if raw[i] != 0xff {
+				i++
+				continue
+			}
+			if i+1 >= n {
+				return 0, false
+			}
+			c := raw[i+1]
+			if c == 0x00 || (c >= 0xd0 && c <= 0xd7) {
+				i += 2
+				continue
+			}
+			if c == 0xff {
+				i++ // fill byte before a marker
+				continue
+			}
+			break // a real marker at i
+		}
+	}
+	return 0, false
 }
