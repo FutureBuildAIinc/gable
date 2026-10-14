@@ -427,8 +427,8 @@ House style, one consistent set:
 - Flat illustration with gentle shading: two or three tones per material, a soft ground shadow, no outline heavier than 2 units.
 - Transparent background: no full canvas rectangle. The object's own colours carry it (warm natural wood, neutral greys for metal, one accent colour for a tool body).
 - One clear silhouette that reads small, the obvious angle, the whole object inside the canvas with at least 16 units of margin.
-- No text, except one invented brand word where a label is natural (a box, a bag, a can, a tool body). Never a real brand or logo.
-- Use only svg, g, path, rect, circle, ellipse, line, polyline, polygon, defs, linearGradient, radialGradient, stop, clipPath, text and tspan, with plain presentation attributes (fill, stroke, opacity and the like). A gradient has at most two stops.
+- No words, labels, brand names or logos anywhere on the product or the canvas: no lettering, no numbers, no marks that read as a brand.
+- Use only svg, g, path, rect, circle, ellipse, line, polyline, polygon, defs, linearGradient, radialGradient, stop and clipPath, with plain presentation attributes (fill, stroke, opacity and the like). A gradient has at most two stops.
 - Never use style, script, image, use, filter, animation, links or any external reference.
 - Keep it under 12 KB.`
 
