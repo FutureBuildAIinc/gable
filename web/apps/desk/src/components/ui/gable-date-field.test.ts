@@ -14,6 +14,7 @@ import type { GableDateField } from './gable-date-field'
 import './gable-date-field'
 import { setDealerLocale } from '../../lib/dates'
 import { mount, update, q } from '../../test/dom'
+import { placePopover } from './gable-date-field'
 
 const TAG = 'gable-date-field'
 
@@ -234,5 +235,33 @@ describe('min and max', () => {
     expect(focused?.textContent).toBe('10')
     await key(el, 'Enter')
     expect(el.value).toBe('2026-10-10')
+  })
+})
+
+describe('the popover stays inside the screen', () => {
+  it('placePopover clamps sideways and flips upward when the space below is short', () => {
+    // Room below: under the field, at the field's left.
+    expect(placePopover({ left: 100, bottom: 200, top: 176 } as DOMRect, 1024, 768))
+      .toEqual({ top: 204, left: 100 })
+    // At the right edge: clamped to the viewport.
+    expect(placePopover({ left: 1000, bottom: 200, top: 176 } as DOMRect, 1024, 768).left)
+      .toBe(1024 - 264)
+    // At the left edge: clamped to the margin.
+    expect(placePopover({ left: -30, bottom: 200, top: 176 } as DOMRect, 1024, 768).left).toBe(8)
+    // Near the bottom with more room above: flipped over the field.
+    expect(placePopover({ left: 100, bottom: 740, top: 716 } as DOMRect, 1024, 768))
+      .toEqual({ top: 716 - 320 - 4, left: 100 })
+    // Near the bottom but no room above either: below, at the bottom clamp.
+    const p = placePopover({ left: 100, bottom: 740, top: 420 } as DOMRect, 1024, 768)
+    expect(p.top).toBe(768 - 320 - 8)
+  })
+
+  it('the open popover is fixed at the field, not clipped by a modal', async () => {
+    const el = await mount<GableDateField>(TAG, { value: '2026-10-14' })
+    await openCalendar(el)
+    const pop = q<HTMLElement>(el, '[role="dialog"]')
+    expect(pop.style.position).toBe('fixed')
+    expect(pop.style.top).toBe('4px')
+    expect(pop.style.left).toBe('8px')
   })
 })
