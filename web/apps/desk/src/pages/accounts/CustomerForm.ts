@@ -7,7 +7,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { creditLimitInputText, customerRequestFromCustomer, parseCreditLimitCents } from '../../services/CustomerService.ts';
 import { CUSTOMER_TIERS } from '../../types/customer.ts';
 import type { Customer, CustomerRequest, CustomerTier, PaymentTermsRecord } from '../../types/customer.ts';
-import { BUTTON_PRIMARY, BUTTON_QUIET, INPUT_CLASS, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
+import { BUTTON_PRIMARY, BUTTON_QUIET, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
 
 /**
  * The customer header form, for create (no `customer`) and edit. It builds the whole header

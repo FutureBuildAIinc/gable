@@ -12,7 +12,6 @@ import { CustomerService } from '../../services/CustomerService.ts';
 import { apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { CUSTOMER_TIERS } from '../../types/customer.ts';
 import type { Customer, CustomerRequest, CustomerTier, PaymentTermsRecord } from '../../types/customer.ts';
-import { INPUT_CLASS } from './formFields.ts';
 import { Search, DollarSign, Building2, User, Plus } from 'lucide';
 import './CustomerForm.ts';
 

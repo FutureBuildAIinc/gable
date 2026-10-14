@@ -10,7 +10,7 @@ import { CustomerService, creditLimitInputText, parseCreditLimitCents } from '..
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { CONTACT_ROLES } from '../../types/customer.ts';
 import type { Contact, ContactRequest, ContactRole } from '../../types/customer.ts';
-import { BUTTON_PRIMARY, BUTTON_QUIET, INPUT_CLASS, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
+import { BUTTON_PRIMARY, BUTTON_QUIET, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
 import { confirmDialog } from '../../components/ui/app-dialog.ts';
 
 interface ContactDraft {

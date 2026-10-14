@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { describe, it, expect, vi } from 'vitest'
-import { mount, update, q, flush } from '../../test/dom.ts'
+import { mount, update, q } from '../../test/dom.ts'
 import type { GableSelect, GableSelectOption } from './gable-select.ts'
 import './gable-select.ts'
 
