@@ -125,13 +125,13 @@ export class GableCustomerForm extends LitElement {
                     ${labeled(
                         id('tier'),
                         'Tier',
-                        html`<gable-select id=${id('tier')} .value=${this.tier} .options=${CUSTOMER_TIERS.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))} @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier; }}></gable-select>`,
+                        html`<gable-select id=${id('tier')} label="Tier" .value=${this.tier} .options=${CUSTOMER_TIERS.map(t => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))} @change=${(e: Event) => { this.tier = (e.target as HTMLSelectElement).value as CustomerTier; }}></gable-select>`,
                         err.tier,
                     )}
                     ${labeled(
                         id('terms'),
                         'Payment terms',
-                        html`<gable-select id=${id('terms')} .value=${this.termsId} .options=${this.termOptions.map(o => ({ value: o.id, label: o.label }))} @change=${(e: Event) => { this.termsId = (e.target as HTMLSelectElement).value; }}></gable-select>`,
+                        html`<gable-select id=${id('terms')} label="Payment terms" .value=${this.termsId} .options=${this.termOptions.map(o => ({ value: o.id, label: o.label }))} @change=${(e: Event) => { this.termsId = (e.target as HTMLSelectElement).value; }}></gable-select>`,
                         err.payment_terms_id,
                     )}
                     ${labeled(

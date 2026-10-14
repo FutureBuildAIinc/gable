@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { pickOption } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -158,7 +159,7 @@ test.describe('Delivery on the converted contract', () => {
     // The driver app: pick the driver, open the route, complete the stop with
     // a recipient name (the POD the delivered status requires).
     await page.goto('/driver');
-    await page.getByRole('combobox').selectOption({ label: driverName });
+    await pickOption(page.locator('gable-driver-route-list gable-select'), driverName);
     const routeCard = page.locator('gable-driver-route-list .space-y-3 > div', { hasText: route.vehicle_name }).first();
     await expect(routeCard).toBeVisible();
     await routeCard.click();

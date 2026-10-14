@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type Page } from '@playwright/test';
+import { answerAppDialog } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -18,9 +19,6 @@ const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
 
 async function signIn(page: Page, name: string) {
-  // The desk guards destructive admin acts with native confirm() dialogs;
-  // accept them so the request behind each click actually fires.
-  page.on('dialog', (d) => d.accept());
   await page.goto('/');
   await page.getByLabel('Display name').fill(name);
   const catalog = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/apps' && r.ok());
@@ -58,6 +56,7 @@ test.describe('Tech admin flow on the new contract', () => {
       (r) => r.request().method() === 'DELETE' && r.url().includes('/api/v1/admin/keys/'),
     );
     await row.getByTitle('Revoke Key').click();
+    await answerAppDialog(page, 'Revoke key');
     expect((await revoked).status()).toBe(204);
     await expect(row).toContainText('Revoked', { ignoreCase: true });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-key-revoked.png') });
@@ -82,6 +81,7 @@ test.describe('Tech admin flow on the new contract', () => {
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-ai-saved.png') });
 
     await page.getByRole('button', { name: 'Remove' }).click();
+    await answerAppDialog(page, 'Remove key');
     await expect(page.getByText('AI Features Inactive')).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-ai-removed.png') });
   });
