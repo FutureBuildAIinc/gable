@@ -9,6 +9,119 @@ Short scripts a person can follow on the demo seed to see each MUST row of the
 [parity matrix](LBM-PARITY-MATRIX.md) working across more than one yard. Each item of the matrix's plan adds its
 walk here when it merges; a row is not done until its walk passes.
 
+## The Gable Building Supply demo
+
+A guided walk of the whole demo, one person at a time, for a visitor who has never seen Gable.
+
+### Start it
+
+From the repository root, one command:
+
+```
+DEMO_SEED_IMPORT=1 PAYMENT_VAULT_KEY=$(openssl rand -hex 32) make up
+```
+
+Then open <http://127.0.0.1:8080>. It builds and starts Postgres, migrates and seeds the demo dealer with its larger
+invented catalogue and an invented trading history through today, and serves the API, the worker and the web app,
+waiting until all are healthy. `make down` removes it and its data. Where ports 8080 or 5434 are taken, move them:
+`GABLE_WEB_PORT=18080 GABLE_PG_PORT=15434`, and give the stack its own name with `STACK_PROJECT` and
+`GABLE_PG_CONTAINER` (the same settings on `make down`).
+
+`PAYMENT_VAULT_KEY` seals the keys an administrator enters in Tech Admin. The command above makes a fresh one for the
+run and writes it nowhere. Without a vault key no AI key can be saved, and every AI feature says plainly that AI is off.
+
+### Turn on AI (optional)
+
+The walk runs without AI: a pasted material list, a text file or a spreadsheet is read without it. To turn it on:
+
+1. Sign in as Morgan Hale, open Tech Admin from the front door (or go to `/admin`), then the AI Settings tab.
+2. Choose "Anthropic (native)" as the provider, paste the Anthropic API key into the "Anthropic API key" field and
+   press "Save provider".
+3. Press "Test connection": it answers "Connection ok". The material list intake now also reads photos and PDFs.
+
+The AI key is kept for this run only; after a restart, paste it again in Tech Admin. To keep it across runs instead,
+start every run with the same 64 hex character `PAYMENT_VAULT_KEY` (`docs/modules/tech-admin.md`).
+
+### The dealer
+
+Gable Building Supply is an invented building supply dealer with three yards: Kelowna Main Yard (`KEL-MAIN`), West
+Kelowna Satellite (`WK`) and Lake Country Outpost (`LK`). Each yard has its own register, stock and people. The seed
+carries about 900 products, 160 contractor and homeowner accounts and 30 vendors.
+
+### Signing in
+
+The front door shows one card per person. A card signs in as that person: the role decides the apps the door offers,
+and the desk opens on the person's own yard. This is the local demo (`AUTH_MODE=dev`): the cards shape what the screens
+offer and the server enforces no role; a real dealer signs in through its identity provider.
+
+| Person | Role | Yard | In the walk |
+|---|---|---|---|
+| Morgan Hale | Owner | Kelowna Main Yard | stock across yards, the manager's view |
+| Robin Diaz | Finance | Kelowna Main Yard | AR and a statement |
+| Avery Brooks | Sales | Kelowna Main Yard | a quote from a material list |
+| Jordan Pike | Cashier | Kelowna Main Yard | a counter sale on account |
+| Casey Lin | Purchasing | Kelowna Main Yard | receiving a purchase order |
+| Drew Patel | Cashier | Lake Country Outpost | a sale at a second yard |
+| Sam Ortiz, Taylor Reed, Alex Moreno | Warehouse, Sales (West Kelowna), Driver | | |
+
+### The walk
+
+1. **Sign in.** The door reads "Sign in to Gable Building Supply" with nine cards. Pick Jordan Pike: the door offers
+   the desk and Point of Sale only, and the header names Jordan Pike, Cashier.
+2. **A counter sale on account (Jordan Pike).** Open Point of Sale: the Counter opens on Kelowna Main Yard's register,
+   `REG-01`, with the till closed: nothing can be rung until it opens. Open Till with a float of $200.00: the till's
+   sale opens, `POS-000001`. In the Customer panel find "Kelbrook": Kelbrook Construction shows its credit available and
+   its open balance; enter a purchase order (`KB-2219`) and pick the job Glenmore Lofts. Type a quantity of 12, search
+   `LUM-248-PREM` (the result shows the stock on hand at this yard) and press Enter: twelve 2x4x8 SPF Premium at the
+   customer's price. Then 4 of `OSB-12` (7/16 OSB 4x8). Choose Charge to account and Pay: "Sale POS-000001 complete",
+   and the customer's credit available drops by the sale's total. The completed sale stays on screen, with Void and
+   Return, until New Sale. The sale posts an invoice to Kelbrook's account carrying the purchase order; Robin sees it in
+   step 7.
+3. **A quote from a material list (Avery Brooks).** Open Quotes and the Quote Builder. Pick the customer. Open "From a
+   material list", paste a list (for example `24 2x4x8 SPF`, `6 sheets 7/16 OSB`, `10 boxes 3 in deck screws`, `4
+   2x6x12 SPF`) and Read pasted list: each line comes back with the product it matched and how sure the reader is.
+   Accept confident lines puts them on the quote at the customer's prices (a Contractor account's 7/16 OSB at 16.575,
+   not the list's 19.50), exactly as a line added by hand; a line the reader is unsure of offers its alternatives. Save
+   draft: the saved quote says where its lines came from (Material list), shows the list as it was pasted, and maps
+   each line to its product. Mark it sent and Convert to Order: the order opens with the quote's lines and prices,
+   ready to confirm.
+4. **A sale at a second yard for a customer of the first (Drew Patel).** Sign in as Drew Patel: the Counter opens on Lake
+   Country Outpost's register, `REG-LK`. Open Till. Find "Big White": Big White Cabin Co, a Kelowna Main Yard account,
+   is found here too, with its standing (every customer is a dealer wide account that any yard may sell to). Sell 10 of
+   `LUM-248-PREM` on account (the stock shown is Lake Country's own) and Pay. The customer now trades at Lake Country as
+   well: its first document here linked it to the yard, and the link is audited.
+5. **Receiving a purchase order (Casey Lin).** Open Purchasing: the list shows each order's number, vendor, yard and
+   total. Open the newest order, at the top of the list: sent to Okanagan Hardware Distribution for Kelowna Main Yard,
+   with two lines of joist hangers (the seed draws its other orders at random, so the numbers differ from run to run).
+   Receive Items: the bins
+   offered are Kelowna Main Yard's only (`KEL-A` to `KEL-D`). Confirm Receipt: the order moves to Received and the stock
+   rises ("Items received into inventory").
+6. **Stock across yards (Morgan Hale).** Open Inventory and the product 2x4x8 SPF Premium, then its Stock & Locations
+   tab: Kelowna Main Yard's stock. Switch the yard in the header to West Kelowna Satellite, then to Lake Country Outpost:
+   the tab shows each yard's own stock.
+7. **AR and a statement (Robin Diaz).** Open Reporting and AR Aging: each Kelowna Main Yard customer's open balance by
+   age, with Kelbrook Construction carrying the counter's charge. Switch the yard in the header to Lake Country Outpost:
+   Big White Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
+   invoice and payment in the period with the running balance, and Print for the dealer's statement.
+8. **The manager's view (Morgan Hale).** Open the Dashboard: active orders, pending dispatch, outstanding AR (the
+   counter's account charges included), the revenue trend over the recent days, the top customers, the stock alerts
+   and the recent activity, with the order converted in step 3 on top. Today's revenue counts the money taken at the
+   yard today against yesterday's; the walk's sales went on account, so they show in outstanding AR instead.
+
+### Not in this demo
+
+- Real sign in (the cards are the local demo's), the desktop shells per role, and working offline.
+- AI unless an administrator enters an Anthropic key in Tech Admin, AI (and tests it there): with a key, the material
+  list intake also reads photos and PDFs; without one, pasted lists, text files and spreadsheets are read without AI and
+  every AI feature says plainly that AI is off.
+- Deposits and parked sales at the counter; changing the quantity of a line already on a sale (remove it and add it
+  again); a printed counter receipt.
+- One screen of every yard's stock or AR at once (steps 6 and 7 switch yards).
+- A void or a return of an earlier sale: the counter voids or returns the sale on its screen; there is no sale lookup
+  yet.
+- A job on a quote; product images.
+- Documents are in the seed's currency (USD), though the dealer is Canadian.
+
 ## Before any walk
 
 1. Start the whole stack: `make up` (Postgres, migrate and seed, `core serve`, `core worker` and the web image), then
