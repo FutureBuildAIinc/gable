@@ -4511,7 +4511,7 @@ export interface paths {
         };
         /**
          * The registers the caller may use
-         * @description The registers within the caller's reach, each with its branch's code and name, ordered by branch then name, in the list envelope: a caller with a branch in context (the header, or a branch bound key's pin) sees that branch's registers; a user with no header sees the branches of the user's grants; an administrator or owner with no header sees all. The counter opens on its yard's register.
+         * @description The registers within the caller's reach, each with its branch's code and name, ordered by branch then name, in the list envelope: a caller with a branch in context (the header, or a branch bound key's pin) sees that branch's registers; a user with no header sees the branches of the user's grants; an administrator or owner with no header sees all. A retired register (not active) is never listed. The counter opens on its yard's register.
          */
         get: operations["posRegisterList"];
         put?: never;
@@ -4532,7 +4532,7 @@ export interface paths {
         get?: never;
         /**
          * Name the sale's customer, purchase order and job
-         * @description Names who the sale is for. The customer is named before the first line (the lines price for the customer: 409 invalid_state_transition once a line exists and the customer would change); the purchase order and the job may change while the sale is open. A null customer_id makes the sale a walk-in sale again. The job must be an open job of the customer. The sale's revision moves; the response is the whole sale. A sale or customer that does not exist, or that the caller's branch context or wall hides, answers 404, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+         * @description Names who the sale is for. The customer is named before the first line (the lines price for the customer: 409 invalid_state_transition once a line exists and the customer would change); the purchase order and the job may change while the sale is open. A null customer_id makes the sale a walk-in sale again. The job must be an open job of the customer. The sale's revision moves; the response is the whole sale. A sale that does not exist, or that the caller's branch context or wall hides, answers 404, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name. A user names any customer whatever the user's yard or grants; a customer that does not exist or is inactive, or that a branch bound key's pin does not reach, answers 404.
          */
         put: operations["posTransactionCustomer"];
         post?: never;
