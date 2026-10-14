@@ -77,14 +77,25 @@ function momentFormatter(): Intl.DateTimeFormat {
     return new Intl.DateTimeFormat(dealerLocale, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
-// A business date (YYYY-MM-DD, no time zone) rendered in the dealer's locale.
-// Built from its parts so a west-of-UTC machine never shows the day before;
-// anything that is not a plain date is returned as it came.
+// A business date rendered in the dealer's locale. A plain day (YYYY-MM-DD,
+// no time zone) is built from its parts so a west-of-UTC machine never shows
+// the day before; a business day the server sends as a midnight UTC timestamp
+// (a DATE column in a Go time.Time) is formatted from its day part; any other
+// value that parses is a moment, formatted as that moment's day in the
+// person's own time zone, so machine text never reaches the screen; anything
+// that does not parse at all is returned as it came.
+const PLAIN_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MIDNIGHT_UTC = /^(\d{4})-(\d{2})-(\d{2})T00:00:00(\.\d+)?Z$/;
+
 export function formatDay(day: string | null | undefined): string {
     if (!day) return '—';
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
-    if (!m) return day;
-    return dayFormatter().format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    const m = PLAIN_DAY.exec(day) || MIDNIGHT_UTC.exec(day);
+    if (m) {
+        return dayFormatter().format(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    }
+    const d = new Date(day);
+    if (isNaN(d.getTime())) return day;
+    return dayFormatter().format(d);
 }
 
 // A moment (a Date, or the ISO text the API sends) rendered in the dealer's

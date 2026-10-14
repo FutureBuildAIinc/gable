@@ -160,7 +160,7 @@ export class PortalDeliveries extends LitElement {
                                         Order ${(del.order_number ?? del.order_id).substring(0, 8).toUpperCase()}
                                     </span>
                                     ${del.scheduled_date
-                                        ? html`<span class="flex items-center gap-1">${icon(Clock, 10)} ${formatDay(del.scheduled_date.slice(0, 10))}</span>`
+                                        ? html`<span class="flex items-center gap-1">${icon(Clock, 10)} ${formatDay(del.scheduled_date)}</span>`
                                         : html`<span>${formatDate(del.created_at)}</span>`
                                     }
                                 </div>

@@ -65,7 +65,7 @@ export class PortalInvoices extends LitElement {
             `Date: ${formatDate(invoice.created_at)}`,
             `Status: ${portalStatusLabel(invoice.status)}${invoice.is_overdue ? ' (overdue)' : ''}`,
             `Payment Terms: ${invoice.payment_terms}`,
-            invoice.due_date ? `Due Date: ${formatDay(invoice.due_date.slice(0, 10))}` : '',
+            invoice.due_date ? `Due Date: ${formatDay(invoice.due_date)}` : '',
             '',
             `Subtotal: ${formatCurrency(invoice.subtotal)}`,
             `Tax: ${formatCurrency(invoice.tax_amount)}`,
@@ -138,7 +138,7 @@ export class PortalInvoices extends LitElement {
                                                     ${inv.number}
                                                 </div>
                                                 <div class="text-xs text-zinc-500 mt-0.5">
-                                                    ${formatDate(inv.created_at)}${inv.due_date ? html` · Due ${formatDay(inv.due_date.slice(0, 10))}` : ''}
+                                                    ${formatDate(inv.created_at)}${inv.due_date ? html` · Due ${formatDay(inv.due_date)}` : ''}
                                                 </div>
                                             </div>
                                         </div>
