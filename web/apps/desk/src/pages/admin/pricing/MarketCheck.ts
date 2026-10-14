@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { Radar, Play, X, AlertTriangle } from 'lucide';
 import { formatCents } from '../../../lib/utils';
+import { fetchWithAuth } from '../../../services/fetchClient';
 import { apiErrorMessage, ApiError } from '../../../services/apiError';
 import { ProductService, matchProducts } from '../../../services/product.service';
 import { marketCheckService } from '../../../services/MarketCheckService';
@@ -14,7 +15,8 @@ import type { Product } from '../../../types/product';
 
 /** The most products one check takes (the server's bound). */
 const MAX_PICK = 12;
-/** On first open the pick is the first few lumber products. */
+/** On first open the pick is the yard's top lumber sellers. */
+const API_URL = import.meta.env.VITE_API_URL || '';
 const DEFAULT_PICK = 6;
 const COMPETITOR = 'Home Depot';
 
@@ -98,15 +100,30 @@ export class GableMarketCheck extends LitElement {
         // The product list answers no category and no search, so the pick and the
         // search both work over the catalogue the page loads once.
         this._catalog = await ProductService.listAllProducts();
-        const lumber = this._catalog.filter((p) => p.sku.toUpperCase().startsWith('DL_'));
-        const first = (lumber.length >= 1 ? lumber : this._catalog).slice(0, DEFAULT_PICK);
-        this._pickSource = lumber.length >= 1 ? 'the first lumber products' : 'the first products in the catalogue';
-        this._picked = first.map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
+        const tiles = await this._topSellers();
+        const chosen = tiles.length > 0 ? tiles : this._catalog.slice(0, DEFAULT_PICK);
+        this._pickSource = tiles.length > 0 ? 'the yard top sellers in Lumber' : 'the first products in the catalogue';
+        this._picked = chosen.map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
       }
     } catch (err) {
       this._loadError = apiErrorMessage(err, 'Could not load the Market check');
     } finally {
       this._loading = false;
+    }
+  }
+
+  /**
+   * The yard's top sellers in Lumber from the counter's tiles read, when the route exists and answers some;
+   * any failure (a server without the route answers 404) is an empty list and the caller falls back.
+   */
+  private async _topSellers(): Promise<Picked[]> {
+    try {
+      const response = await fetchWithAuth(`${API_URL}/api/v1/pos/tiles?category=Lumber&limit=${DEFAULT_PICK}`);
+      if (!response.ok) return [];
+      const body = (await response.json()) as { items?: { product_id: string; sku: string; description: string }[] };
+      return (body.items ?? []).slice(0, DEFAULT_PICK).map((t) => ({ id: t.product_id, sku: t.sku, description: t.description }));
+    } catch {
+      return [];
     }
   }
 

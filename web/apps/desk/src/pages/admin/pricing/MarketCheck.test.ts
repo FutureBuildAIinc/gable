@@ -43,17 +43,26 @@ function result(rows: unknown[]) {
 let calls: { method: string; path: string; body: unknown }[]
 let settings: Record<string, unknown>
 let runAnswer: () => Response
+/** The counter's tiles answer; null stands for a server without the route (404). */
+let tiles: unknown[] | null
 
 beforeEach(() => {
   localStorage.setItem('token', 'test-token')
   calls = []
   settings = SETTINGS
+  tiles = null
   runAnswer = () => jsonResponse(result([row(1)]))
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost')
     const method = init?.method ?? 'GET'
     calls.push({ method, path: url.pathname, body: init?.body ? JSON.parse(String(init.body)) : undefined })
     if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(settings)
+    if (url.pathname === '/api/v1/pos/tiles') {
+      calls.push({ method: 'TILES', path: url.search, body: undefined })
+      return tiles === null
+        ? new Response('404 page not found', { status: 404 })
+        : jsonResponse({ categories: [], items: tiles, images: false })
+    }
     if (url.pathname === '/api/v1/products') {
       return jsonResponse({ items: [1, 2, 3, 4, 5, 6, 7].map((n) => product(n)).concat([product(99, 'HW_NAILS')]), next_cursor: null, limit: 200 })
     }
@@ -93,7 +102,7 @@ describe('Market check screen', () => {
     expect(el.querySelector('[data-testid="run"]')).toBeNull()
   })
 
-  it('shows the header, the store label, the badge and the first pick of lumber products', async () => {
+  it('shows the header, the store label, the badge and the first pick', async () => {
     const el = await open()
     expect(text(el)).toContain('Market check')
     expect(text(q(el, '[data-testid="store-label"]'))).toBe(SETTINGS.store_label)
@@ -103,6 +112,34 @@ describe('Market check screen', () => {
     expect(chips).toContain('DL_SPF_6')
     expect(chips).not.toContain('DL_SPF_7')
     expect(chips).not.toContain('HW_NAILS')
+  })
+
+  it('prefers the yard top sellers in Lumber from the counter tiles, and says so', async () => {
+    tiles = [3, 1, 5].map((n) => ({ product_id: `p-${n}`, sku: `TOP_${n}`, description: `Top ${n}` }))
+    const el = await open()
+    expect(calls.find((c) => c.method === 'TILES')!.path).toBe('?category=Lumber&limit=6')
+    const chips = text(q(el, '[data-testid="chips"]'))
+    expect(chips).toContain('TOP_3')
+    expect(chips).toContain('TOP_5')
+    expect(chips).not.toContain('DL_SPF_1')
+    expect(text(el)).toContain('the yard top sellers in Lumber')
+  })
+
+  it('falls back to the first catalogue products, never by a SKU prefix, when the tiles are absent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(SETTINGS)
+      if (url.pathname === '/api/v1/products') {
+        return jsonResponse({ items: [1, 2, 3, 4, 5, 6, 7].map((n) => product(n, `HW_${n}`)), next_cursor: null, limit: 200 })
+      }
+      return new Response('404 page not found', { status: 404 })
+    }))
+    const el = await open()
+    const chips = text(q(el, '[data-testid="chips"]'))
+    expect(chips).toContain('HW_1')
+    expect(chips).toContain('HW_6')
+    expect(chips).not.toContain('HW_7')
+    expect(text(el)).toContain('the first products in the catalogue')
   })
 
   it('removes a chip, adds from the search, and runs with the picked ids', async () => {
@@ -127,6 +164,7 @@ describe('Market check screen', () => {
       const url = new URL(String(input), 'http://localhost')
       if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(SETTINGS)
       if (url.pathname === '/api/v1/products') return jsonResponse({ items: [product(1)], next_cursor: null, limit: 200 })
+      if (url.pathname === '/api/v1/pos/tiles') return new Response('404 page not found', { status: 404 })
       return new Promise<Response>((resolve) => { release = resolve })
     }))
     const el = await open()

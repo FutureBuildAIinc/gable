@@ -263,7 +263,7 @@ Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address an
    the webhook id, the store label ("Home Depot, Spokane WA: nearest store with live prices"), band 5 and floor 15,
    and Save. The card now shows the id as "Saved" with Replace and Clear, and never the value.
    `GET /api/v1/admin/market-check/settings` answers `webhook_id_saved: true` and no id.
-2. Open Pricing, then Market check. The six top lumber products are picked. Remove one chip, add another with the
+2. Open Pricing, then Market check. The yard's six top lumber sellers are picked (the counter tiles; the first six catalogue products when that route is absent), and the page says which. Remove one chip, add another with the
    search, and press Run check. While it runs the rows are placeholders reading "Reading live prices through FB Connect".
 3. Read the summary line and the table: each matched row shows our price, the Home Depot title and price with its
    confidence and unit note, the difference in percent and dollars, the position and the suggested price with its
