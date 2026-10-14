@@ -708,3 +708,24 @@ func getJSON(t *testing.T, mux http.Handler, path string, dst any) {
 		t.Fatalf("GET %s: %v", path, err)
 	}
 }
+
+// FROM-PRINCIPAL 118 a (review round 1): a product is named for what it is, so
+// no product description in the import names a maker. The invented vendor
+// records and their keys stay; only the descriptions are checked.
+func TestImportDescriptionsNameNoMaker(t *testing.T) {
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row struct {
+			SKU         string `json:"sku"`
+			Description string `json:"description"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		if strings.Contains(strings.ToLower(row.Description), "proframe") {
+			t.Errorf("%s: description %q names a maker", row.SKU, row.Description)
+		}
+	}
+}
