@@ -4,6 +4,7 @@
 package pim
 
 import (
+	"encoding/xml"
 	"errors"
 	"strings"
 	"testing"
@@ -88,6 +89,18 @@ func TestSanitizeSVG_RefusesEachAttack(t *testing.T) {
 		{"nothing drawn", wrap(`<g></g>`)},
 		{"foreign namespace element", wrap(`<h:script xmlns:h="http://www.w3.org/1999/xhtml">x</h:script><rect width="1" height="1"/>`)},
 		{"long label", wrap(`<text x="1" y="1">` + strings.Repeat("A", 80) + `</text><rect width="1" height="1"/>`)},
+		{"css escaped url", wrap(`<rect width="1" height="1" fill="u\72l(//evil.test/a.svg#x)"/>`)},
+		{"css escaped url short form", wrap(`<rect width="1" height="1" fill="\75rl(//evil.test/a.svg#x)"/>`)},
+		{"css escaped url as a character reference", wrap(`<rect width="1" height="1" fill="&#92;75rl(//evil.test/a.svg#x)"/>`)},
+		{"url with a comment inside", wrap(`<rect width="1" height="1" fill="url/**/(//evil.test/a)"/>`)},
+		{"escape in font-family", wrap(`<text x="1" y="1" font-family="u\72l(//evil.test/a)">a</text><rect width="1" height="1"/>`)},
+		{"output over the cap", wrap(`<rect width="1" height="1" fill="` + strings.Repeat("\n", 19000) + `" stroke="` + strings.Repeat("\n", 19000) + `" opacity="` + strings.Repeat("\n", 19000) + `"/>`)},
+		{"escaped url in clip-path", wrap(`<rect width="1" height="1" clip-path="\75rl(//evil.example/x)"/>`)},
+		{"paint that is not a colour or a reference", wrap(`<rect width="1" height="1" fill="//evil.example/x"/>`)},
+		{"paint function that is not rgb", wrap(`<rect width="1" height="1" stroke="image(//evil.example/x)"/>`)},
+		{"stop colour that is not a colour", wrap(`<defs><linearGradient id="a"><stop offset="0" stop-color="url(//evil.example/x)"/></linearGradient></defs><rect width="1" height="1"/>`)},
+		{"clip-path that is not a reference", wrap(`<rect width="1" height="1" clip-path="circle(10px)"/>`)},
+		{"quote growth over the cap", wrap(`<path d='` + strings.Repeat(`"`, 14000) + `' stroke='` + strings.Repeat(`"`, 14000) + `' fill='` + strings.Repeat(`"`, 14000) + `'/>`)},
 		{"trailing second root", wrap(`<rect width="1" height="1"/>`) + wrap(`<rect width="1" height="1"/>`)},
 	}
 	for _, tc := range cases {
@@ -121,5 +134,38 @@ func TestSanitizeSVG_DropsUnlistedHarmlessParts(t *testing.T) {
 	}
 	if !strings.Contains(s, `<rect`) || !strings.Contains(s, `fill="#fff"`) {
 		t.Errorf("clean part lost: %s", s)
+	}
+}
+
+// A repeated attribute keeps its first value, so the output is well formed
+// XML a browser parses, and a second pass is the identity.
+func TestSanitizeSVG_KeepsFirstOfRepeatedAttribute(t *testing.T) {
+	out, err := SanitizeSVG([]byte(wrap(`<rect x="1" x="2" width="4" height="4" fill="red" fill="blue"/>`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if strings.Count(s, ` x="`) != 1 || strings.Count(s, ` fill="`) != 1 || !strings.Contains(s, `x="1"`) || !strings.Contains(s, `fill="red"`) {
+		t.Errorf("repeated attributes kept: %s", s)
+	}
+	if err := xml.Unmarshal(out, new(struct{ XMLName xml.Name })); err != nil {
+		t.Errorf("output is not well formed: %v", err)
+	}
+}
+
+// The paint and reference attributes are held to a small grammar; these are
+// kept as they are, and every accepted output is its own fixed point.
+func TestSanitizeSVG_PaintGrammarAndIdempotence(t *testing.T) {
+	for _, paint := range []string{"none", "currentColor", "#fff", "#ffff", "#c9a36b", "#c9a36bcc", "red", "rgb(10,20,30)", "rgba(10, 20, 30, 0.5)", "rgb(10%,20%,30%)", "url(#wood)", "url( #wood )"} {
+		in := wrap(`<defs><linearGradient id="wood"/></defs><rect width="4" height="4" fill="` + paint + `" stroke="` + paint + `"/>`)
+		out, err := SanitizeSVG([]byte(in))
+		if err != nil {
+			t.Errorf("paint %q refused: %v", paint, err)
+			continue
+		}
+		again, err := SanitizeSVG(out)
+		if err != nil || string(again) != string(out) {
+			t.Errorf("paint %q: second pass changed the drawing (err %v)", paint, err)
+		}
 	}
 }

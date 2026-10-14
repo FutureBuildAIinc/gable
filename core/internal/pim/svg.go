@@ -81,7 +81,11 @@ var (
 	sameDocRE  = regexp.MustCompile(`^#[A-Za-z][A-Za-z0-9_-]{0,63}$`)
 	urlOpenRE  = regexp.MustCompile(`(?i)url\s*\(`)
 	urlLocalRE = regexp.MustCompile(`(?i)url\(\s*#[A-Za-z][A-Za-z0-9_-]{0,63}\s*\)`)
-	schemeRE   = regexp.MustCompile(`(?i)\b(javascript|data|vbscript|file|https?|ftp)\s*:`)
+	// paint: none, currentColor, #hex of 3, 4, 6 or 8 digits, a named colour,
+	// rgb() or rgba() of numbers, or a same document url(#id).
+	paintRE  = regexp.MustCompile(`(?i)^(none|currentcolor|#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})|[a-z]{3,20}|rgba?\(\s*[0-9.]+%?\s*(?:,\s*[0-9.]+%?\s*){2,3}\)|url\(\s*#[A-Za-z][A-Za-z0-9_-]{0,63}\s*\))$`)
+	refRE    = regexp.MustCompile(`(?i)^(none|url\(\s*#[A-Za-z][A-Za-z0-9_-]{0,63}\s*\))$`)
+	schemeRE = regexp.MustCompile(`(?i)\b(javascript|data|vbscript|file|https?|ftp)\s*:`)
 )
 
 func unsafe(format string, args ...any) error {
@@ -245,6 +249,9 @@ func SanitizeSVG(in []byte) ([]byte, error) {
 	if !drawn {
 		return nil, unsafe("the drawing has nothing drawn in it")
 	}
+	if out.Len() > maxSVGBytes {
+		return nil, unsafe("the drawing is larger than %d KB once written", maxSVGBytes>>10)
+	}
 	return out.Bytes(), nil
 }
 
@@ -296,6 +303,12 @@ func checkValue(v string) error {
 	if len(v) > maxSVGValueBytes {
 		return unsafe("an attribute value is too long")
 	}
+	// A presentation attribute is parsed as CSS, where a backslash escapes
+	// (u\72l( is url() and a comment can split a name. No kept attribute
+	// needs either.
+	if strings.Contains(v, `\`) || strings.Contains(v, "/*") {
+		return unsafe("a backslash or a comment marker in a value is not allowed")
+	}
 	if schemeRE.MatchString(v) {
 		return unsafe("a URL or data value is not allowed")
 	}
@@ -317,6 +330,7 @@ type keptAttr struct{ name, value string }
 // viewBox must be 256 square; the root's own size is replaced by ours.
 func keptAttributes(element string, attrs []xml.Attr, root bool) ([]keptAttr, error) {
 	var kept []keptAttr
+	seen := map[string]bool{} // a repeated name keeps its first value
 	sawViewBox := false
 	for _, a := range attrs {
 		local := a.Name.Local
@@ -328,7 +342,8 @@ func keptAttributes(element string, attrs []xml.Attr, root bool) ([]keptAttr, er
 			return nil, err
 		}
 		if local == "href" && (space == "" || space == xlinkNamespace) {
-			if element == "linearGradient" || element == "radialGradient" {
+			if (element == "linearGradient" || element == "radialGradient") && !seen["href"] {
+				seen["href"] = true
 				kept = append(kept, keptAttr{"href", strings.TrimSpace(a.Value)})
 			}
 			continue
@@ -351,6 +366,20 @@ func keptAttributes(element string, attrs []xml.Attr, root bool) ([]keptAttr, er
 		if local == "id" && !idRE.MatchString(a.Value) {
 			return nil, unsafe("an id is not a plain name")
 		}
+		switch local {
+		case "fill", "stroke", "stop-color":
+			if !paintRE.MatchString(strings.TrimSpace(a.Value)) {
+				return nil, unsafe("the %s value is not a colour or a same document reference", local)
+			}
+		case "clip-path":
+			if !refRE.MatchString(strings.TrimSpace(a.Value)) {
+				return nil, unsafe("the clip-path value is not a same document reference")
+			}
+		}
+		if seen[local] {
+			continue
+		}
+		seen[local] = true
 		kept = append(kept, keptAttr{local, a.Value})
 	}
 	if root && element == "svg" && !sawViewBox {
