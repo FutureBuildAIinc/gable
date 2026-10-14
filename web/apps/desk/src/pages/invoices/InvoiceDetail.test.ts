@@ -93,6 +93,31 @@ describe('gable-invoice-detail', () => {
       expect(buttonByText(el, 'Void')).toBeTruthy()
     })
 
+    it('prints the invoice document through the token, in a tab opened empty', async () => {
+      localStorage.setItem('token', 'test-token')
+      const tab = { location: { href: '' }, close: vi.fn() }
+      const open = vi.fn(() => tab)
+      vi.stubGlobal('open', open)
+      URL.createObjectURL = vi.fn(() => 'blob:invoice')
+      URL.revokeObjectURL = vi.fn()
+      const state = stub(invoice(), {
+        [`/api/v1/documents/print/invoice/${INVOICE_ID}`]: () => new Response(new Blob(['%PDF']), { status: 200 }),
+      })
+      try {
+        el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+        buttonByText(el, 'Print PDF').click()
+        await flush()
+        await flush()
+        expect(open.mock.calls[0]).toEqual(['', '_blank'])
+        const call = state.calls.find(c => c.url.pathname === `/api/v1/documents/print/invoice/${INVOICE_ID}`)
+        expect(call, 'expected the invoice document to be fetched').toBeDefined()
+        expect(new Headers(call!.init?.headers).get('Authorization')).toBe('Bearer test-token')
+        expect(tab.location.href).toBe('blob:invoice')
+      } finally {
+        localStorage.removeItem('token')
+      }
+    })
+
     it('keeps every header button label on one line', async () => {
       el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
       const header = el.querySelector('h1')!.closest('div.border-b')!
