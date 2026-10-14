@@ -6,6 +6,7 @@ package purchase_order_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/product"
@@ -50,8 +51,13 @@ func seedCreateBranch(t *testing.T) *createBranchSeed {
 		t.Fatalf("seed product: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id IN (SELECT id FROM purchase_orders WHERE vendor_id = $1)`, s.vendor)
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE vendor_id = $1`, s.vendor)
+		// A reorder run drafts for every alerting product in the shared
+		// database, not only this test's, so the drafts it wrote at this
+		// test's branches go with it (a draft left at a branch blocks the
+		// branch's removal).
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id IN
+			(SELECT id FROM purchase_orders WHERE vendor_id = $1 OR branch_id IN ($2, $3))`, s.vendor, s.branchA, s.branchB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE vendor_id = $1 OR branch_id IN ($2, $3)`, s.vendor, s.branchA, s.branchB)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, s.product)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, s.vendor)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, s.branchA, s.branchB)
@@ -250,5 +256,65 @@ func TestCreateFromSOLine_TakesTheGrantsBranch(t *testing.T) {
 	branch, ok = s.poBranch(t)
 	if !ok || branch != s.branchA {
 		t.Errorf("context branch special order draft sits at branch %v (found %t), want the order's branch %s", branch, ok, s.branchA)
+	}
+}
+
+// TestCreateReorders_SkipsAProductThatVanishes pins the run against the
+// shared database (r5 P3-2, r6 P3-1): the run lists every alerting product in
+// the database, other packages' tests create and delete such products, and a
+// product deleted between the listing and the line insert used to fail the
+// whole run on the product foreign key. The run now skips that product. A
+// parallel churner creates and deletes alerting products of its own while the
+// run goes again and again; none of the runs may fail.
+func TestCreateReorders_SkipsAProductThatVanishes(t *testing.T) {
+	s := seedCreateBranch(t)
+	svc := newCreateBranchService(s)
+	ctx := context.Background()
+	sub := "cb-churn-" + uuid.NewString()
+	s.grant(t, sub, s.branchA)
+
+	churnVendor := uuid.New()
+	if _, err := s.db.Pool.Exec(ctx, `INSERT INTO vendors (id, name) VALUES ($1, 'pin churn vendor')`, churnVendor); err != nil {
+		t.Fatalf("seed churn vendor: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE po_id IN (SELECT id FROM purchase_orders WHERE vendor_id = $1)`, churnVendor)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE vendor_id = $1`, churnVendor)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM products WHERE vendor_id = $1`, churnVendor)
+		_, _ = s.db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, churnVendor)
+	})
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			pid := uuid.New()
+			if _, err := s.db.Pool.Exec(ctx,
+				`INSERT INTO products (id, sku, description, uom_primary, base_price, vendor_id, reorder_point, reorder_qty)
+				 VALUES ($1, $2, 'pin churn', 'EA', 1, $3, 5, 10)`, pid, "CHURN-"+pid.String()[:8], churnVendor); err != nil {
+				continue
+			}
+			_, _ = s.db.Pool.Exec(ctx, `DELETE FROM purchase_order_lines WHERE product_id = $1`, pid)
+			_, _ = s.db.Pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, pid)
+		}
+	}()
+
+	var failures []error
+	for i := 0; i < 60 && len(failures) == 0; i++ {
+		if _, err := svc.CreateReorders(branchctx.With(ctx, &branchctx.Context{UserSub: sub})); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	close(stop)
+	wg.Wait()
+	for _, err := range failures {
+		t.Errorf("a reorder run failed while another product vanished: %v", err)
 	}
 }

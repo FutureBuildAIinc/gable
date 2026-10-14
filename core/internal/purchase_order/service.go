@@ -27,6 +27,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // salesVelocityLister is the narrow read interface RefreshReorderTargets needs.
@@ -261,6 +262,14 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				Cost:        0, // Cost catalog wiring is a separate backlog item.
 			}
 			if err := s.repo.AddPOLine(ctx, line); err != nil {
+				// A product deleted between the alert listing and this
+				// insert has nothing left to reorder: skip it, as the next
+				// run would not list it, rather than failing the whole run
+				// (and leaving the drafts of the vendors it had passed).
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "purchase_order_lines_product_id_fkey" {
+					continue
+				}
 				return createdCount, fmt.Errorf("add PO line: %w", err)
 			}
 		}
