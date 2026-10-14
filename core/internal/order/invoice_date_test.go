@@ -48,6 +48,7 @@ func TestFulfilmentStampsTheBranchLocalInvoiceDate(t *testing.T) {
 				f.productID, yard); err != nil {
 				t.Fatalf("seed inventory: %v", err)
 			}
+			f.now = func() time.Time { return instant }
 			f.serveWith(f.withStock(), f.withMoney(), func(s *order.Service) *order.Service {
 				return s.WithClockForTest(func() time.Time { return instant })
 			})
