@@ -185,13 +185,15 @@ Every push to this repository is published. So:
   this repository, may adapt code, functions and tests it wrote itself from an internal FutureBuild codebase it has
   cleared for this repository. Adapted code follows this repository's conventions and design system and carries the
   SPDX header a new file at its path takes (the next rule), in place of any header, licence line or provenance
-  comment its source carried. Its file, commit message, pull request and branch name call its source only "an
-  internal FutureBuild codebase", never by name, path or commit. It never brings in a secret or credential, an
-  internal host, an internal note, a real dealer's or customer's name, figures or data, a person's name or data, or
-  anything specific to one dealer (its business rules, seeds, role records or screens). Everything else is patterns
-  only, including a third party's code vendored inside such a codebase and any document text: patterns may inform a
-  design; text is never copied. Gable's own published sidecars, such as AI_LM, whose wire types
-  `core/internal/integrations` mirrors, are this product, not another.
+  comment its source carried. No file in this repository, and no commit message, pull request or branch name,
+  credits or names the codebase adapted code came from, or gives that codebase's paths or commits. Adapted code
+  never brings in a secret or credential, an internal host, an internal note, a real dealer's or customer's name,
+  figures or data, a person's name or data, or anything that names, describes or is specific to one dealer or its
+  systems (its business rules, seeds, role records or screens). Everything else is patterns only: patterns may
+  inform a design; text is never copied. That includes any document text and any third party's code inside such a
+  codebase: anything vendored, and any file or passage that carries, or is credited to, someone else's copyright,
+  licence or package. Mirroring a published Gable sidecar's wire types for a contract test, as
+  `core/internal/integrations` does for AI_LM, is not copying from another product.
 - Every new file carries the SPDX header its directory's row in `LICENSE-MAP.md` gives (copy the two header lines from a neighbouring file of the same kind). Never change the SPDX identifier of an existing file. The REUSE job is a merge gate.
 - Documents carry no calendar dates or durations, and no em or en dashes.
 - Never commit build binaries or generated artefacts that have a generator, and never leave scratch files (for example `pr-body.txt`) in the repository root.
