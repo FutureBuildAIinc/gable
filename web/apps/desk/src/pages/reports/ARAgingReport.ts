@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents } from '../../lib/utils.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { ArService } from '../../services/ArService.ts';
 import type { ArAgingItem, ArAgingTotal, AgingGroupBy } from '../../types/account.ts';
 import { DollarSign } from 'lucide';
@@ -30,9 +31,18 @@ export class ARAgingReportPage extends LitElement {
     @state() private basis: Basis = 'due_date';
     @state() private asOf = '';
 
+    private _unsubBranch: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
+        this._unsubBranch = onBranchChanged(() => { void this._load(); });
         this._load();
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubBranch?.();
+        this._unsubBranch = null;
     }
 
     private async _load() {
