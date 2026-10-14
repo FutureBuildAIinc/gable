@@ -1752,7 +1752,7 @@ export interface paths {
         };
         /**
          * Print a customer statement as PDF
-         * @description Renders the customer's account statement, as GET /api/v1/ar/customers/{id}/statement computes it for the same from, to and job_id, under the identity of the customer's primary yard. {id} is the customer. from and to are YYYY-MM-DD business dates in the primary branch's time zone (to defaults to today, from to a month before to). Role gated admin, owner, sales and finance; a branch bound machine key reaches it only while the customer holds its pin. A customer in a branch the caller may not target is a 403.
+         * @description Renders the customer's account statement, as GET /api/v1/ar/customers/{id}/statement computes it for the same from, to and job_id, under the identity of the customer's primary yard. {id} is the customer. from and to are YYYY-MM-DD business dates in the primary branch's time zone (to defaults to today, from to a month before to). Role gated admin, owner, sales and finance; a branch bound machine key reaches it only while the customer holds its pin. A customer the caller may not see (the customer read is the wall) is a 404; a role refusal is a 403.
          */
         get: operations["documentsPrintStatement"];
         put?: never;
