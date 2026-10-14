@@ -38,6 +38,8 @@ services:
       DEMO_SEED: "1"
       # The larger invented catalogue and its 120 day history: DEMO_SEED_IMPORT=1 make up.
       DEMO_SEED_IMPORT: "${DEMO_SEED_IMPORT:-0}"
+      # The import's 120 day history; DEMO_SEED_HISTORY=0 leaves it out.
+      DEMO_SEED_HISTORY: "${DEMO_SEED_HISTORY:-1}"
     healthcheck:
       disable: true
     depends_on:

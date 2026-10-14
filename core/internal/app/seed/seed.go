@@ -162,6 +162,20 @@ func demoImportRequested() bool {
 	}
 }
 
+// demoHistoryEnv turns the import's 120 day history (section 22c) off when set
+// to 0, false, no or off; the history is on whenever the import is.
+const demoHistoryEnv = "DEMO_SEED_HISTORY"
+
+// demoHistoryRequested reports whether the import's history runs.
+func demoHistoryRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoHistoryEnv))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
 // Run seeds the demo data and returns. Behaviour is unchanged from the old
 // entry point: without DEMO_SEED set it logs and returns without touching
 // any database.
@@ -1374,9 +1388,14 @@ func Run() {
 		// 22c. 120 DAY HISTORY
 		//    Orders, invoices and payments spread across the three yards over the
 		//    last 120 days so the revenue trend query answers more than one period
-		//    across the three yards.
+		//    across the three yards. Only the imported customers trade in it: the
+		//    history writes its documents directly (each carries its own day), so
+		//    the seed's own customers, whose statements and AR the walks open,
+		//    keep only documents posted through the AR core.
 		// =========================================================================
-		if err := seedHistory(seedCtx, db, ar, customerIDs, branchIDs, skuToID); err != nil {
+		if !demoHistoryRequested() {
+			fmt.Printf("Seed: history skipped (%s=0)\n", demoHistoryEnv)
+		} else if err := seedHistory(seedCtx, db, ar, importCust, branchIDs, skuToID); err != nil {
 			log.Printf("Seed: history: %v", err)
 		}
 	}

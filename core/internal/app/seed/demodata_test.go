@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -25,6 +26,8 @@ import (
 // seed with the import, each through its command in a subprocess as an
 // operator runs them, then checks what the import promises:
 //
+//  0. Every catalogue row and every customer row lands (a refused row is
+//     only logged by the seed, so the count is the check).
 //  1. Margin: every imported product has a nonzero target_margin and a
 //     nonzero commission_rate.
 //  2. Domain: no vendor, staff or customer row names the dealer on its legacy
@@ -55,6 +58,22 @@ func TestDemoImportRequested(t *testing.T) {
 			t.Errorf("%s=%q: demoImportRequested() = %v, want %v", demoImportEnv, tc.value, got, tc.want)
 		}
 	}
+	// The history is on with the import unless it is turned off.
+	for _, tc := range []struct {
+		value string
+		want  bool
+	}{
+		{"", true},
+		{"1", true},
+		{"0", false},
+		{" Off ", false},
+		{"false", false},
+	} {
+		t.Setenv(demoHistoryEnv, tc.value)
+		if got := demoHistoryRequested(); got != tc.want {
+			t.Errorf("%s=%q: demoHistoryRequested() = %v, want %v", demoHistoryEnv, tc.value, got, tc.want)
+		}
+	}
 }
 
 func TestDemoImport(t *testing.T) {
@@ -68,6 +87,25 @@ func TestDemoImport(t *testing.T) {
 	if first.products == 0 || first.customers == 0 || first.vendors == 0 {
 		t.Fatalf("the import wrote nothing: %+v", first)
 	}
+
+	t.Run("every catalogue and customer row lands", func(t *testing.T) {
+		for _, c := range []struct {
+			name, query, key string
+			data             []byte
+		}{
+			{"catalogue", `SELECT COUNT(*) FROM products WHERE sku = ANY($1)`, "sku", catalogData},
+			{"customers", `SELECT COUNT(*) FROM customers WHERE account_number = ANY($1)`, "account_number", customersData},
+		} {
+			keys := jsonlKeys(t, c.data, c.key)
+			var n int
+			if err := db.QueryRow(c.query, keys).Scan(&n); err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if n != len(keys) {
+				t.Errorf("%s: %d of %d rows landed (the seed logs each refused row)", c.name, n, len(keys))
+			}
+		}
+	})
 
 	t.Run("every imported product has a margin", func(t *testing.T) {
 		rows, err := db.Query(`
@@ -223,6 +261,27 @@ func runCommand(t *testing.T, dbURL, pkg string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go run %s: %v\n%s", pkg, err, out)
 	}
+}
+
+// jsonlKeys answers one string field of every row of an embedded jsonl file.
+func jsonlKeys(t *testing.T, data []byte, field string) []string {
+	t.Helper()
+	var keys []string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("%s: %v", field, err)
+		}
+		key, _ := row[field].(string)
+		if key == "" {
+			t.Fatalf("a row has no %s: %s", field, line)
+		}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 // importCounts are the reference data row counts a second run must keep.

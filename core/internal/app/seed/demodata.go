@@ -439,6 +439,13 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 	vendorToID map[string]uuid.UUID, slugToID map[string]uuid.UUID) (map[string]uuid.UUID, error) {
 
 	skuToID := make(map[string]uuid.UUID)
+	// The catalogue sells some finishes by the quart; migration 099 seeds the
+	// gallon (576 GAL to 77 CF) but not the quart. A dealer unit, upserted like
+	// other reference data.
+	if _, err := db.ExecContext(ctx, `INSERT INTO units (code, name, dimension, std_unit_qty, std_ref_qty)
+		VALUES ('QT', 'Quart', 'VOLUME', 2304, 77) ON CONFLICT (code) DO NOTHING`); err != nil {
+		log.Printf("Seed: import catalog: unit QT: %v", err)
+	}
 	scanner := bufio.NewScanner(bytes.NewReader(catalogData))
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 	for scanner.Scan() {
@@ -474,6 +481,13 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 		commission := row.Commission
 		if commission == 0 && row.TargetMargin > 0 {
 			commission = row.TargetMargin * 0.25
+		}
+		// The board cross section is both dimensions or neither (the products
+		// check): a sheet or a profile carries a thickness alone, which is not a
+		// board measure, so it records neither.
+		thickness, boardWidth := row.ThicknessIn, row.WidthIn
+		if (thickness == nil) != (boardWidth == nil) {
+			thickness, boardWidth = nil, nil
 		}
 		var id string
 		err := db.QueryRowContext(ctx, `INSERT INTO products
@@ -521,7 +535,7 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 			row.Barcode, categoryName, "", vendorID, categoryID,
 			row.Species, row.Grade,
 			nfloat64(row.LengthIn), nfloat64(row.WidthInDim), nfloat64(row.HeightIn), row.Stackable,
-			nfloat64(row.ThicknessIn), nfloat64(row.WidthIn), nfloat64(row.LengthFt), row.RandomLength,
+			nfloat64(thickness), nfloat64(boardWidth), nfloat64(row.LengthFt), row.RandomLength,
 			row.IsCommodity, !(row.TaxClass == "EXEMPT"),
 		).Scan(&id)
 		if err != nil {
