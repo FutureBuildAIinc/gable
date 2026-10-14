@@ -5,6 +5,7 @@
  * A quote read from a material list is called a Material list wherever it is shown:
  * the stored source `ai` cannot tell the rule based reader from the AI one.
  */
+import type { LitElement } from 'lit'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './QuoteList'
 import './QuoteAnalytics'
@@ -33,7 +34,7 @@ describe('Material list words outside the quote', () => {
       }
       return jsonResponse({ items: [], next_cursor: null })
     }))
-    const el = await mount<HTMLElement>('gable-quote-list')
+    const el = await mount<LitElement>('gable-quote-list')
     await flush(); await flush()
     await update(el, {})
     expect(text(el)).toContain('Material list')
@@ -47,7 +48,7 @@ describe('Material list words outside the quote', () => {
       total_quote_value_cents: 0, total_accepted_value_cents: 0, ai_sourced_count: 2, ai_conversion_rate: 50,
       manual_conversion_rate: 0, trend_data: [],
     } as never)
-    const el = await mount<HTMLElement>('gable-quote-analytics')
+    const el = await mount<LitElement>('gable-quote-analytics')
     await flush(); await flush()
     await update(el, {})
     expect(text(el)).toContain('Material list vs manual')
