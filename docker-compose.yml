@@ -36,6 +36,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
       DEMO_SEED: "1"
+      # The larger invented catalogue and its 120 day history: DEMO_SEED_IMPORT=1 make up.
+      DEMO_SEED_IMPORT: "${DEMO_SEED_IMPORT:-0}"
     healthcheck:
       disable: true
     depends_on:

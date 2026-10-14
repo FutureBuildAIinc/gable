@@ -1,0 +1,233 @@
+{
+  "_about": "History generator parameters for the Gable demo (B tenant). ~120 days. A Gable coder implements a deterministic seed that walks these parameters; the brief says rows themselves are out of scope, only the parameters.",
+  "_seed": 11900021,
+  "_window": {
+    "days": 120,
+    "_reason": "Brief calls for about 120 days; one full quarter plus spring ramp."
+  },
+  "_rounding_units": "All money numbers in CAD dollars, two decimals. Quantities as floats, scale 4. Percentages as decimals (0.0 to 1.0).",
+  "_branches": ["KEL-MAIN", "WK", "LK"],
+  "_anchor_for_seasonal": "Day 0 is the seed anchor date (set by DEMO_DISPATCH_DATE). Day 60 is the spring peak; day 100 begins fall easing; day 120 is mid-fall slow.",
+
+  "counter_sales_per_yard_per_day": {
+    "KEL-MAIN": {
+      "weekday_mean": 38,
+      "weekday_stddev": 9,
+      "saturday_mean": 26,
+      "saturday_stddev": 6,
+      "_department_mix_share": {
+        "lumber": 0.32,
+        "sheet_goods": 0.10,
+        "engineered_wood": 0.06,
+        "roofing_insulation": 0.06,
+        "drywall_compound": 0.05,
+        "siding_trim": 0.05,
+        "concrete_masonry": 0.04,
+        "fasteners_connectors": 0.07,
+        "millwork_doors": 0.05,
+        "decking_fence": 0.07,
+        "paint_sundries": 0.04,
+        "hardware_handtools": 0.05,
+        "seasonal_lawn": 0.04
+      },
+      "_reason": "Kelowna Main is the big yard. Counter sales average ~38 weekdays; Saturday adds contractor pickup and DIY walk-in traffic."
+    },
+    "WK": {
+      "weekday_mean": 18,
+      "weekday_stddev": 5,
+      "saturday_mean": 12,
+      "saturday_stddev": 4,
+      "_department_mix_share": {
+        "lumber": 0.30,
+        "sheet_goods": 0.10,
+        "engineered_wood": 0.06,
+        "roofing_insulation": 0.08,
+        "drywall_compound": 0.04,
+        "siding_trim": 0.06,
+        "concrete_masonry": 0.05,
+        "fasteners_connectors": 0.08,
+        "millwork_doors": 0.04,
+        "decking_fence": 0.10,
+        "paint_sundries": 0.03,
+        "hardware_handtools": 0.04,
+        "seasonal_lawn": 0.02
+      },
+      "_reason": "West Kelowna is mid-size; deck and fence running higher because of the West Side subdivision builds."
+    },
+    "LK": {
+      "weekday_mean": 9,
+      "weekday_stddev": 3,
+      "saturday_mean": 7,
+      "saturday_stddev": 2,
+      "_department_mix_share": {
+        "lumber": 0.26,
+        "sheet_goods": 0.08,
+        "engineered_wood": 0.04,
+        "roofing_insulation": 0.05,
+        "drywall_compound": 0.04,
+        "siding_trim": 0.04,
+        "concrete_masonry": 0.06,
+        "fasteners_connectors": 0.08,
+        "millwork_doors": 0.03,
+        "decking_fence": 0.08,
+        "paint_sundries": 0.04,
+        "hardware_handtools": 0.05,
+        "seasonal_lawn": 0.15
+      },
+      "_reason": "Lake Country outpost is small but seasonal heavy (lake property lawns, snow)."
+    }
+  },
+
+  "weekday_seasonal_multiplier_curve": {
+    "_shape": "seasonal",
+    "_values": {
+      "0_to_19": 1.10,
+      "20_to_39": 1.18,
+      "40_to_59": 1.25,
+      "60_to_79": 1.30,
+      "80_to_99": 1.22,
+      "100_to_119": 1.05
+    },
+    "_noise_amplitude": 0.05,
+    "_reason": "Spring building season peaks around day 60; numbers ramp up over March and May, ease through August, and tail off heading into fall."
+  },
+
+  "trade_vs_walkin_share": {
+    "KEL-MAIN": {"trade_share": 0.55, "walkin_share": 0.45},
+    "WK":        {"trade_share": 0.62, "walkin_share": 0.38},
+    "LK":        {"trade_share": 0.40, "walkin_share": 0.60},
+    "_reason": "WK runs heavier trade because of Peachland and Westside commercial; LK leans walk-in and DIY thanks to cottage country traffic."
+  },
+
+  "quotes_per_day_by_yard": {
+    "KEL-MAIN": {"mean": 4.2, "stddev": 1.4},
+    "WK":        {"mean": 1.8, "stddev": 0.9},
+    "LK":        {"mean": 0.4, "stddev": 0.3},
+    "_reason": "Quote volume per yard tracks counter volume trade-weighted; PLATINUM accounts are most active on quotes."
+  },
+
+  "quote_lifecycle": {
+    "state_mix_at_creation": {
+      "DRAFT": 0.10,
+      "SENT": 0.55,
+      "ACCEPTED": 0.25,
+      "REJECTED": 0.05,
+      "EXPIRED": 0.05
+    },
+    "mean_time_to_convert_days": 7,
+    "stddev_time_to_convert_days": 5,
+    "expiry_window_days": 30,
+    "_reason": "Roughly 30 percent of sent quotes accept within a week; another 25 percent drift to expired at 30 days without response; small share gets rejected on price."
+  },
+
+  "special_orders_per_week_per_yard": {
+    "KEL-MAIN": {"mean": 6, "stddev": 2},
+    "WK":        {"mean": 3, "stddev": 1.5},
+    "LK":        {"mean": 1, "stddev": 0.8},
+    "_typical_lead_days": 14,
+    "_special_order_lines_per_so_mean": 2.4,
+    "_deposit_required_share": 0.75,
+    "_deposit_pct": 0.50,
+    "_reason": "Special orders are vendor-direct or non-stock millwork; three quarters demand a deposit; lead time around two weeks."
+  },
+
+  "purchase_orders_and_receipts": {
+    "po_per_vendor_per_week_mean": 1.3,
+    "po_lines_per_po_mean": 4.2,
+    "po_lines_short_rate": 0.08,
+    "po_lines_over_rate": 0.04,
+    "po_lines_damaged_in_rate": 0.02,
+    "lead_time_draw": {
+      "min_days": 2,
+      "max_days": 21,
+      "_reason": "Reads vendors.average_lead_time_days with noise. Local mills average 4 days; Pacific Northwest millwork 2 to 3 weeks."
+    },
+    "status_mix_at_creation": {
+      "DRAFT": 0.05,
+      "SENT": 0.25,
+      "PARTIAL": 0.20,
+      "RECEIVED": 0.50
+    },
+    "_reason": "Most POs close fully received; some partials carry for two weeks; short and over receipts reflect real yard receiving variance."
+  },
+
+  "deliveries_by_truck_and_zone": {
+    "trucks_per_day_per_yard": {
+      "KEL-MAIN": {"flatbed": 1.6, "box_truck": 0.6, "crane": 0.15, "pickup": 0.5, "van": 0.2},
+      "WK":        {"flatbed": 0.6, "box_truck": 0.3, "pickup": 0.2, "van": 0.1},
+      "LK":        {"flatbed": 0.25, "box_truck": 0.1, "pickup": 0.15}
+    },
+    "stops_per_route_mean": 2.4,
+    "stops_per_route_stddev": 1.1,
+    "zone_share_of_stops": {
+      "kelowna_north": 0.22,
+      "kelowna_south": 0.18,
+      "west_kelowna": 0.18,
+      "lake_country": 0.10,
+      "vernon": 0.06,
+      "penticton_south": 0.08,
+      "peachland_summerland": 0.10,
+      "big_white": 0.04,
+      "rutland_glenmore": 0.04
+    },
+    "pod_share_for_completed": 0.92,
+    "_reason": "Two flatbeds and one boom at KEL-MAIN run most days; box truck and pickup fill in. POD photos almost always captured by site foreman."
+  },
+
+  "ar_payments_aging_spread": {
+    "share_paid_within_terms": 0.55,
+    "share_paid_late_under_30": 0.20,
+    "share_paid_late_30_to_60": 0.10,
+    "share_paid_late_60_to_90": 0.07,
+    "share_paid_late_90_plus": 0.05,
+    "share_still_open_at_window_end": 0.03,
+    "average_payment_amount_per_invoice_share": {
+      "_reason": "Net 30 invoices paid in full at 1.0; partials at 0.5 average. Some customers split pay across multiple checks."
+    },
+    "payment_methods": {
+      "cheque": 0.25,
+      "eft": 0.45,
+      "credit_card": 0.10,
+      "cash": 0.05,
+      "ach_pull": 0.15
+    },
+    "_reason": "About half pay within terms; the tail carries the aging risk the credit report lives on; cheque share still meaningful in construction trades."
+  },
+
+  "returns_and_credit_memos": {
+    "return_share_of_order_lines": 0.025,
+    "credit_memo_reasons_share": {
+      "DAMAGE": 0.30,
+      "RETURN": 0.45,
+      "PRICE_ADJUSTMENT": 0.15,
+      "OTHER": 0.10
+    },
+    "credit_memo_status_mix": {
+      "DRAFT": 0.40,
+      "OPEN": 0.50,
+      "APPLIED": 0.10
+    },
+    "average_credit_memo_cad": 180,
+    "credit_memo_cad_stddev": 240,
+    "_reason": "LBM yards see ~2.5 percent returns; damage + wrong product dominate. About half post (open), the rest stay draft."
+  },
+
+  "price_changes_on_commodity_lumber": {
+    "frequency_per_week": 2.4,
+    "products_affected_per_change": 1.0,
+    "_category_scope": ["lumber", "engineered_wood"],
+    "_direction_distribution": {
+      "up_share": 0.55,
+      "down_share": 0.40,
+      "flat_share": 0.05
+    },
+    "_pct_change_at_event_distribution": {
+      "min_pct": 0.005,
+      "max_pct": 0.06,
+      "_reason": "Commodity lumber swaps weekly based on mill list price and BC supply. Spike events 4 to 6 percent; routine moves 0.5 to 2 percent."
+    },
+    "_reason": "Commodity lumber and OSB prices move weekly; price_protection migration 081 frames these and the price change ledger carries them."
+  },
+
+  "_seeding_seed": "Each seed day rolls once off the workspace seed (11900021). One cash-register till session per yard per day if the day has counter sales. Apply zone_share for delivery stops."
+}
