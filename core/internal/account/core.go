@@ -56,6 +56,11 @@ func NewService(db *database.DB, glSvc *gl.Service, logger *slog.Logger) *Servic
 	return &Service{db: db, gl: glSvc, logger: logger, now: time.Now}
 }
 
+// WithClock sets the clock the business day of the acts is read on (the
+// service reads time.Now otherwise); a test that moves the time of a whole
+// flow sets the same clock on every service of the flow.
+func (s *Service) WithClock(now func() time.Time) *Service { s.now = now; return s }
+
 // conflict is a 409 with a blocker, the shape the refusals of section 9 take.
 func conflict(code, message string) *httpx.Error {
 	return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: message,
@@ -82,6 +87,21 @@ func (s *Service) refuseDayToCome(ctx context.Context, branchID uuid.UUID, on ti
 		return invalidField(field, fmt.Sprintf("%s has not come yet: money is dated no later than today, %s", date(on), date(today)))
 	}
 	return nil
+}
+
+// refuseDayToComeOf is refuseDayToCome for an act that names a document, not
+// a branch: the day is the document's own branch's. A document that is not
+// there is left to the act's own refusal.
+func (s *Service) refuseDayToComeOf(ctx context.Context, table string, id uuid.UUID, on time.Time, field string) error {
+	var branch uuid.UUID
+	err := s.ex(ctx).QueryRow(ctx, `SELECT branch_id FROM `+table+` WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read the document's branch: %w", err)
+	}
+	return s.refuseDayToCome(ctx, branch, on, field)
 }
 
 // ErrNoTransaction is the refusal to run an act with no transaction open.
@@ -523,7 +543,15 @@ func (s *Service) RestampDay(ctx context.Context, invoiceID, paymentID uuid.UUID
 	if paidAt.Before(invoicedAt) {
 		return invalidField("paid_at", "a payment is not made before its invoice")
 	}
-	if paidAt.After(s.now()) || invoicedAt.After(s.now()) {
+	if invoicedAt.After(s.now()) {
+		return invalidField("invoiced_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil && !paidAt.After(invoicedAt) {
+		// a payment received the invoice's own day follows it by a second, so
+		// a statement orders the application behind its invoice
+		paidAt = invoicedAt.Add(time.Second)
+	}
+	if paidAt.After(s.now()) {
 		return invalidField("paid_at", "a day is not in the future")
 	}
 	if paymentID != uuid.Nil {

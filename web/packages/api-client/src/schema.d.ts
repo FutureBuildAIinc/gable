@@ -7325,6 +7325,27 @@ export interface components {
             /** Format: int64 */
             closing_balance_cents: number;
             open_documents: components["schemas"]["ArOpenDocument"][];
+            /** @description Payments received on or before the statement's last day that still hold unapplied cash on it. */
+            unapplied_payments: components["schemas"]["ArUnappliedPayment"][];
+            /**
+             * Format: int64
+             * @description The sum of the unapplied payments.
+             */
+            unapplied_cents: number;
+            /**
+             * Format: int64
+             * @description The closing balance less unapplied cash; the aging's total for the customer on the statement's last day.
+             */
+            net_balance_cents: number;
+        };
+        ArUnappliedPayment: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: date */
+            received_on: string;
+            /** Format: int64 */
+            unapplied_cents: number;
         };
         ArStatement: {
             /** Format: uuid */

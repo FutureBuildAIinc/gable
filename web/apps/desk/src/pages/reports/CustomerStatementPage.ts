@@ -347,11 +347,41 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                     ` : nothing}
 
-                    <div class="flex justify-end mt-4 pt-4 border-t border-white/10">
+                    ${cur.unapplied_payments.length > 0 ? html`
+                        <div class="mt-6" data-testid="statement-unapplied">
+                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">Unapplied cash</h3>
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
+                                    <tr>
+                                        <th class="px-4 py-2">Payment</th>
+                                        <th class="px-4 py-2">Received</th>
+                                        <th class="px-4 py-2 text-right">Unapplied</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-white/5">
+                                    ${cur.unapplied_payments.map(p => html`
+                                        <tr>
+                                            <td class="px-4 py-2 font-mono text-teal-300">${p.number}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${p.received_on}</td>
+                                            <td class="px-4 py-2 text-right font-mono text-emerald-400">${formatCents(p.unapplied_cents)}</td>
+                                        </tr>
+                                    `)}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : nothing}
+
+                    <div class="flex justify-end gap-8 mt-4 pt-4 border-t border-white/10">
                         <div class="text-right">
                             <p class="text-xs text-zinc-500">Closing Balance</p>
                             <p class="text-2xl font-mono font-bold text-white">${formatCents(cur.closing_balance_cents)}</p>
                         </div>
+                        ${cur.unapplied_cents > 0 ? html`
+                            <div class="text-right" data-testid="statement-net-balance">
+                                <p class="text-xs text-zinc-500">Net balance (after unapplied cash)</p>
+                                <p class="text-2xl font-mono font-bold text-white">${formatCents(cur.net_balance_cents)}</p>
+                            </div>
+                        ` : nothing}
                     </div>
                 </div>
             </div>

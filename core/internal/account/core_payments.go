@@ -514,6 +514,9 @@ func (s *Service) Reverse(ctx context.Context, in ReverseIn) (*Effects, error) {
 	if probe.Kind == KindDiscount {
 		return nil, conflict("discount_stands_with_payment", "a discount stands beside the payment that earned it: reverse that payment's application")
 	}
+	if err := s.refuseDayToComeOf(ctx, "invoices", probe.InvoiceID, in.On, "reversed_on"); err != nil {
+		return nil, err
+	}
 	r := &reversal{invoices: map[uuid.UUID]*invoiceRow{}, invoiceAdd: map[uuid.UUID]int64{}}
 	switch {
 	case probe.PaymentID != nil:
@@ -716,6 +719,9 @@ func (s *Service) VoidPayment(ctx context.Context, in VoidPaymentIn) (*Effects, 
 	}
 	if pay.Status != "POSTED" {
 		return nil, httpx.InvalidStateTransition("the payment is already voided")
+	}
+	if err := s.refuseDayToCome(ctx, pay.BranchID, in.On, "voided_on"); err != nil {
+		return nil, err
 	}
 	if pay.Method == "CARD" {
 		return nil, conflict("card_payment", "a card payment is not voided here: refund it through the gateway")
