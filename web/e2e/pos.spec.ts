@@ -97,9 +97,11 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   // sale's revision; the page sends the whole tender list at once.
   const total = await saleTotal(page);
   expect(total).toBeGreaterThan(1);
-  await expect(page.getByTestId('pos-pay')).toContainText(`$${total.toFixed(2)}`);
+  // No tender is assumed: Pay says to choose one until the cashier does.
+  await expect(page.getByTestId('pos-pay')).toContainText('Choose how the customer pays');
   await openPayment(page);
   await page.getByTestId('tender-cash').click();
+  await expect(page.getByTestId('pos-pay')).toContainText(`$${total.toFixed(2)}`);
   await page.getByLabel('Tender amount').fill('1.00');
   await page.getByRole('button', { name: 'Add as split tender' }).click();
   const added = page.getByTestId('pos-added-tenders');
