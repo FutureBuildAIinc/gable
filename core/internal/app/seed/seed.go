@@ -470,7 +470,7 @@ func Run() {
 		{"3/4 OSB T&G 4x8", "OSB-34-TG", "PCS", "Gable Building Supply", "Sheet Goods", 22.00, 34.00, 65.0, 100, 250},
 		{"7/16 OSB 4x8", "OSB-12", "PCS", "Gable Building Supply", "Sheet Goods", 12.00, 19.50, 44.0, 120, 300},
 		{"1/2 Drywall Regular 4x8", "DW-12-REG", "PCS", "Gable Building Supply", "Sheet Goods", 11.00, 16.00, 57.0, 100, 250},
-		{"5/8 Drywall Firecode 4x8", "DW-58-FC", "PCS", "Gable Building Supply", "Sheet Goods", 14.00, 21.00, 70.0, 60, 150},
+		{"5/8 Drywall Type X 4x8", "DW-58-FC", "PCS", "Gable Building Supply", "Sheet Goods", 14.00, 21.00, 70.0, 60, 150},
 		{"3-1/4\" Common Nails (25kg)", "NAIL-16D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Common Nails (25kg)", "NAIL-10D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Deck Screws (2.5kg)", "SCR-DECK-3-5", "BOX", "Mountain Fastener Supply", "Hardware", 18.00, 29.99, 5.0, 40, 100},
@@ -478,7 +478,7 @@ func Run() {
 		{"Joist Hanger 2x8", "HANGER-28", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.95, 1.65, 0.6, 150, 400},
 		{"Joist Hanger 2x10", "HANGER-210", "PCS", "Okanagan Hardware Distribution", "Hardware", 1.10, 1.85, 0.7, 100, 300},
 		{"Hurricane Tie H1", "TIE-H1", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.65, 1.15, 0.3, 200, 500},
-		{"Simpson Strong-Tie LUS28", "SIMP-LUS28", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.90, 1.50, 0.4, 150, 400},
+		{"Face Mount Joist Hanger 2x8", "HANGER-28FM", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.90, 1.50, 0.4, 150, 400},
 		{"Architectural Shingles 30yr", "RF-ARCH-30", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
 		{"Architectural Shingles (Black)", "RF-SH-BLK", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
 		{"Architectural Shingles (Weathered Wood)", "RF-SH-WW", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
@@ -506,15 +506,15 @@ func Run() {
 		{"Flashing J 6 X 6 X 10", "CORN2006", "EA", "Gable Building Supply", "Cornice", 15.50, 23.25, 3.0, 20, 50},
 		{"Flashing Z Bar 3/4 X 10'", "CORN2009", "EA", "Gable Building Supply", "Cornice", 3.50, 5.25, 1.5, 30, 60},
 		{"Silicone Clear Caulk", "CORNCLEAR", "EA", "Okanagan Hardware Distribution", "Cornice", 5.75, 8.65, 0.8, 40, 80},
-		{"Cemtrim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Gable Building Supply", "Cornice", 7.54, 11.31, 12.0, 50, 120},
-		{"Cemtrim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Gable Building Supply", "Cornice", 11.94, 17.91, 18.0, 30, 80},
+		{"Composite Trim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Gable Building Supply", "Cornice", 7.54, 11.31, 12.0, 50, 120},
+		{"Composite Trim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Gable Building Supply", "Cornice", 11.94, 17.91, 18.0, 30, 80},
 		{"Vinyl H Mold 1/4 X 12'", "CORNHMOLD14", "EA", "Gable Building Supply", "Cornice", 4.00, 6.00, 1.0, 30, 60},
 		{"Poly Black 18 X 300", "CORNPOLY18", "RL", "Okanagan Hardware Distribution", "Cornice", 23.12, 34.68, 25.0, 10, 25},
-		{"Solid Soffit Hardie Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Gable Building Supply", "Cornice", 15.25, 22.88, 20.0, 30, 60},
-		{"Solid Soffit Hardie Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Gable Building Supply", "Cornice", 20.45, 30.68, 28.0, 20, 50},
-		{"Vented Soffit Hardie Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Gable Building Supply", "Cornice", 26.15, 39.23, 30.0, 25, 60},
-		{"Vented Soffit Hardie Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Gable Building Supply", "Cornice", 17.50, 26.25, 22.0, 20, 50},
-		{"Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX", "CORNSHTGR49", "EA", "Gable Building Supply", "Cornice", 9.36, 14.04, 24.0, 40, 100},
+		{"Solid Soffit Fibre Cement Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Gable Building Supply", "Cornice", 15.25, 22.88, 20.0, 30, 60},
+		{"Solid Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Gable Building Supply", "Cornice", 20.45, 30.68, 28.0, 20, 50},
+		{"Vented Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Gable Building Supply", "Cornice", 26.15, 39.23, 30.0, 25, 60},
+		{"Vented Soffit Fibre Cement Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Gable Building Supply", "Cornice", 17.50, 26.25, 22.0, 20, 50},
+		{"Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier", "CORNSHTGR49", "EA", "Gable Building Supply", "Cornice", 9.36, 14.04, 24.0, 40, 100},
 		{"Window Tape 6\" (100')", "CORNTAPE", "RL", "Okanagan Hardware Distribution", "Cornice", 22.00, 33.00, 3.0, 15, 30},
 
 		// Random-length / economy grade
@@ -1087,7 +1087,7 @@ func Run() {
 				var podURL, podSigner *string
 				var podTS *time.Time
 				if dStatus == "DELIVERED" {
-					u := "https://storage.gable.com/pod/" + uuid.New().String() + ".jpg"
+					u := "https://storage.gablebuildingsupply.example/pod/" + uuid.New().String() + ".jpg"
 					n := "Site Foreman"
 					t := sDate.Add(time.Duration(8+rand.Intn(6)) * time.Hour)
 					podURL = &u
