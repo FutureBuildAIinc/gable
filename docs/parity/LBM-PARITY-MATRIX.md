@@ -17,11 +17,11 @@ matrix builds the MUST rows in order. Sizes are in dev hour equivalents.
   after each group's last numbered row, and the products not checked for them say so.
 - **The products, from public sources only.** Each product's own site, help centre, documentation, data sheets,
   release notes, press releases and customer stories, and reputable reviews and trade press. Every claim links
-  the page it rests on (R, B and A numbers, listed in the appendix). A separate check fetched every cited page
-  and corrected each claim its page did not support:
-  Rundoo, 114 pages fetched, 22 rows corrected.
-  BisTrack, 72 pages fetched, 31 rows corrected.
-  Agility, 161 pages fetched, 19 rows corrected.
+  the page it rests on (R, B and A numbers, listed in [SOURCES.md](SOURCES.md)). A separate check fetched every
+  cited page it could reach and corrected each claim its page did not support:
+  Rundoo, 114 of 114 pages fetched, 22 rows corrected.
+  BisTrack, 72 of 82 pages fetched, 31 rows corrected. The other 10 are Epicor training transcripts behind its customer sign in; a claim resting only on them is marked behind a demo or login.
+  Agility, 161 of 161 pages fetched, 19 rows corrected.
 - **Evidence.** "documented" means a help page, document or data sheet describes it; "marketing only" means
   only a product page or a review claims it, without detail; "behind a demo" means the vendor says it exists
   and the detail sits behind a demo, a customer login or a sales call; "Not public" means nothing public was
@@ -42,7 +42,7 @@ matrix builds the MUST rows in order. Sizes are in dev hour equivalents.
 | BisTrack | 72 | 42 | 0 | 8 |
 | Agility | 100 | 20 | 0 | 2 |
 
-Gable at `58dde7e8`, over the 122 listed rows: 9 built, 84 partial, 29 missing. Priorities over all 142 rows: 80 MUST, 33 SHOULD, 29 LATER.
+Gable at `58dde7e8`, over the 122 listed rows: 8 built, 85 partial, 29 missing. Priorities over all 142 rows: 79 MUST, 34 SHOULD, 29 LATER.
 
 The three products, in their own words and their reviewers':
 
@@ -106,7 +106,7 @@ line links (`rows/`, one file per group). Every cited page is listed in [SOURCES
 | [SO-09](rows/SO.md#so-09) | Jobs and projects on orders (job sites, lot and block) | Partial | Yes | Yes | Partial | **MUST** |
 | [SO-10](rows/SO.md#so-10) | Charge lines and text lines (delivery and other charges, notes) | Yes | Yes | Yes | Built | **MUST** |
 | [SO-11](rows/SO.md#so-11) | Blanket or call off orders (contract quantities released over time) | Partial | Yes | Yes | Missing | **SHOULD** |
-| [SO-12](rows/SO.md#so-12) | Sales history and last price paid at order entry | Partial | Yes | Yes | Missing | **SHOULD** |
+| [SO-12](rows/SO.md#so-12) | Sales history and last price paid at order entry | Partial | Yes | Yes | Missing | **MUST** |
 | [SO-13](rows/SO.md#so-13) | Customer PO capture into orders (OCR and EDI) | Not checked | Yes | Not checked | Partial | **LATER** |
 | [SO-14](rows/SO.md#so-14) | Equipment and tool rentals | Not checked | Yes | Not checked | Missing | **LATER** |
 | [SO-15](rows/SO.md#so-15) | Installed sales and crew scheduling | Not checked | Yes | Yes | Missing | **LATER** |
@@ -121,7 +121,7 @@ line links (`rows/`, one file per group). Every cited page is listed in [SOURCES
 | [PR-03](rows/PR.md#pr-03) | Quantity breaks | Yes | Yes | Yes | Partial | **MUST** |
 | [PR-04](rows/PR.md#pr-04) | Branch pricing (prices differ by yard) | Partial | Yes | Yes | Missing | **MUST** |
 | [PR-05](rows/PR.md#pr-05) | Margin floors (minimum gross margin, override with approval) | Partial | Partial | Yes | Partial | **MUST** |
-| [PR-06](rows/PR.md#pr-06) | Price overrides and line discounts with reason codes and audit | Partial | Partial | Partial | Partial (PR 72) | **MUST** |
+| [PR-06](rows/PR.md#pr-06) | Price overrides and line discounts with reason codes and audit | Partial | Partial | Partial | Partial (PR 72) | **SHOULD** |
 | [PR-07](rows/PR.md#pr-07) | Commodity and market cost updates (lumber market moves, mass price changes) | Partial | Partial | Yes | Partial (C4-1a) | **MUST** |
 | [PR-08](rows/PR.md#pr-08) | Promotions and sale pricing (including mix and match) | Partial | Yes | Partial | Partial | **SHOULD** |
 | [PR-09](rows/PR.md#pr-09) | Job pricing held for a job or quote | Yes | Not public | Yes | Partial | **MUST** |
@@ -183,8 +183,8 @@ line links (`rows/`, one file per group). Every cited page is listed in [SOURCES
 |---|---|---|---|---|---|---|
 | [DD-01](rows/DD.md#dd-01) | Delivery scheduling and the dispatch board | Yes | Yes | Partial | Partial | **MUST** |
 | [DD-02](rows/DD.md#dd-02) | Loads and load planning (weight, volume, truck capacity) | Partial | Yes | Yes | Partial | **SHOULD** |
-| [DD-03](rows/DD.md#dd-03) | Trucks and equipment (fleet, trailers, boom or forklift, capacity) | Partial | Partial | Partial | Partial | **MUST** |
-| [DD-04](rows/DD.md#dd-04) | Routes and runs (stop sequence, route optimisation) | Partial | Yes | Yes | Built | **MUST** |
+| [DD-03](rows/DD.md#dd-03) | Trucks and equipment (fleet, trailers, boom or forklift, capacity) | Partial | Partial | Partial | Partial | **SHOULD** |
+| [DD-04](rows/DD.md#dd-04) | Routes and runs (stop sequence, route optimisation) | Partial | Yes | Yes | Partial | **MUST** |
 | [DD-05](rows/DD.md#dd-05) | Proof of delivery (driver app, signature, photos, location) | Yes | Yes | Yes | Partial | **MUST** |
 | [DD-06](rows/DD.md#dd-06) | Delivery tracking and customer notices | Yes | Yes | Yes | Partial | **MUST** |
 | [DD-07](rows/DD.md#dd-07) | Delivery charges and zones | Partial | Yes | Yes | Partial | **SHOULD** |
@@ -280,78 +280,81 @@ line links (`rows/`, one file per group). Every cited page is listed in [SOURCES
 
 ### The items, in build order
 
+Each MUST row closes in exactly one item, the one that writes its walk; an earlier item may advance it. "After" names
+the items that must merge first.
+
 **Phase 0, in flight.** These close the work already open.
 
-| # | Item | Rows | What it delivers | Class | Size |
-|---|---|---|---|---|---|
-| M0a | SEC-NOHEADER-1 (pull request 119) to merge | MY-01 | A user with no branch in context held to the user's own grants on every read and act; the tax exemption routes walled; the seed's customer branch rows and their backfill | security, data | 12 to 24 |
-| M0b | C2-5, POS and till (pull request 72) to merge | CP-01, CP-03, CP-06, CP-08, CP-11 | The counter on the contract: tenders as payments, returns as credit memos, till sessions, the refund intents and their rail; takes `refactor/v1` in after M0a, then its money review pair | money | 16 to 32 |
-| M0c | C4-1a, inventory, purchase orders, vendors and EDI partners on the module recipe | PU-01, PU-02, IN-05 | The paused work resumed: the recipe's errors, numbers, money and events on those modules, so the inventory and purchasing items build on one contract | data | 40 to 70 |
+| # | Item | Closes | Advances | What it delivers | After | Class | Size |
+|---|---|---|---|---|---|---|---|
+| M0a | SEC-NOHEADER-1 (pull request 119) to merge | | MY-01 | A user with no branch in context held to the user's own grants on every read and act; the tax exemption routes walled; the seed's customer branch rows and their backfill | | security, data | 12 to 24 |
+| M0b | C2-5, POS and till (pull request 72) to merge | | CP-01, CP-03, CP-06, CP-08, CP-11 | The counter on the contract: tenders as payments, returns as credit memos bounded by the sale with reason codes, till sessions, the refund intents and their rail; it takes `refactor/v1` in after M0a, then its money review pair | M0a | money | 16 to 32 |
+| M0c | C4-1a, inventory, purchase orders, vendors and EDI partners on the module recipe | | PU-01, PU-02, IN-05 | The paused work resumed: the recipe's errors, numbers, money and events on those modules; stock levels and reorder recommendations per branch, counting on order and back orders | | data | 40 to 70 |
 
-**Phase 1, the multi yard base.** Everything after it reads a yard.
+**Phase 1, the multi yard base.** Pricing, then units on documents, then stock identity, run one after another, as
+ADR 0006 (section 9.1) and ADR 0008 require; M1, M3 and M6 run beside that chain.
 
-| # | Item | Rows | What it delivers | Class | Size |
-|---|---|---|---|---|---|
-| M1 | Multi yard setup and the two yard demo | MY-01, AR-01 | Multi yard on at setup and in the demo seed; at least two yards with registers, stock and people granted per yard; customers every yard can sell to, by the rule the product owner sets; the first walks | security, data | 16 to 32 |
-| M2 | Units on documents (C3-2B, ADR 0006) | UM-01, UM-02, UM-03, UM-05 | Orders, invoices, the counter, purchase orders and receipts in any unit of the product's set, the resolved factor stored on each line, a price unit apart from the stocking unit (MBF) | money | 40 to 64 |
-| M3 | Documents and a real sender | IX-07, MY-05, CP-14 | An email sender behind the notifier (SMTP; a local catcher in the dev stack); forms carrying the dealer's and the yard's name, logo, address and remit to; receipt, invoice, statement, quote, purchase order and pick ticket documents | none | 32 to 52 |
-| M4 | Stock identity (ADR 0008 package A) | IN-01, IN-02, IN-03, IN-07, CP-01 | One stock row per product, yard, bin, lot and length; the move ledger; allocations that carry identity; counter sales and voids at the register's own yard; available by yard at quote and order entry; tally and lots in stock | data, money | 56 to 90 |
-| M5 | Pricing in documents and by yard (C3-2A-pricing, ADR 0006) | PR-01, PR-02, PR-03, PR-04, PR-09 | The scaled price engine in orders and at the counter; yard base prices and price levels; contracts and rules with effective dates, a yard, and update and delete routes; job price lists; category pricing on by default | money | 48 to 80 |
-| M6 | A branch on the ledger | MY-02, GL-02, GL-03 | A branch on every journal line from every posting path; fiscal periods and year end close; P and L by branch and consolidated, with a branch column | money | 48 to 80 |
+| # | Item | Closes | Advances | What it delivers | After | Class | Size |
+|---|---|---|---|---|---|---|---|
+| M1 | Multi yard setup and the two yard demo | MY-01, AR-01 | | Multi yard on at setup and in the demo seed; each yard with its own register, stock and people granted to it; customers as dealer wide accounts any yard sells to, linked to each yard they trade at by their first document there (the product owner's ruling); the first walks | M0a | security, data | 16 to 32 |
+| M5 | Pricing by yard (C3-2A-pricing, ADR 0006) | PR-01, PR-02, PR-03, PR-04, PR-09 | | Price levels and profiles; yard base prices; the resolver; contracts and rules with effective dates, a yard, and update and delete routes; job price lists; category pricing on by default; within the pricing module only, as ADR 0006 sets | | money | 40 to 64 |
+| M3 | Documents and a real sender | IX-07, MY-05 | CP-14, AR-04 | An email sender behind the notifier (SMTP; a local catcher in the dev stack) and a record of what was sent; the dealer's profile; forms carrying the dealer's and the yard's name, logo, address and remit to; invoice, statement, quote, purchase order and pick ticket documents | | none | 32 to 52 |
+| M6 | A branch on the ledger | MY-02, GL-02, GL-03 | | A branch on every journal line from every posting path; fiscal periods and year end close; P and L by branch and consolidated, with a branch column | | money | 48 to 80 |
+| M2 | Units and the resolver on documents (C3-2B, ADR 0006) | UM-01, UM-02, UM-03, UM-05 | | Orders, invoices, credit memos, the counter, the portal, purchase orders and receipts in any unit of the product's set, the resolved factor stored on each line; the resolver in every document; the stocking unit price hold lifted (MBF) only now | M0b, M5 | money | 48 to 80 |
+| M4 | Stock identity (ADR 0008 package A) | IN-01, IN-02, IN-03, IN-07, CP-01 | | One stock row per product, yard, bin, lot and length; the move ledger; allocations that carry identity; counter sales and voids at the register's own yard; available by yard at quote and order entry; tally and lots in stock | M0b, M0c, M2 | data, money | 56 to 90 |
 
 **Phase 2, stock and buying across yards.**
 
-| # | Item | Rows | What it delivers | Class | Size |
-|---|---|---|---|---|---|
-| M7 | Coded adjustments, cost and valuation (ADR 0008 package B) | IN-09, IN-10 | Reason codes, movement rows and events, GL at average cost by branch; receipts posting to inventory; valuation by branch tied to the ledger | money, data | 32 to 52 |
-| M8 | Purchase orders and receiving | PU-01, PU-02, PU-03 | Numbers, revisions and status rules; the branch chosen on create; a receipt document and the over receipt rule; received not invoiced posting; expected dates per line; the back order report; close short | money | 32 to 52 |
-| M9 | Transfers between yards | IN-04 | Request, pick, ship, stock and value in transit, receipt at the far yard, GL by branch | money, data | 40 to 64 |
-| M10 | Min and max per yard, and purchase suggestions | IN-05, PU-07 | Points per yard; suggestions that count on order and back orders, with vendor costs | none | 20 to 32 |
-| M11 | Counts by bin | IN-06 | Count sessions, snapshots, variance review and posting with the GL | money | 28 to 44 |
-| M12 | The product master | IN-11 | General product edit; vendors per item with item numbers and costs; UPCs; images; per yard settings | none | 20 to 32 |
-| M13 | Landed cost | PU-04 | Freight and other landed costs at receipt, spread by value, weight or quantity into cost, with GL | money | 20 to 32 |
-| M14 | Vendor returns and credit memos (ADR 0008 package E) | PU-10 | Returns taking stock out at cost; vendor credit memos matched to returns and applied to bills; GL | money | 24 to 40 |
-| M15 | Matching and payment runs | PU-08, GL-01 | Bills matched to receipts by item (two and three way, several bills per order); payment runs with check and ACH files; a branch on vendor payments | money | 32 to 52 |
+| # | Item | Closes | Advances | What it delivers | After | Class | Size |
+|---|---|---|---|---|---|---|---|
+| M7 | Coded adjustments, cost and the receipt's posting (ADR 0008 package B) | IN-09, IN-10 | PU-02 | Reason codes, movement rows and events, GL at average cost by branch; the receipt's posting (inventory against received not invoiced); valuation by branch tied to the ledger | M4, M6 | money, data | 32 to 56 |
+| M8 | Purchase orders and receiving | PU-01, PU-02, PU-03 | | Revisions and status rules on top of M0c; the branch chosen on create; a receipt document and the over receipt rule; expected dates per line; the back order report; close short | M0c, M7 | money | 28 to 44 |
+| M9 | Transfers between yards | IN-04 | | Request, pick, ship, stock and value in transit, receipt at the far yard, GL by branch | M4, M7 | money, data | 40 to 64 |
+| M10 | Min and max per yard, and purchase suggestions: what M0c leaves | IN-05, PU-07 | | Points per yard maintained through the API; suggestions priced from vendor costs, by vendor, with seasonality left to SHOULD | M0c, M4 | none | 8 to 16 |
+| M11 | Counts by bin | IN-06 | | Count sessions, snapshots, variance review and posting with the GL | M4, M7 | money | 28 to 44 |
+| M12 | The product master | IN-11 | | General product edit; vendors per item with item numbers and costs; UPCs; images; per yard settings | M0c | none | 20 to 32 |
+| M13 | Landed cost | PU-04 | | Freight and other landed costs at receipt, spread by value, weight or quantity into cost, with GL | M8 | money | 20 to 32 |
+| M14 | Vendor returns and credit memos (ADR 0008 package E) | PU-10 | | Returns taking stock out at cost; vendor credit memos matched to returns and applied to bills; GL | M7 | money | 24 to 40 |
+| M15 | Matching, payment runs and 1099s | PU-08, GL-01 | | Bills matched to receipts by item (two and three way, several bills per order); payment runs with check and ACH files; 1099 tracking; a branch on vendor payments | M6, M8 | money | 36 to 56 |
 
 **Phase 3, selling across yards.**
 
-| # | Item | Rows | What it delivers | Class | Size |
-|---|---|---|---|---|---|
-| M16 | Quotes that expire and revise | QE-01 | Expiry enforced, stored revisions, accept and convert in either order | none | 16 to 24 |
-| M17 | Orders with releases and jobs | SO-01, SO-09, SO-05 | Ship dates per line and release; job routes with site, lot and block, and contact; back order expected dates from the linked purchase order | none | 32 to 52 |
-| M18 | Special orders and drop ship (ADR 0008 package C) | SO-02, SO-03 | The linked purchase order from the order line; the receipt allocated to that line; direct ship billed from the vendor's confirmation | money | 32 to 52 |
-| M19 | Margin floors, override reasons and approvals | PR-05, PR-06, SO-06 | A margin floor on quote, order and counter lines; overrides with reason codes, an approval queue and an audit report | money | 32 to 52 |
-| M20 | Fulfil and ship from another yard | SO-08, DD-09 | A sourcing yard per line; availability and allocation there; a transfer or direct ship from it; the margin and GL split between yards | money | 32 to 52 |
-| M21 | Picking and will call | SO-07, SO-04 | Picks that persist (picked and loaded states, bins, quantities, a load sheet); will call staging, a ready notice and release with a signature | none | 32 to 48 |
-| M22 | Mass price and cost change | PR-07 | Changes by category, vendor or yard, by percent or amount, with a preview and an audit; vendor price files into costs | money | 20 to 32 |
-| M23 | Tally on documents | UM-04 | Tally on order, invoice, fulfilment, counter and receipt lines, kept through convert | money | 24 to 40 |
+| # | Item | Closes | Advances | What it delivers | After | Class | Size |
+|---|---|---|---|---|---|---|---|
+| M16 | Quotes that expire and revise | QE-01 | | Expiry enforced, stored revisions, accept and convert in either order | | none | 16 to 24 |
+| M17 | Orders with releases, jobs and the last price paid | SO-01, SO-05, SO-09, SO-12 | | Ship dates per line and release; job routes with site, lot and block, and contact; back order expected dates from the linked purchase order; sales history and the last price paid at quote and order entry | M8 | none | 36 to 60 |
+| M18 | Special orders and drop ship (ADR 0008 package C) | SO-02, SO-03 | | The linked purchase order from the order line; the receipt allocated to that line; direct ship billed from the vendor's confirmation | M4, M8 | money | 32 to 52 |
+| M19 | Margin floors and approvals | PR-05, SO-06 | | A margin floor on quote, order and counter lines; an approval queue whose every override carries a reason; the credit and margin holds in one place | M2 | money | 28 to 44 |
+| M33 | Delivery by yard | DD-01, DD-04, DD-05, DD-06 | | A home yard per truck and driver and a board per yard; each route starting at its yard; route edit and cancel; proof of delivery with place and signer; customer notices through the sender | M3 | none | 32 to 52 |
+| M20 | Fulfil and ship from another yard | SO-08, DD-09 | | A sourcing yard per line; availability and allocation there; a transfer or direct ship from it; the margin and GL split between yards | M7, M9, M33 | money | 32 to 52 |
+| M21 | Picking and will call | SO-04, SO-07 | | Picks that persist (picked and loaded states, bins, quantities, a load sheet); will call staging, a ready notice and release with a signature | M4 | none | 32 to 48 |
+| M22 | Mass price and cost change | PR-07 | | Changes by category, vendor or yard, by percent or amount, with a preview and an audit; vendor price files into costs (the price file part of ADR 0008 package F; its feed intake endpoints stay SHOULD with PU-06) | M5, M0c | money | 20 to 32 |
+| M23 | Tally on documents | UM-04 | | Tally on order, invoice, fulfilment, counter and receipt lines, kept through convert | M2, M4 | money | 24 to 40 |
 
 **Phase 4, the counter and the money.**
 
-| # | Item | Rows | What it delivers | Class | Size |
-|---|---|---|---|---|---|
-| M24 | Account sales and tender rules | CP-02, CP-04, CP-11, CP-03 | A PO and job on a counter sale; PO required and cash only accounts; the credit check and account notes at the counter; validated tender methods; split tender and store credit | money | 32 to 52 |
-| M25 | Credit holds and approvals | AR-02 | Customer level hold and stop flags; a credit limit change workflow with its history; the check on every order, counter and delivery path | money | 24 to 40 |
-| M26 | Till control and end of day by branch | CP-08, CP-09 | Drops, pickups, paid in and out; no sale without an open till; the daily close by branch with deposit reconciliation; daily sales by branch | money | 32 to 52 |
-| M27 | Tax by jurisdiction, and sales tax reports | CP-10, GL-06 | Jurisdictions and rates by yard or ship to; exemption certificates checked for validity; taxability per line; reports by jurisdiction and branch | money | 40 to 64 |
-| M28 | Returns against the original sale | CP-06 | Returns checked against the sale's lines and quantities, reason codes, restocking fees, exchanges, to the original tender | money | 20 to 32 |
-| M29 | The card terminal and payment gateway seams | CP-05, IX-01, PE-02 | A terminal seam with a test terminal (sale, void and refund at the terminal, settlement); an online gateway seam with a test gateway; one live processor needs the dealer's account | money, security | 40 to 64 |
-| M30 | Statements and finance charges | AR-04, AR-05 | A statement run for all or chosen customers, by job, as documents and email; finance charge rules and a periodic run that bills them, with GL | money | 32 to 52 |
-| M31 | Job accounts | AR-07 | Job sub accounts with a credit limit, terms, billing contact, balance and aging; payments to a job | money | 32 to 48 |
-| M32 | Deposits, charge lines and terms where people work | CP-07, SO-10, AR-09, AR-03 | The API follow ups their screens need: a deposit at the counter, the discount at apply, batch receipt entry | money | 12 to 20 |
+| # | Item | Closes | Advances | What it delivers | After | Class | Size |
+|---|---|---|---|---|---|---|---|
+| M24 | Account sales, tender rules and counter documents | CP-02, CP-03, CP-04, CP-11, CP-14 | | A PO and job on a counter sale; PO required, cash only accounts, check limits and ID capture; the credit check and account notes at the counter; validated tender methods; split tender and store credit; the receipt printed or emailed and a signature at the counter | M0b, M2, M3 | money | 40 to 64 |
+| M25 | Credit holds and approvals | AR-02 | | Customer level hold and stop flags; a credit limit change workflow with its history; the check on every order, counter and delivery path | M0b | money | 24 to 40 |
+| M26 | Till control and end of day by branch | CP-08, CP-09 | | Drops, pickups, paid in and out; no sale without an open till; the daily close by branch with deposit reconciliation; daily sales by branch | M0b, M6 | money | 32 to 52 |
+| M27 | Tax by jurisdiction, and sales tax reports | CP-10, GL-06 | | Jurisdictions and rates by yard or ship to; exemption certificates checked for validity; taxability per line; reports by jurisdiction and branch | M2, M6 | money | 40 to 64 |
+| M29 | The card terminal and payment gateway seams | CP-05, IX-01 | PE-02 | A terminal seam with a test terminal (sale, void and refund at the terminal, settlement); an online gateway seam with a test gateway; one live processor needs the dealer's account | M0b | money, security | 40 to 64 |
+| M28 | Returns: what M0b leaves | CP-06 | | Restocking fees, exchanges, card refunds at the terminal, and a reason code list behind the return's reason | M0b, M29 | money | 12 to 20 |
+| M30 | Statements and finance charges | AR-04, AR-05 | | A statement run for all or chosen customers, by job, as documents and email; finance charge rules and a periodic run that bills them, with GL | M3, M6 | money | 32 to 52 |
+| M31 | Job accounts | AR-07 | | Job sub accounts with a credit limit, terms, billing contact, balance and aging; payments to a job | M17 | money | 32 to 48 |
+| M32 | Deposits, charge lines and terms where people work | CP-07, SO-10, AR-03, AR-09 | | The API follow ups their screens need: a deposit at the counter, the discount at apply, batch receipt entry | M0b | money | 12 to 20 |
 
-**Phase 5, delivery, reporting, the portal and the yard.**
+**Phase 5, reporting, the portal and the yard.**
 
-| # | Item | Rows | What it delivers | Class | Size |
-|---|---|---|---|---|---|
-| M33 | Delivery by yard | DD-01, DD-03, DD-04, DD-05, DD-06 | A home yard per truck and driver and a board per yard; each route starting at its yard; route edit and cancel; proof of delivery with place and signer; customer notices through the sender | none | 32 to 52 |
-| M34 | Reports by branch, delivered | GL-05 | A branch field and cut on every canned and builder report; scheduled reports emailed as PDF or CSV; margin and GL reports | none | 24 to 40 |
-| M35 | The contractor portal | PE-01, PE-02, PE-04 | Statements and aging in the portal; invoice documents; money in cents on the recipe; paying invoices through the gateway seam; notices | money | 32 to 52 |
-| M36 | Scanning and labels | MY-04 | UPC and bin barcodes matched; labels (bin, bundle, shelf, item) printed | none | 20 to 32 |
+| # | Item | Closes | Advances | What it delivers | After | Class | Size |
+|---|---|---|---|---|---|---|---|
+| M34 | Reports by branch, delivered | GL-05 | | A branch field and cut on every canned and builder report; scheduled reports emailed as PDF or CSV; margin and GL reports | M3, M6 | none | 24 to 40 |
+| M35 | The contractor portal | PE-01, PE-02, PE-04 | | Statements and aging in the portal; invoice documents; money in cents on the recipe; paying invoices through the gateway seam; notices | M3, M29 | money | 32 to 52 |
+| M36 | Scanning and labels | MY-04 | | UPC and bin barcodes matched; labels (bin, bundle, shelf, item) printed | M4 | none | 20 to 32 |
 
-Items can run in parallel where their rows do not depend on each other: phase 1's items after M0b and M0c, and
-then one item from each of phases 2, 3 and 4 at a time, since each phase holds its own modules. Phase 2 needs M4
-and M6; phase 3 needs M2, M4 and M5; phase 4 needs M0b, M5 and M6.
+Outside phase 1's serial chain, an item starts when its "After" items have merged; two items that change the same
+module (the counter, allocation, jobs) do not run at once.
 
 ### The screens
 
@@ -414,22 +417,25 @@ the shells: about 64 to 99.
 
 | | Size |
 |---|---|
-| MUST items (M0a to M36) | 1,148 to 1,876 |
+| MUST items (M0a to M36) | 1,136 to 1,860 |
 | Their screens | 240 to 480 |
 | The shell track | 200 to 315 |
 | The design track | 136 to 204 |
-| **The MUST plan** | **about 1,724 to 2,875** |
+| **The MUST plan** | **about 1,712 to 2,859** |
 
 The SHOULD rows follow in the same way once the MUST rows are built; a first estimate, before they are briefed, is
 about 600 to 1,000.
 
-### Rulings this plan waits on
+### Rulings
 
-- **Customers across yards (M1).** Whether a customer one yard opened is an account every yard sells to, and how the
-  link between a customer and the yards it trades at is kept. M1 and every multi yard walk wait on it.
+- **Customers across yards (M1): ruled.** Every customer is a dealer wide account that any yard's people may sell to;
+  the customer's links record the yards it trades at, with its home yard; the first document at a new yard adds the
+  link, audited; branch bound keys keep their pin; finance and reports keep following grants.
+- **The plan itself, and with it the design track's start.** Waiting.
 - **The shells' navigation and the distinct flows.** See [GABLE-DISTINCT.md](GABLE-DISTINCT.md): what the shell
-  pattern changes in Gable's own flows.
-- **Offline.** This plan puts an offline store for the field shell at SHOULD, keeps the counter online (CP-13 is
-  LATER), and lets no money queue.
-- **Sign in methods.** Which methods the open source build offers by default and where a dealer chooses them (S9).
+  pattern changes in Gable's own flows. Waiting.
+- **Offline.** This plan keeps the counter online (CP-13 is LATER), puts an offline store for the field shell at
+  SHOULD, and lets no money queue. Waiting.
+- **Sign in methods.** Which methods the open source build offers by default, and where a dealer chooses them (S9).
+  Waiting.
 

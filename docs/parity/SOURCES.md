@@ -5,7 +5,7 @@ SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 # Parity sources
 
-Every page the [parity matrix](LBM-PARITY-MATRIX.md) and its rows cite, by product. Each was fetched to check the claims that cite it. Customer stories are titled generically; this repository names no dealer.
+Every page the [parity matrix](LBM-PARITY-MATRIX.md) and its rows cite, by product. Each page a checker could reach was fetched to check the claims that cite it. Prose and titles name no dealer: customer stories are titled generically, and their URLs keep the vendor's own address, which may carry the dealer's name.
 
 ## Rundoo
 
@@ -202,16 +202,16 @@ Every page the [parity matrix](LBM-PARITY-MATRIX.md) and its rows cite, by produ
 | B70 | [BisTrack Delivery (Apple App Store listing)](https://apps.apple.com/us/app/bistrack-delivery/id1228385709) | vendor_docs |
 | B71 | [Epicor BisTrack profile and reviews (Software Advice)](https://www.softwareadvice.com/scm/epicor-bistrack-profile/) | review |
 | B72 | [GPS Insight help: EPICOR/BisTrack Integration](https://help.gpsinsight.com/docs/epicor-bistrack-integration/) | vendor_docs |
-| B73 | [Epicor training transcript: Finance Charges (BisTrack, course r2061)](https://ondemand.epicor.com/courseResources/r2061_FinanceChargesTranscript_1.pdf) | vendor_docs |
-| B74 | [Epicor training transcript: Customer Accounts Overview (BisTrack, course r2046)](https://ondemand.epicor.com/courseResources/r2046_CustomerAccountsOverviewTranscript_1.pdf) | vendor_docs |
-| B75 | [Epicor training transcript: Customer Master Tables (BisTrack, course r2214)](https://ondemand.epicor.com/courseResources/r2214_CustomerMasterTables_Transcript_1.pdf) | vendor_docs |
-| B76 | [Epicor training transcript: Cash Drawer Balancing (BisTrack, course r2029)](https://ondemand.epicor.com/courseResources/r2029_CashDrawerBalancingTranscript_1.pdf) | vendor_docs |
-| B77 | [Epicor training transcript: System Manager Computer Options (BisTrack, course r2155)](https://ondemand.epicor.com/courseResources/r2155_System%20Manager%20Computer%20Options_Transcript_1.pdf) | vendor_docs |
-| B78 | [Epicor training transcript: Options and Notes Tabs (BisTrack, course r2206)](https://ondemand.epicor.com/courseResources/r2206_OptionsandNotesTab_Transcript_1.pdf) | vendor_docs |
-| B79 | [Epicor training transcript: Adding New Customer Accounts (BisTrack, course r2047)](https://ondemand.epicor.com/courseResources/r2047_AddingNewCustomerAccountsTranscript_1.pdf) | vendor_docs |
-| B80 | [Epicor training transcript: Credit Controls Overview (BisTrack course BT122, r2049)](https://ondemand.epicor.com/courseResources/r2049_BT122CreditControlsOverviewTranscript_1.pdf) | vendor_docs |
-| B81 | [Epicor training transcript: Prices Tab (BisTrack, course r2212)](https://ondemand.epicor.com/courseResources/r2212_PricesTab_Transcript_1.pdf) | vendor_docs |
-| B82 | [Epicor training transcript: Using Notes, Special Instructions, and Text Lines (BisTrack, course r2129)](https://ondemand.epicor.com/courseResources/r2129_Using%20Notes,%20Special%20Instructions,%20and%20Text%20Lines%20Transcript_1.pdf) | vendor_docs |
+| B73 | [Epicor training transcript: Finance Charges (BisTrack, course r2061) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2061_FinanceChargesTranscript_1.pdf) | vendor_docs |
+| B74 | [Epicor training transcript: Customer Accounts Overview (BisTrack, course r2046) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2046_CustomerAccountsOverviewTranscript_1.pdf) | vendor_docs |
+| B75 | [Epicor training transcript: Customer Master Tables (BisTrack, course r2214) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2214_CustomerMasterTables_Transcript_1.pdf) | vendor_docs |
+| B76 | [Epicor training transcript: Cash Drawer Balancing (BisTrack, course r2029) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2029_CashDrawerBalancingTranscript_1.pdf) | vendor_docs |
+| B77 | [Epicor training transcript: System Manager Computer Options (BisTrack, course r2155) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2155_System%20Manager%20Computer%20Options_Transcript_1.pdf) | vendor_docs |
+| B78 | [Epicor training transcript: Options and Notes Tabs (BisTrack, course r2206) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2206_OptionsandNotesTab_Transcript_1.pdf) | vendor_docs |
+| B79 | [Epicor training transcript: Adding New Customer Accounts (BisTrack, course r2047) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2047_AddingNewCustomerAccountsTranscript_1.pdf) | vendor_docs |
+| B80 | [Epicor training transcript: Credit Controls Overview (BisTrack course BT122, r2049) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2049_BT122CreditControlsOverviewTranscript_1.pdf) | vendor_docs |
+| B81 | [Epicor training transcript: Prices Tab (BisTrack, course r2212) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2212_PricesTab_Transcript_1.pdf) | vendor_docs |
+| B82 | [Epicor training transcript: Using Notes, Special Instructions, and Text Lines (BisTrack, course r2129) (behind Epicor's customer sign in)](https://ondemand.epicor.com/courseResources/r2129_Using%20Notes,%20Special%20Instructions,%20and%20Text%20Lines%20Transcript_1.pdf) | vendor_docs |
 
 ## Agility
 
@@ -373,7 +373,6 @@ Every page the [parity matrix](LBM-PARITY-MATRIX.md) and its rows cite, by produ
 | A154 | [Agility customer story](https://www.dmsi.com/resources/beisser-lumber/) | case_study |
 | A155 | [Independent ERP Partner](https://www.dmsi.com/independent-erp-partner/) | vendor_site |
 | A156 | [Agility customer story](https://www.dmsi.com/resources/mid-state-lumber/) | case_study |
-| A157 | [Agility customer story](https://www.dmsi.com/resources/ray-escamillas-journey-to-success-with-agility-and-dmsi-at-red-river-lumber/) | case_study |
 | A158 | [Agility customer story](https://www.dmsi.com/resources/interior-supply/) | case_study |
 | A159 | [Agility customer story](https://www.dmsi.com/resources/sprint-lumber/) | case_study |
 | A160 | [DMSi Agility profile (erp-software.org)](https://usa.erp-software.org/software/dmsi-agility/) | review |

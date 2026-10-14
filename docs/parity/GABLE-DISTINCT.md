@@ -43,7 +43,7 @@ repository relative; MVP paths are marked "MVP".
 - **Status:** built (sign in and tiles); the `open` handling is designed and waits on C5-2b.
 - **Distinct because:** Gable opens into a catalog of separately enabled apps, not one menu tree.
 - **Verdict:** keep, with a change. The tile audience table (`APP_AUDIENCE`) repeats the server's role guards in the
-  browser; the catalog should send each app's roles (the `roles` field exists and is unused) so the door cannot drift
+  browser; the catalog should send each app's roles (the door reads a `roles` field when the catalog sends one, and the core never sends it) so the door cannot drift
   from the guards.
 
 #### D2. The desk home grid
