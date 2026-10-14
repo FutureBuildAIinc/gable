@@ -228,9 +228,13 @@ When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/s
 
 ### AR balance: derive from documents; `customers.balance_due` is a secondary record
 For **reads / decisions**, derive the customer's AR from documents, never from the
-denormalized `customers.balance_due` column. The portal AR summary, dashboard and reporting
+denormalized `customers.balance_due` column. The portal AR summary and reporting
 read `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')` (each repeats the
 set that `invoice.OpenInvoiceStatuses` names; they do not net partial payments, the gate does).
+The dashboard's Outstanding AR is the yard's net open receivable as `core/internal/account/aging.go`
+reads it today (each invoice's open amount, each numbered credit memo's open amount, each payment's
+unapplied cash as a negative, inside the caller's wall, nothing voided), so it equals AR Aging's
+total for the same yard; the count beside it stays the number of `UNPAID` and `PARTIAL` invoices.
 The order **credit-limit gate** reads
 `OpenReceivableCents` in the order repository (ADR 0005 section 5.3): the open amounts of the
 customer's open invoices and open credit memos (negative), less its unapplied cash, plus the

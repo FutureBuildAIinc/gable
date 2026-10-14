@@ -30,6 +30,17 @@ type Repository interface {
 // PostgresRepository implements Repository for Postgres.
 type PostgresRepository struct {
 	db *database.DB
+	// now is the server's clock (time.Now unless a test sets it); the
+	// revenue days read it, while the open receivable's day is the default
+	// branch's business date read in the database, as the aging's default.
+	now func() time.Time
+}
+
+func (r *PostgresRepository) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // NewRepository creates a new dashboard repository.
@@ -40,10 +51,15 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // GetDashboardSummary returns all aggregate KPIs in a single query using a CTE.
 // The caller's reach walls every arm (the payments arms through the order or
 // the invoice their payment settles, the rest through their own branch).
+// Outstanding AR is the yard's net open receivable as the aging reads it
+// today (account.agingSQL): each invoice's open amount, each numbered credit
+// memo's open amount and each payment's unapplied cash as a negative. It is
+// inlined, not read through the account module, so the one query, the per
+// reach cache and its reach keys stay as they are.
 func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	summary := &DashboardSummary{}
 
-	now := time.Now()
+	now := r.clock()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	todayEnd := todayStart.Add(24 * time.Hour)
 	yesterdayStart := todayStart.AddDate(0, 0, -1)
@@ -52,7 +68,14 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	// through either document's branch, the pair the header rule read before.
 	paymentWall := "(" + middleware.Wall("o", 4, 5) + " OR " + middleware.Wall("i", 4, 5) + ")"
 	query := `
-		WITH today_rev AS (
+		WITH asof AS (
+			-- The open receivable's day: the default branch's business date,
+			-- the aging's default (account.todayInDefaultBranch), never the
+			-- server process's local day.
+			SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			        WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date AS d
+		),
+		today_rev AS (
 			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
 			FROM payments p
 			LEFT JOIN invoices i ON i.id = p.invoice_id
@@ -81,11 +104,35 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			WHERE d.status IN ('PENDING', 'ASSIGNED')
 			  AND ` + middleware.Wall("o", 4, 5) + `
 		),
+		open_docs AS (
+			SELECT ROUND(i.total_amount * 100)::bigint - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+			            WHERE a.invoice_id = i.id AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0) AS amt
+			FROM invoices i
+			WHERE i.invoice_date <= (SELECT d FROM asof) AND (i.voided_on IS NULL OR i.voided_on > (SELECT d FROM asof))
+			  AND ` + middleware.Wall("i", 4, 5) + `
+			UNION ALL
+			SELECT ROUND(m.total_amount * 100)::bigint
+			       + COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+			            WHERE a.credit_memo_id = m.id AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0)
+			       + COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.credit_memo_id = m.id AND f.refunded_on <= (SELECT d FROM asof)), 0)
+			FROM credit_memos m
+			WHERE m.number IS NOT NULL AND m.memo_date <= (SELECT d FROM asof) AND (m.voided_on IS NULL OR m.voided_on > (SELECT d FROM asof))
+			  AND ` + middleware.Wall("m", 4, 5) + `
+			UNION ALL
+			SELECT -GREATEST(0, ROUND(p.amount * 100)::bigint
+			       - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+			            WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0)
+			       - COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.payment_id = p.id AND f.refunded_on <= (SELECT d FROM asof)), 0)
+			       - ROUND(p.migrated_excess * 100)::bigint)
+			FROM payments p
+			WHERE p.received_on <= (SELECT d FROM asof) AND (p.voided_on IS NULL OR p.voided_on > (SELECT d FROM asof))
+			  AND ` + middleware.Wall("p", 4, 5) + `
+		),
 		outstanding AS (
-			SELECT (COALESCE(SUM(total_amount), 0) * 100)::bigint AS amount, COUNT(*) AS cnt
-			FROM invoices
-			WHERE status IN ('UNPAID', 'PARTIAL')
-			  AND ` + middleware.Wall("", 4, 5) + `
+			SELECT (SELECT COALESCE(SUM(amt), 0)::bigint FROM open_docs) AS amount,
+			       (SELECT COUNT(*) FROM invoices
+			         WHERE status IN ('UNPAID', 'PARTIAL')
+			           AND ` + middleware.Wall("", 4, 5) + `) AS cnt
 		)
 		SELECT
 			(SELECT val FROM today_rev),

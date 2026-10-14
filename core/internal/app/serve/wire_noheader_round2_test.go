@@ -511,8 +511,11 @@ func TestNoHeader_Dashboard(t *testing.T) {
 	if sum.TodayRevenue != 500 {
 		t.Errorf("no header summary collects %d today cents, want A's 500", sum.TodayRevenue)
 	}
-	if sum.OutstandingAR != 1000 || sum.OutstandingCnt != 1 {
-		t.Errorf("no header summary carries %d outstanding cents over %d invoices, want A's 1000 over one",
+	// Outstanding AR is the net open receivable as aging reads it: A's
+	// invoice of 10, less A's open credit memo of 1 and A's unapplied cash
+	// of 5, over one open invoice; B's documents do not count.
+	if sum.OutstandingAR != 400 || sum.OutstandingCnt != 1 {
+		t.Errorf("no header summary carries %d outstanding cents over %d invoices, want A's net 400 over one",
 			sum.OutstandingAR, sum.OutstandingCnt)
 	}
 	status, adminBuf := f.userAs(t, "admin", "GET", "/api/v1/dashboard/summary", "", nil)
