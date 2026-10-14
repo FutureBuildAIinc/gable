@@ -263,50 +263,33 @@ describe('the counter as the Panels layout', () => {
   });
 
   describe('a quantity on a line', () => {
-    const result = { product_id: 'p-2x4', sku: '2X4-8', description: '2x4 8ft', uom: 'EA', unit_price_cents: 350, in_stock: 100 };
-    type Inner = { _searchResults: unknown[]; _searchQuery: string };
-    const setResults = async (el: POSTerminal) => {
-      (el as unknown as Inner)._searchResults = [result];
-      await el.updateComplete;
-    };
-    const setQty = async (el: POSTerminal, v: string) => {
-      const input = el.querySelector('#pos-qty') as HTMLInputElement;
-      input.value = v;
-      input.dispatchEvent(new Event('input'));
-      await el.updateComplete;
-    };
+    const result = { product_id: 'p-2x4', sku: '2X4-8', description: '2x4 8ft', uom: 'EA', unit_price_cents: 350, in_stock: '100' };
+    const add = (el: Element, qty: string, over: object = {}) =>
+      el.dispatchEvent(new CustomEvent('pos-catalog-add', { detail: { product: { ...result, ...over }, qty }, bubbles: true, composed: true }));
     const flush = async (el: POSTerminal) => { await new Promise((r) => setTimeout(r, 0)); await el.updateComplete; };
 
     it('adds a result with the typed quantity as one line with its total', async () => {
       const twelve = { ...line('x', 4200), quantity: '12', unit_price_ten_thousandths: 35000 };
       svc.addItem.mockResolvedValue(sale({ lines: [twelve as never], subtotal_cents: 4200, total_cents: 4200 }));
       const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '12');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '12');
       await flush(el);
       expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '12', 'EA');
       expect(el.querySelectorAll('[data-testid="pos-lines"] li').length).toBe(1);
       expect(el.querySelector('[data-testid="pos-lines"]')?.textContent).toContain('$42.00');
     });
 
-    it('allows a decimal quantity for a length unit and defaults to one', async () => {
+    it('allows a decimal quantity for a length unit', async () => {
       svc.addItem.mockResolvedValue(sale());
       const el = await mount(sale({ lines: [] }));
-      expect((el.querySelector('#pos-qty') as HTMLInputElement).value).toBe('1');
-      (el as unknown as Inner)._searchResults = [{ ...result, product_id: 'p-trim', sku: 'TRIM-LF', uom: 'LF' }];
-      await el.updateComplete;
-      await setQty(el, '2.5');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '2.5', { product_id: 'p-trim', sku: 'TRIM-LF', uom: 'LF' });
       await flush(el);
       expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-trim', '2.5', 'LF');
     });
 
     it('refuses a decimal quantity for a unit counted whole and sends nothing', async () => {
       const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '2.5');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '2.5');
       await flush(el);
       expect(el.querySelector('[role="alert"]')?.textContent).toContain('EA is counted in whole units');
       expect(svc.addItem).not.toHaveBeenCalled();
@@ -315,89 +298,19 @@ describe('the counter as the Panels layout', () => {
     it('adds a whole quantity of a unit counted whole, written with a zero fraction', async () => {
       svc.addItem.mockResolvedValue(sale());
       const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '3.0');
-      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      add(el, '3.0');
       await flush(el);
       expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '3', 'EA');
-    });
-
-    it('on Enter right after typing, adds a result of the current query, never the earlier one', async () => {
-      svc.addItem.mockResolvedValue(sale());
-      const ten = { ...result, product_id: 'p-10', sku: '2X4-10' };
-      // The search answers "2X4-8" with the longer board first and the exact SKU second.
-      svc.searchProducts.mockResolvedValue([ten, result]);
-      const el = await mount(sale({ lines: [] }));
-      (el as unknown as Inner)._searchResults = [ten, result];
-      await el.updateComplete;
-      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-      input.value = '2X4-8';
-      input.dispatchEvent(new Event('input'));
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      await flush(el);
-      expect(svc.searchProducts).toHaveBeenCalledWith('2X4-8');
-      expect(svc.addItem).toHaveBeenCalledTimes(1);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '1', 'EA');
-    });
-
-    it('on Enter with no exact SKU match, adds the top result of the current search', async () => {
-      svc.addItem.mockResolvedValue(sale());
-      const board = { ...result, product_id: 'p-board', sku: 'STUD-92' };
-      svc.searchProducts.mockResolvedValue([board]);
-      const el = await mount(sale({ lines: [] }));
-      (el as unknown as Inner)._searchResults = [result];
-      await el.updateComplete;
-      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-      input.value = 'stud';
-      input.dispatchEvent(new Event('input'));
-      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      await flush(el);
-      expect(svc.addItem).toHaveBeenCalledTimes(1);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-board', '1', 'EA');
-    });
-
-    it('drops a search answer that arrives after a newer query', async () => {
-      let late: (v: unknown) => void = () => {};
-      svc.searchProducts
-        .mockImplementationOnce(() => new Promise((r) => { late = r; }))
-        .mockResolvedValueOnce([result]);
-      const el = await mount(sale({ lines: [] }));
-      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-      input.value = 'old';
-      input.dispatchEvent(new Event('input'));
-      await el.updateComplete;
-      await new Promise((r) => setTimeout(r, 250));
-      input.value = '2X4-8';
-      input.dispatchEvent(new Event('input'));
-      await el.updateComplete;
-      await new Promise((r) => setTimeout(r, 250));
-      late([{ ...result, product_id: 'p-old', sku: 'OLD-1' }]);
-      await flush(el);
-      const shown = el.querySelector('[data-testid="pos-results"]')?.textContent ?? '';
-      expect(shown).toContain('2X4-8');
-      expect(shown).not.toContain('OLD-1');
     });
 
     it('refuses a zero or negative quantity and adds nothing', async () => {
       const el = await mount(sale({ lines: [] }));
       for (const v of ['0', '-3', '']) {
-        await setResults(el);
-        await setQty(el, v);
-        (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+        add(el, v);
         await flush(el);
         expect(el.querySelector('[role="alert"]')?.textContent).toContain('quantity');
       }
       expect(svc.addItem).not.toHaveBeenCalled();
-    });
-
-    it('adds the highlighted result when Enter is pressed in the quantity field', async () => {
-      svc.addItem.mockResolvedValue(sale());
-      const el = await mount(sale({ lines: [] }));
-      await setResults(el);
-      await setQty(el, '4');
-      (el.querySelector('#pos-qty') as HTMLInputElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
-      await flush(el);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '4', 'EA');
     });
   });
 
@@ -427,7 +340,9 @@ describe('the counter as the Panels layout', () => {
   });
 
   describe('the visual review', () => {
-    const filled = (el: Element) => [...el.querySelectorAll('button')].filter((b) => b.className.includes('bg-gable-green'));
+    // a catalogue chip is a selection, not an action
+    const filled = (el: Element) => [...el.querySelectorAll('button')]
+      .filter((b) => b.className.includes('bg-gable-green') && b.getAttribute('data-testid') !== 'catalog-chip');
 
     it('before a till is open, Pay is a disabled neutral button and Open Till the one primary', async () => {
       const el = await mount(sale());
@@ -716,7 +631,18 @@ describe('the Panels board', () => {
 
   describe('the catalogue add event', () => {
     const fire = (el: Element, quantity: string, over: object = {}) =>
-      el.dispatchEvent(new CustomEvent('pos-catalog-add', { detail: { product: { ...product, ...over }, quantity }, bubbles: true }));
+      el.dispatchEvent(new CustomEvent('pos-catalog-add', { detail: { product: { ...product, ...over }, qty: quantity }, bubbles: true, composed: true }));
+
+    it('mounts the catalogue open with a till, locked without, keyed on the yard register', async () => {
+      const el = await mount(sale());
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { disabled: boolean; yardKey: string };
+      expect(cat.disabled).toBe(false);
+      expect(cat.yardKey).toBe('REG-01');
+      (el as unknown as Inner)._till = null;
+      await el.updateComplete;
+      expect(cat.disabled).toBe(true);
+      el.remove();
+    });
 
     it('adds through the add path with its quantity', async () => {
       svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
@@ -846,7 +772,7 @@ describe('the Panels board', () => {
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(q(el, 'pos-items').className).toContain('opacity-60');
-    expect(q(el, 'pos-empty').textContent?.trim()).toBe('Open the till to start a sale');
+    expect(q(el, 'catalog-closed').textContent?.trim()).toBe('Open the till to start a sale');
     expect(expanded(el, 'customer')).toBe('false');
     expect(toggle(el, 'customer').textContent).toContain('1');
     expect(toggle(el, 'customer').disabled).toBe(true);
@@ -1265,17 +1191,17 @@ describe('the counter before the till opens, and after a sale completes', () => 
 
   it('says the till must be open in the empty state', async () => {
     const el = await mountNoTill();
-    expect(q(el, 'pos-empty').textContent?.trim()).toBe('Open the till to start a sale');
+    expect(q(el, 'catalog-closed').textContent?.trim()).toBe('Open the till to start a sale');
     el.remove();
   });
 
-  it('locks and dims the search, quantity, Scan, customer find and Payment card with no till', async () => {
+  it('locks and dims the catalogue, customer find and Payment card with no till', async () => {
     const el = await mountNoTill();
-    for (const sel of ['#pos-search-input', '#pos-qty', '#pos-customer-search']) {
-      expect((el.querySelector(sel) as HTMLInputElement).disabled).toBe(true);
+    expect((el.querySelector('#pos-customer-search') as HTMLInputElement).disabled).toBe(true);
+    for (const id of ['catalog-search', 'catalog-qty', 'catalog-add']) {
+      expect((q(el, id) as HTMLInputElement).disabled).toBe(true);
     }
-    const scan = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Scan') as HTMLButtonElement;
-    expect(scan.disabled).toBe(true);
+    expect(q(el, 'pos-items').className).toContain('opacity-60');
     expect(q(el, 'panel-payment').className).toContain('opacity-50');
     expect(q(el, 'panel-customer').textContent).not.toContain('Open the till to start a sale');
     // Void and Return belong to a completed sale only: with no sale done, neither is offered
@@ -1288,27 +1214,6 @@ describe('the counter before the till opens, and after a sale completes', () => 
     await (el as unknown as { _addItem(p: unknown, q: string): Promise<void> })._addItem(
       { product_id: 'p1', sku: 'SKU-1', description: 'Item 1', uom: 'EA', unit_price_cents: 500, in_stock: '9' }, '1');
     await el.updateComplete;
-    answered(el);
-    el.remove();
-  });
-
-  it('answers Enter on the search with no till', async () => {
-    const el = await mountNoTill();
-    const input = el.querySelector('#pos-search-input') as HTMLInputElement;
-    input.value = 'SKU-1';
-    input.dispatchEvent(new Event('input'));
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await new Promise((r) => setTimeout(r, 0));
-    await el.updateComplete;
-    answered(el);
-    el.remove();
-  });
-
-  it('answers a scan with no till', async () => {
-    const el = await mountNoTill();
-    await (el as unknown as { _handleScan(b: string): Promise<void> })._handleScan('SKU-1');
-    await el.updateComplete;
-    await new Promise((r) => setTimeout(r, 0));
     answered(el);
     el.remove();
   });

@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
@@ -12,7 +12,7 @@ import { InvoiceService } from '../../services/InvoiceService';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { authCustody } from '@gable/auth';
-import '../../components/BarcodeScanner.ts';
+import './catalog/gable-pos-catalog';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
@@ -33,19 +33,12 @@ export class POSTerminal extends LitElement {
   createRenderRoot() { return this; }
 
   @state() private _sale: Sale | null = null;
-  @state() private _searchQuery = '';
-  @state() private _searchResults: QuickSearchResult[] = [];
   @state() private _pendingTenders: TenderIn[] = [];
   @state() private _tenderMethod: TenderMethod = 'cash';
   @state() private _tenderAmount = '';
   @state() private _loading = false;
   @state() private _error: string | null = null;
   @state() private _success: string | null = null;
-  @state() private _isScanning = false;
-  // The quantity the next added result takes, and the highlighted result.
-  @state() private _qtyText = '1';
-  @state() private _highlight = 0;
-
   // The sale's customer: the lookup, the account's standing and what a charge
   // to the account carries (the purchase order and the job).
   @state() private _customer: CounterCustomer | null = null;
@@ -91,14 +84,7 @@ export class POSTerminal extends LitElement {
   private _yardId: string | null = null;
   private _revertingYard = false;
 
-  @query('#pos-search-input') private _searchInput!: HTMLInputElement;
-
   private _errorTimer: ReturnType<typeof setTimeout> | null = null;
-  private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
-  /** Counts searches; an answer to an older one is dropped. */
-  private _searchSeq = 0;
-  /** True from a keystroke until the results on screen answer the typed query. */
-  private _resultsStale = false;
   private _custDebounce: ReturnType<typeof setTimeout> | null = null;
 
   connectedCallback() {
@@ -311,122 +297,13 @@ export class POSTerminal extends LitElement {
     this.removeEventListener('pos-catalog-add', this._onCatalogAdd);
     this._registerSeq++;
     if (this._errorTimer) clearTimeout(this._errorTimer);
-    if (this._searchDebounce) clearTimeout(this._searchDebounce);
     if (this._custDebounce) clearTimeout(this._custDebounce);
   }
 
   updated(changed: Map<string, unknown>) {
-    if (changed.has('_searchQuery')) {
-      this._debounceSearch();
-    }
     if (changed.has('_custQuery')) {
       this._debounceCustomers();
     }
-  }
-
-  /** Arrows move the highlighted result; Enter adds it with the typed quantity. */
-  private _resultKey(e: KeyboardEvent) {
-    const n = this._searchResults.length;
-    if (n === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      this._highlight = Math.min(this._highlight + 1, n - 1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      this._highlight = Math.max(this._highlight - 1, 0);
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      void this._addItem(this._searchResults[Math.min(this._highlight, n - 1)]);
-    }
-  }
-
-  /**
-   * Enter adds only a result of the query now in the box. While the typed text is
-   * ahead of the results on screen (the search delay), the search runs at once and
-   * the exact SKU, else the top result of that search, is added.
-   */
-  private _searchKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' && this._till === null) {
-      e.preventDefault();
-      this._needTill();
-      return;
-    }
-    if (e.key === 'Enter' && this._resultsStale && this._searchQuery.trim().length >= 2) {
-      e.preventDefault();
-      void this._enterSearch();
-      return;
-    }
-    this._resultKey(e);
-  }
-
-  private async _enterSearch() {
-    if (this._till === null) {
-      this._needTill();
-      return;
-    }
-    const query = this._searchQuery;
-    if (this._searchDebounce) clearTimeout(this._searchDebounce);
-    try {
-      const results = await this._runSearch(query);
-      if (results === null || results.length === 0) return;
-      const exact = results.find((r) => r.sku.toLowerCase() === query.trim().toLowerCase());
-      await this._addItem(exact ?? results[0]);
-    } catch {
-      this._error = 'Search failed';
-    }
-  }
-
-  /** Runs a search; null when a newer query was typed before it answered. */
-  private async _runSearch(query: string): Promise<QuickSearchResult[] | null> {
-    const seq = ++this._searchSeq;
-    const results = await posService.searchProducts(query);
-    if (seq !== this._searchSeq) return null;
-    this._searchResults = results;
-    this._resultsStale = false;
-    return results;
-  }
-
-  /* ---- Barcode scanning ---- */
-
-  private async _handleScan(barcode: string) {
-    if (this._till === null) {
-      this._needTill();
-      return;
-    }
-    try {
-      const results = await posService.searchProducts(barcode);
-      if (results && results.length > 0) {
-        const exactMatch = results.find(r => r.sku === barcode || r.product_id === barcode) || results[0];
-        await this._addItem(exactMatch);
-      } else {
-        this._error = `Product not found for barcode: ${barcode}`;
-        this._errorTimer = setTimeout(() => { this._error = null; }, 3000);
-      }
-    } catch (err: unknown) {
-      this._error = err instanceof Error ? err.message : 'Error scanning barcode';
-    }
-  }
-
-  /* ---- Product search with debounce ---- */
-
-  private _debounceSearch() {
-    if (this._searchDebounce) clearTimeout(this._searchDebounce);
-
-    if (this._searchQuery.length < 2) {
-      this._searchSeq++;
-      this._searchResults = [];
-      this._resultsStale = false;
-      return;
-    }
-
-    this._searchDebounce = setTimeout(async () => {
-      try {
-        await this._runSearch(this._searchQuery);
-      } catch {
-        this._searchResults = [];
-        this._resultsStale = false;
-      }
-    }, 200);
   }
 
   /* ---- The sale's customer ---- */
@@ -641,10 +518,6 @@ export class POSTerminal extends LitElement {
       this._tenderMethod = 'cash';
       this._step = 'customer';
       this._open = 'customer';
-      // Focus the search input after render
-      this.updateComplete.then(() => {
-        this._searchInput?.focus();
-      });
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to start the sale';
     } finally {
@@ -726,7 +599,7 @@ export class POSTerminal extends LitElement {
     });
   }
 
-  private async _addItem(product: QuickSearchResult, quantity = this._qtyText) {
+  private async _addItem(product: QuickSearchResult, quantity: string) {
     if (!(await this._readySale())) return;
     if (!this._sale) return;
     const qty = normalizeQuantity(quantity);
@@ -742,14 +615,7 @@ export class POSTerminal extends LitElement {
       this._error = null;
       const updated = await posService.addItem(this._sale.id, product.product_id, qty, product.uom);
       this._sale = updated;
-      this._searchQuery = '';
-      this._searchSeq++;
-      this._searchResults = [];
-      this._resultsStale = false;
-      this._highlight = 0;
-      this._qtyText = '1';
       if (this._step === 'payment' && this._open === null) this._open = 'payment';
-      this._searchInput?.focus();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to add item';
     }
@@ -757,11 +623,11 @@ export class POSTerminal extends LitElement {
 
   /** The catalogue's Add: the same add path the search takes, with its quantity. */
   private _onCatalogAdd = (e: Event) => {
-    const detail = (e as CustomEvent<{ product?: QuickSearchResult & { image_url?: string | null }; quantity?: string }>).detail;
+    const detail = (e as CustomEvent<{ product?: QuickSearchResult & { image_url?: string | null }; qty?: string }>).detail;
     const product = detail?.product;
     if (!product) return;
     if (product.image_url) this._images = { ...this._images, [product.product_id]: product.image_url };
-    void this._addItem(product, detail.quantity ?? '1');
+    void this._addItem(product, detail.qty ?? '1');
   };
 
   /** Removes every line of the open sale through the line removal, after a confirm. */
@@ -1162,55 +1028,12 @@ export class POSTerminal extends LitElement {
       </header>`;
   }
 
-  /** The Items card: the product search today, until the catalogue takes its place. */
+  /** The Items card is the catalogue; it dims and locks with no till or no open sale. */
   private _renderItems() {
-    const noTill = this._till === null;
     return html`
-      <section class="flex min-h-[12rem] flex-col rounded-xl border border-white/10 bg-slate-steel p-4 xl:w-[56%] xl:shrink-0 xl:self-start ${noTill ? 'opacity-60' : ''}" data-testid="pos-items">
-        <h2 class="text-lg font-bold text-white">Items</h2>
-        <div class="relative mt-3">
-          <div class="flex gap-2">
-            <input id="pos-search-input" type="text" autocomplete="off"
-              placeholder="Search by name, SKU or scan"
-              .value=${this._searchQuery}
-              ?disabled=${noTill}
-              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; this._highlight = 0; this._resultsStale = true; }}
-              @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
-              class="min-w-0 flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Search product by SKU or description" />
-            <label class="sr-only" for="pos-qty">Quantity</label>
-            <input id="pos-qty" type="text" inputmode="decimal" autocomplete="off"
-              .value=${this._qtyText}
-              ?disabled=${noTill}
-              @input=${(e: Event) => { this._qtyText = (e.target as HTMLInputElement).value; }}
-              @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
-              class="w-20 rounded-lg border border-white/10 bg-deep-space px-3 py-3 text-right font-mono text-base text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40"
-              title="Quantity to add" aria-label="Quantity" />
-            <button @click=${() => { this._isScanning = true; }} ?disabled=${noTill}
-              class="rounded-lg border border-white/20 px-4 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Scan</button>
-          </div>
-          ${this._isScanning ? html`
-            <gable-barcode-scanner
-              @scan=${(e: CustomEvent) => { this._isScanning = false; this._handleScan(e.detail); }}
-              @close=${() => { this._isScanning = false; }}
-            ></gable-barcode-scanner>` : nothing}
-          ${this._searchResults.length > 0 ? html`
-            <div class="absolute left-0 right-0 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-slate-steel shadow-2xl" data-testid="pos-results">
-              ${this._searchResults.map((r, i) => html`
-                <button @click=${() => this._addItem(r)}
-                  aria-current=${i === this._highlight ? 'true' : 'false'}
-                  class="flex w-full items-center gap-3 border-b border-white/10 px-4 py-2 text-left text-sm text-white last:border-b-0 hover:bg-white/5 ${i === this._highlight ? 'bg-white/10' : ''}">
-                  <span class="min-w-[100px] font-mono text-xs text-blueprint-blue">${r.sku}</span>
-                  <span class="flex-1 text-slate-200">${r.description}</span>
-                  <span class="font-mono font-semibold text-gable-green">${fmt(r.unit_price_cents)}/${r.uom}</span>
-                  <span class="font-mono text-xs text-slate-400">${r.in_stock} on hand</span>
-                </button>`)}
-            </div>` : nothing}
-        </div>
-        <div class="flex min-h-[120px] flex-1 items-center justify-center text-sm text-slate-400" data-testid="pos-empty">
-          ${noTill ? 'Open the till to start a sale' : 'Search and add products to start a sale'}
-        </div>
-      </section>`;
+      <div class="min-w-0 xl:w-[56%] xl:shrink-0 xl:self-start ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
+        <gable-pos-catalog ?disabled=${this._till === null} yard-key=${this._registerId}></gable-pos-catalog>
+      </div>`;
   }
 
   /** One linear panel's header: a disclosure button with its number or check, its value and Change. */
