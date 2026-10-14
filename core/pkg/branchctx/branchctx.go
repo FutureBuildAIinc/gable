@@ -90,6 +90,28 @@ func GrantsSubForQuery(ctx context.Context) *string {
 	return &sub
 }
 
+// CustomerReadBranchForQuery is IDForQuery for a customer READ under ruling A
+// (ADR 0007 section 5.8): customers are dealer wide accounts, so a user, an
+// administrator and an unbound key read every customer whatever header they
+// send, and only a key bound to a branch keeps its pin (PR 83's wall, exactly
+// as IDForQuery answers it for that key).
+func CustomerReadBranchForQuery(ctx context.Context) *uuid.UUID {
+	if _, bound := KeyBranchFromContext(ctx); !bound {
+		return nil
+	}
+	return IDForQuery(ctx)
+}
+
+// CustomerReadGrantsSubForQuery is the grants companion of
+// CustomerReadBranchForQuery: nil for everyone but a bound key, whose own
+// answer is GrantsSubForQuery (no user sub, so nil in practice).
+func CustomerReadGrantsSubForQuery(ctx context.Context) *string {
+	if _, bound := KeyBranchFromContext(ctx); !bound {
+		return nil
+	}
+	return GrantsSubForQuery(ctx)
+}
+
 // With injects a branch Context onto ctx. Used by test helpers and by
 // receivers (e.g. A2A) that bypass the HTTP branch middleware.
 func With(ctx context.Context, bc *Context) context.Context {

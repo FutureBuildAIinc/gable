@@ -92,7 +92,7 @@ pg-shell:
 migrate:
 	cd core && go run ./cmd/migrate
 
-# Populate the database with Kelowna / Gable Lumber & Supply demo data.
+# Populate the database with Kelowna / Gable Building Supply demo data.
 #
 # REQUIRES `DEMO_SEED=1`. Without it the command connects to nothing, writes
 # nothing, and exits 0 with an explanatory log line — which is the correct

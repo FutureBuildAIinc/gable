@@ -71,10 +71,14 @@ type Customer struct {
 	Tier            CustomerTier `json:"tier"`
 	IsActive        bool         `json:"is_active"`
 	PrimaryBranchID uuid.UUID    `json:"primary_branch_id"`
-	PriceLevelID    *uuid.UUID   `json:"price_level_id"`
-	PriceLevel      *PriceLevel  `json:"price_level"`
-	SalespersonID   *uuid.UUID   `json:"salesperson_id"`
-	SalespersonName *string      `json:"salesperson_name"`
+	// BranchIDs are the yards the customer trades at (ruling A): the home
+	// yard is always among them, and the first document at another yard
+	// adds it.
+	BranchIDs       []uuid.UUID `json:"branch_ids"`
+	PriceLevelID    *uuid.UUID  `json:"price_level_id"`
+	PriceLevel      *PriceLevel `json:"price_level"`
+	SalespersonID   *uuid.UUID  `json:"salesperson_id"`
+	SalespersonName *string     `json:"salesperson_name"`
 
 	// CreditLimitCents is null for no limit; zero is a limit of nothing.
 	CreditLimitCents *httpx.Cents `json:"credit_limit_cents"`

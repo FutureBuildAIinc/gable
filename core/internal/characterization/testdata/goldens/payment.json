@@ -642,10 +642,10 @@
           "details": [
             {
               "code": "exceeds_open_amount",
-              "message": "invoice IN-000051 has 1142 cents open: 1143 cents were asked"
+              "message": "invoice IN-000052 has 1142 cents open: 1143 cents were asked"
             }
           ],
-          "message": "invoice IN-000051 has 1142 cents open: 1143 cents were asked"
+          "message": "invoice IN-000052 has 1142 cents open: 1143 cents were asked"
         },
         "meta": {
           "request_id": "<id-22>"
@@ -680,10 +680,10 @@
           "details": [
             {
               "code": "discount_not_available",
-              "message": "the early pay discount of invoice IN-000051 is not available on this date"
+              "message": "the early pay discount of invoice IN-000052 is not available on this date"
             }
           ],
-          "message": "the early pay discount of invoice IN-000051 is not available on this date"
+          "message": "the early pay discount of invoice IN-000052 is not available on this date"
         },
         "meta": {
           "request_id": "<id-23>"
@@ -876,10 +876,10 @@
           "details": [
             {
               "code": "exceeds_open_amount",
-              "message": "invoice IN-000051 has 0 cents open: 1 cents were asked"
+              "message": "invoice IN-000052 has 0 cents open: 1 cents were asked"
             }
           ],
-          "message": "invoice IN-000051 has 0 cents open: 1 cents were asked"
+          "message": "invoice IN-000052 has 0 cents open: 1 cents were asked"
         },
         "meta": {
           "request_id": "<id-27>"
@@ -1374,7 +1374,7 @@
               "currency": "USD",
               "customer_id": "<id-1>",
               "from_status": "unpaid",
-              "number": "IN-000051",
+              "number": "IN-000052",
               "open_cents": 1142,
               "revision": 2,
               "status": "partial",
@@ -1418,7 +1418,7 @@
               "currency": "USD",
               "customer_id": "<id-1>",
               "from_status": "partial",
-              "number": "IN-000051",
+              "number": "IN-000052",
               "open_cents": 0,
               "revision": 3,
               "status": "paid",
@@ -1506,7 +1506,7 @@
               "currency": "USD",
               "customer_id": "<id-1>",
               "from_status": "paid",
-              "number": "IN-000051",
+              "number": "IN-000052",
               "open_cents": 3142,
               "revision": 4,
               "status": "unpaid",

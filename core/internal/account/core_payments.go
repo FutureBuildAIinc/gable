@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
@@ -97,6 +98,9 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 		in.OrderID, in.ProjectID, card.GatewayTxID, card.GatewayStatus, card.TokenID, card.Last4, card.Brand, card.AuthCode).Scan(&number)
 	if err != nil {
 		return uuid.Nil, nil, fmt.Errorf("failed to record the payment: %w", err)
+	}
+	if err := customerlink.Ensure(ctx, s.db, "payments", id); err != nil {
+		return uuid.Nil, nil, err
 	}
 	fx := &Effects{}
 	payID := id

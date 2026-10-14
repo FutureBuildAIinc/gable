@@ -23,7 +23,7 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "balance": 7100214,
+          "balance": 8981814,
           "code": "1020",
           "created_at": "<ts+0d>",
           "description": "Customer balances due",
@@ -101,7 +101,7 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "balance": -4123197,
+          "balance": -4324797,
           "code": "2020",
           "created_at": "<ts+0d>",
           "description": "Collected sales tax awaiting remittance",
@@ -166,7 +166,7 @@
           "updated_at": "<ts+0d>"
         },
         {
-          "balance": -34319002,
+          "balance": -35999002,
           "code": "4010",
           "created_at": "<ts+0d>",
           "description": "Revenue from material sales",
@@ -302,7 +302,7 @@
       "body": {
         "created_at": "<ts+0d>",
         "entry_date": "<ts+0d>",
-        "entry_number": 127,
+        "entry_number": 128,
         "id": "<id-21>",
         "lines": [
           {

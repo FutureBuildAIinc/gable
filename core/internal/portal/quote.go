@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -403,6 +404,9 @@ func (r *PostgresRepository) CreatePortalQuote(ctx context.Context, customerID u
 		`, quoteID, customerID, hdr.ProjectID, hdr.DeliveryType, hdr.Notes).Scan(&number, &branchID)
 		if err != nil {
 			return fmt.Errorf("failed to insert quote header: %w", err)
+		}
+		if err := customerlink.Ensure(txCtx, r.db, "quotes", quoteID); err != nil {
+			return err
 		}
 
 		for i, l := range lines {

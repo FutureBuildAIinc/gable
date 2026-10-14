@@ -48,7 +48,7 @@
         ],
         "upc": null,
         "updated_at": "<ts+0d>",
-        "vendor": "Gable Lumber & Supply",
+        "vendor": "Gable Building Supply",
         "vendor_id": null,
         "weight_lbs": 9,
         "width_in": 3.5
@@ -97,7 +97,7 @@
             "units": [],
             "upc": null,
             "updated_at": "<ts+0d>",
-            "vendor": "Gable Lumber & Supply",
+            "vendor": "Gable Building Supply",
             "vendor_id": null,
             "weight_lbs": 0.5,
             "width_in": null
@@ -133,7 +133,7 @@
             "units": [],
             "upc": null,
             "updated_at": "<ts+0d>",
-            "vendor": "Gable Lumber & Supply",
+            "vendor": "Gable Building Supply",
             "vendor_id": null,
             "weight_lbs": 0.5,
             "width_in": null
@@ -169,7 +169,7 @@
             "units": [],
             "upc": null,
             "updated_at": "<ts+0d>",
-            "vendor": "Gable Lumber & Supply",
+            "vendor": "Gable Building Supply",
             "vendor_id": null,
             "weight_lbs": 0.3,
             "width_in": null

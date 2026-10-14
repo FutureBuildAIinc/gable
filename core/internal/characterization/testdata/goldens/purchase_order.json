@@ -34,7 +34,7 @@
             "quantity": 20
           }
         ],
-        "number": "PO-000015",
+        "number": "PO-000016",
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
@@ -66,7 +66,7 @@
             "quantity": 20
           }
         ],
-        "number": "PO-000015",
+        "number": "PO-000016",
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",

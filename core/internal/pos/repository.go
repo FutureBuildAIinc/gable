@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -297,7 +298,6 @@ func (r *PostgresRepository) CreateSale(ctx context.Context, s *Sale) error {
 	if err != nil {
 		return err
 	}
-	var created time.Time
 	var branch uuid.UUID
 	switch {
 	case registerBranch != nil:
@@ -310,18 +310,23 @@ func (r *PostgresRepository) CreateSale(ctx context.Context, s *Sale) error {
 		}
 	}
 	s.BranchID = branch
-	err = r.ex(ctx).QueryRow(ctx, `
+	// The sale, the customer's link to its yard and the link's audit row
+	// commit together or not at all (ruling A, ADR 0007 section 5.8).
+	return r.db.RunInTx(ctx, func(ctx context.Context) error {
+		var created time.Time
+		err := r.ex(ctx).QueryRow(ctx, `
 		INSERT INTO pos_transactions (id, number, register_id, cashier_id, customer_id, currency, subtotal, tax_amount,
 			total, change_due, status, till_session_id, branch_id, created_at, updated_at, revision)
 		VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, 0, $7, $8, $9, NOW(), NOW(), 1)
 		RETURNING created_at, revision`,
-		s.ID, s.Number, s.RegisterID, s.CashierID, s.CustomerID, s.Currency, StatusOpen, s.TillSessionID, s.BranchID,
-	).Scan(&created, &s.Revision)
-	s.CreatedAt = httpx.TimestampOf(created)
-	if err != nil {
-		return fmt.Errorf("failed to create the sale: %w", mapWriteError(err))
-	}
-	return nil
+			s.ID, s.Number, s.RegisterID, s.CashierID, s.CustomerID, s.Currency, StatusOpen, s.TillSessionID, s.BranchID,
+		).Scan(&created, &s.Revision)
+		if err != nil {
+			return fmt.Errorf("failed to create the sale: %w", mapWriteError(err))
+		}
+		s.CreatedAt = httpx.TimestampOf(created)
+		return customerlink.Ensure(ctx, r.db, "pos_transactions", s.ID)
+	})
 }
 
 func (r *PostgresRepository) LockSale(ctx context.Context, id uuid.UUID) error {
@@ -1808,12 +1813,17 @@ func (r *PostgresRepository) customerJobs(ctx context.Context, customerID uuid.U
 }
 
 func (r *PostgresRepository) SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error {
-	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET customer_id = $2, currency = $3, customer_po = $4, job_id = $5,
-		updated_at = NOW(), revision = revision + 1 WHERE id = $1`, saleID, customerID, currency, po, jobID)
-	if err != nil {
-		return fmt.Errorf("failed to name the sale's customer: %w", mapWriteError(err))
-	}
-	return nil
+	// The account update, the customer's link to the sale's yard and the
+	// link's audit row commit together or not at all (ruling A, ADR 0007
+	// section 5.8).
+	return r.db.RunInTx(ctx, func(ctx context.Context) error {
+		_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET customer_id = $2, currency = $3, customer_po = $4, job_id = $5,
+			updated_at = NOW(), revision = revision + 1 WHERE id = $1`, saleID, customerID, currency, po, jobID)
+		if err != nil {
+			return fmt.Errorf("failed to name the sale's customer: %w", mapWriteError(err))
+		}
+		return customerlink.Ensure(ctx, r.db, "pos_transactions", saleID)
+	})
 }
 
 // ListRegisters reads the registers the caller may use, by branch then name.
