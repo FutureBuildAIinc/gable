@@ -79,6 +79,9 @@ export class GableOrderList extends LitElement {
     private setStatus(status: OrderStatus | 'all') {
         if (this.status === status) return;
         this.status = status;
+        // The address follows the chosen tab (a replace, not a new history
+        // entry), so a reload or a copied link reopens what is on screen.
+        history.replaceState(null, '', status === 'all' ? '/orders' : `/orders?status=${status}`);
         this.loading = true;
         this.loadOrders();
     }
