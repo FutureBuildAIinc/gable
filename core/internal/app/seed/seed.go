@@ -1211,6 +1211,7 @@ func Run() {
 		VALUES ('Gable Lumber & Supply', '#00FFA3', 'support@gablelumber.ca', '250-555-1000')
 		ON CONFLICT DO NOTHING`)
 	fmt.Println("Seed: Portal Config")
+	seedDealerProfile(db)
 
 	// =========================================================================
 	// 19. CREDIT MEMOS

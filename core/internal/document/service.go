@@ -274,7 +274,14 @@ func finish(m core.Maroto) ([]byte, error) {
 	return doc.GetBytes(), nil
 }
 
-func money(c interface{ DecimalString() string }) string { return "$" + c.DecimalString() }
+// money renders an amount as a customer reads it: -$22.70, never $-22.70.
+func money(c interface{ DecimalString() string }) string {
+	d := c.DecimalString()
+	if strings.HasPrefix(d, "-") {
+		return "-$" + d[1:]
+	}
+	return "$" + d
+}
 
 func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer) ([]byte, error) {
 	b := s.branding(ctx, inv.BranchID)

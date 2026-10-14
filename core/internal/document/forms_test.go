@@ -198,7 +198,10 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 		CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
 		Currencies: []account.StatementCurrency{{
 			Currency: "CAD", OpeningBalanceCents: 1000, ClosingBalanceCents: 6500,
-			Lines:         []account.StatementLine{{Date: "2026-02-10", Type: "INVOICE", Description: "Invoice IN-000007", AmountCents: 5500, BalanceAfterCents: 6500}},
+			Lines: []account.StatementLine{
+				{Date: "2026-02-10", Type: "INVOICE", Description: "Invoice IN-000007", AmountCents: 5500, BalanceAfterCents: 6500},
+				{Date: "2026-02-12", Type: "PAYMENT", Description: "Payment PAY-000001", AmountCents: -2270, BalanceAfterCents: 4230},
+			},
 			OpenDocuments: []account.OpenDocument{{Kind: "invoice", Number: "IN-000007", Date: "2026-02-10", TotalCents: 5500, OpenCents: 5500}},
 		}},
 	}
@@ -207,9 +210,10 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"STATEMENT", "South Yard", "2 Beta Street", "Remit Dept, PO Box 77, Testtown", "C-9", "2026-02-01", "Invoice IN-000007", "$10.00", "$65.00", "IN-000007"} {
+	for _, want := range []string{"STATEMENT", "South Yard", "2 Beta Street", "Remit Dept, PO Box 77, Testtown", "C-9", "2026-02-01", "Invoice IN-000007", "$10.00", "$65.00", "IN-000007", "-$22.70"} {
 		mustContain(t, doc, want)
 	}
+	mustNotContain(t, doc, "$-")
 	mustNotContain(t, doc, "North Yard")
 }
 
