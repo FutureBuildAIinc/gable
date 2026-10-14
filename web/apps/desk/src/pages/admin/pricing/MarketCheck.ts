@@ -27,12 +27,19 @@ interface Picked {
 }
 
 /**
- * The catalogue's fixed length dimensional lumber (all three board fields set, not random length), the
- * most available first: the nearest read of "lumber" the product list carries (it has no category).
+ * The catalogue's dimensional lumber by the trade's definition from the board fields: nominal thickness 2,
+ * width 4 to 12 inches, length 8 to 16 feet, not random length (so 2x4 to 2x12, 8 to 16 feet; engineered
+ * wood such as LVL is not). The most available first. The product list carries no category.
  */
-export function fixedLengthLumber(catalog: Product[]): Picked[] {
+export function dimensionalLumber(catalog: Product[]): Picked[] {
+  const num = (v: unknown) => (v == null ? NaN : Number.parseFloat(String(v)));
   return catalog
-    .filter((p) => p.board_thickness_in != null && p.board_width_in != null && p.board_length_ft != null && !p.random_length)
+    .filter((p) => {
+      const t = num(p.board_thickness_in);
+      const w = num(p.board_width_in);
+      const l = num(p.board_length_ft);
+      return !p.random_length && t === 2 && w >= 4 && w <= 12 && l >= 8 && l <= 16;
+    })
     .sort((a, b) => Number.parseFloat(b.available) - Number.parseFloat(a.available))
     .slice(0, DEFAULT_PICK)
     .map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
@@ -113,14 +120,14 @@ export class GableMarketCheck extends LitElement {
         // search both work over the catalogue the page loads once.
         this._catalog = await ProductService.listAllProducts();
         const tiles = await this._topSellers();
-        const boards = fixedLengthLumber(this._catalog);
+        const boards = dimensionalLumber(this._catalog);
         let chosen: Picked[];
         if (tiles.length > 0) {
           chosen = tiles;
           this._pickSource = 'the yard top sellers in Lumber';
         } else if (boards.length > 0) {
           chosen = boards;
-          this._pickSource = 'the fixed length dimensional lumber with the most on hand';
+          this._pickSource = 'the dimensional lumber (2x4 to 2x12, 8 to 16 feet) with the most on hand';
         } else {
           chosen = this._catalog.slice(0, DEFAULT_PICK).map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
           this._pickSource = 'the first products in the catalogue';

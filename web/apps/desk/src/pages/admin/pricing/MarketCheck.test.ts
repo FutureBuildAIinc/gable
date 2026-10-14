@@ -142,16 +142,23 @@ describe('Market check screen', () => {
     expect(text(el)).toContain('the first products in the catalogue')
   })
 
-  it('falls back to the fixed length dimensional lumber with the most available, then to the first products', async () => {
+  it('falls back to dimensional lumber (2x4 to 2x12, 8 to 16 feet) with the most on hand, then to the first products', async () => {
     const board = (n: number, avail: string, over: Record<string, unknown> = {}) => ({
-      ...product(n, `BRD_${n}`), board_thickness_in: '1.5000', board_width_in: '3.5000', board_length_ft: '8.0000',
+      ...product(n, `BRD_${n}`), board_thickness_in: '2', board_width_in: '4', board_length_ft: '8',
       random_length: false, available: avail, ...over,
     })
     const items = [
       { ...product(1, 'TW_WIPE'), available: '900.0000' },
-      board(2, '10.0000'), board(3, '500.0000'), board(4, '40.0000', { random_length: true }),
-      board(5, '300.0000'), board(6, '20.0000', { board_width_in: null }), board(7, '75.5000'),
-      board(8, '60.0000'), board(9, '5.0000'), board(10, '200.0000'), board(11, '9.0000'),
+      // engineered wood: fixed length, thousands on hand, but not 2x stock
+      { ...product(30, 'EW_LVL_W18000_L32'), board_thickness_in: '1.75', board_width_in: '18', board_length_ft: '32', random_length: false, available: '5000.0000' },
+      board(2, '10.0000'), board(3, '500.0000', { board_width_in: '12', board_length_ft: '16' }),
+      board(4, '40.0000', { random_length: true }),
+      board(5, '300.0000', { board_width_in: '6.0000', board_length_ft: '10.0000', board_thickness_in: '2.0000' }),
+      board(6, '20.0000', { board_width_in: null }), board(7, '75.5000'), board(8, '60.0000'),
+      board(9, '5.0000'), board(10, '200.0000'), board(11, '9.0000'),
+      board(12, '4000.0000', { board_thickness_in: '4' }), board(13, '4000.0000', { board_width_in: '14' }),
+      board(14, '4000.0000', { board_length_ft: '20' }), board(15, '4000.0000', { board_length_ft: '6' }),
+      board(16, '4000.0000', { board_width_in: '2' }),
     ]
     let listing = items
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -163,8 +170,10 @@ describe('Market check screen', () => {
     let el = await open()
     const chips = text(q(el, '[data-testid="chips"]'))
     for (const sku of ['BRD_3', 'BRD_5', 'BRD_10', 'BRD_7', 'BRD_8', 'BRD_2']) expect(chips).toContain(sku)
-    for (const sku of ['TW_WIPE', 'BRD_4', 'BRD_6', 'BRD_9', 'BRD_11']) expect(chips).not.toContain(sku)
-    expect(text(el)).toContain('the fixed length dimensional lumber with the most on hand')
+    for (const sku of ['TW_WIPE', 'EW_LVL', 'BRD_4', 'BRD_6', 'BRD_9', 'BRD_11', 'BRD_12', 'BRD_13', 'BRD_14', 'BRD_15', 'BRD_16']) {
+      expect(chips).not.toContain(sku)
+    }
+    expect(text(el)).toContain('the dimensional lumber (2x4 to 2x12, 8 to 16 feet) with the most on hand')
     // the chips are in order of most available
     expect(chips.indexOf('BRD_3')).toBeLessThan(chips.indexOf('BRD_5'))
     el.remove()
