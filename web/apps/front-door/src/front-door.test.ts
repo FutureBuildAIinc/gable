@@ -103,7 +103,7 @@ describe('front door persona cards (dev mode)', () => {
 
   it('renders one card per persona in dev mode, with name, role in words, and home yard', async () => {
     const el = await mount();
-    const cards = [...el.querySelectorAll('[role="listitem"]')];
+    const cards = [...el.querySelectorAll('button[aria-label^="Sign in as"]')];
     expect(cards).toHaveLength(DEMO_PERSONAS.length);
     for (const card of cards) {
       expect(card.tagName.toLowerCase()).toBe('button');
@@ -132,7 +132,7 @@ describe('front door persona cards (dev mode)', () => {
       { key: 'purchase_order', name: 'Purchasing', summary: '', category: 'Purchasing', core: true, enabled: true, depends_on: null },
     ]);
     const el = await mount();
-    const cashierCard = [...el.querySelectorAll('[role="listitem"]')].find(
+    const cashierCard = [...el.querySelectorAll('button[aria-label^="Sign in as"]')].find(
       (b) => b.textContent?.includes('Jordan Pike'),
     ) as HTMLButtonElement;
     expect(cashierCard).toBeDefined();
@@ -151,7 +151,7 @@ describe('front door persona cards (dev mode)', () => {
       { key: 'quote', name: 'Quotes', summary: '', category: 'Sales', core: true, enabled: true, depends_on: null },
     ]);
     const el = await mount();
-    const cashierCard = [...el.querySelectorAll('[role="listitem"]')].find(
+    const cashierCard = [...el.querySelectorAll('button[aria-label^="Sign in as"]')].find(
       (b) => b.textContent?.includes('Jordan Pike'),
     ) as HTMLButtonElement;
     cashierCard.click();
@@ -176,7 +176,7 @@ describe('front door persona cards (dev mode)', () => {
       { key: 'techadmin', name: 'Tech Admin', summary: '', category: 'Platform', core: true, enabled: true, depends_on: null },
     ]);
     const el = await mount();
-    const ownerCard = [...el.querySelectorAll('[role="listitem"]')].find(
+    const ownerCard = [...el.querySelectorAll('button[aria-label^="Sign in as"]')].find(
       (b) => b.textContent?.includes('Morgan Hale'),
     ) as HTMLButtonElement;
     ownerCard.click();
@@ -192,7 +192,7 @@ describe('front door persona cards (dev mode)', () => {
 
   it('every persona card is reachable by keyboard with a labelled button', async () => {
     const el = await mount();
-    const cards = [...el.querySelectorAll('[role="listitem"]')] as HTMLButtonElement[];
+    const cards = [...el.querySelectorAll('button[aria-label^="Sign in as"]')] as HTMLButtonElement[];
     for (const card of cards) {
       // Visible focus on focus-visible (the browser test runner does not
       // synthesise focus automatically); we assert the styling is in place.
@@ -200,5 +200,28 @@ describe('front door persona cards (dev mode)', () => {
       expect(card.getAttribute('aria-label')).toMatch(/^Sign in as /);
       expect(card.getAttribute('type')).toBe('button');
     }
+  });
+});
+
+/**
+ * The door in a production build (VITE_AUTH_DEV_MODE not set): no persona
+ * cards render, the heading is the plain product name, and the wrapper uses
+ * the base width. Every dealer's real door will carry their own tenant name,
+ * so the production build must not render "Gable Building Supply".
+ */
+describe('front door production build (no dev mode)', () => {
+  it('renders the token door with no persona cards', async () => {
+    authConfig.devMode = false;
+    const el = await mount();
+    expect(el.querySelector('h1')?.textContent).toBe('Sign in to Gable');
+    expect(el.querySelector('textarea[aria-label="Bearer token"]')).not.toBeNull();
+    expect(el.querySelector('button[aria-label^="Sign in as"]')).toBeNull();
+    expect(el.querySelector('[role="listitem"]')).toBeNull();
+  });
+
+  it('does not include the tenant name in the heading', async () => {
+    authConfig.devMode = false;
+    const el = await mount();
+    expect(el.querySelector('h1')?.textContent).not.toContain('Building Supply');
   });
 });

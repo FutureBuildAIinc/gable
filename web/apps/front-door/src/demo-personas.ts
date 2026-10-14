@@ -12,8 +12,13 @@
  * screens offer (the door filters tiles with the persona's role, the desk
  * opens on the persona's yard), not what the server allows.
  *
- * Frozen, so a card cannot drift from the seed; the only mutator is the
- * lookup helpers, which return the same reference for the same subject.
+ * Frozen at the top level; each entry is typed readonly.
+ *
+ * The list ships inert in a build without dev mode: no card renders and
+ * `signInDev` refuses, so the names are not reachable from the production
+ * bundle (the static import in front-door.ts is the same shape the dev bundle
+ * carries, and `Object.freeze` on the array blocks push/splice/length writes
+ * from any caller).
  */
 
 /** A staff role the seed may carry. */
@@ -124,11 +129,6 @@ export const DEMO_PERSONAS: readonly DemoPersona[] = Object.freeze([
     homeYardName: YARD_NAMES['KEL-MAIN'],
   },
 ] as DemoPersona[]);
-
-/** Look a card up by its subject (the seed's staff.subject). */
-export function findPersona(subject: string): DemoPersona | null {
-  return DEMO_PERSONAS.find((p) => p.subject === subject) ?? null;
-}
 
 /** The role in human words, the same words the seed's role column uses. */
 export const ROLE_WORDS: Readonly<Record<PersonaRole, string>> = {

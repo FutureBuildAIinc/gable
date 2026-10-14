@@ -18,10 +18,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { branchContext, type BranchChangedDetail } from './BranchContext'
 import { fetchWithAuth } from './fetchClient'
 import { jsonResponse } from '../test/dom'
-import { authConfig, authCustody } from '@gable/auth'
+import { authConfig, authCustody, BRANCH_STORAGE_KEY } from '@gable/auth'
 import type { BranchSummary } from '../types/location'
 
-const STORAGE_KEY = 'gable_current_branch_id'
+const STORAGE_KEY = BRANCH_STORAGE_KEY
 
 function branch(id: string, code: string, isHome = false): BranchSummary {
   return { id, code, name: `${code} Yard`, active: true, is_home: isHome }
@@ -381,5 +381,42 @@ describe('BranchContext: persona home yard (dev mode)', () => {
 
     const init = fetchMock.mock.calls.at(-1)![1] as RequestInit
     expect((init.headers as Headers).get('X-Branch-Id')).toBe('b-lk')
+  })
+
+  /**
+   * A second persona, after a sign out + sign in through the same path the
+   * door uses: the door clears the stored branch key in localStorage before
+   * `signInDev`, so the next desk boot picks the new persona's home yard
+   * rather than restoring the first's. Sign out alone does not clear the key
+   * (signOut only drops custody, which is sessionStorage); the clear is the
+   * door's responsibility. The door's path is reproduced here verbatim:
+   * `localStorage.removeItem(BRANCH_STORAGE_KEY)` then `signInDev(persona)`.
+   * Without the door's clear, the stored KEL-MAIN wins and the LK persona
+   * lands on Kelowna, the walk step "a sale at a second yard for a customer
+   * of the first" fails.
+   */
+  it('opens on the new persona home yard after switching personas', async () => {
+    authConfig.devMode = true
+    // First persona: KEL-MAIN.
+    authCustody.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    serve([KEL_HOME, WK, LK])
+    await reinit()
+    expect(branchContext.currentId).toBe('b-kel-main')
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('b-kel-main')
+
+    // Sign out: custody drops, but the stored branch key stays (the bug the
+    // door's clear was added to fix).
+    authCustody.signOut()
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('b-kel-main')
+
+    // The door's _signInAsPersona: clear the stored branch, then sign in as
+    // the persona. Same effect on the desk.
+    localStorage.removeItem(STORAGE_KEY)
+    authCustody.signInDev('Drew Patel', { role: 'cashier', homeYardCode: 'LK' })
+    await reinit()
+
+    expect(branchContext.currentId).toBe('b-lk')
+    expect(branchContext.current?.code).toBe('LK')
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('b-lk')
   })
 })

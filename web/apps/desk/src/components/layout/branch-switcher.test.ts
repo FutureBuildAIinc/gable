@@ -16,6 +16,7 @@ import type { GableBranchSwitcher } from './branch-switcher'
 import './branch-switcher'
 import { mount, update, text, q, jsonResponse } from '../../test/dom'
 import type { BranchSummary } from '../../types/location'
+import { BRANCH_STORAGE_KEY } from '@gable/auth'
 
 function branch(id: string, code: string, isHome = false): BranchSummary {
   return { id, code, name: `${code} Yard`, active: true, is_home: isHome }
@@ -155,7 +156,7 @@ describe('gable-branch-switcher — switching', () => {
     await update(el, {})
 
     expect(branchContext.currentId).toBe('b-kel')
-    expect(localStorage.getItem('gable_current_branch_id')).toBe('b-kel')
+    expect(localStorage.getItem(BRANCH_STORAGE_KEY)).toBe('b-kel')
   })
 
   it('closes the menu and relabels the trigger after a pick', async () => {

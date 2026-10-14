@@ -14,10 +14,10 @@
  * avoid a circular import between the two modules.
  */
 import type { BranchSummary } from '../types/location';
-import { authConfig, authCustody } from '@gable/auth';
+import { authConfig, authCustody, BRANCH_STORAGE_KEY } from '@gable/auth';
 import { LocationService } from './LocationService';
 
-const STORAGE_KEY = 'gable_current_branch_id';
+const STORAGE_KEY = BRANCH_STORAGE_KEY;
 
 export interface BranchChangedDetail {
   branchId: string | null;

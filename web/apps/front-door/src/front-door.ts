@@ -34,7 +34,7 @@ import {
   Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
 import { icon, cn } from '@gable/design-system';
-import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
+import { authCustody, authConfig, BRANCH_STORAGE_KEY, InvalidTokenError } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
 
@@ -139,10 +139,17 @@ export class GableFrontDoor extends LitElement {
    * Sign in via a persona card: pass the persona's role and home yard code
    * into custody, so the door filters tiles with the role and the desk opens
    * on the persona's yard.
+   *
+   * Drop the previously stored yard first: an earlier persona's home would
+   * win on the next desk boot, because every dev persona sees every yard in
+   * its grants list and a stored id is restored before the persona is
+   * consulted. A reload within the same persona still keeps the stored
+   * choice: the desk re-inits on its own and writes the same id again.
    */
   private _signInAsPersona(persona: DemoPersona) {
     this._signInError = null;
     try {
+      localStorage.removeItem(BRANCH_STORAGE_KEY);
       authCustody.signInDev(persona.name, { role: persona.role, homeYardCode: persona.homeYardCode });
     } catch (err) {
       this._signInError = err instanceof Error ? err.message : String(err);
@@ -267,18 +274,31 @@ export class GableFrontDoor extends LitElement {
   }
 
   private _renderSignIn() {
+    // The heading and the card width differ between dev (the wide card and
+    // the tenant's name) and a production build (the base wrapper on
+    // refactor/v1, the plain product name). Every dealer's real door carries
+    // their own tenant name, so the production door must not render "Gable
+    // Building Supply".
+    const dev = authConfig.devMode;
+    const headingText = dev ? 'Sign in to Gable Building Supply' : 'Sign in to Gable';
+    const outerClasses = dev
+      ? 'flex items-start justify-center py-12'
+      : 'flex items-center justify-center py-16';
+    const innerClasses = dev
+      ? 'glass-card rounded-2xl p-8 w-full max-w-4xl space-y-6 animate-fade-in'
+      : 'glass-card rounded-2xl p-8 w-full max-w-md space-y-5 animate-fade-in';
     return html`
-      <div class="flex items-start justify-center py-12">
-        <div class="glass-card rounded-2xl p-8 w-full max-w-4xl space-y-6 animate-fade-in">
+      <div class="${outerClasses}">
+        <div class="${innerClasses}">
           <div class="space-y-1">
-            <h1 class="text-xl font-semibold text-white">Sign in to Gable Building Supply</h1>
+            <h1 class="text-xl font-semibold text-white">${headingText}</h1>
             <p class="text-sm text-zinc-400">
-              ${authConfig.devMode
+              ${dev
                 ? 'This is the local demo. Each card signs in as that person, shaping what the screens offer.'
                 : 'Paste the bearer token your identity provider issued. It is held for this tab only and cleared when you sign out.'}
             </p>
           </div>
-          ${authConfig.devMode ? this._renderPersonaCards() : html`
+          ${dev ? this._renderPersonaCards() : html`
             <label class="block space-y-1.5">
               <span class="text-xs uppercase tracking-wider text-muted-foreground">Bearer token</span>
               <textarea
@@ -339,27 +359,28 @@ export class GableFrontDoor extends LitElement {
   private _renderPersonaCard(persona: DemoPersona) {
     const roleWords = ROLE_WORDS[persona.role];
     return html`
-      <button
-        type="button"
-        role="listitem"
-        @click=${() => this._signInAsPersona(persona)}
-        aria-label="Sign in as ${persona.name}, ${roleWords}, at ${persona.homeYardName}"
-        class="group text-left rounded-xl bg-slate-steel border border-white/5 p-4 transition-all hover:border-gable-green/40 hover:shadow-glow hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
-      >
-        <div class="flex items-center gap-3">
-          <div class="h-10 w-10 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow shrink-0">
-            ${initialsFor(persona.name)}
+      <div role="listitem">
+        <button
+          type="button"
+          @click=${() => this._signInAsPersona(persona)}
+          aria-label="Sign in as ${persona.name}, ${roleWords}, at ${persona.homeYardName}"
+          class="group w-full text-left rounded-xl bg-slate-steel border border-white/5 p-4 transition-all hover:border-gable-green/40 hover:shadow-glow hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
+        >
+          <div class="flex items-center gap-3">
+            <div class="h-10 w-10 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow shrink-0">
+              ${initialsFor(persona.name)}
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-white truncate">${persona.name}</div>
+              <div class="text-[11px] uppercase tracking-wider text-muted-foreground">${roleWords}</div>
+            </div>
           </div>
-          <div class="min-w-0">
-            <div class="text-sm font-medium text-white truncate">${persona.name}</div>
-            <div class="text-[11px] uppercase tracking-wider text-muted-foreground">${roleWords}</div>
+          <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
+            <span class="text-xs text-zinc-400 truncate">${persona.homeYardName}</span>
+            <span class="text-[10px] font-mono text-muted-foreground tracking-wider shrink-0">${persona.homeYardCode}</span>
           </div>
-        </div>
-        <div class="mt-3 pt-3 border-t border-white/5 flex items-center justify-between gap-3">
-          <span class="text-xs text-zinc-400 truncate">${persona.homeYardName}</span>
-          <span class="text-[10px] font-mono text-muted-foreground tracking-wider shrink-0">${persona.homeYardCode}</span>
-        </div>
-      </button>
+        </button>
+      </div>
     `;
   }
 
