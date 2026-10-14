@@ -403,8 +403,7 @@ export class GableOrderDetail extends LitElement {
                         <div class="bg-slate-steel rounded-lg border border-white/10 p-6">
                             <h3 class="font-semibold text-white mb-4">Customer Details</h3>
                             <div class="space-y-2 text-sm">
-                                ${order.customer_name ? html`<p class="text-white font-medium text-base">${order.customer_name}</p>` : nothing}
-                                <p class="text-muted-foreground">Account: <span class="text-white font-mono">${order.customer_id.slice(0, 8)}</span></p>
+                                <p class="text-white font-medium text-base"><a href="/accounts/${order.customer_id}" class="hover:underline">${order.customer_name || 'Customer'}</a></p>
                                 ${order.customer_po ? html`<p class="text-muted-foreground">PO: <span class="text-white font-mono">${order.customer_po}</span></p>` : nothing}
                                 ${order.ship_to ? html`
                                     <p class="text-muted-foreground pt-2">
