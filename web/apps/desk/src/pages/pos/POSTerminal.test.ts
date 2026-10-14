@@ -1766,3 +1766,77 @@ describe('closing the till', () => {
     el.remove();
   });
 });
+
+describe('no tender until the cashier chooses one', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const pressed = (el: Element) => ['cash', 'check', 'card', 'account']
+    .filter((m) => q(el, `tender-${m}`)?.getAttribute('aria-pressed') === 'true');
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('starts a sale with a line and the till open with no tender pressed and Pay off', async () => {
+    const el = await mount(sale());
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-pay').textContent).toContain('Choose how the customer pays');
+    expect((el.querySelector('#pos-tender-amount') as HTMLInputElement).disabled).toBe(true);
+    expect((q(el, 'pos-add-tender') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'panel-summary-body').textContent).toContain('None yet');
+    el.remove();
+  });
+
+  it('does not complete the sale when Pay is pressed with no tender chosen', async () => {
+    const el = await mount(sale());
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('sends one account tender for a named account customer who chose Charge to account', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale({ customer_id: 'cu1' }));
+    (el as unknown as { _customer: CounterCustomer })._customer = account;
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    q(el, 'tender-account').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual(['account']);
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledTimes(1);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    el.remove();
+  });
+
+  it('asks for a tender again after a completed sale and New Sale', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    q(el, 'pos-pay').click();
+    await settle();
+    await el.updateComplete;
+    svc.startSale.mockResolvedValue(sale({ id: 's2', lines: [line('c', 5000)], total_cents: 5000 }));
+    const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
+    newSale.click();
+    await settle();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+
+  it('asks for the next tender again after Add as split tender', async () => {
+    const el = await mount(sale());
+    q(el, 'tender-cash').click();
+    await el.updateComplete;
+    await typeInto(el, '50.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+});
