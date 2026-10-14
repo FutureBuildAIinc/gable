@@ -9,7 +9,16 @@ vi.mock('./fetchClient', () => ({ fetchWithAuth: (...a: unknown[]) => fetchWithA
 
 import { marketCheckService, RUN_TIMEOUT_MS, TOO_SLOW_WORDS } from './MarketCheckService'
 
-beforeEach(() => fetchWithAuth.mockReset())
+beforeEach(() => { fetchWithAuth.mockClear() })
+
+async function failure(): Promise<string> {
+  try {
+    await marketCheckService.run(['p-1'])
+  } catch (e) {
+    return (e as Error).message
+  }
+  return ''
+}
 
 describe('marketCheckService.run', () => {
   it('passes a timeout above the server worst case (batches of up to 30 seconds)', async () => {
@@ -26,13 +35,13 @@ describe('marketCheckService.run', () => {
   ])('reads a %s in words', async (name, message) => {
     const err = new Error(message)
     err.name = name
-    fetchWithAuth.mockRejectedValue(err)
-    await expect(marketCheckService.run(['p-1'])).rejects.toThrow(TOO_SLOW_WORDS)
+    fetchWithAuth.mockImplementation(() => { throw err })
+    expect(await failure()).toBe(TOO_SLOW_WORDS)
     expect(TOO_SLOW_WORDS).toBe('FB Connect took too long to answer; try again')
   })
 
   it('leaves another failure as it is', async () => {
-    fetchWithAuth.mockRejectedValue(new TypeError('Failed to fetch'))
-    await expect(marketCheckService.run(['p-1'])).rejects.toThrow('Failed to fetch')
+    fetchWithAuth.mockImplementation(() => { throw new TypeError("Failed to fetch") })
+    expect(await failure()).toBe('Failed to fetch')
   })
 })
