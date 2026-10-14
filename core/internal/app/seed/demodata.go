@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"sort"
 	"strings"
 	"time"
 
@@ -204,6 +205,10 @@ type historyParams struct {
 		Days int `json:"days"`
 	} `json:"_window"`
 	Branches []string `json:"_branches"`
+	// CounterSales holds each yard's orders a day.
+	CounterSales map[string]struct {
+		WeekdayMean int `json:"weekday_mean"`
+	} `json:"counter_sales_per_yard_per_day"`
 }
 
 // demoImportResults captures the counts the loader printed at the end of its
@@ -489,6 +494,12 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 		if (thickness == nil) != (boardWidth == nil) {
 			thickness, boardWidth = nil, nil
 		}
+		// The legacy text column carries the vendor's display name, as the base
+		// seed writes it; the lists show it.
+		var vendorName string
+		if vendorID != uuid.Nil {
+			db.QueryRowContext(ctx, `SELECT name FROM vendors WHERE id = $1`, vendorID).Scan(&vendorName)
+		}
 		var id string
 		err := db.QueryRowContext(ctx, `INSERT INTO products
 			(sku, description, uom_primary, sale_uom, price_uom, purchase_uom,
@@ -532,7 +543,7 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 			row.SKU, row.Description, row.UOMPrimary,
 			row.WeightLbs, 0.0, 0.0,
 			row.Price, row.Cost, row.TargetMargin, commission,
-			row.Barcode, categoryName, "", vendorID, categoryID,
+			row.Barcode, categoryName, vendorName, vendorID, categoryID,
 			row.Species, row.Grade,
 			nfloat64(row.LengthIn), nfloat64(row.WidthInDim), nfloat64(row.HeightIn), row.Stackable,
 			nfloat64(thickness), nfloat64(boardWidth), nfloat64(row.LengthFt), row.RandomLength,
@@ -648,7 +659,8 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 			(account_number, name, email, phone, address, tier,
 				price_level_id, salesperson_id, primary_branch_id,
 				currency, credit_limit, payment_terms_id, is_active)
-			VALUES ($1,$2,$3,$4,$5,$6::customer_tier,$7,$8,$9,'CAD',$10,$11,TRUE)
+			VALUES ($1,$2,$3,$4,$5,$6::customer_tier,$7,$8,$9,
+				(SELECT value FROM system_settings WHERE key = 'currency.default'),$10,$11,TRUE)
 			ON CONFLICT (account_number) DO UPDATE SET
 				name = EXCLUDED.name,
 				email = EXCLUDED.email,
@@ -782,19 +794,32 @@ func importStaff(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID) er
 	return scanner.Err()
 }
 
-// seedHistory generates 120 days of payments across the three yards so the
-// dashboard's revenue trend query returns a multi-period, multi-branch
-// series. The generator is deterministic: it consumes historyParamsData via
-// a math/rand source seeded with the params._seed constant.
+// historyTaxRate is the invoices' rate, as the base seed's (BC: GST and PST).
+const historyTaxRate = 0.12
+
+// historyLine is one drawn line of a history order, in the money convention:
+// the quantity whole, the unit price in ten thousandths, the total in cents.
+type historyLine struct {
+	product    uuid.UUID
+	qty        int64
+	unitTT     int64
+	totalCents int64
+}
+
+// seedHistory generates 120 days of orders, invoices and payments across the
+// three yards. The generator is deterministic: it consumes historyParamsData
+// through a math/rand source seeded with the params._seed constant, and walks
+// the yards, customers and products in a fixed order, so the same day gives
+// the same history.
 //
-// The history writes orders, invoices and payments directly so each row
-// carries the day the generator picked; the dashboard's revenue trend query
-// groups on DATE(p.created_at) so a fresh deployment shows the spread.
-// Quotes, deliveries and POs are not generated here: the brief's red tests
-// require only that revenue trends across multiple periods and yards, and
-// the dashboard query is the gate. The AR core stamps payment.created_at
-// to NOW(), which would collapse every period to one day; the history
-// bypasses it for that reason.
+// Each order is written with its lines, each invoice with the matching lines,
+// exactly as the base seed writes its own (UNPAID, open at its total); the
+// invoice is then posted and paid in full through the AR core (receivables.
+// post), so the ledger, the subledger, the application and the payment's
+// number are what the AR core writes, never hand written rows. A day is
+// written in one transaction, then posted (on several connections, a
+// customer's invoices on one), oldest day first, so each customer's subledger
+// runs in day order.
 func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 	customerIDs map[string]uuid.UUID, yards map[string]uuid.UUID, skuToID map[string]uuid.UUID) error {
 
@@ -807,64 +832,105 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 	now := time.Now().UTC()
 	anchor := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
 
-	// Per-yard weekday means (the brief's HISTORY-SPEC names them).
-	dayMeans := map[string]int{
-		"KEL-MAIN": 38,
-		"WK":       18,
-		"LK":       9,
+	// The yards walk in code order (a map's order is random, and the history
+	// must be the same for the same day), each with its weekday mean from the
+	// parameters file.
+	type yardMean struct {
+		code string
+		mean int
 	}
+	var historyYards []yardMean
+	for code, cs := range hp.CounterSales {
+		historyYards = append(historyYards, yardMean{code, cs.WeekdayMean})
+	}
+	sort.Slice(historyYards, func(a, b int) bool { return historyYards[a].code < historyYards[b].code })
 
-	// Collect every customer's home yard; the legacy seed's customers and
-	// the imported customers all carry primary_branch_id.
+	// The customers that trade, with their home yard, by account number.
 	type custYard struct {
 		ID   uuid.UUID
 		Yard uuid.UUID
 	}
-	allCust := make([]custYard, 0)
-	for _, cid := range customerIDs {
-		var bid uuid.UUID
-		if err := db.QueryRowContext(ctx, `SELECT primary_branch_id FROM customers WHERE id = $1`, cid).Scan(&bid); err == nil && bid != uuid.Nil {
-			allCust = append(allCust, custYard{ID: cid, Yard: bid})
+	custIDs := make([]string, 0, len(customerIDs))
+	for _, id := range customerIDs {
+		custIDs = append(custIDs, id.String())
+	}
+	crows, err := db.QueryContext(ctx, `
+		SELECT id, primary_branch_id FROM customers
+		WHERE id = ANY($1::uuid[]) AND primary_branch_id IS NOT NULL
+		ORDER BY account_number, id`, pgArray(custIDs))
+	if err != nil {
+		return fmt.Errorf("history customers: %w", err)
+	}
+	var allCust []custYard
+	for crows.Next() {
+		var c custYard
+		if err := crows.Scan(&c.ID, &c.Yard); err != nil {
+			crows.Close()
+			return fmt.Errorf("history customers: %w", err)
 		}
+		allCust = append(allCust, c)
+	}
+	crows.Close()
+	if err := crows.Err(); err != nil {
+		return fmt.Errorf("history customers: %w", err)
 	}
 	if len(allCust) == 0 {
 		return nil
 	}
 
-	// Build a flat list of product IDs and prices the generator can sample.
-	type prodRow struct {
-		ID    uuid.UUID
-		Price float64
+	// The products the generator samples, with their price in ten thousandths.
+	prodIDs := make([]string, 0, len(skuToID))
+	for _, id := range skuToID {
+		prodIDs = append(prodIDs, id.String())
 	}
-	prods := make([]prodRow, 0, len(skuToID))
-	for _, pid := range skuToID {
-		var price float64
-		if err := db.QueryRowContext(ctx, `SELECT base_price FROM products WHERE id = $1`, pid).Scan(&price); err == nil && price > 0 {
-			prods = append(prods, prodRow{ID: pid, Price: price})
+	prows, err := db.QueryContext(ctx, `
+		SELECT id, ROUND(base_price * 10000)::bigint FROM products
+		WHERE id = ANY($1::uuid[]) AND base_price > 0
+		ORDER BY sku, id`, pgArray(prodIDs))
+	if err != nil {
+		return fmt.Errorf("history products: %w", err)
+	}
+	type prodRow struct {
+		ID     uuid.UUID
+		PriceT int64
+	}
+	var prods []prodRow
+	for prows.Next() {
+		var p prodRow
+		if err := prows.Scan(&p.ID, &p.PriceT); err != nil {
+			prows.Close()
+			return fmt.Errorf("history products: %w", err)
 		}
+		prods = append(prods, p)
+	}
+	prows.Close()
+	if err := prows.Err(); err != nil {
+		return fmt.Errorf("history products: %w", err)
 	}
 	if len(prods) == 0 {
 		return nil
 	}
 
-	const taxRate = 0.12
+	totalOrders, totalPosted := 0, 0
 
-	totalOrders := 0
-	totalPayments := 0
-
-	for dayOffset := 1; dayOffset <= hp.Window.Days; dayOffset++ {
+	for dayOffset := hp.Window.Days; dayOffset >= 1; dayOffset-- {
 		day := anchor.AddDate(0, 0, -dayOffset)
-		weekday := day.Weekday()
-		if weekday == time.Sunday {
+		if day.Weekday() == time.Sunday {
 			// Sundays closed.
 			continue
 		}
-		for yardCode, mean := range dayMeans {
-			yardID, ok := yards[yardCode]
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("history day: %w", err)
+		}
+		var posts []seedInvoice
+		seq := 0
+		for _, y := range historyYards {
+			yardID, ok := yards[y.code]
 			if !ok {
 				continue
 			}
-			count := mean + rng.Intn(5) - 2
+			count := y.mean + rng.Intn(5) - 2
 			if count < 1 {
 				count = 1
 			}
@@ -879,65 +945,116 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 			}
 			for i := 0; i < count; i++ {
 				c := pool[rng.Intn(len(pool))]
-				orderID := uuid.New()
-				invID := uuid.New()
-				payID := uuid.New()
 
-				// Two or three product lines per order. The history writes
-				// the line sums straight into the order; the brief's
-				// revenue-trend gate does not read order_lines.
+				// Two or three product lines per order, priced at the product's
+				// list price; every figure is integer arithmetic.
 				nLines := 2 + rng.Intn(2)
-				var subtotal float64
+				lines := make([]historyLine, 0, nLines)
+				var subtotal int64
 				for l := 0; l < nLines; l++ {
 					p := prods[rng.Intn(len(prods))]
-					qty := 1 + rng.Intn(20)
-					subtotal += float64(qty) * p.Price
+					qty := int64(1 + rng.Intn(20))
+					hl := historyLine{product: p.ID, qty: qty, unitTT: p.PriceT, totalCents: (qty*p.PriceT + 50) / 100}
+					subtotal += hl.totalCents
+					lines = append(lines, hl)
 				}
-				tax := subtotal * taxRate
-				total := subtotal + tax
-				invDate := day
-
-				if _, err := db.ExecContext(ctx, `INSERT INTO orders
-					(id, customer_id, branch_id, total_amount, subtotal, status, created_at,
-						delivery_type, currency, tax_source)
-					VALUES ($1, $2, $3, $4, $5, 'FULFILLED', $6, 'PICKUP', 'CAD', 'LEGACY')`,
-					orderID, c.ID, yardID, total, subtotal, day); err != nil {
-					continue
+				taxCents := (subtotal*12 + 50) / 100
+				seq++
+				in, err := writeHistoryDocs(ctx, tx, c.ID, c.Yard, day, lines, subtotal, taxCents)
+				if err != nil {
+					// The day's transaction is aborted by a refused statement:
+					// stop the day, the rest of the history goes on.
+					log.Printf("Seed: history day %s: %v", day.Format("2006-01-02"), err)
+					posts = nil
+					break
 				}
-				totalOrders++
-
-				if _, err := db.ExecContext(ctx, `INSERT INTO invoices
-					(id, order_id, customer_id, branch_id, status, total_amount, subtotal,
-						tax_rate, tax_amount, due_date, payment_terms_id, invoice_date, created_at)
-					VALUES ($1,$2,$3,$4,'PAID',$5,$6,$7,$8,$9::date,
-						(SELECT payment_terms_id FROM customers WHERE id = $3),$10::date,$10)`,
-					invID, orderID, c.ID, yardID, total, subtotal, taxRate, tax,
-					invDate.AddDate(0, 1, 0), invDate); err != nil {
-					continue
-				}
-
-				// Payment at invDate so DATE(p.created_at) spans 120 days. Two
-				// parameters for the same value: $7 is the timestamp (created_at), $8 is
-				// the date (received_on). PostgreSQL cannot deduce a shared type when
-				// the same parameter is used twice with different casts.
-				if _, err := db.ExecContext(ctx, `INSERT INTO payments
-					(id, invoice_id, order_id, customer_id, branch_id, amount, method, status,
-						created_at, received_on, amount_unapplied, currency, number)
-					VALUES ($1, $2, $3, $4, $5, $6, 'ACH', 'POSTED',
-						$7, $8, 0, 'CAD', $9)`,
-					payID, invID, orderID, c.ID, yardID, total, invDate, invDate, fmt.Sprintf("HIST-%s", payID.String()[:8])); err != nil {
-					log.Printf("Seed: history payment %s: %v", payID, err)
-					continue
-				}
-				totalPayments++
+				// The act stamps its rows with the present; the history day goes
+				// on them (see receivables.post), one second apart per document
+				// so a day's statement lines keep their order.
+				in.Stamp = day.Add(time.Duration(seq) * 2 * time.Second)
+				posts = append(posts, in)
+			}
+			if posts == nil {
+				break
 			}
 		}
+		if posts == nil {
+			_ = tx.Rollback()
+			continue
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("history day: %w", err)
+		}
+		totalOrders += len(posts)
+		totalPosted += ar.postParallel(ctx, posts)
 	}
-	_ = ar
-	fmt.Printf("Seed: history: %d days, %d orders, %d payments across %d yards\n",
-		hp.Window.Days, totalOrders, totalPayments, len(dayMeans))
+	fmt.Printf("Seed: history: %d days, %d orders, %d invoices posted and paid through the AR core across %d yards\n",
+		hp.Window.Days, totalOrders, totalPosted, len(historyYards))
 	return nil
 }
+
+// writeHistoryDocs writes one history order with its lines and its invoice
+// with the matching lines, in the shape the base seed writes them, and answers
+// the invoice for the AR core to post and settle in full.
+func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid.UUID, day time.Time,
+	lines []historyLine, subtotal, taxCents int64) (seedInvoice, error) {
+	orderID, invID := uuid.New(), uuid.New()
+	total := subtotal + taxCents
+	// The order takes the currency the base seed's orders fall back to, which
+	// is the invoices' default: the documents of one sale agree.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at,
+			delivery_type, currency, tax_source)
+		VALUES ($1, $2, $3, $4::bigint::numeric / 100, $5::bigint::numeric / 100, 'FULFILLED', $6,
+			'PICKUP', (SELECT value FROM system_settings WHERE key = 'currency.default'), 'LEGACY')`,
+		orderID, customerID, branchID, total, subtotal, day); err != nil {
+		return seedInvoice{}, fmt.Errorf("order: %w", err)
+	}
+	prod, qty, unit, tot, pos := make([]string, len(lines)), make([]string, len(lines)), make([]string, len(lines)),
+		make([]string, len(lines)), make([]string, len(lines))
+	for i, l := range lines {
+		prod[i], qty[i], unit[i], tot[i], pos[i] = l.product.String(), fmt.Sprint(l.qty), fmt.Sprint(l.unitTT), fmt.Sprint(l.totalCents), fmt.Sprint(i)
+	}
+	// The shared line shape (ADR 0005 2.2), as the base seed writes it: one
+	// statement per order, the product's own description, SKU and unit.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+			description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+			quantity_allocated, quantity_fulfilled, created_at)
+		SELECT $1, l.product_id, l.qty, l.unit_tt::numeric / 10000, 'PRODUCT', l.pos,
+			COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1,
+			l.unit_tt::numeric / 10000, 'PRICE_LIST', l.total_c::numeric / 100, TRUE, 0, l.qty, $7
+		FROM unnest($2::uuid[], $3::numeric[], $4::bigint[], $5::bigint[], $6::int[]) AS l(product_id, qty, unit_tt, total_c, pos)
+		JOIN products p ON p.id = l.product_id`,
+		orderID, pgArray(prod), pgArray(qty), pgArray(unit), pgArray(tot), pgArray(pos), day); err != nil {
+		return seedInvoice{}, fmt.Errorf("order lines: %w", err)
+	}
+	// number is left to the column DEFAULT, as the base seed leaves it; the
+	// invoice is UNPAID and open at its total until the AR core settles it.
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal,
+			tax_rate, tax_amount, due_date, payment_terms_id, invoice_date, created_at)
+		VALUES ($1, $2, $3, $4, 'UNPAID', $5::bigint::numeric / 100, $6::bigint::numeric / 100, $7,
+			$8::bigint::numeric / 100, $9::date, (SELECT payment_terms_id FROM customers WHERE id = $3), $10::date, $10)`,
+		invID, orderID, customerID, branchID, total, subtotal, historyTaxRate, taxCents,
+		day.AddDate(0, 1, 0), day); err != nil {
+		return seedInvoice{}, fmt.Errorf("invoice: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
+			quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable, created_at)
+		SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
+			ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable, $3
+		FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID, day); err != nil {
+		return seedInvoice{}, fmt.Errorf("invoice lines: %w", err)
+	}
+	return seedInvoice{ID: invID, CustomerID: customerID, BranchID: branchID, Date: day, Subtotal: subtotal, Tax: taxCents,
+		Paid: total, OrderID: orderID, PaidOn: day, Method: "ACH"}, nil
+}
+
+// pgArray formats a Postgres array literal of plain values (UUIDs and
+// numbers), for a parameter the statement casts to its array type.
+func pgArray(values []string) string { return "{" + strings.Join(values, ",") + "}" }
 
 // openImportPool opens a *sql.DB from a connection string, same way seed.Run
 // does, so the import functions can use the database/sql API.

@@ -1388,10 +1388,10 @@ func Run() {
 		// 22c. 120 DAY HISTORY
 		//    Orders, invoices and payments spread across the three yards over the
 		//    last 120 days so the revenue trend query answers more than one period
-		//    across the three yards. Only the imported customers trade in it: the
-		//    history writes its documents directly (each carries its own day), so
-		//    the seed's own customers, whose statements and AR the walks open,
-		//    keep only documents posted through the AR core.
+		//    across the three yards. Only the imported customers trade in it, each
+		//    order and invoice with its lines, every invoice posted and paid in
+		//    full through the AR core on the day the generator picked, so the
+		//    statements, the ledger and the aging agree with the documents.
 		// =========================================================================
 		if !demoHistoryRequested() {
 			fmt.Printf("Seed: history skipped (%s=0)\n", demoHistoryEnv)

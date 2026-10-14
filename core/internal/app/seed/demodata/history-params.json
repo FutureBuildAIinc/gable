@@ -1,13 +1,13 @@
 {
-  "_about": "History generator parameters for the Gable demo (B tenant). ~120 days. A Gable coder implements a deterministic seed that walks these parameters; the brief says rows themselves are out of scope, only the parameters.",
+  "_about": "History generator parameters for the Gable demo: the window, the fixed random seed and each yard's weekday orders a day. The remaining keys describe the intended shape of the history.",
   "_seed": 11900021,
   "_window": {
     "days": 120,
     "_reason": "Brief calls for about 120 days; one full quarter plus spring ramp."
   },
-  "_rounding_units": "All money numbers in CAD dollars, two decimals. Quantities as floats, scale 4. Percentages as decimals (0.0 to 1.0).",
+  "_rounding_units": "All money numbers in dollars, two decimals. Quantities as floats, scale 4. Percentages as decimals (0.0 to 1.0).",
   "_branches": ["KEL-MAIN", "WK", "LK"],
-  "_anchor_for_seasonal": "Day 0 is the seed anchor date (set by DEMO_DISPATCH_DATE). Day 60 is the spring peak; day 100 begins fall easing; day 120 is mid-fall slow.",
+  "_anchor_for_seasonal": "Day 0 is the seed anchor date. Day 60 is the spring peak; day 100 begins fall easing; day 120 is mid-fall slow.",
 
   "counter_sales_per_yard_per_day": {
     "KEL-MAIN": {
@@ -229,5 +229,5 @@
     "_reason": "Commodity lumber and OSB prices move weekly; price_protection migration 081 frames these and the price change ledger carries them."
   },
 
-  "_seeding_seed": "Each seed day rolls once off the workspace seed (11900021). One cash-register till session per yard per day if the day has counter sales. Apply zone_share for delivery stops."
+  "_seeding_seed": "Each seed day rolls once off the fixed seed above."
 }

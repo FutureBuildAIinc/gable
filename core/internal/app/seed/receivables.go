@@ -9,6 +9,7 @@ import (
 	"log"
 	"log/slog"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
@@ -47,6 +48,14 @@ type seedInvoice struct {
 	Subtotal   int64 // cents
 	Tax        int64 // cents
 	Paid       int64 // cents of the total paid by a seeded check, 0 for none
+
+	// The history's own fields; the base seed leaves them zero.
+	OrderID uuid.UUID // the order the payment is recorded against
+	PaidOn  time.Time // the day the payment is received, Date plus 7 days when zero
+	Method  string    // the payment method, CHECK when empty
+	// Stamp is the moment the history puts on the rows the act stamps with the
+	// present (zero for the base seed, which keeps them).
+	Stamp time.Time
 }
 
 func (s seedInvoice) total() int64 { return s.Subtotal + s.Tax }
@@ -79,11 +88,28 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 			if in.Paid < in.total() {
 				note = "Partial payment"
 			}
-			_, _, err := r.acct.RecordPayment(ctx, account.RecordPaymentIn{
-				CustomerID: in.CustomerID, BranchID: in.BranchID, Currency: currency, Method: "CHECK", AmountCents: in.Paid,
-				Reference: fmt.Sprintf("CHK-%d", 1000+in.Date.YearDay()*7%9000), Notes: note, ReceivedOn: in.Date.AddDate(0, 0, 7),
-				Actor: "seed", Applications: []account.ApplyLine{{InvoiceID: in.ID, AmountCents: in.Paid}}})
-			return err
+			method, receivedOn := in.Method, in.PaidOn
+			if method == "" {
+				method = "CHECK"
+			}
+			if receivedOn.IsZero() {
+				receivedOn = in.Date.AddDate(0, 0, 7)
+			}
+			var orderID *uuid.UUID
+			if in.OrderID != uuid.Nil {
+				orderID = &in.OrderID
+			}
+			payID, _, err := r.acct.RecordPayment(ctx, account.RecordPaymentIn{
+				CustomerID: in.CustomerID, BranchID: in.BranchID, Currency: currency, Method: method, AmountCents: in.Paid,
+				Reference: fmt.Sprintf("CHK-%d", 1000+in.Date.YearDay()*7%9000), Notes: note, ReceivedOn: receivedOn,
+				OrderID: orderID, Actor: "seed", Applications: []account.ApplyLine{{InvoiceID: in.ID, AmountCents: in.Paid}}})
+			if err != nil {
+				return err
+			}
+			if in.Stamp.IsZero() {
+				return nil
+			}
+			return r.stampDay(ctx, in, payID)
 		})
 		if err != nil {
 			log.Printf("Seed: invoice %s was not posted: %v", in.ID, err)
@@ -92,6 +118,74 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 		posted++
 	}
 	return posted
+}
+
+// historyWorkers is how many connections the history posts on at once; the AR
+// core's pool holds ten.
+const historyWorkers = 6
+
+// postParallel posts the invoices on several connections at once, which the
+// history's volume needs to seed inside the stack's wait. A customer's
+// invoices all go to one worker, in the order given, so its subledger runs in
+// that order exactly as a single run writes it; the counters the acts draw on
+// (payment and entry numbers) are sequences, so the workers do not queue on
+// one another. The call returns once every worker is done.
+func (r *receivables) postParallel(ctx context.Context, invoices []seedInvoice) int {
+	lanes := make([][]seedInvoice, historyWorkers)
+	for _, in := range invoices {
+		w := int(in.CustomerID[0]) % historyWorkers
+		lanes[w] = append(lanes[w], in)
+	}
+	counts := make([]int, historyWorkers)
+	var wg sync.WaitGroup
+	for w := range lanes {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			counts[w] = r.post(ctx, lanes[w])
+		}(w)
+	}
+	wg.Wait()
+	total := 0
+	for _, n := range counts {
+		total += n
+	}
+	return total
+}
+
+// stampDay puts the history's day on the rows the act wrote with the present:
+// the AR core stamps the subledger rows, the application and the payment with
+// the moment of the call, and the revenue trend, the statements and the ledger's
+// created dates would all collapse onto the day of the seed. The ledger entries
+// and the receipt's date already carry the day through the act's dates; this
+// sets the stamps in the same transaction as the act, never a row of its own.
+// The payment is also linked to its invoice, as the order and invoice walks
+// (the dashboard's trend and recent activity) follow it.
+func (r *receivables) stampDay(ctx context.Context, in seedInvoice, payID uuid.UUID) error {
+	// One statement: each update is a CTE over the rows the act just wrote, so
+	// the act costs one more round trip, not seven.
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		WITH apps AS (
+			UPDATE ar_applications SET created_at = $2 WHERE invoice_id = $1 RETURNING id
+		), ct_inv AS (
+			UPDATE customer_transactions SET created_at = $3 WHERE source_kind = 'invoice' AND reference_id = $1
+		), ct_pay AS (
+			UPDATE customer_transactions SET created_at = $2 WHERE source_kind = 'application'
+				AND reference_id IN (SELECT id FROM apps)
+		), pay AS (
+			UPDATE payments SET invoice_id = $1, created_at = $2, updated_at = $2 WHERE id = $4
+		), inv AS (
+			UPDATE invoices SET paid_at = $2, updated_at = $2 WHERE id = $1
+		), gl_inv AS (
+			UPDATE gl_journal_entries SET created_at = $3, updated_at = $3 WHERE source_ref_id = $1
+		)
+		UPDATE gl_journal_entries SET created_at = $2, updated_at = $2
+		WHERE source_ref_id = $4 OR source_ref_id IN (SELECT id FROM apps)`,
+		in.ID, in.Stamp.Add(time.Second), in.Stamp, payID)
+	if err != nil {
+		return fmt.Errorf("the history's day was not stamped: %w", err)
+	}
+	return nil
 }
 
 // postMemo posts a draft credit memo the seed inserted (one ADJUST line, no

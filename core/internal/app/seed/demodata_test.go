@@ -10,12 +10,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -36,6 +40,9 @@ import (
 //     yards, so the dashboard's trend has more than one period.
 //  4. Idempotency: a second seed run leaves every reference data row count
 //     unchanged.
+//  5. The history is real AR: every order and invoice has lines that sum to
+//     its subtotal, every payment is numbered by the AR core, the subledger,
+//     the statement, the ledger and the aging agree with the documents.
 
 // TestDemoImportRequested pins the opt in: the import runs only when
 // DEMO_SEED_IMPORT asks for it, so the default seed (the one the
@@ -200,10 +207,250 @@ func TestDemoImport(t *testing.T) {
 		}
 	})
 
-	t.Run("a second run changes no reference data", func(t *testing.T) {
+	t.Run("history documents carry lines that sum to their subtotal", func(t *testing.T) {
+		keys := jsonlKeys(t, customersData, "account_number")
+		for _, c := range []struct{ name, docs, lines, fk string }{
+			{"orders", "orders", "order_lines", "order_id"},
+			{"invoices", "invoices", "invoice_lines", "invoice_id"},
+		} {
+			var total, bad int
+			q := fmt.Sprintf(`
+				SELECT COUNT(*),
+				       COUNT(*) FILTER (WHERE d.subtotal IS DISTINCT FROM (SELECT SUM(l.line_total) FROM %s l WHERE l.%s = d.id))
+				FROM %s d JOIN customers c ON c.id = d.customer_id
+				WHERE c.account_number = ANY($1)`, c.lines, c.fk, c.docs)
+			if err := db.QueryRow(q, keys).Scan(&total, &bad); err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			if total == 0 {
+				t.Fatalf("%s: the imported customers have none", c.name)
+			}
+			if bad > 0 {
+				t.Errorf("%s: %d of %d have no lines or lines that do not sum to the subtotal", c.name, bad, total)
+			}
+		}
+		var off int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM invoices i JOIN customers c ON c.id = i.customer_id
+			WHERE c.account_number = ANY($1) AND i.total_amount <> i.subtotal + i.tax_amount`, keys).Scan(&off); err != nil {
+			t.Fatal(err)
+		}
+		if off > 0 {
+			t.Errorf("%d invoices whose total is not subtotal plus tax", off)
+		}
+	})
+
+	t.Run("every payment is numbered by the AR core", func(t *testing.T) {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM payments WHERE number !~ '^PAY-[0-9]{6}$'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			t.Errorf("%d payments carry a number outside the PAY- scheme", n)
+		}
+	})
+
+	t.Run("the subledger and the statement carry the history", func(t *testing.T) {
+		keys := jsonlKeys(t, customersData, "account_number")
+		var drift int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM customers c
+			WHERE c.account_number = ANY($1)
+			  AND COALESCE((SELECT SUM(ROUND(t.amount * 100)) FROM customer_transactions t WHERE t.customer_id = c.id), 0)
+			   <> COALESCE((SELECT SUM(ROUND(i.amount_open * 100)) FROM invoices i
+			                WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0)`, keys).Scan(&drift); err != nil {
+			t.Fatal(err)
+		}
+		if drift > 0 {
+			t.Errorf("%d imported customers whose subledger differs from their open invoices", drift)
+		}
+
+		var cust string
+		var invoices, payments int
+		if err := db.QueryRow(`
+			SELECT c.id, COUNT(DISTINCT i.id), COUNT(DISTINCT p.id)
+			FROM customers c JOIN invoices i ON i.customer_id = c.id AND i.status = 'PAID'
+			JOIN payments p ON p.customer_id = c.id
+			WHERE c.account_number = ANY($1)
+			GROUP BY c.id ORDER BY 2 DESC, 1 LIMIT 1`, keys).Scan(&cust, &invoices, &payments); err != nil {
+			t.Fatalf("an imported customer with paid history: %v", err)
+		}
+		today := time.Now().UTC()
+		var st account.Statement
+		getJSON(t, accountMux(t, dbURL), fmt.Sprintf("/api/v1/ar/customers/%s/statement?from=%s&to=%s", cust,
+			today.AddDate(0, 0, -130).Format("2006-01-02"), today.Format("2006-01-02")), &st)
+		if len(st.Currencies) != 1 {
+			t.Fatalf("statement has %d currencies, want 1", len(st.Currencies))
+		}
+		cur := st.Currencies[0]
+		var inv, pay int
+		days := map[string]bool{}
+		for _, l := range cur.Lines {
+			switch l.Type {
+			case account.TransactionTypeInvoice:
+				inv++
+			case account.TransactionTypePayment:
+				pay++
+			}
+			days[l.Date] = true
+		}
+		if inv != invoices || pay != invoices {
+			t.Errorf("statement lists %d invoices and %d payments, want %d of each", inv, pay, invoices)
+		}
+		if invoices > 3 && len(days) < 3 {
+			t.Errorf("statement lines fall on %d days: the history day is not on them", len(days))
+		}
+		for i := 1; i < len(cur.Lines); i++ {
+			if cur.Lines[i].Date < cur.Lines[i-1].Date {
+				t.Fatalf("statement lines out of day order at %d", i)
+			}
+		}
+		if cur.ClosingBalanceCents != 0 {
+			t.Errorf("closing balance %d, want 0 (every invoice is paid)", cur.ClosingBalanceCents)
+		}
+		_ = payments
+	})
+
+	t.Run("the ledger balances and carries the history's revenue", func(t *testing.T) {
+		keys := jsonlKeys(t, customersData, "account_number")
+		var debit, credit int64
+		if err := db.QueryRow(`SELECT COALESCE(SUM(ROUND(debit * 100)), 0), COALESCE(SUM(ROUND(credit * 100)), 0) FROM gl_journal_lines`).Scan(&debit, &credit); err != nil {
+			t.Fatal(err)
+		}
+		if debit != credit {
+			t.Errorf("ledger debits %d differ from credits %d", debit, credit)
+		}
+		var subtotals, revenue int64
+		if err := db.QueryRow(`
+			SELECT COALESCE(SUM(ROUND(i.subtotal * 100)), 0) FROM invoices i
+			JOIN customers c ON c.id = i.customer_id WHERE c.account_number = ANY($1)`, keys).Scan(&subtotals); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`
+			SELECT COALESCE(SUM(ROUND(l.credit * 100)), 0) FROM gl_journal_lines l
+			JOIN gl_accounts a ON a.id = l.account_id AND a.code = '4010'
+			JOIN gl_journal_entries e ON e.id = l.journal_entry_id AND e.source = 'INVOICE'
+			JOIN invoices i ON i.id = e.source_ref_id
+			JOIN customers c ON c.id = i.customer_id WHERE c.account_number = ANY($1)`, keys).Scan(&revenue); err != nil {
+			t.Fatal(err)
+		}
+		if subtotals == 0 || revenue != subtotals {
+			t.Errorf("Sales Revenue credits %d cents for the history, its invoices' subtotals are %d", revenue, subtotals)
+		}
+	})
+
+	t.Run("the aging answers through every cursor with no history cash unapplied", func(t *testing.T) {
+		keys := jsonlKeys(t, customersData, "account_number")
+		mux := accountMux(t, dbURL)
+		path := "/api/v1/ar/aging?group_by=customer&basis=due_date"
+		cursor, pages := "", 0
+		var items []account.AgingItem
+		for {
+			var page struct {
+				Items      []account.AgingItem `json:"items"`
+				NextCursor *string             `json:"next_cursor"`
+			}
+			next := path
+			if cursor != "" {
+				next += "&cursor=" + url.QueryEscape(cursor)
+			}
+			getJSON(t, mux, next, &page)
+			items = append(items, page.Items...)
+			pages++
+			if page.NextCursor == nil || *page.NextCursor == "" {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		if len(items) == 0 {
+			t.Fatalf("the aging lists nothing (%d pages)", pages)
+		}
+		imported := map[string]bool{}
+		rows, err := db.Query(`SELECT id FROM customers WHERE account_number = ANY($1)`, keys)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			imported[id] = true
+		}
+		rows.Close()
+		for _, it := range items {
+			if imported[it.CustomerID.String()] && it.UnappliedCents != 0 {
+				t.Fatalf("customer %s shows %d cents unapplied from the history", it.CustomerName, it.UnappliedCents)
+			}
+		}
+		var sum struct {
+			Totals []account.AgingTotal `json:"totals"`
+		}
+		getJSON(t, mux, "/api/v1/ar/aging/summary?basis=due_date", &sum)
+		for _, tot := range sum.Totals {
+			if tot.Currency != "USD" {
+				t.Errorf("the aging summary carries %d cents in %s: the seed's documents are all USD", tot.TotalCents, tot.Currency)
+			}
+		}
+	})
+
+	t.Run("the tenant's currency is on every imported customer and history document", func(t *testing.T) {
+		keys := jsonlKeys(t, customersData, "account_number")
+		var bad int
+		for _, q := range []string{
+			`SELECT COUNT(*) FROM customers c WHERE c.account_number = ANY($1)
+			   AND c.currency IS DISTINCT FROM (SELECT value FROM system_settings WHERE key = 'currency.default')`,
+			`SELECT COUNT(*) FROM orders d JOIN customers c ON c.id = d.customer_id WHERE c.account_number = ANY($1)
+			   AND d.currency IS DISTINCT FROM (SELECT value FROM system_settings WHERE key = 'currency.default')`,
+			`SELECT COUNT(*) FROM invoices d JOIN customers c ON c.id = d.customer_id WHERE c.account_number = ANY($1)
+			   AND d.currency IS DISTINCT FROM (SELECT value FROM system_settings WHERE key = 'currency.default')`,
+			`SELECT COUNT(*) FROM payments d JOIN customers c ON c.id = d.customer_id WHERE c.account_number = ANY($1)
+			   AND d.currency IS DISTINCT FROM (SELECT value FROM system_settings WHERE key = 'currency.default')`,
+		} {
+			if err := db.QueryRow(q, keys).Scan(&bad); err != nil {
+				t.Fatal(err)
+			}
+			if bad > 0 {
+				t.Errorf("%d rows are not in the tenant's currency: %s", bad, strings.Join(strings.Fields(q)[:6], " "))
+			}
+		}
+	})
+
+	t.Run("every imported product names its vendor", func(t *testing.T) {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM products p JOIN vendors v ON v.id = p.vendor_id
+			WHERE p.vendor IS DISTINCT FROM v.name`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n > 0 {
+			t.Errorf("%d products with a vendor carry no vendor name in the vendor column", n)
+		}
+	})
+
+	t.Run("a second run repaves the same history and changes no reference data", func(t *testing.T) {
+		history := func() (count int, cents int64, invoices int) {
+			// The imported customers only: the base seed's own documents are
+			// drawn without the fixed seed.
+			keys := jsonlKeys(t, customersData, "account_number")
+			if err := db.QueryRow(`SELECT COUNT(*), COALESCE(SUM(ROUND(p.amount * 100)), 0)::bigint FROM payments p
+				JOIN customers c ON c.id = p.customer_id WHERE c.account_number = ANY($1)`, keys).Scan(&count, &cents); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM invoices i
+				JOIN customers c ON c.id = i.customer_id WHERE c.account_number = ANY($1)`, keys).Scan(&invoices); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		c1, s1, i1 := history()
 		runCommand(t, dbURL, "./cmd/seed")
 		if second := snapshotCounts(t, db); second != first {
 			t.Errorf("reference data moved on a second run: first %+v, second %+v", first, second)
+		}
+		// The fixed random seed gives the same history for the same day, and
+		// the run truncates before it writes, so nothing doubles.
+		if c2, s2, i2 := history(); c2 != c1 || s2 != s1 || i2 != i1 {
+			t.Errorf("the second run's history differs: payments %d (%d cents) and %d invoices, then %d (%d cents) and %d", c1, s1, i1, c2, s2, i2)
 		}
 	})
 }
@@ -305,4 +552,31 @@ func snapshotCounts(t *testing.T, db *sql.DB) importCounts {
 		}
 	}
 	return c
+}
+
+// accountMux serves the account module's routes over the scratch database,
+// unguarded, as the package's tests call them.
+func accountMux(t *testing.T, dbURL string) *http.ServeMux {
+	t.Helper()
+	ar, err := newReceivables(dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(ar.close)
+	mux := http.NewServeMux()
+	account.NewHandler(ar.acct).RegisterRoutes(mux, nil, nil)
+	return mux
+}
+
+// getJSON answers 200 or fails with the body, and decodes it into dst.
+func getJSON(t *testing.T, mux http.Handler, path string, dst any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET %s: %d %s", path, rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), dst); err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
 }

@@ -1,10 +1,9 @@
 {
-  "_doc": "Vendor keys for the Gable Building Supply demo. Agent A (catalogue) writes first; agent B (customers and vendors) extends but never edits A's rows. The key is a stable short identifier the catalogue JSONL uses to refer to the vendor. B's loader resolves the key to the vendors.name column (UNIQUE). All entries invented; nothing real.",
+  "_doc": "Vendor keys for the Gable Building Supply demo. The key is a stable short identifier the catalogue file uses to refer to the vendor; the loader resolves it to the vendor's name. All entries are invented.",
   "_rules": [
-    "All names, emails, phones are invented. No real BC company, brand, manufacturer or trademark.",
-    "B may append new keys. B must not change or remove A's keys.",
-    "The legacy 8 vendor names match the seed.go demo and remain stable so A's catalogue references them exactly.",
-    "phone on 250-555-01xx, email on reserved .example or invented .ca domain that does not resolve to a real firm."
+    "All names, emails and phones are invented; no real company, brand or trademark.",
+    "A key is never changed or removed once the catalogue uses it.",
+    "Phones are on 250-555-01xx; emails are on the reserved .example domain or an invented one."
   ],
   "vendors": [
     {
@@ -15,7 +14,7 @@
       "average_lead_time_days": 3,
       "fill_rate": 97.5,
       "ship_to": ["KEL-MAIN", "WK", "LK"],
-      "notes": "Legacy in-house yard feed. Same name as the demo seed (seed.go line 331). A reuses this name exactly."
+      "notes": "In-house yard feed."
     },
     {
       "key": "OK_HDW",
@@ -25,7 +24,7 @@
       "average_lead_time_days": 5,
       "fill_rate": 94.2,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Legacy vendor from seed.go line 332."
+      "notes": "Core demo vendor."
     },
     {
       "key": "BC_ROOF",
@@ -35,7 +34,7 @@
       "average_lead_time_days": 7,
       "fill_rate": 91.0,
       "ship_to": ["KEL-MAIN", "WK", "LK"],
-      "notes": "Legacy vendor from seed.go line 333."
+      "notes": "Core demo vendor."
     },
     {
       "key": "INT_MILL",
@@ -45,7 +44,7 @@
       "average_lead_time_days": 14,
       "fill_rate": 88.5,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Legacy vendor from seed.go line 334."
+      "notes": "Core demo vendor."
     },
     {
       "key": "VAL_RMX",
@@ -55,7 +54,7 @@
       "average_lead_time_days": 2,
       "fill_rate": 99.0,
       "ship_to": ["KEL-MAIN", "WK", "LK"],
-      "notes": "Legacy vendor from seed.go line 335."
+      "notes": "Core demo vendor."
     },
     {
       "key": "MTN_FAST",
@@ -65,7 +64,7 @@
       "average_lead_time_days": 4,
       "fill_rate": 96.8,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Legacy vendor from seed.go line 336."
+      "notes": "Core demo vendor."
     },
     {
       "key": "CAR_INS",
@@ -75,7 +74,7 @@
       "average_lead_time_days": 6,
       "fill_rate": 93.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Legacy vendor from seed.go line 337."
+      "notes": "Core demo vendor."
     },
     {
       "key": "PAC_WD",
@@ -85,7 +84,7 @@
       "average_lead_time_days": 21,
       "fill_rate": 85.0,
       "ship_to": ["KEL-MAIN"],
-      "notes": "Legacy vendor from seed.go line 338."
+      "notes": "Core demo vendor."
     },
     {
       "key": "OKN_LBR_MILL",
