@@ -12,6 +12,7 @@ import type { GableOrderDetail } from './OrderDetail'
 import type { Order } from '../../types/order'
 import { mountAsync, text, jsonResponse } from '../../test/dom'
 import { ToastService } from '../../lib/toast-service.ts'
+import { readFileSync } from 'node:fs'
 
 // the header's Fulfil Order button
 function fulfilButton(el: Element): HTMLButtonElement {
@@ -326,5 +327,15 @@ describe('gable-order-detail - the order contract', () => {
     expect(JSON.parse(String(call!.init!.body))).toEqual({ revision: 2, picked_up_by: 'Counter customer' })
     expect(new Headers(call!.init!.headers).get('If-Match')).toBe('"2"')
     expect(text(el)).toContain('Fulfilled')
+  })
+})
+
+describe('the order page source', () => {
+  it('keeps the credit hold comment on handleConfirm, which it describes', () => {
+    const src = readFileSync(new URL('./OrderDetail.ts', import.meta.url), 'utf8')
+    const at = src.indexOf('The confirm is the transition')
+    expect(at).toBeGreaterThan(-1)
+    const after = src.slice(at).split('private async ')[1]
+    expect(after.startsWith('handleConfirm(')).toBe(true)
   })
 })
