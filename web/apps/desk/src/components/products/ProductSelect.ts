@@ -63,7 +63,7 @@ export class GableProductSelect extends LitElement {
         <div class="relative">
           <div
             @click=${() => this._isOpen = !this._isOpen}
-            class="flex items-center w-full px-4 py-2 bg-[#161821] border border-white/10 rounded-md cursor-pointer hover:border-[#00FFA3] transition-colors"
+            class="flex items-center w-full px-4 py-2 bg-slate-steel border border-white/10 rounded-md cursor-pointer hover:border-gable-green transition-colors"
           >
             ${icon(Search, 16, 'text-gray-400 mr-2')}
             <input
@@ -80,7 +80,7 @@ export class GableProductSelect extends LitElement {
           </div>
 
           ${this._isOpen ? html`
-            <div class="absolute z-50 w-full mt-1 bg-[#161821] border border-white/10 rounded-md shadow-xl max-h-60 overflow-auto">
+            <div class="absolute z-50 w-full mt-1 bg-slate-steel border border-white/10 rounded-md shadow-xl max-h-60 overflow-auto">
               ${this._loading ? html`
                 <div class="p-4 text-center text-gray-500 text-sm">Loading...</div>
               ` : nothing}
@@ -91,11 +91,11 @@ export class GableProductSelect extends LitElement {
 
               ${!this._loading ? this._filteredProducts.slice(0, 50).map(product => html`
                 <div
-                  class="px-4 py-2 hover:bg-[#00FFA3]/10 cursor-pointer flex justify-between items-center group"
+                  class="px-4 py-2 hover:bg-gable-green/10 cursor-pointer flex justify-between items-center group"
                   @click=${() => this._selectProduct(product)}
                 >
                   <div>
-                    <div class="text-white font-mono text-sm group-hover:text-[#00FFA3] transition-colors">${product.sku}</div>
+                    <div class="text-white font-mono text-sm group-hover:text-gable-green transition-colors">${product.sku}</div>
                     <div class="text-xs text-gray-500 truncate max-w-[300px]">${product.description}</div>
                   </div>
                   <div class="text-xs text-right text-gray-500 font-mono">${formatPrice4(product.base_price_ten_thousandths)}</div>

@@ -89,15 +89,15 @@ export class GableBarcodeScanner extends LitElement {
   render() {
     return html`
       <div
-        class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+        class="fixed inset-0 z-50 bg-backdrop/80 backdrop-blur-sm flex items-center justify-center p-4"
         @click=${this._handleBackdropClick}
         role="dialog"
         aria-modal="true"
         aria-labelledby="barcode-scanner-title"
       >
-        <div class="bg-[#12131A] border border-white/10 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col relative animate-scale-up">
+        <div class="bg-slate-steel border border-white/10 rounded-xl overflow-hidden w-full max-w-md shadow-2xl flex flex-col relative animate-scale-up">
           <!-- Header -->
-          <div class="px-4 py-3 border-b border-white/10 flex justify-between items-center bg-[#0A0B10]">
+          <div class="px-4 py-3 border-b border-white/10 flex justify-between items-center bg-deep-space">
             <h3 id="barcode-scanner-title" class="text-white font-medium">Scan Barcode</h3>
             <button
               @click=${this._close}
@@ -122,11 +122,11 @@ export class GableBarcodeScanner extends LitElement {
               </div>
             ` : html`
               <div class="w-full relative">
-                <div id="reader-container" class="w-full overflow-hidden rounded-lg bg-black border border-white/10 [&>div]:!border-none [&>div>video]:!rounded-lg [&_button]:!bg-[#00FFA3] [&_button]:!text-black [&_button]:!border-none [&_button]:!rounded [&_button]:!px-3 [&_button]:!py-1.5 [&_button]:!font-medium [&_button]:!text-sm hover:[&_button]:!bg-[#00E593] [&_select]:!bg-[#12131A] [&_select]:!text-white [&_select]:!border-white/20 [&_select]:!rounded [&_select]:!px-2 [&_select]:!py-1 [&_select]:!text-sm [&_a]:hidden pb-2"></div>
+                <div id="reader-container" class="w-full overflow-hidden rounded-lg bg-black border border-white/10 [&>div]:!border-none [&>div>video]:!rounded-lg [&_button]:!bg-gable-green [&_button]:!text-black [&_button]:!border-none [&_button]:!rounded [&_button]:!px-3 [&_button]:!py-1.5 [&_button]:!font-medium [&_button]:!text-sm hover:[&_button]:!bg-gable-green-hover [&_select]:!bg-slate-steel [&_select]:!text-white [&_select]:!border-white/20 [&_select]:!rounded [&_select]:!px-2 [&_select]:!py-1 [&_select]:!text-sm [&_a]:hidden pb-2"></div>
 
                 ${this._isScanning ? html`
-                  <div class="absolute top-4 right-4 flex items-center gap-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-xs text-[#00FFA3] font-mono border border-[#00FFA3]/20">
-                    <span class="w-2 h-2 rounded-full bg-[#00FFA3] animate-pulse"></span>
+                  <div class="absolute top-4 right-4 flex items-center gap-2 bg-black/60 backdrop-blur px-2 py-1 rounded text-xs text-gable-green font-mono border border-gable-green/20">
+                    <span class="w-2 h-2 rounded-full bg-gable-green animate-pulse"></span>
                     Scanning
                   </div>
                 ` : nothing}
@@ -135,7 +135,7 @@ export class GableBarcodeScanner extends LitElement {
           </div>
 
           <!-- Footer hint -->
-          <div class="px-4 py-3 bg-[#0A0B10] border-t border-white/10 text-center">
+          <div class="px-4 py-3 bg-deep-space border-t border-white/10 text-center">
             <p class="text-xs text-zinc-400">Position the barcode or QR code inside the frame</p>
           </div>
         </div>

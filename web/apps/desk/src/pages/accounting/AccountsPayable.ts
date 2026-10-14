@@ -632,7 +632,7 @@ export class AccountsPayable extends LitElement {
 
                 <!-- 1. Log Bill Modal -->
                 ${this.showLogBillModal ? html`
-                    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-backdrop/60 backdrop-blur-sm animate-in fade-in duration-200">
                         <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-200">
                             <div class="flex justify-between items-center p-4 border-b border-white/5 bg-zinc-950/40">
                                 <h3 class="text-base font-semibold text-white flex items-center gap-2">
@@ -830,7 +830,7 @@ export class AccountsPayable extends LitElement {
 
                 <!-- 2. Record Payment Modal -->
                 ${this.showPayVendorModal ? html`
-                    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-backdrop/60 backdrop-blur-sm animate-in fade-in duration-200">
                         <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full shadow-2xl animate-in zoom-in-95 duration-200">
                             <div class="flex justify-between items-center p-4 border-b border-white/5 bg-zinc-950/40">
                                 <h3 class="text-base font-semibold text-white flex items-center gap-2">
@@ -981,7 +981,7 @@ export class AccountsPayable extends LitElement {
 
                 <!-- 3. View Invoice Details Modal -->
                 ${this.showDetailInvoiceModal && this.selectedInvoice ? html`
-                    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-backdrop/60 backdrop-blur-sm animate-in fade-in duration-200">
                         <div class="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full shadow-2xl animate-in zoom-in-95 duration-200">
                             <div class="flex justify-between items-center p-4 border-b border-white/5 bg-zinc-950/40">
                                 <h3 class="text-base font-semibold text-white flex items-center gap-2">

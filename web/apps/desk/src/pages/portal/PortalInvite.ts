@@ -55,7 +55,7 @@ export class PortalInvite extends LitElement {
                     </div>
                 </div>
 
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl p-1">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl p-1">
                     <div class="p-6">
                         <form @submit=${(e: Event) => this._handleSubmit(e)} class="space-y-6">
                             <div>
@@ -79,7 +79,7 @@ export class PortalInvite extends LitElement {
                                     ${roles.map(r => html`
                                         <label
                                             class="relative flex flex-col p-4 cursor-pointer rounded-xl border transition-all ${this._selectedRole === r
-                                                ? 'bg-[#00FFA3]/10 border-[#00FFA3] shadow-[0_0_15px_rgba(0,255,163,0.1)]'
+                                                ? 'bg-gable-green/10 border-gable-green shadow-glow-soft'
                                                 : 'bg-black/20 border-white/5 hover:bg-white/5 hover:border-white/20'
                                             }"
                                         >
@@ -92,8 +92,8 @@ export class PortalInvite extends LitElement {
                                                 class="sr-only"
                                             />
                                             <div class="flex items-center justify-between mb-2">
-                                                <span class="font-semibold ${this._selectedRole === r ? 'text-[#00FFA3]' : 'text-white'}">${r}</span>
-                                                ${this._selectedRole === r ? icon(Shield, 16, 'text-[#00FFA3]') : ''}
+                                                <span class="font-semibold ${this._selectedRole === r ? 'text-gable-green' : 'text-white'}">${r}</span>
+                                                ${this._selectedRole === r ? icon(Shield, 16, 'text-gable-green') : ''}
                                             </div>
                                             <span class="text-xs text-zinc-500 leading-relaxed">
                                                 ${roleDescriptions[r]}
@@ -114,7 +114,7 @@ export class PortalInvite extends LitElement {
                                 <button
                                     type="submit"
                                     ?disabled=${this.submitting || !this.email}
-                                    class="flex items-center gap-2 px-6 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-all shadow-[0_0_15px_rgba(0,255,163,0.3)] disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed"
+                                    class="flex items-center gap-2 px-6 py-2 bg-gable-green text-black font-semibold rounded-lg hover:bg-emerald-400 transition-all shadow-glow disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed"
                                 >
                                     ${this.submitting ? icon(Loader2, 18, 'animate-spin') : icon(UserPlus, 18)}
                                     Send Invitation

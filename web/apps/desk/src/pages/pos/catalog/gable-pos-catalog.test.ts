@@ -404,7 +404,7 @@ describe('gable-pos-catalog', () => {
     await open();
     const plate = el.querySelector('[data-testid="catalog-picture"]')!;
     expect(plate.className).toContain('h-[72px]');
-    expect(plate.className).toContain('bg-white');
+    expect(plate.className).toContain('bg-plate');
     const chip = el.querySelectorAll('[data-testid="catalog-chip"]')[2];
     expect(chip.className).not.toMatch(/gable-green/);
   });

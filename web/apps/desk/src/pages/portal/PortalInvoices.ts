@@ -113,7 +113,7 @@ export class PortalInvoices extends LitElement {
 
                 ${this.invoices.length === 0
                     ? html`
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-12 text-center">
                                 ${icon(FileText, 48, 'text-zinc-600 mx-auto mb-4')}
                                 <p class="text-zinc-400">No invoices yet.</p>
@@ -123,7 +123,7 @@ export class PortalInvoices extends LitElement {
                     : html`
                         <div class="space-y-3">
                             ${this.invoices.map(inv => html`
-                                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                                     <div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
                                         <div class="flex items-center gap-4">
                                             <div

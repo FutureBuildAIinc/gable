@@ -318,7 +318,7 @@ export class GablePosCatalog extends LitElement {
 
     private _picture(item: CatalogItem) {
         const shown = item.image_url && !this._brokenImages.has(item.product_id);
-        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-white">
+        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-plate">
             ${shown
                 ? html`<img src=${item.image_url!} alt="" loading="lazy" class="h-full w-full object-cover"
                       @error=${() => { this._brokenImages = new Set(this._brokenImages).add(item.product_id); }} />`

@@ -38,7 +38,7 @@ export class StopList extends LitElement {
 
         if (this.loading) {
             return html`
-                <div class="flex justify-center items-center h-screen bg-[#0A0B10]">
+                <div class="flex justify-center items-center h-screen bg-deep-space">
                     <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-gable-green"></div>
                 </div>
             `;
@@ -91,7 +91,7 @@ export class StopList extends LitElement {
                         return html`
                             <div class="relative pl-10">
                                 <!-- Timeline Node -->
-                                <div class="absolute left-0 top-6 -translate-y-1/2 w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs z-10 bg-[#0A0B10] transition-colors ${
+                                <div class="absolute left-0 top-6 -translate-y-1/2 w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs z-10 bg-deep-space transition-colors ${
                                     isCompleted ? 'border-gable-green text-gable-green' :
                                     isFailed ? 'border-rose-500 text-rose-500' :
                                     isNext ? 'border-white text-white shadow-[0_0_10px_rgba(255,255,255,0.3)]' :
@@ -101,7 +101,7 @@ export class StopList extends LitElement {
                                 </div>
 
                                 <div
-                                    class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl transition-all active:scale-[0.98] cursor-pointer relative overflow-hidden ${
+                                    class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl transition-all active:scale-[0.98] cursor-pointer relative overflow-hidden ${
                                         isNext ? 'border-gable-green/50 bg-gable-green/5' : 'border-white/5'
                                     } ${isCompleted ? 'opacity-60 grayscale-[0.5]' : ''}"
                                     @click=${() => router.navigate(`/driver/deliveries/${d.id}`)}

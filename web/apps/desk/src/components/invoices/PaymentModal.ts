@@ -71,7 +71,7 @@ export class GablePaymentModal extends LitElement {
     if (!this.isOpen) return nothing;
 
     return html`
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title">
         <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
           <div class="mb-6">
             <h2 id="payment-modal-title" class="text-xl font-bold text-zinc-100">Record Payment</h2>

@@ -48,7 +48,7 @@ export class GableSalesDialog extends LitElement {
         if (!this.isOpen) return nothing;
         const disabled = this.busy || (this.requireReason && !this.reason.trim());
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="sales-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm p-4" role="dialog" aria-modal="true" aria-labelledby="sales-dialog-title">
                 <form @submit=${(e: Event) => this.submit(e)} class="w-full max-w-md bg-slate-steel border border-white/10 rounded-lg shadow-2xl p-6 space-y-4">
                     <h2 id="sales-dialog-title" class="text-xl font-bold text-white">${this.heading}</h2>
                     <p class="text-sm text-zinc-400">${this.body}</p>

@@ -253,7 +253,7 @@ export class SavedReports extends LitElement {
     private _renderScheduleModal() {
         if (!this.scheduleFor) return nothing;
         return html`
-            <div class="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+            <div class="fixed inset-0 bg-backdrop/50 flex items-center justify-center p-4 z-50">
                 <div class="bg-white rounded shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto">
                     <div class="flex justify-between items-center px-6 py-4 border-b">
                         <div>

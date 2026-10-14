@@ -104,7 +104,7 @@ export class PortalDashboard extends LitElement {
                 <!-- Stats Row -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                     ${stats.map(stat => html`
-                        <div class="group hover:-translate-y-1 transition-transform duration-300 rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="group hover:-translate-y-1 transition-transform duration-300 rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-6">
                                 <div class="flex justify-between items-start mb-4">
                                     <div
@@ -122,7 +122,7 @@ export class PortalDashboard extends LitElement {
                 </div>
 
                 <!-- Recent Orders -->
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                     <div class="flex flex-row items-center justify-between pb-2 p-6">
                         <h3 class="text-lg font-semibold text-white">Recent Orders</h3>
                         <a

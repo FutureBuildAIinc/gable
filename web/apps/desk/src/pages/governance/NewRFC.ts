@@ -48,7 +48,7 @@ export class GableNewRFC extends LitElement {
             <input
               type="text"
               required
-              class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white focus:border-[#00FFA3] outline-none"
+              class="w-full bg-deep-space border border-white/20 rounded p-3 text-white focus:border-gable-green outline-none"
               placeholder="e.g. Implement Zero Trust Auth"
               .value=${this._title}
               @input=${(e: Event) => { this._title = (e.target as HTMLInputElement).value; }}
@@ -60,7 +60,7 @@ export class GableNewRFC extends LitElement {
             <textarea
               required
               rows="4"
-              class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white focus:border-[#00FFA3] outline-none"
+              class="w-full bg-deep-space border border-white/20 rounded p-3 text-white focus:border-gable-green outline-none"
               placeholder="What is broken or missing? Why is this important now?"
               .value=${this._problemStatement}
               @input=${(e: Event) => { this._problemStatement = (e.target as HTMLTextAreaElement).value; }}
@@ -72,7 +72,7 @@ export class GableNewRFC extends LitElement {
             <textarea
               required
               rows="4"
-              class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white focus:border-[#00FFA3] outline-none"
+              class="w-full bg-deep-space border border-white/20 rounded p-3 text-white focus:border-gable-green outline-none"
               placeholder="Briefly describe the approach..."
               .value=${this._proposedSolution}
               @input=${(e: Event) => { this._proposedSolution = (e.target as HTMLTextAreaElement).value; }}
@@ -90,7 +90,7 @@ export class GableNewRFC extends LitElement {
             <button
               type="submit"
               ?disabled=${this._loading}
-              class="px-6 py-3 bg-[#00FFA3] text-black font-bold rounded hover:shadow-[0_0_15px_rgba(0,255,163,0.3)] disabled:opacity-50"
+              class="px-6 py-3 bg-gable-green text-black font-bold rounded hover:shadow-glow disabled:opacity-50"
             >
               ${this._loading ? 'Generating...' : 'Generate Draft'}
             </button>

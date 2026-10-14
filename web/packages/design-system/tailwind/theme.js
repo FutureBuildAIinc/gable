@@ -7,9 +7,25 @@
  * spreads this into its own tailwind.config.js so the tokens have exactly one
  * home; the app's config keeps only what is app-specific (content globs).
  *
- * The raw colour values behind the aliases live in src/tokens.css:
- * Industrial Dark, Gable Green primary, JetBrains Mono for data.
+ * The raw colour values behind the aliases live in src/tokens.css as RGB
+ * channel variables (--gb-*): Industrial Dark on :root, Gable light on
+ * :root[data-theme="light"]. Every colour here reads them, so a utility such
+ * as text-white, bg-white/5 or border-zinc-800 follows the mode.
  */
+
+const STEPS = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
+const PALETTES = [
+    'zinc', 'slate', 'gray',
+    'emerald', 'green', 'red', 'rose', 'amber', 'yellow', 'orange', 'blue',
+    'sky', 'teal', 'indigo', 'violet', 'purple', 'pink', 'cyan', 'lime',
+];
+
+/** rgb(var(--gb-<name>) / <alpha-value>): one colour that follows the mode. */
+const channel = (name) => `rgb(var(--gb-${name}) / <alpha-value>)`;
+
+/** A full 50 to 950 palette read from the variables. */
+const palette = (name) =>
+    Object.fromEntries(STEPS.map((step) => [step, channel(`${name}-${step}`)]));
 
 /** @type {import('tailwindcss').Config} */
 export const gableTheme = {
@@ -64,13 +80,28 @@ export const gableTheme = {
             },
 
             // Specific Brand Aliases
-            'gable-green': '#00FFA3',
-            'deep-space': '#0A0B10', // Surface 0
-            'slate-steel': '#161821', // Surface 1
-            'surface-2': '#1E2029',   // Surface 2 (Cards)
-            'surface-3': '#252836',   // Surface 3 (Modals)
-            'safety-red': '#F43F5E',
-            'blueprint-blue': '#38BDF8'
+            'gable-green': channel('gable-green'),
+            'gable-green-hover': channel('gable-green-hover'),
+            'gable-green-tint': channel('gable-green-tint'),
+            'deep-space': channel('deep-space'), // Surface 0 (the ground)
+            'slate-steel': channel('slate-steel'), // Surface 1
+            'surface-2': channel('surface-2'),   // Surface 2 (Cards)
+            'surface-3': channel('surface-3'),   // Surface 3 (Modals)
+            'safety-red': channel('safety-red'),
+            'blueprint-blue': channel('blueprint-blue'),
+            // The second voice (tags, secondary chips)
+            sage: channel('sage'),
+            'sage-fill': channel('sage-fill'),
+            'sage-tint': channel('sage-tint'),
+            // A picture plate: white as today, the modal value in light
+            plate: channel('plate'),
+            // A modal veil: black as today, the ink value in light
+            backdrop: channel('backdrop'),
+
+            // The neutral and status palettes follow the mode
+            white: channel('white'),
+            black: channel('black'),
+            ...Object.fromEntries(PALETTES.map((name) => [name, palette(name)])),
         },
         borderRadius: {
             lg: 'var(--radius)',
@@ -80,11 +111,12 @@ export const gableTheme = {
             '2xl': '2rem',  // MD3 Extra Large (32dp)
         },
         boxShadow: {
-            'elevation-1': '0px 1px 2px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15)',
-            'elevation-2': '0px 1px 2px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15)',
-            'elevation-3': '0px 1px 3px rgba(0, 0, 0, 0.3), 0px 4px 8px 3px rgba(0, 0, 0, 0.15)',
-            'glow': '0 0 15px rgba(0, 255, 163, 0.3)',
-            'glow-strong': '0 0 25px rgba(0, 255, 163, 0.5)',
+            'elevation-1': 'var(--gb-elevation-1)',
+            'elevation-2': 'var(--gb-elevation-2)',
+            'elevation-3': 'var(--gb-elevation-3)',
+            'glow': 'var(--gb-glow)',
+            'glow-soft': 'var(--gb-glow-soft)',
+            'glow-strong': 'var(--gb-glow-strong)',
         },
         animation: {
             'fade-in': 'fadeIn 0.3s cubic-bezier(0.2, 0.0, 0, 1.0)', // Emphasized easing

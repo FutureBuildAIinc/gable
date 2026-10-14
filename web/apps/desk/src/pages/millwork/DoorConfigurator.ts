@@ -57,12 +57,12 @@ export class DoorConfigurator extends LitElement {
 
     if (this._error) {
       return html`
-        <div class="flex h-full items-center justify-center bg-[#0A0B10] text-[#E0E0E0]">
+        <div class="flex h-full items-center justify-center bg-deep-space text-zinc-200">
           <div class="text-center space-y-4">
             <p class="text-red-400">${this._error}</p>
             <button
               @click=${() => this._fetchOptions()}
-              class="px-4 py-2 rounded-lg bg-[#00FFA3]/10 text-[#00FFA3] border border-[#00FFA3]/20 hover:bg-[#00FFA3]/20 transition-colors text-sm font-medium"
+              class="px-4 py-2 rounded-lg bg-gable-green/10 text-gable-green border border-gable-green/20 hover:bg-gable-green/20 transition-colors text-sm font-medium"
             >
               Retry
             </button>
@@ -78,10 +78,10 @@ export class DoorConfigurator extends LitElement {
     const cents = (n: number): string => (n / 100).toFixed(2);
 
     return html`
-      <div class="flex h-full bg-[#0A0B10] text-[#E0E0E0]">
+      <div class="flex h-full bg-deep-space text-zinc-200">
         <!-- Configuration Panel -->
         <div class="w-1/3 border-r border-white/10 p-6 overflow-y-auto">
-          <h2 class="text-2xl font-bold mb-6 text-[#00FFA3]">Configure Door</h2>
+          <h2 class="text-2xl font-bold mb-6 text-gable-green">Configure Door</h2>
 
           <div class="space-y-8">
             <!-- Door Type -->
@@ -92,7 +92,7 @@ export class DoorConfigurator extends LitElement {
                   <button
                     @click=${() => { this._config = { ...this._config, doorType: opt }; }}
                     class="p-4 border rounded-lg text-left transition-all ${this._config.doorType?.id === opt.id
-                      ? 'border-[#00FFA3] bg-[#00FFA3]/10 text-white'
+                      ? 'border-gable-green bg-gable-green/10 text-white'
                       : 'border-white/10 hover:border-white/30 text-gray-300'
                     }"
                   >
@@ -111,7 +111,7 @@ export class DoorConfigurator extends LitElement {
                   <button
                     @click=${() => { this._config = { ...this._config, material: opt }; }}
                     class="p-4 border rounded-lg text-left transition-all ${this._config.material?.id === opt.id
-                      ? 'border-[#00FFA3] bg-[#00FFA3]/10 text-white'
+                      ? 'border-gable-green bg-gable-green/10 text-white'
                       : 'border-white/10 hover:border-white/30 text-gray-300'
                     }"
                   >
@@ -132,7 +132,7 @@ export class DoorConfigurator extends LitElement {
                     type="number"
                     .value=${String(this._config.width)}
                     @input=${(e: Event) => { this._config = { ...this._config, width: parseInt((e.target as HTMLInputElement).value) || 0 }; }}
-                    class="w-full bg-[#161821] border border-white/20 rounded p-2 focus:border-[#00FFA3] outline-none"
+                    class="w-full bg-slate-steel border border-white/20 rounded p-2 focus:border-gable-green outline-none"
                   />
                 </div>
                 <div>
@@ -141,7 +141,7 @@ export class DoorConfigurator extends LitElement {
                     type="number"
                     .value=${String(this._config.height)}
                     @input=${(e: Event) => { this._config = { ...this._config, height: parseInt((e.target as HTMLInputElement).value) || 0 }; }}
-                    class="w-full bg-[#161821] border border-white/20 rounded p-2 focus:border-[#00FFA3] outline-none"
+                    class="w-full bg-slate-steel border border-white/20 rounded p-2 focus:border-gable-green outline-none"
                   />
                 </div>
               </div>
@@ -154,7 +154,7 @@ export class DoorConfigurator extends LitElement {
                 <button
                   @click=${() => { this._config = { ...this._config, glass: null }; }}
                   class="p-3 border rounded text-left ${this._config.glass === null
-                    ? 'border-[#00FFA3] bg-[#00FFA3]/10'
+                    ? 'border-gable-green bg-gable-green/10'
                     : 'border-white/10'
                   }"
                 >
@@ -164,7 +164,7 @@ export class DoorConfigurator extends LitElement {
                   <button
                     @click=${() => { this._config = { ...this._config, glass: opt }; }}
                     class="p-3 border rounded text-left flex justify-between ${this._config.glass?.id === opt.id
-                      ? 'border-[#00FFA3] bg-[#00FFA3]/10 text-white'
+                      ? 'border-gable-green bg-gable-green/10 text-white'
                       : 'border-white/10 hover:border-white/30 text-gray-300'
                     }"
                   >
@@ -178,11 +178,11 @@ export class DoorConfigurator extends LitElement {
         </div>
 
         <!-- Visualizer / Summary -->
-        <div class="flex-1 p-12 flex flex-col items-center justify-center bg-gradient-to-br from-[#0A0B10] to-[#161821]">
+        <div class="flex-1 p-12 flex flex-col items-center justify-center bg-gradient-to-br from-deep-space to-slate-steel">
 
           <!-- Placeholder Visualizer -->
           <div
-            class="border-4 bg-[#0A0B10] relative shadow-2xl mb-8 transition-all duration-500"
+            class="border-4 bg-deep-space relative shadow-2xl mb-8 transition-all duration-500"
             style="width: ${this._config.width * 2}px; height: ${this._config.height * 2}px; border-color: ${this._config.material?.name === 'Mahogany' ? '#6D2E15' : '#38BDF8'}"
           >
             <div class="absolute inset-0 flex items-center justify-center text-white/20 font-mono text-4xl">
@@ -194,7 +194,7 @@ export class DoorConfigurator extends LitElement {
           </div>
 
           <!-- Price Tag -->
-          <div class="bg-[#161821] border border-white/10 p-6 rounded-xl w-96 shadow-xl">
+          <div class="bg-slate-steel border border-white/10 p-6 rounded-xl w-96 shadow-xl">
             <h3 class="text-gray-400 uppercase text-xs tracking-wider mb-4">Estimate Summary</h3>
 
             <div class="space-y-2 mb-4 text-sm">
@@ -203,13 +203,13 @@ export class DoorConfigurator extends LitElement {
                 <span>$${cents(basePriceCents)}</span>
               </div>
               ${this._config.doorType ? html`
-                <div class="flex justify-between text-[#00FFA3]">
+                <div class="flex justify-between text-gable-green">
                   <span>${this._config.doorType.name}</span>
                   <span>+$${cents(this._config.doorType.price_adjustment_cents)}</span>
                 </div>
               ` : nothing}
               ${this._config.material ? html`
-                <div class="flex justify-between text-[#00FFA3]">
+                <div class="flex justify-between text-gable-green">
                   <span>${this._config.material.name}</span>
                   <span>+$${cents(this._config.material.price_adjustment_cents)}</span>
                 </div>

@@ -133,7 +133,7 @@ export class PortalDeliveries extends LitElement {
         const expanded = this.expandedId === del.id;
 
         return html`
-            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                 <!-- Header row -->
                 <button @click=${() => { this.expandedId = expanded ? null : del.id; }} class="w-full text-left p-4 hover:bg-white/5 transition-colors">
                     <div class="flex items-center justify-between">
@@ -314,7 +314,7 @@ export class PortalDeliveries extends LitElement {
 
                 ${this.deliveries.length === 0
                     ? html`
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-12 text-center">
                                 ${icon(Truck, 48, 'text-zinc-600 mx-auto mb-4')}
                                 <p class="text-zinc-400">No deliveries yet.</p>
@@ -323,7 +323,7 @@ export class PortalDeliveries extends LitElement {
                     `
                     : filtered.length === 0
                         ? html`
-                            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                                 <div class="p-8 text-center">
                                     <p class="text-zinc-500 text-sm">No deliveries match this filter.</p>
                                 </div>
@@ -339,7 +339,7 @@ export class PortalDeliveries extends LitElement {
                 <!-- Lightbox -->
                 ${this.lightboxUrl ? html`
                     <div
-                        class="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-8"
+                        class="fixed inset-0 z-[100] bg-backdrop/80 backdrop-blur-md flex items-center justify-center p-8"
                         @click=${() => { this.lightboxUrl = null; }}
                     >
                         <div class="relative max-w-3xl w-full">

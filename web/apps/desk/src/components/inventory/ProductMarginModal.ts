@@ -94,8 +94,8 @@ export class GableProductMarginModal extends LitElement {
     if (!this.isOpen || !this.product) return nothing;
 
     return html`
-      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pricing-controls-modal-title">
-        <div class="bg-[#0A0B10] border border-white/10 rounded-xl shadow-2xl w-full max-w-md overflow-hidden relative">
+      <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-backdrop/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="pricing-controls-modal-title">
+        <div class="bg-deep-space border border-white/10 rounded-xl shadow-2xl w-full max-w-md overflow-hidden relative">
           <div class="flex items-center justify-between p-6 border-b border-white/10">
             <div>
               <h2 id="pricing-controls-modal-title" class="text-xl font-bold text-white">Pricing Controls</h2>

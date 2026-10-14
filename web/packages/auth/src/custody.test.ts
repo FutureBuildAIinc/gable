@@ -56,6 +56,20 @@ afterEach(() => {
   authConfig.devMode = false
 })
 
+describe('custody — subject', () => {
+  it('is null signed out, the sub claim for a token, dev:<name> for a dev session', () => {
+    const c = new AuthCustody()
+    expect(c.subject).toBeNull()
+    c.signInWithToken(TOKEN)
+    expect(c.subject).toBe('user-1')
+    authConfig.devMode = true
+    c.signInDev('Local Developer')
+    expect(c.subject).toBe('dev:Local Developer')
+    c.signOut()
+    expect(c.subject).toBeNull()
+  })
+})
+
 describe('custody — in-memory rule', () => {
   it('holds nothing before any sign-in', () => {
     const c = new AuthCustody(memoryStorage())

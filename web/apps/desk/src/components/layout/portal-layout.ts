@@ -75,7 +75,7 @@ export class GablePortalLayout extends LitElement {
     return html`
       <div class="min-h-screen text-foreground flex font-sans selection:bg-gable-green/30" style="--portal-primary: ${primary}; background-color: #0C0E14;">
         <!-- Mobile overlay -->
-        ${this._sidebarOpen ? html`<div class="fixed inset-0 z-40 bg-black/50 md:hidden" @click=${() => { this._sidebarOpen = false; }}></div>` : nothing}
+        ${this._sidebarOpen ? html`<div class="fixed inset-0 z-40 bg-backdrop/50 md:hidden" @click=${() => { this._sidebarOpen = false; }}></div>` : nothing}
 
         <!-- Sidebar -->
         <aside class="${cn(

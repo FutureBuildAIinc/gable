@@ -156,7 +156,7 @@ export class YardInventoryLookup extends LitElement {
                     ${this.products.map(p => html`
                         <div>
                             <div
-                                class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer ${this.expanded === p.id ? 'border-amber-400/30' : 'border-white/5'}"
+                                class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer ${this.expanded === p.id ? 'border-amber-400/30' : 'border-white/5'}"
                                 @click=${() => this._expandProduct(p.id)}
                             >
                                 <div class="p-4">

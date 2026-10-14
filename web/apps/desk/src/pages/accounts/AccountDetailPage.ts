@@ -360,7 +360,7 @@ export class GableAccountDetail extends LitElement {
         if (!this.applying) return nothing;
         const invoice = this.openInvoices.find(i => i.id === this.applyInvoiceId);
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                     <h2 id="apply-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Apply unapplied cash</h2>
                     <p class="text-zinc-400 text-sm mb-6">${this.applying.number} holds ${formatCents(this.applying.unapplied_cents)} unapplied</p>
@@ -399,7 +399,7 @@ export class GableAccountDetail extends LitElement {
     private renderVoidDialog() {
         if (!this.voiding) return nothing;
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                     <h2 id="void-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Void payment</h2>
                     <p class="text-zinc-400 text-sm mb-6">Voiding ${this.voiding.number} reverses every application of it and reopens its invoices${this.voiding.method === 'card' ? '; a card payment is refunded through the gateway instead' : ''}.</p>
