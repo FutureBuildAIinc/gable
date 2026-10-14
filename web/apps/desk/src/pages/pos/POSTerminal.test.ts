@@ -485,10 +485,15 @@ describe('the counter opens on its own yard\'s register', () => {
     svc.currentTill.mockResolvedValue(null);
     svc.startSale.mockResolvedValue(sale());
   });
+  // The server's answer: the request carries the yard, so the list is that
+  // yard's registers (every register with no yard selected).
+  const serve = (all: CounterRegister[]) =>
+    svc.listRegisters.mockImplementation(async () =>
+      all.filter((r) => branchContext.currentId === null || r.branch_id === branchContext.currentId));
 
   it('opens a cashier at Lake Country on that yard\'s register and shows its code', async () => {
     branchContext.setCurrent('b-lk');
-    svc.listRegisters.mockResolvedValue([REG_01, lk, wk]);
+    serve([REG_01, lk, wk]);
     const el = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(el);
     await settle(el);
@@ -500,7 +505,7 @@ describe('the counter opens on its own yard\'s register', () => {
 
   it('moves to the new yard\'s register when the yard changes', async () => {
     branchContext.setCurrent('b-main');
-    svc.listRegisters.mockResolvedValue([REG_01, lk, wk]);
+    serve([REG_01, lk, wk]);
     const el = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(el);
     await settle(el);
@@ -515,7 +520,7 @@ describe('the counter opens on its own yard\'s register', () => {
 
   it('says so plainly and offers no till or sale action when the yard has no register', async () => {
     branchContext.setCurrent('b-none');
-    svc.listRegisters.mockResolvedValue([REG_01, lk]);
+    serve([REG_01, lk]);
     const el = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(el);
     await settle(el);
@@ -530,7 +535,7 @@ describe('the counter opens on its own yard\'s register', () => {
 
   it('offers a picker when the yard has more than one register and remembers the choice per yard', async () => {
     branchContext.setCurrent('b-wk');
-    svc.listRegisters.mockResolvedValue([REG_01, wk, wk2]);
+    serve([REG_01, wk, wk2]);
     const el = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(el);
     await settle(el);

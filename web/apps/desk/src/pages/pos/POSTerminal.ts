@@ -105,9 +105,11 @@ export class POSTerminal extends LitElement {
   }
 
   /**
-   * Lists the registers and takes the current yard's: the one this yard last
-   * used, else the first by name. With no yard selected (all yards) every
-   * register is in reach. Then the till and a fresh sale follow.
+   * Lists the registers and takes the current yard's. The list is the
+   * server's: the request carries the yard (X-Branch-Id), so the answer is that
+   * yard's registers, the user's grants with no yard, or every register for an
+   * administrator with none. The counter takes the one this yard last used,
+   * else the first by name. Then the till and a fresh sale follow.
    */
   private async _loadRegisters() {
     const seq = ++this._registerSeq;
@@ -119,10 +121,7 @@ export class POSTerminal extends LitElement {
       this._error = err instanceof Error ? err.message : 'Failed to list the registers';
     }
     if (seq !== this._registerSeq) return;
-    const yard = branchContext.currentId;
-    const here = all
-      .filter((r) => yard === null || r.branch_id === yard)
-      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const here = [...all].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     this._registers = here;
     this._registersLoaded = true;
     const remembered = localStorage.getItem(this._storageKey());
@@ -866,7 +865,7 @@ export class POSTerminal extends LitElement {
             <select id="pos-register-picker" data-testid="pos-register-picker"
               @change=${(e: Event) => this._chooseRegister((e.target as HTMLSelectElement).value)}
               class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
-              ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.name}</option>`)}
+              ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.branch_code} ${r.name}</option>`)}
             </select>` : nothing}
           ${this._till ? html`
             <span title="Drawer open" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">
