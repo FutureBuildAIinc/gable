@@ -109,9 +109,9 @@ export class GableAppShell extends LitElement {
         : 'local development';
     const initials = name === '' ? '??' : initialsFor(name);
     return html`
-      <div class="relative" data-user-menu>
+      <div class="relative" data-user-menu @focusout=${this._handleUserMenuFocusout}>
         <button
-          @click=${() => { this._userMenuOpen = !this._userMenuOpen; }}
+          @click=${() => this._toggleUserMenu()}
           @keydown=${this._handleUserChipKeydown}
           aria-haspopup="menu"
           aria-expanded=${this._userMenuOpen ? 'true' : 'false'}
@@ -156,14 +156,54 @@ export class GableAppShell extends LitElement {
     `;
   }
 
-  /** ArrowDown on the chip opens the menu and moves to its first item. */
-  private _handleUserChipKeydown(e: KeyboardEvent) {
-    if (e.key !== 'ArrowDown') return;
-    e.preventDefault();
+  /** Open the menu and move the focus to its first (or last) item. */
+  private _openUserMenu(focus: 'first' | 'last') {
     this._userMenuOpen = true;
     void this.updateComplete.then(() => {
-      this.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+      const items = Array.from(this.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+      if (items.length === 0) return;
+      (focus === 'last' ? items[items.length - 1] : items[0]).focus();
     });
+  }
+
+  /** Click, Enter or Space on the chip (all fire click): toggle; an open
+   *  moves the focus into the menu, the ARIA menu button pattern. */
+  private _toggleUserMenu() {
+    if (this._userMenuOpen) {
+      this._closeUserMenu(false);
+    } else {
+      this._openUserMenu('first');
+    }
+  }
+
+  /** On the chip: ArrowDown opens on the first item, ArrowUp on the last,
+   *  Escape closes an open menu (the focus is already on the chip). */
+  private _handleUserChipKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      if (!this._userMenuOpen) return;
+      e.preventDefault();
+      this._closeUserMenu(false);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this._openUserMenu('first');
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this._openUserMenu('last');
+    }
+  }
+
+  /** The menu closes when the focus leaves the chip and menu for good
+   *  (a Tab past the menu, a click elsewhere that moves the focus). */
+  private _handleUserMenuFocusout(e: FocusEvent) {
+    if (!this._userMenuOpen) return;
+    const next = e.relatedTarget as Node | null;
+    const wrap = this.querySelector('[data-user-menu]');
+    if (next && wrap?.contains(next)) return;
+    this._userMenuOpen = false;
   }
 
   /** In the menu: the arrows move between items, Escape closes and
