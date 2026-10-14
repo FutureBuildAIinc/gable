@@ -8,6 +8,7 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
 import { PIMService } from '../../services/PIMService.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { apiErrorMessage } from '../../services/apiError.ts';
 import { formatPrice4 } from '../../lib/utils.ts';
 import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box } from 'lucide';
@@ -50,9 +51,22 @@ export class GableProductDetail extends LitElement {
     @state() private isMarginModalOpen = false;
     @state() private activeTab: TabId = 'overview';
 
+    private _unsubBranch: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
         this.loadProduct();
+        // The detail's stock figures are the current yard's; a yard change
+        // refreshes them (quietly, so the open tab and any form in it stay).
+        this._unsubBranch = onBranchChanged(() => this.refreshStock());
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     updated(changed: Map<string, unknown>) {
@@ -72,6 +86,33 @@ export class GableProductDetail extends LitElement {
             ToastService.show(apiErrorMessage(err, 'Failed to load product'), 'error');
         } finally {
             this.loading = false;
+        }
+    }
+
+    /**
+     * Refreshes only the yard scoped stock figures. Content, media, collateral
+     * and the product's other fields keep their objects, so no tab or open form
+     * (the content and SEO editors, the margin modal) is reset by a yard change.
+     */
+    private async refreshStock() {
+        const current = this.detail;
+        if (!this.routeId || !current) return;
+        try {
+            const fresh = await PIMService.getProductDetail(this.routeId);
+            if (this.detail !== current && this.detail?.product.id !== fresh.product.id) return;
+            const latest = this.detail ?? current;
+            this.detail = {
+                ...latest,
+                product: {
+                    ...latest.product,
+                    on_hand: fresh.product.on_hand,
+                    allocated: fresh.product.allocated,
+                    available: fresh.product.available,
+                },
+            };
+        } catch (err) {
+            console.error('Failed to refresh the stock figures:', err);
+            ToastService.show(apiErrorMessage(err, 'Failed to load the stock for this yard'), 'error');
         }
     }
 
