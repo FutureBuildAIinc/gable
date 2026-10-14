@@ -41,11 +41,7 @@ func TestWire_AStoredTestResultReadsUntestedOnceTheSettingsMoved(t *testing.T) {
 // A save whose provider cannot be reached keeps the key, answers 200, and says
 // in words that the key could not be tested: never the raw transport error.
 func TestWire_ASaveThatCannotReachTheProviderAnswersInWords(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	url := srv.URL
-	srv.Close()
-	client := ai.NewClient("").WithProvider(ai.ProviderAnthropic).
-		WithAnthropicKey(fakeAnthropicKey).WithAnthropicBaseURL(url)
+	client := unreachableClient(t)
 	f := newFixtureWith(t, func(s *techadmin.Service) *techadmin.Service {
 		return s.WithVault(testVault(t)).WithAITester(client)
 	})
@@ -67,4 +63,15 @@ func TestWire_ASaveThatCannotReachTheProviderAnswersInWords(t *testing.T) {
 	if strings.Contains(string(r.raw), "dial tcp") {
 		t.Errorf("the answer holds the raw transport error: %s", r.raw)
 	}
+}
+
+// unreachableClient is an Anthropic client whose provider address refuses
+// every connection.
+func unreachableClient(t *testing.T) *ai.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	url := srv.URL
+	srv.Close()
+	return ai.NewClient("").WithProvider(ai.ProviderAnthropic).
+		WithAnthropicKey(fakeAnthropicKey).WithAnthropicBaseURL(url)
 }
