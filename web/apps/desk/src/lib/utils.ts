@@ -65,13 +65,9 @@ export function formatDay(day: string | null | undefined): string {
 // symbol. 123456.78 -> "$123,456.78", -73.88 -> "-$73.88", null -> "$0.00".
 export function formatDollars(amount: number | null | undefined): string {
     const n = typeof amount === 'number' && isFinite(amount) ? amount : 0;
-    const negative = n < 0;
-    const abs = Math.abs(n);
-    // toFixed avoids the float-arithmetic surprise ("0.1 + 0.2 = 0.30000000000000004"),
-    // and Intl handles the grouping. Truncate floats to cents: these are display-only.
-    const whole = Math.floor(abs);
-    const cents = Math.round((abs - whole) * 100);
-    const safeCents = cents === 100 ? 0 : cents; // 12.005 rounds to 100, not 0
-    const text = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(whole + safeCents / 100);
+    // Intl rounds the whole value to cents and carries into the dollars
+    // (9.996 -> "10.00"); a value that rounds to zero is never negative.
+    const text = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+    const negative = n < 0 && text !== '0.00';
     return `${negative ? '-' : ''}$${text}`;
 }

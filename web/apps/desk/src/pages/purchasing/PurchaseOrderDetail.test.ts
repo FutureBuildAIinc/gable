@@ -144,6 +144,11 @@ describe('purchase order detail receive form', () => {
       loc('loc-other-1', OTHER_BRANCH_ID, 'bin', 'N-1'),
       // Top-level branch of a different yard: must NOT appear
       loc('loc-branch-other', OTHER_BRANCH_ID, 'branch', 'North Yard'),
+      // The PO's own yard row: on the wire a branch row's branch_id is its own
+      // id, so only the type rule keeps it out
+      loc(PO_BRANCH_ID, PO_BRANCH_ID, 'branch', 'Main Yard'),
+      // A location tied to no yard: must NOT appear
+      loc('loc-no-yard', null, 'bin', 'X-1'),
     ]
     const locationsPage = { items: locations, next_cursor: null, limit: 200 }
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -172,5 +177,22 @@ describe('purchase order detail receive form', () => {
     expect(optionValues).toContain('loc-po-2')
     expect(optionValues).not.toContain('loc-other-1')
     expect(optionValues).not.toContain('loc-branch-other')
+    expect(optionValues).not.toContain(PO_BRANCH_ID)
+    expect(optionValues).not.toContain('loc-no-yard')
+  })
+
+  it('shows a line total whose fraction rounds up as the next dollar', async () => {
+    const line = { id: 'l-1', po_id: PO_ID, product_id: PRODUCT_ID, description: '2x4x8 SPF Premium', quantity: 1.0009, qty_received: 0, cost: 9.99 }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
+      if (url.endsWith(`/purchase-orders/${PO_ID}`)) return jsonResponse(po({ lines: [line] }))
+      if (url.includes('/locations')) return jsonResponse([])
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
+    expect(textOf(el)).toContain('$10.00')
+    expect(textOf(el)).not.toContain('$9.00')
   })
 })

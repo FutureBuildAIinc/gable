@@ -28,6 +28,16 @@ describe('formatDollars', () => {
     expect(formatDollars(-73.88)).toBe('-$73.88')
   })
 
+  it('carries a fraction that rounds up into the next dollar', () => {
+    expect(formatDollars(9.996)).toBe('$10.00')
+    expect(formatDollars(12.9999)).toBe('$13.00')
+    expect(formatDollars(1.0009 * 9.99)).toBe('$10.00')
+  })
+
+  it('never signs an amount that rounds to zero', () => {
+    expect(formatDollars(-0.001)).toBe('$0.00')
+  })
+
   it('treats null and undefined as zero', () => {
     expect(formatDollars(null)).toBe('$0.00')
     expect(formatDollars(undefined)).toBe('$0.00')

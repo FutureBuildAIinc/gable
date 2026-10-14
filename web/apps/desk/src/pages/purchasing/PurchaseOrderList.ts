@@ -219,11 +219,10 @@ export class PurchaseOrderList extends LitElement {
                             <tbody class="divide-y divide-white/5">
                                 ${this.pos.map((po) => {
                                     // The yard is the branch the wire stamped on the PO; resolve
-                                    // its display name from the BranchContext, falling back to
-                                    // the UUID so the column never blanks out before the user's
-                                    // branch grant list has arrived.
+                                    // its display name from the BranchContext. A branch outside
+                                    // the caller's list reads "Not set", never a raw id.
                                     const yardName = po.branch_id
-                                        ? branchContext.branches.find((b) => b.id === po.branch_id)?.name ?? po.branch_id
+                                        ? branchContext.branches.find((b) => b.id === po.branch_id)?.name ?? ''
                                         : '';
                                     return html`
                                     <tr

@@ -105,13 +105,13 @@ export class PurchaseOrderDetail extends LitElement {
     }
 
     /** The PO's yard, resolved to its display name. "Main Yard" reads better
-     *  than a UUID; falls back to the UUID when the BranchContext has not
-     *  loaded the branch yet, so the page never blanks out the header. */
+     *  than a UUID; empty when the branch is not in the caller's branch list
+     *  (the header then omits the yard rather than print an id). */
     private get _yardName(): string {
         const po = this.po;
         if (!po?.branch_id) return '';
         const branch = branchContext.branches.find((b) => b.id === po.branch_id);
-        return branch?.name ?? po.branch_id;
+        return branch?.name ?? '';
     }
 
     /** Receive bins only: locations under the PO's own yard, no top-level
