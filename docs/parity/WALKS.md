@@ -255,7 +255,7 @@ need. Save a PDF with `curl -s <url> -o form.pdf` and read it with `pdftotext fo
     (`GET /api/v1/documents/print/purchase-order/<id>`): the quote arrives in the catcher; the purchase order shows
     the vendor, the placing yard's address and its lines.
 
-## Walk: Market check, our prices against a live store through FB Connect
+### Market check, our prices against a live store through FB Connect
 
 Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address and the pricing flow's webhook id.
 
