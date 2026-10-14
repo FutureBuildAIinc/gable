@@ -375,28 +375,35 @@ describe('the counter as the Panels layout', () => {
       expect(input.value).toBe('150.50');
     });
 
-    it('lets the whole counter scroll below the desktop width, so no panel is clipped by a capped column', async () => {
+    it('keeps one scroller, the page body, with the right column sticky and never a scroller of its own', async () => {
       const el = await mount(sale());
       const body = q(el, 'pos-body');
       expect(body.className).toMatch(/(^|\s)overflow-y-auto(\s|$)/);
-      expect(body.className).toContain('xl:overflow-visible');
       const column = q(el, 'pos-panels');
-      expect(column.className).not.toMatch(/max-h-/);
-      expect(column.className).not.toMatch(/(^|\s)overflow-y-auto(\s|$)/);
-      expect(column.className).toContain('xl:overflow-y-auto');
+      expect(column.className).toContain('min-[900px]:sticky');
+      for (const n of [column, ...column.querySelectorAll('*')]) {
+        expect(n.className.toString()).not.toMatch(/overflow-y-auto|overflow-auto|max-h-/);
+      }
       expect(body.contains(q(el, 'panel-customer'))).toBe(true);
       expect(body.contains(q(el, 'pos-pay'))).toBe(true);
     });
 
-    it('keeps the right column as one scrolling region holding Payment and the order summary with Pay', async () => {
+    it('holds Payment and the order summary with Pay in the one right column', async () => {
       const el = await mount(sale());
       const column = q(el, 'pos-panels');
-      const scrollers = [...column.querySelectorAll('*')].filter((n) => n.className.toString().includes('overflow-y-auto'));
-      expect(scrollers.length + (column.className.includes('xl:overflow-y-auto') ? 1 : 0)).toBe(1);
-      const region = column.className.includes('xl:overflow-y-auto') ? column : scrollers[0];
-      expect(region.contains(q(el, 'panel-payment'))).toBe(true);
-      expect(region.contains(q(el, 'pos-order-summary'))).toBe(true);
+      expect(column.contains(q(el, 'panel-payment'))).toBe(true);
+      expect(column.contains(q(el, 'pos-order-summary'))).toBe(true);
       expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
+    });
+
+    it('keeps two columns down to 900 pixels and stacks the order summary and Pay first below that', async () => {
+      const el = await mount(sale());
+      expect(q(el, 'pos-body').className).toContain('min-[900px]:flex-row');
+      expect(q(el, 'pos-items').className).toMatch(/min-\[900px\]:w-\[/);
+      expect(q(el, 'pos-panels').className).toContain('order-first');
+      expect(q(el, 'pos-panels').className).toContain('min-[900px]:order-none');
+      expect(q(el, 'pos-order-summary').className).toContain('order-first');
+      expect(q(el, 'pos-order-summary').className).toContain('min-[900px]:order-none');
     });
 
     it('lists every line of the order summary, never in a clipped scroller', async () => {
@@ -419,11 +426,10 @@ describe('the counter as the Panels layout', () => {
       expect(voidBtn.className).not.toContain('safety-red');
     });
 
-    it('shows no live remove control on a completed sale', async () => {
+    it('shows no remove control at all on a completed sale', async () => {
       const el = await mount(sale({ status: 'completed' }));
-      const removes = [...el.querySelectorAll('[data-testid="pos-lines"] button[aria-label^="Remove"]')] as HTMLButtonElement[];
-      expect(removes.length).toBe(2);
-      for (const b of removes) expect(b.disabled).toBe(true);
+      expect(el.querySelectorAll('[data-testid="pos-lines"] li').length).toBe(2);
+      expect(el.querySelectorAll('[data-testid="pos-lines"] button[aria-label^="Remove"]').length).toBe(0);
     });
 
     it('words the completion band with a colon', async () => {
@@ -485,10 +491,18 @@ describe('the Panels board', () => {
     el.remove();
   });
 
-  it('collapses a done panel to its value with Change, which reopens it', async () => {
+  it('keeps Customer open on an account customer, showing the standing, PO and job, and collapses on Next: Payment', async () => {
     svc.attachCustomer.mockResolvedValue(sale({ customer_id: 'cu1' }));
     const el = await mount(sale());
     await (el as unknown as Inner)._chooseCustomer(account);
+    await el.updateComplete;
+    expect(expanded(el, 'customer')).toBe('true');
+    expect(expanded(el, 'payment')).toBe('false');
+    expect(q(el, 'pos-customer-name').textContent).toBe('Test Builders');
+    expect(q(el, 'pos-customer-standing').textContent).toContain('Credit available');
+    expect(el.querySelector('#pos-po')).toBeTruthy();
+    expect((q(el, 'pos-next-payment') as HTMLButtonElement).disabled).toBe(false);
+    q(el, 'pos-next-payment').click();
     await el.updateComplete;
     const head = toggle(el, 'customer');
     expect(head.textContent).toContain('Test Builders');
@@ -499,6 +513,51 @@ describe('the Panels board', () => {
     await el.updateComplete;
     expect(expanded(el, 'customer')).toBe('true');
     expect(expanded(el, 'payment')).toBe('false');
+    expect((el as unknown as Inner)._customer?.id).toBe('cu1');
+    expect(q(el, 'pos-customer-name').textContent).toBe('Test Builders');
+    expect(svc.attachCustomer).toHaveBeenCalledTimes(1);
+    el.remove();
+  });
+
+  it('asks for items before Next: Payment when the sale has no line yet, and keeps the chips with the panel', async () => {
+    svc.attachCustomer.mockResolvedValue(sale({ customer_id: 'cu1', lines: [] }));
+    const el = await mount(sale({ lines: [] }));
+    await (el as unknown as Inner)._chooseCustomer(account);
+    await el.updateComplete;
+    expect(expanded(el, 'customer')).toBe('true');
+    expect((q(el, 'pos-next-payment') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'panel-customer-body').textContent).toContain('Add items to continue');
+    expect(q(el, 'progress-customer').getAttribute('data-state')).toBe('current');
+    el.remove();
+  });
+
+  it('labels the control that clears the customer Walk-in sale and returns to a walk in', async () => {
+    svc.attachCustomer
+      .mockResolvedValueOnce(sale({ customer_id: 'cu1', lines: [] }))
+      .mockResolvedValueOnce(sale({ customer_id: null, lines: [] }));
+    const el = await mount(sale({ lines: [] }));
+    await (el as unknown as Inner)._chooseCustomer(account);
+    await el.updateComplete;
+    const buttons = [...q(el, 'pos-customer').querySelectorAll('button')].map((b) => b.textContent?.trim());
+    expect(buttons).toContain('Walk-in sale');
+    expect(buttons).not.toContain('Change');
+    ([...q(el, 'pos-customer').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Walk-in sale') as HTMLElement).click();
+    await flush(el);
+    expect(svc.attachCustomer).toHaveBeenLastCalledWith('s1', { customer_id: null });
+    expect((el as unknown as Inner)._customer).toBeNull();
+    el.remove();
+  });
+
+  it('cannot reach Pay on account for a PO required customer until the PO is entered', async () => {
+    svc.attachCustomer.mockResolvedValue(sale({ customer_id: 'cu1' }));
+    const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const el = await mount(sale());
+    await (el as unknown as Inner)._chooseCustomer(needsPO);
+    await el.updateComplete;
+    q(el, 'pos-next-payment').click();
+    await el.updateComplete;
+    expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
+    expect(svc.completeSale).not.toHaveBeenCalled();
     el.remove();
   });
 
@@ -668,6 +727,41 @@ describe('the Panels board', () => {
       el.remove();
     });
 
+    it('resets the card once an add is accepted, and leaves it as typed when the add is refused', async () => {
+      svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const el = await mount(sale({ lines: [] }));
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { resetQuantity(): void };
+      const reset = vi.spyOn(cat, 'resetQuantity');
+      // refused: a decimal on a counted unit
+      fire(el, '1.5');
+      await flush(el);
+      expect(svc.addItem).not.toHaveBeenCalled();
+      expect(reset).not.toHaveBeenCalled();
+      // refused: the server turns the add away
+      svc.addItem.mockRejectedValueOnce(new Error('stale revision'));
+      fire(el, '2');
+      await flush(el);
+      expect(reset).not.toHaveBeenCalled();
+      // accepted
+      fire(el, '3');
+      await flush(el);
+      expect(svc.addItem).toHaveBeenLastCalledWith('s1', 'p-z', '3', 'EA');
+      expect(reset).toHaveBeenCalledTimes(1);
+      el.remove();
+    });
+
+    it('does not reset the card for an add made with no till', async () => {
+      const el = await mount(sale());
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { resetQuantity(): void };
+      const reset = vi.spyOn(cat, 'resetQuantity');
+      (el as unknown as Inner)._till = null;
+      await el.updateComplete;
+      fire(el, '1');
+      await flush(el);
+      expect(reset).not.toHaveBeenCalled();
+      el.remove();
+    });
+
     it('answers with no till and adds nothing', async () => {
       const el = await mount(sale());
       (el as unknown as Inner)._till = null;
@@ -695,6 +789,25 @@ describe('the Panels board', () => {
       expect(q(el, 'pos-lines').querySelectorAll('[data-testid="pos-line-thumb"]').length).toBe(2);
       el.remove();
     });
+  });
+
+  it('dims Clear sale with no lines as Pay is dimmed', async () => {
+    const el = await mount(sale({ lines: [] }));
+    const clear = q(el, 'pos-clear-sale') as HTMLButtonElement;
+    expect(clear.disabled).toBe(true);
+    expect(clear.className).toContain('opacity-40');
+    expect(clear.className).toContain('text-slate-400');
+    el.remove();
+  });
+
+  it('notes under the catalogue that the next product starts the next sale, only once a sale is complete', async () => {
+    const open = await mount(sale());
+    expect(q(open, 'pos-next-sale-note')).toBeNull();
+    const done = await mount(sale({ status: 'completed' }));
+    expect(q(done, 'pos-next-sale-note').textContent).toContain('Add a product to start the next sale');
+    expect((done.querySelector('gable-pos-catalog') as HTMLElement & { disabled: boolean }).disabled).toBe(false);
+    open.remove();
+    done.remove();
   });
 
   describe('the receipt choices', () => {
@@ -741,6 +854,21 @@ describe('the Panels board', () => {
       await flush(el);
       expect(el.querySelector('[role="alert"]')?.textContent).toContain('no email address');
       el.remove();
+    });
+
+    it('draws Void and Return smaller and quieter than the receipt choices, with the contact line beside Email', async () => {
+      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      const print = q(el, 'pos-receipt-print');
+      for (const b of [q(el, 'pos-void'), [...q(el, 'pos-complete').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Return') as HTMLElement]) {
+        expect(b.className).toContain('text-xs');
+        expect(b.className).not.toContain('text-sm');
+      }
+      expect(print.className).toContain('text-sm');
+      expect(q(el, 'pos-receipt-contact').textContent).toContain('contact on the account');
+      el.remove();
+      const walk = await mount(done({ invoice_id: 'inv-2', customer_id: null }));
+      expect(q(walk, 'pos-receipt-contact')).toBeNull();
+      walk.remove();
     });
 
     it('shows how it was paid on the order summary, with the change given', async () => {
@@ -1280,14 +1408,17 @@ describe('the counter before the till opens, and after a sale completes', () => 
       }
     });
 
-    it('marks New Sale the one primary, lights Summary and locks Change, purchase order and job', async () => {
+    it('makes the card\'s New sale the one primary, lights Summary and locks Change, purchase order and job', async () => {
       const el = await completeOne();
       const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
-      expect(newSale.className).toContain('bg-gable-green');
+      expect(newSale.className).not.toContain('bg-gable-green');
+      const cardNew = [...q(el, 'pos-complete').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New sale') as HTMLElement;
+      expect(cardNew.className).toContain('bg-gable-green');
       const closeTill = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Close Till') as HTMLElement;
       expect(closeTill.className).not.toContain('bg-gable-green');
       expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('current');
-      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Change') as HTMLButtonElement | undefined;
+      // the clear control only exists once a customer is named; a walk in's own button is the choice
+      const change = [...q(el, 'pos-customer').querySelectorAll('button:not([data-testid="pos-walk-in"])')].find((x) => x.textContent?.trim() === 'Walk-in sale') as HTMLButtonElement | undefined;
       if (change) expect(change.disabled).toBe(true);
       const po = el.querySelector('#pos-po') as HTMLInputElement | null;
       if (po) expect(po.disabled).toBe(true);
@@ -1353,7 +1484,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       el.remove();
     });
 
-    it('locks Change, purchase order and job on a completed account sale', async () => {
+    it('locks the walk-in control, purchase order and job on a completed account sale', async () => {
       const withJob = { ...account, jobs: [{ id: 'j1', name: 'Back patio' }] } as unknown as CounterCustomer;
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', customer_id: 'cu1' }));
       const el = await mount(sale({ customer_id: 'cu1' }));
@@ -1363,7 +1494,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
       await el.updateComplete;
-      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Change') as HTMLButtonElement;
+      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Walk-in sale') as HTMLButtonElement;
       expect(change.disabled).toBe(true);
       expect(change.title).toBe('Start a new sale to change the customer');
       expect((el.querySelector('#pos-po') as HTMLInputElement).disabled).toBe(true);

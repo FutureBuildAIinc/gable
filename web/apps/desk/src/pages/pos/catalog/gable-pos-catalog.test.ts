@@ -11,6 +11,14 @@ vi.mock('../../../services/POSService', async (orig) => {
   return { ...real, posService: svc };
 });
 
+// The real scanner starts a camera; a plain element stands in for it.
+vi.mock('../../../components/BarcodeScanner.ts', () => {
+  if (!customElements.get('gable-barcode-scanner')) {
+    customElements.define('gable-barcode-scanner', class extends HTMLElement {});
+  }
+  return {};
+});
+
 import './gable-pos-catalog';
 import type { GablePosCatalog } from './gable-pos-catalog';
 import { mount, update, q } from '../../../test/dom';
@@ -79,7 +87,7 @@ describe('gable-pos-catalog', () => {
     expect(svc.tiles).toHaveBeenLastCalledWith({ category: 'Pavers', q: undefined });
   });
 
-  it('asks for q after two characters, debounced, within the chip', async () => {
+  it('asks for q after two characters, debounced, across every category', async () => {
     await open();
     el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-chip"]')[1].click();
     await tick(el);
@@ -91,7 +99,7 @@ describe('gable-pos-catalog', () => {
     expect(svc.tiles).not.toHaveBeenCalled();
     await new Promise((r) => setTimeout(r, 400));
     expect(svc.tiles).toHaveBeenCalledTimes(1);
-    expect(svc.tiles).toHaveBeenCalledWith({ category: 'Lumber', q: 'lu' });
+    expect(svc.tiles).toHaveBeenCalledWith({ category: undefined, q: 'lu' });
   });
 
   it('adds the exact SKU on Enter with the typed quantity, then resets it to 1', async () => {
@@ -109,7 +117,37 @@ describe('gable-pos-catalog', () => {
       product_id: 'id-LUM-248-PREM', sku: 'LUM-248-PREM', description: 'Product LUM-248-PREM', uom: 'PCS',
       unit_price_cents: 550, in_stock: '514', image_url: '/img/LUM-248-PREM.svg',
     });
+    // the page has not accepted the add yet: what was typed stays
+    expect(qty(el).value).toBe('12');
+    el.resetQuantity();
+    await el.updateComplete;
     expect(qty(el).value).toBe('1');
+    expect(search(el).value).toBe('');
+  });
+
+  it('keeps the typed quantity after a tile add until the page resets it', async () => {
+    await open();
+    qty(el).value = '2.5';
+    qty(el).dispatchEvent(new Event('input', { bubbles: true }));
+    el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-tile-add"]')[0].click();
+    await el.updateComplete;
+    expect(added).toHaveLength(1);
+    expect(qty(el).value).toBe('2.5');
+  });
+
+  it('clears the old yard tiles at once on a yard change and blocks adds until the new read answers', async () => {
+    await open({ yardKey: 'main' });
+    let answer!: (v: CatalogTiles) => void;
+    svc.tiles.mockReturnValueOnce(new Promise((r) => { answer = r; }));
+    await update(el, { yardKey: 'north' });
+    expect(el.querySelectorAll('[data-testid="catalog-tile"]')).toHaveLength(0);
+    expect(el.textContent).toContain('Loading products');
+    el.querySelector<HTMLButtonElement>('[data-testid="catalog-tile-add"]')?.click();
+    expect(added).toHaveLength(0);
+    answer({ ...FIXTURE, items: [item('NORTH-1')] });
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.querySelectorAll('[data-testid="catalog-tile"]')).toHaveLength(1);
   });
 
   it('adds the first result when no SKU matches exactly', async () => {
@@ -195,5 +233,112 @@ describe('gable-pos-catalog', () => {
     await tick(el);
     expect(el.textContent).not.toContain('Products could not be loaded');
     expect(el.querySelectorAll('[data-testid="catalog-tile"]')).toHaveLength(3);
+  });
+
+  it('adds nothing for fewer than two characters and says so', async () => {
+    await open();
+    type(el, 'l');
+    enter(el);
+    await new Promise((r) => setTimeout(r, 20));
+    await el.updateComplete;
+    expect(added).toHaveLength(0);
+    expect(el.textContent).toContain('Type at least two characters');
+    q<HTMLButtonElement>(el, '[data-testid="catalog-add"]').click();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(added).toHaveLength(0);
+  });
+
+  it('searches every category while a search is typed and restores the chip when cleared', async () => {
+    await open();
+    el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-chip"]')[2].click();
+    await tick(el);
+    const pressed = () => [...el.querySelectorAll('[data-testid="catalog-chip"]')]
+      .map((c) => c.getAttribute('aria-pressed'));
+    expect(pressed()).toEqual(['false', 'false', 'true']);
+    svc.tiles.mockClear();
+    type(el, 'LUM-248');
+    await new Promise((r) => setTimeout(r, 400));
+    await el.updateComplete;
+    expect(svc.tiles).toHaveBeenLastCalledWith({ category: undefined, q: 'LUM-248' });
+    expect(pressed()).toEqual(['true', 'false', 'false']);
+    type(el, '');
+    await new Promise((r) => setTimeout(r, 400));
+    await el.updateComplete;
+    expect(svc.tiles).toHaveBeenLastCalledWith({ category: 'Pavers', q: undefined });
+    expect(pressed()).toEqual(['false', 'false', 'true']);
+  });
+
+  it('finds an exact SKU from another category on Enter with a chip selected', async () => {
+    await open();
+    el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-chip"]')[2].click();
+    await tick(el);
+    svc.tiles.mockImplementation(async (query: { category?: string; q?: string }) => ({
+      ...FIXTURE,
+      items: query.category ? [] : [FIXTURE.items[1]],
+    }));
+    type(el, 'LUM-248-PREM');
+    enter(el);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(added).toHaveLength(1);
+    expect(added[0].product.sku).toBe('LUM-248-PREM');
+  });
+
+  describe('scan', () => {
+    const scan = (code: string) => {
+      q<HTMLButtonElement>(el, '[data-testid="catalog-scan"]').click();
+      return el.updateComplete.then(() => {
+        const scanner = q<HTMLElement>(el, 'gable-barcode-scanner');
+        scanner.dispatchEvent(new CustomEvent('scan', { detail: code, bubbles: true, composed: true }));
+      });
+    };
+
+    it('adds the exact match of a scanned code with the typed quantity', async () => {
+      await open();
+      svc.tiles.mockResolvedValue({ ...FIXTURE, items: [FIXTURE.items[1]] });
+      qty(el).value = '3';
+      qty(el).dispatchEvent(new Event('input', { bubbles: true }));
+      await scan('LUM-248-PREM');
+      await new Promise((r) => setTimeout(r, 20));
+      await el.updateComplete;
+      expect(svc.tiles).toHaveBeenLastCalledWith({ category: undefined, q: 'LUM-248-PREM' });
+      expect(added).toHaveLength(1);
+      expect(added[0].product.sku).toBe('LUM-248-PREM');
+      expect(added[0].qty).toBe('3');
+      expect(el.querySelector('gable-barcode-scanner')).toBeNull();
+    });
+
+    it('says a scanned code was not found and adds nothing', async () => {
+      await open();
+      svc.tiles.mockResolvedValue({ ...FIXTURE, items: [FIXTURE.items[0]] });
+      await scan('9999999');
+      await new Promise((r) => setTimeout(r, 20));
+      await el.updateComplete;
+      expect(added).toHaveLength(0);
+      expect(el.textContent).toContain('Product not found for barcode: 9999999');
+    });
+
+    it('does not offer the scan while disabled', async () => {
+      await open({ disabled: true });
+      expect(q<HTMLButtonElement>(el, '[data-testid="catalog-scan"]').disabled).toBe(true);
+    });
+  });
+
+  it('draws the picture at 72 pixels on a light plate and keeps unselected chips free of green', async () => {
+    await open();
+    const plate = el.querySelector('[data-testid="catalog-picture"]')!;
+    expect(plate.className).toContain('h-[72px]');
+    expect(plate.className).toContain('bg-white');
+    const chip = el.querySelectorAll('[data-testid="catalog-chip"]')[2];
+    expect(chip.className).not.toMatch(/gable-green/);
+  });
+
+  it('lays the grid out by its own width and keeps the chips on one row', async () => {
+    await open();
+    const grid = q<HTMLElement>(el, '[data-testid="catalog-grid"]');
+    expect(grid.className).toContain('repeat(auto-fill,minmax(12.5rem,1fr))');
+    expect(grid.className).not.toMatch(/\b(lg|xl):grid-cols/);
+    const row = q<HTMLElement>(el, '[data-testid="catalog-chips"]');
+    expect(row.className).toContain('flex-nowrap');
+    expect(row.className).toContain('overflow-x-auto');
   });
 });
