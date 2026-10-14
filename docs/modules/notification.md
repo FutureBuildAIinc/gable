@@ -44,7 +44,10 @@ from a server, `logged by the log sender, not sent` from the log sender).
 Messages are MIME: a base64 text part, and for a document a base64 attachment
 named for it. A subject or recipient holding a line break, or a recipient that
 is not an address, is refused before anything is sent. A non ASCII subject is
-encoded. One send is bounded in time when the caller sets no deadline.
+encoded. One send is bounded in time when the caller sets no deadline. A document
+email is sent in the background and its delivery row is written once the
+outcome is known; a send that succeeded but could not be recorded leaves no
+row, only a log line.
 
 ## A local mail catcher
 
