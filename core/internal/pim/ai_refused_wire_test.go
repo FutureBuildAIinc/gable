@@ -53,3 +53,27 @@ func TestWire_PIMGenerateRoutesAnswerAProviderRefusalInWords(t *testing.T) {
 		})
 	}
 }
+
+// The image route answers 202 and draws afterwards, so a refusal of the saved
+// key cannot be its answer. The row settles "refused", a state of its own that
+// the page reads in words, never "failed" with a retry that can never work.
+func TestWire_PIMImageSettlesRefusedWhenTheProviderRefusesTheKey(t *testing.T) {
+	an := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`))
+	}))
+	defer an.Close()
+	repo := newChanRepo()
+	mux := http.NewServeMux()
+	NewHandler(newPIMTestService(repo, anthropicClient(an.URL))).RegisterRoutes(mux)
+
+	rec := postJSON(mux, "/api/v1/products/"+uuid.New().String()+"/pim/generate/image", `{}`)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202; body %s", rec.Code, rec.Body)
+	}
+	u := repo.wait(t)
+	if u.status != "refused" || u.url != "" {
+		t.Errorf("finalize = %+v, want refused with no url", u)
+	}
+}
