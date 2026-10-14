@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/stdlib"
 )
 
 // The seeder writes prices. A number in demoPricingRules that the pricing
@@ -418,5 +419,97 @@ func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 	}
 	if bName != "operator counter" {
 		t.Errorf("a re-seed renamed the branch only re-pointed register to %q, want the operator's name kept", bName)
+	}
+}
+
+// CORRECTNESS: the seed mirrors each customer's primary branch into
+// customer_branches, the row the product's own create writes beside it, and
+// a re-seed never moves a customer's stored primary branch (r5 P2-1 and P3-9,
+// r6 section 2). Without the row the customer wall hides the customer from
+// every header and grants caller; moving the branch would strand the row.
+// The seed owns only the rows it creates: a customer an operator moved by
+// hand is not moved back.
+//
+// DB-gated. It runs the seeder's own customer step twice per leg.
+func TestSeedCustomer_MirrorsThePrimaryBranchAndNeverMovesIt(t *testing.T) {
+	pool := testutil.RequireDB(t)
+	ctx := context.Background()
+	sqlDB := stdlib.OpenDBFromPool(pool.Pool)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	var priceLevel uuid.UUID
+	if err := pool.Pool.QueryRow(ctx, `SELECT id FROM price_levels LIMIT 1`).Scan(&priceLevel); err != nil {
+		t.Fatalf("a price level for the customer: %v", err)
+	}
+	branchA, branchB := uuid.New(), uuid.New()
+	for _, b := range []uuid.UUID{branchA, branchB} {
+		if _, err := pool.Pool.Exec(ctx,
+			`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'seed customer test branch')`,
+			b, "SEEDC-"+b.String()[:8]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	acct := "SEEDC-" + uuid.NewString()[:8]
+	c := demoCustomer{Name: "seed customer test", Acct: acct, Email: "seedc@example.com", Phone: "250-555-0100",
+		Addr: "1 Test Rd", Tier: "GOLD", Terms: "NET30", PriceLevel: "x", CreditLimit: 1000, PrimaryBranch: branchA}
+	t.Cleanup(func() {
+		_, _ = pool.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN (SELECT id FROM customers WHERE account_number = $1)`, acct)
+		_, _ = pool.Pool.Exec(ctx, `DELETE FROM customers WHERE account_number = $1`, acct)
+		_, _ = pool.Pool.Exec(ctx, `DELETE FROM locations WHERE id IN ($1, $2)`, branchA, branchB)
+	})
+
+	rows := func(id uuid.UUID) map[uuid.UUID]bool {
+		t.Helper()
+		out := map[uuid.UUID]bool{}
+		r, err := pool.Pool.Query(ctx, `SELECT branch_id FROM customer_branches WHERE customer_id = $1`, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
+		for r.Next() {
+			var b uuid.UUID
+			if err := r.Scan(&b); err != nil {
+				t.Fatal(err)
+			}
+			out[b] = true
+		}
+		return out
+	}
+	primary := func(id uuid.UUID) uuid.UUID {
+		t.Helper()
+		var b uuid.UUID
+		if err := pool.Pool.QueryRow(ctx, `SELECT primary_branch_id FROM customers WHERE id = $1`, id).Scan(&b); err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+
+	id, branch, err := seedCustomer(sqlDB, c, priceLevel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := seedCustomer(sqlDB, c, priceLevel); err != nil {
+		t.Fatal(err)
+	}
+	if branch != branchA {
+		t.Errorf("seedCustomer returned branch %s, want %s", branch, branchA)
+	}
+	if got := rows(id); len(got) != 1 || !got[branchA] {
+		t.Errorf("after two seeds the customer holds branch rows %v, want exactly its primary branch %s", got, branchA)
+	}
+
+	// A customer an operator moved by hand is not moved back, and the row
+	// follows the stored branch only by adding it, never by deleting.
+	if _, err := pool.Pool.Exec(ctx, `UPDATE customers SET primary_branch_id = $1 WHERE id = $2`, branchB, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := seedCustomer(sqlDB, c, priceLevel); err != nil {
+		t.Fatal(err)
+	}
+	if got := primary(id); got != branchB {
+		t.Errorf("a re-seed moved the customer's primary branch to %s, want it left at %s", got, branchB)
+	}
+	if got := rows(id); !got[branchB] {
+		t.Errorf("after the move the customer holds branch rows %v, want a row for its stored primary branch %s", got, branchB)
 	}
 }
