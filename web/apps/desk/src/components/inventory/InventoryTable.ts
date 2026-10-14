@@ -83,7 +83,6 @@ export class GableInventoryTable extends LitElement {
                         </td>
                         <td class="px-6 py-4">
                           <div class="text-zinc-300 font-medium">${p.description}</div>
-                          <div class="text-xs text-zinc-500 font-mono mt-0.5">ID: ${p.id.substring(0, 8)}</div>
                         </td>
                         <td class="px-6 py-4">
                           <div class="text-zinc-400 text-sm truncate max-w-[150px]">${p.vendor || '-'}</div>
@@ -96,9 +95,14 @@ export class GableInventoryTable extends LitElement {
                         <td class="px-6 py-4 text-right font-mono text-emerald-400">
                           ${formatPrice4(p.average_unit_cost_ten_thousandths)}
                         </td>
-                        <td class="px-6 py-4 text-right font-mono text-zinc-300">
-                          ${(p.target_margin || 0).toFixed(1)}% <br />
-                          <span class="text-xs text-zinc-500">${(p.commission_rate || 0).toFixed(1)}% Comm</span>
+                        <td class="px-6 py-4 text-right font-mono">
+                          ${(p.target_margin && p.target_margin > 0)
+                            ? html`<span class="text-zinc-300">${p.target_margin.toFixed(1)}%</span>`
+                            : html`<span class="text-zinc-500">Not set</span>`}
+                          <br />
+                          ${(p.commission_rate && p.commission_rate > 0)
+                            ? html`<span class="text-xs text-zinc-500">${p.commission_rate.toFixed(1)}% Comm</span>`
+                            : html`<span class="text-xs text-zinc-500">Not set</span>`}
                         </td>
                         <td class="px-6 py-4 text-right">
                           <span class="font-mono text-white group-hover:text-gable-green transition-colors">
