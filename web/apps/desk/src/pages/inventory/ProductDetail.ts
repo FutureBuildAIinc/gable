@@ -57,8 +57,8 @@ export class GableProductDetail extends LitElement {
         super.connectedCallback();
         this.loadProduct();
         // The detail's stock figures are the current yard's; a yard change
-        // loads it again (quietly, so the open tab stays as it is).
-        this._unsubBranch = onBranchChanged(() => this.loadProduct());
+        // refreshes them (quietly, so the open tab and any form in it stay).
+        this._unsubBranch = onBranchChanged(() => this.refreshStock());
     }
 
     disconnectedCallback() {
@@ -86,6 +86,33 @@ export class GableProductDetail extends LitElement {
             ToastService.show(apiErrorMessage(err, 'Failed to load product'), 'error');
         } finally {
             this.loading = false;
+        }
+    }
+
+    /**
+     * Refreshes only the yard scoped stock figures. Content, media, collateral
+     * and the product's other fields keep their objects, so no tab or open form
+     * (the content and SEO editors, the margin modal) is reset by a yard change.
+     */
+    private async refreshStock() {
+        const current = this.detail;
+        if (!this.routeId || !current) return;
+        try {
+            const fresh = await PIMService.getProductDetail(this.routeId);
+            if (this.detail !== current && this.detail?.product.id !== fresh.product.id) return;
+            const latest = this.detail ?? current;
+            this.detail = {
+                ...latest,
+                product: {
+                    ...latest.product,
+                    on_hand: fresh.product.on_hand,
+                    allocated: fresh.product.allocated,
+                    available: fresh.product.available,
+                },
+            };
+        } catch (err) {
+            console.error('Failed to refresh the stock figures:', err);
+            ToastService.show(apiErrorMessage(err, 'Failed to load the stock for this yard'), 'error');
         }
     }
 

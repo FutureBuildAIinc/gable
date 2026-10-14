@@ -24,10 +24,20 @@ export class GableProductMarginModal extends LitElement {
   @state() private _isSaving = false;
   @state() private _error = '';
 
+  /** The product and revision the form was last filled from. */
+  private _filledFrom = '';
+
   updated(changed: Map<string, unknown>) {
+    // Fill the form from a different product or a saved revision only: the page
+    // hands over a new object when it refreshes the yard's stock figures, and
+    // the margins being typed must survive that.
     if (changed.has('product') && this.product) {
-      this._targetMargin = this.product.target_margin || 0;
-      this._commissionRate = this.product.commission_rate || 0;
+      const key = `${this.product.id}:${this.product.revision}`;
+      if (key !== this._filledFrom) {
+        this._filledFrom = key;
+        this._targetMargin = this.product.target_margin || 0;
+        this._commissionRate = this.product.commission_rate || 0;
+      }
     }
   }
 

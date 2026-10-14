@@ -33,7 +33,7 @@ export class GableProductStockTab extends LitElement {
         // The levels are the current yard's; a yard change loads them again,
         // and an adjustment opened at the old yard is closed, not posted there.
         this._unsubBranch = onBranchChanged(() => {
-            this.adjustModal = null;
+            this._closeAdjustModal();
             this.loading = true;
             this._loadInventory();
         });

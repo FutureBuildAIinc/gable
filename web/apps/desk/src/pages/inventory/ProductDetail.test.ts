@@ -42,7 +42,7 @@ describe('the product page follows the yard', () => {
             available: onHand,
             revision: 1,
           },
-          content: null,
+          content: { short_description: 'saved text' },
           media: [],
           collateral: [],
         })
@@ -69,6 +69,24 @@ describe('the product page follows the yard', () => {
 
     expect(detailCalls()).toBe(before + 1)
     expect(text(el)).toContain('14')
+  })
+
+  it('keeps the open tab and its content on a yard change', async () => {
+    const el = await mountAsync<GableProductDetail>('gable-product-detail', { routeId: PRODUCT_ID })
+    const page = el as unknown as { activeTab: string; detail: { content: unknown } }
+    page.activeTab = 'content'
+    await update(el, {})
+    const tab = el.querySelector('gable-product-content-tab')
+    expect(tab).not.toBeNull()
+    const contentBefore = page.detail.content
+
+    onHand = '14.0000'
+    window.dispatchEvent(new CustomEvent('gable:branch-changed', { detail: { branchId: 'lk' } }))
+    await flush()
+    await update(el, {})
+
+    expect(el.querySelector('gable-product-content-tab')).toBe(tab)
+    expect(page.detail.content).toBe(contentBefore)
   })
 
   it('stops listening once it leaves the page', async () => {
