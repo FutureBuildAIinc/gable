@@ -259,7 +259,7 @@ func Run() {
 		middleware.RequireRole("admin", "owner", "sales", "warehouse", "finance", "cashier", "purchasing"),
 		middleware.RequireRole("admin", "owner"))
 
-	// Unified AI client — the chosen provider's key (DB-first via system_settings,
+	// Unified AI client: the chosen provider's key (DB-first via system_settings,
 	// env fallback for OpenRouter) powers all AI features: material-list/freight
 	// OCR, PIM content, and product image (photo) or illustration generation. Base URL and per-task model slugs are admin-overridable.
 	//
