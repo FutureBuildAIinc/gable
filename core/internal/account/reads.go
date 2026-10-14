@@ -63,8 +63,9 @@ func (s *Service) Now() time.Time { return s.now() }
 
 // GetSummary is GET /api/v1/accounts/{id}: the balance (the subledger), the
 // credit limit (null for no limit), the credit left, and the open credit memos
-// plus unapplied cash as a negative figure. These are the customer record's own
-// figures, which ADR 0007 section 5.8 makes dealer wide: the customer is read
+// plus unapplied cash as a negative figure. These are the customer's dealer wide
+// standing (ADR 0007 section 5.8; each payment and credit memo behind the
+// open credits and unapplied cash keeps its own wall): the customer is read
 // through ruling A's reach (a user and an unbound key reach every customer, a
 // key bound to a branch keeps its pin and reads a customer outside it as
 // missing). The subledger and the statement keep their wall (CustomerInWall).
