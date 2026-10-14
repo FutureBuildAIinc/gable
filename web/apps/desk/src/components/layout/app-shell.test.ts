@@ -435,4 +435,56 @@ describe('gable-app-shell: the person menu', () => {
     const item = q<HTMLButtonElement>(el, '[role="menuitem"]')
     expect(document.activeElement).toBe(item)
   })
+
+  it('opening the menu by click (or Enter or Space, which fire click) moves the focus to Sign out', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    chip.click()
+    await update(el, {})
+    await flush()
+
+    const item = q<HTMLButtonElement>(el, '[role="menuitem"]')
+    expect(document.activeElement).toBe(item)
+  })
+
+  it('Escape on the chip closes the menu and keeps the focus on the chip', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    chip.click()
+    await update(el, {})
+    await flush()
+
+    chip.focus()
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await update(el, {})
+
+    expect(el.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(chip)
+  })
+
+  it('the menu closes when the focus leaves it', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    chip.click()
+    await update(el, {})
+    await flush()
+
+    const item = q<HTMLButtonElement>(el, '[role="menuitem"]')
+    item.dispatchEvent(new FocusEvent('focusout', { relatedTarget: document.body, bubbles: true }))
+    await update(el, {})
+
+    expect(el.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('ArrowUp on the chip opens the menu on its last item', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    await update(el, {})
+    await flush()
+
+    const items = Array.from(el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+    expect(items.length).toBeGreaterThan(0)
+    expect(document.activeElement).toBe(items[items.length - 1])
+  })
 })
