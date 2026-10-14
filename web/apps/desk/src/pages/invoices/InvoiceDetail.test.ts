@@ -101,7 +101,7 @@ describe('gable-invoice-detail', () => {
       URL.createObjectURL = vi.fn(() => 'blob:invoice')
       URL.revokeObjectURL = vi.fn()
       const state = stub(invoice(), {
-        [`/api/v1/documents/print/invoice/${INVOICE_ID}`]: () => new Response(new Blob(['%PDF']), { status: 200 }),
+        [`/api/v1/documents/print/invoice/${INVOICE_ID}`]: () => new Response('%PDF', { status: 200 }),
       })
       try {
         el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })

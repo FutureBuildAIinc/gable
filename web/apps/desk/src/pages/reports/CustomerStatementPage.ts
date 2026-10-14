@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
@@ -14,7 +15,6 @@ import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
 import { FileText, Search } from 'lucide';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 @customElement('gable-customer-statement')
 export class CustomerStatementPage extends LitElement {
@@ -77,11 +77,16 @@ export class CustomerStatementPage extends LitElement {
     }
 
     /** Print opens the statement's own document for the period shown, as the invoice's print does. */
-    private _printStatement() {
+    private async _printStatement() {
         const st = this.statement;
         if (!st || !this.customerId) return;
         const params = new URLSearchParams({ from: st.from, to: st.to });
-        window.open(`${API_URL}/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, '_blank');
+        try {
+            const shown = await openAuthedPdf(`/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, 'Failed to read the statement document');
+            if (shown.blocked) ToastService.show('Allow pop ups for this page to print the statement', 'error');
+        } catch (err) {
+            ToastService.show(err instanceof Error ? err.message : 'Failed to print the statement', 'error');
+        }
     }
 
     private _onSearchInput(e: Event) {

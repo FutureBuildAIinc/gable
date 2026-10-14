@@ -30,7 +30,7 @@ describe('openAuthedPdf', () => {
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       order.push('fetch')
       expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token')
-      return new Response(new Blob(['%PDF-1.4']), { status: 200, headers: { 'Content-Type': 'application/pdf' } })
+      return new Response('%PDF-1.4', { status: 200, headers: { 'Content-Type': 'application/pdf' } })
     }))
     const shown = await openAuthedPdf('/api/v1/documents/print/invoice/abc', 'Failed to read the invoice')
     expect(order).toEqual(['open', 'fetch'])
@@ -42,7 +42,7 @@ describe('openAuthedPdf', () => {
 
   it('answers the url for a download when the tab is blocked', async () => {
     vi.stubGlobal('open', vi.fn(() => null))
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(new Blob(['x']), { status: 200 })))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('x', { status: 200 })))
     const shown = await openAuthedPdf('/api/v1/documents/print/invoice/abc', 'Failed')
     expect(shown).toEqual({ url: 'blob:authed-pdf', blocked: true })
   })

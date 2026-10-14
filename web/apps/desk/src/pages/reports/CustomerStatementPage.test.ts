@@ -212,7 +212,7 @@ describe('customer statement print', () => {
     URL.createObjectURL = vi.fn(() => 'blob:statement')
     URL.revokeObjectURL = vi.fn()
     const fetchMock = vi.fn(async (url: string) => {
-      if (String(url).includes('/documents/print/statement/')) return new Response(new Blob(['%PDF']), { status: 200 })
+      if (String(url).includes('/documents/print/statement/')) return new Response('%PDF', { status: 200 })
       const routes: Record<string, unknown> = {
         [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
         [`/ar/customers/${CUSTOMER_ID}/statement`]: statement(CUSTOMER_ID),

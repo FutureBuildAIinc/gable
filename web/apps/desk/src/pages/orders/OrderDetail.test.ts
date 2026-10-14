@@ -117,7 +117,7 @@ describe('gable-order-detail - the order contract', () => {
     URL.createObjectURL = vi.fn(() => 'blob:pickticket')
     URL.revokeObjectURL = vi.fn()
     const fetchMock = vi.fn(async (url: string) => {
-      if (String(url).includes('/documents/print/pickticket/')) return new Response(new Blob(['%PDF']), { status: 200 })
+      if (String(url).includes('/documents/print/pickticket/')) return new Response('%PDF', { status: 200 })
       return jsonResponse(order())
     })
     vi.stubGlobal('fetch', fetchMock)
