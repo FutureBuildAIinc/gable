@@ -96,9 +96,9 @@ func seedReceiptSale(t *testing.T, f *keyPinFixture, txn uuid.UUID, branch, cust
 		t.Cleanup(func() { _, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, sale) })
 	}
 	if _, err := f.db.Pool.Exec(ctx,
-		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id, currency, invoice_id)
-		 SELECT $1, register_id, cashier_id, $3, branch_id, till_session_id, currency, $4 FROM pos_transactions WHERE id = $2`,
-		sale, txn, status, invArg); err != nil {
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id, currency, invoice_id, customer_id)
+		 SELECT $1, register_id, cashier_id, $3, branch_id, till_session_id, currency, $4, $5 FROM pos_transactions WHERE id = $2`,
+		sale, txn, status, invArg, customer); err != nil {
 		t.Fatalf("seed receipt sale: %v", err)
 	}
 	return sale, inv
@@ -146,7 +146,31 @@ func TestPosReceipt_CashierPrintsAndEmailsTheSalesInvoice(t *testing.T) {
 	sale, inv := seedReceiptSale(t, f, f.txnA, f.branchA, ada, "COMPLETED", true)
 	other, _ := seedReceiptSale(t, f, f.txnB, f.branchB, ada, "COMPLETED", true)
 	open, _ := seedReceiptSale(t, f, f.txnA, f.branchA, ada, "OPEN", false)
+	// States the status clause alone refuses: each keeps an invoice id (a void
+	// keeps the sale's invoice), so the missing invoice is never the reason.
+	openInvoiced, _ := seedReceiptSale(t, f, f.txnA, f.branchA, ada, "OPEN", true)
+	voided, _ := seedReceiptSale(t, f, f.txnA, f.branchA, ada, "VOIDED", true)
+	held, _ := seedReceiptSale(t, f, f.txnA, f.branchA, ada, "HELD", true)
 	noContact, _ := seedReceiptSale(t, f, f.txnA, f.branchA, f.custID, "COMPLETED", true)
+
+	// The shared WALK-IN row is given an address: no walk in's receipt may go
+	// to it, whether the sale names no customer or names the row.
+	var walkIn uuid.UUID
+	var walkInEmail *string
+	if err := f.db.Pool.QueryRow(ctx, `SELECT id, email FROM customers WHERE account_number = 'WALK-IN'`).Scan(&walkIn, &walkInEmail); err != nil {
+		t.Fatalf("read the walk in row: %v", err)
+	}
+	if _, err := f.db.Pool.Exec(ctx, `UPDATE customers SET email = 'walkin-shared@example.test' WHERE id = $1`, walkIn); err != nil {
+		t.Fatalf("give the walk in row an email: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(ctx, `UPDATE customers SET email = $2 WHERE id = $1`, walkIn, walkInEmail)
+	})
+	walkInNamed, _ := seedReceiptSale(t, f, f.txnA, f.branchA, walkIn, "COMPLETED", true)
+	walkInBare, _ := seedReceiptSale(t, f, f.txnA, f.branchA, walkIn, "COMPLETED", true)
+	if _, err := f.db.Pool.Exec(ctx, `UPDATE pos_transactions SET customer_id = NULL WHERE id = $1`, walkInBare); err != nil {
+		t.Fatalf("clear the sale's customer: %v", err)
+	}
 
 	t.Run("the cashier prints the sale's invoice", func(t *testing.T) {
 		get := func(role, path string) (*http.Response, []byte) {
@@ -212,15 +236,34 @@ func TestPosReceipt_CashierPrintsAndEmailsTheSalesInvoice(t *testing.T) {
 			t.Errorf("a refused email was sent: %d messages in all", n)
 		}
 	})
-	t.Run("an open sale has no receipt", func(t *testing.T) {
-		for _, c := range []struct{ method, path string }{
-			{"GET", "/api/v1/pos/transactions/" + open.String() + "/receipt"},
-			{"POST", "/api/v1/pos/transactions/" + open.String() + "/receipt/email"},
-		} {
-			status, buf := f.userAs(t, "cashier", c.method, c.path, "", hdr)
-			if status != http.StatusConflict || receiptCode(t, buf) != "no_receipt" {
-				t.Errorf("%s %s: %d %s, want 409 no_receipt", c.method, c.path, status, buf)
+	t.Run("only a completed sale has a receipt, whatever invoice it keeps", func(t *testing.T) {
+		for _, id := range []uuid.UUID{open, openInvoiced, voided, held} {
+			for _, c := range []struct{ method, path string }{
+				{"GET", "/api/v1/pos/transactions/" + id.String() + "/receipt"},
+				{"POST", "/api/v1/pos/transactions/" + id.String() + "/receipt/email"},
+			} {
+				status, buf := f.userAs(t, "cashier", c.method, c.path, "", hdr)
+				if status != http.StatusConflict || receiptCode(t, buf) != "no_receipt" {
+					t.Errorf("%s %s: %d %s, want 409 no_receipt", c.method, c.path, status, buf)
+				}
 			}
+		}
+		if n := len(f.mail.recipients(0)); n != 1 {
+			t.Errorf("a refused email was sent: %d messages in all", n)
+		}
+	})
+	t.Run("the walk in row is never emailed, whatever it holds", func(t *testing.T) {
+		for name, id := range map[string]uuid.UUID{"names no customer": walkInBare, "names the walk in row": walkInNamed} {
+			status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+id.String()+"/receipt/email", "", hdr)
+			if status != http.StatusConflict || receiptCode(t, buf) != "no_contact" {
+				t.Errorf("email of a sale that %s: %d %s, want 409 no_contact", name, status, buf)
+			}
+			if status, buf := f.userAs(t, "cashier", "GET", "/api/v1/pos/transactions/"+id.String()+"/receipt", "", hdr); status != http.StatusOK {
+				t.Errorf("print of a sale that %s: %d %s, want 200", name, status, buf)
+			}
+		}
+		if n := len(f.mail.recipients(0)); n != 1 {
+			t.Errorf("a walk in receipt was sent: %d messages in all", n)
 		}
 	})
 	t.Run("an account with no contact answers no_contact in words", func(t *testing.T) {
