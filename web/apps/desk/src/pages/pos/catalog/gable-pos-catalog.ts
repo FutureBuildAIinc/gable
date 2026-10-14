@@ -98,6 +98,15 @@ export class GablePosCatalog extends LitElement {
         return this._searching ? '' : this._category;
     }
 
+    protected willUpdate(changed: Map<string, unknown>): void {
+        // The old yard's tiles must not stay clickable while the new yard's first read is pending.
+        if (changed.has('yardKey') && changed.get('yardKey') !== undefined) {
+            this._items = [];
+            this._failed = false;
+            this._loading = true;
+        }
+    }
+
     protected updated(changed: Map<string, unknown>): void {
         if (changed.has('_categories')) this._measureChips();
         // The first value arrives with the first read; only a later change re-reads.
@@ -186,7 +195,6 @@ export class GablePosCatalog extends LitElement {
             qty: this._qty.trim(),
         };
         this.dispatchEvent(new CustomEvent<CatalogAddDetail>('pos-catalog-add', { detail, bubbles: true, composed: true }));
-        this._qty = '1';
     }
 
     /** Enter or the Add button: the exact SKU among the results, else the first. */
@@ -212,8 +220,20 @@ export class GablePosCatalog extends LitElement {
         const pick = exact ?? this._items[0];
         if (!pick) return;
         this._emit(pick);
-        this._query = '';
-        void this._read();
+    }
+
+    /**
+     * The page calls this once it has accepted an add: the quantity returns to 1
+     * and the search is cleared. A refused add leaves both as typed.
+     */
+    resetQuantity(): void {
+        this._qty = '1';
+        this._notice = '';
+        if (this._query !== '') {
+            this._clearTimer();
+            this._query = '';
+            void this._read();
+        }
     }
 
     /** A scanned code is looked up across the whole catalogue and added only on an exact match. */
@@ -324,7 +344,9 @@ export class GablePosCatalog extends LitElement {
                       <button type="button" data-testid="catalog-retry" @click=${() => void this._read()}
                           class="rounded border border-white/20 px-2 py-1 text-xs font-semibold text-white hover:border-gable-green hover:text-gable-green">Retry</button>
                   </p>`
-                : this._items.length === 0 && !this._loading
+                : this._loading && this._items.length === 0
+                    ? html`<p class="mt-4 text-sm text-slate-400" role="status">Loading products</p>`
+                : this._items.length === 0
                     ? html`<p class="mt-4 text-sm text-slate-400">No products match</p>`
                     : html`<ul data-testid="catalog-grid" class=${`mt-4 grid grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-3 ${this.disabled ? 'opacity-50' : ''}`}
                           aria-busy=${this._loading ? 'true' : 'false'}>

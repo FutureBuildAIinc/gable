@@ -117,7 +117,37 @@ describe('gable-pos-catalog', () => {
       product_id: 'id-LUM-248-PREM', sku: 'LUM-248-PREM', description: 'Product LUM-248-PREM', uom: 'PCS',
       unit_price_cents: 550, in_stock: '514', image_url: '/img/LUM-248-PREM.svg',
     });
+    // the page has not accepted the add yet: what was typed stays
+    expect(qty(el).value).toBe('12');
+    el.resetQuantity();
+    await el.updateComplete;
     expect(qty(el).value).toBe('1');
+    expect(search(el).value).toBe('');
+  });
+
+  it('keeps the typed quantity after a tile add until the page resets it', async () => {
+    await open();
+    qty(el).value = '2.5';
+    qty(el).dispatchEvent(new Event('input', { bubbles: true }));
+    el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-tile-add"]')[0].click();
+    await el.updateComplete;
+    expect(added).toHaveLength(1);
+    expect(qty(el).value).toBe('2.5');
+  });
+
+  it('clears the old yard tiles at once on a yard change and blocks adds until the new read answers', async () => {
+    await open({ yardKey: 'main' });
+    let answer!: (v: CatalogTiles) => void;
+    svc.tiles.mockReturnValueOnce(new Promise((r) => { answer = r; }));
+    await update(el, { yardKey: 'north' });
+    expect(el.querySelectorAll('[data-testid="catalog-tile"]')).toHaveLength(0);
+    expect(el.textContent).toContain('Loading products');
+    el.querySelector<HTMLButtonElement>('[data-testid="catalog-tile-add"]')?.click();
+    expect(added).toHaveLength(0);
+    answer({ ...FIXTURE, items: [item('NORTH-1')] });
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(el.querySelectorAll('[data-testid="catalog-tile"]')).toHaveLength(1);
   });
 
   it('adds the first result when no SKU matches exactly', async () => {
