@@ -142,6 +142,7 @@ func (h *Handler) GetLogo(w http.ResponseWriter, r *http.Request) {
 
 // PutLogo takes the image as the raw request body: PNG or JPEG, at most
 // MaxLogoBytes, whose bytes must decode as the type the Content-Type names.
+// A PNG is stored as sent; a JPEG is stored as its image written again.
 func (h *Handler) PutLogo(w http.ResponseWriter, r *http.Request) {
 	if _, err := httpx.StrictQuery(r); err != nil {
 		httpx.WriteError(w, r, err)
@@ -173,6 +174,15 @@ func (h *Handler) PutLogo(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.BadRequest("the body is not a valid "+want+" image",
 			httpx.FieldError{Field: "body", Message: "must decode as " + ctype}))
 		return
+	}
+	if want == "jpeg" {
+		// A segment walk cannot find a payload placed inside the last
+		// scan, so the picture is written again and only it is stored.
+		if raw, err = ReencodeLogoJPEG(raw); err != nil {
+			httpx.WriteError(w, r, httpx.BadRequest("the body is not a valid jpeg image",
+				httpx.FieldError{Field: "body", Message: "must decode as " + ctype}))
+			return
+		}
 	}
 	p, err := h.svc.SetLogo(r.Context(), Logo{Bytes: raw, ContentType: ctype}, r.Header.Get("If-Match"), nil)
 	if err != nil {

@@ -142,8 +142,10 @@ func LogoEmbeddable(raw []byte) bool {
 // CheckLogoImage accepts raw only when it is one whole image of the named
 // format ("png" or "jpeg") within the dimension cap: the header is read and
 // the size checked before any pixel is decoded, then the whole image is
-// decoded, and bytes after the image's end are refused. The stored bytes are
-// the uploaded ones; nothing is re-encoded.
+// decoded, and bytes after the image's end are refused (for a JPEG, after its
+// end marker: bytes a segment walk cannot tell from scan data are not caught
+// here, which is why a JPEG upload is then written again, see
+// ReencodeLogoJPEG). A PNG's stored bytes are the uploaded ones.
 func CheckLogoImage(raw []byte, format string) error {
 	cfg, got, err := logoConfig(raw)
 	if err != nil {
@@ -180,6 +182,25 @@ func CheckLogoImage(raw []byte, format string) error {
 		}
 	}
 	return nil
+}
+
+// LogoJPEGQuality is the quality a JPEG logo is written again at.
+const LogoJPEGQuality = 90
+
+// ReencodeLogoJPEG writes the decoded image of a JPEG that CheckLogoImage
+// passed as a new JPEG at LogoJPEGQuality, so nothing carried in its
+// segments, between its scans or inside its last scan survives. The content
+// type and the picture's size are unchanged.
+func ReencodeLogoJPEG(raw []byte) ([]byte, error) {
+	img, err := jpeg.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, img, &jpeg.Options{Quality: LogoJPEGQuality}); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 // jpegEnd walks a JPEG's segments and returns the offset just past the EOI
