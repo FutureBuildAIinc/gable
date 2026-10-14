@@ -97,6 +97,9 @@ export class DevModeDisabledError extends Error {
 /** The counter's remembered-sale keys (the desk's POS terminal writes them). */
 const COUNTER_SALE_KEY_PREFIX = 'gable.pos.sale.'
 
+/** The desk's open apps, its tab strip (the desk's `lib/workspace.ts` writes it). */
+const DESK_WORKSPACE_KEY = 'gable_workspace'
+
 export class AuthCustody {
   private _session: AuthSession | null = null;
   private _adopted = false;
@@ -268,12 +271,13 @@ export class AuthCustody {
     this._adopted = true;
     // The counter remembers the empty sale a person last opened on each
     // register; signing out forgets them (a stale hint is harmless, a kept one
-    // outlives the person).
+    // outlives the person). The desk's open apps are the person's too:
+    // signing out closes them, so the next person starts on their own home.
     try {
       const ls = globalThis.localStorage;
       for (let i = ls.length - 1; i >= 0; i--) {
         const k = ls.key(i);
-        if (k !== null && k.startsWith(COUNTER_SALE_KEY_PREFIX)) ls.removeItem(k);
+        if (k !== null && (k.startsWith(COUNTER_SALE_KEY_PREFIX) || k === DESK_WORKSPACE_KEY)) ls.removeItem(k);
       }
     } catch {
       // A hostile storage context: nothing was remembered that we can reach.
