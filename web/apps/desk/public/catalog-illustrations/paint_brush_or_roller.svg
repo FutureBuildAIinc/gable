@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>9 inch roller frame and cover</title>
+  <defs><style>
+    .handle{fill:#3a3530}
+    .handleHi{fill:#5a4a3a}
+    .handleEnd{fill:#c84a3d}
+    .handleEndHi{fill:#e0685a}
+    .cage{fill:#aab0b8}
+    .cageHi{fill:#d0d4da}
+    .cageShade{fill:#7a7e84}
+    .cover{fill:#f0eedc}
+    .coverShade{fill:#d8d2bc}
+    .coverEdge{fill:#a89c84}
+    .endCap{fill:#5a5e64}
+    .shaft{fill:#c8ccd2}
+  </style></defs>
+  <ellipse cx="128" cy="230" rx="98" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="shaft" x="124" y="118" width="8" height="80"/>
+    <rect class="handle" x="116" y="198" width="24" height="14" rx="2"/>
+    <rect class="handleHi" x="116" y="198" width="24" height="3" rx="1"/>
+    <ellipse class="handleEnd" cx="128" cy="216" rx="14" ry="6"/>
+    <ellipse class="handleEndHi" cx="128" cy="214" rx="10" ry="3" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="cageShade" x="50" y="112" width="156" height="10" rx="2"/>
+    <rect class="cage" x="50" y="100" width="156" height="10" rx="2"/>
+    <rect class="cageHi" x="50" y="100" width="156" height="2" rx="1"/>
+    <line x1="56" y1="105" x2="56" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="68" y1="105" x2="68" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="80" y1="105" x2="80" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="92" y1="105" x2="92" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="104" y1="105" x2="104" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="116" y1="105" x2="116" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="128" y1="105" x2="128" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="140" y1="105" x2="140" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="152" y1="105" x2="152" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="164" y1="105" x2="164" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="176" y1="105" x2="176" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="188" y1="105" x2="188" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+    <line x1="200" y1="105" x2="200" y2="116" stroke="#7a7e84" stroke-width="0.8"/>
+  </g>
+  <g>
+    <rect class="cover" x="46" y="80" width="164" height="34" rx="2"/>
+    <rect class="coverShade" x="46" y="106" width="164" height="8" opacity="0.55"/>
+    <rect class="coverEdge" x="46" y="80" width="164" height="3" rx="1" opacity="0.7"/>
+    <line x1="56" y1="86" x2="56" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="68" y1="86" x2="68" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="80" y1="86" x2="80" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="92" y1="86" x2="92" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="104" y1="86" x2="104" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="116" y1="86" x2="116" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="128" y1="86" x2="128" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="140" y1="86" x2="140" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="152" y1="86" x2="152" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="164" y1="86" x2="164" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="176" y1="86" x2="176" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="188" y1="86" x2="188" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+    <line x1="200" y1="86" x2="200" y2="106" stroke="#a89c84" stroke-width="0.4" opacity="0.6"/>
+  </g>
+  <g>
+    <ellipse class="endCap" cx="50" cy="97" rx="4" ry="17"/>
+    <ellipse class="endCap" cx="206" cy="97" rx="4" ry="17"/>
+    <rect class="cage" x="46" y="116" width="164" height="4" opacity="0.7"/>
+  </g>
+</svg>

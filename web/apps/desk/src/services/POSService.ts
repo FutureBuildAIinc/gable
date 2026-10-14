@@ -31,6 +31,38 @@ async function expectOk(response: Response, fallback: string): Promise<Response>
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
+/** One category chip of the counter's catalogue read. */
+export interface CatalogCategory {
+    name: string;
+    count: number;
+}
+
+/** One tile of the counter's catalogue read (GET /api/v1/pos/tiles). */
+export interface CatalogItem {
+    product_id: string;
+    sku: string;
+    description: string;
+    uom: string;
+    unit_price_cents: number;
+    /** The yard's on hand, a decimal string. */
+    in_stock: string;
+    category: string;
+    image_url: string | null;
+}
+
+export interface CatalogTiles {
+    categories: CatalogCategory[];
+    items: CatalogItem[];
+    /** The product images setting; image_url is null while it is off. */
+    images: boolean;
+}
+
+export interface TilesQuery {
+    category?: string;
+    q?: string;
+    limit?: number;
+}
+
 /** Dollars typed by a cashier to integer cents; an empty or bad parse is NaN. */
 export function dollarsToCents(text: string): number {
     const t = text.trim();
@@ -68,6 +100,40 @@ export const posService = {
             'Failed to read the sale',
         );
         return response.json();
+    },
+
+    /**
+     * Fetches the completed sale's own receipt through the authenticated client (a
+     * plain new tab would carry no token) and shows it from a blob url in a tab
+     * opened during the click. A blocked tab answers the url for a download link;
+     * a refusal closes the tab and throws the server's words.
+     */
+    async printReceipt(saleId: string): Promise<{ url: string; blocked: boolean }> {
+        // The tab opens during the click, before any await, so a pop up blocker lets it through.
+        const tab = window.open('', '_blank');
+        try {
+            const response = await expectOk(
+                await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`),
+                'Failed to read the receipt',
+            );
+            const url = URL.createObjectURL(await response.blob());
+            if (tab === null) return { url, blocked: true };
+            tab.location.href = url;
+            // the tab has the document by then
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            return { url, blocked: false };
+        } catch (err) {
+            tab?.close();
+            throw err;
+        }
+    },
+
+    /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */
+    async emailReceipt(saleId: string): Promise<void> {
+        await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt/email`, { method: 'POST' }),
+            'Failed to email the receipt',
+        );
     },
 
     async addItem(saleId: string, productID: string, quantity: string, uom?: string): Promise<Sale> {
@@ -136,6 +202,20 @@ export const posService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/products/search?q=${encodeURIComponent(query)}`),
             'Failed to search products',
+        );
+        return response.json();
+    },
+
+    /** The counter's catalogue for the caller's yard: category chips and product tiles. */
+    async tiles(query: TilesQuery = {}): Promise<CatalogTiles> {
+        const params = new URLSearchParams();
+        if (query.category) params.append('category', query.category);
+        if (query.q) params.append('q', query.q);
+        if (query.limit) params.append('limit', String(query.limit));
+        const qs = params.toString();
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/tiles${qs ? `?${qs}` : ''}`),
+            'Failed to read the catalogue',
         );
         return response.json();
     },

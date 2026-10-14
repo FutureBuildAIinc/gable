@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>PEX 1/2 inch elbow with crimp ring</title>
+  <defs><style>
+    .pexRed{fill:#a83a2c}
+    .pexRedShade{fill:#7a2a1e}
+    .pexRedHi{fill:#c84a3a}
+    .pexEnd{fill:#5a1a12}
+    .crimp{fill:#b8bcc4}
+    .crimpShade{fill:#7a7e84}
+    .crimpHi{fill:#d8dce2}
+    .body{fill:#8a8e94}
+    .bodyShade{fill:#5a5e64}
+    .bodyHi{fill:#b0b4ba}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="84" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <ellipse class="body" cx="68" cy="196" rx="38" ry="36"/>
+    <ellipse class="bodyShade" cx="68" cy="204" rx="38" ry="28"/>
+    <ellipse class="bodyHi" cx="68" cy="184" rx="34" ry="14" opacity="0.5"/>
+    <ellipse class="bodyShade" cx="68" cy="220" rx="36" ry="12" opacity="0.6"/>
+  </g>
+  <g>
+    <ellipse class="pexRed" cx="100" cy="100" rx="20" ry="20"/>
+    <ellipse class="pexRedHi" cx="100" cy="94" rx="14" ry="6" opacity="0.6"/>
+    <ellipse class="pexRedShade" cx="100" cy="106" rx="18" ry="14"/>
+    <ellipse class="pexEnd" cx="100" cy="100" rx="12" ry="12"/>
+  </g>
+  <g>
+    <rect class="pexRed" x="58" y="100" width="48" height="60"/>
+    <rect class="pexRedHi" x="58" y="100" width="48" height="3"/>
+    <rect class="pexRedShade" x="58" y="156" width="48" height="4"/>
+    <ellipse class="pexRed" cx="82" cy="100" rx="24" ry="6"/>
+    <ellipse class="pexRedShade" cx="82" cy="160" rx="24" ry="6"/>
+    <rect class="crimpShade" x="58" y="146" width="48" height="14"/>
+    <rect class="crimp" x="58" y="142" width="48" height="14"/>
+    <rect class="crimpHi" x="58" y="142" width="48" height="2"/>
+    <line x1="60" y1="146" x2="60" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="66" y1="146" x2="66" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="72" y1="146" x2="72" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="78" y1="146" x2="78" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="84" y1="146" x2="84" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="90" y1="146" x2="90" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="96" y1="146" x2="96" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="102" y1="146" x2="102" y2="154" stroke="#7a7e84" stroke-width="0.4"/>
+  </g>
+  <g>
+    <rect class="pexRed" x="100" y="80" width="116" height="40" rx="2"/>
+    <rect class="pexRedHi" x="100" y="80" width="116" height="3" rx="1"/>
+    <rect class="pexRedShade" x="100" y="116" width="116" height="4"/>
+    <ellipse class="pexEnd" cx="216" cy="100" rx="4" ry="20"/>
+    <rect class="crimpShade" x="116" y="76" width="22" height="48"/>
+    <rect class="crimp" x="116" y="76" width="22" height="48" rx="1"/>
+    <rect class="crimpHi" x="116" y="76" width="22" height="2"/>
+    <line x1="120" y1="80" x2="120" y2="120" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="124" y1="80" x2="124" y2="120" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="128" y1="80" x2="128" y2="120" stroke="#7a7e84" stroke-width="0.4"/>
+    <line x1="132" y1="80" x2="132" y2="120" stroke="#7a7e84" stroke-width="0.4"/>
+  </g>
+  <g opacity="0.55">
+    <line x1="170" y1="92" x2="200" y2="92" stroke="#5a1a12" stroke-width="0.6"/>
+    <line x1="170" y1="100" x2="200" y2="100" stroke="#5a1a12" stroke-width="0.6"/>
+    <line x1="170" y1="108" x2="200" y2="108" stroke="#5a1a12" stroke-width="0.6"/>
+  </g>
+</svg>

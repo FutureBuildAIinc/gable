@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <ellipse cx="128" cy="226" rx="80" ry="6" fill="#000" opacity="0.18"/>
+  <rect x="56" y="76" width="144" height="148" fill="#1a1c20"/>
+  <rect x="56" y="76" width="144" height="148" fill="none" stroke="#0a0a0a" stroke-width="1.5"/>
+  <rect x="56" y="76" width="144" height="14" fill="#0a0a0a"/>
+  <rect x="56" y="210" width="144" height="14" fill="#0a0a0a"/>
+  <rect x="64" y="100" width="128" height="64" fill="#faf6e8"/>
+  <rect x="64" y="100" width="128" height="64" fill="none" stroke="#0a0a0a" stroke-width="1"/>
+  <rect x="64" y="100" width="128" height="10" fill="#c84a2e"/>
+  
+  <text x="128" y="138" font-family="Arial, sans-serif" font-size="9" font-weight="bold" fill="#1a1c20" text-anchor="middle">TRASH BAGS</text>
+  <text x="128" y="150" font-family="Arial, sans-serif" font-size="8" fill="#1a1c20" text-anchor="middle">HEAVY DUTY</text>
+  <text x="128" y="160" font-family="Arial, sans-serif" font-size="7" fill="#1a1c20" text-anchor="middle">100 CT 55 GAL</text>
+  <g transform="translate(80,178)">
+    <path d="M 0 8 L 4 0 L 12 0 L 16 8 L 14 24 L 2 24 Z" fill="#2a4a2a" opacity="0.85"/>
+    <path d="M 4 0 L 12 0 L 10 -2 L 6 -2 Z" fill="#2a4a2a" opacity="0.85"/>
+  </g>
+  <g transform="translate(112,180)">
+    <path d="M 0 8 L 4 0 L 12 0 L 16 8 L 14 24 L 2 24 Z" fill="#2a4a2a" opacity="0.85"/>
+    <path d="M 4 0 L 12 0 L 10 -2 L 6 -2 Z" fill="#2a4a2a" opacity="0.85"/>
+  </g>
+  <g transform="translate(144,178)">
+    <path d="M 0 8 L 4 0 L 12 0 L 16 8 L 14 24 L 2 24 Z" fill="#2a4a2a" opacity="0.85"/>
+    <path d="M 4 0 L 12 0 L 10 -2 L 6 -2 Z" fill="#2a4a2a" opacity="0.85"/>
+  </g>
+</svg>

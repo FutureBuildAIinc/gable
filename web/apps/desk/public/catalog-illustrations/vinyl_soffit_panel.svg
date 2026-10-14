@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <ellipse cx="128" cy="226" rx="78" ry="6" fill="#000" opacity="0.18"/>
+  <rect x="40" y="80" width="176" height="120" fill="#a8a4a0"/>
+  <rect x="40" y="80" width="176" height="120" fill="none" stroke="#7a766e" stroke-width="1"/>
+  <rect x="44" y="84" width="168" height="112" fill="#b8b4ae"/>
+  <g fill="#7a766e">
+    <circle cx="56" cy="108" r="3"/>
+    <circle cx="76" cy="108" r="3"/>
+    <circle cx="96" cy="108" r="3"/>
+    <circle cx="116" cy="108" r="3"/>
+    <circle cx="136" cy="108" r="3"/>
+    <circle cx="156" cy="108" r="3"/>
+    <circle cx="176" cy="108" r="3"/>
+    <circle cx="196" cy="108" r="3"/>
+    <circle cx="56" cy="128" r="3"/>
+    <circle cx="76" cy="128" r="3"/>
+    <circle cx="96" cy="128" r="3"/>
+    <circle cx="116" cy="128" r="3"/>
+    <circle cx="136" cy="128" r="3"/>
+    <circle cx="156" cy="128" r="3"/>
+    <circle cx="176" cy="128" r="3"/>
+    <circle cx="196" cy="128" r="3"/>
+    <circle cx="56" cy="148" r="3"/>
+    <circle cx="76" cy="148" r="3"/>
+    <circle cx="96" cy="148" r="3"/>
+    <circle cx="116" cy="148" r="3"/>
+    <circle cx="136" cy="148" r="3"/>
+    <circle cx="156" cy="148" r="3"/>
+    <circle cx="176" cy="148" r="3"/>
+    <circle cx="196" cy="148" r="3"/>
+    <circle cx="56" cy="168" r="3"/>
+    <circle cx="76" cy="168" r="3"/>
+    <circle cx="96" cy="168" r="3"/>
+    <circle cx="116" cy="168" r="3"/>
+    <circle cx="136" cy="168" r="3"/>
+    <circle cx="156" cy="168" r="3"/>
+    <circle cx="176" cy="168" r="3"/>
+    <circle cx="196" cy="168" r="3"/>
+  </g>
+  <rect x="40" y="80" width="176" height="6" fill="#7a766e"/>
+  <rect x="40" y="194" width="176" height="6" fill="#7a766e"/>
+</svg>

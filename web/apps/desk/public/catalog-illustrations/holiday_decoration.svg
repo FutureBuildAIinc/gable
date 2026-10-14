@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>LED string lights, 24 inch wreath</title>
+  <defs>
+    <style>
+      .wreathMain{fill:#2a7a3a}
+      .wreathShade{fill:#1a5a2a}
+      .wreathHi{fill:#5aaa6a}
+      .wreathNeedle{fill:#3a8a4a}
+      .wreathNeedleLight{fill:#7aca7a}
+      .bowMain{fill:#c84a3d}
+      .bowShade{fill:#8a2a24}
+      .bowHi{fill:#e0685a}
+      .berryMain{fill:#c84a3d}
+      .berryHi{fill:#e0685a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <circle class="wreathMain" cx="128" cy="128" r="84"/>
+    <circle class="wreathShade" cx="128" cy="128" r="78" fill="none" stroke="#1a5a2a" stroke-width="6" opacity="0.7"/>
+    <circle class="wreathHi" cx="128" cy="128" r="84" fill="none" stroke="#5aaa6a" stroke-width="2" opacity="0.7"/>
+  </g>
+  <g opacity="0.8">
+    <line x1="60" y1="100" x2="80" y2="92" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="80" y1="92" x2="100" y2="100" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="100" y1="100" x2="120" y2="92" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="120" y1="92" x2="140" y2="100" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="140" y1="100" x2="160" y2="92" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="160" y1="92" x2="180" y2="100" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="180" y1="100" x2="196" y2="128" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="60" y1="156" x2="80" y2="164" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="80" y1="164" x2="100" y2="156" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="100" y1="156" x2="120" y2="164" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="120" y1="164" x2="140" y2="156" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="140" y1="156" x2="160" y2="164" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="160" y1="164" x2="180" y2="156" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="60" y1="128" x2="80" y2="120" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="180" y1="128" x2="196" y2="128" stroke="#5aaa6a" stroke-width="1"/>
+    <line x1="60" y1="128" x2="80" y2="136" stroke="#5aaa6a" stroke-width="1"/>
+  </g>
+  <g>
+    <ellipse class="bowMain" cx="128" cy="48" rx="32" ry="22"/>
+    <ellipse class="bowShade" cx="128" cy="56" rx="32" ry="6" opacity="0.6"/>
+    <ellipse class="bowHi" cx="128" cy="40" rx="32" ry="6" opacity="0.5"/>
+    <ellipse class="bowMain" cx="100" cy="32" rx="20" ry="14"/>
+    <ellipse class="bowShade" cx="100" cy="38" rx="20" ry="4" opacity="0.6"/>
+    <ellipse class="bowMain" cx="156" cy="32" rx="20" ry="14"/>
+    <ellipse class="bowShade" cx="156" cy="38" rx="20" ry="4" opacity="0.6"/>
+    <ellipse class="bowShade" cx="128" cy="50" rx="14" ry="10" fill="#5a2a24"/>
+    <ellipse class="bowMain" cx="128" cy="50" rx="10" ry="6" fill="#e0685a"/>
+    <rect class="bowShade" x="124" y="56" width="8" height="22" rx="2"/>
+  </g>
+  <g>
+    <circle class="berryMain" cx="80" cy="180" r="5"/>
+    <circle class="berryHi" cx="78" cy="178" r="2" opacity="0.7"/>
+    <circle class="berryMain" cx="180" cy="180" r="5"/>
+    <circle class="berryHi" cx="178" cy="178" r="2" opacity="0.7"/>
+    <circle class="berryMain" cx="86" cy="190" r="4"/>
+    <circle class="berryMain" cx="174" cy="190" r="4"/>
+    <circle class="berryMain" cx="172" cy="200" r="3"/>
+    <circle class="berryMain" cx="84" cy="200" r="3"/>
+  </g>
+</svg>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>White vitreous china pedestal lavatory sink</title>
+  <defs>
+    <style>
+      .chinaMain{fill:#f8f8f0}
+      .chinaShade{fill:#dcdcd0}
+      .chinaHi{fill:#ffffff}
+      .chinaDark{fill:#9a9a90}
+      .pedestalMain{fill:#f0f0e8}
+      .pedestalShade{fill:#c8c8b8}
+      .basin{fill:#e6e6d8}
+      .basinShade{fill:#a8a8a0}
+      .hole{fill:#5a5d66}
+      .faucetMain{fill:#b8bcc4}
+      .faucetShade{fill:#7a7d86}
+      .knob{fill:#9a9da4}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="86" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <ellipse class="basinShade" cx="128" cy="106" rx="86" ry="20" opacity="0.4"/>
+    <path class="chinaMain" d="M 38 100 Q 38 64 128 64 Q 218 64 218 100 Q 218 130 184 130 L 72 130 Q 38 130 38 100 Z"/>
+    <path class="chinaShade" d="M 38 100 Q 38 64 128 64 Q 218 64 218 100 Q 218 110 200 116 L 184 130 L 72 130 Q 38 130 38 100 Z" opacity="0.55"/>
+    <ellipse class="chinaHi" cx="100" cy="76" rx="44" ry="4" opacity="0.6"/>
+    <path class="chinaDark" d="M 38 100 Q 38 124 72 130 L 60 130 Q 38 130 38 100 Z" opacity="0.45"/>
+  </g>
+  <g>
+    <ellipse class="basin" cx="128" cy="106" rx="68" ry="14"/>
+    <ellipse class="basinShade" cx="128" cy="110" rx="56" ry="8" opacity="0.55"/>
+    <ellipse cx="128" cy="106" rx="46" ry="6" fill="#c8c8b8" opacity="0.45"/>
+    <circle class="hole" cx="128" cy="110" r="3"/>
+    <circle class="hole" cx="128" cy="98" r="1.5"/>
+  </g>
+  <g>
+    <rect class="faucetMain" x="124" y="48" width="8" height="22" rx="1"/>
+    <rect class="faucetShade" x="129" y="48" width="3" height="22" opacity="0.7"/>
+    <rect class="faucetMain" x="100" y="58" width="56" height="6" rx="1"/>
+    <rect class="faucetMain" x="96" y="56" width="6" height="10" rx="1"/>
+    <rect class="faucetShade" x="96" y="62" width="6" height="4" opacity="0.7"/>
+    <rect class="faucetMain" x="154" y="56" width="6" height="10" rx="1"/>
+    <rect class="faucetShade" x="154" y="62" width="6" height="4" opacity="0.7"/>
+    <circle class="knob" cx="96" cy="58" r="3"/>
+    <circle class="knob" cx="160" cy="58" r="3"/>
+  </g>
+  <g>
+    <path class="pedestalMain" d="M 80 130 L 176 130 L 168 220 L 88 220 Z"/>
+    <path class="pedestalShade" d="M 80 130 L 176 130 L 174 134 L 82 134 Z" opacity="0.5"/>
+    <path class="pedestalShade" d="M 168 220 L 88 220 L 88 224 L 168 224 Z" opacity="0.5"/>
+    <path class="pedestalShade" d="M 168 220 L 176 130 L 172 130 L 162 220 Z" opacity="0.5"/>
+    <path class="chinaHi" d="M 96 138 Q 90 178 96 218 L 92 218 Q 86 178 92 138 Z" opacity="0.55"/>
+  </g>
+</svg>

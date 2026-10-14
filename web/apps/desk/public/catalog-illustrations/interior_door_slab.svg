@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Interior door slab 30x80 hollow core moulded panel</title>
+  <defs>
+    <style>
+      .doorMain{fill:#faf3e0}
+      .doorShade{fill:#d8c8a0}
+      .doorHi{fill:#ffffff}
+      .panelMain{fill:#e8dcc0}
+      .panelShade{fill:#a89878}
+      .handleMain{fill:#5a5d66}
+      .handleShade{fill:#3a3d44}
+      .hingeMain{fill:#7a7a72}
+      .hingeShade{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="72" ry="5" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="doorMain" x="46" y="30" width="164" height="200"/>
+    <rect class="doorHi" x="46" y="30" width="164" height="4" opacity="0.6"/>
+    <rect class="doorShade" x="46" y="220" width="164" height="10" opacity="0.5"/>
+    <rect class="doorShade" x="200" y="30" width="10" height="200" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="panelMain" x="60" y="48" width="68" height="50" rx="1"/>
+    <rect class="panelShade" x="60" y="92" width="68" height="6" opacity="0.6"/>
+    <rect class="panelMain" x="128" y="48" width="68" height="50" rx="1"/>
+    <rect class="panelShade" x="128" y="92" width="68" height="6" opacity="0.6"/>
+    <rect class="panelMain" x="60" y="108" width="68" height="50" rx="1"/>
+    <rect class="panelShade" x="60" y="152" width="68" height="6" opacity="0.6"/>
+    <rect class="panelMain" x="128" y="108" width="68" height="50" rx="1"/>
+    <rect class="panelShade" x="128" y="152" width="68" height="6" opacity="0.6"/>
+    <rect class="panelMain" x="60" y="168" width="68" height="50" rx="1"/>
+    <rect class="panelShade" x="60" y="212" width="68" height="6" opacity="0.6"/>
+    <rect class="panelMain" x="128" y="168" width="68" height="50" rx="1"/>
+    <rect class="panelShade" x="128" y="212" width="68" height="6" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="handleMain" x="184" y="124" width="20" height="6" rx="2"/>
+    <rect class="handleShade" x="184" y="128" width="20" height="2" rx="1"/>
+    <rect class="handleMain" x="190" y="130" width="8" height="14" rx="2"/>
+    <ellipse class="handleMain" cx="194" cy="148" rx="5" ry="3"/>
+    <ellipse class="handleShade" cx="194" cy="148" rx="3" ry="1" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="hingeMain" x="44" y="60" width="6" height="22" rx="1"/>
+    <rect class="hingeShade" x="44" y="78" width="6" height="4" opacity="0.6"/>
+    <rect class="hingeMain" x="44" y="120" width="6" height="22" rx="1"/>
+    <rect class="hingeShade" x="44" y="138" width="6" height="4" opacity="0.6"/>
+    <rect class="hingeMain" x="44" y="180" width="6" height="22" rx="1"/>
+    <rect class="hingeShade" x="44" y="198" width="6" height="4" opacity="0.6"/>
+  </g>
+</svg>

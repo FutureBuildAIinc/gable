@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>50 lb box of bright common nails</title>
+  <defs>
+    <style>
+      .boxFront{fill:#b8884d}
+      .boxSide{fill:#8e5e2a}
+      .boxTop{fill:#cc9a5a}
+      .boxRim{fill:#7a4e22}
+      .nailShaft{fill:#9a9a9a}
+      .nailShaftShade{fill:#6a6a6a}
+      .nailHead{fill:#7a7a7a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+      .textWt{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="96" ry="7" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="boxTop" points="42,82 200,82 212,98 54,98"/>
+    <rect class="boxRim" x="42" y="80" width="158" height="3"/>
+    <polygon class="boxSide" points="200,82 212,98 212,202 200,186"/>
+    <rect class="boxFront" x="42" y="82" width="158" height="104"/>
+    <rect class="boxRim" x="42" y="184" width="158" height="2" opacity="0.6"/>
+  </g>
+  
+  <rect x="58" y="124" width="126" height="1" fill="#3a2410" opacity="0.6"/>
+  <text class="textSub" x="120" y="146" font-size="9" fill="#3a2410" text-anchor="middle">COMMON NAILS</text>
+  <text class="textSub" x="120" y="160" font-size="6.5" fill="#3a2410" text-anchor="middle" opacity="0.7">BRIGHT  3-1/2 IN  QTY 320</text>
+  <rect x="54" y="170" width="26" height="14" fill="#3a2410"/>
+  <text class="textWt" x="67" y="180.5" font-size="8" fill="#e8d4a8" text-anchor="middle">50 LB</text>
+  <g>
+    <rect class="nailShaft" x="84" y="62" width="3" height="22" rx="0.5"/>
+    <polygon class="nailHead" points="82,62 89,62 87,56 84,56"/>
+    <rect class="nailShaftShade" x="86" y="62" width="1" height="22" opacity="0.6"/>
+    <rect class="nailShaft" x="100" y="58" width="3" height="26" rx="0.5"/>
+    <polygon class="nailHead" points="98,58 105,58 103,52 100,52"/>
+    <rect class="nailShaftShade" x="102" y="58" width="1" height="26" opacity="0.6"/>
+    <rect class="nailShaft" x="118" y="64" width="3" height="20" rx="0.5"/>
+    <polygon class="nailHead" points="116,64 123,64 121,58 118,58"/>
+    <rect class="nailShaftShade" x="120" y="64" width="1" height="20" opacity="0.6"/>
+    <rect class="nailShaft" x="136" y="60" width="3" height="24" rx="0.5"/>
+    <polygon class="nailHead" points="134,60 141,60 139,54 136,54"/>
+    <rect class="nailShaftShade" x="138" y="60" width="1" height="24" opacity="0.6"/>
+    <rect class="nailShaft" x="154" y="58" width="3" height="26" rx="0.5"/>
+    <polygon class="nailHead" points="152,58 159,58 157,52 154,52"/>
+    <rect class="nailShaftShade" x="156" y="58" width="1" height="26" opacity="0.6"/>
+    <rect class="nailShaft" x="172" y="62" width="3" height="22" rx="0.5"/>
+    <polygon class="nailHead" points="170,62 177,62 175,56 172,56"/>
+    <rect class="nailShaftShade" x="174" y="62" width="1" height="22" opacity="0.6"/>
+  </g>
+</svg>

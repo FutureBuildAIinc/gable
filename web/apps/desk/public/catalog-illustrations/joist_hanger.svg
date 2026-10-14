@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>galvanized joist hanger for 2x6 to 2x12 joists</title>
+  <defs>
+    <style>
+      .steelMain{fill:#a8a8a8}
+      .steelHi{fill:#cdcdcd}
+      .steelShade{fill:#5a5a5a}
+      .steelDark{fill:#3a3a3a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="86" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <path class="steelMain" d="M 32 60 L 224 60 L 224 90 L 208 90 L 208 200 L 48 200 L 48 90 L 32 90 Z"/>
+    <path class="steelHi" d="M 32 60 L 224 60 L 224 68 L 32 68 Z" opacity="0.6"/>
+    <path class="steelShade" d="M 208 90 L 224 90 L 224 200 L 208 200 Z" opacity="0.7"/>
+    <path class="steelShade" d="M 32 90 L 48 90 L 48 200 L 32 200 Z" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="steelMain" x="48" y="90" width="160" height="6"/>
+    <rect class="steelShade" x="48" y="94" width="160" height="2" opacity="0.6"/>
+  </g>
+  <g>
+    <circle cx="60" cy="124" r="5" fill="#3a3a3a"/>
+    <circle cx="60" cy="124" r="3" fill="#7a7a7a"/>
+    <circle cx="196" cy="124" r="5" fill="#3a3a3a"/>
+    <circle cx="196" cy="124" r="3" fill="#7a7a7a"/>
+    <circle cx="60" cy="180" r="5" fill="#3a3a3a"/>
+    <circle cx="60" cy="180" r="3" fill="#7a7a7a"/>
+    <circle cx="196" cy="180" r="5" fill="#3a3a3a"/>
+    <circle cx="196" cy="180" r="3" fill="#7a7a7a"/>
+    <circle cx="80" cy="200" r="3" fill="#3a3a3a"/>
+    <circle cx="176" cy="200" r="3" fill="#3a3a3a"/>
+  </g>
+  <g>
+    
+  </g>
+</svg>

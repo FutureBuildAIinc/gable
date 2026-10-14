@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Exterior door unit 32x80 steel, 6 panel</title>
+  <defs>
+    <style>
+      .frameMain{fill:#faf3e0}
+      .frameShade{fill:#d8d0b8}
+      .doorMain{fill:#f4ecd8}
+      .doorShade{fill:#d8c8a0}
+      .doorHi{fill:#faf3e0}
+      .panelMain{fill:#dcd0a8}
+      .panelShade{fill:#a89878}
+      .handleMain{fill:#3a3d44}
+      .handleShade{fill:#1a1a1a}
+      .hingeMain{fill:#7a7a72}
+      .hingeShade{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="76" ry="5" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="frameMain" x="36" y="34" width="184" height="196"/>
+    <rect class="frameShade" x="36" y="220" width="184" height="10" opacity="0.5"/>
+    <rect class="frameShade" x="216" y="34" width="4" height="196" opacity="0.5"/>
+    <rect class="frameMain" x="40" y="38" width="176" height="188" fill="none" stroke="#d8d0b8" stroke-width="1"/>
+  </g>
+  <g>
+    <rect class="doorMain" x="48" y="42" width="160" height="180"/>
+    <rect class="doorHi" x="48" y="42" width="160" height="4" opacity="0.6"/>
+    <rect class="doorShade" x="200" y="42" width="8" height="180" opacity="0.5"/>
+    <rect class="doorShade" x="48" y="216" width="160" height="6" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="panelMain" x="64" y="58" width="58" height="42" rx="1"/>
+    <rect class="panelShade" x="64" y="92" width="58" height="8" opacity="0.6"/>
+    <rect class="panelMain" x="134" y="58" width="58" height="42" rx="1"/>
+    <rect class="panelShade" x="134" y="92" width="58" height="8" opacity="0.6"/>
+    <rect class="panelMain" x="64" y="110" width="58" height="42" rx="1"/>
+    <rect class="panelShade" x="64" y="144" width="58" height="8" opacity="0.6"/>
+    <rect class="panelMain" x="134" y="110" width="58" height="42" rx="1"/>
+    <rect class="panelShade" x="134" y="144" width="58" height="8" opacity="0.6"/>
+    <rect class="panelMain" x="64" y="162" width="58" height="50" rx="1"/>
+    <rect class="panelShade" x="64" y="204" width="58" height="8" opacity="0.6"/>
+    <rect class="panelMain" x="134" y="162" width="58" height="50" rx="1"/>
+    <rect class="panelShade" x="134" y="204" width="58" height="8" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="handleMain" x="190" y="124" width="20" height="6" rx="2"/>
+    <rect class="handleShade" x="190" y="128" width="20" height="2" rx="1"/>
+    <rect class="handleMain" x="196" y="130" width="8" height="14" rx="2"/>
+    <ellipse class="handleMain" cx="200" cy="148" rx="5" ry="3"/>
+    <ellipse class="handleShade" cx="200" cy="148" rx="3" ry="1" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="hingeMain" x="46" y="60" width="6" height="22" rx="1"/>
+    <rect class="hingeShade" x="46" y="78" width="6" height="4" opacity="0.6"/>
+    <rect class="hingeMain" x="46" y="120" width="6" height="22" rx="1"/>
+    <rect class="hingeShade" x="46" y="138" width="6" height="4" opacity="0.6"/>
+    <rect class="hingeMain" x="46" y="180" width="6" height="22" rx="1"/>
+    <rect class="hingeShade" x="46" y="198" width="6" height="4" opacity="0.6"/>
+  </g>
+</svg>

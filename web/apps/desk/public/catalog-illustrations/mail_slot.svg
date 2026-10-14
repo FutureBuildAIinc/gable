@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Brushed nickel mail slot</title>
+  <defs><style>
+    .plate{fill:#9aa0a8}
+    .plateHi{fill:#c8ccd2}
+    .plateShade{fill:#72767c}
+    .plateDeep{fill:#4e5258}
+    .slot{fill:#1c1c20}
+    .flap{fill:#aab0b8}
+    .flapEdge{fill:#7e8288}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="92" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="plateShade" x="44" y="60" width="168" height="116" rx="6"/>
+    <rect class="plate" x="40" y="56" width="168" height="116" rx="6"/>
+    <rect class="plateHi" x="40" y="56" width="168" height="4" rx="2"/>
+    <rect class="plateShade" x="40" y="166" width="168" height="6" rx="2"/>
+    <line x1="46" y1="68" x2="46" y2="166" stroke="#c8ccd0" stroke-width="0.6" opacity="0.6"/>
+    <line x1="202" y1="68" x2="202" y2="166" stroke="#72767c" stroke-width="0.6" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="slot" x="62" y="100" width="124" height="22" rx="2"/>
+    <rect class="plateDeep" x="62" y="100" width="124" height="3" rx="1"/>
+    <rect class="plateDeep" x="62" y="119" width="124" height="3" rx="1" opacity="0.7"/>
+  </g>
+  <g>
+    <path class="flap" d="M 60 92 L 188 92 L 192 122 L 56 122 Z"/>
+    <path class="flapEdge" d="M 56 122 L 192 122 L 192 124 L 56 124 Z"/>
+    <rect class="plateHi" x="60" y="92" width="128" height="2"/>
+    <line x1="72" y1="98" x2="76" y2="118" stroke="#72767c" stroke-width="0.4" opacity="0.6"/>
+    <line x1="100" y1="98" x2="104" y2="118" stroke="#72767c" stroke-width="0.4" opacity="0.6"/>
+    <line x1="128" y1="98" x2="132" y2="118" stroke="#72767c" stroke-width="0.4" opacity="0.6"/>
+    <line x1="156" y1="98" x2="160" y2="118" stroke="#72767c" stroke-width="0.4" opacity="0.6"/>
+    <line x1="184" y1="98" x2="180" y2="118" stroke="#72767c" stroke-width="0.4" opacity="0.6"/>
+  </g>
+  <g>
+    <circle class="plateDeep" cx="60" cy="76" r="3"/>
+    <circle class="plateShade" cx="60" cy="76" r="1.5"/>
+    <circle class="plateDeep" cx="188" cy="76" r="3"/>
+    <circle class="plateShade" cx="188" cy="76" r="1.5"/>
+    <circle class="plateDeep" cx="60" cy="152" r="3"/>
+    <circle class="plateShade" cx="60" cy="152" r="1.5"/>
+    <circle class="plateDeep" cx="188" cy="152" r="3"/>
+    <circle class="plateShade" cx="188" cy="152" r="1.5"/>
+  </g>
+</svg>

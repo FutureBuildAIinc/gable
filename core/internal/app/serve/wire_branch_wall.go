@@ -304,6 +304,15 @@ func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
 		w.scoped("finance", "owner"))
 }
 
+// posReceipts mounts the counter's receipt pair (print and email of a sale's
+// own invoice) under the counter's own roles and the same branch middleware as
+// the sale read, so a sale the caller cannot read answers what that read
+// answers. The document handler renders and sends; the POS service names the
+// sale's invoice.
+func (w *branchWall) posReceipts(mux *http.ServeMux, h *document.Handler, sales document.SaleInvoices, roles ...string) {
+	h.WithSaleReceipts(sales).RegisterReceiptRoutes(mux, w.scoped(roles...))
+}
+
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {
 	h.WithBranchGuard(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "purchasing"))
 }

@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Wheelbarrow side view: tray, one front wheel, two handles and legs</title>
+  <defs>
+    <style>
+      .trayMain{fill:#c84a2e}
+      .trayHi{fill:#e8684a}
+      .trayShade{fill:#7a2818}
+      .trayRim{fill:#a02818}
+      .legMain{fill:#3a3d44}
+      .legHi{fill:#5a5d66}
+      .legShade{fill:#1a1d24}
+      .handleMain{fill:#3a3d44}
+      .handleHi{fill:#5a5d66}
+      .handleShade{fill:#1a1d24}
+      .tire{fill:#1a1d24}
+      .rimMain{fill:#7a7d86}
+      .rimHi{fill:#aab0b8}
+      .rimShade{fill:#3a3d44}
+      .hub{fill:#2a2e34}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <path class="trayMain" d="M 50 130 L 80 110 L 220 110 L 200 156 L 80 156 Z"/>
+    <path class="trayRim" d="M 50 130 L 80 110 L 220 110 L 216 116 L 84 116 L 56 134 Z" opacity="0.7"/>
+    <path class="trayShade" d="M 80 140 L 200 140 L 200 156 L 80 156 Z" opacity="0.6"/>
+    <rect class="trayHi" x="86" y="116" width="130" height="3" opacity="0.6"/>
+    <line x1="86" y1="124" x2="208" y2="124" stroke="#7a2818" stroke-width="0.5" opacity="0.5"/>
+    <line x1="86" y1="132" x2="208" y2="132" stroke="#7a2818" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <path class="handleMain" d="M 80 116 L 36 88 L 28 100 L 80 128 Z"/>
+    <path class="handleHi" d="M 80 116 L 36 88 L 32 92 L 80 120 Z" opacity="0.6"/>
+    <ellipse class="handleMain" cx="32" cy="94" rx="8" ry="6"/>
+    <ellipse class="handleHi" cx="32" cy="92" rx="5" ry="3" opacity="0.6"/>
+    <path class="handleMain" d="M 200 116 L 244 88 L 252 100 L 200 128 Z"/>
+    <path class="handleHi" d="M 200 116 L 244 88 L 248 92 L 200 120 Z" opacity="0.6"/>
+    <ellipse class="handleMain" cx="248" cy="94" rx="8" ry="6"/>
+    <ellipse class="handleHi" cx="248" cy="92" rx="5" ry="3" opacity="0.6"/>
+  </g>
+  <g>
+    <path class="legMain" d="M 88 156 L 100 196 L 110 196 L 102 156 Z"/>
+    <path class="legHi" d="M 88 156 L 100 156 L 100 196 L 96 196 Z" opacity="0.6"/>
+    <path class="legShade" d="M 102 156 L 110 196 L 110 196 L 106 156 Z" opacity="0.5"/>
+    <ellipse fill="#1a1410" cx="102" cy="198" rx="14" ry="4" opacity="0.5"/>
+    <path class="legMain" d="M 132 156 L 124 196 L 134 196 L 142 156 Z"/>
+    <path class="legHi" d="M 132 156 L 124 156 L 124 196 L 130 196 Z" opacity="0.6"/>
+    <ellipse fill="#1a1410" cx="128" cy="198" rx="14" ry="4" opacity="0.5"/>
+  </g>
+  <g>
+    <circle class="tire" cx="138" cy="178" r="26"/>
+    <circle class="rimMain" cx="138" cy="178" r="18"/>
+    <circle class="rimHi" cx="138" cy="174" rx="14" ry="6" opacity="0.6"/>
+    <circle class="rimShade" cx="138" cy="182" rx="14" ry="6" opacity="0.5"/>
+    <circle class="hub" cx="138" cy="178" r="6"/>
+    <circle fill="#7a7d86" cx="138" cy="178" r="2"/>
+  </g>
+  <g>
+    <path class="legMain" d="M 122 156 L 138 156 L 130 152 L 126 152 Z" opacity="0"/>
+  </g>
+</svg>
