@@ -34,6 +34,12 @@ describe('product page picture', () => {
     expect(thumb.querySelector('img')?.getAttribute('src')).toBe('/catalog-illustrations/a.svg')
   })
 
+  it('draws no thumb host for a path that is not a same origin path', async () => {
+    stubDetail('https://example.com/a.svg')
+    const el = await mountAsync<GableProductDetail>('gable-product-detail', { routeId: PRODUCT_ID })
+    expect(el.querySelector('gable-product-thumb')).toBeNull()
+  })
+
   it('draws nothing for a product with no picture', async () => {
     stubDetail(null)
     const el = await mountAsync<GableProductDetail>('gable-product-detail', { routeId: PRODUCT_ID })

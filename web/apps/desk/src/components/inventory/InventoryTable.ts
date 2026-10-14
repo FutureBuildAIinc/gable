@@ -9,7 +9,7 @@ import { router } from '../../lib/router';
 import type { Product } from '../../types/product';
 import { formatPrice4 } from '../../lib/utils';
 import { formatQuantity } from '../../lib/money';
-import '../ProductThumb';
+import { isDrawablePath } from '../ProductThumb';
 
 @customElement('gable-inventory-table')
 export class GableInventoryTable extends LitElement {
@@ -38,7 +38,7 @@ export class GableInventoryTable extends LitElement {
 
   render() {
     // A picture column only while some product has a picture: with the setting off the list is as it was.
-    const pictures = this.products.some((p) => !!p.image_url);
+    const pictures = this.products.some((p) => isDrawablePath(p.image_url));
     return html`
       <div class="w-full overflow-hidden">
         <div class="overflow-x-auto">

@@ -9,7 +9,7 @@ import type { Product } from '../../types/product';
 import { resolveLinePrice } from '../../lib/line-price';
 import type { CalculatedPrice } from '../../types/pricing';
 import { ToastService } from '../../lib/toast-service';
-import '../ProductThumb';
+import { isDrawablePath } from '../ProductThumb';
 import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput, floatDollarsToTenThousandths } from '../../lib/money';
 
 @customElement('gable-line-item-editor')
@@ -97,7 +97,7 @@ export class GableLineItemEditor extends LitElement {
 
   render() {
     // Room for a thumb on every result only while some product carries a picture.
-    const pictures = this.products.some(p => !!p.image_url);
+    const pictures = this.products.some(p => isDrawablePath(p.image_url));
     return html`
       <div class="bg-[#161821] border border-white/10 p-4 rounded-lg mb-4">
         <h3 class="text-sm font-medium text-gray-400 mb-3 uppercase tracking-wider">Add Line Item</h3>

@@ -35,7 +35,7 @@ import { Save, Send, Printer, Calculator, AlertCircle, TrendingUp, Truck, Packag
 
 // Side-effect imports: register child custom elements
 import './quotes/QuoteList.ts';
-import '../components/ProductThumb.ts';
+import { isDrawablePath } from '../components/ProductThumb.ts';
 import '../components/customers/CustomerSelect.ts';
 import '../components/quotes/MaterialIntake.ts';
 import '../components/quotes/LineItemEditor.ts';
@@ -632,7 +632,7 @@ export class GableQuoteBuilder extends LitElement {
         const secondary = 'inline-flex items-center justify-center rounded-lg text-sm font-medium border border-white/10 text-zinc-200 hover:bg-white/5 px-3 py-2 disabled:opacity-50';
         const card = 'bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl';
         // The picture of each line's product, built once per render; room for a thumb only while some line has one.
-        this.pictureByProduct = new Map(this.products.filter(p => p.image_url).map(p => [p.id, p.image_url as string]));
+        this.pictureByProduct = new Map(this.products.filter(p => isDrawablePath(p.image_url)).map(p => [p.id, p.image_url as string]));
         const linePictures = this.lines.some(l => this.pictureOf(l) !== null);
 
         return html`
