@@ -2033,6 +2033,7 @@
             "quantity": 5
           }
         ],
+        "number": "PO-000018",
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
@@ -2075,6 +2076,7 @@
             "quantity": 1
           }
         ],
+        "number": "PO-000019",
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
@@ -2115,6 +2117,7 @@
             "quantity": 10
           }
         ],
+        "number": "PO-000018",
         "source": "MANUAL",
         "status": "DRAFT",
         "updated_at": "<ts+0d>",
@@ -2484,6 +2487,7 @@
             "quantity": 10
           }
         ],
+        "number": "PO-000018",
         "source": "MANUAL",
         "status": "PARTIAL",
         "updated_at": "<ts+0d>",
@@ -2723,6 +2727,7 @@
             "quantity": 10
           }
         ],
+        "number": "PO-000018",
         "source": "MANUAL",
         "status": "PARTIAL",
         "updated_at": "<ts+0d>",
