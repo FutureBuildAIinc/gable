@@ -54,17 +54,27 @@ const TYPED_KEY = /^[a-zA-Z0-9]$/;
  * The canonical spelling of a pressed key, or '' when the press is not one a
  * hotkey may claim (ordinary typing, a named key, the meta key).
  */
-export function chordFromEvent(e: { key: string; shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean }): string {
+export function chordFromEvent(e: { key: string; code?: string; shiftKey?: boolean; ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean }): string {
   if (e.metaKey) return '';
   const isFunction = FUNCTION_KEY.test(e.key);
-  const isTyped = TYPED_KEY.test(e.key);
+  let name = e.key;
+  let isTyped = TYPED_KEY.test(e.key);
+  if (!isFunction && (e.ctrlKey || e.altKey)) {
+    // Option with a letter composes a character on some keyboards, so a
+    // chord with Ctrl or Alt is spelled from the physical key
+    const physical = /^Key([A-Z])$/.exec(e.code ?? '') ?? /^Digit([0-9])$/.exec(e.code ?? '');
+    if (physical) {
+      name = physical[1];
+      isTyped = true;
+    }
+  }
   if (!isFunction && !isTyped) return '';
   if (isTyped && !e.ctrlKey && !e.altKey) return '';
   const parts: string[] = [];
   if (e.shiftKey) parts.push('shift');
   if (e.ctrlKey) parts.push('ctrl');
   if (e.altKey) parts.push('alt');
-  parts.push(e.key.toLowerCase());
+  parts.push(name.toLowerCase());
   return parts.join('-');
 }
 

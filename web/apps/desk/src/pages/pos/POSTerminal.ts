@@ -19,6 +19,8 @@ const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
+/** A line carries a quantity control when it has a quantity the route reprices. */
+const hasQuantityControl = (l: SaleLine) => l.parent_line_id === null && ['product', 'kit', 'charge'].includes(l.line_type);
 const methodLabel = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m.charAt(0).toUpperCase() + m.slice(1));
 
 /**
@@ -266,7 +268,8 @@ export class POSTerminal extends LitElement {
       // Seed blind-count inputs for every method the drawer expects (+ cash).
       // The report answers in storage spelling (CASH, CHECK); the close route
       // takes the wire's lowercase, so each method is one lowercase row.
-      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {}).map((m) => m.toLowerCase())]);
+      // account charges are not money in the drawer: never a row, never posted
+      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {}).map((m) => m.toLowerCase()).filter((m) => m !== 'account')]);
       const seed: Record<string, string> = {};
       methods.forEach((m) => { seed[m] = ''; });
       this._counts = seed;
@@ -694,6 +697,8 @@ export class POSTerminal extends LitElement {
   private get _canPay(): boolean {
     const sale = this._sale;
     if (!sale || this._till === null || sale.status !== 'open' || this._loading) return false;
+    // a quantity change on its way would leave the sale paid at the old quantity
+    if (this._changing.size > 0) return false;
     if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
     return payPlan(sale.total_cents, this._pendingTenders, this._entry).ok;
   }
@@ -720,15 +725,15 @@ export class POSTerminal extends LitElement {
       case 'tender-cash':
       case 'tender-check':
       case 'tender-card':
-        return till && open && hasLines;
+        return till && open && hasLines && this._changing.size === 0;
       case 'tender-account':
-        return till && open && hasLines && this._accountRefusal === null;
+        return till && open && hasLines && this._changing.size === 0 && this._accountRefusal === null;
       case 'pay':
         return this._canPay;
       case 'new-sale':
-        return this._register !== null && till;
+        return this._register !== null && till && this._changing.size === 0;
       case 'clear-sale':
-        return open && hasLines && !this._loading;
+        return open && hasLines && !this._loading && this._changing.size === 0;
       case 'void':
         return this._completed !== null && sale?.id === this._completed.id;
       default:
@@ -741,6 +746,21 @@ export class POSTerminal extends LitElement {
     const action = resolveHotkey(chordFromEvent(e));
     if (action === null || !this._hotkeyLive(action)) return;
     e.preventDefault();
+    // a typed quantity not yet committed is committed first and the key is
+    // not run over the old figure: the cashier presses it again
+    const field = document.activeElement;
+    if (field instanceof HTMLInputElement && field.dataset.lineId) {
+      const item = this._sale?.lines.find((l) => l.id === field.dataset.lineId);
+      if (item && field.value.trim() !== (item.quantity ?? '').trim()) {
+        void this._changeQuantity(item, field.value, field).then((saved) => {
+          if (!saved) return;
+          this._success = 'Quantity saved. Press the key again.';
+          if (this._errorTimer) clearTimeout(this._errorTimer);
+          this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
+        });
+        return;
+      }
+    }
     void this._runHotkey(action);
   };
 
@@ -762,7 +782,7 @@ export class POSTerminal extends LitElement {
         this._open = 'customer';
         return focus('#pos-customer-search');
       case 'quantity': {
-        const lines = (this._sale?.lines ?? []).filter((l) => l.parent_line_id === null);
+        const lines = (this._sale?.lines ?? []).filter((l) => l.parent_line_id === null && hasQuantityControl(l));
         const target = lines.find((l) => l.id === this._selectedLineId) ?? lines[lines.length - 1];
         if (!target) return;
         const input = this.querySelector(`input[data-line-id="${target.id}"]`) as HTMLInputElement | null;
@@ -786,6 +806,11 @@ export class POSTerminal extends LitElement {
       case 'new-sale': return this._beginFresh();
       case 'clear-sale': return this._clearSale();
       case 'void': return this._voidSale();
+      default: {
+        // a new action in the roster must be given a handler here
+        const unhandled: never = action;
+        return unhandled;
+      }
     }
   }
 
@@ -808,24 +833,24 @@ export class POSTerminal extends LitElement {
    * Sets a line's quantity on the sale's revision. A change that cannot be
    * made says why and puts the number back.
    */
-  private async _changeQuantity(item: SaleLine, text: string, input: HTMLInputElement | null) {
+  private async _changeQuantity(item: SaleLine, text: string, input: HTMLInputElement | null): Promise<boolean> {
     const sale = this._sale;
     const restore = () => { if (input) input.value = item.quantity ?? ''; };
-    if (!sale || sale.status !== 'open' || this._changing.has(item.id)) return;
+    if (!sale || sale.status !== 'open' || this._changing.has(item.id)) return false;
     const qty = normalizeQuantity(text);
     if (qty === null) {
       this._error = 'Enter a quantity above zero';
       restore();
-      return;
+      return false;
     }
     if (qty.includes('.') && isCountedUnit(item.uom ?? '')) {
       this._error = `${item.uom} is counted in whole units`;
       restore();
-      return;
+      return false;
     }
     if (Number(qty) === Number(item.quantity)) {
       restore();
-      return;
+      return false;
     }
     this._changing.add(item.id);
     this.requestUpdate();
@@ -833,9 +858,11 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._sale = await posService.changeQuantity(sale.id, item.id, qty, sale.revision);
       if (input) input.value = this._sale.lines.find((l) => l.id === item.id)?.quantity ?? qty;
+      return true;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to change the quantity';
       restore();
+      return false;
     } finally {
       this._changing.delete(item.id);
       this.requestUpdate();
@@ -844,6 +871,7 @@ export class POSTerminal extends LitElement {
 
   /** The line's quantity one step either way, as the number a cashier would type. */
   private _stepQuantity(item: SaleLine, by: 1 | -1) {
+    this._selectedLineId = item.id;
     const next = Math.round((Number(item.quantity) + by) * 10000) / 10000;
     if (!(next > 0)) return;
     void this._changeQuantity(item, String(next), null);
@@ -1456,7 +1484,7 @@ export class POSTerminal extends LitElement {
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
                 </div>
-                ${open && item.line_type === 'product' ? this._renderQuantityControl(item) : nothing}
+                ${open && hasQuantityControl(item) ? this._renderQuantityControl(item) : nothing}
                 <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
                 ${open ? html`
                 <button @click=${() => this._removeItem(item.id)} title="Remove"
