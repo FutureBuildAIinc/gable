@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>coiled metal strap tie</title>
+  <defs><style>
+    .strapOuter{fill:#5a5e64}
+    .strapMid{fill:#7a7e84}
+    .strapInner{fill:#a8acb2}
+    .strapDeep{fill:#3a3e44}
+    .strapEdge{fill:#2a2e34}
+    .hub{fill:#3a3530}
+    .stamp{fill:#3a2410}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="88" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <circle class="strapDeep" cx="128" cy="132" r="76"/>
+    <circle class="strapOuter" cx="128" cy="132" r="72"/>
+    <circle class="strapMid" cx="128" cy="132" r="68"/>
+    <circle class="strapInner" cx="128" cy="132" r="64"/>
+    <circle class="strapMid" cx="128" cy="132" r="60"/>
+    <circle class="strapOuter" cx="128" cy="132" r="56"/>
+    <circle class="strapInner" cx="128" cy="132" r="52"/>
+    <circle class="strapMid" cx="128" cy="132" r="48"/>
+    <circle class="strapOuter" cx="128" cy="132" r="44"/>
+    <circle class="strapInner" cx="128" cy="132" r="40"/>
+    <circle class="strapMid" cx="128" cy="132" r="36"/>
+    <circle class="strapOuter" cx="128" cy="132" r="32"/>
+    <circle class="strapInner" cx="128" cy="132" r="28"/>
+    <circle class="strapMid" cx="128" cy="132" r="24"/>
+    <circle class="strapOuter" cx="128" cy="132" r="20"/>
+    <circle class="strapDeep" cx="128" cy="132" r="14"/>
+  </g>
+  <g>
+    <circle class="hub" cx="128" cy="132" r="9"/>
+    <circle class="strapEdge" cx="128" cy="132" r="6"/>
+    <rect class="hub" x="124" y="124" width="8" height="2"/>
+    <rect class="hub" x="124" y="138" width="8" height="2"/>
+    <rect class="hub" x="120" y="130" width="2" height="4"/>
+    <rect class="hub" x="134" y="130" width="2" height="4"/>
+  </g>
+  <g>
+    <rect class="stamp" x="174" y="64" width="66" height="22" rx="2"/>
+    
+  </g>
+  <g>
+    <line x1="174" y1="76" x2="200" y2="86" stroke="#3a3530" stroke-width="0.6" opacity="0.6"/>
+    <line x1="240" y1="76" x2="200" y2="86" stroke="#3a3530" stroke-width="0.6" opacity="0.6"/>
+    <line x1="207" y1="86" x2="200" y2="92" stroke="#3a3530" stroke-width="0.6" opacity="0.6"/>
+  </g>
+</svg>

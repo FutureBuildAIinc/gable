@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Roof snow rake with extendable handle</title>
+  <defs><style>
+    .head{fill:#1a1d24}
+    .headHi{fill:#3a3d44}
+    .headShade{fill:#0a0a14}
+    .blade{fill:#3a3e44}
+    .bladeHi{fill:#5a5e64}
+    .shaftA{fill:#a8acb2}
+    .shaftAHi{fill:#d8dce2}
+    .shaftAShade{fill:#5a5e64}
+    .shaftB{fill:#c8ccd2}
+    .shaftBHi{fill:#e8ecef}
+    .shaftBShade{fill:#7a7e84}
+    .connector{fill:#3a3e44}
+    .connectorHi{fill:#5a5e64}
+    .grip{fill:#1a1d24}
+    .gripShade{fill:#3a3d44}
+    .gripHi{fill:#5a5d66}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g transform="rotate(15 130 128)">
+    <path class="head" d="M 26 60 L 234 60 L 230 100 L 30 100 Z"/>
+    <path class="headHi" d="M 26 60 L 234 60 L 232 66 L 28 66 Z"/>
+    <path class="headShade" d="M 30 96 L 230 96 L 230 100 L 30 100 Z"/>
+    <rect class="blade" x="36" y="100" width="188" height="6"/>
+    <rect class="bladeHi" x="36" y="100" width="188" height="2"/>
+    <rect class="headShade" x="36" y="106" width="188" height="2"/>
+    <rect class="blade" x="46" y="62" width="2" height="36"/>
+    <rect class="blade" x="64" y="62" width="2" height="36"/>
+    <rect class="blade" x="82" y="62" width="2" height="36"/>
+    <rect class="blade" x="100" y="62" width="2" height="36"/>
+    <rect class="blade" x="118" y="62" width="2" height="36"/>
+    <rect class="blade" x="136" y="62" width="2" height="36"/>
+    <rect class="blade" x="154" y="62" width="2" height="36"/>
+    <rect class="blade" x="172" y="62" width="2" height="36"/>
+    <rect class="blade" x="190" y="62" width="2" height="36"/>
+    <rect class="blade" x="208" y="62" width="2" height="36"/>
+  </g>
+  <g transform="rotate(15 130 128)">
+    <rect class="shaftAShade" x="120" y="100" width="14" height="40"/>
+    <rect class="shaftA" x="120" y="100" width="14" height="40"/>
+    <rect class="shaftAHi" x="120" y="100" width="3" height="40"/>
+    <rect class="connector" x="116" y="138" width="22" height="14" rx="2"/>
+    <rect class="connectorHi" x="116" y="138" width="22" height="2" opacity="0.7"/>
+    <circle class="connectorHi" cx="120" cy="145" r="1.5"/>
+    <circle class="connectorHi" cx="134" cy="145" r="1.5"/>
+  </g>
+  <g transform="rotate(15 130 128)">
+    <rect class="shaftBShade" x="120" y="148" width="14" height="60"/>
+    <rect class="shaftB" x="120" y="148" width="14" height="60"/>
+    <rect class="shaftBHi" x="120" y="148" width="3" height="60"/>
+    <rect class="connector" x="116" y="206" width="22" height="14" rx="2"/>
+    <rect class="connectorHi" x="116" y="206" width="22" height="2" opacity="0.7"/>
+    <circle class="connectorHi" cx="120" cy="213" r="1.5"/>
+    <circle class="connectorHi" cx="134" cy="213" r="1.5"/>
+  </g>
+  <g transform="rotate(15 130 128)">
+    <rect class="grip" x="116" y="218" width="22" height="22" rx="3"/>
+    <rect class="gripShade" x="116" y="218" width="22" height="4" rx="2"/>
+    <rect class="gripHi" x="116" y="218" width="3" height="22" opacity="0.7"/>
+    <line x1="124" y1="222" x2="124" y2="240" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="128" y1="222" x2="128" y2="240" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="132" y1="222" x2="132" y2="240" stroke="#5a5d66" stroke-width="0.6"/>
+  </g>
+</svg>

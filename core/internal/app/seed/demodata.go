@@ -254,6 +254,9 @@ func seedDemoImport(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 	if err != nil {
 		return nil, nil, fmt.Errorf("catalog: %w", err)
 	}
+	if err := applyProductPictures(ctx, db); err != nil {
+		return nil, nil, fmt.Errorf("pictures: %w", err)
+	}
 	customerIDs, err := importCustomers(ctx, db, yards, priceLevelIDs)
 	if err != nil {
 		return nil, nil, fmt.Errorf("customers: %w", err)
@@ -435,6 +438,15 @@ func topSlug(slug string) string {
 	return slug
 }
 
+// pictureOf is the image_url an imported product carries: its family's
+// illustration, NULL when the row names no family.
+func pictureOf(family string) any {
+	if family == "" {
+		return nil
+	}
+	return picturePath(family)
+}
+
 // importCatalog reads demodata/catalog.jsonl and upserts each row into
 // products, keying on sku. The vendor_key resolves to vendors.id via the
 // vendorToID map. Inventory per yard is split into rows of inventory; the
@@ -508,9 +520,9 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 				upc, category, vendor, vendor_id, category_id,
 				species, grade, length_in, width_in, height_in, stackable,
 				board_thickness_in, board_width_in, board_length_ft, random_length,
-				is_commodity, taxable)
+				is_commodity, taxable, image_url)
 			VALUES ($1,$2,$3,$3,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-				$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
+				$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
 			ON CONFLICT (sku) DO UPDATE SET
 				description = EXCLUDED.description,
 				uom_primary = EXCLUDED.uom_primary,
@@ -538,6 +550,7 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 				random_length = EXCLUDED.random_length,
 				is_commodity = EXCLUDED.is_commodity,
 				taxable = EXCLUDED.taxable,
+				image_url = EXCLUDED.image_url,
 				updated_at = NOW()
 			RETURNING id`,
 			row.SKU, row.Description, row.UOMPrimary,
@@ -547,7 +560,7 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 			row.Species, row.Grade,
 			nfloat64(row.LengthIn), nfloat64(row.WidthInDim), nfloat64(row.HeightIn), row.Stackable,
 			nfloat64(thickness), nfloat64(boardWidth), nfloat64(row.LengthFt), row.RandomLength,
-			row.IsCommodity, !(row.TaxClass == "EXEMPT"),
+			row.IsCommodity, !(row.TaxClass == "EXEMPT"), pictureOf(row.ImageFamily),
 		).Scan(&id)
 		if err != nil {
 			log.Printf("Seed: import catalog %s: %v", row.SKU, err)

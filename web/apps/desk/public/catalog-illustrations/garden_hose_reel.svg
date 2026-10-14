@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Portable garden hose reel cart</title>
+  <defs>
+    <style>
+      .frameMain{fill:#3a8a4a}
+      .frameShade{fill:#1a5a2a}
+      .frameHi{fill:#5aaa6a}
+      .reelMain{fill:#5a5d66}
+      .reelShade{fill:#2a2d33}
+      .reelHi{fill:#8a8f98}
+      .hoseMain{fill:#2a7a3a}
+      .hoseShade{fill:#1a5a2a}
+      .wheel{fill:#1a1a1a}
+      .wheelHub{fill:#7a7a7a}
+      .handleMain{fill:#3a3d44}
+      .handleGrip{fill:#1a1a1a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="100" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="frameMain" x="56" y="80" width="144" height="8" rx="2"/>
+    <rect class="frameShade" x="56" y="84" width="144" height="4" opacity="0.6"/>
+    <rect class="frameMain" x="60" y="40" width="6" height="148"/>
+    <rect class="frameMain" x="190" y="40" width="6" height="148"/>
+    <rect class="handleMain" x="56" y="32" width="144" height="10" rx="3"/>
+    <rect class="handleGrip" x="60" y="34" width="20" height="6" rx="1"/>
+    <rect class="handleGrip" x="176" y="34" width="20" height="6" rx="1"/>
+  </g>
+  <g>
+    <circle class="reelMain" cx="128" cy="148" r="56"/>
+    <circle class="reelHi" cx="128" cy="148" r="56" fill="none" stroke="#8a8f98" stroke-width="1.5" opacity="0.6"/>
+    <circle class="reelShade" cx="128" cy="148" r="50" fill="none" stroke="#1a1a1a" stroke-width="1" opacity="0.7"/>
+    <circle class="reelMain" cx="128" cy="148" r="46" fill="none" stroke="#3a3d44" stroke-width="2"/>
+    <ellipse class="hoseMain" cx="128" cy="148" rx="38" ry="40"/>
+    <ellipse class="hoseShade" cx="128" cy="148" rx="38" ry="36" opacity="0.5"/>
+    <ellipse class="hoseMain" cx="128" cy="148" rx="32" ry="34" fill="none" stroke="#1a5a2a" stroke-width="2"/>
+    <ellipse class="hoseMain" cx="128" cy="148" rx="24" ry="26" fill="none" stroke="#1a5a2a" stroke-width="2"/>
+    <ellipse class="hoseMain" cx="128" cy="148" rx="16" ry="18" fill="none" stroke="#1a5a2a" stroke-width="2"/>
+    <circle class="reelMain" cx="128" cy="148" r="8" fill="#2a2d33"/>
+    <circle class="wheelHub" cx="128" cy="148" r="3"/>
+  </g>
+  <g>
+    <circle class="wheel" cx="68" cy="210" r="18"/>
+    <circle class="wheelHub" cx="68" cy="210" r="6"/>
+    <circle class="wheelHub" cx="68" cy="210" r="2" fill="#1a1a1a"/>
+    <line x1="68" y1="194" x2="68" y2="226" stroke="#3a3d44" stroke-width="1.2"/>
+    <line x1="52" y1="210" x2="84" y2="210" stroke="#3a3d44" stroke-width="1.2"/>
+    <circle class="wheel" cx="188" cy="210" r="18"/>
+    <circle class="wheelHub" cx="188" cy="210" r="6"/>
+    <circle class="wheelHub" cx="188" cy="210" r="2" fill="#1a1a1a"/>
+    <line x1="188" y1="194" x2="188" y2="226" stroke="#3a3d44" stroke-width="1.2"/>
+    <line x1="172" y1="210" x2="204" y2="210" stroke="#3a3d44" stroke-width="1.2"/>
+  </g>
+</svg>

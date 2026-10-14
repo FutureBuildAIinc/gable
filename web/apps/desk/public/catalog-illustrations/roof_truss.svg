@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pre-built common roof truss</title>
+  <defs><style>
+    .chord{fill:#c89868}
+    .chordHi{fill:#d8ad7c}
+    .chordShade{fill:#a87a4e}
+    .web{fill:#a87a4e}
+    .webShade{fill:#8b6f4e}
+    .connector{fill:#3a3e44}
+    .gusset{fill:#d8c8a4}
+    .gussetShade{fill:#a89c84}
+    .grain{stroke:#9a6e44;fill:none;stroke-linecap:round}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="106" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="chord" points="20,200 236,200 234,210 22,210"/>
+    <polygon class="chordHi" points="20,200 236,200 234,202 22,202"/>
+    <polygon class="chordShade" points="22,206 236,206 234,210 22,210"/>
+    <polygon class="chordShade" points="20,200 22,200 22,210 20,210"/>
+    <polygon class="chordShade" points="236,200 234,200 234,210 236,210"/>
+  </g>
+  <g>
+    <line class="grain" x1="40" y1="206" x2="216" y2="206" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="40" y1="208" x2="216" y2="208" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <polygon class="chord" points="22,50 234,50 234,58 22,58"/>
+    <polygon class="chordHi" points="22,50 234,50 234,52 22,52"/>
+  </g>
+  <g>
+    <polygon class="web" points="128,52 128,200 132,200 132,52"/>
+    <polygon class="web" points="22,50 128,200 124,202 18,52"/>
+    <polygon class="web" points="234,50 128,200 132,202 238,52"/>
+    <polygon class="web" points="50,52 128,128 124,130 46,54"/>
+    <polygon class="web" points="206,52 128,128 132,130 210,54"/>
+    <polygon class="web" points="80,52 128,164 124,166 76,54"/>
+    <polygon class="web" points="176,52 128,164 132,166 180,54"/>
+  </g>
+  <g opacity="0.85">
+    <polygon class="gusset" points="120,124 136,124 136,138 120,138"/>
+    <polygon class="gussetShade" points="120,124 136,124 136,128 120,128"/>
+    <polygon class="gusset" points="44,50 64,50 64,68 44,68"/>
+    <polygon class="gussetShade" points="44,50 64,50 64,54 44,54"/>
+    <polygon class="gusset" points="192,50 212,50 212,68 192,68"/>
+    <polygon class="gussetShade" points="192,50 212,50 212,54 192,54"/>
+  </g>
+  <g>
+    <circle class="connector" cx="20" cy="200" r="3"/>
+    <circle class="connector" cx="236" cy="200" r="3"/>
+    <circle class="connector" cx="128" cy="200" r="3"/>
+  </g>
+</svg>

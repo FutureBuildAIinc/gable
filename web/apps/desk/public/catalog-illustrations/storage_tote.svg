@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>27 gallon plastic storage tote with lid</title>
+  <defs><style>
+    .body{fill:#3a6aaa}
+    .bodyHi{fill:#5a8aca}
+    .bodyShade{fill:#1a4a8a}
+    .bodyDeep{fill:#0a2a52}
+    .lid{fill:#4a8aca}
+    .lidHi{fill:#7aaeec}
+    .lidShade{fill:#2a5a8a}
+    .rim{fill:#2a5a8a}
+    .handle{fill:#2a5e94}
+    .handleHi{fill:#5a8aca}
+    .clasp{fill:#2a2e34}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="106" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <ellipse class="bodyDeep" cx="128" cy="208" rx="100" ry="14"/>
+    <path class="body" d="M 28 90 L 228 90 L 220 208 L 36 208 Z"/>
+    <path class="bodyHi" d="M 28 90 L 228 90 L 226 100 L 30 100 Z"/>
+    <path class="bodyShade" d="M 220 198 L 228 90 L 224 90 L 218 200 Z"/>
+    <rect class="bodyDeep" x="28" y="200" width="200" height="8"/>
+  </g>
+  <g>
+    <line x1="44" y1="110" x2="36" y2="200" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="80" y1="110" x2="76" y2="200" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="128" y1="110" x2="128" y2="200" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="176" y1="110" x2="180" y2="200" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="212" y1="110" x2="220" y2="200" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="30" y1="130" x2="226" y2="130" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="32" y1="160" x2="224" y2="160" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+    <line x1="34" y1="190" x2="222" y2="190" stroke="#0a2a52" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="handle" x="40" y="138" width="64" height="14" rx="3"/>
+    <rect class="handleHi" x="40" y="138" width="64" height="3" rx="2"/>
+    <rect class="handle" x="152" y="138" width="64" height="14" rx="3"/>
+    <rect class="handleHi" x="152" y="138" width="64" height="3" rx="2"/>
+    <ellipse class="handle" cx="40" cy="145" rx="6" ry="9"/>
+    <ellipse class="handle" cx="104" cy="145" rx="6" ry="9"/>
+    <ellipse class="handle" cx="152" cy="145" rx="6" ry="9"/>
+    <ellipse class="handle" cx="216" cy="145" rx="6" ry="9"/>
+  </g>
+  <g>
+    <rect class="lid" x="26" y="74" width="204" height="20" rx="4"/>
+    <rect class="lidHi" x="26" y="74" width="204" height="4" rx="2"/>
+    <rect class="lidShade" x="26" y="90" width="204" height="4"/>
+    <rect class="rim" x="28" y="92" width="200" height="6"/>
+    <ellipse class="lidShade" cx="128" cy="74" rx="100" ry="6"/>
+    <rect class="lid" x="34" y="68" width="190" height="8" rx="3"/>
+  </g>
+  <g>
+    <rect class="clasp" x="34" y="84" width="6" height="14" rx="1"/>
+    <rect class="clasp" x="216" y="84" width="6" height="14" rx="1"/>
+    <rect class="clasp" x="124" y="84" width="8" height="14" rx="1"/>
+  </g>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Brass ball valve with red lever handle</title>
+  <defs>
+    <style>
+      .bodyMain{fill:#c89a44}
+      .bodyHi{fill:#e8c468}
+      .bodyShade{fill:#8a6a24}
+      .bodyDeep{fill:#5a3e14}
+      .bodyRim{fill:#a87a2c}
+      .leverMain{fill:#c84a2e}
+      .leverHi{fill:#e8684a}
+      .leverShade{fill:#8a2818}
+      .stemMain{fill:#7a5e1e}
+      .stemHi{fill:#a87a2c}
+      .thread{fill:#7a5e1e}
+      .accent{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="84" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="bodyMain" x="60" y="116" width="136" height="14" rx="2"/>
+    <rect class="bodyHi" x="60" y="116" width="136" height="3" rx="1" opacity="0.7"/>
+    <rect class="bodyShade" x="60" y="127" width="136" height="3" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="thread" x="68" y="130" width="40" height="6" opacity="0.8"/>
+    <rect class="thread" x="68" y="130" width="40" height="6" fill="none" stroke="#3a2e10" stroke-width="0.4"/>
+    <line x1="68" y1="130" x2="108" y2="130" stroke="#3a2e10" stroke-width="0.6"/>
+    <line x1="68" y1="136" x2="108" y2="136" stroke="#3a2e10" stroke-width="0.6"/>
+    <rect class="thread" x="148" y="130" width="40" height="6" opacity="0.8"/>
+    <rect class="thread" x="148" y="130" width="40" height="6" fill="none" stroke="#3a2e10" stroke-width="0.4"/>
+    <line x1="148" y1="130" x2="188" y2="130" stroke="#3a2e10" stroke-width="0.6"/>
+    <line x1="148" y1="136" x2="188" y2="136" stroke="#3a2e10" stroke-width="0.6"/>
+    <rect class="bodyMain" x="56" y="100" width="144" height="56" rx="4"/>
+    <rect class="bodyShade" x="56" y="146" width="144" height="10" opacity="0.55"/>
+    <rect class="bodyHi" x="58" y="102" width="140" height="3" opacity="0.6"/>
+    <rect class="bodyDeep" x="194" y="100" width="6" height="56" opacity="0.5"/>
+  </g>
+  <g>
+    <circle class="bodyMain" cx="128" cy="156" rx="34" ry="34"/>
+    <circle class="bodyShade" cx="128" cy="160" rx="34" ry="30" opacity="0.55"/>
+    <circle class="bodyHi" cx="128" cy="142" rx="28" ry="8" opacity="0.5"/>
+    <circle class="bodyRim" cx="128" cy="156" r="34" fill="none" stroke="#7a5e1e" stroke-width="1.5"/>
+    <circle class="accent" cx="128" cy="156" r="6" opacity="0.7"/>
+    <circle fill="#1a1a1a" cx="128" cy="156" r="2"/>
+  </g>
+  <g>
+    <rect class="stemMain" x="120" y="80" width="16" height="22"/>
+    <rect class="stemHi" x="120" y="80" width="3" height="22" opacity="0.7"/>
+    <rect class="stemMain" x="116" y="74" width="24" height="8" rx="1"/>
+    <rect class="stemHi" x="116" y="74" width="24" height="2" rx="1" opacity="0.7"/>
+  </g>
+  <g transform="rotate(-30 128 156)">
+    <rect class="leverMain" x="120" y="56" width="16" height="50" rx="2"/>
+    <rect class="leverHi" x="120" y="56" width="16" height="6" rx="1" opacity="0.7"/>
+    <rect class="leverShade" x="132" y="62" width="4" height="44" opacity="0.7"/>
+    <ellipse class="leverMain" cx="128" cy="56" rx="14" ry="6"/>
+    <ellipse class="leverHi" cx="128" cy="54" rx="9" ry="3" opacity="0.7"/>
+    <ellipse class="leverMain" cx="128" cy="106" rx="14" ry="5"/>
+    <ellipse class="leverHi" cx="128" cy="104" rx="9" ry="2" opacity="0.7"/>
+    <circle fill="#3a3d44" cx="128" cy="156" r="4" opacity="0.7"/>
+  </g>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Fresh SPF 2x framing lumber stack</title>
+  <defs><style>
+    .face{fill:#e8c896}
+    .topedge{fill:#f4d8a8}
+    .bottomedge{fill:#c8a878}
+    .endgrain{fill:#a88858}
+    .grain{stroke:#b08856;fill:none;stroke-linecap:round}
+    .strap{fill:#3a3530}
+    .strapshade{fill:#5a524a}
+    .tag{fill:#faf3e0}
+    .stamp{fill:#3a2410}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="100" ry="7" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="face" x="30" y="162" width="196" height="22"/>
+    <rect class="topedge" x="30" y="162" width="196" height="2"/>
+    <line class="grain" x1="36" y1="170" x2="220" y2="170" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="178" x2="222" y2="178" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="162" width="14" height="22"/>
+    <ellipse cx="233" cy="173" rx="3.5" ry="3" fill="none" stroke="#7a5e2c" stroke-width="0.6" opacity="0.6"/>
+    <ellipse cx="233" cy="173" rx="1.8" ry="1.4" fill="none" stroke="#7a5e2c" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="140" width="196" height="22"/>
+    <rect class="topedge" x="30" y="140" width="196" height="2"/>
+    <line class="grain" x1="38" y1="148" x2="222" y2="148" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="34" y1="156" x2="218" y2="156" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="140" width="14" height="22"/>
+    <ellipse cx="233" cy="151" rx="3.5" ry="3" fill="none" stroke="#7a5e2c" stroke-width="0.6" opacity="0.6"/>
+    <ellipse cx="233" cy="151" rx="1.8" ry="1.4" fill="none" stroke="#7a5e2c" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="118" width="196" height="22"/>
+    <rect class="topedge" x="30" y="118" width="196" height="2"/>
+    <line class="grain" x1="40" y1="126" x2="220" y2="126" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="36" y1="134" x2="224" y2="134" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="118" width="14" height="22"/>
+    <ellipse cx="233" cy="129" rx="3.5" ry="3" fill="none" stroke="#7a5e2c" stroke-width="0.6" opacity="0.6"/>
+    <ellipse cx="233" cy="129" rx="1.8" ry="1.4" fill="none" stroke="#7a5e2c" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="96" width="196" height="22"/>
+    <rect class="topedge" x="30" y="96" width="196" height="2"/>
+    <line class="grain" x1="38" y1="104" x2="220" y2="104" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="112" x2="222" y2="112" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="96" width="14" height="22"/>
+    <ellipse cx="233" cy="107" rx="3.5" ry="3" fill="none" stroke="#7a5e2c" stroke-width="0.6" opacity="0.6"/>
+    <ellipse cx="233" cy="107" rx="1.8" ry="1.4" fill="none" stroke="#7a5e2c" stroke-width="0.5"/>
+  </g>
+  <rect class="strap" x="78" y="92" width="5" height="98"/>
+  <rect class="strapshade" x="78" y="92" width="1.5" height="98"/>
+  <rect class="strap" x="172" y="92" width="5" height="98"/>
+  <rect class="strapshade" x="172" y="92" width="1.5" height="98"/>
+  <rect x="78" y="98" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="98" width="5" height="3" fill="#5a524a"/>
+  <rect x="78" y="180" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="180" width="5" height="3" fill="#5a524a"/>
+  <g>
+    <rect class="tag" x="100" y="50" width="58" height="22" rx="2"/>
+    <rect class="stamp" x="100" y="50" width="58" height="4"/>
+    
+    <text x="129" y="68" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="700" letter-spacing="0.5" fill="#3a2410" text-anchor="middle">SPF 2x4-8 #2&amp;BTR KD</text>
+  </g>
+</svg>

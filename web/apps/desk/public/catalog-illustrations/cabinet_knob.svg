@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Brushed nickel cabinet bar pull with mounting screws</title>
+  <defs>
+    <style>
+      .pullMain{fill:#b8bcc4}
+      .pullHi{fill:#e6e9ee}
+      .pullMid{fill:#9a9da4}
+      .pullShade{fill:#5a5d66}
+      .screwHead{fill:#9a9da4}
+      .screwSlot{fill:#1a1d24}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="210" rx="104" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="pullMain" x="34" y="116" width="188" height="28" rx="6"/>
+    <rect class="pullHi" x="34" y="116" width="188" height="4" rx="2" opacity="0.8"/>
+    <rect class="pullShade" x="34" y="138" width="188" height="6" rx="4" opacity="0.55"/>
+    <rect class="pullMid" x="34" y="120" width="188" height="2" opacity="0.4"/>
+  </g>
+  <g>
+    <rect class="pullMain" x="50" y="106" width="22" height="48" rx="3"/>
+    <rect class="pullHi" x="50" y="106" width="3" height="48" opacity="0.7"/>
+    <rect class="pullShade" x="69" y="106" width="3" height="48" opacity="0.6"/>
+    <rect class="pullMain" x="184" y="106" width="22" height="48" rx="3"/>
+    <rect class="pullHi" x="184" y="106" width="3" height="48" opacity="0.7"/>
+    <rect class="pullShade" x="203" y="106" width="3" height="48" opacity="0.6"/>
+  </g>
+  <g>
+    <circle class="screwHead" cx="61" cy="94" r="9"/>
+    <circle class="pullShade" cx="61" cy="94" r="7" opacity="0.4"/>
+    <rect class="screwSlot" x="56" y="93" width="10" height="2" rx="0.5"/>
+    <circle class="screwHead" cx="195" cy="94" r="9"/>
+    <circle class="pullShade" cx="195" cy="94" r="7" opacity="0.4"/>
+    <rect class="screwSlot" x="190" y="93" width="10" height="2" rx="0.5"/>
+    <circle class="screwHead" cx="61" cy="166" r="9"/>
+    <circle class="pullShade" cx="61" cy="166" r="7" opacity="0.4"/>
+    <rect class="screwSlot" x="56" y="165" width="10" height="2" rx="0.5"/>
+    <circle class="screwHead" cx="195" cy="166" r="9"/>
+    <circle class="pullShade" cx="195" cy="166" r="7" opacity="0.4"/>
+    <rect class="screwSlot" x="190" y="165" width="10" height="2" rx="0.5"/>
+  </g>
+</svg>

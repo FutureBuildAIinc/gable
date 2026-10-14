@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Plywood sheathing panel at an angle, rougher face with stamp marks and layered ply edge</title>
+  <defs>
+    <style>
+      .frontFace{fill:#c8a06a}
+      .frontFaceHi{fill:#d8b07a}
+      .frontFaceShade{fill:#a07a48}
+      .plyEdge{fill:#a87a4a}
+      .plyEdgeShade{fill:#7a5230}
+      .plyEdgeHi{fill:#c89868}
+      .flakeMain{fill:#7a5a30}
+      .flakeMid{fill:#a87a4a}
+      .flakeHi{fill:#5a4828}
+      .stamp{fill:#3a2410}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="108" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g transform="rotate(-12 128 128)">
+    <polygon class="frontFace" points="36,46 220,46 220,210 36,210"/>
+    <polygon class="frontFaceHi" points="36,46 220,46 220,52 36,52"/>
+    <polygon class="frontFaceShade" points="216,52 220,52 220,210 216,210"/>
+  </g>
+  <g transform="rotate(-12 128 128)">
+    <g opacity="0.7">
+      <ellipse class="flakeMain" cx="60" cy="68" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="78" cy="74" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="100" cy="70" rx="7" ry="2.5"/>
+      <ellipse class="flakeMid" cx="124" cy="76" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="148" cy="72" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="172" cy="76" rx="7" ry="2.5"/>
+      <ellipse class="flakeMain" cx="196" cy="74" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="56" cy="86" rx="6" ry="2"/>
+      <ellipse class="flakeMain" cx="80" cy="90" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="106" cy="86" rx="7" ry="2.5"/>
+      <ellipse class="flakeMain" cx="132" cy="92" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="158" cy="86" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="184" cy="90" rx="7" ry="2.5"/>
+      <ellipse class="flakeMid" cx="206" cy="86" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="68" cy="106" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="92" cy="110" rx="7" ry="2.5"/>
+      <ellipse class="flakeMain" cx="116" cy="106" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="142" cy="112" rx="6" ry="2"/>
+      <ellipse class="flakeMain" cx="168" cy="106" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="192" cy="110" rx="7" ry="2.5"/>
+      <ellipse class="flakeMain" cx="60" cy="128" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="84" cy="132" rx="6" ry="2"/>
+      <ellipse class="flakeMain" cx="108" cy="128" rx="7" ry="2.5"/>
+      <ellipse class="flakeMid" cx="134" cy="134" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="158" cy="128" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="184" cy="132" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="202" cy="128" rx="7" ry="2.5"/>
+      <ellipse class="flakeMid" cx="72" cy="150" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="96" cy="154" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="120" cy="150" rx="7" ry="2.5"/>
+      <ellipse class="flakeMain" cx="146" cy="154" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="170" cy="150" rx="6" ry="2"/>
+      <ellipse class="flakeMain" cx="194" cy="154" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="60" cy="172" rx="7" ry="2.5"/>
+      <ellipse class="flakeMain" cx="84" cy="176" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="108" cy="172" rx="6" ry="2"/>
+      <ellipse class="flakeMain" cx="134" cy="176" rx="7" ry="2.5"/>
+      <ellipse class="flakeMid" cx="158" cy="172" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="182" cy="176" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="204" cy="172" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="72" cy="194" rx="6" ry="2"/>
+      <ellipse class="flakeMid" cx="96" cy="196" rx="5" ry="2"/>
+      <ellipse class="flakeMain" cx="120" cy="194" rx="7" ry="2.5"/>
+      <ellipse class="flakeMid" cx="144" cy="196" rx="6" ry="2"/>
+      <ellipse class="flakeMain" cx="168" cy="194" rx="5" ry="2"/>
+      <ellipse class="flakeMid" cx="192" cy="196" rx="7" ry="2.5"/>
+    </g>
+    <g opacity="0.5">
+      <line stroke="#5a3818" stroke-width="0.4" x1="44" y1="60" x2="60" y2="60"/>
+      <line stroke="#5a3818" stroke-width="0.4" x1="180" y1="116" x2="200" y2="116"/>
+    </g>
+  </g>
+  <g transform="rotate(-12 128 128)">
+    <polygon class="plyEdge" points="220,46 230,52 230,210 220,210"/>
+    <polygon class="plyEdgeHi" points="220,46 230,52 230,56 220,54"/>
+    <polygon class="plyEdgeShade" points="226,52 230,52 230,210 226,210"/>
+    <g stroke="#5a3a18" stroke-width="0.4" opacity="0.7">
+      <line x1="222" y1="60" x2="228" y2="60"/>
+      <line x1="222" y1="72" x2="228" y2="72"/>
+      <line x1="222" y1="84" x2="228" y2="84"/>
+      <line x1="222" y1="96" x2="228" y2="96"/>
+      <line x1="222" y1="108" x2="228" y2="108"/>
+      <line x1="222" y1="120" x2="228" y2="120"/>
+      <line x1="222" y1="132" x2="228" y2="132"/>
+      <line x1="222" y1="144" x2="228" y2="144"/>
+      <line x1="222" y1="156" x2="228" y2="156"/>
+      <line x1="222" y1="168" x2="228" y2="168"/>
+      <line x1="222" y1="180" x2="228" y2="180"/>
+      <line x1="222" y1="192" x2="228" y2="192"/>
+      <line x1="222" y1="204" x2="228" y2="204"/>
+    </g>
+  </g>
+  <g transform="rotate(-12 128 128)">
+    <rect class="stamp" x="76" y="118" width="92" height="28" rx="6" opacity="0.85"/>
+    
+    <text x="122" y="142" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="1" text-anchor="middle" fill="#e0d0a0">CDX  4x8  EXTERIOR</text>
+  </g>
+</svg>

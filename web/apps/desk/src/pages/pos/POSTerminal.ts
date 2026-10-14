@@ -2,22 +2,23 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
+import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
 import { branchContext } from '../../services/BranchContext';
-import { chargeRefusal, standingOf, money } from './standing';
+import { chargeRefusal, standingOf, money, PO_REFUSAL } from './standing';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
-import { payPlan, panelProgress, type PanelState } from './panels';
+import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { authCustody } from '@gable/auth';
-import '../../components/BarcodeScanner.ts';
+import './catalog/gable-pos-catalog';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 // The sale each register last opened, so a visit that left it empty reuses it.
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
+const methodLabel = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m.charAt(0).toUpperCase() + m.slice(1));
 
 /**
  * POSTerminal -- Full-screen retail counter sales interface on the wire
@@ -30,19 +31,12 @@ export class POSTerminal extends LitElement {
   createRenderRoot() { return this; }
 
   @state() private _sale: Sale | null = null;
-  @state() private _searchQuery = '';
-  @state() private _searchResults: QuickSearchResult[] = [];
   @state() private _pendingTenders: TenderIn[] = [];
   @state() private _tenderMethod: TenderMethod = 'cash';
   @state() private _tenderAmount = '';
   @state() private _loading = false;
   @state() private _error: string | null = null;
   @state() private _success: string | null = null;
-  @state() private _isScanning = false;
-  // The quantity the next added result takes, and the highlighted result.
-  @state() private _qtyText = '1';
-  @state() private _highlight = 0;
-
   // The sale's customer: the lookup, the account's standing and what a charge
   // to the account carries (the purchase order and the job).
   @state() private _customer: CounterCustomer | null = null;
@@ -50,6 +44,17 @@ export class POSTerminal extends LitElement {
   @state() private _custResults: CounterCustomer[] = [];
   @state() private _poText = '';
   @state() private _jobId = '';
+
+  // The linear panels: the sale's current step and the one panel open (or none).
+  @state() private _step: PanelKey = 'customer';
+  @state() private _open: PanelKey | null = 'customer';
+  // The picture each product came with from the catalogue, by product id.
+  @state() private _images: Record<string, string> = {};
+  @state() private _receiptNote: string | null = null;
+  @state() private _receiptRefused = false;
+  @state() private _receiptBusy = false;
+  /** A blob url the receipt can be downloaded from when its tab was blocked. */
+  @state() private _receiptDownload: string | null = null;
 
   // The completed sale offered for a return or a void.
   @state() private _completed: Sale | null = null;
@@ -81,19 +86,13 @@ export class POSTerminal extends LitElement {
   private _yardId: string | null = null;
   private _revertingYard = false;
 
-  @query('#pos-search-input') private _searchInput!: HTMLInputElement;
-
   private _errorTimer: ReturnType<typeof setTimeout> | null = null;
-  private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
-  /** Counts searches; an answer to an older one is dropped. */
-  private _searchSeq = 0;
-  /** True from a keystroke until the results on screen answer the typed query. */
-  private _resultsStale = false;
   private _custDebounce: ReturnType<typeof setTimeout> | null = null;
 
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener('gable:branch-changed', this._onYardChanged);
+    this.addEventListener('pos-catalog-add', this._onCatalogAdd);
     this._yardId = branchContext.currentId;
     void this._loadRegisters();
   }
@@ -297,124 +296,16 @@ export class POSTerminal extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     window.removeEventListener('gable:branch-changed', this._onYardChanged);
+    this.removeEventListener('pos-catalog-add', this._onCatalogAdd);
     this._registerSeq++;
     if (this._errorTimer) clearTimeout(this._errorTimer);
-    if (this._searchDebounce) clearTimeout(this._searchDebounce);
     if (this._custDebounce) clearTimeout(this._custDebounce);
   }
 
   updated(changed: Map<string, unknown>) {
-    if (changed.has('_searchQuery')) {
-      this._debounceSearch();
-    }
     if (changed.has('_custQuery')) {
       this._debounceCustomers();
     }
-  }
-
-  /** Arrows move the highlighted result; Enter adds it with the typed quantity. */
-  private _resultKey(e: KeyboardEvent) {
-    const n = this._searchResults.length;
-    if (n === 0) return;
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      this._highlight = Math.min(this._highlight + 1, n - 1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      this._highlight = Math.max(this._highlight - 1, 0);
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      void this._addItem(this._searchResults[Math.min(this._highlight, n - 1)]);
-    }
-  }
-
-  /**
-   * Enter adds only a result of the query now in the box. While the typed text is
-   * ahead of the results on screen (the search delay), the search runs at once and
-   * the exact SKU, else the top result of that search, is added.
-   */
-  private _searchKey(e: KeyboardEvent) {
-    if (e.key === 'Enter' && this._till === null) {
-      e.preventDefault();
-      this._needTill();
-      return;
-    }
-    if (e.key === 'Enter' && this._resultsStale && this._searchQuery.trim().length >= 2) {
-      e.preventDefault();
-      void this._enterSearch();
-      return;
-    }
-    this._resultKey(e);
-  }
-
-  private async _enterSearch() {
-    if (this._till === null) {
-      this._needTill();
-      return;
-    }
-    const query = this._searchQuery;
-    if (this._searchDebounce) clearTimeout(this._searchDebounce);
-    try {
-      const results = await this._runSearch(query);
-      if (results === null || results.length === 0) return;
-      const exact = results.find((r) => r.sku.toLowerCase() === query.trim().toLowerCase());
-      await this._addItem(exact ?? results[0]);
-    } catch {
-      this._error = 'Search failed';
-    }
-  }
-
-  /** Runs a search; null when a newer query was typed before it answered. */
-  private async _runSearch(query: string): Promise<QuickSearchResult[] | null> {
-    const seq = ++this._searchSeq;
-    const results = await posService.searchProducts(query);
-    if (seq !== this._searchSeq) return null;
-    this._searchResults = results;
-    this._resultsStale = false;
-    return results;
-  }
-
-  /* ---- Barcode scanning ---- */
-
-  private async _handleScan(barcode: string) {
-    if (this._till === null) {
-      this._needTill();
-      return;
-    }
-    try {
-      const results = await posService.searchProducts(barcode);
-      if (results && results.length > 0) {
-        const exactMatch = results.find(r => r.sku === barcode || r.product_id === barcode) || results[0];
-        await this._addItem(exactMatch);
-      } else {
-        this._error = `Product not found for barcode: ${barcode}`;
-        this._errorTimer = setTimeout(() => { this._error = null; }, 3000);
-      }
-    } catch (err: unknown) {
-      this._error = err instanceof Error ? err.message : 'Error scanning barcode';
-    }
-  }
-
-  /* ---- Product search with debounce ---- */
-
-  private _debounceSearch() {
-    if (this._searchDebounce) clearTimeout(this._searchDebounce);
-
-    if (this._searchQuery.length < 2) {
-      this._searchSeq++;
-      this._searchResults = [];
-      this._resultsStale = false;
-      return;
-    }
-
-    this._searchDebounce = setTimeout(async () => {
-      try {
-        await this._runSearch(this._searchQuery);
-      } catch {
-        this._searchResults = [];
-        this._resultsStale = false;
-      }
-    }, 200);
   }
 
   /* ---- The sale's customer ---- */
@@ -422,7 +313,7 @@ export class POSTerminal extends LitElement {
   private _debounceCustomers() {
     if (this._custDebounce) clearTimeout(this._custDebounce);
     if (this._custQuery.trim().length < 2) {
-      this._custResults = [];
+      if (this._custResults.length > 0) this._custResults = [];
       return;
     }
     this._custDebounce = setTimeout(async () => {
@@ -446,9 +337,35 @@ export class POSTerminal extends LitElement {
       this._custResults = [];
       this._poText = '';
       this._jobId = '';
+      // An account customer keeps the panel open for the purchase order and
+      // the job; Next: Payment moves on once there is a line.
+      this._step = 'customer';
+      this._open = 'customer';
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to name the customer';
     }
+  }
+
+  /** A walk in sale is the choice not to name a customer. */
+  private async _walkInSale() {
+    if (!(await this._readySale())) return;
+    this._customerSettled();
+  }
+
+  /** The customer is settled: Payment is the step, open once there is a line. */
+  private _customerSettled() {
+    this._step = 'payment';
+    this._open = this._saleHasLines ? 'payment' : null;
+  }
+
+  private _togglePanel(key: PanelKey) {
+    if (this._till === null) return;
+    if (this._open === key) {
+      this._open = null;
+      return;
+    }
+    this._open = key;
+    this._step = key;
   }
 
   /** Back to a walk-in sale (only before the first line). */
@@ -460,6 +377,8 @@ export class POSTerminal extends LitElement {
       this._customer = null;
       this._poText = '';
       this._jobId = '';
+      this._step = 'customer';
+      this._open = 'customer';
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to clear the customer';
     }
@@ -503,7 +422,7 @@ export class POSTerminal extends LitElement {
     if (c) {
       const st = standingOf(c);
       return html`
-        <div id="pos-customer" class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
+        <div id="pos-customer" class="rounded-lg bg-deep-space p-3" data-testid="pos-customer">
           <div class="flex items-start justify-between gap-2">
             <div>
               <div class="text-sm font-semibold text-white" data-testid="pos-customer-name">${c.name}</div>
@@ -514,7 +433,7 @@ export class POSTerminal extends LitElement {
               ?disabled=${hasLines || finished || this._loading}
               title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
-            >Change</button>
+            >Walk-in sale</button>
           </div>
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
@@ -545,13 +464,21 @@ export class POSTerminal extends LitElement {
                 </div>
               </div>` : nothing}
           </div>
+          ${finished ? nothing : html`
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <span class="text-xs text-slate-400">${hasLines ? '' : 'Add items to continue'}</span>
+              <button data-testid="pos-next-payment" ?disabled=${!hasLines || this._till === null}
+                @click=${() => { this._step = 'payment'; this._open = 'payment'; }}
+                class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Next: Payment</button>
+            </div>`}
         </div>`;
     }
     return html`
-      <div id="pos-customer" class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Customer</span>
-          <span class="text-xs text-slate-400">Walk-in sale</span>
+      <div id="pos-customer" class="rounded-lg bg-deep-space p-3" data-testid="pos-customer">
+        <div class="flex items-center justify-between gap-2">
+          <label for="pos-customer-search" class="text-xs font-semibold uppercase tracking-wide text-slate-400">Find the customer</label>
+          <button data-testid="pos-walk-in" @click=${() => this._walkInSale()} ?disabled=${this._till === null}
+            class="min-h-11 rounded border border-white/20 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Walk-in sale</button>
         </div>
         <input id="pos-customer-search" type="text" autocomplete="off"
           placeholder="Find by name or account number"
@@ -591,6 +518,9 @@ export class POSTerminal extends LitElement {
       this._custResults = [];
       this._poText = '';
       this._jobId = '';
+      this._receiptNote = null;
+      this._receiptRefused = false;
+      this._dropReceiptDownload();
       // A completed sale on screen stays offerable for a void or a return
       // until this new sale replaces it (New Sale, a product or a customer).
       const reg = this._registerId;
@@ -600,10 +530,8 @@ export class POSTerminal extends LitElement {
       this._sale = sale;
       this._tenderAmount = '';
       this._tenderMethod = 'cash';
-      // Focus the search input after render
-      this.updateComplete.then(() => {
-        this._searchInput?.focus();
-      });
+      this._step = 'customer';
+      this._open = 'customer';
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to start the sale';
     } finally {
@@ -685,31 +613,56 @@ export class POSTerminal extends LitElement {
     });
   }
 
-  private async _addItem(product: QuickSearchResult, quantity = this._qtyText) {
-    if (!(await this._readySale())) return;
-    if (!this._sale) return;
+  /** True once the line is on the sale; a refused add answers false. */
+  private async _addItem(product: QuickSearchResult, quantity: string): Promise<boolean> {
+    if (!(await this._readySale())) return false;
+    if (!this._sale) return false;
     const qty = normalizeQuantity(quantity);
     if (qty === null) {
       this._error = 'Enter a quantity above zero';
-      return;
+      return false;
     }
     if (qty.includes('.') && isCountedUnit(product.uom)) {
       this._error = `${product.uom} is counted in whole units`;
-      return;
+      return false;
     }
     try {
       this._error = null;
       const updated = await posService.addItem(this._sale.id, product.product_id, qty, product.uom);
       this._sale = updated;
-      this._searchQuery = '';
-      this._searchSeq++;
-      this._searchResults = [];
-      this._resultsStale = false;
-      this._highlight = 0;
-      this._qtyText = '1';
-      this._searchInput?.focus();
+      if (this._step === 'payment' && this._open === null) this._open = 'payment';
+      return true;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to add item';
+      return false;
+    }
+  }
+
+  /** The catalogue's Add: the same add path, with its quantity; the card resets only on an accepted add. */
+  private _onCatalogAdd = (e: Event) => {
+    const detail = (e as CustomEvent<{ product?: QuickSearchResult & { image_url?: string | null }; qty?: string; query?: string }>).detail;
+    const product = detail?.product;
+    if (!product) return;
+    if (product.image_url) this._images = { ...this._images, [product.product_id]: product.image_url };
+    const sent = { qty: detail.qty, query: detail.query };
+    void this._addItem(product, detail.qty ?? '1').then((accepted) => {
+      if (!accepted) return;
+      (this.querySelector('gable-pos-catalog') as (HTMLElement & { resetQuantity?: (s?: { qty?: string; query?: string }) => void }) | null)
+        ?.resetQuantity?.(sent);
+    });
+  };
+
+  /** Removes every line of the open sale through the line removal, after a confirm. */
+  private async _clearSale() {
+    const sale = this._sale;
+    if (!sale || sale.status !== 'open') return;
+    const ids = sale.lines.filter((l) => l.parent_line_id === null).map((l) => l.id);
+    if (ids.length === 0) return;
+    if (!window.confirm(`Remove all ${ids.length} line${ids.length === 1 ? '' : 's'} from sale ${sale.number}?`)) return;
+    for (const id of ids) {
+      if (this._sale?.id !== sale.id) return;
+      await this._removeItem(id);
+      if (this._error) return;
     }
   }
 
@@ -813,12 +766,12 @@ export class POSTerminal extends LitElement {
       const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
       this._sale = completed;
       this._completed = completed;
-      const change = completed.change_cents || 0;
-      this._success = change > 0
-        ? `Sale ${completed.number} complete: ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
-        : `Sale ${completed.number} complete: ${fmt(completed.total_cents)}`;
+      // The Sale complete card says it (number, total, tenders, change): no band over the page.
+      this._success = null;
       this._pendingTenders = [];
       this._tenderAmount = '';
+      this._step = 'summary';
+      this._open = null;
       if (tenders.some((t) => t.method === 'account')) void this._refreshStanding();
 
       // The completed sale, its band and the change due stay until the cashier
@@ -1037,144 +990,110 @@ export class POSTerminal extends LitElement {
   private _progressChip(label: string, n: number, state: PanelState) {
     const tone = state === 'done'
       ? 'border-gable-green/40 text-gable-green'
-      : state === 'current' ? 'border-white/30 text-white' : 'border-white/10 text-slate-400';
+      : state === 'current' ? 'border-gable-green text-white' : 'border-white/10 text-slate-400';
     return html`
       <span data-testid="progress-${label.toLowerCase()}" data-state=${state}
         class="flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone}">
-        <span class="font-mono">${n}</span>${label}
+        <span class="font-mono">${state === 'done' ? '✓' : n}</span>${label}
       </span>`;
   }
 
-  private _renderHeader(sale: Sale | null) {
-    const cashier = authCustody.displayName ?? 'Cashier';
-    const progress = panelProgress({
-      hasLines: (sale?.lines.length ?? 0) > 0,
-      customerNamed: this._customer !== null,
-      tendered: this._pendingTenders.length > 0,
-      completed: sale?.status === 'completed',
-    });
+  private _renderHeader(sale: Sale | null, progress: ReturnType<typeof panelProgress>) {
+    const cashier = authCustody.displayName ?? 'Signed in';
     return html`
-      <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-white/10 bg-slate-steel px-6 py-3" data-testid="pos-header">
-        <div class="flex flex-wrap items-center gap-3">
-          <h1 class="text-lg font-bold text-white">Counter</h1>
-          <span class="rounded-full bg-white/10 px-2 py-0.5 font-mono text-xs text-slate-200" data-testid="pos-register">${this._registerId}</span>
-          ${this._registers.length > 1 ? html`
-            <label class="sr-only" for="pos-register-picker">Register</label>
-            <select id="pos-register-picker" data-testid="pos-register-picker"
-              @change=${(e: Event) => {
-                const picker = e.target as HTMLSelectElement;
-                if (!this._chooseRegister(picker.value)) picker.value = this._registerId;
-              }}
-              class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
-              ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.branch_code} ${r.name}</option>`)}
-            </select>` : nothing}
-          ${this._till ? html`
-            <span title="Drawer open" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">
-              Till open &middot; float ${fmt(this._till.opening_float_cents)}
-            </span>` : html`
-            <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
-          <span class="text-xs text-slate-400" data-testid="pos-cashier">Cashier <span class="text-slate-200">${cashier}</span></span>
-          ${sale ? html`<span class="font-mono text-xs text-slate-400">${sale.number} &middot; ${sale.status}</span>` : nothing}
+      <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-white/10 bg-slate-steel px-4 py-2 min-[900px]:flex-nowrap" data-testid="pos-header">
+        <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 min-[900px]:flex-nowrap">
+          <div class="shrink-0">
+            <div class="flex items-baseline gap-2" data-testid="pos-title-row">
+              <h1 class="text-xl font-bold text-white">New sale</h1>
+              ${sale ? html`<span class="font-mono text-xs text-slate-400">${sale.number} &middot; ${sale.status}</span>` : nothing}
+            </div>
+            ${this._register ? html`
+              <p class="flex flex-wrap items-center gap-x-2 text-xs text-slate-400" data-testid="pos-yard-register">
+                <span>${this._register.branch_name}</span><span aria-hidden="true">&middot;</span>
+                <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
+                ${this._registers.length > 1 ? html`
+                  <label class="sr-only" for="pos-register-picker">Register</label>
+                  <select id="pos-register-picker" data-testid="pos-register-picker"
+                    @change=${(e: Event) => {
+                      const picker = e.target as HTMLSelectElement;
+                      if (!this._chooseRegister(picker.value)) picker.value = this._registerId;
+                    }}
+                    class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
+                    ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.branch_code} ${r.name}</option>`)}
+                  </select>` : nothing}
+              </p>` : nothing}
+          </div>
+          <nav class="flex flex-wrap items-center gap-2" aria-label="Sale progress">
+            ${this._progressChip('Customer', 1, progress.customer)}
+            ${this._progressChip('Payment', 2, progress.payment)}
+            ${this._progressChip('Summary', 3, progress.summary)}
+          </nav>
         </div>
-        <nav class="order-last flex w-full items-center gap-2 xl:order-none xl:w-auto" aria-label="Sale progress">
-          ${this._progressChip('Customer', 1, progress.customer)}
-          ${this._progressChip('Payment', 2, progress.payment)}
-          ${this._progressChip('Summary', 3, progress.summary)}
-        </nav>
-        <div class="flex gap-2">
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:flex-nowrap">
+          ${this._till ? html`
+            <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
+            <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
+          <span class="max-w-[8rem] truncate text-xs text-slate-200" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
               title="Count the drawer and close the till with its Z report"
-              class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till</button>` : html`
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
-              class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
+              class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>`}
           ${this._register && this._till ? html`
           <button @click=${() => this._beginFresh()}
-            class="rounded px-4 py-1.5 text-sm ${sale?.status === 'completed' ? 'bg-gable-green font-semibold text-deep-space' : 'border border-white/20 text-slate-200'}">New Sale</button>` : nothing}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}
         </div>
       </header>`;
   }
 
-  private _renderItems(productLines: SaleLine[]) {
-    const noTill = this._till === null;
-    const th = 'border-b border-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400';
+  /** The Items card is the catalogue; it dims and locks with no till or no open sale. */
+  private _renderItems() {
     return html`
-      <section class="flex ${productLines.length > 0 ? 'min-h-[22rem]' : 'min-h-[12rem]'} flex-1 flex-col border-white/10 xl:min-h-0 xl:border-r" data-testid="pos-items">
-        <div class="relative border-b border-white/10 p-4">
-          <div class="flex gap-2">
-            <input id="pos-search-input" type="text" autocomplete="off"
-              placeholder="Search by SKU or description"
-              .value=${this._searchQuery}
-              ?disabled=${noTill}
-              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; this._highlight = 0; this._resultsStale = true; }}
-              @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
-              class="flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Search product by SKU or description" />
-            <label class="sr-only" for="pos-qty">Quantity</label>
-            <input id="pos-qty" type="text" inputmode="decimal" autocomplete="off"
-              .value=${this._qtyText}
-              ?disabled=${noTill}
-              @input=${(e: Event) => { this._qtyText = (e.target as HTMLInputElement).value; }}
-              @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
-              class="w-20 rounded-lg border border-white/10 bg-deep-space px-3 py-3 text-right font-mono text-base text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40"
-              title="Quantity to add" aria-label="Quantity" />
-            <button @click=${() => { this._isScanning = true; }} ?disabled=${noTill}
-              class="rounded-lg border border-white/20 px-4 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Scan</button>
-          </div>
-          ${this._isScanning ? html`
-            <gable-barcode-scanner
-              @scan=${(e: CustomEvent) => { this._isScanning = false; this._handleScan(e.detail); }}
-              @close=${() => { this._isScanning = false; }}
-            ></gable-barcode-scanner>` : nothing}
-          ${this._searchResults.length > 0 ? html`
-            <div class="absolute left-4 right-4 top-full z-10 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-slate-steel shadow-2xl" data-testid="pos-results">
-              ${this._searchResults.map((r, i) => html`
-                <button @click=${() => this._addItem(r)}
-                  aria-current=${i === this._highlight ? 'true' : 'false'}
-                  class="flex w-full items-center gap-3 border-b border-white/10 px-4 py-2 text-left text-sm text-white last:border-b-0 hover:bg-white/5 ${i === this._highlight ? 'bg-white/10' : ''}">
-                  <span class="min-w-[100px] font-mono text-xs text-blueprint-blue">${r.sku}</span>
-                  <span class="flex-1 text-slate-200">${r.description}</span>
-                  <span class="font-mono font-semibold text-gable-green">${fmt(r.unit_price_cents)}/${r.uom}</span>
-                  <span class="font-mono text-xs text-slate-400">${r.in_stock} on hand</span>
-                </button>`)}
-            </div>` : nothing}
-        </div>
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
-          ${productLines.length === 0 ? html`
-            <div class="flex h-full min-h-[120px] items-center justify-center text-sm text-slate-400" data-testid="pos-empty">
-              ${this._till === null ? 'Open the till to start a sale' : 'Search and add products to start a sale'}
-            </div>` : html`
-            <table class="w-full border-collapse" aria-label="Ticket lines" data-testid="pos-lines">
-              <thead><tr>
-                <th class="${th} text-left">Item</th>
-                <th class="${th} text-center">Qty</th>
-                <th class="${th} text-right">Price</th>
-                <th class="${th} text-right">Total</th>
-                <th class="${th} w-14"></th>
-              </tr></thead>
-              <tbody>
-                ${productLines.map((item) => html`
-                  <tr class="border-b border-white/5">
-                    <td class="px-3 py-3 text-sm text-white">${item.description}</td>
-                    <td class="px-3 py-3 text-center font-mono text-sm text-slate-200">${item.quantity} ${item.uom}</td>
-                    <td class="px-3 py-3 text-right font-mono text-sm text-slate-200">
-                      ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</td>
-                    <td class="px-3 py-3 text-right font-mono text-sm font-semibold text-white">
-                      ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</td>
-                    <td class="px-3 py-3">
-                      <button @click=${() => this._removeItem(item.id)} title="Remove"
-                        aria-label="Remove ${item.description}"
-                        ?disabled=${this._sale?.status !== 'open'}
-                        class="inline-flex h-11 w-11 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent">×</button>
-                    </td>
-                  </tr>`)}
-              </tbody>
-            </table>`}
-        </div>
-      </section>`;
+      <div class="w-full min-w-0 min-[900px]:w-[58%] min-[900px]:shrink-0 xl:w-[56%] ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
+        <gable-pos-catalog ?disabled=${this._till === null} yard-key=${this._registerId}
+          note=${this._sale?.status === 'completed' ? 'Add a product to start the next sale' : ''}></gable-pos-catalog>
+      </div>`;
   }
 
-  private _renderPaymentPanel(sale: Sale | null, hasLines: boolean) {
+  /** One linear panel's header: a disclosure button with its number or check, its value and Change. */
+  private _panelHead(key: PanelKey, n: number, title: string, state: PanelState, isOpen: boolean, value: string) {
+    const done = state === 'done';
+    const finished = this._sale?.status === 'completed';
+    return html`
+      <h3 class="m-0">
+        <button type="button" id="pos-panel-${key}-head" data-testid="panel-${key}-toggle"
+          aria-expanded=${isOpen ? 'true' : 'false'} aria-controls="pos-panel-${key}-body"
+          ?disabled=${this._till === null || finished}
+          @click=${() => this._togglePanel(key)}
+          class="flex min-h-11 w-full items-center gap-3 rounded-xl px-4 py-3 text-left disabled:cursor-not-allowed">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border font-mono text-xs ${done ? 'border-gable-green text-gable-green' : isOpen ? 'border-gable-green text-white' : 'border-white/20 text-slate-400'}">${done ? '✓' : n}</span>
+          <span class="text-base font-semibold ${isOpen || done ? 'text-white' : 'text-slate-400'}">${title}</span>
+          ${!isOpen && value !== '' ? html`<span class="ml-auto min-w-0 truncate text-sm text-slate-300">${value}</span>` : nothing}
+          ${!isOpen && done && !finished ? html`<span class="${value === '' ? 'ml-auto ' : ''}shrink-0 text-sm font-semibold text-gable-green">Change</span>` : nothing}
+        </button>
+      </h3>`;
+  }
+
+  private _panelClass(isOpen: boolean) {
+    return `rounded-xl border bg-slate-steel ${isOpen ? 'border-gable-green' : 'border-white/10'}`;
+  }
+
+  /** What the tenders come to, in words: the added ones and the entry, or what the sale took. */
+  private _paymentValue(sale: Sale | null): string {
+    if (sale?.status === 'completed') {
+      return sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(' + ');
+    }
+    const parts = this._pendingTenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`);
+    const entry = this._entry;
+    if (entry !== null && this._tenderedSoFar < (sale?.total_cents ?? 0)) {
+      parts.push(`${methodLabel(entry.method)} ${fmt(entry.amount_cents)}`);
+    }
+    return parts.join(' + ');
+  }
+
+  private _renderPaymentPanel(sale: Sale | null, hasLines: boolean, state: PanelState, isOpen: boolean) {
     const open = sale?.status === 'open';
     const total = sale?.total_cents ?? 0;
     const owed = this._owedCents;
@@ -1182,102 +1101,264 @@ export class POSTerminal extends LitElement {
     const isCash = this._tenderMethod === 'cash';
     const change = isCash && entry !== null && this._tenderedSoFar < total
       ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
+    const ready = this._till !== null && hasLines && open;
+    // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
+    const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
+    const needsPO = accountWhy === PO_REFUSAL;
     return html`
-      <section class="rounded-lg border border-white/10 bg-deep-space p-3 ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-payment"
+      <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-payment"
         aria-disabled=${this._till === null ? 'true' : 'false'}>
-        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Payment</div>
-        ${this._pendingTenders.length > 0 ? html`
-          <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
-            ${this._pendingTenders.map((t) => html`
-              <div class="flex justify-between py-0.5 text-sm text-slate-200">
-                <span class="capitalize">${t.method}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
-              </div>`)}
-            <div class="flex justify-between pt-1 text-sm font-bold ${owed > 0 ? 'text-amber-400' : 'text-gable-green'}">
-              <span>${owed > 0 ? 'Still owed' : 'Covered'}</span><span class="font-mono">${fmt(owed)}</span>
-            </div>
-          </div>` : nothing}
-        <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
-          ${METHODS.map((m) => {
-            const refused = m === 'account' ? this._accountRefusal : null;
-            const chosen = this._tenderMethod === m && this._till !== null;
-            return html`
-              <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
-                ?disabled=${!hasLines || !open || refused !== null}
-                title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
-                aria-pressed=${chosen ? 'true' : 'false'}
-                class="rounded-lg border px-3 py-3 text-sm font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
-                ${m === 'account' ? 'Charge to account' : m}
-              </button>`;
-          })}
-        </div>
-        <label class="mt-3 block text-xs text-slate-400" for="pos-tender-amount">
-          ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
-        </label>
-        <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
-          placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
-          ?disabled=${!hasLines || !open}
-          @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
-          @blur=${() => this._formatTenderAmount()}
-          class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
-          aria-label="Tender amount" />
-        ${isCash && change > 0 ? html`
-          <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
-            <span>Change due</span><span class="font-mono">${fmt(change)}</span>
-          </div>` : nothing}
-        <div class="mt-3 flex gap-2">
-          <button data-testid="pos-add-tender" @click=${() => this._addPendingTender()}
-            ?disabled=${!hasLines || !open || entry === null || owed <= 0}
-            class="flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
+        ${this._panelHead('payment', 2, 'Payment', state, isOpen, state === 'done' ? this._paymentValue(sale) : '')}
+        <div id="pos-panel-payment-body" data-testid="panel-payment-body" ?hidden=${!isOpen} class="px-4 pb-4">
+          <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Amount due</div>
+          <div class="font-mono text-4xl font-bold text-white" data-testid="pos-amount-due">${fmt(owed)}</div>
           ${this._pendingTenders.length > 0 ? html`
-            <button @click=${() => { this._pendingTenders = []; }}
-              class="rounded border border-white/10 px-3 py-2 text-xs text-slate-400">Clear tenders</button>` : nothing}
+            <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
+              ${this._pendingTenders.map((t) => html`
+                <div class="flex justify-between py-0.5 text-sm text-slate-200">
+                  <span class="capitalize">${t.method}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
+                </div>`)}
+              <div class="flex justify-between pt-1 text-sm font-bold ${owed > 0 ? 'text-amber-400' : 'text-gable-green'}">
+                <span>${owed > 0 ? 'Still owed' : 'Covered'}</span><span class="font-mono">${fmt(owed)}</span>
+              </div>
+            </div>` : nothing}
+          <div class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-400">How is the customer paying?</div>
+          <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
+            ${METHODS.map((m) => {
+              const refused = m === 'account' ? this._accountRefusal : null;
+              const chosen = this._tenderMethod === m && this._till !== null;
+              return html`
+                <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
+                  ?disabled=${!hasLines || !open || refused !== null}
+                  title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
+                  aria-pressed=${chosen ? 'true' : 'false'}
+                  class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
+                  ${m === 'account' ? 'Charge to account' : m}
+                </button>`;
+            })}
+          </div>
+          ${accountWhy !== null ? html`
+            <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" data-testid="pos-account-refusal">
+              <p>${accountWhy}</p>
+              ${needsPO ? html`
+                <button data-testid="pos-refusal-customer" @click=${() => { this._step = 'customer'; this._open = 'customer'; }}
+                  class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">Enter the purchase order in Customer</button>` : nothing}
+            </div>` : nothing}
+          <label class="mt-3 block text-xs text-slate-400" for="pos-tender-amount">
+            ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
+          </label>
+          <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
+            placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
+            ?disabled=${!hasLines || !open}
+            @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
+            @blur=${() => this._formatTenderAmount()}
+            class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
+            aria-label="Tender amount" />
+          ${isCash && change > 0 ? html`
+            <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
+              <span>Change due</span><span class="font-mono">${fmt(change)}</span>
+            </div>` : nothing}
+          <div class="mt-3 flex gap-2">
+            <button data-testid="pos-add-tender" @click=${() => this._addPendingTender()}
+              ?disabled=${!hasLines || !open || entry === null || owed <= 0}
+              class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
+            ${this._pendingTenders.length > 0 ? html`
+              <button @click=${() => { this._pendingTenders = []; }}
+                class="min-h-11 rounded border border-white/10 px-3 py-2 text-xs text-slate-400">Clear tenders</button>` : nothing}
+          </div>
+          <div class="mt-4 flex items-center justify-between gap-2">
+            <button data-testid="pos-payment-back" @click=${() => { this._step = 'customer'; this._open = 'customer'; }}
+              class="min-h-11 rounded px-3 py-2 text-sm font-semibold text-slate-300 hover:text-white">Back</button>
+            <button data-testid="pos-next-summary" ?disabled=${!ready}
+              @click=${() => { this._step = 'summary'; this._open = 'summary'; }}
+              class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Next: Summary</button>
+          </div>
         </div>
       </section>`;
   }
 
-  private _renderSummaryPanel(sale: Sale | null, hasLines: boolean) {
+  private _renderSummaryPanel(sale: Sale | null, state: PanelState, isOpen: boolean) {
+    const count = (sale?.lines ?? []).filter((l) => l.parent_line_id === null).length;
+    const tender = this._paymentValue(sale);
+    return html`
+      <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-summary">
+        ${this._panelHead('summary', 3, 'Summary', state, isOpen, sale?.status === 'completed' ? fmt(sale.total_cents) : '')}
+        <div id="pos-panel-summary-body" data-testid="panel-summary-body" ?hidden=${!isOpen} class="px-4 pb-4">
+          <dl class="text-sm">
+            <div class="flex justify-between py-1"><dt class="text-slate-400">Customer</dt>
+              <dd class="text-white">${this._customer?.name ?? 'Walk-in sale'}</dd></div>
+            <div class="flex justify-between py-1"><dt class="text-slate-400">Lines</dt>
+              <dd class="font-mono text-white" data-testid="review-lines">${count}</dd></div>
+            <div class="flex justify-between py-1"><dt class="text-slate-400">Tender</dt>
+              <dd class="font-mono text-white">${tender === '' ? 'None yet' : tender}</dd></div>
+            <div class="flex justify-between py-1 font-bold"><dt class="text-slate-200">Total</dt>
+              <dd class="font-mono text-white" data-testid="review-total">${fmt(sale?.total_cents ?? 0)}</dd></div>
+          </dl>
+          <div class="mt-3">
+            <button data-testid="pos-summary-back" @click=${() => { this._step = 'payment'; this._open = 'payment'; }}
+              class="min-h-11 rounded px-3 py-2 text-sm font-semibold text-slate-300 hover:text-white">Back</button>
+          </div>
+        </div>
+      </section>`;
+  }
+
+  private _renderThumb(line: SaleLine) {
+    const src = line.product_id ? this._images[line.product_id] : undefined;
+    return html`
+      <span data-testid="pos-line-thumb" class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-deep-space">
+        ${src ? html`<img src=${src} alt="" class="h-full w-full object-cover" />` : html`
+          <svg viewBox="0 0 24 24" class="h-5 w-5 text-slate-500" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="16" rx="2"></rect><circle cx="9" cy="10" r="1.5"></circle>
+            <path d="M21 16l-5-5-8 9"></path>
+          </svg>`}
+      </span>`;
+  }
+
+  private _renderOrderSummary(sale: Sale | null, productLines: SaleLine[], hasLines: boolean) {
     const owed = this._owedCents;
     const total = sale?.total_cents ?? 0;
     const open = sale?.status === 'open';
+    const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry);
     const canPay = this._till !== null && hasLines && open && !this._loading && plan.ok;
-    // Void and Return act on the completed sale on screen only: an empty new
-    // sale, whatever the one before it was, offers neither.
-    const followOn = this._completed !== null && sale !== null && sale.id === this._completed.id
-      && sale.status === 'completed';
-    const follow = followOn
-      ? 'border-white/30 text-slate-200 hover:bg-white/5'
-      : 'cursor-not-allowed border-white/10 bg-white/5 text-slate-400 opacity-40';
+    const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
+      : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
-      <section class="flex items-center gap-3 rounded-lg border border-white/10 bg-deep-space p-3 xl:block" data-testid="panel-summary">
-        <div class="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 xl:block">Summary</div>
-        <dl class="text-sm xl:mt-2">
-          <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Lines</dt>
-            <dd class="font-mono" data-testid="summary-lines">${(sale?.lines ?? []).filter((l) => l.parent_line_id === null).length}</dd></div>
-          <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Subtotal</dt>
+      <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
+        <h2 class="text-lg font-bold text-white">Order summary</h2>
+        <p class="text-sm text-slate-400" data-testid="pos-order-customer">${this._customer?.name ?? 'Walk-in sale'}</p>
+        ${productLines.length === 0 ? html`
+          <p class="mt-3 text-sm text-slate-400" data-testid="pos-no-lines">No items yet</p>` : html`
+          <ul class="mt-3 space-y-3" aria-label="Ticket lines" data-testid="pos-lines">
+            ${productLines.map((item) => html`
+              <li class="flex items-center gap-3">
+                ${this._renderThumb(item)}
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-semibold text-white">${item.description}</div>
+                  <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
+                </div>
+                <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
+                ${open ? html`
+                <button @click=${() => this._removeItem(item.id)} title="Remove"
+                  aria-label="Remove ${item.description}"
+                  class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red">×</button>` : nothing}
+              </li>`)}
+          </ul>`}
+        <dl class="mt-4 border-t border-white/10 pt-3 text-sm">
+          <div class="flex justify-between py-1 text-slate-400"><dt>Items</dt>
+            <dd class="font-mono" data-testid="summary-lines">${productLines.length}</dd></div>
+          <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
-          <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Tax</dt>
+          <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
             <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
-          <div class="mt-1 flex items-baseline justify-between gap-4 font-bold text-white xl:border-t xl:border-white/10 xl:pt-2"><dt>Total</dt>
-            <dd class="font-mono text-2xl text-gable-green" data-testid="summary-total">${fmt(total)}</dd></div>
-          ${this._pendingTenders.length > 0 ? html`
+          <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
+            <dd class="font-mono text-2xl text-white" data-testid="summary-total">${fmt(total)}</dd></div>
+          ${completed ? html`
+            ${(sale?.tenders ?? []).map((t) => html`
+              <div class="flex justify-between py-1 text-slate-300"><dt>${t.method === 'account' ? 'Charged to account' : `Paid by ${t.method}`}</dt>
+                <dd class="font-mono">${fmt(t.amount_cents)}</dd></div>`)}
+            ${(sale?.change_cents ?? 0) > 0 ? html`
+              <div class="flex justify-between py-1 font-semibold text-gable-green"><dt>Change given</dt>
+                <dd class="font-mono">${fmt(sale?.change_cents ?? 0)}</dd></div>` : nothing}` : this._pendingTenders.length > 0 ? html`
             <div class="flex justify-between py-1 text-slate-400"><dt>Still owed</dt>
               <dd class="font-mono">${fmt(owed)}</dd></div>` : nothing}
         </dl>
         <button data-testid="pos-pay" @click=${() => this._pay()} ?disabled=${!canPay}
-          class="min-w-0 flex-1 rounded-lg px-4 py-4 text-base font-bold xl:mt-3 xl:w-full ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
+          class="mt-4 min-h-14 w-full rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
           ${label}
         </button>
-        <div class="flex gap-2 xl:mt-3">
-          <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}
-            class="min-h-11 flex-1 rounded border px-3 py-2 text-xs font-semibold ${follow}">Void</button>
-          <button @click=${() => this._beginReturn()} ?disabled=${!followOn}
-            class="min-h-11 flex-1 rounded border px-3 py-2 text-xs font-semibold ${follow}">Return</button>
+        ${completed ? nothing : html`
+        <button data-testid="pos-clear-sale" @click=${() => this._clearSale()} ?disabled=${!clearable}
+          class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>`}
+      </section>`;
+  }
+
+  /** Sends the sale's receipt to the contact on the account; the server says in words if there is none. */
+  private async _emailReceipt(saleId: string) {
+    if (this._receiptBusy) return;
+    this._receiptBusy = true;
+    try {
+      this._error = null;
+      await posService.emailReceipt(saleId);
+      this._receiptNote = 'Receipt sent to the contact on the account';
+      this._receiptRefused = false;
+    } catch (err: unknown) {
+      this._receiptNote = err instanceof Error ? err.message : 'Failed to email the receipt';
+      this._receiptRefused = true;
+    } finally {
+      this._receiptBusy = false;
+    }
+  }
+
+  private _dropReceiptDownload() {
+    if (this._receiptDownload) URL.revokeObjectURL(this._receiptDownload);
+    this._receiptDownload = null;
+  }
+
+  /** Opens the sale's receipt document; a refusal is said in words beside Print receipt. */
+  private async _printReceipt(saleId: string) {
+    this._dropReceiptDownload();
+    try {
+      const shown = await posService.printReceipt(saleId);
+      if (shown?.blocked) {
+        this._receiptDownload = shown.url;
+        this._receiptNote = 'Allow pop ups for this page to print the receipt, or download it';
+        this._receiptRefused = true;
+        return;
+      }
+      this._receiptNote = null;
+      this._receiptRefused = false;
+    } catch (err: unknown) {
+      this._receiptNote = err instanceof Error ? err.message : 'Failed to print the receipt';
+      this._receiptRefused = true;
+    }
+  }
+
+  private _renderSaleComplete(sale: Sale) {
+    // Void and Return act on the completed sale on screen only: an empty new
+    // sale, whatever the one before it was, offers neither.
+    const followOn = this._completed !== null && sale.id === this._completed.id;
+    const follow = followOn
+      ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
+      : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40';
+    const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
+    const invoice = sale.invoice_id;
+    return html`
+      <section class="rounded-xl border border-gable-green bg-slate-steel p-4" data-testid="pos-complete" aria-live="polite">
+        <div class="flex items-center gap-3">
+          <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gable-green text-2xl font-bold text-deep-space" aria-hidden="true">✓</span>
+          <div class="min-w-0">
+            <h2 class="text-xl font-bold text-white">Sale complete</h2>
+            <p class="font-mono text-sm text-slate-300">${sale.number} &middot; ${fmt(sale.total_cents)}${how !== '' ? html` &middot; ${how}` : nothing}${sale.change_cents > 0 ? html`, change ${fmt(sale.change_cents)}` : nothing}</p>
+          </div>
         </div>
+        ${invoice ? html`
+          <div class="mt-4">
+            <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Receipt</div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button data-testid="pos-receipt-print" @click=${() => this._printReceipt(sale.id)}
+                class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">Print receipt</button>
+              ${sale.customer_id !== null ? html`
+                <button data-testid="pos-receipt-email" @click=${() => this._emailReceipt(sale.id)} ?disabled=${this._receiptBusy}
+                  class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40">Email receipt</button>` : nothing}
+            </div>
+            ${sale.customer_id !== null ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-contact">Email goes to the contact on the account</p>` : nothing}
+            ${this._receiptNote ? html`<p class="mt-2 text-xs ${this._receiptRefused ? 'text-safety-red' : 'text-slate-400'}" data-testid="pos-receipt-note" role="status">${this._receiptNote}</p>` : nothing}
+            ${this._receiptDownload ? html`<a data-testid="pos-receipt-download" href=${this._receiptDownload} download="receipt-${sale.number}.pdf"
+              class="mt-1 inline-block text-xs font-semibold text-gable-green underline">Download the receipt</a>` : nothing}
+          </div>` : nothing}
+        <div class="mt-4 flex gap-2">
+          <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}
+            class="min-h-9 flex-1 rounded border px-3 py-1.5 text-xs ${follow}">Void</button>
+          <button @click=${() => this._beginReturn()} ?disabled=${!followOn}
+            class="min-h-9 flex-1 rounded border px-3 py-1.5 text-xs ${follow}">Return</button>
+        </div>
+        <button @click=${() => this._beginFresh()} ?disabled=${this._till === null}
+          class="mt-3 min-h-14 w-full rounded-lg bg-gable-green px-4 py-4 text-base font-bold text-deep-space disabled:cursor-not-allowed disabled:opacity-40">New sale</button>
       </section>`;
   }
 
@@ -1286,10 +1367,14 @@ export class POSTerminal extends LitElement {
     const lines: SaleLine[] = sale?.lines ?? [];
     const productLines = lines.filter((l) => l.parent_line_id === null);
     const hasLines = productLines.length > 0;
+    const completed = sale?.status === 'completed';
+    const progress = panelProgress(this._step, completed);
+    const openKey = completed || this._till === null ? null : this._open;
+    const customerValue = this._customer?.name ?? 'Walk-in sale';
 
     return html`
       <div class="flex h-screen flex-col bg-deep-space font-sans text-white" data-testid="pos-terminal">
-        ${this._renderHeader(sale)}
+        ${this._renderHeader(sale, progress)}
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderReturnModal()}
@@ -1318,19 +1403,19 @@ export class POSTerminal extends LitElement {
               Ask an administrator to add a register for this yard, or switch to a yard that has one.
             </p>
           </div>` : html`
-        <div class="flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-visible" data-testid="pos-body">
-          ${this._renderItems(productLines)}
-          <div class="flex shrink-0 flex-col border-t border-white/10 bg-slate-steel xl:min-h-0 xl:w-[420px] xl:overflow-y-auto xl:border-t-0"
-            data-testid="pos-panels">
-            <div class="p-4">
-              <div class="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-1">
-                <section data-testid="panel-customer">${this._renderCustomerPanel()}</section>
-                ${this._renderPaymentPanel(sale, hasLines)}
+        <div class="flex min-h-0 flex-1 flex-col items-start gap-4 overflow-y-auto p-4 min-[900px]:flex-row" data-testid="pos-body">
+          ${this._renderItems()}
+          <div class="order-first flex w-full min-w-0 shrink-0 flex-col gap-3 min-[900px]:order-none min-[900px]:w-auto min-[900px]:flex-1" data-testid="pos-panels">
+            <section class="${this._panelClass(openKey === 'customer')} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-customer">
+              ${this._panelHead('customer', 1, 'Customer', progress.customer, openKey === 'customer', customerValue)}
+              <div id="pos-panel-customer-body" data-testid="panel-customer-body" ?hidden=${openKey !== 'customer'} class="px-4 pb-4">
+                ${this._renderCustomerPanel()}
               </div>
-            </div>
-            <div class="sticky bottom-0 mt-auto shrink-0 border-t xl:static border-white/10 bg-slate-steel p-4" data-testid="pos-panel-foot">
-              ${this._renderSummaryPanel(sale, hasLines)}
-            </div>
+            </section>
+            ${this._renderPaymentPanel(sale, hasLines, progress.payment, openKey === 'payment')}
+            ${this._renderSummaryPanel(sale, progress.summary, openKey === 'summary')}
+            ${completed && sale ? this._renderSaleComplete(sale) : nothing}
+            ${this._renderOrderSummary(sale, productLines, hasLines)}
           </div>
         </div>`}
       </div>

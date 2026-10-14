@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Western Red Cedar 1x fence boards in a small stack with grain and end cuts</title>
+  <defs>
+    <style>
+      .faceA{fill:#a85a3c}
+      .faceB{fill:#9a4e30}
+      .topEdge{fill:#c4784c}
+      .sideEdge{fill:#7a3c24}
+      .endGrain{fill:#6a2c1c}
+      .grain{fill:none;stroke:#7a3c24;stroke-linecap:round}
+      .ring{fill:none;stroke:#3a1f10}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="220" rx="106" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="sideEdge" points="32,170 46,180 38,180 38,206 32,206"/>
+    <polygon class="topEdge" points="32,170 220,170 230,180 46,180"/>
+    <rect class="faceA" x="46" y="180" width="174" height="26"/>
+    <rect class="sideEdge" x="216" y="180" width="4" height="26" opacity="0.5"/>
+    <ellipse class="endGrain" cx="226" cy="193" rx="10" ry="13"/>
+    <ellipse class="ring" cx="226" cy="193" rx="6" ry="9" stroke-width="0.5"/>
+    <ellipse class="ring" cx="226" cy="193" rx="3" ry="5" stroke-width="0.4"/>
+  </g>
+  <g opacity="0.55">
+    <line class="grain" x1="50" y1="190" x2="220" y2="190" stroke-width="0.5"/>
+    <line class="grain" x1="54" y1="198" x2="220" y2="198" stroke-width="0.4"/>
+  </g>
+  <g>
+    <polygon class="sideEdge" points="32,134 46,144 38,144 38,170 32,170"/>
+    <polygon class="topEdge" points="32,134 220,134 230,144 46,144"/>
+    <rect class="faceB" x="46" y="144" width="174" height="26"/>
+    <rect class="topEdge" x="46" y="144" width="174" height="2"/>
+    <rect class="sideEdge" x="216" y="144" width="4" height="26" opacity="0.5"/>
+    <ellipse class="endGrain" cx="226" cy="157" rx="10" ry="13"/>
+    <ellipse class="ring" cx="226" cy="157" rx="6" ry="9" stroke-width="0.5"/>
+    <ellipse class="ring" cx="226" cy="157" rx="3" ry="5" stroke-width="0.4"/>
+  </g>
+  <g opacity="0.55">
+    <line class="grain" x1="50" y1="154" x2="220" y2="154" stroke-width="0.5"/>
+    <line class="grain" x1="54" y1="162" x2="220" y2="162" stroke-width="0.4"/>
+  </g>
+  <g>
+    <polygon class="sideEdge" points="32,98 46,108 38,108 38,134 32,134"/>
+    <polygon class="topEdge" points="32,98 220,98 230,108 46,108"/>
+    <rect class="faceA" x="46" y="108" width="174" height="26"/>
+    <rect class="topEdge" x="46" y="108" width="174" height="2"/>
+    <rect class="sideEdge" x="216" y="108" width="4" height="26" opacity="0.5"/>
+    <ellipse class="endGrain" cx="226" cy="121" rx="10" ry="13"/>
+    <ellipse class="ring" cx="226" cy="121" rx="6" ry="9" stroke-width="0.5"/>
+    <ellipse class="ring" cx="226" cy="121" rx="3" ry="5" stroke-width="0.4"/>
+  </g>
+  <g opacity="0.55">
+    <line class="grain" x1="50" y1="118" x2="220" y2="118" stroke-width="0.5"/>
+    <line class="grain" x1="54" y1="126" x2="220" y2="126" stroke-width="0.4"/>
+  </g>
+  <g>
+    <polygon class="sideEdge" points="32,62 46,72 38,72 38,98 32,98"/>
+    <polygon class="topEdge" points="32,62 220,62 230,72 46,72"/>
+    <rect class="faceB" x="46" y="72" width="174" height="26"/>
+    <rect class="topEdge" x="46" y="72" width="174" height="2"/>
+    <rect class="sideEdge" x="216" y="72" width="4" height="26" opacity="0.5"/>
+    <ellipse class="endGrain" cx="226" cy="85" rx="10" ry="13"/>
+    <ellipse class="ring" cx="226" cy="85" rx="6" ry="9" stroke-width="0.5"/>
+    <ellipse class="ring" cx="226" cy="85" rx="3" ry="5" stroke-width="0.4"/>
+  </g>
+  <g opacity="0.55">
+    <line class="grain" x1="50" y1="82" x2="220" y2="82" stroke-width="0.5"/>
+    <line class="grain" x1="54" y1="90" x2="220" y2="90" stroke-width="0.4"/>
+  </g>
+</svg>

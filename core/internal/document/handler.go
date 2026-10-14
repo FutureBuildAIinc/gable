@@ -41,6 +41,7 @@ type Handler struct {
 	quoteSvc   *quote.Service          // optional; see WithQuotes
 	poSvc      *purchase_order.Service // optional; see WithPurchaseOrders
 	deliveries emaildelivery.Recorder  // optional; see WithDeliveries
+	sales      SaleInvoices            // optional; see WithSaleReceipts
 	sends      sync.WaitGroup
 
 	sendTimeout time.Duration // zero means the package's sendTimeout; tests shorten it
@@ -154,7 +155,12 @@ func (h *Handler) HandlePrintInvoice(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
 	}
+	h.printInvoice(w, r, id)
+}
 
+// printInvoice answers the invoice's document: the documents route and the
+// counter's receipt route render it through this one function.
+func (h *Handler) printInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	inv, err := h.invoiceSvc.GetInvoiceRecord(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
@@ -222,7 +228,13 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 		httputil.RespondError(w, r, "invalid id", http.StatusBadRequest, err)
 		return
 	}
+	h.emailInvoice(w, r, id, noEmail)
+}
 
+// emailInvoice queues the invoice's email to its customer: the invoice email
+// route and the counter's receipt email route send through this one function,
+// and differ only in the refusal they answer when the customer has no address.
+func (h *Handler) emailInvoice(w http.ResponseWriter, r *http.Request, id uuid.UUID, noAddress func() error) {
 	inv, err := h.invoiceSvc.GetInvoiceRecord(r.Context(), id)
 	if err != nil {
 		httputil.RespondError(w, r, "invoice not found", http.StatusNotFound, err)
@@ -244,7 +256,7 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 	// with its generic one, so this one answers the wire envelope.
 	email := cust.EmailOrEmpty()
 	if email == "" {
-		httpx.WriteError(w, r, noEmail())
+		httpx.WriteError(w, r, noAddress())
 		return
 	}
 	pdfBytes, err := h.docSvc.GenerateInvoicePDF(r.Context(), inv, cust)

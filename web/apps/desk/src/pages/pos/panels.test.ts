@@ -36,17 +36,13 @@ describe('payPlan', () => {
 });
 
 describe('panelProgress', () => {
-  it('walks Customer, Payment, Summary as the sale advances', () => {
-    expect(panelProgress({ hasLines: false, customerNamed: false, tendered: false })).toEqual(
-      { customer: 'current', payment: 'upcoming', summary: 'upcoming' });
-    expect(panelProgress({ hasLines: true, customerNamed: false, tendered: false })).toEqual(
-      { customer: 'current', payment: 'current', summary: 'upcoming' });
-    expect(panelProgress({ hasLines: true, customerNamed: true, tendered: true })).toEqual(
-      { customer: 'done', payment: 'done', summary: 'current' });
+  it('walks Customer, Payment, Summary one step at a time', () => {
+    expect(panelProgress('customer', false)).toEqual({ customer: 'current', payment: 'upcoming', summary: 'upcoming' });
+    expect(panelProgress('payment', false)).toEqual({ customer: 'done', payment: 'current', summary: 'upcoming' });
+    expect(panelProgress('summary', false)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
   });
 
-  it('lights Summary and nothing else on a completed sale', () => {
-    expect(panelProgress({ hasLines: true, customerNamed: false, tendered: false, completed: true })).toEqual(
-      { customer: 'done', payment: 'done', summary: 'current' });
+  it('marks all three steps done on a completed sale', () => {
+    expect(panelProgress('customer', true)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
   });
 });

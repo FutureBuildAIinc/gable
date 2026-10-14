@@ -43,6 +43,9 @@ export function standingOf(c: CounterCustomer): Standing {
     }
 }
 
+/** The words for a charge refused only for want of the purchase order. */
+export const PO_REFUSAL = 'This account asks for a purchase order: enter it before charging';
+
 /**
  * Why a charge of totalCents to this account is refused at the counter, in
  * words, or null when it is offered. The server holds the same rules (409
@@ -62,7 +65,7 @@ export function chargeRefusal(
         return `This sale is ${money(totalCents - customer.available_credit_cents)} over the available credit`;
     }
     if (customer.po_required && purchaseOrder.trim() === '') {
-        return 'This account asks for a purchase order: enter it before charging';
+        return PO_REFUSAL;
     }
     return null;
 }

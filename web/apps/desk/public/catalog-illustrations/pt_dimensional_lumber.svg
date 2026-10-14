@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pressure treated MCA lumber stack</title>
+  <defs><style>
+    .face{fill:#8a6e3a}
+    .faceHi{fill:#9e8450}
+    .faceShade{fill:#5a4824}
+    .topedge{fill:#a08c54}
+    .endgrain{fill:#5a4824}
+    .endring{stroke:#3a2e18;fill:none}
+    .strap{fill:#3a3530}
+    .strapshade{fill:#5a524a}
+    .tag{fill:#faf3e0}
+    .stamp{fill:#3a2410}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="100" ry="7" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="face" x="30" y="166" width="196" height="22"/>
+    <rect class="topedge" x="30" y="166" width="196" height="2"/>
+    <line x1="36" y1="174" x2="220" y2="174" stroke="#3a2e18" stroke-width="0.5" opacity="0.55"/>
+    <line x1="42" y1="182" x2="222" y2="182" stroke="#3a2e18" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="166" width="14" height="22"/>
+    <ellipse class="endring" cx="233" cy="177" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="endring" cx="233" cy="177" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="144" width="196" height="22"/>
+    <rect class="topedge" x="30" y="144" width="196" height="2"/>
+    <line x1="38" y1="152" x2="222" y2="152" stroke="#3a2e18" stroke-width="0.5" opacity="0.55"/>
+    <line x1="34" y1="160" x2="218" y2="160" stroke="#3a2e18" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="144" width="14" height="22"/>
+    <ellipse class="endring" cx="233" cy="155" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="endring" cx="233" cy="155" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="122" width="196" height="22"/>
+    <rect class="topedge" x="30" y="122" width="196" height="2"/>
+    <line x1="40" y1="130" x2="220" y2="130" stroke="#3a2e18" stroke-width="0.5" opacity="0.55"/>
+    <line x1="36" y1="138" x2="224" y2="138" stroke="#3a2e18" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="122" width="14" height="22"/>
+    <ellipse class="endring" cx="233" cy="133" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="endring" cx="233" cy="133" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="100" width="196" height="22"/>
+    <rect class="topedge" x="30" y="100" width="196" height="2"/>
+    <line x1="38" y1="108" x2="220" y2="108" stroke="#3a2e18" stroke-width="0.5" opacity="0.55"/>
+    <line x1="42" y1="116" x2="222" y2="116" stroke="#3a2e18" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="100" width="14" height="22"/>
+    <ellipse class="endring" cx="233" cy="111" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="endring" cx="233" cy="111" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <rect class="strap" x="78" y="96" width="5" height="98"/>
+  <rect class="strapshade" x="78" y="96" width="1.5" height="98"/>
+  <rect class="strap" x="172" y="96" width="5" height="98"/>
+  <rect class="strapshade" x="172" y="96" width="1.5" height="98"/>
+  <rect x="78" y="102" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="102" width="5" height="3" fill="#5a524a"/>
+  <rect x="78" y="184" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="184" width="5" height="3" fill="#5a524a"/>
+  <g>
+    <rect class="tag" x="100" y="138" width="58" height="20" rx="2"/>
+    <rect class="stamp" x="100" y="138" width="58" height="3"/>
+    
+    <text x="129" y="154" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="700" letter-spacing="0.5" fill="#3a2410" text-anchor="middle">MCA 2x4-8</text>
+  </g>
+</svg>

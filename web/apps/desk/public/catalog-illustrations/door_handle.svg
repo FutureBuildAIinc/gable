@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Door lever in brushed nickel</title>
+  <defs>
+    <style>
+      .plateMain{fill:#bdbdbd}
+      .plateHi{fill:#e0e0e0}
+      .plateShade{fill:#7a7a7a}
+      .leverMain{fill:#bdbdbd}
+      .leverHi{fill:#e0e0e0}
+      .leverShade{fill:#7a7a7a}
+      .screw{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="86" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="plateMain" x="80" y="60" width="96" height="148" rx="14"/>
+    <rect class="plateHi" x="80" y="60" width="96" height="6" rx="3" opacity="0.6"/>
+    <rect class="plateShade" x="80" y="200" width="96" height="8" rx="4" opacity="0.5"/>
+    <rect class="plateShade" x="168" y="60" width="8" height="148" opacity="0.5"/>
+    <g opacity="0.5">
+      <line x1="86" y1="72" x2="170" y2="72" stroke="#7a7a7a" stroke-width="0.4"/>
+      <line x1="86" y1="92" x2="170" y2="92" stroke="#7a7a7a" stroke-width="0.4"/>
+      <line x1="86" y1="112" x2="170" y2="112" stroke="#7a7a7a" stroke-width="0.4"/>
+      <line x1="86" y1="132" x2="170" y2="132" stroke="#7a7a7a" stroke-width="0.4"/>
+      <line x1="86" y1="152" x2="170" y2="152" stroke="#7a7a7a" stroke-width="0.4"/>
+      <line x1="86" y1="172" x2="170" y2="172" stroke="#7a7a7a" stroke-width="0.4"/>
+      <line x1="86" y1="192" x2="170" y2="192" stroke="#7a7a7a" stroke-width="0.4"/>
+    </g>
+  </g>
+  <g>
+    <ellipse class="leverMain" cx="128" cy="134" rx="22" ry="22"/>
+    <ellipse class="leverHi" cx="128" cy="134" rx="22" ry="22" fill="none" stroke="#cdcdcd" stroke-width="2" opacity="0.6"/>
+    <rect class="leverMain" x="120" y="118" width="16" height="14" rx="2"/>
+    <rect class="leverHi" x="120" y="118" width="3" height="14" opacity="0.6"/>
+    <rect class="leverShade" x="133" y="118" width="3" height="14" opacity="0.7"/>
+    <rect class="leverMain" x="32" y="128" width="96" height="12" rx="6"/>
+    <rect class="leverHi" x="32" y="128" width="96" height="2" opacity="0.6"/>
+    <rect class="leverShade" x="32" y="138" width="96" height="2" opacity="0.7"/>
+    <ellipse class="leverMain" cx="40" cy="134" rx="6" ry="6"/>
+    <ellipse class="leverHi" cx="40" cy="132" rx="3" ry="2" opacity="0.7"/>
+  </g>
+  <g>
+    <circle class="screw" cx="92" cy="76" r="4"/>
+    <line x1="89" y1="76" x2="95" y2="76" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="92" y1="73" x2="92" y2="79" stroke="#1a1a1a" stroke-width="0.8"/>
+    <circle class="screw" cx="164" cy="76" r="4"/>
+    <line x1="161" y1="76" x2="167" y2="76" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="164" y1="73" x2="164" y2="79" stroke="#1a1a1a" stroke-width="0.8"/>
+    <circle class="screw" cx="92" cy="192" r="4"/>
+    <line x1="89" y1="192" x2="95" y2="192" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="92" y1="189" x2="92" y2="195" stroke="#1a1a1a" stroke-width="0.8"/>
+    <circle class="screw" cx="164" cy="192" r="4"/>
+    <line x1="161" y1="192" x2="167" y2="192" stroke="#1a1a1a" stroke-width="0.8"/>
+    <line x1="164" y1="189" x2="164" y2="195" stroke="#1a1a1a" stroke-width="0.8"/>
+  </g>
+</svg>
