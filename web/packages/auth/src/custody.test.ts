@@ -175,7 +175,7 @@ describe('custody — the counter\'s remembered sale keys', () => {
   })
 })
 
-describe('custody — the desk\'s open apps', () => {
+describe('custody: the desk\'s open apps', () => {
   it('sign out closes them, so the next person starts on their own home', () => {
     localStorage.setItem('gable_workspace', JSON.stringify({ tabs: [{ key: 'reporting', path: '/reports/ar-aging' }], active: 'reporting' }))
     localStorage.setItem('gable.pos.register.main', 'REG-01')
