@@ -9,6 +9,8 @@ package pos_test
 // the same as removing the line and adding it at the new quantity.
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"testing"
@@ -252,5 +254,99 @@ func TestQuantityChangeRaceHasOneWinner(t *testing.T) {
 	got := f.do("GET", "/api/v1/pos/transactions/"+s, nil)
 	if totalsOf(t, got) != totalsOf(t, want) {
 		t.Errorf("totals %v, want the winner's quantity alone %v", totalsOf(t, got), totalsOf(t, want))
+	}
+}
+
+// RULE (money): for every kind of line the counter sells, a quantity change
+// gives the line total, its taxable flag, its tax and the sale's totals that
+// removing the line and adding it at the new quantity gives.
+func TestQuantityChangeEqualsRemoveAndAddForEveryLineKind(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	var chargeCode string
+	if err := f.db.Pool.QueryRow(context.Background(),
+		`SELECT code FROM charge_codes WHERE is_active ORDER BY code LIMIT 1`).Scan(&chargeCode); err != nil {
+		t.Fatalf("no active charge code: %v", err)
+	}
+	product := func(extra map[string]any) func(qty string) map[string]any {
+		return func(qty string) map[string]any {
+			l := map[string]any{"product_id": f.productID.String(), "quantity": qty}
+			for k, v := range extra {
+				l[k] = v
+			}
+			return l
+		}
+	}
+	cases := []struct {
+		name     string
+		line     func(qty string) map[string]any
+		from, to string
+	}{
+		{"plain", product(nil), "2", "7"},
+		{"fractional", product(nil), "2.5", "3.3333"},
+		{"kit", func(qty string) map[string]any {
+			return map[string]any{"product_id": f.kitID.String(), "quantity": qty}
+		}, "1", "3"},
+		{"override price", product(map[string]any{"unit_price_ten_thousandths": 70000, "override_reason": "matched a quote"}), "2", "5"},
+		{"percent discount", product(map[string]any{"discount_percent": "10", "discount_reason": "contractor"}), "2", "5"},
+		{"cents discount", product(map[string]any{"discount_cents": 150, "discount_reason": "damaged edge"}), "2", "5"},
+		{"unit ratio", product(map[string]any{"price_uom": "M", "uom_qty": "1000", "price_uom_qty": "1"}), "500", "1500"},
+		{"non stock untaxed", func(qty string) map[string]any {
+			return map[string]any{"description": "cut to length", "uom": "EA", "quantity": qty,
+				"unit_price_ten_thousandths": 100000, "taxable": false}
+		}, "2", "5"},
+		{"non stock taxed", func(qty string) map[string]any {
+			return map[string]any{"description": "cut to length", "uom": "EA", "quantity": qty,
+				"unit_price_ten_thousandths": 100000, "taxable": true}
+		}, "2", "5"},
+		{"charge", func(qty string) map[string]any {
+			return map[string]any{"charge_code": chargeCode, "description": "freight", "quantity": qty, "unit_price_ten_thousandths": 250000}
+		}, "1", "3"},
+	}
+	topLine := func(r resp) map[string]any {
+		raw, _ := r.body["lines"].([]any)
+		for _, l := range raw {
+			m := l.(map[string]any)
+			if m["parent_line_id"] == nil {
+				return m
+			}
+		}
+		return nil
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			a := f.startSale(nil)
+			added := f.addLine(a, c.line(c.from))
+			if added.status != http.StatusOK {
+				t.Fatalf("add = %d: %s", added.status, added.raw)
+			}
+			changed := f.patchQty(a, lineIDs(t, added)[0], c.to, rev(t, added))
+			if changed.status != http.StatusOK {
+				t.Fatalf("change = %d: %s", changed.status, changed.raw)
+			}
+
+			b := f.startSale(nil)
+			first := f.addLine(b, c.line(c.from))
+			if r := f.do("DELETE", "/api/v1/pos/transactions/"+b+"/items/"+lineIDs(t, first)[0], nil,
+				"X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)); r.status != http.StatusOK {
+				t.Fatalf("remove = %d: %s", r.status, r.raw)
+			}
+			again := f.addLine(b, c.line(c.to))
+			if again.status != http.StatusOK {
+				t.Fatalf("re-add = %d: %s", again.status, again.raw)
+			}
+			if got, want := totalsOf(t, changed), totalsOf(t, again); got != want {
+				t.Errorf("subtotal, tax, total = %v, remove and add = %v", got, want)
+			}
+			got, want := topLine(changed), topLine(again)
+			for _, k := range []string{"line_total_cents", "taxable", "unit_price_ten_thousandths", "price_source", "quantity"} {
+				if fmt.Sprint(got[k]) != fmt.Sprint(want[k]) {
+					t.Errorf("%s = %v, remove and add = %v", k, got[k], want[k])
+				}
+			}
+			if n, m := len(changed.body["lines"].([]any)), len(again.body["lines"].([]any)); n != m {
+				t.Errorf("%d lines, remove and add %d", n, m)
+			}
+		})
 	}
 }
