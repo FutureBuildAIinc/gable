@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // The counter's Panels layout, as pure functions of the sale's figures: what
-// Pay will send and what the three panels show as the sale's progress. The
+// Pay will send and which of the three panels is the sale's current step. The
 // tenders it plans are exactly the ones the Add tender and Complete steps
 // sent before; only the number of clicks changes. Integer cents throughout.
 
@@ -33,18 +33,27 @@ export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn |
 
 export type PanelState = 'done' | 'current' | 'upcoming';
 
+export type PanelKey = 'customer' | 'payment' | 'summary';
+
 export interface PanelProgress {
     customer: PanelState;
     payment: PanelState;
     summary: PanelState;
 }
 
-/** The three panels as the sale's linear progress; all three stay visible. */
-export function panelProgress(s: { hasLines: boolean; customerNamed: boolean; tendered: boolean; completed?: boolean }): PanelProgress {
-    if (s.completed) return { customer: 'done', payment: 'done', summary: 'current' };
-    return {
-        customer: s.customerNamed ? 'done' : 'current',
-        payment: s.tendered ? 'done' : s.hasLines ? 'current' : 'upcoming',
-        summary: s.tendered ? 'current' : 'upcoming',
+const ORDER: PanelKey[] = ['customer', 'payment', 'summary'];
+
+/**
+ * The three panels as one linear walk: the panels before the current step are
+ * done, the current one is lit, the rest wait. A completed sale has walked all
+ * three and shows Summary as the last lit step.
+ */
+export function panelProgress(step: PanelKey, completed: boolean): PanelProgress {
+    if (completed) return { customer: 'done', payment: 'done', summary: 'current' };
+    const at = ORDER.indexOf(step);
+    const stateOf = (k: PanelKey): PanelState => {
+        const i = ORDER.indexOf(k);
+        return i < at ? 'done' : i === at ? 'current' : 'upcoming';
     };
+    return { customer: stateOf('customer'), payment: stateOf('payment'), summary: stateOf('summary') };
 }
