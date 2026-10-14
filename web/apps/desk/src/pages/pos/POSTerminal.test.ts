@@ -1873,3 +1873,56 @@ describe('no tender until the cashier chooses one', () => {
     el.remove();
   });
 });
+
+describe('the resets after Clear tenders and Clear sale', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const pressed = (el: Element) => ['cash', 'check', 'card', 'account']
+    .filter((m) => q(el, `tender-${m}`)?.getAttribute('aria-pressed') === 'true');
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('puts the chosen method back to none on Clear tenders', async () => {
+    const el = await mount(sale());
+    await chooseCash(el);
+    await typeInto(el, '50.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual(['card']);
+    const clear = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Clear tenders') as HTMLElement;
+    clear.click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+
+  it('drops the added tenders on Clear sale, so the next lines are not paid on them', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    svc.removeItem
+      .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
+      .mockResolvedValueOnce(sale({ lines: [], subtotal_cents: 0, tax_cents: 0, total_cents: 0 }));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await chooseCash(el);
+    await typeInto(el, '86.50');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    q(el, 'pos-clear-sale').click();
+    await settle();
+    await el.updateComplete;
+    // a new line lands on the emptied sale
+    (el as unknown as { _sale: Sale })._sale = sale({
+      lines: [line('n', 5000)] as unknown as Sale['lines'], subtotal_cents: 5000, tax_cents: 0, total_cents: 5000,
+    });
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    confirm.mockRestore();
+    el.remove();
+  });
+});
