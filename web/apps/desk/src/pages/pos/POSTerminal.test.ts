@@ -18,14 +18,9 @@ const svc = vi.hoisted(() => ({
   openTill: vi.fn(),
   tillReport: vi.fn(),
   closeTill: vi.fn(),
+  printReceipt: vi.fn(),
+  emailReceipt: vi.fn(),
 }));
-
-const inv = vi.hoisted(() => ({ emailInvoice: vi.fn() }));
-
-vi.mock('../../services/InvoiceService', async (orig) => {
-  const real = await orig<typeof import('../../services/InvoiceService')>();
-  return { ...real, InvoiceService: { ...real.InvoiceService, emailInvoice: inv.emailInvoice } };
-});
 
 vi.mock('../../services/POSService', async (orig) => {
   const real = await orig<typeof import('../../services/POSService')>();
@@ -791,6 +786,50 @@ describe('the Panels board', () => {
     });
   });
 
+  describe('the account refusal in words', () => {
+    const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const onHold = { ...account, standing: 'no_credit', available_credit_cents: 0 } as unknown as CounterCustomer;
+    const withCustomer = async (c: CounterCustomer) => {
+      const el = await mount(sale({ customer_id: c.id }));
+      (el as unknown as Inner)._customer = c;
+      await el.updateComplete;
+      return el;
+    };
+
+    it('prints the reason under the tenders, not only as a tooltip, with the way on for a missing PO', async () => {
+      const el = await withCustomer(needsPO);
+      const note = q(el, 'pos-account-refusal');
+      expect(note.textContent).toContain('purchase order');
+      expect(q(el, 'panel-payment-body').contains(note)).toBe(true);
+      toggle(el, 'payment').click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('false');
+      q(el, 'pos-refusal-customer').click();
+      await el.updateComplete;
+      expect(expanded(el, 'customer')).toBe('true');
+      expect(expanded(el, 'payment')).toBe('false');
+      el.remove();
+    });
+
+    it('says an account on hold in words with no way on, and says nothing for a walk in', async () => {
+      const held = await withCustomer(onHold);
+      expect(q(held, 'pos-account-refusal').textContent).toContain('no credit');
+      expect(q(held, 'pos-refusal-customer')).toBeNull();
+      const walk = await mount(sale());
+      expect(q(walk, 'pos-account-refusal')).toBeNull();
+      held.remove();
+      walk.remove();
+    });
+
+    it('drops the words once the purchase order is entered', async () => {
+      const el = await withCustomer(needsPO);
+      (el as unknown as { _poText: string })._poText = 'PO-7';
+      await el.updateComplete;
+      expect(q(el, 'pos-account-refusal')).toBeNull();
+      el.remove();
+    });
+  });
+
   it('dims Clear sale with no lines as Pay is dimmed', async () => {
     const el = await mount(sale({ lines: [] }));
     const clear = q(el, 'pos-clear-sale') as HTMLButtonElement;
@@ -834,25 +873,25 @@ describe('the Panels board', () => {
       bare.remove();
     });
 
-    it('opens the invoice document for Print', async () => {
-      const open = vi.spyOn(window, 'open').mockReturnValue(null);
-      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+    it('prints through the counter\'s own receipt route with the sale\'s id', async () => {
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
       q(el, 'pos-receipt-print').click();
-      expect(open).toHaveBeenCalledWith('/api/v1/documents/print/invoice/inv-1', '_blank');
-      open.mockRestore();
+      expect(svc.printReceipt).toHaveBeenCalledWith('sale-9');
       el.remove();
     });
 
     it('sends the invoice for Email and says so, or says why not', async () => {
-      inv.emailInvoice.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('customer has no email address on file'));
-      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      svc.emailReceipt.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('This account has no email address on file'));
+      const el = await mount(done({ id: 'sale-9', invoice_id: 'inv-1', customer_id: 'cu1' }));
       q(el, 'pos-receipt-email').click();
       await flush(el);
-      expect(inv.emailInvoice).toHaveBeenCalledWith('inv-1');
+      expect(svc.emailReceipt).toHaveBeenCalledWith('sale-9');
       expect(q(el, 'pos-receipt-note').textContent).toContain('sent');
       q(el, 'pos-receipt-email').click();
       await flush(el);
-      expect(el.querySelector('[role="alert"]')?.textContent).toContain('no email address');
+      // the words sit beside Email receipt, not in the page band
+      expect(q(el, 'pos-receipt-note').textContent).toContain('no email address');
+      expect(q(el, 'pos-complete').contains(q(el, 'pos-receipt-note'))).toBe(true);
       el.remove();
     });
 
