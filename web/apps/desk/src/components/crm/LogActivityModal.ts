@@ -7,6 +7,22 @@ import type { CreateActivityRequest, Contact, ActivityType } from '../../types/c
 import { crmApi } from '../../services/crmApi';
 import { ToastService } from '../../lib/toast-service';
 import { todayDay } from '../../lib/dates.ts';
+
+// The current hour and minute, HH:MM, as the time entry's default.
+function nowTime(): string {
+  const n = new Date();
+  return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`;
+}
+
+// The app's own time entry takes HH:MM and nothing else.
+function parseTime(text: string): string | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return null;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
 import '../ui/gable-date-field.ts';
 import type { GableDateField } from '../ui/gable-date-field.ts';
 
@@ -23,6 +39,7 @@ export class GableLogActivityModal extends LitElement {
   @state() private _activityType: ActivityType = 'call';
   @state() private _description = '';
   @state() private _activityDay = todayDay();
+  @state() private _activityTime = nowTime();
   @state() private _contactId = '';
 
   private async _handleSubmit(e: Event) {
@@ -32,12 +49,17 @@ export class GableLogActivityModal extends LitElement {
         ToastService.show('Choose a date', 'error');
         return;
       }
+      const time = parseTime(this._activityTime);
+      if (!time) {
+        ToastService.show('Enter the time as HH:MM, for example 09:30', 'error');
+        return;
+      }
       this._loading = true;
       const payload: CreateActivityRequest = {
         activity_type: this._activityType,
         description: this._description,
-        // The day the person picked, at noon so the day survives every time zone's round trip.
-        activity_date: new Date(`${this._activityDay}T12:00:00`).toISOString(),
+        // The day and time the person entered, in their own zone.
+        activity_date: new Date(`${this._activityDay}T${time}:00`).toISOString(),
         contact_id: this._contactId === '' ? undefined : this._contactId,
       };
       await crmApi.createActivity(this.customerId, payload);
@@ -84,12 +106,29 @@ export class GableLogActivityModal extends LitElement {
             </div>
 
             <div class="mb-4">
-              <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
-              <gable-date-field
-                label="Activity date"
-                .value=${this._activityDay}
-                @change=${(e: Event) => this._activityDay = (e.target as GableDateField).value}
-              ></gable-date-field>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+                  <gable-date-field
+                    label="Activity date"
+                    .value=${this._activityDay}
+                    @change=${(e: Event) => this._activityDay = (e.target as GableDateField).value}
+                  ></gable-date-field>
+                </div>
+                <div>
+                  <label for="log-activity-time" class="block text-sm font-medium text-gray-700 mb-1">Time</label>
+                  <input
+                    id="log-activity-time"
+                    type="text"
+                    inputmode="numeric"
+                    aria-label="Activity time"
+                    placeholder="HH:MM"
+                    .value=${this._activityTime}
+                    @input=${(e: InputEvent) => this._activityTime = (e.target as HTMLInputElement).value}
+                    class="w-full px-3 py-2 border border-zinc-300 rounded-md text-zinc-900 focus:ring-2 focus:ring-blueprint-blue/50 focus:border-blueprint-blue"
+                  />
+                </div>
+              </div>
             </div>
 
             <div class="mb-4">
