@@ -9,6 +9,10 @@ function dialogEl(): GableAppDialog {
   return q<GableAppDialog>(document.body, 'gable-app-dialog')
 }
 
+function dialogElSafe(): GableAppDialog | null {
+  return document.body.querySelector<GableAppDialog>('gable-app-dialog')
+}
+
 async function settleDialog(): Promise<GableAppDialog> {
   const el = dialogEl()
   await el.updateComplete
@@ -154,6 +158,32 @@ describe('gable-app-dialog confirmDialog', () => {
     expect(document.body.querySelectorAll('gable-app-dialog').length).toBe(1)
     clickConfirm()
     await expect(second).resolves.toBe(true)
+  })
+})
+
+describe('gable-app-dialog in the top layer', () => {
+  it('renders as a native dialog element, open while the question is up', async () => {
+    const result = confirmDialog({ title: 'Confirm this order?' })
+    await settleDialog()
+    const dlg = dialogEl().querySelector('dialog')
+    expect(dlg, 'the app dialog renders a native <dialog> so the browser puts it in the top layer').not.toBeNull()
+    expect(dlg!.hasAttribute('open') || (dlg as HTMLDialogElement).open).toBe(true)
+    clickCancel()
+    await expect(result).resolves.toBe(false)
+    expect(dialogElSafe()?.querySelector('dialog') ?? null).toBeNull()
+  })
+
+  it('stays answerable when asked from inside a modal layer', async () => {
+    const modal = document.createElement('div')
+    modal.className = 'fixed inset-0 z-[60]'
+    document.body.appendChild(modal)
+    const result = confirmDialog({ title: 'Delete this vehicle?', tone: 'danger' })
+    await settleDialog()
+    const dlg = dialogEl().querySelector('dialog')
+    expect(dlg).not.toBeNull()
+    clickConfirm()
+    await expect(result).resolves.toBe(true)
+    modal.remove()
   })
 })
 
