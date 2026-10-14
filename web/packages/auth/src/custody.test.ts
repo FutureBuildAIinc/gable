@@ -56,7 +56,7 @@ afterEach(() => {
   authConfig.devMode = false
 })
 
-describe('custody — subject', () => {
+describe('custody, subject', () => {
   it('is null signed out, the sub claim for a token, dev:<name> for a dev session', () => {
     const c = new AuthCustody()
     expect(c.subject).toBeNull()
