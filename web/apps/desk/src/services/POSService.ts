@@ -102,6 +102,19 @@ export const posService = {
         return response.json();
     },
 
+    /** Opens the completed sale's own receipt document in a new tab (the counter's role reaches it). */
+    printReceipt(saleId: string): void {
+        window.open(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`, '_blank');
+    },
+
+    /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */
+    async emailReceipt(saleId: string): Promise<void> {
+        await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt/email`, { method: 'POST' }),
+            'Failed to email the receipt',
+        );
+    },
+
     async addItem(saleId: string, productID: string, quantity: string, uom?: string): Promise<Sale> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items`, {

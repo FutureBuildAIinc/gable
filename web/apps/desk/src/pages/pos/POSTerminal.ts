@@ -8,7 +8,6 @@ import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, Tender
 import { branchContext } from '../../services/BranchContext';
 import { chargeRefusal, standingOf, money } from './standing';
 import { formatPrice4 } from '../../lib/utils';
-import { InvoiceService } from '../../services/InvoiceService';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
 import { authCustody } from '@gable/auth';
@@ -19,7 +18,6 @@ const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
-const API_URL = import.meta.env.VITE_API_URL || '';
 const methodLabel = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m.charAt(0).toUpperCase() + m.slice(1));
 
 /**
@@ -53,6 +51,7 @@ export class POSTerminal extends LitElement {
   // The picture each product came with from the catalogue, by product id.
   @state() private _images: Record<string, string> = {};
   @state() private _receiptNote: string | null = null;
+  @state() private _receiptRefused = false;
 
   // The completed sale offered for a return or a void.
   @state() private _completed: Sale | null = null;
@@ -517,6 +516,7 @@ export class POSTerminal extends LitElement {
       this._poText = '';
       this._jobId = '';
       this._receiptNote = null;
+      this._receiptRefused = false;
       // A completed sale on screen stays offerable for a void or a return
       // until this new sale replaces it (New Sale, a product or a customer).
       const reg = this._registerId;
@@ -1098,6 +1098,10 @@ export class POSTerminal extends LitElement {
     const change = isCash && entry !== null && this._tenderedSoFar < total
       ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
     const ready = this._till !== null && hasLines && open;
+    // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
+    const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
+    const needsPO = accountWhy !== null && this._customer?.po_required === true && this._poText.trim() === ''
+      && this._customer.standing !== 'no_credit' && this._customer.standing !== 'over_limit';
     return html`
       <section class="${this._panelClass(isOpen)} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-payment"
         aria-disabled=${this._till === null ? 'true' : 'false'}>
@@ -1130,6 +1134,13 @@ export class POSTerminal extends LitElement {
                 </button>`;
             })}
           </div>
+          ${accountWhy !== null ? html`
+            <div class="mt-3 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" data-testid="pos-account-refusal">
+              <p>${accountWhy}</p>
+              ${needsPO ? html`
+                <button data-testid="pos-refusal-customer" @click=${() => { this._step = 'customer'; this._open = 'customer'; }}
+                  class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">Enter the purchase order in Customer</button>` : nothing}
+            </div>` : nothing}
           <label class="mt-3 block text-xs text-slate-400" for="pos-tender-amount">
             ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
           </label>
@@ -1257,24 +1268,22 @@ export class POSTerminal extends LitElement {
           class="mt-4 min-h-14 w-full rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
           ${label}
         </button>
+        ${completed ? nothing : html`
         <button data-testid="pos-clear-sale" @click=${() => this._clearSale()} ?disabled=${!clearable}
-          class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>
+          class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>`}
       </section>`;
   }
 
-  private _printReceipt(invoiceId: string) {
-    window.open(`${API_URL}/api/v1/documents/print/invoice/${invoiceId}`, '_blank');
-  }
-
-  /** Sends the sale's invoice to the contact on the account; the server says if there is none. */
-  private async _emailReceipt(invoiceId: string) {
+  /** Sends the sale's receipt to the contact on the account; the server says in words if there is none. */
+  private async _emailReceipt(saleId: string) {
     try {
       this._error = null;
-      await InvoiceService.emailInvoice(invoiceId);
+      await posService.emailReceipt(saleId);
       this._receiptNote = 'Receipt sent to the contact on the account';
+      this._receiptRefused = false;
     } catch (err: unknown) {
-      this._receiptNote = null;
-      this._error = err instanceof Error ? err.message : 'Failed to email the receipt';
+      this._receiptNote = err instanceof Error ? err.message : 'Failed to email the receipt';
+      this._receiptRefused = true;
     }
   }
 
@@ -1300,14 +1309,14 @@ export class POSTerminal extends LitElement {
           <div class="mt-4">
             <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Receipt</div>
             <div class="mt-2 flex flex-wrap gap-2">
-              <button data-testid="pos-receipt-print" @click=${() => this._printReceipt(invoice)}
+              <button data-testid="pos-receipt-print" @click=${() => posService.printReceipt(sale.id)}
                 class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">Print receipt</button>
               ${sale.customer_id !== null ? html`
-                <button data-testid="pos-receipt-email" @click=${() => this._emailReceipt(invoice)}
+                <button data-testid="pos-receipt-email" @click=${() => this._emailReceipt(sale.id)}
                   class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">Email receipt</button>` : nothing}
             </div>
             ${sale.customer_id !== null ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-contact">Email goes to the contact on the account</p>` : nothing}
-            ${this._receiptNote ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-note">${this._receiptNote}</p>` : nothing}
+            ${this._receiptNote ? html`<p class="mt-2 text-xs ${this._receiptRefused ? 'text-safety-red' : 'text-slate-400'}" data-testid="pos-receipt-note" role="status">${this._receiptNote}</p>` : nothing}
           </div>` : nothing}
         <div class="mt-4 flex gap-2">
           <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}

@@ -42,7 +42,7 @@ describe('panelProgress', () => {
     expect(panelProgress('summary', false)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
   });
 
-  it('lights Summary and nothing else on a completed sale', () => {
-    expect(panelProgress('customer', true)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
+  it('marks all three steps done on a completed sale', () => {
+    expect(panelProgress('customer', true)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
   });
 });

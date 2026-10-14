@@ -46,10 +46,10 @@ const ORDER: PanelKey[] = ['customer', 'payment', 'summary'];
 /**
  * The three panels as one linear walk: the panels before the current step are
  * done, the current one is lit, the rest wait. A completed sale has walked all
- * three and shows Summary as the last lit step.
+ * three, so all three are done.
  */
 export function panelProgress(step: PanelKey, completed: boolean): PanelProgress {
-    if (completed) return { customer: 'done', payment: 'done', summary: 'current' };
+    if (completed) return { customer: 'done', payment: 'done', summary: 'done' };
     const at = ORDER.indexOf(step);
     const stateOf = (k: PanelKey): PanelState => {
         const i = ORDER.indexOf(k);
