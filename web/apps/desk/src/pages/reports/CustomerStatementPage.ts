@@ -14,6 +14,8 @@ import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
 import { FileText, Search } from 'lucide';
 
+const API_URL = import.meta.env.VITE_API_URL || '';
+
 @customElement('gable-customer-statement')
 export class CustomerStatementPage extends LitElement {
     createRenderRoot() { return this; }
@@ -72,6 +74,14 @@ export class CustomerStatementPage extends LitElement {
         }
         // The statement read owns the loading state from here, in its own turn.
         await this._loadStatement();
+    }
+
+    /** Print opens the statement's own document for the period shown, as the invoice's print does. */
+    private _printStatement() {
+        const st = this.statement;
+        if (!st || !this.customerId) return;
+        const params = new URLSearchParams({ from: st.from, to: st.to });
+        window.open(`${API_URL}/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, '_blank');
     }
 
     private _onSearchInput(e: Event) {
@@ -231,7 +241,8 @@ export class CustomerStatementPage extends LitElement {
                         </button>
                         ${this.statement ? html`
                             <button
-                                @click=${() => window.print()}
+                                @click=${() => this._printStatement()}
+                                data-testid="print-statement"
                                 class="inline-flex items-center gap-2 border border-white/10 text-white px-4 py-2 rounded hover:bg-white/5 transition-colors"
                             >
                                 ${icon(FileText, 16, 'w-4 h-4')}
