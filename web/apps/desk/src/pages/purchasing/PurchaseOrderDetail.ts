@@ -27,6 +27,9 @@ export class PurchaseOrderDetail extends LitElement {
     @state() private receiving = false;
     @state() private receiveData: Record<string, { qty: number; locationId: string }> = {};
     @state() private isSubmitting = false;
+    /** The receipt just confirmed on this page: what came in, how much of
+     *  each line, into which bin. Kept so the page says it in words. */
+    @state() private lastReceipt: { description: string; sku?: string; qty: number; bin: string }[] | null = null;
 
     @state() private freightCharges: FreightCharge[] = [];
     @state() private freightUploading = false;
@@ -161,7 +164,19 @@ export class PurchaseOrderDetail extends LitElement {
             }
 
             await PurchaseOrderService.receivePO(this.po.id, { lines });
-            ToastService.show('Items received into inventory', 'success');
+            const binLabel = (id: string) => {
+                const loc = this.locations.find((l) => l.id === id);
+                return loc ? loc.path || loc.code : id;
+            };
+            this.lastReceipt = lines.map((l) => {
+                const poLine = (this.po?.lines || []).find((pl) => pl.id === l.line_id);
+                return {
+                    description: poLine?.description ?? '',
+                    sku: poLine?.sku,
+                    qty: l.qty_received,
+                    bin: binLabel(l.location_id),
+                };
+            });
             this.receiving = false;
             this._loadPO(this.po.id);
         } catch (err) {
@@ -221,6 +236,48 @@ export class PurchaseOrderDetail extends LitElement {
         };
     }
 
+    /** The receipt, in words, on the page: what came in, how much of each
+     *  line, into which bin, and that the order is now received. The bins
+     *  are named only for the receipt this page just confirmed (the wire
+     *  does not carry a line's bin); a reloaded received order lists each
+     *  line's received count instead. */
+    private _renderReceipt() {
+        const po = this.po;
+        if (!po) return nothing;
+        const receivedLines = (po.lines || []).filter((l) => l.qty_received > 0);
+        if (!this.lastReceipt && receivedLines.length === 0) return nothing;
+        if (po.status !== 'RECEIVED' && po.status !== 'PARTIAL') return nothing;
+
+        const statusWords = po.status === 'RECEIVED'
+            ? 'This purchase order is now received.'
+            : 'This purchase order is partially received.';
+
+        return html`
+            <div class="mb-6 rounded-xl border border-gable-green/30 bg-gable-green/5 p-4">
+                <div class="flex items-center gap-2 mb-1">
+                    ${icon(CheckCircle, 20, 'w-5 h-5 text-gable-green')}
+                    <h2 class="text-sm font-semibold text-white">${this.lastReceipt ? 'Receipt confirmed' : 'Received into inventory'}</h2>
+                </div>
+                <p class="text-sm text-zinc-300">${statusWords}</p>
+                <ul class="mt-2 space-y-1 text-sm text-zinc-300 list-none">
+                    ${this.lastReceipt
+                        ? this.lastReceipt.map((r) => html`
+                            <li>
+                                <span class="font-mono text-white">${r.qty}</span> × ${r.description}${r.sku ? html` <span class="text-zinc-500">(${r.sku})</span>` : nothing} into <span class="font-mono text-white">${r.bin}</span>
+                            </li>
+                        `)
+                        : receivedLines.map((l) => html`
+                            <li>
+                                ${l.description}${l.sku ? html` <span class="text-zinc-500">(${l.sku})</span>` : nothing}:
+                                <span class="font-mono text-white">${l.qty_received}</span> of
+                                <span class="font-mono text-white">${l.quantity}</span> received
+                            </li>
+                        `)}
+                </ul>
+            </div>
+        `;
+    }
+
     render() {
         if (!this.po) {
             return html`
@@ -278,6 +335,8 @@ export class PurchaseOrderDetail extends LitElement {
                     ` : nothing}
                 </div>
             </div>
+
+            ${this._renderReceipt()}
 
             <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl">
                 <div class="p-0">
