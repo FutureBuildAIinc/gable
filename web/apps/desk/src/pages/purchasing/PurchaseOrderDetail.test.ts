@@ -4,7 +4,7 @@
 /**
  * The purchase order detail page: three things it must show on a demo:
  *
- *  1. The vendor's name (the wire sends `vendor_name` already).
+ *  1. The vendor's name, resolved from `vendor_id` (the wire carries only the id).
  *  2. The PO's yard, as a branch name resolved client-side from
  *     `branch_id` against `BranchContext.branches`.
  *  3. Each line's SKU in place of the UUID fragment the old code put in
@@ -32,7 +32,6 @@ function po(overrides: Record<string, unknown> = {}) {
     id: PO_ID,
     branch_id: PO_BRANCH_ID,
     vendor_id: 'v-1',
-    vendor_name: 'Acme Lumber',
     status: 'SENT',
     source: 'MANUAL',
     created_at: '2031-03-09T08:00:00Z',
@@ -43,7 +42,6 @@ function po(overrides: Record<string, unknown> = {}) {
         id: 'l-1',
         po_id: PO_ID,
         product_id: PRODUCT_ID,
-        sku: 'LUM-2X4-08',
         description: '2x4x8 SPF Premium',
         quantity: 50,
         qty_received: 0,
@@ -99,6 +97,8 @@ describe('purchase order detail header', () => {
       if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
       if (url.endsWith(`/purchase-orders/${PO_ID}`)) return jsonResponse(po())
       if (url.includes('/locations')) return jsonResponse([])
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
       return jsonResponse([])
     }))
     const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
@@ -110,6 +110,8 @@ describe('purchase order detail header', () => {
       if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
       if (url.endsWith(`/purchase-orders/${PO_ID}`)) return jsonResponse(po())
       if (url.includes('/locations')) return jsonResponse([])
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
       return jsonResponse([])
     }))
     const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
@@ -122,6 +124,8 @@ describe('purchase order detail header', () => {
       if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
       if (url.endsWith(`/purchase-orders/${PO_ID}`)) return jsonResponse(po())
       if (url.includes('/locations')) return jsonResponse([])
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
       return jsonResponse([])
     }))
     const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
@@ -146,6 +150,8 @@ describe('purchase order detail receive form', () => {
       if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
       if (url.endsWith(`/purchase-orders/${PO_ID}`)) return jsonResponse(po({ status: 'SENT' }))
       if (url.includes('/locations')) return jsonResponse(locationsPage)
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
       return jsonResponse([])
     }))
     const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })

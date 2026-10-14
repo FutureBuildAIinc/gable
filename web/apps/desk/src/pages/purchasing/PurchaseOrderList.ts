@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
+import { VendorService } from '../../services/VendorService';
 import { branchContext } from '../../services/BranchContext.ts';
 import type { PurchaseOrder, POSourceSummary } from '../../types/purchaseOrder';
 import type { ReorderAlert } from '../../types/product';
@@ -45,6 +46,8 @@ export class PurchaseOrderList extends LitElement {
     @state() private alerts: ReorderAlert[] = [];
     @state() private loading = true;
     @state() private sourceSummary: POSourceSummary = {};
+    /** Vendor names by id: the list route carries only `vendor_id`. */
+    @state() private vendorNames: Record<string, string> = {};
     private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
@@ -66,11 +69,13 @@ export class PurchaseOrderList extends LitElement {
 
     private async _loadData() {
         try {
-            const [poData, alertData, summary] = await Promise.all([
+            const [poData, alertData, summary, vendors] = await Promise.all([
                 PurchaseOrderService.listPOs(),
                 PurchaseOrderService.getReorderAlerts(),
                 PurchaseOrderService.getSourceSummary().catch(() => ({} as POSourceSummary)),
+                VendorService.listVendors().catch(() => []),
             ]);
+            this.vendorNames = Object.fromEntries((vendors || []).map((v) => [v.id, v.name]));
             this.pos = poData || [];
             this.alerts = alertData || [];
             this.sourceSummary = summary || {};
@@ -229,7 +234,7 @@ export class PurchaseOrderList extends LitElement {
                                             ${po.id.slice(0, 8)}...
                                         </td>
                                         <td class="px-6 py-4 text-zinc-200">
-                                            ${po.vendor_name ?? html`<span class="text-zinc-500">Not set</span>`}
+                                            ${po.vendor_name ?? (po.vendor_id ? this.vendorNames[po.vendor_id] : undefined) ?? html`<span class="text-zinc-500">Not set</span>`}
                                         </td>
                                         <td class="px-6 py-4 text-zinc-200">
                                             ${yardName || html`<span class="text-zinc-500">Not set</span>`}

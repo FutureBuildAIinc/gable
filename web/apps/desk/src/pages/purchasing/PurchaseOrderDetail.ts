@@ -10,6 +10,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import { LocationService } from '../../services/LocationService';
 import { ProductService } from '../../services/product.service.ts';
+import { VendorService } from '../../services/VendorService';
 import { branchContext } from '../../services/BranchContext.ts';
 import type { PurchaseOrder, PurchaseOrderLine, FreightCharge, FreightUploadResponse } from '../../types/purchaseOrder';
 import type { Location } from '../../types/location';
@@ -47,10 +48,11 @@ export class PurchaseOrderDetail extends LitElement {
     private async _loadPO(poId: string) {
         try {
             const data = await PurchaseOrderService.getPO(poId);
-            // The wire does not carry the SKU; resolve it for every product the
-            // PO lines reference. One fetch per unique product id; a missing
-            // product is left blank rather than failed.
-            await this._enrichLinesWithSku(data);
+            // The wire carries neither the SKU nor the vendor's name; resolve the
+            // SKU for every product the lines reference (one fetch per unique
+            // product id) and the vendor's name from its id. A missing product
+            // or vendor is left blank rather than failed.
+            await Promise.all([this._enrichLinesWithSku(data), this._resolveVendorName(data)]);
             this.po = data;
             const initial: Record<string, { qty: number; locationId: string }> = {};
             (data.lines || []).forEach((line: PurchaseOrderLine) => {
@@ -81,6 +83,16 @@ export class PurchaseOrderDetail extends LitElement {
                 // it just renders without a SKU.
             }
         }));
+    }
+
+    /** Fills `vendor_name` from `vendor_id` when the wire left it out. */
+    private async _resolveVendorName(po: PurchaseOrder): Promise<void> {
+        if (po.vendor_name || !po.vendor_id) return;
+        try {
+            po.vendor_name = (await VendorService.getVendor(po.vendor_id)).name;
+        } catch {
+            // The header simply omits the vendor.
+        }
     }
 
     private async _loadFreightCharges(poId: string) {
