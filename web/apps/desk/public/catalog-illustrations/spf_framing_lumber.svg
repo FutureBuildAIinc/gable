@@ -59,7 +59,7 @@
   <g>
     <rect class="tag" x="100" y="50" width="58" height="22" rx="2"/>
     <rect class="stamp" x="100" y="50" width="58" height="4"/>
-    <text x="129" y="60" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="700" letter-spacing="1" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    
     <text x="129" y="68" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="700" letter-spacing="0.5" fill="#3a2410" text-anchor="middle">SPF 2x4-8 #2&amp;BTR KD</text>
   </g>
 </svg>

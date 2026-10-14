@@ -27,7 +27,7 @@
     <rect class="label" x="62" y="86" width="132" height="124"/>
     <rect class="label" x="62" y="86" width="132" height="124" fill="none" stroke="#1a4a2a" stroke-width="0.6"/>
     <rect class="labelDark" x="62" y="86" width="132" height="22"/>
-    <text class="textBrand" x="128" y="102" font-size="13" fill="#faf3e0" text-anchor="middle">GardenPro</text>
+    
     <rect class="labelDark" x="62" y="200" width="132" height="10"/>
     <text class="textSub" x="128" y="124" font-size="10" fill="#1a4a2a" text-anchor="middle">FERTILIZER</text>
     <text class="textNums" x="128" y="146" font-size="14" fill="#c84a3d" text-anchor="middle">10-10-10</text>

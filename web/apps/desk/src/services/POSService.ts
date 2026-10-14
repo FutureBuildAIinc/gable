@@ -102,9 +102,20 @@ export const posService = {
         return response.json();
     },
 
-    /** Opens the completed sale's own receipt document in a new tab (the counter's role reaches it). */
-    printReceipt(saleId: string): void {
-        window.open(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`, '_blank');
+    /**
+     * Fetches the completed sale's own receipt through the authenticated client (a
+     * plain new tab would carry no token) and opens it from a blob url in a new tab.
+     * A refusal throws the server's words.
+     */
+    async printReceipt(saleId: string): Promise<void> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`),
+            'Failed to read the receipt',
+        );
+        const url = URL.createObjectURL(await response.blob());
+        window.open(url, '_blank');
+        // the tab has the document by then; the url is not kept
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
     },
 
     /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */

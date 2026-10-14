@@ -40,7 +40,7 @@
   <g>
     <rect class="label" x="42" y="118" width="56" height="58" rx="1"/>
     <rect x="42" y="118" width="56" height="6" fill="#3a2410"/>
-    <text class="textBrand" x="70" y="134" font-size="10" fill="#3a2410" text-anchor="middle">ProFrame</text>
+    
     <rect x="48" y="138" width="44" height="2" fill="#3a2410" opacity="0.7"/>
     <text class="textSub" x="70" y="148" font-size="6" fill="#3a2410" text-anchor="middle">ISO A</text>
     <text class="textSub" x="70" y="156" font-size="5" fill="#5a2418" text-anchor="middle">SIDE A</text>
@@ -65,7 +65,7 @@
   <g>
     <rect class="label" x="162" y="118" width="56" height="58" rx="1"/>
     <rect x="162" y="118" width="56" height="6" fill="#3a2410"/>
-    <text class="textBrand" x="190" y="134" font-size="10" fill="#3a2410" text-anchor="middle">ProFrame</text>
+    
     <rect x="168" y="138" width="44" height="2" fill="#3a2410" opacity="0.7"/>
     <text class="textSub" x="190" y="148" font-size="6" fill="#3a2410" text-anchor="middle">POLY B</text>
     <text class="textSub" x="190" y="156" font-size="5" fill="#3e0e2a" text-anchor="middle">SIDE B</text>

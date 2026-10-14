@@ -23,7 +23,7 @@
     <rect x="46" y="86" width="152" height="104" fill="none" stroke="#5a3a1e" stroke-width="0.5" opacity="0.5"/>
     <rect class="boxRim" x="46" y="187" width="152" height="3" opacity="0.6"/>
   </g>
-  <text class="textBrand" x="122" y="116" font-size="13" fill="#3a2210" text-anchor="middle">ProFrame</text>
+  
   <rect x="62" y="124" width="120" height="1" fill="#3a2210" opacity="0.6"/>
   <text class="textSub" x="122" y="142" font-size="9" fill="#3a2210" text-anchor="middle">ROOFING NAILS</text>
   <text class="textSub" x="122" y="156" font-size="6" fill="#3a2210" text-anchor="middle" opacity="0.7">GALVANIZED  HOT DIPPED</text>

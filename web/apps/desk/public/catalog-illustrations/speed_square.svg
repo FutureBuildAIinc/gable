@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>Stone brand 7 inch aluminum speed square</title>
+  <title>7 inch aluminum speed square</title>
   <defs><style>
     .body{fill:#c8ccd2}
     .bodyHi{fill:#e8ecef}
@@ -31,7 +31,7 @@
     <line x1="50" y1="180" x2="120" y2="180" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
   </g>
   <g transform="rotate(45 128 128)">
-    <text x="100" y="74" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="700" letter-spacing="0.5" fill="#3a3530" text-anchor="middle">STONE</text>
+    
     <text x="100" y="80" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="0.5" fill="#3a3530" text-anchor="middle">7 IN</text>
   </g>
   <g transform="rotate(45 128 128)">

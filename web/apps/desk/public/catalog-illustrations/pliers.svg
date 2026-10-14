@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>Stone brand side cutters</title>
+  <title>side cutters</title>
   <defs><style>
     .steel{fill:#5a5e64}
     .steelHi{fill:#a8acb2}
@@ -64,6 +64,6 @@
   </g>
   <g>
     <rect class="stamp" x="58" y="146" width="38" height="12" rx="1"/>
-    <text x="77" y="155" font-family="Verdana,Arial,sans-serif" font-size="8" font-weight="700" letter-spacing="0.5" fill="#e8e2d2" text-anchor="middle">STONE</text>
+    
   </g>
 </svg>

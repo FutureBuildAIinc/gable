@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>ProFrame galvanized hurricane tie</title>
+  <title>galvanized hurricane tie</title>
   <defs>
     <style>
       .steelMain{fill:#a8a8a8}
@@ -34,6 +34,6 @@
   </g>
   <g>
     <rect class="steelShade" x="120" y="100" width="36" height="20" fill="none" stroke="#5a5a5a" stroke-width="0.6" opacity="0.5"/>
-    <text class="textBrand" x="138" y="113" font-size="6" fill="#3a3a3a" text-anchor="middle">PROFRAME</text>
+    
   </g>
 </svg>

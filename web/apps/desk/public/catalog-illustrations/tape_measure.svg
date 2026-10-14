@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>Stone brand 25 ft tape measure, yellow case</title>
+  <title>25 ft tape measure, yellow case</title>
   <defs><style>
     .case{fill:#e8c020}
     .caseHi{fill:#f4d850}
@@ -51,7 +51,7 @@
   <g>
     <rect class="caseShade" x="100" y="100" width="92" height="40" rx="4"/>
     <rect class="caseHi" x="100" y="100" width="92" height="40" rx="4" opacity="0.85"/>
-    <text class="textBrand" x="146" y="124" font-size="14" fill="#3a2410" text-anchor="middle">STONE</text>
+    
     <rect x="106" y="128" width="80" height="1" fill="#3a2410" opacity="0.6"/>
     <text class="textSub" x="146" y="138" font-size="6" fill="#3a2410" text-anchor="middle">25 FT TAPE</text>
   </g>

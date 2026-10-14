@@ -58,7 +58,7 @@
   </g>
   <g transform="rotate(-12 128 128)">
     <rect class="stamp" x="80" y="138" width="92" height="28" rx="2" opacity="0.85"/>
-    <text x="126" y="154" font-family="Verdana,Arial,sans-serif" font-size="9" font-weight="700" letter-spacing="1.5" fill="#f0e0c0" text-anchor="middle">Ridgeline</text>
+    
     <text x="126" y="162" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="1" text-anchor="middle" fill="#e0d0a0">BC PINE  SANDED  4x8</text>
   </g>
 </svg>

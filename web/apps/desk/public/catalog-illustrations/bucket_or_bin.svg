@@ -29,7 +29,7 @@
     <rect class="label" x="62" y="124" width="132" height="68"/>
     <rect x="58" y="124" width="140" height="2" fill="#1a1a1a" opacity="0.6"/>
     <rect x="58" y="192" width="140" height="2" fill="#1a1a1a" opacity="0.6"/>
-    <text class="textBrand" x="128" y="148" font-size="14" fill="#1d6cb0" text-anchor="middle">ProFrame</text>
+    
     <rect x="74" y="156" width="108" height="1" fill="#3a3d44" opacity="0.6"/>
     <text x="128" y="174" font-family="Verdana,Arial,sans-serif" font-weight="700" font-size="11" fill="#1d6cb0" text-anchor="middle">5 GAL</text>
   </g>

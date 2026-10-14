@@ -14,9 +14,10 @@ import (
 // SaleInvoices names the invoice behind a counter sale's receipt. The lookup
 // is the counter's own sale read, so a sale the caller cannot read is the
 // missing sale's 404 here too; a sale that is not completed or has no invoice
-// is a 409 no_receipt.
+// is a 409 no_receipt. walkIn is true when the sale names no customer or the
+// shared walk in row, whose address no receipt is ever sent to.
 type SaleInvoices interface {
-	ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (uuid.UUID, error)
+	ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (invoiceID uuid.UUID, walkIn bool, err error)
 }
 
 // WithSaleReceipts supplies the sale lookup the counter's receipt routes need.
@@ -36,7 +37,7 @@ func (h *Handler) RegisterReceiptRoutes(mux *http.ServeMux, guard func(http.Hand
 // HandlePrintSaleReceipt is GET /pos/transactions/{id}/receipt: the sale's
 // invoice document, rendered by the documents print route's own function.
 func (h *Handler) HandlePrintSaleReceipt(w http.ResponseWriter, r *http.Request) {
-	invoiceID, ok := h.saleInvoice(w, r)
+	invoiceID, _, ok := h.saleInvoice(w, r)
 	if !ok {
 		return
 	}
@@ -47,25 +48,31 @@ func (h *Handler) HandlePrintSaleReceipt(w http.ResponseWriter, r *http.Request)
 // sale's invoice to the account's contact, sent by the invoice email route's
 // own function.
 func (h *Handler) HandleEmailSaleReceipt(w http.ResponseWriter, r *http.Request) {
-	invoiceID, ok := h.saleInvoice(w, r)
+	invoiceID, walkIn, ok := h.saleInvoice(w, r)
 	if !ok {
+		return
+	}
+	// The email goes to the invoice customer's address; the shared walk in
+	// row would receive every walk in's receipt if it ever held one.
+	if walkIn {
+		httpx.WriteError(w, r, noContact())
 		return
 	}
 	h.emailInvoice(w, r, invoiceID, noContact)
 }
 
-func (h *Handler) saleInvoice(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+func (h *Handler) saleInvoice(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool, bool) {
 	id, err := pathUUID(r)
 	if err != nil {
 		httpx.WriteError(w, r, err)
-		return uuid.Nil, false
+		return uuid.Nil, false, false
 	}
-	invoiceID, err := h.sales.ReceiptInvoice(r.Context(), id)
+	invoiceID, walkIn, err := h.sales.ReceiptInvoice(r.Context(), id)
 	if err != nil {
 		httpx.WriteError(w, r, err)
-		return uuid.Nil, false
+		return uuid.Nil, false, false
 	}
-	return invoiceID, true
+	return invoiceID, walkIn, true
 }
 
 // noContact is the refusal in words the Sale complete card shows: a walk in
