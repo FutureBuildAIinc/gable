@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -1689,6 +1690,40 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	if after := linesOn(f.txnA); after != before+1 {
 		t.Errorf("bound key line insert on the own transaction: %d rows then %d, want one new line", before, after)
 	}
+
+	// The counter's customer: the lookup finds the pin's own customer and
+	// never the foreign one, and naming a customer on the foreign sale reads
+	// as a missing sale (nothing written) while the pin's own sale takes it.
+	var acctA, acctB string
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT account_number FROM customers WHERE id = $1`, f.custID).Scan(&acctA); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT account_number FROM customers WHERE id = $1`, f.custB).Scan(&acctB); err != nil {
+		t.Fatal(err)
+	}
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/customers?q="+url.QueryEscape(acctB), "", nil)
+	f.twinLeg("GET", "/api/v1/pos/customers")
+	if strings.Contains(string(buf), f.custB.String()) {
+		t.Errorf("bound key counter lookup carries the foreign customer: %s", buf)
+	}
+	buf = f.allow(t, "bound", "GET", "/api/v1/pos/customers?q="+url.QueryEscape(acctA), "", nil, http.StatusOK)
+	if !strings.Contains(string(buf), f.custID.String()) {
+		t.Errorf("bound key counter lookup does not carry the pin's own customer: %s", buf)
+	}
+	if sB, _ := f.key(t, f.bound, "PUT", "/api/v1/pos/transactions/"+f.txnB.String()+"/customer",
+		fmt.Sprintf(`{"customer_id":%q}`, f.custID.String()), nil); sB != http.StatusNotFound {
+		t.Errorf("bound key naming a customer on the foreign sale: %d, want 404", sB)
+	}
+	f.twinLeg("PUT", "/api/v1/pos/transactions/"+f.txnB.String()+"/customer")
+	var named *uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT customer_id FROM pos_transactions WHERE id = $1`, f.txnB).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != nil && *named == f.custID {
+		t.Errorf("bound key named the pin's customer on the foreign sale")
+	}
+	f.allow(t, "bound", "PUT", "/api/v1/pos/transactions/"+f.txnA.String()+"/customer",
+		`{"customer_id":null}`, nil, http.StatusOK)
 
 	// The account routes name a customer in the path: the foreign customer is
 	// refused with the audit row, the pin's own answers, and the
