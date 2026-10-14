@@ -75,6 +75,9 @@ export class TechAdminPage extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        // A link may name the tab to open (the Market check page links to its own card).
+        const named = new URLSearchParams(window.location.search).get('tab');
+        if (named === 'market-check') this.activeTab = named;
         this._loadKeys();
         this._loadAISettings();
         this._loadRoutingSettings();

@@ -21,6 +21,7 @@ const SETTINGS = {
   band_pct: '5',
   margin_floor_pct: '15',
   configured: true,
+  notice: '',
 }
 
 function product(n: number, sku = `DL_SPF_${n}`) {
@@ -98,8 +99,14 @@ describe('Market check screen', () => {
     expect(text(q(el, '[data-testid="not-configured"]'))).toContain(
       "Market check is off. An admin enters the FB Connect address and the flow's webhook id in Tech Admin.",
     )
-    expect(q<HTMLAnchorElement>(el, '[data-testid="not-configured"] a').getAttribute('href')).toBe('/admin')
+    expect(q<HTMLAnchorElement>(el, '[data-testid="not-configured"] a').getAttribute('href')).toBe('/admin?tab=market-check')
     expect(el.querySelector('[data-testid="run"]')).toBeNull()
+  })
+
+  it('says why it is off when the server has a notice (an id that cannot be read)', async () => {
+    settings = { ...SETTINGS, configured: false, notice: 'The saved webhook id cannot be read; enter it again' }
+    const el = await open()
+    expect(text(q(el, '[data-testid="not-configured"]'))).toContain('The saved webhook id cannot be read; enter it again')
   })
 
   it('shows the header, the store label, the badge and the first pick', async () => {

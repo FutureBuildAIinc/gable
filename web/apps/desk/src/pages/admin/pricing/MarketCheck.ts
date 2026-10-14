@@ -208,8 +208,9 @@ export class GableMarketCheck extends LitElement {
         <p class="text-white font-medium">Market check is off.</p>
         <p class="text-sm text-slate-400 mt-1">
           An admin enters the FB Connect address and the flow's webhook id in
-          <a href="/admin" class="text-blueprint-blue underline">Tech Admin</a>.
+          <a href="/admin?tab=market-check" class="text-blueprint-blue underline">Tech Admin</a>.
         </p>
+        ${this._settings?.notice ? html`<p class="text-sm text-amber-400 mt-2">${this._settings.notice}</p>` : nothing}
       </div>
     `;
   }

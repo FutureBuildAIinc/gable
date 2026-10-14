@@ -271,6 +271,9 @@ Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address an
 4. Check a suggestion by hand: a row above the band suggests the competitor's price plus the band, never under the
    margin floor (cost divided by one less the floor percent).
 5. As a cashier or a sales user, `POST /api/v1/pricing/market-check` is a 403.
-6. Clear the id in Tech Admin and open Market check again: it says the check is off, with a link to Tech Admin.
+6. Clear the id in Tech Admin and open Market check again: it says the check is off, with a link that opens Tech Admin
+   on the Market check tab.
+7. Change the FB Connect address and Save without entering the id again: the id shows empty with "Enter the webhook id
+   again for the new address", and the Market check says it is off until it is entered.
 
 None of the other walks of the plan are written yet; they land with their items.

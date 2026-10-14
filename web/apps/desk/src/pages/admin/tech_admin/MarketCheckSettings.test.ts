@@ -9,7 +9,7 @@ import { mount, update, flush, q, text, jsonResponse } from '../../../test/dom'
 
 const BASE = {
   connect_url: 'https://connect.example.test', webhook_id_saved: true, flow_name: 'Pricing flow', store_label: '',
-  store_id: '', store_zip: '', band_pct: '5', margin_floor_pct: '15', configured: true,
+  store_id: '', store_zip: '', band_pct: '5', margin_floor_pct: '15', configured: true, notice: '',
 }
 
 let current: Record<string, unknown>
@@ -62,6 +62,35 @@ describe('Market check settings card', () => {
     expect(text(el)).toContain('Replace')
     expect(text(el)).toContain('Clear')
     expect(el.innerHTML).not.toContain('test-hook')
+  })
+
+  it('shows the server notice beside the id field (a changed address cleared the id)', async () => {
+    current = { ...BASE, webhook_id_saved: false, configured: false, notice: 'Enter the webhook id again for the new address' }
+    const el = await open()
+    expect(text(q(el, '[data-testid="notice"]'))).toBe('Enter the webhook id again for the new address')
+    expect(q<HTMLInputElement>(el, 'input[name="webhook_id"]').value).toBe('')
+  })
+
+  it('shows the notice an address change brings back from the save', async () => {
+    const el = await open()
+    const input = q<HTMLInputElement>(el, 'input[name="connect_url"]')
+    input.value = 'https://other.example.test'
+    input.dispatchEvent(new Event('input'))
+    await update(el, {})
+    // the server clears the id for a new address and says so
+    puts.length = 0
+    vi.stubGlobal('fetch', vi.fn(async (_i: RequestInfo | URL, init?: RequestInit) => {
+      if ((init?.method ?? 'GET') === 'PUT') {
+        puts.push(JSON.parse(String(init!.body)))
+        return jsonResponse({ ...BASE, connect_url: 'https://other.example.test', webhook_id_saved: false, configured: false,
+          notice: 'Enter the webhook id again for the new address' })
+      }
+      return jsonResponse(current)
+    }))
+    await click(el, '[data-testid="save"]')
+    expect(text(q(el, '[data-testid="notice"]'))).toContain('Enter the webhook id again for the new address')
+    expect(el.querySelector('[data-testid="webhook-saved"]')).toBeNull()
+    expect(q<HTMLInputElement>(el, 'input[name="webhook_id"]').type).toBe('password')
   })
 
   it('shows a password input with autocomplete off when none is saved', async () => {

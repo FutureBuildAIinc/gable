@@ -3470,7 +3470,7 @@ export interface paths {
         get: operations["marketCheckGetSettings"];
         /**
          * Save the Market check settings
-         * @description Admin or owner. A field left out keeps what is saved. webhook_id absent keeps the saved id, an empty string clears it; a new id is sealed with the vault (refused in words when no vault key is configured). The address is https://host[:port] with no user info, path, query or fragment (http only for a loopback host). Answers the GET shape.
+         * @description Admin or owner. A field left out keeps what is saved. webhook_id absent keeps the saved id, an empty string clears it; a new id is sealed with the vault (refused in words when no vault key is configured). The address is https://host[:port] with no user info, path, query or fragment (http only for a loopback host). A request that changes the address clears the saved id unless it carries a new one. Answers the GET shape.
          */
         put: operations["marketCheckSaveSettings"];
         post?: never;
@@ -3491,7 +3491,7 @@ export interface paths {
         put?: never;
         /**
          * Check picked products against the live store
-         * @description Admin or owner. Runs the FB Connect pricing flow for one to twelve distinct products in batches of three. Per product: our walk in price, the competitor's matched title and price, the difference and position recomputed from our own figures, and a suggested price that keeps the margin floor. A batch that fails marks only its own items error. 409 not_configured when the address or the webhook id is not saved. Cost is never in the answer and is never sent to the flow.
+         * @description Admin or owner. Runs the FB Connect pricing flow for one to twelve distinct products in batches of three. Per product: our walk in price, the competitor's matched title and price, the difference and position recomputed from our own figures, and a suggested price that keeps the margin floor. A batch that fails marks only its own items error. 409 not_configured when the address or the webhook id is not saved or usable. One run at a time per caller: a second answers 429. The response gets its own write deadline past one batch. Cost is never in the answer and is never sent to the flow.
          */
         post: operations["marketCheckRun"];
         delete?: never;
@@ -10500,7 +10500,10 @@ export interface components {
             band_pct: string;
             /** @description A decimal percent from 0 to 90. */
             margin_floor_pct: string;
+            /** @description True only when the address and the id are saved and usable (the stored id opens and the address is valid). */
             configured: boolean;
+            /** @description A plain sentence when the saved state needs the admin (an id to enter again); empty otherwise. */
+            notice: string;
         };
         MarketCheckSettingsRequest: {
             connect_url?: string;
@@ -22446,6 +22449,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
+            /** @description This caller already has a market check running; one at a time. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
             500: components["responses"]["WireInternalError"];
         };
     };

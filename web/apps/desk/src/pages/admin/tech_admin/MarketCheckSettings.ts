@@ -138,6 +138,9 @@ export class GableMarketCheckSettings extends LitElement {
                                     class="px-3 py-1 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-500/10">Clear</button>
                             </div>`
                             : nothing}
+                        ${this._settings.notice
+                            ? html`<p class="text-sm text-amber-400" data-testid="notice">${this._settings.notice}</p>`
+                            : nothing}
                         ${showInput
                             ? html`<div class="relative">
                                 ${icon(Shield, 16, 'absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500')}

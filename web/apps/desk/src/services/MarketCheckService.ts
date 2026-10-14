@@ -20,10 +20,12 @@ export interface MarketCheckSettings {
     band_pct: string;
     margin_floor_pct: string;
     configured: boolean;
+    /** A plain sentence when the saved state needs the admin (an id to enter again); empty otherwise. */
+    notice: string;
 }
 
 /** A field left out keeps what is saved; webhook_id '' clears the saved id. */
-export type MarketCheckSettingsInput = Partial<Omit<MarketCheckSettings, 'webhook_id_saved' | 'configured'>> & {
+export type MarketCheckSettingsInput = Partial<Omit<MarketCheckSettings, 'webhook_id_saved' | 'configured' | 'notice'>> & {
     webhook_id?: string;
 };
 
