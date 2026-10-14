@@ -1829,7 +1829,7 @@ describe('no tender until the cashier chooses one', () => {
     q(el, 'pos-pay').click();
     await settle();
     await el.updateComplete;
-    svc.startSale.mockResolvedValue(sale({ id: 's2', lines: [line('c', 5000)], total_cents: 5000 }));
+    svc.startSale.mockResolvedValue(sale({ id: 's2', lines: [line('c', 5000)] as unknown as Sale['lines'], total_cents: 5000 }));
     const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
     newSale.click();
     await settle();
