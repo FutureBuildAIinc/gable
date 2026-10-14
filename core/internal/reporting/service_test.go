@@ -179,6 +179,10 @@ func (f *fakeRepo) ScheduleCreatorGrants(_ context.Context, sub string) (int, er
 	return 1, nil
 }
 
+// MultiBranchEnabled answers the switch on, so the fake keeps the grants
+// rule the scheduler applies with several branches.
+func (f *fakeRepo) MultiBranchEnabled(_ context.Context) (bool, error) { return true, nil }
+
 var _ Repository = (*fakeRepo)(nil)
 
 // --- date-window handling ------------------------------------------------

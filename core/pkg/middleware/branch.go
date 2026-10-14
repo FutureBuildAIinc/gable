@@ -311,7 +311,7 @@ func (m *BranchMiddleware) maybeRefreshSettings(ctx context.Context) {
 }
 
 func (m *BranchMiddleware) refreshSettings(ctx context.Context) {
-	enabled := readBoolSetting(ctx, m.db, "multi_branch_enabled", false)
+	enabled := readBoolSetting(ctx, m.db, MultiBranchSettingKey, false)
 	required := readBoolSetting(ctx, m.db, "default_branch_required", true)
 	m.killSwitch.Store(enabled)
 	m.requireDefault.Store(required)
@@ -328,6 +328,13 @@ func readBoolSetting(ctx context.Context, db *database.DB, key string, def bool)
 	if err != nil {
 		return def
 	}
+	return ParseBoolSetting(val, def)
+}
+
+// ParseBoolSetting reads a system_settings boolean the way the branch
+// middleware does: true, t, 1, yes and on are true, false, f, 0, no and off
+// are false, and anything else is def.
+func ParseBoolSetting(val string, def bool) bool {
 	switch strings.ToLower(strings.TrimSpace(val)) {
 	case "true", "t", "1", "yes", "on":
 		return true
@@ -337,6 +344,10 @@ func readBoolSetting(ctx context.Context, db *database.DB, key string, def bool)
 		return def
 	}
 }
+
+// MultiBranchSettingKey is the system_settings key of the single branch
+// switch the branch middleware reads.
+const MultiBranchSettingKey = "multi_branch_enabled"
 
 // Compose chains middleware in the order given so that the first element is
 // the outermost wrapper. `Compose(a, b)(next)` is equivalent to

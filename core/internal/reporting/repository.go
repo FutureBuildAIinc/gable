@@ -53,6 +53,11 @@ type Repository interface {
 	// does not record as an administrator: the grants are read afresh at
 	// every run, so a revoked grant takes effect at the next one.
 	ScheduleCreatorGrants(ctx context.Context, sub string) (int, error)
+	// MultiBranchEnabled reads the single branch switch the branch
+	// middleware reads (a missing row is off, as it is there). A lookup
+	// failure is returned, never read as off, so a scheduled run cannot
+	// widen its reach on a failed read.
+	MultiBranchEnabled(ctx context.Context) (bool, error)
 }
 
 type PostgresRepository struct {
@@ -461,6 +466,21 @@ func (r *PostgresRepository) ScheduleCreatorGrants(ctx context.Context, sub stri
 		return 0, fmt.Errorf("failed to read the schedule creator's grants: %w", err)
 	}
 	return n, nil
+}
+
+// MultiBranchEnabled reads system_settings.multi_branch_enabled, the value
+// the branch middleware refreshes its kill switch from.
+func (r *PostgresRepository) MultiBranchEnabled(ctx context.Context) (bool, error) {
+	var val string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT value FROM system_settings WHERE key = $1`, middleware.MultiBranchSettingKey).Scan(&val)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read the single branch switch: %w", err)
+	}
+	return middleware.ParseBoolSetting(val, false), nil
 }
 
 func (r *PostgresRepository) DeleteReportSchedule(ctx context.Context, id string) error {

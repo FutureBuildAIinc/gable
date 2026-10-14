@@ -278,13 +278,29 @@ func (s *Scheduler) isRegistered(id string) bool {
 // or whose creator is not recorded as an administrator and currently holds
 // no user_locations grant at all, does not run; the refusal is logged, an
 // audit row is written when a logger is wired, and the second return is
-// false. A creator whose role alone changed (a finance creator granted
+// false. While the single branch switch is off (multi_branch_enabled, read
+// at each run as the branch middleware reads it) a recorded creator's run
+// keeps the every branch reach, grants or none, as the middleware treats every
+// caller; the no creator refusal stays. A creator whose role alone changed (a finance creator granted
 // every branch, say) cannot be told apart by a background job here, the
 // repository's stated limit: no table persists the role.
 func (s *Scheduler) creatorRunContext(ctx context.Context, schedule ReportSchedule) (context.Context, bool) {
 	if schedule.CreatedBy == "" {
 		s.refuseRun(ctx, schedule, "the schedule records no creator")
 		return nil, false
+	}
+	// While the single branch switch is off the branch middleware treats
+	// every caller as wide, so a recorded creator's run keeps the every
+	// branch reach as the creator's own on demand run does. The setting is
+	// read at each run, like the grants.
+	multi, err := s.service.MultiBranchEnabled(ctx)
+	if err != nil {
+		log.Printf("reporting scheduler: schedule %s did not run: the single branch switch could not be read: %v",
+			schedule.ID, err)
+		return nil, false
+	}
+	if !multi {
+		return branchctx.With(ctx, &branchctx.Context{UserSub: schedule.CreatedBy, IsAdmin: true}), true
 	}
 	if !schedule.CreatorIsAdmin {
 		grants, err := s.service.ScheduleCreatorGrants(ctx, schedule.CreatedBy)

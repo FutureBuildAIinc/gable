@@ -1008,7 +1008,10 @@ later), the run of an administrator or owner creator keeps the every branch
 view, any other creator's run carries the granted branches' rows only, and
 a schedule with no creator recorded, or whose creator is not recorded as an
 administrator and holds no branch grant at all, does not run (it is logged
-and audited) until a caller with report access recreates it. The
+and audited) until a caller with report access recreates it. While the
+single branch switch is off the run reads that setting afresh and a
+recorded creator keeps the every branch view whatever its grants, as the
+branch middleware treats every caller. The
 reconciliation's currency half follows the same reach (the principal's
 ruling under item 64): its two branch owned sums, the customers' balances
 through their customer_branches rows and the unapplied cash through the

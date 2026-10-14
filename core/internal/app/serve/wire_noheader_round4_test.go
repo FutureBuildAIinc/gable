@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
 )
 
@@ -222,5 +224,86 @@ func TestNoHeader_AccountWallSwitchOffKeepsRowlessCustomers(t *testing.T) {
 		if status, buf := f.userSubAs(t, "pin-nogrants-acct", "finance", "GET", p, "", nil); status != http.StatusOK {
 			t.Errorf("switch off: finance with no grants read of the rowless customer's %s: %d %s, want 200", p, status, buf)
 		}
+	}
+}
+
+// saveAndScheduleAs saves a report as the role given and schedules it, and
+// returns the stored schedule the way Scheduler.Start reloads it. The saved
+// report counts the orders of the fixture's two customers.
+func saveAndScheduleAs(t *testing.T, f *keyPinFixture, role string, hdr map[string]string) (reporting.ReportSchedule, *reporting.Service) {
+	t.Helper()
+	saveBody := `{"name":"pin noheader schedule r4","description":"pin","entity_type":"orders",` +
+		`"definition_json":{"columns":[{"field":"customer_name","label":"Customer"},{"field":"id","label":"Orders","aggregation":"COUNT"}],` +
+		`"filters":[{"field":"customer_name","operator":"LIKE","value":"pin cust"}],` +
+		`"groupings":[{"field":"customer_name"}]}}`
+	status, buf := f.userAs(t, role, "POST", "/api/v1/reporting/save", saveBody, hdr)
+	if status != http.StatusOK {
+		t.Fatalf("%s saved report: %d %s", role, status, buf)
+	}
+	var saved struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(buf, &saved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM audit_log WHERE entity_type = 'report_schedule'
+			AND entity_id IN (SELECT id FROM report_schedules WHERE report_id = $1)`, saved.ID)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM report_schedules WHERE report_id = $1`, saved.ID)
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM saved_reports WHERE id = $1`, saved.ID)
+	})
+	schedBody := `{"report_id":"` + saved.ID + `","cron_expression":"0 0 9 * * *","recipients":["probe@example.invalid"]}`
+	status, buf = f.userAs(t, role, "POST", "/api/v1/reporting/schedules", schedBody, hdr)
+	if status != http.StatusCreated {
+		t.Fatalf("%s scheduled report: %d %s", role, status, buf)
+	}
+	svc := reporting.NewService(reporting.NewRepository(f.db))
+	schedules, err := svc.ListReportSchedules(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range schedules {
+		if schedules[i].ReportID == saved.ID {
+			return schedules[i], svc
+		}
+	}
+	t.Fatalf("the %s caller's schedule is not stored", role)
+	return reporting.ReportSchedule{}, nil
+}
+
+// TestNoHeader_ReportScheduleUnderTheSingleBranchSwitch is the scheduler
+// under the switch the branch middleware reads (r6 P2-1): while
+// multi_branch_enabled is off every caller is treated as wide, so a finance
+// creator with no grants at all gets the run and the rows of every branch,
+// as the creator's own on demand run does. The scheduler reads the setting
+// at each run: with the switch on, the same schedule meets item 65's rule
+// (a creator with no grants does not run, audited) at the very next run.
+func TestNoHeader_ReportScheduleUnderTheSingleBranchSwitch(t *testing.T) {
+	f := newKeyPinFixtureSwitched(t, "false")
+	f.seedWalledTwins(t)
+	stored, svc := saveAndScheduleAs(t, f, "finance", nil)
+	if stored.CreatedBy != "pin-finance" || stored.CreatorIsAdmin {
+		t.Fatalf("the finance caller's schedule records creator %q admin %t", stored.CreatedBy, stored.CreatorIsAdmin)
+	}
+	sender := &r3CaptureSender{}
+	sched := reporting.NewScheduler(svc, sender).WithRefusalAudit(audit.NewLogger(f.db))
+
+	if err := sched.ExecuteAndSendReport(context.Background(), stored); err != nil {
+		t.Fatalf("switch off: a finance creator with no grants did not run: %v", err)
+	}
+	content := sender.last()
+	if !strings.Contains(content, "pin cust B") || !strings.Contains(content, "pin cust") {
+		t.Errorf("switch off: the run misses a branch's rows, want every branch: %s", content)
+	}
+
+	// The switch on: the next run of the same schedule is held to the
+	// creator's grants, and a creator with none does not run.
+	setSetting(t, f.db, "multi_branch_enabled", "true")
+	before := sender.count()
+	if err := sched.ExecuteAndSendReport(context.Background(), stored); err == nil {
+		t.Error("switch on: a finance creator with no grants ran, want the fail closed refusal")
+	}
+	if sender.count() != before {
+		t.Errorf("switch on: the refused run sent %d run(s), want none", sender.count()-before)
 	}
 }

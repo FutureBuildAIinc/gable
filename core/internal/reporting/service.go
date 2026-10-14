@@ -232,6 +232,13 @@ func (s *Service) ScheduleCreatorGrants(ctx context.Context, sub string) (int, e
 	return s.repo.ScheduleCreatorGrants(ctx, sub)
 }
 
+// MultiBranchEnabled reads the single branch switch the branch middleware
+// reads, so a scheduled run treats its creator as the middleware treats every
+// caller.
+func (s *Service) MultiBranchEnabled(ctx context.Context) (bool, error) {
+	return s.repo.MultiBranchEnabled(ctx)
+}
+
 func (s *Service) ExecuteReportDefinition(ctx context.Context, def *ReportDefinition, entityType string) ([]map[string]interface{}, error) {
 	pgRepo, ok := s.repo.(*PostgresRepository)
 	if !ok {
