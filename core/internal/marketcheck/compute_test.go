@@ -26,7 +26,7 @@ func TestSuggest(t *testing.T) {
 		{"above target over the floor", 1000, 600, 500, "above", 630, "lower_to_band", 66.7, true},
 		{"above target under the floor", 1000, 550, 500, "above", 589, "held_at_floor", 81.8, true},
 		{"below raises to the band", 700, 1000, 500, "below", 950, "raise_to_band", -30.0, true},
-		{"below raise still max with floor", 520, 560, 500, "below", 589, "raise_to_band", -7.1, true},
+		{"below raise held at the floor", 520, 560, 500, "below", 589, "held_at_floor", -7.1, true},
 		{"in line keeps", 1000, 1000, 500, "in_line", 1000, "keep", 0.0, true},
 		{"in line edge of band is in line", 1050, 1000, 500, "in_line", 1050, "keep", 5.0, true},
 		{"in line under the floor takes the floor", 550, 550, 500, "in_line", 589, "held_at_floor", 0.0, true},
