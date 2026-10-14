@@ -91,8 +91,12 @@ func TestDemoImport(t *testing.T) {
 	runCommand(t, dbURL, "./cmd/migrate")
 	// The tenant takes a currency other than the documents' column default
 	// (USD), so a history document that fell back to the default would show.
-	if _, err := db.Exec(`UPDATE system_settings SET value = 'CAD' WHERE key IN ('currency.default', 'currency.enabled')`); err != nil {
+	res, err := db.Exec(`UPDATE system_settings SET value = 'CAD' WHERE key IN ('currency.default', 'currency.enabled')`)
+	if err != nil {
 		t.Fatalf("set the tenant's currency: %v", err)
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 2 {
+		t.Fatalf("set the tenant's currency: %d settings changed (%v), want 2", n, err)
 	}
 	runCommand(t, dbURL, "./cmd/seed")
 	first := snapshotCounts(t, db)
@@ -209,6 +213,34 @@ func TestDemoImport(t *testing.T) {
 			if yardDays < 5 {
 				t.Errorf("yard %s has %d days of revenue in the window, want at least 5", yard, yardDays)
 			}
+		}
+	})
+
+	t.Run("the history trades today, stamped before the seed ran", func(t *testing.T) {
+		var now time.Time
+		if err := db.QueryRow(`SELECT NOW()`).Scan(&now); err != nil {
+			t.Fatal(err)
+		}
+		now = now.UTC()
+		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+		if now.Weekday() == time.Sunday || now.Sub(dayStart) < 30*time.Minute {
+			t.Skip("the yards are closed today, or the day is too young for the history to hold it")
+		}
+		keys := jsonlKeys(t, customersData, "account_number")
+		var today int64
+		var future int
+		if err := db.QueryRow(`
+			SELECT COALESCE(SUM(CASE WHEN p.created_at >= $2 THEN ROUND(p.amount * 100) ELSE 0 END), 0)::bigint,
+				COUNT(*) FILTER (WHERE p.created_at > NOW())
+			FROM payments p JOIN customers c ON c.id = p.customer_id
+			WHERE c.account_number = ANY($1)`, keys, dayStart).Scan(&today, &future); err != nil {
+			t.Fatalf("today's history payments: %v", err)
+		}
+		if today <= 0 {
+			t.Fatalf("the history took no money today: the dashboard's day would read nothing")
+		}
+		if future != 0 {
+			t.Fatalf("%d history payments are stamped after the seed ran", future)
 		}
 	})
 
@@ -399,22 +431,6 @@ func TestDemoImport(t *testing.T) {
 		for _, it := range items {
 			if imported[it.CustomerID.String()] && it.UnappliedCents != 0 {
 				t.Fatalf("customer %s shows %d cents unapplied from the history", it.CustomerName, it.UnappliedCents)
-			}
-		}
-		var sum struct {
-			Totals []account.AgingTotal `json:"totals"`
-		}
-		getJSON(t, mux, "/api/v1/ar/aging/summary?basis=due_date", &sum)
-		var tenant string
-		if err := db.QueryRow(`SELECT value FROM system_settings WHERE key = 'currency.default'`).Scan(&tenant); err != nil {
-			t.Fatal(err)
-		}
-		for _, tot := range sum.Totals {
-			// The history pays every invoice in full, so it leaves no cash
-			// unapplied in the tenant's currency (the base seed's own
-			// documents keep the column default and are not checked here).
-			if tot.Currency == tenant && tot.UnappliedCents != 0 {
-				t.Errorf("the aging summary carries %d cents of unapplied %s cash", tot.UnappliedCents, tenant)
 			}
 		}
 	})

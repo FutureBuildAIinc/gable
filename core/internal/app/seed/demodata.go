@@ -806,11 +806,12 @@ type historyLine struct {
 	totalCents int64
 }
 
-// seedHistory generates 120 days of orders, invoices and payments across the
-// three yards. The generator is deterministic: it consumes historyParamsData
-// through a math/rand source seeded with the params._seed constant, and walks
-// the yards, customers and products in a fixed order, so the same day gives
-// the same history.
+// seedHistory generates the window's days of orders, invoices and payments
+// across the three yards, and today's up to shortly before the run. The
+// generator is deterministic: it consumes historyParamsData through a
+// math/rand source seeded with the params._seed constant, and walks the yards,
+// customers and products in a fixed order, so the same day gives the same
+// history (today's stamps follow the time of the run).
 //
 // Each order is written with its lines, each invoice with the matching lines,
 // exactly as the base seed writes its own (UNPAID, open at its total); the
@@ -831,6 +832,15 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 	rng := rand.New(rand.NewSource(int64(hp.Seed)))
 	now := time.Now().UTC()
 	anchor := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	// Today trades too, so the dashboard's day is a real one: its documents are
+	// stamped from two hours before the run, never before the day began (the
+	// server's UTC day), and are left out while the day is too young to hold
+	// them before the run.
+	todayFrom := now.Add(-2 * time.Hour)
+	if dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC); todayFrom.Before(dayStart) {
+		todayFrom = dayStart
+	}
+	withToday := now.Sub(todayFrom) >= 10*time.Minute
 
 	// The yards walk in code order (a map's order is random, and the history
 	// must be the same for the same day), each with its weekday mean from the
@@ -913,8 +923,14 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 
 	totalOrders, totalPosted := 0, 0
 
-	for dayOffset := hp.Window.Days; dayOffset >= 1; dayOffset-- {
+	for dayOffset := hp.Window.Days; dayOffset >= 0; dayOffset-- {
 		day := anchor.AddDate(0, 0, -dayOffset)
+		if dayOffset == 0 {
+			if !withToday {
+				continue
+			}
+			day = todayFrom
+		}
 		if day.Weekday() == time.Sunday {
 			// Sundays closed.
 			continue
@@ -988,8 +1004,12 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 		totalOrders += len(posts)
 		totalPosted += ar.postParallel(ctx, posts)
 	}
-	fmt.Printf("Seed: history: %d days, %d orders, %d invoices posted and paid through the AR core across %d yards\n",
-		hp.Window.Days, totalOrders, totalPosted, len(historyYards))
+	through := "yesterday"
+	if withToday {
+		through = "today"
+	}
+	fmt.Printf("Seed: history: %d days through %s, %d orders, %d invoices posted and paid through the AR core across %d yards\n",
+		hp.Window.Days, through, totalOrders, totalPosted, len(historyYards))
 	if totalPosted != totalOrders {
 		// An unposted invoice stays open with no subledger, GL or payment:
 		// the books would no longer tie, so say so instead of carrying on.
