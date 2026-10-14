@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -596,6 +597,53 @@ func TestDemoImport(t *testing.T) {
 			if _, ok := want[id]; !ok && g != 0 {
 				t.Errorf("customer %s: the aging totals %d, it has no document", id, g)
 			}
+		}
+	})
+
+	t.Run("the dashboard's Outstanding AR equals the aging summary's total", func(t *testing.T) {
+		ar, err := newReceivables(dbURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ar.close()
+		ctx := context.Background()
+		var today time.Time
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`).Scan(&today); err != nil {
+			t.Fatal(err)
+		}
+		aging, err := ar.acct.AgingSummary(ctx, account.AgingQuery{AsOf: today, Basis: "due_date"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var total int64
+		for _, c := range aging.Totals {
+			total += int64(c.TotalCents)
+		}
+		// The seed's invoices and the aging both read the document day; the
+		// dashboard must read the same receivable the aging does.
+		summary, err := dashboard.NewRepository(ar.db).GetDashboardSummary(ctx, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary.OutstandingAR != total {
+			t.Errorf("Outstanding AR %d, aging summary total %d", summary.OutstandingAR, total)
+		}
+		// And both equal the documents: open invoices less open credits and
+		// unapplied cash.
+		var docs int64
+		if err := db.QueryRow(`
+			SELECT COALESCE(SUM(cents), 0)::bigint FROM (
+				SELECT ROUND(amount_open * 100) AS cents FROM invoices WHERE status <> 'VOID'
+				UNION ALL
+				SELECT ROUND(amount_open * 100) FROM credit_memos WHERE status NOT IN ('DRAFT', 'VOID')
+				UNION ALL
+				SELECT -ROUND(amount_unapplied * 100) FROM payments WHERE status = 'POSTED'
+			) d`).Scan(&docs); err != nil {
+			t.Fatal(err)
+		}
+		if docs <= 0 || summary.OutstandingAR != docs {
+			t.Errorf("Outstanding AR %d, the documents say %d", summary.OutstandingAR, docs)
 		}
 	})
 
