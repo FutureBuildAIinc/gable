@@ -8,6 +8,7 @@ import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
 import { PIMService } from '../../services/PIMService.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { apiErrorMessage } from '../../services/apiError.ts';
 import { formatPrice4 } from '../../lib/utils.ts';
 import { ArrowLeft, Loader2, Package, FileText, Image, Megaphone, Search, Warehouse, Box } from 'lucide';
@@ -50,9 +51,22 @@ export class GableProductDetail extends LitElement {
     @state() private isMarginModalOpen = false;
     @state() private activeTab: TabId = 'overview';
 
+    private _unsubBranch: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
         this.loadProduct();
+        // The detail's stock figures are the current yard's; a yard change
+        // loads it again (quietly, so the open tab stays as it is).
+        this._unsubBranch = onBranchChanged(() => this.loadProduct());
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        if (this._unsubBranch) {
+            this._unsubBranch();
+            this._unsubBranch = null;
+        }
     }
 
     updated(changed: Map<string, unknown>) {

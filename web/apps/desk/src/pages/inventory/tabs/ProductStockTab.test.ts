@@ -77,6 +77,22 @@ describe('the product stock tab follows the yard', () => {
     expect(text(el)).not.toContain('KEL-MAIN')
   })
 
+  it('closes an adjustment opened at the old yard when the yard changes', async () => {
+    const el = await mountAsync<GableProductStockTab>('gable-product-stock-tab', { productId: PRODUCT_ID })
+    const adjust = el.querySelector<HTMLButtonElement>('button[title="Adjust Stock"]')
+    expect(adjust).not.toBeNull()
+    adjust!.click()
+    await update(el, {})
+    expect(text(el)).toContain('Adjust Stock @')
+
+    yard = 'LK'
+    window.dispatchEvent(new CustomEvent('gable:branch-changed', { detail: { branchId: 'lk' } }))
+    await flush()
+    await update(el, {})
+
+    expect(text(el)).not.toContain('Adjust Stock @')
+  })
+
   it('stops listening once it leaves the page', async () => {
     const el = await mountAsync<GableProductStockTab>('gable-product-stock-tab', { productId: PRODUCT_ID })
     el.remove()
