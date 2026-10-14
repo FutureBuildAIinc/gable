@@ -105,3 +105,32 @@ func TestExtractItemsWithAI_NonTextWithoutAIStaysSynthetic(t *testing.T) {
 		assertFallback(t, items, synthetic, err)
 	}
 }
+
+// Only plain text, csv and the spreadsheet types are a list; markup the
+// detector calls text (an SVG, an HTML page) is not the user's list, so it keeps
+// the labelled sample rather than coming back as noise lines.
+func TestExtractItemsWithAI_MarkupIsNotAList(t *testing.T) {
+	for _, ct := range []string{"text/xml; charset=utf-8", "text/html; charset=utf-8", "image/svg+xml"} {
+		s := NewService(&mockProductRepo{}, nil)
+		items, synthetic, err := s.ExtractItemsWithAI(context.Background(), []byte("<svg><text>5 pcs</text></svg>"), ct)
+		assertFallback(t, items, synthetic, err)
+	}
+}
+
+// A header row (qty,item) is not a line of the list.
+func TestExtractItems_SkipsAHeaderRow(t *testing.T) {
+	s := NewService(&mockProductRepo{}, nil)
+	for _, body := range []string{
+		"qty,item\n12,Cedar Post\n3,Polymeric Sand\n",
+		"Quantity\tDescription\n12\tCedar Post\n3\tPolymeric Sand\n",
+	} {
+		got := s.ExtractItems(body)
+		if len(got) != 2 || strings.Contains(strings.ToLower(got[0].rawText), "qty") || strings.Contains(strings.ToLower(got[0].rawText), "quantity") {
+			t.Fatalf("expected the two data rows only, got %+v", got)
+		}
+	}
+	// A first line that is a product, not a header, stays.
+	if got := s.ExtractItems("Polymeric Sand, bag\n3 pcs - Cedar Post\n"); len(got) != 2 {
+		t.Fatalf("a product line must not be taken for a header, got %+v", got)
+	}
+}
