@@ -58,7 +58,11 @@ export class GableInventoryAlertsWidget extends LitElement {
                                 </div>
                             `
                             : this.alerts.map((alert) => html`
-                                <div class="p-4 hover:bg-white/5 transition-colors group">
+                                <a
+                                    href=${`/inventory/${alert.product_id}`}
+                                    aria-label="Open the stock for ${alert.name}"
+                                    class="block p-4 hover:bg-white/5 transition-colors group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+                                >
                                     <h4 class="text-sm font-medium text-white mb-1 group-hover:text-amber-400 transition-colors">
                                         ${alert.name}
                                     </h4>
@@ -75,7 +79,7 @@ export class GableInventoryAlertsWidget extends LitElement {
                                             </span>
                                         </div>
                                     </div>
-                                </div>
+                                </a>
                             `)
                         }
                     </div>

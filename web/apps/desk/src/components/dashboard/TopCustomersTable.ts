@@ -63,12 +63,16 @@ export class GableTopCustomersTable extends LitElement {
                                     : this.customers.map((customer) => html`
                                         <tr class="group hover:bg-white/5 transition-colors">
                                             <td class="px-6 py-3 font-medium text-white">
-                                                <div class="flex items-center gap-3">
+                                                <a
+                                                    href=${`/accounts/${customer.customer_id}`}
+                                                    aria-label="Open ${customer.customer_name}'s account"
+                                                    class="flex items-center gap-3 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green"
+                                                >
                                                     <div class="h-8 w-8 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-800 flex items-center justify-center text-xs font-bold text-white border border-white/10 shadow-sm group-hover:scale-105 transition-transform">
                                                         ${customer.customer_name.substring(0, 2).toUpperCase()}
                                                     </div>
-                                                    ${customer.customer_name}
-                                                </div>
+                                                    <span class="group-hover:text-gable-green transition-colors">${customer.customer_name}</span>
+                                                </a>
                                             </td>
                                             <td class="px-6 py-3 text-right font-mono text-zinc-400">
                                                 ${customer.order_count}

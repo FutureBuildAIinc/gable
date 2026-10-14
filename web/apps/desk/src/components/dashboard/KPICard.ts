@@ -16,6 +16,10 @@ export class GableKPICard extends LitElement {
     @property({ attribute: false }) iconHtml?: TemplateResult;
     @property({ type: Boolean }) loading = false;
     @property({ type: String }) valueColor = 'text-white';
+    /** Where the card drills in; unset renders a plain card. */
+    @property({ type: String }) href?: string;
+    /** The link's spoken name ("Open today's sales"). */
+    @property({ type: String, attribute: 'link-label' }) linkLabel?: string;
 
     private getTrendColor(): string {
         if (this.trend === undefined || this.trend === null) return 'text-zinc-500';
@@ -61,8 +65,8 @@ export class GableKPICard extends LitElement {
                 ? numericValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
                 : this.value;
 
-        return html`
-            <div class="rounded-xl border border-white/10 bg-slate-steel/50 hover:bg-slate-steel/70 hover:border-white/20 transition-all duration-300 cursor-pointer group relative overflow-hidden">
+        const card = html`
+            <div class="rounded-xl border border-white/10 bg-slate-steel/50 hover:bg-slate-steel/70 hover:border-white/20 transition-all duration-300 cursor-pointer group relative overflow-hidden h-full">
                 <div class="p-6 relative z-10">
                     <div class="flex items-center justify-between mb-2">
                         <h3 class="text-sm font-medium text-zinc-400 font-sans tracking-wide">${this.cardTitle}</h3>
@@ -92,6 +96,17 @@ export class GableKPICard extends LitElement {
                 <!-- Hover Glow Effect -->
                 <div class="absolute -bottom-4 -right-4 w-24 h-24 bg-gable-green/20 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
             </div>
+        `;
+
+        if (!this.href) return card;
+        return html`
+            <a
+                href=${this.href}
+                aria-label=${this.linkLabel ?? this.cardTitle}
+                class="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
+            >
+                ${card}
+            </a>
         `;
     }
 }

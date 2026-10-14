@@ -173,12 +173,16 @@ export class GableDashboard extends LitElement {
                         .iconHtml=${icon(DollarSign, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-gable-green"
+                        href="/reports/daily-till"
+                        link-label="Open today's sales"
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Active Orders"
                         .value=${this.summary?.active_orders ?? 0}
                         .iconHtml=${icon(ShoppingCart, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
+                        href="/orders"
+                        link-label="Open the active orders"
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Pending Dispatch"
@@ -186,6 +190,8 @@ export class GableDashboard extends LitElement {
                         .iconHtml=${icon(Truck, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-blueprint-blue"
+                        href="/dispatch"
+                        link-label="Open the deliveries waiting for dispatch"
                     ></gable-kpi-card>
                     <gable-kpi-card
                         card-title="Outstanding AR"
@@ -194,6 +200,8 @@ export class GableDashboard extends LitElement {
                         .iconHtml=${icon(CreditCard, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
                         valueColor="text-amber-400"
+                        href="/reports/ar-aging"
+                        link-label="Open AR Aging"
                     ></gable-kpi-card>
                 </div>
 

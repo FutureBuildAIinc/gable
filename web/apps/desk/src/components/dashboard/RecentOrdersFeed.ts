@@ -58,7 +58,11 @@ export class GableRecentOrdersFeed extends LitElement {
                         ${this.orders.length === 0
                             ? html`<div class="p-6 text-center text-zinc-500">No recent orders</div>`
                             : this.orders.map((order) => html`
-                                <a href="/orders/${order.order_id}" class="block p-4 hover:bg-white/5 transition-colors group">
+                                <a
+                                    href="/orders/${order.order_id}"
+                                    aria-label="Open the order for ${order.customer_name}"
+                                    class="block p-4 hover:bg-white/5 transition-colors group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+                                >
                                     <div class="flex justify-between items-start mb-1">
                                         <div class="font-medium text-white group-hover:text-gable-green transition-colors">
                                             ${order.customer_name}
