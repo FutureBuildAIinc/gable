@@ -2157,3 +2157,122 @@ describe('the blind count at close', () => {
     el.remove();
   });
 });
+
+describe('PR 150 fix round 1: quantity edits, controls and the blind count', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const byLabel = (el: Element, label: string) => el.querySelector(`[aria-label="${label}"]`) as HTMLElement | null;
+  const key = async (el: POSTerminal, k: string, init: KeyboardEventInit = {}) => {
+    const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
+    (document.activeElement ?? document.body).dispatchEvent(ev);
+    await el.updateComplete;
+    return ev;
+  };
+  const withType = (id: string, type: string, cents: number, qty = '1') =>
+    ({ ...line(id, cents), line_type: type, quantity: qty });
+
+  it('commits a typed quantity before a key acts, so Pay never completes at the old quantity', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({ revision: 4, lines: [{ ...line('a', 25000), quantity: '5' }, line('b', 3000)] as unknown as Sale['lines'] }));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    const input = byLabel(el, 'Quantity of Item a') as HTMLInputElement;
+    input.focus();
+    input.value = '5';
+    input.dispatchEvent(new Event('input'));
+    await key(el, 'F12');
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '5', 3);
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('keeps Pay and the money keys off while a quantity change is on its way', async () => {
+    svc.changeQuantity.mockReturnValue(new Promise(() => {}));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    (byLabel(el, 'Increase quantity of Item a') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    (document.activeElement as HTMLElement | null)?.blur();
+    await key(el, 'F12');
+    await key(el, 'F6');
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    expect(q(el, 'tender-cash').getAttribute('aria-pressed')).toBe('false');
+    el.remove();
+  });
+
+  it('gives a kit line and a charge line the quantity control, and a component none', async () => {
+    const lines = [
+      withType('k', 'kit', 9000),
+      { ...withType('c1', 'component', 0), parent_line_id: 'k' },
+      withType('f', 'charge', 2500),
+    ];
+    const el = await mount(sale({ lines: lines as unknown as Sale['lines'] }));
+    expect(byLabel(el, 'Quantity of Item k')).toBeTruthy();
+    expect(byLabel(el, 'Quantity of Item f')).toBeTruthy();
+    expect(byLabel(el, 'Quantity of Item c1')).toBeNull();
+    el.remove();
+  });
+
+  it('picks the last line that has a control for Alt+Q, and a plus press selects its line', async () => {
+    const lines = [withType('a', 'product', 5000), withType('t', 'text', 0)];
+    svc.changeQuantity.mockResolvedValue(sale({ lines: [{ ...withType('a', 'product', 10000), quantity: '2' }, lines[1]] as unknown as Sale['lines'] }));
+    const el = await mount(sale({ lines: lines as unknown as Sale['lines'] }));
+    await key(el, 'q', { altKey: true, code: 'KeyQ' });
+    expect(document.activeElement).toBe(byLabel(el, 'Quantity of Item a'));
+    el.remove();
+
+    const two = await mount(sale({ lines: [withType('a', 'product', 5000), withType('b', 'product', 3000)] as unknown as Sale['lines'] }));
+    (byLabel(two, 'Increase quantity of Item a') as HTMLButtonElement).click();
+    await settle();
+    await two.updateComplete;
+    (document.activeElement as HTMLElement | null)?.blur();
+    await key(two, 'q', { altKey: true, code: 'KeyQ' });
+    expect(document.activeElement).toBe(byLabel(two, 'Quantity of Item a'));
+    two.remove();
+  });
+
+  it('counts only what the drawer holds: no Account row, and Post sends only cash', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 1, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000, ACCOUNT: 12000 },
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { over_short_cents: 0, expected_by_method: {}, counted_by_method: {} },
+      sale_count: 1, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await settle();
+    await el.updateComplete;
+    const inputs = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    expect(inputs.length).toBe(1);
+    inputs[0].value = '250.00';
+    inputs[0].dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    ([...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count')) as HTMLElement).click();
+    await settle();
+    expect(svc.closeTill.mock.calls[0][1]).toEqual({ cash: 25000 });
+    el.remove();
+  });
+
+  it('is silenced by any element with role dialog, not only the till dialogs', async () => {
+    const el = await mount(sale());
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    const ev = await key(el, 'F6');
+    expect(q(el, 'tender-cash').getAttribute('aria-pressed')).toBe('false');
+    expect(ev.defaultPrevented).toBe(false);
+    dialog.remove();
+    el.remove();
+  });
+});
