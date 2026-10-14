@@ -7,7 +7,7 @@
  * carries no Authorization header and lands on a 401.
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { openAuthedPdf } from './authedPdf'
+import { openAuthedPdf, fetchAuthedBlobUrl } from './authedPdf'
 
 describe('openAuthedPdf', () => {
   const tab = { location: { href: '' }, close: vi.fn() }
@@ -54,5 +54,48 @@ describe('openAuthedPdf', () => {
     )))
     await expect(openAuthedPdf('/api/v1/documents/print/statement/abc', 'Failed to read the statement')).rejects.toThrow(/customer not found|Failed to read the statement/)
     expect(tab.close).toHaveBeenCalled()
+  })
+
+  it('saves the document as a download when the tab is blocked and a file name is given', async () => {
+    vi.stubGlobal('open', vi.fn(() => null))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('%PDF', { status: 200 })))
+    const clicked: { href: string; download: string }[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push({ href: this.getAttribute('href') ?? '', download: this.download })
+    })
+    try {
+      const shown = await openAuthedPdf('/api/v1/documents/print/invoice/abc', 'Failed', 'invoice.pdf')
+      expect(shown.blocked).toBe(true)
+      expect(clicked).toEqual([{ href: 'blob:authed-pdf', download: 'invoice.pdf' }])
+    } finally {
+      click.mockRestore()
+    }
+  })
+})
+
+describe('fetchAuthedBlobUrl', () => {
+  beforeEach(() => {
+    localStorage.setItem('token', 'test-token')
+    URL.createObjectURL = vi.fn(() => 'blob:picture')
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.removeItem('token')
+  })
+
+  it('fetches with the token and answers a blob url', async () => {
+    const fetchMock = vi.fn(async () => new Response('bytes', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await fetchAuthedBlobUrl('/api/v1/quotes/q1/file', 'Failed')).toBe('blob:picture')
+    const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1]
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token')
+  })
+
+  it('throws the server\'s words on a refusal', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'not_found', message: 'no original' } }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } },
+    )))
+    await expect(fetchAuthedBlobUrl('/api/v1/quotes/q1/file', 'Failed')).rejects.toThrow(/no original|Failed/)
   })
 })
