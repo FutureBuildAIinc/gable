@@ -976,10 +976,11 @@ every branch:
   `branch_id` (`primary_branch_id` on the customer create), and none
   refuses fail closed (the payment family held its resolved branch
   already; the quote, order, draft, customer, purchase order and AP bill
-  creates follow it, and so do the purchase order drafts no body drives:
-  the reorder run a purchasing caller starts and the special order draft
-  an accepted quote fires, while the reorder timer's system caller keeps
-  the default resolution it always had);
+  creates follow it, and so does the reorder run a purchasing caller
+  starts, while the reorder timer's system caller keeps the default
+  resolution it always had; the special order draft an accepted quote
+  fires takes the branch of the order its line belongs to, not the
+  caller's grants);
 - the tax exemption routes and the tax preview hold the customer they name
   (path, body, the exemption's own row, the preview's customer and ship to)
   to the customer family's wall: a customer outside the reach reads as

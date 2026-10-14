@@ -1282,7 +1282,7 @@ type autoPOAdapter struct {
 	productSvc *product.Service
 }
 
-func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error {
 	// Resolve product description for the PO line; a line with no product
 	// (the quote accept path, which carries none) takes a plain one.
 	desc := "special order"
@@ -1291,7 +1291,7 @@ func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, produc
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
 		}
 	}
-	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, productID, vendorID, desc, quantity, unitCost)
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, branch, productID, vendorID, desc, quantity, unitCost)
 }
 
 // pricingAuditAdapter bridges the pricing package's mirrored audit entries

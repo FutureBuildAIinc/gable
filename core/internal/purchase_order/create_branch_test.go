@@ -217,7 +217,7 @@ func TestCreateFromSOLine_TakesTheGrantsBranch(t *testing.T) {
 	// Exactly one granted branch: the special order draft lands there.
 	one := "so-one-" + uuid.NewString()
 	s.grant(t, one, s.branchA)
-	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{UserSub: one}), soLine, &s.product, &s.vendor, "pin special", 1, 1); err != nil {
+	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{UserSub: one}), soLine, s.branchA, &s.product, &s.vendor, "pin special", 1, 1); err != nil {
 		t.Fatalf("one grant special order draft: %v", err)
 	}
 	branch, ok := s.poBranch(t)
@@ -226,36 +226,29 @@ func TestCreateFromSOLine_TakesTheGrantsBranch(t *testing.T) {
 	}
 	clearDraft()
 
-	// No grants at all: fail closed, nothing written.
-	none := "so-none-" + uuid.NewString()
-	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{UserSub: none}), soLine, &s.product, &s.vendor, "pin special", 1, 1); err == nil || !strings.Contains(err.Error(), "branch_id") {
-		t.Errorf("no grants special order draft: %v, want the fail closed refusal naming branch_id", err)
-	}
-	if _, ok := s.poBranch(t); ok {
-		t.Errorf("no grants special order draft wrote a row, want none")
-	}
-	clearDraft()
-
-	// Several granted branches: the choice refusal, nothing written.
+	// A user holding two grants, with no header, accepts a quote whose
+	// order sits at A: the draft exists at the order's own branch (r5 P3-6,
+	// r6 P3-5), not the choice refusal the caller's grants used to answer.
 	many := "so-many-" + uuid.NewString()
 	s.grant(t, many, s.branchA, s.branchB)
-	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{UserSub: many}), soLine, &s.product, &s.vendor, "pin special", 1, 1); err == nil || !strings.Contains(err.Error(), "branch_id") {
-		t.Errorf("two grants special order draft: %v, want the choice refusal naming branch_id", err)
+	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{UserSub: many}), soLine, s.branchA, &s.product, &s.vendor, "pin special", 1, 1); err != nil {
+		t.Fatalf("two grants special order draft: %v", err)
 	}
-	if _, ok := s.poBranch(t); ok {
-		t.Errorf("two grants special order draft wrote a row, want none")
+	branch, ok = s.poBranch(t)
+	if !ok || branch != s.branchA {
+		t.Errorf("two grants special order draft sits at branch %v (found %t), want the order's branch %s", branch, ok, s.branchA)
 	}
 	clearDraft()
 
-	// A context that carries a branch keeps its own resolution (the header
-	// caller and the A2A receiver's injected inbound branch both arrive
-	// here): the draft lands at the context branch, as it always did.
-	at := s.branchB
-	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{BranchID: &at}), soLine, &s.product, &s.vendor, "pin special", 1, 1); err != nil {
+	// A context that carries a branch lands the draft at the order's branch
+	// too (the header caller and the A2A receiver's injected inbound branch
+	// both arrive here with the order's own branch).
+	at := s.branchA
+	if err := svc.CreateFromSOLine(branchctx.With(ctx, &branchctx.Context{BranchID: &at}), soLine, s.branchA, &s.product, &s.vendor, "pin special", 1, 1); err != nil {
 		t.Fatalf("context branch special order draft: %v", err)
 	}
 	branch, ok = s.poBranch(t)
-	if !ok || branch != s.branchB {
-		t.Errorf("context branch special order draft sits at branch %v (found %t), want the context branch %s", branch, ok, s.branchB)
+	if !ok || branch != s.branchA {
+		t.Errorf("context branch special order draft sits at branch %v (found %t), want the order's branch %s", branch, ok, s.branchA)
 	}
 }

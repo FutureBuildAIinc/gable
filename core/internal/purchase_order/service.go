@@ -381,26 +381,20 @@ type CreatePOLineInput struct {
 // product, so the receipt puts the stock on hand and the order module's
 // release picks it up (ADR 0005 5.4). The header and the line are one
 // transaction: a line that cannot be linked leaves no empty header behind.
-// The draft settles its branch the way every create does
-// (SEC-NOHEADER-1): the context branch first (the header caller, the A2A
-// receiver's injected inbound branch), then, for a user context with no
-// branch, the user's grants (one writes there, several answer the choice
-// refusal, none fail closed), so an accepted quote's special order draft
-// never lands at the deployment default a no header creator holds no grant
-// on. The refusal is returned, not logged: the accept path's own fire and
-// forget policy decides what it does with it, and nothing is written either
-// way.
-func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
-	resolved, err := s.branchFor(ctx, nil)
-	if err != nil {
-		return err
-	}
+// The draft sits at the branch of the order the line belongs to, which the
+// caller names (SEC-NOHEADER-1): the order's own branch, never the caller's
+// grants, so a user who holds several branches and sends no header, and
+// accepts a quote of one of them, gets the draft at that order's branch
+// instead of a choice refusal logged and lost. The draft of the vendor is
+// looked up at that branch alone, so the line never joins another branch's
+// draft.
+func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, branch uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context) error {
 		var po *PurchaseOrder
 		var err error
 
 		if vendorId != nil {
-			po, err = s.repo.GetDraftPOByVendor(ctx, vendorId)
+			po, err = s.repo.GetDraftPOByVendorAt(ctx, *vendorId, branch)
 		}
 
 		if po == nil || err != nil {
@@ -410,9 +404,7 @@ func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, prod
 				Status:   StatusDraft,
 				Source:   SourceSpecialOrder,
 			}
-			if resolved != nil {
-				newPO.BranchID = *resolved
-			}
+			newPO.BranchID = branch
 			if err := s.repo.CreatePO(ctx, newPO); err != nil {
 				return fmt.Errorf("failed to create PO: %w", err)
 			}

@@ -29,7 +29,7 @@ import (
 type AutoPOService interface {
 	// productID is nil for a line that carries no product on its purchase
 	// order line (the plain accept path, whose lines are inert on receipt).
-	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
+	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error
 }
 
 // OrderCreator is the order module's conversion seam (ADR 0005 section 5.8):
@@ -1037,8 +1037,15 @@ func (s *Service) triggerAutoPO(ctx context.Context, q *Quote, created *order.Or
 				s.logger.Info("auto-PO skipped: the quote line has no order line", "quote_id", q.ID, "line_id", line.ID)
 				continue
 			}
+			// The draft sits at the branch of the order the line belongs to
+			// (the quote's own when no order was created), never at a branch
+			// resolved from the caller's grants.
+			branch := q.BranchID
+			if created != nil {
+				branch = created.BranchID
+			}
 			err := s.poSvc.CreatePOFromSpecialOrderLine(
-				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked,
+				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked, branch,
 			)
 			if err != nil {
 				s.logger.Warn("auto-PO failed for quote line",

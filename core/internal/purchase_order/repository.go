@@ -131,6 +131,24 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 	return &po, nil
 }
 
+// GetDraftPOByVendorAt is the draft purchase order of the vendor at one
+// branch, for the special order draft, whose branch is the linked order's
+// own: it carries no wall, because the branch is the order's and the caller
+// asked for it by name, not by reach.
+func (r *Repository) GetDraftPOByVendorAt(ctx context.Context, vendorID, branch uuid.UUID) (*PurchaseOrder, error) {
+	var po PurchaseOrder
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
+		FROM purchase_orders
+		WHERE vendor_id = $1 AND status = 'DRAFT' AND branch_id = $2
+		LIMIT 1`, vendorID, branch).Scan(
+		&po.ID, &po.VendorID, &po.Status, &po.Source, &po.CreatedAt, &po.UpdatedAt, &po.BranchID)
+	if err != nil {
+		return nil, err
+	}
+	return &po, nil
+}
+
 func (r *Repository) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
 	query := `
 		SELECT po.id, po.vendor_id, po.status, po.source, po.created_at, po.updated_at, po.branch_id,
