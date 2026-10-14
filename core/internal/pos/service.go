@@ -729,14 +729,22 @@ var errNotConfigured = errors.New("the counter's money path is not wired")
 // ReceiptInvoice is the invoice behind a completed sale's receipt. The sale is
 // read exactly as GetSale reads it, so a sale outside the caller's reach is
 // the missing sale; an open, held or voided sale, and a sale with no invoice,
-// is a 409 no_receipt.
-func (s *Service) ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (uuid.UUID, error) {
+// is a 409 no_receipt. walkIn is true when the sale names no customer or the
+// shared walk in customer, so a caller can refuse to send it anywhere.
+func (s *Service) ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (invoiceID uuid.UUID, walkIn bool, err error) {
 	sale, err := s.repo.GetSale(ctx, saleID)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, false, err
 	}
 	if sale.Status != StatusCompleted || sale.InvoiceID == nil {
-		return uuid.Nil, conflict("no_receipt", "this sale has no receipt: only a completed sale with an invoice has one")
+		return uuid.Nil, false, conflict("no_receipt", "this sale has no receipt: only a completed sale with an invoice has one")
 	}
-	return *sale.InvoiceID, nil
+	if sale.CustomerID == nil {
+		return *sale.InvoiceID, true, nil
+	}
+	walkInID, _, err := s.repo.WalkInCustomer(ctx)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	return *sale.InvoiceID, walkInID == *sale.CustomerID, nil
 }
