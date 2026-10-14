@@ -5,12 +5,52 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// sealedPrefix marks a value sealed by the payment vault (AES-256-GCM); the
+// envelope is shared so one vault key serves every sealed setting.
+const sealedPrefix = "enc:v1:"
+
+// Sealer is the at-rest sealing the key store uses; *payment.Vault satisfies it.
+type Sealer interface {
+	Present() bool
+	Seal(plaintext string) (string, error)
+	Open(sealed string) (string, error)
+}
+
+// ErrNoVault is returned when a key must be sealed and no vault key is set:
+// a key is never stored in plain text.
+var ErrNoVault = errors.New("no vault key is configured (set PAYMENT_VAULT_KEY), so a key cannot be stored")
+
+// IsSealedValue reports whether s carries the seal envelope.
+func IsSealedValue(s string) bool { return strings.HasPrefix(s, sealedPrefix) }
+
+// openValue opens a sealed value; a legacy plaintext value passes through.
+func openValue(v Sealer, s string) (string, error) {
+	if !IsSealedValue(s) {
+		return s, nil
+	}
+	if v == nil || !v.Present() {
+		return "", errors.New("value is sealed but no vault key is configured")
+	}
+	return v.Open(s)
+}
+
+// SealValue seals a plaintext secret for storage, refusing when no vault key
+// is configured.
+func SealValue(v Sealer, plaintext string) (string, error) {
+	if v == nil || !v.Present() {
+		return "", ErrNoVault
+	}
+	return v.Seal(plaintext)
+}
 
 // KeyStore provides a centralized, dynamically-refreshable API key store.
 // It checks the system_settings DB table first, falling back to an env var default.
@@ -24,6 +64,15 @@ type KeyStore struct {
 	cached   string
 	cachedAt time.Time
 	ttl      time.Duration
+
+	sealer Sealer // optional: opens values sealed at rest
+}
+
+// WithSealer attaches the vault that opens sealed values on read. Values that
+// are not sealed (legacy rows) still read as they are.
+func (ks *KeyStore) WithSealer(s Sealer) *KeyStore {
+	ks.sealer = s
+	return ks
 }
 
 // NewKeyStore creates a key store that reads from system_settings table.
@@ -116,7 +165,13 @@ func (ks *KeyStore) loadFromDB(ctx context.Context) string {
 	var val string
 	err := ks.pool.QueryRow(ctx, "SELECT value FROM system_settings WHERE key = $1", ks.settingKey).Scan(&val)
 	if err == nil && val != "" {
-		return val
+		opened, oerr := openValue(ks.sealer, val)
+		if oerr != nil {
+			// Never fall back to the sealed text, and never log the value.
+			slog.Error("AI setting could not be opened", "key", ks.settingKey, "error", oerr)
+			return ks.envDefault
+		}
+		return opened
 	}
 	if err != nil {
 		slog.Debug("No DB setting found, using env fallback", "key", ks.settingKey)

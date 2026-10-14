@@ -39,6 +39,17 @@ type Client struct {
 	models       *ModelRouter
 	httpClient   *http.Client
 	maestro      *MaestroClient // optional: routes text AI through Brain (dead code today)
+
+	// The native Anthropic provider (see anthropic.go). The provider is chosen
+	// in settings; the key lives sealed in system_settings and has no
+	// environment fallback.
+	provider            string
+	providerStore       *KeyStore
+	anthropicKey        string
+	anthropicKeyStore   *KeyStore
+	anthropicModel      string
+	anthropicModelStore *KeyStore
+	anthropicBaseURL    string // tests only
 }
 
 const (
@@ -136,9 +147,53 @@ func (c *Client) getBaseURL(ctx context.Context) string {
 	return strings.TrimRight(candidate, "/")
 }
 
-// IsConfigured returns true if an API key is available (from DB or env/static).
+// IsConfigured returns true if the active provider has its key (from DB or
+// env/static for OpenRouter; the sealed admin key for Anthropic).
 func (c *Client) IsConfigured(ctx context.Context) bool {
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicKeyValue(ctx) != ""
+	}
 	return c.getKey(ctx) != ""
+}
+
+// WithProvider fixes the provider (tests, static configs).
+func (c *Client) WithProvider(p string) *Client { c.provider = p; return c }
+
+// WithProviderStore attaches the admin-editable provider choice.
+func (c *Client) WithProviderStore(ks *KeyStore) *Client { c.providerStore = ks; return c }
+
+// WithAnthropicKey fixes the Anthropic key (tests only; serve uses the store).
+func (c *Client) WithAnthropicKey(k string) *Client { c.anthropicKey = k; return c }
+
+// WithAnthropicKeyStore attaches the store the sealed Anthropic key is read from.
+func (c *Client) WithAnthropicKeyStore(ks *KeyStore) *Client { c.anthropicKeyStore = ks; return c }
+
+// WithAnthropicModel fixes the Anthropic model (tests).
+func (c *Client) WithAnthropicModel(m string) *Client { c.anthropicModel = m; return c }
+
+// WithAnthropicModelStore attaches the admin-editable Anthropic model.
+func (c *Client) WithAnthropicModelStore(ks *KeyStore) *Client { c.anthropicModelStore = ks; return c }
+
+// WithAnthropicBaseURL points the Anthropic provider at a test server.
+func (c *Client) WithAnthropicBaseURL(u string) *Client { c.anthropicBaseURL = u; return c }
+
+func (c *Client) activeProvider(ctx context.Context) string {
+	if c.providerStore != nil {
+		if p := c.providerStore.Get(ctx); p == ProviderAnthropic || p == ProviderOpenRouter {
+			return p
+		}
+	}
+	if c.provider == ProviderAnthropic {
+		return ProviderAnthropic
+	}
+	return ProviderOpenRouter
+}
+
+func (c *Client) anthropicKeyValue(ctx context.Context) string {
+	if c.anthropicKeyStore != nil {
+		return c.anthropicKeyStore.Get(ctx)
+	}
+	return c.anthropicKey
 }
 
 // --- JWT context propagation for Maestro (dead code path, preserved) ---
@@ -443,6 +498,9 @@ func (c *Client) Generate(ctx context.Context, systemPrompt, userPrompt string, 
 	if maxTokens == 0 {
 		maxTokens = 2048
 	}
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicGenerate(ctx, systemPrompt, userPrompt, maxTokens)
+	}
 
 	msgs := make([]chatMessage, 0, 2)
 	if systemPrompt != "" {
@@ -533,6 +591,20 @@ func (c *Client) ExtractFreightInvoice(ctx context.Context, fileBytes []byte, co
 		return nil, "", fmt.Errorf("no AI key configured — please enter the freight total manually")
 	}
 
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		raw, err := c.anthropicFileCall(ctx, freightSystemPrompt,
+			"Extract the freight charge details from this invoice. Return JSON with total_amount, carrier_name, and invoice_number.",
+			fileBytes, contentType, 1024)
+		if err != nil {
+			return nil, "", err
+		}
+		var result FreightInvoiceResult
+		if err := json.Unmarshal([]byte(stripJSONFence(raw)), &result); err != nil {
+			return nil, raw, fmt.Errorf("failed to parse AI response as JSON: %w", err)
+		}
+		return &result, raw, nil
+	}
+
 	content, plugins, err := buildFileContent(fileBytes, contentType,
 		"Extract the freight charge details from this invoice. Return JSON with total_amount, carrier_name, and invoice_number.")
 	if err != nil {
@@ -606,6 +678,12 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 
 	if !c.IsConfigured(ctx) {
 		return "", fmt.Errorf("no AI key configured")
+	}
+
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicFileCall(ctx, systemPrompt,
+			"Extract all material list items from this document. Output each item as: QUANTITY UOM - DESCRIPTION",
+			fileBytes, contentType, 4096)
 	}
 
 	content, plugins, err := buildFileContent(fileBytes, contentType,
