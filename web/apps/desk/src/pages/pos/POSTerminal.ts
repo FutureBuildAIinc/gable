@@ -6,14 +6,14 @@ import { customElement, state, query } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer } from '../../types/pos';
 import { chargeRefusal, standingOf, money } from './standing';
+import { formatPrice4 } from '../../lib/utils';
+import { normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState } from './panels';
 import { authCustody } from '@gable/auth';
 import '../../components/BarcodeScanner.ts';
 
 const REGISTER_ID = 'REG-01';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-/** A scale 4 price to dollars, for the display only. */
-const fmtPrice = (tenThousandths: number) => `$${(tenThousandths / 10000).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
 
 /**
@@ -36,6 +36,9 @@ export class POSTerminal extends LitElement {
   @state() private _error: string | null = null;
   @state() private _success: string | null = null;
   @state() private _isScanning = false;
+  // The quantity the next added result takes, and the highlighted result.
+  @state() private _qtyText = '1';
+  @state() private _highlight = 0;
 
   // The sale's customer: the lookup, the account's standing and what a charge
   // to the account carries (the purchase order and the job).
@@ -158,6 +161,22 @@ export class POSTerminal extends LitElement {
     }
     if (changed.has('_custQuery')) {
       this._debounceCustomers();
+    }
+  }
+
+  /** Arrows move the highlighted result; Enter adds it with the typed quantity. */
+  private _resultKey(e: KeyboardEvent) {
+    const n = this._searchResults.length;
+    if (n === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this._highlight = Math.min(this._highlight + 1, n - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this._highlight = Math.max(this._highlight - 1, 0);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      void this._addItem(this._searchResults[Math.min(this._highlight, n - 1)]);
     }
   }
 
@@ -322,7 +341,7 @@ export class POSTerminal extends LitElement {
           ?disabled=${hasLines}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:opacity-40" />
-        ${hasLines ? html`<div class="mt-1 text-xs text-slate-400">Name the customer before the first line.</div>` : nothing}
+        <div class="mt-1 text-xs text-slate-400">Name the customer before the first line</div>
         ${this._custResults.length > 0 ? html`
           <div class="mt-2 max-h-56 overflow-y-auto rounded border border-white/10" data-testid="pos-customer-results">
             ${this._custResults.map((r) => {
@@ -369,13 +388,21 @@ export class POSTerminal extends LitElement {
     }
   }
 
-  private async _addItem(product: QuickSearchResult) {
+  private async _addItem(product: QuickSearchResult, quantity = this._qtyText) {
     if (!this._sale) return;
+    const qty = normalizeQuantity(quantity);
+    if (qty === null) {
+      this._error = 'Enter a quantity above zero';
+      return;
+    }
     try {
-      const updated = await posService.addItem(this._sale.id, product.product_id, '1', product.uom);
+      this._error = null;
+      const updated = await posService.addItem(this._sale.id, product.product_id, qty, product.uom);
       this._sale = updated;
       this._searchQuery = '';
       this._searchResults = [];
+      this._highlight = 0;
+      this._qtyText = '1';
       this._searchInput?.focus();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to add item';
@@ -681,7 +708,7 @@ export class POSTerminal extends LitElement {
   private _progressChip(label: string, n: number, state: PanelState) {
     const tone = state === 'done'
       ? 'border-gable-green/40 text-gable-green'
-      : state === 'current' ? 'border-white/30 text-white' : 'border-white/10 text-slate-500';
+      : state === 'current' ? 'border-white/30 text-white' : 'border-white/10 text-slate-400';
     return html`
       <span data-testid="progress-${label.toLowerCase()}" data-state=${state}
         class="flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone}">
@@ -735,9 +762,17 @@ export class POSTerminal extends LitElement {
             <input id="pos-search-input" type="text" autocomplete="off"
               placeholder="Search by SKU or description"
               .value=${this._searchQuery}
-              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; }}
+              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; this._highlight = 0; }}
+              @keydown=${(e: KeyboardEvent) => this._resultKey(e)}
               class="flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green"
               aria-label="Search product by SKU or description" />
+            <label class="sr-only" for="pos-qty">Quantity</label>
+            <input id="pos-qty" type="text" inputmode="decimal" autocomplete="off"
+              .value=${this._qtyText}
+              @input=${(e: Event) => { this._qtyText = (e.target as HTMLInputElement).value; }}
+              @keydown=${(e: KeyboardEvent) => this._resultKey(e)}
+              class="w-20 rounded-lg border border-white/10 bg-deep-space px-3 py-3 text-right font-mono text-base text-white outline-none focus:border-gable-green"
+              title="Quantity to add" aria-label="Quantity" />
             <button @click=${() => { this._isScanning = true; }}
               class="rounded-lg border border-white/20 px-4 text-sm font-semibold text-slate-200">Scan</button>
           </div>
@@ -748,9 +783,10 @@ export class POSTerminal extends LitElement {
             ></gable-barcode-scanner>` : nothing}
           ${this._searchResults.length > 0 ? html`
             <div class="absolute left-4 right-4 top-full z-10 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-slate-steel shadow-2xl" data-testid="pos-results">
-              ${this._searchResults.map((r) => html`
+              ${this._searchResults.map((r, i) => html`
                 <button @click=${() => this._addItem(r)}
-                  class="flex w-full items-center gap-3 border-b border-white/10 px-4 py-2 text-left text-sm text-white last:border-b-0 hover:bg-white/5">
+                  aria-current=${i === this._highlight ? 'true' : 'false'}
+                  class="flex w-full items-center gap-3 border-b border-white/10 px-4 py-2 text-left text-sm text-white last:border-b-0 hover:bg-white/5 ${i === this._highlight ? 'bg-white/10' : ''}">
                   <span class="min-w-[100px] font-mono text-xs text-blueprint-blue">${r.sku}</span>
                   <span class="flex-1 text-slate-200">${r.description}</span>
                   <span class="font-mono font-semibold text-gable-green">${fmt(r.unit_price_cents)}/${r.uom}</span>
@@ -760,7 +796,7 @@ export class POSTerminal extends LitElement {
         </div>
         <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
           ${productLines.length === 0 ? html`
-            <div class="flex h-full min-h-[120px] items-center justify-center text-sm text-slate-500" data-testid="pos-empty">
+            <div class="flex h-full min-h-[120px] items-center justify-center text-sm text-slate-400" data-testid="pos-empty">
               Search and add products to start a sale
             </div>` : html`
             <table class="w-full border-collapse" aria-label="Ticket lines" data-testid="pos-lines">
@@ -777,7 +813,7 @@ export class POSTerminal extends LitElement {
                     <td class="px-3 py-3 text-sm text-white">${item.description}</td>
                     <td class="px-3 py-3 text-center font-mono text-sm text-slate-200">${item.quantity} ${item.uom}</td>
                     <td class="px-3 py-3 text-right font-mono text-sm text-slate-200">
-                      ${item.unit_price_ten_thousandths !== null ? fmtPrice(item.unit_price_ten_thousandths) : '-'}</td>
+                      ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</td>
                     <td class="px-3 py-3 text-right font-mono text-sm font-semibold text-white">
                       ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</td>
                     <td class="px-3 py-3">
@@ -822,7 +858,7 @@ export class POSTerminal extends LitElement {
                 ?disabled=${!hasLines || !open || refused !== null}
                 title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
                 aria-pressed=${chosen ? 'true' : 'false'}
-                class="rounded-lg border px-3 py-3 text-sm font-semibold capitalize disabled:cursor-not-allowed disabled:opacity-40 ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white'}">
+                class="rounded-lg border px-3 py-3 text-sm font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed disabled:opacity-40 ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white'}">
                 ${m === 'account' ? 'Charge to account' : m}
               </button>`;
           })}

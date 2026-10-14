@@ -221,4 +221,88 @@ describe('the counter as the Panels layout', () => {
       expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
     });
   });
+
+  describe('a quantity on a line', () => {
+    const result = { product_id: 'p-2x4', sku: '2X4-8', description: '2x4 8ft', uom: 'EA', unit_price_cents: 350, in_stock: 100 };
+    type Inner = { _searchResults: unknown[]; _searchQuery: string };
+    const setResults = async (el: POSTerminal) => {
+      (el as unknown as Inner)._searchResults = [result];
+      await el.updateComplete;
+    };
+    const setQty = async (el: POSTerminal, v: string) => {
+      const input = el.querySelector('#pos-qty') as HTMLInputElement;
+      input.value = v;
+      input.dispatchEvent(new Event('input'));
+      await el.updateComplete;
+    };
+    const flush = async (el: POSTerminal) => { await new Promise((r) => setTimeout(r, 0)); await el.updateComplete; };
+
+    it('adds a result with the typed quantity as one line with its total', async () => {
+      const twelve = { ...line('x', 4200), quantity: '12', unit_price_ten_thousandths: 35000 };
+      svc.addItem.mockResolvedValue(sale({ lines: [twelve as never], subtotal_cents: 4200, total_cents: 4200 }));
+      const el = await mount(sale({ lines: [] }));
+      await setResults(el);
+      await setQty(el, '12');
+      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '12', 'EA');
+      expect(el.querySelectorAll('[data-testid="pos-lines"] tbody tr').length).toBe(1);
+      expect(el.querySelector('[data-testid="pos-lines"]')?.textContent).toContain('$42.00');
+    });
+
+    it('allows a decimal quantity and defaults to one', async () => {
+      svc.addItem.mockResolvedValue(sale());
+      const el = await mount(sale({ lines: [] }));
+      expect((el.querySelector('#pos-qty') as HTMLInputElement).value).toBe('1');
+      await setResults(el);
+      await setQty(el, '2.5');
+      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '2.5', 'EA');
+    });
+
+    it('refuses a zero or negative quantity and adds nothing', async () => {
+      const el = await mount(sale({ lines: [] }));
+      for (const v of ['0', '-3', '']) {
+        await setResults(el);
+        await setQty(el, v);
+        (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+        await flush(el);
+        expect(el.querySelector('[role="alert"]')?.textContent).toContain('quantity');
+      }
+      expect(svc.addItem).not.toHaveBeenCalled();
+    });
+
+    it('adds the highlighted result when Enter is pressed in the quantity field', async () => {
+      svc.addItem.mockResolvedValue(sale());
+      const el = await mount(sale({ lines: [] }));
+      await setResults(el);
+      await setQty(el, '4');
+      (el.querySelector('#pos-qty') as HTMLInputElement).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '4', 'EA');
+    });
+  });
+
+  it('shows a unit price at the wire precision and its line total to the cent', async () => {
+    const odd = { ...line('o', 1658), unit_price_ten_thousandths: 165750 };
+    const whole = { ...line('w', 500), unit_price_ten_thousandths: 50000 };
+    const el = await mount(sale({ lines: [odd as never, whole as never] }));
+    const text = el.querySelector('[data-testid="pos-lines"]')?.textContent ?? '';
+    expect(text).toContain('$16.575');
+    expect(text).toContain('$16.58');
+    expect(text).toContain('$5.00');
+    expect(text).not.toContain('$5.0000');
+  });
+
+  it('tells the cashier to name the customer first, from the start of an empty sale', async () => {
+    const el = await mount(sale({ lines: [] }));
+    expect(q(el, 'panel-customer').textContent).toContain('Name the customer before the first line');
+  });
+
+  it('words the account tender in sentence case', async () => {
+    const el = await mount(sale());
+    expect(q(el, 'tender-account').textContent?.trim()).toBe('Charge to account');
+    expect(q(el, 'tender-account').className).not.toContain('capitalize');
+  });
 });
