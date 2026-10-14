@@ -20,7 +20,7 @@ interface GableSelectLike {
 /** Pick an option of the app's own select by its visible label. */
 export async function pickOption(control: Locator, option: string | RegExp) {
     const host = selectHost(control);
-    await host.getByRole('button').first().click();
+    await host.locator('button').first().click();
     await host.getByRole('option', { name: option, exact: true }).click();
 }
 

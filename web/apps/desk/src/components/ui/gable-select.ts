@@ -240,12 +240,11 @@ export class GableSelect extends LitElement {
             lastGroup = option.group;
             rows.push(this._renderOption(option, index));
         });
-        const activeDesc = this._activeIndex >= 0 ? `${this._ids}-opt-${this._activeIndex}` : nothing;
         return html`
             <div
+                id="${this._ids}-list"
                 role="listbox"
                 aria-label=${this.label || nothing}
-                aria-activedescendant=${activeDesc}
                 @click=${(e: Event) => e.preventDefault()}
                 class="absolute z-50 left-0 right-0 max-h-60 overflow-y-auto rounded-md bg-surface-2 border border-white/10 shadow-xl py-1 ${this._openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}"
             >
@@ -258,12 +257,16 @@ export class GableSelect extends LitElement {
 
     render() {
         const chosen = this.selectedOption;
+        const activeDesc = this._open && this._activeIndex >= 0 ? `${this._ids}-opt-${this._activeIndex}` : nothing;
         return html`
             <div class="relative">
                 <button
                     type="button"
+                    role="combobox"
                     aria-haspopup="listbox"
                     aria-expanded=${this._open ? 'true' : 'false'}
+                    aria-controls="${this._ids}-list"
+                    aria-activedescendant=${activeDesc}
                     aria-label=${this.label || nothing}
                     ?disabled=${this.disabled}
                     @click=${this._toggle}
