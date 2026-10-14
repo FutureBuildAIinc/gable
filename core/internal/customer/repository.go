@@ -296,7 +296,7 @@ func nilIfZero(id uuid.UUID) any {
 func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Customer, error) {
 	c := &Customer{}
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+customerColumns+customerFrom+`
-		WHERE c.id = $1 AND `+wall("c", 2, 3), id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx))
+		WHERE c.id = $1 AND `+wall("c", 2, 3), id, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx))
 	if err := scanCustomer(row, c); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -309,7 +309,7 @@ func (r *PostgresRepository) GetCustomer(ctx context.Context, id uuid.UUID) (*Cu
 func (r *PostgresRepository) GetCustomerByEmail(ctx context.Context, email string) (*Customer, error) {
 	c := &Customer{}
 	row := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+customerColumns+customerFrom+`
-		WHERE c.email = $1 AND `+wall("c", 2, 3)+` ORDER BY c.created_at, c.id LIMIT 1`, email, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx))
+		WHERE c.email = $1 AND `+wall("c", 2, 3)+` ORDER BY c.created_at, c.id LIMIT 1`, email, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx))
 	if err := scanCustomer(row, c); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -368,7 +368,7 @@ func likePattern(q string) string {
 
 // customerWhere builds the one predicate the list and its count share.
 func customerWhere(ctx context.Context, f ListFilter, withCursor bool) (string, []any) {
-	args := []any{branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)}
+	args := []any{branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)}
 	conds := []string{wall("c", 1, 2)}
 	add := func(cond string, v any) {
 		args = append(args, v)
@@ -435,7 +435,7 @@ func (r *PostgresRepository) GetEscalationPolicy(ctx context.Context, customerID
 		SELECT c.price_escalation_policy, ROUND(c.escalation_threshold_pct * 10000)::bigint,
 		       c.escalation_agreement_signed_at, c.escalation_agreement_ref, c.revision
 		FROM customers c
-		WHERE c.id = $1 AND `+wall("c", 2, 3), customerID, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).
+		WHERE c.id = $1 AND `+wall("c", 2, 3), customerID, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)).
 		Scan(&policy, &threshold, &signed, &p.AgreementRef, &p.Revision)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
