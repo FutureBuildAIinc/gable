@@ -276,13 +276,18 @@ func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID 
 }
 
 func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string, date time.Time) ([]ZReport, error) {
+	// The day's bounds are absolute instants in the date's own zone: a
+	// timestamptz never meets a date cast, whose midnight belongs to the
+	// database session's zone, not the caller's (the sale list's rule).
+	start := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	end := start.AddDate(0, 0, 1)
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT id, till_session_id, register_id, branch_id, ROUND(over_short * 100)::bigint, payload, generated_at
 		FROM till_z_reports
 		WHERE ($1 = '' OR register_id = $1)
-			AND (generated_at >= $2::date AND generated_at < ($2::date + 1))
-			AND `+middleware.Wall("", 3, 4)+`
-		ORDER BY generated_at DESC`, registerID, date, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+			AND (generated_at >= $2 AND generated_at < $3)
+			AND `+middleware.Wall("", 4, 5)+`
+		ORDER BY generated_at DESC`, registerID, start, end, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Z-reports: %w", err)
 	}

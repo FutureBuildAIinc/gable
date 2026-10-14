@@ -256,6 +256,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/payment-terms":                                    {KeyBranchClassStatedLimit, "the dealer wide payment terms vocabulary"},
 	"GET /api/v1/payment-terms/{id}":                               {KeyBranchClassStatedLimit, "the dealer wide payment terms vocabulary"},
 	"GET /api/v1/pos/catalog":                                      {KeyBranchClassStatedLimit, "the dealer wide product catalogue"},
+	"GET /api/v1/pos/customers":                                    {KeyBranchClassWalled, "customer_branches (the customer wall the customer list carries, held to the caller's branch context or grants); the counter's lookup reads only what that wall reaches"},
 	"GET /api/v1/pos/products/search":                              {KeyBranchClassStatedLimit, "the dealer wide product catalogue"},
 	"GET /api/v1/price_levels":                                     {KeyBranchClassStatedLimit, "the dealer wide price level vocabulary"},
 	"GET /api/v1/pricing/categories":                               {KeyBranchClassStatedLimit, "product category reference data, no branch fact"},
@@ -427,6 +428,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"PUT /api/v1/quotes/{id}":                                      {KeyBranchClassWalled, "quotes.branch_id"},
 	"PUT /api/v1/quotes/{id}/file":                                 {KeyBranchClassWalled, "quotes.branch_id"},
 	"PUT /api/v1/ship-tos/{id}":                                    {KeyBranchClassWalled, "customer_ship_tos.customer_id to customer_branches"},
+	"PUT /api/v1/pos/transactions/{id}/customer":                   {KeyBranchClassWalled, "pos_transactions.branch_id (the sale is held to the caller's branch before any write: 404 for a hidden sale, 403 by name with no branch in context and no grant) and the named customer through the customer branch wall (a hidden customer reads as missing); no machine key cashier"},
 }
 
 // KeyBranchRouteClassFor returns the class the table gives a method and
