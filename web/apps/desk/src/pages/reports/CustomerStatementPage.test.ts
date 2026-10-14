@@ -342,7 +342,8 @@ describe('customer statement open documents scope', () => {
         await new Promise((r) => setTimeout(r, 0))
         await el.updateComplete
       }
-      expect(textOf(el)).toMatch(/open documents follow the yard/i)
+      expect(textOf(el)).toContain('Documents listed are those this yard can see; the balance covers the whole account')
+      expect(el.querySelectorAll('[data-testid="statement-scope"]').length, 'said once').toBe(1)
     } finally {
       history.replaceState(null, '', '/')
     }

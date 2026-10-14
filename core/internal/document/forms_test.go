@@ -393,11 +393,11 @@ func TestStatementSaysItsOpenDocumentsFollowTheYard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, doc, "Open documents at this yard")
+	mustContain(t, doc, "Documents listed are those this yard can see; the balance covers the whole account")
 
 	doc, err = svc.GenerateStatementPDF(context.Background(), st, cust)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustNotContain(t, doc, "Open documents at this yard")
+	mustNotContain(t, doc, "Documents listed are those this yard can see; the balance covers the whole account")
 }
