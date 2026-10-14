@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Fixed skylight unit, white frame, glass</title>
+  <defs><style>
+    .frame{fill:#f4f0e8}
+    .frameHi{fill:#fbf7ee}
+    .frameShade{fill:#b8b1a4}
+    .frameDeep{fill:#7a7464}
+    .glass{fill:#a8cce8}
+    .glassHi{fill:#cce0f0}
+    .glassShade{fill:#5a82a4}
+    .mount{fill:#cdcdcc}
+    .mountHi{fill:#e8e8e8}
+    .mountShade{fill:#7a7a78}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="106" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="mountShade" points="22,82 234,60 234,212 22,222"/>
+    <polygon class="mount" points="22,82 234,60 230,68 22,86"/>
+    <polygon class="mountHi" points="22,86 230,68 230,72 22,90"/>
+    <polygon class="mountShade" points="230,68 230,212 234,212 234,60"/>
+  </g>
+  <g>
+    <rect class="frameShade" x="38" y="62" width="180" height="138" rx="4"/>
+    <rect class="frame" x="34" y="58" width="180" height="138" rx="4"/>
+    <rect class="frameHi" x="34" y="58" width="180" height="4" rx="2"/>
+    <rect class="frameShade" x="34" y="190" width="180" height="6" rx="2"/>
+    <rect class="frameDeep" x="34" y="58" width="3" height="138" opacity="0.5"/>
+    <rect class="frameDeep" x="211" y="58" width="3" height="138" opacity="0.5"/>
+  </g>
+  <g>
+    <polygon class="glassShade" points="46,72 202,72 202,180 46,180"/>
+    <polygon class="glass" points="46,72 202,72 202,180 46,180"/>
+    <polygon class="glassHi" points="46,72 202,72 196,82 56,96" opacity="0.7"/>
+    <polygon class="glassShade" points="46,170 202,170 196,180 46,180" opacity="0.6"/>
+    <polygon class="glassHi" points="60,90 100,80 90,150 60,160" opacity="0.5"/>
+    <polygon class="glassShade" points="120,84 180,80 168,140 116,148" opacity="0.4"/>
+  </g>
+  <g>
+    <line x1="46" y1="124" x2="202" y2="124" stroke="#7a7464" stroke-width="1" opacity="0.6"/>
+    <line x1="124" y1="72" x2="124" y2="180" stroke="#7a7464" stroke-width="1" opacity="0.6"/>
+    <rect class="frameHi" x="48" y="74" width="72" height="48" opacity="0.3"/>
+    <rect class="frameHi" x="126" y="74" width="74" height="48" opacity="0.3"/>
+    <rect class="frameHi" x="48" y="126" width="72" height="52" opacity="0.3"/>
+    <rect class="frameHi" x="126" y="126" width="74" height="52" opacity="0.3"/>
+  </g>
+</svg>

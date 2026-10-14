@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Charcoal kettle grill with lid handle</title>
+  <defs>
+    <style>
+      .bowlMain{fill:#3a3e44}
+      .bowlShade{fill:#1a1d22}
+      .bowlHi{fill:#5a5e64}
+      .bowlRim{fill:#5a5e64}
+      .lidMain{fill:#3a3e44}
+      .lidShade{fill:#1a1d22}
+      .lidHi{fill:#5a5e64}
+      .handleMain{fill:#3a3d44}
+      .handleHi{fill:#8a8e94}
+      .handleShade{fill:#1a1d24}
+      .leg{fill:#2a2e34}
+      .legHi{fill:#5a5e64}
+      .vent{fill:#1a1a1a}
+      .smoke{fill:#d8d4c8}
+      .accent{fill:#c84a2e}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="100" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <path class="bowlMain" d="M 50 110 Q 50 200 128 200 Q 206 200 206 110 Z"/>
+    <path class="bowlShade" d="M 50 110 L 206 110 Q 206 130 196 134 Q 128 158 60 134 Q 50 130 50 110 Z" opacity="0.6"/>
+    <ellipse class="bowlRim" cx="128" cy="110" rx="78" ry="10"/>
+    <ellipse class="bowlShade" cx="128" cy="108" rx="78" ry="6" opacity="0.5"/>
+    <rect class="vent" x="118" y="110" width="20" height="3" rx="1"/>
+  </g>
+  <g>
+    <path class="lidMain" d="M 50 110 Q 50 60 128 60 Q 206 60 206 110 Z"/>
+    <path class="lidShade" d="M 50 110 Q 50 86 206 86 Q 206 100 206 110 Z" opacity="0.7"/>
+    <ellipse class="lidHi" cx="128" cy="64" rx="40" ry="3" opacity="0.6"/>
+    <ellipse class="lidRim" cx="128" cy="110" rx="78" ry="8" fill="#5a5e64"/>
+  </g>
+  <g>
+    <rect class="handleMain" x="116" y="32" width="24" height="6" rx="2"/>
+    <rect class="handleHi" x="116" y="32" width="24" height="2" rx="1"/>
+    <rect class="handleMain" x="124" y="38" width="8" height="20" rx="1"/>
+    <rect class="handleShade" x="128" y="38" width="4" height="20"/>
+    <ellipse class="handleMain" cx="128" cy="58" rx="22" ry="4"/>
+    <ellipse class="handleHi" cx="128" cy="58" rx="14" ry="2" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="leg" x="68" y="200" width="8" height="22" rx="1"/>
+    <rect class="legHi" x="68" y="200" width="2" height="22" opacity="0.7"/>
+    <rect class="leg" x="180" y="200" width="8" height="22" rx="1"/>
+    <rect class="legHi" x="180" y="200" width="2" height="22" opacity="0.7"/>
+    <rect class="leg" x="124" y="204" width="8" height="22" rx="1"/>
+    <rect class="legHi" x="124" y="204" width="2" height="22" opacity="0.7"/>
+    <ellipse fill="#1a1410" cx="72" cy="222" rx="6" ry="2" opacity="0.6"/>
+    <ellipse fill="#1a1410" cx="184" cy="222" rx="6" ry="2" opacity="0.6"/>
+    <ellipse fill="#1a1410" cx="128" cy="226" rx="6" ry="2" opacity="0.6"/>
+  </g>
+  <g opacity="0.5">
+    <ellipse class="smoke" cx="128" cy="24" rx="8" ry="3"/>
+    <ellipse class="smoke" cx="130" cy="14" rx="12" ry="4"/>
+    <ellipse class="smoke" cx="128" cy="6" rx="14" ry="5"/>
+  </g>
+  <rect class="accent" x="100" y="156" width="56" height="3" opacity="0.5"/>
+</svg>

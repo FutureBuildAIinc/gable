@@ -4830,6 +4830,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/tiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counter's catalogue tiles
+         * @description The counter's catalogue for the caller's yard (its branch context, as the product search takes it): up to eight category chips, the yard's categories by units sold, then by product count, then by name, and the product tiles. With neither category nor q the tiles are the yard's top sellers by quantity sold (completed counter sale lines and the lines of invoices at the yard that are not void), then by description; category keeps one category's products in that order; q (two characters or more, sku or description) puts an exact sku first. unit_price_cents and in_stock mean what the product search answers. image_url is null unless the catalog.product_images setting is on and the product has a picture; images is that setting. Never null arrays.
+         */
+        get: operations["posTileList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/sync": {
         parameters: {
             query?: never;
@@ -12440,6 +12460,30 @@ export interface components {
             payload: components["schemas"]["PosTillReport"];
             /** Format: date-time */
             generated_at: string;
+        };
+        PosTileSet: {
+            categories: components["schemas"]["PosTileCategory"][];
+            items: components["schemas"]["PosTile"][];
+            /** @description The catalog.product_images setting. */
+            images: boolean;
+        };
+        PosTileCategory: {
+            name: string;
+            /** Format: int64 */
+            count: number;
+        };
+        PosTile: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            uom: string;
+            /** Format: int64 */
+            unit_price_cents: number;
+            /** @description A decimal string of the yard's on hand quantity. */
+            in_stock: string;
+            category: string;
+            image_url: string | null;
         };
         PosSearchResult: {
             /** Format: uuid */
@@ -24829,6 +24873,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PosSearchResult"][];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTileList: {
+        parameters: {
+            query?: {
+                category?: string;
+                q?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The chips and the tiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTileSet"];
                 };
             };
             400: components["responses"]["BadRequestEither"];

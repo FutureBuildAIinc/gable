@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pressure treated 1x6 fence board</title>
+  <defs><style>
+    .face{fill:#7a8c54}
+    .faceHi{fill:#9aa66e}
+    .faceShade{fill:#5a6c34}
+    .topedge{fill:#a6b87c}
+    .endgrain{fill:#5a6c34}
+    .grain{stroke:#3a4e1e;fill:none;stroke-linecap:round}
+    .strap{fill:#3a3530}
+    .strapshade{fill:#5a524a}
+    .tag{fill:#faf3e0}
+    .stamp{fill:#3a2410}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="98" ry="7" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="face" x="32" y="158" width="192" height="22"/>
+    <rect class="topedge" x="32" y="158" width="192" height="2"/>
+    <line class="grain" x1="36" y1="166" x2="220" y2="166" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="174" x2="222" y2="174" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="224" y="148" width="14" height="32"/>
+    <ellipse class="endgrain" cx="231" cy="164" rx="3" ry="2.4" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="face" x="32" y="136" width="192" height="22"/>
+    <rect class="topedge" x="32" y="136" width="192" height="2"/>
+    <line class="grain" x1="38" y1="144" x2="222" y2="144" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="34" y1="152" x2="218" y2="152" stroke-width="0.6" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="32" y="114" width="192" height="22"/>
+    <rect class="topedge" x="32" y="114" width="192" height="2"/>
+    <line class="grain" x1="40" y1="122" x2="220" y2="122" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="36" y1="130" x2="224" y2="130" stroke-width="0.6" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="32" y="92" width="192" height="22"/>
+    <rect class="topedge" x="32" y="92" width="192" height="2"/>
+    <line class="grain" x1="38" y1="100" x2="220" y2="100" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="108" x2="222" y2="108" stroke-width="0.6" opacity="0.5"/>
+  </g>
+  <rect class="strap" x="78" y="88" width="4" height="98"/>
+  <rect class="strapshade" x="78" y="88" width="1" height="98"/>
+  <rect class="strap" x="174" y="88" width="4" height="98"/>
+  <rect class="strapshade" x="174" y="88" width="1" height="98"/>
+  <g>
+    <rect class="tag" x="104" y="50" width="50" height="22" rx="2"/>
+    <rect class="stamp" x="104" y="50" width="50" height="4"/>
+    <text x="129" y="60" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="700" letter-spacing="1" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    <text x="129" y="68" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="700" letter-spacing="0.5" fill="#3a2410" text-anchor="middle">1x6-6 MCA</text>
+  </g>
+</svg>

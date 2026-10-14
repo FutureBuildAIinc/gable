@@ -1653,6 +1653,14 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 		t.Errorf("bound key register list does not carry the pin's own register: %s", buf)
 	}
 
+	// The counter's tiles read answers for the pin's yard (a bound key keeps
+	// its pin, no foreign history); the twin leg proves the same wire.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/tiles?limit=3", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/tiles?limit=3")
+	if !strings.Contains(string(buf), `"items"`) || !strings.Contains(string(buf), `"categories"`) {
+		t.Errorf("bound key tiles read has no chips or tiles: %s", buf)
+	}
+
 	// The Z report of the foreign session answers what a missing one answers;
 	// the list carries the pin's own Z report and not the foreign one.
 	sMiss, _ = f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/zreport", "", nil)

@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>ProFrame random orbit sander</title>
+  <defs><style>
+    .body{fill:#c84a2e}
+    .bodyHi{fill:#e0685a}
+    .bodyShade{fill:#8a3024}
+    .bodyDeep{fill:#5a2418}
+    .top{fill:#2a2e34}
+    .topHi{fill:#5a5e64}
+    .topShade{fill:#1a1d22}
+    .base{fill:#3a3e44}
+    .baseHi{fill:#5a5e64}
+    .baseShade{fill:#1a1d22}
+    .pad{fill:#c8ccd2}
+    .padShade{fill:#7a7e84}
+    .grip{fill:#1a1d24}
+    .gripShade{fill:#3a3d44}
+    .gripHi{fill:#5a5d66}
+    .dust{fill:#1a1d24}
+    .dustHi{fill:#3a3d44}
+    .accent{fill:#2a2e34}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <ellipse class="pad" cx="128" cy="178" rx="80" ry="20"/>
+    <ellipse class="padShade" cx="128" cy="180" rx="80" ry="16" opacity="0.6"/>
+    <ellipse class="baseShade" cx="128" cy="166" rx="68" ry="18"/>
+    <ellipse class="base" cx="128" cy="164" rx="64" ry="16"/>
+    <ellipse class="baseHi" cx="128" cy="158" rx="58" ry="8" opacity="0.6"/>
+  </g>
+  <g>
+    <path class="top" d="M 60 100 L 196 100 L 196 162 L 60 162 Z"/>
+    <path class="topHi" d="M 60 100 L 196 100 L 196 106 L 60 106 Z"/>
+    <path class="topShade" d="M 60 156 L 196 156 L 196 162 L 60 162 Z"/>
+    <rect class="accent" x="60" y="116" width="136" height="14"/>
+    <text class="textBrand" x="128" y="127" font-size="11" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    <rect x="68" y="138" width="14" height="3" fill="#3a3530"/>
+    <rect x="86" y="138" width="14" height="3" fill="#3a3530"/>
+    <rect x="104" y="138" width="14" height="3" fill="#3a3530"/>
+    <rect x="122" y="138" width="14" height="3" fill="#3a3530"/>
+    <rect x="140" y="138" width="14" height="3" fill="#3a3530"/>
+    <rect x="158" y="138" width="14" height="3" fill="#3a3530"/>
+    <rect x="176" y="138" width="14" height="3" fill="#3a3530"/>
+  </g>
+  <g>
+    <ellipse class="top" cx="128" cy="100" rx="64" ry="22"/>
+    <ellipse class="topHi" cx="128" cy="92" rx="58" ry="10" opacity="0.6"/>
+    <ellipse class="topShade" cx="128" cy="108" rx="60" ry="14"/>
+    <ellipse class="body" cx="128" cy="92" rx="44" ry="10" opacity="0.7"/>
+    <ellipse class="bodyHi" cx="128" cy="88" rx="40" ry="4" opacity="0.5"/>
+  </g>
+  <g>
+    <ellipse class="dust" cx="128" cy="76" rx="22" ry="14"/>
+    <ellipse class="dustHi" cx="128" cy="70" rx="18" ry="6" opacity="0.6"/>
+    <rect class="dust" x="106" y="76" width="44" height="14"/>
+    <rect class="dustHi" x="106" y="76" width="44" height="3"/>
+    <path class="dust" d="M 106 90 L 96 100 L 96 110 L 106 110 L 106 90"/>
+    <ellipse class="dustHi" cx="96" cy="105" rx="3" ry="5"/>
+    <rect class="accent" x="100" y="64" width="56" height="6" rx="1"/>
+    <rect class="accent" x="100" y="58" width="56" height="3" rx="1"/>
+  </g>
+  <g>
+    <path class="grip" d="M 174 110 L 200 100 L 200 142 L 174 142 Z"/>
+    <path class="gripShade" d="M 174 110 L 200 100 L 200 108 L 174 118 Z"/>
+    <line x1="178" y1="116" x2="196" y2="116" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="178" y1="124" x2="196" y2="124" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="178" y1="132" x2="196" y2="132" stroke="#5a5d66" stroke-width="0.6"/>
+    <rect class="accent" x="184" y="116" width="8" height="14"/>
+  </g>
+</svg>

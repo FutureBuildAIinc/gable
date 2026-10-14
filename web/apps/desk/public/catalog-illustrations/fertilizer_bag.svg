@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Bag of 10-10-10 fertilizer</title>
+  <defs>
+    <style>
+      .bagMain{fill:#3a8a4a}
+      .bagShade{fill:#1a4a2a}
+      .bagHi{fill:#5aaa6a}
+      .bagRim{fill:#1a4a2a}
+      .label{fill:#faf3e0}
+      .labelBand{fill:#faf3e0}
+      .labelDark{fill:#1a4a2a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+      .textNums{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="92" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="bagMain" points="58,42 198,42 214,72 198,220 58,220 42,72"/>
+    <polygon class="bagHi" points="58,42 198,42 196,48 60,48"/>
+    <polygon class="bagShade" points="198,42 214,72 210,222 198,220" opacity="0.7"/>
+    <polygon class="bagShade" points="58,42 42,72 46,222 58,220" opacity="0.7"/>
+    <polygon class="bagRim" points="58,42 198,42 214,72 42,72" opacity="0.5"/>
+    <polygon class="bagShade" points="86,42 170,42 178,72 78,72" opacity="0.4"/>
+  </g>
+  <g>
+    <rect class="label" x="62" y="86" width="132" height="124"/>
+    <rect class="label" x="62" y="86" width="132" height="124" fill="none" stroke="#1a4a2a" stroke-width="0.6"/>
+    <rect class="labelDark" x="62" y="86" width="132" height="22"/>
+    <text class="textBrand" x="128" y="102" font-size="13" fill="#faf3e0" text-anchor="middle">GardenPro</text>
+    <rect class="labelDark" x="62" y="200" width="132" height="10"/>
+    <text class="textSub" x="128" y="124" font-size="10" fill="#1a4a2a" text-anchor="middle">FERTILIZER</text>
+    <text class="textNums" x="128" y="146" font-size="14" fill="#c84a3d" text-anchor="middle">10-10-10</text>
+    <text class="textSub" x="128" y="162" font-size="7" fill="#1a4a2a" text-anchor="middle" opacity="0.7">ALL PURPOSE</text>
+    <text x="128" y="180" font-family="Verdana,Arial,sans-serif" font-weight="600" font-size="6" fill="#1a4a2a" text-anchor="middle" opacity="0.7">LAWN BY PRODUCT</text>
+    <rect x="74" y="190" width="32" height="14" fill="#c84a3d"/>
+    <text x="90" y="200" font-family="Verdana,Arial,sans-serif" font-weight="700" font-size="8" fill="#faf3e0" text-anchor="middle">25 LB</text>
+  </g>
+</svg>

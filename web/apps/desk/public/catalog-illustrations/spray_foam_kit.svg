@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Spray foam insulation kit with two pressurized tanks</title>
+  <defs><style>
+    .tankA{fill:#c84a2e}
+    .tankAHi{fill:#e0685a}
+    .tankAShade{fill:#8a3024}
+    .tankADeep{fill:#5a2418}
+    .tankB{fill:#a83a8a}
+    .tankBHi{fill:#c858a8}
+    .tankBShade{fill:#6e1a52}
+    .tankBDeep{fill:#3e0e2a}
+    .valve{fill:#3a3e44}
+    .valveHi{fill:#5a5e64}
+    .label{fill:#faf3e0}
+    .labelText{fill:#3a2410}
+    .hose{fill:#3a3530}
+    .hoseHi{fill:#5a524a}
+    .gun{fill:#2a2e34}
+    .gunHi{fill:#5a5e64}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1px}
+    .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="108" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <ellipse class="tankAHi" cx="68" cy="76" rx="30" ry="8"/>
+    <path class="tankA" d="M 38 76 L 98 76 L 102 220 L 34 220 Z"/>
+    <path class="tankAHi" d="M 38 76 L 98 76 L 98 84 L 38 84 Z"/>
+    <path class="tankAShade" d="M 96 76 L 102 220 L 88 220 L 98 76 Z" opacity="0.7"/>
+    <ellipse class="tankA" cx="68" cy="220" rx="34" ry="6"/>
+    <ellipse class="tankADeep" cx="68" cy="220" rx="34" ry="6" opacity="0.5"/>
+    <ellipse class="tankADeep" cx="68" cy="76" rx="30" ry="3" opacity="0.5"/>
+    <rect class="valve" x="60" y="60" width="16" height="20" rx="1"/>
+    <rect class="valveHi" x="60" y="60" width="16" height="2" opacity="0.7"/>
+    <rect class="valve" x="56" y="46" width="24" height="14" rx="1"/>
+    <rect class="valveHi" x="56" y="46" width="24" height="2" opacity="0.7"/>
+    <circle class="valve" cx="68" cy="36" r="5"/>
+    <rect class="valve" x="64" y="32" width="8" height="2"/>
+    <rect class="valve" x="64" y="38" width="8" height="2"/>
+  </g>
+  <g>
+    <rect class="label" x="42" y="118" width="56" height="58" rx="1"/>
+    <rect x="42" y="118" width="56" height="6" fill="#3a2410"/>
+    <text class="textBrand" x="70" y="134" font-size="10" fill="#3a2410" text-anchor="middle">ProFrame</text>
+    <rect x="48" y="138" width="44" height="2" fill="#3a2410" opacity="0.7"/>
+    <text class="textSub" x="70" y="148" font-size="6" fill="#3a2410" text-anchor="middle">ISO A</text>
+    <text class="textSub" x="70" y="156" font-size="5" fill="#5a2418" text-anchor="middle">SIDE A</text>
+    <text class="textSub" x="70" y="170" font-size="5" fill="#3a2410" text-anchor="middle">PRESSURIZED</text>
+  </g>
+  <g>
+    <ellipse class="tankBHi" cx="188" cy="76" rx="30" ry="8"/>
+    <path class="tankB" d="M 158 76 L 218 76 L 222 220 L 154 220 Z"/>
+    <path class="tankBHi" d="M 158 76 L 218 76 L 218 84 L 158 84 Z"/>
+    <path class="tankBShade" d="M 216 76 L 222 220 L 208 220 L 218 76 Z" opacity="0.7"/>
+    <ellipse class="tankB" cx="188" cy="220" rx="34" ry="6"/>
+    <ellipse class="tankBDeep" cx="188" cy="220" rx="34" ry="6" opacity="0.5"/>
+    <ellipse class="tankBDeep" cx="188" cy="76" rx="30" ry="3" opacity="0.5"/>
+    <rect class="valve" x="180" y="60" width="16" height="20" rx="1"/>
+    <rect class="valveHi" x="180" y="60" width="16" height="2" opacity="0.7"/>
+    <rect class="valve" x="176" y="46" width="24" height="14" rx="1"/>
+    <rect class="valveHi" x="176" y="46" width="24" height="2" opacity="0.7"/>
+    <circle class="valve" cx="188" cy="36" r="5"/>
+    <rect class="valve" x="184" y="32" width="8" height="2"/>
+    <rect class="valve" x="184" y="38" width="8" height="2"/>
+  </g>
+  <g>
+    <rect class="label" x="162" y="118" width="56" height="58" rx="1"/>
+    <rect x="162" y="118" width="56" height="6" fill="#3a2410"/>
+    <text class="textBrand" x="190" y="134" font-size="10" fill="#3a2410" text-anchor="middle">ProFrame</text>
+    <rect x="168" y="138" width="44" height="2" fill="#3a2410" opacity="0.7"/>
+    <text class="textSub" x="190" y="148" font-size="6" fill="#3a2410" text-anchor="middle">POLY B</text>
+    <text class="textSub" x="190" y="156" font-size="5" fill="#3e0e2a" text-anchor="middle">SIDE B</text>
+    <text class="textSub" x="190" y="170" font-size="5" fill="#3a2410" text-anchor="middle">PRESSURIZED</text>
+  </g>
+</svg>

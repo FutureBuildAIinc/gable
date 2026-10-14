@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Plywood select panel at an angle, smooth light face and layered ply edge</title>
+  <defs>
+    <style>
+      .frontFace{fill:#eccfa0}
+      .frontFaceHi{fill:#f6e0bc}
+      .frontFaceShade{fill:#c4a378}
+      .plyEdge{fill:#a87a4a}
+      .plyEdgeShade{fill:#7a5230}
+      .plyEdgeHi{fill:#c89868}
+      .grain{stroke:#a87a4a;fill:none;stroke-linecap:round}
+      .stamp{fill:#3a2410}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="108" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g transform="rotate(-12 128 128)">
+    <polygon class="frontFace" points="36,46 220,46 220,210 36,210"/>
+    <polygon class="frontFaceHi" points="36,46 220,46 220,52 36,52"/>
+    <polygon class="frontFaceShade" points="216,52 220,52 220,210 216,210"/>
+  </g>
+  <g transform="rotate(-12 128 128)">
+    <g>
+      <line class="grain" x1="44" y1="68" x2="216" y2="68" stroke-width="0.4" opacity="0.5"/>
+      <line class="grain" x1="48" y1="80" x2="220" y2="80" stroke-width="0.5" opacity="0.55"/>
+      <line class="grain" x1="44" y1="94" x2="216" y2="94" stroke-width="0.4" opacity="0.5"/>
+      <line class="grain" x1="48" y1="108" x2="220" y2="108" stroke-width="0.5" opacity="0.55"/>
+      <line class="grain" x1="44" y1="124" x2="216" y2="124" stroke-width="0.4" opacity="0.5"/>
+      <line class="grain" x1="48" y1="140" x2="220" y2="140" stroke-width="0.5" opacity="0.55"/>
+      <line class="grain" x1="44" y1="158" x2="216" y2="158" stroke-width="0.4" opacity="0.5"/>
+      <line class="grain" x1="48" y1="178" x2="220" y2="178" stroke-width="0.5" opacity="0.55"/>
+      <line class="grain" x1="44" y1="196" x2="216" y2="196" stroke-width="0.4" opacity="0.5"/>
+    </g>
+    <g opacity="0.45">
+      <ellipse cx="80" cy="100" rx="22" ry="3" fill="#c4a378"/>
+      <ellipse cx="180" cy="130" rx="28" ry="3" fill="#c4a378"/>
+      <ellipse cx="120" cy="170" rx="24" ry="3" fill="#c4a378"/>
+    </g>
+  </g>
+  <g transform="rotate(-12 128 128)">
+    <polygon class="plyEdge" points="220,46 230,52 230,210 220,210"/>
+    <polygon class="plyEdgeHi" points="220,46 230,52 230,56 220,54"/>
+    <polygon class="plyEdgeShade" points="226,52 230,52 230,210 226,210"/>
+    <g stroke="#5a3a18" stroke-width="0.4" opacity="0.7">
+      <line x1="222" y1="60" x2="228" y2="60"/>
+      <line x1="222" y1="72" x2="228" y2="72"/>
+      <line x1="222" y1="84" x2="228" y2="84"/>
+      <line x1="222" y1="96" x2="228" y2="96"/>
+      <line x1="222" y1="108" x2="228" y2="108"/>
+      <line x1="222" y1="120" x2="228" y2="120"/>
+      <line x1="222" y1="132" x2="228" y2="132"/>
+      <line x1="222" y1="144" x2="228" y2="144"/>
+      <line x1="222" y1="156" x2="228" y2="156"/>
+      <line x1="222" y1="168" x2="228" y2="168"/>
+      <line x1="222" y1="180" x2="228" y2="180"/>
+      <line x1="222" y1="192" x2="228" y2="192"/>
+      <line x1="222" y1="204" x2="228" y2="204"/>
+    </g>
+  </g>
+  <g transform="rotate(-12 128 128)">
+    <rect class="stamp" x="80" y="138" width="92" height="28" rx="2" opacity="0.85"/>
+    <text x="126" y="154" font-family="Verdana,Arial,sans-serif" font-size="9" font-weight="700" letter-spacing="1.5" fill="#f0e0c0" text-anchor="middle">Ridgeline</text>
+    <text x="126" y="162" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="1" text-anchor="middle" fill="#e0d0a0">BC PINE  SANDED  4x8</text>
+  </g>
+</svg>

@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Vanity light fixture, 3 shade chrome bar</title>
+  <defs><style>
+    .chrome{fill:#b8bcc4}
+    .chromeHi{fill:#e0e4ea}
+    .chromeShade{fill:#8a8e94}
+    .glass{fill:#f4eedc}
+    .glassShade{fill:#d8d2bc}
+    .glassRim{fill:#a89c84}
+    .socket{fill:#3a3530}
+    .bulb{fill:#fff4c8}
+  </style></defs>
+  <ellipse cx="128" cy="230" rx="104" ry="6" fill="#1a1410" opacity="0.18"/>
+  <rect class="chrome" x="118" y="44" width="20" height="18" rx="2"/>
+  <rect class="chromeShade" x="118" y="56" width="20" height="6" rx="1"/>
+  <rect class="chrome" x="30" y="60" width="196" height="10" rx="3"/>
+  <rect class="chromeHi" x="30" y="60" width="196" height="2" rx="1"/>
+  <rect class="chromeShade" x="30" y="68" width="196" height="2" rx="1" opacity="0.55"/>
+  <g>
+    <rect class="socket" x="54" y="70" width="20" height="8"/>
+    <rect class="glassRim" x="44" y="78" width="40" height="6" rx="1"/>
+    <path class="glass" d="M 48 84 L 80 84 L 84 200 Q 64 208 44 200 Z"/>
+    <path class="glassShade" d="M 60 88 L 80 88 L 84 200 Q 72 206 60 200 Z" opacity="0.6"/>
+    <ellipse class="bulb" cx="64" cy="178" rx="8" ry="12" opacity="0.85"/>
+  </g>
+  <g>
+    <rect class="socket" x="118" y="70" width="20" height="8"/>
+    <rect class="glassRim" x="108" y="78" width="40" height="6" rx="1"/>
+    <path class="glass" d="M 112 84 L 144 84 L 148 200 Q 128 208 108 200 Z"/>
+    <path class="glassShade" d="M 124 88 L 144 88 L 148 200 Q 136 206 124 200 Z" opacity="0.6"/>
+    <ellipse class="bulb" cx="128" cy="178" rx="8" ry="12" opacity="0.85"/>
+  </g>
+  <g>
+    <rect class="socket" x="182" y="70" width="20" height="8"/>
+    <rect class="glassRim" x="172" y="78" width="40" height="6" rx="1"/>
+    <path class="glass" d="M 176 84 L 208 84 L 212 200 Q 192 208 172 200 Z"/>
+    <path class="glassShade" d="M 188 88 L 208 88 L 212 200 Q 200 206 188 200 Z" opacity="0.6"/>
+    <ellipse class="bulb" cx="192" cy="178" rx="8" ry="12" opacity="0.85"/>
+  </g>
+</svg>

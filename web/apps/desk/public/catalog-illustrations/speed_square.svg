@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Stone brand 7 inch aluminum speed square</title>
+  <defs><style>
+    .body{fill:#c8ccd2}
+    .bodyHi{fill:#e8ecef}
+    .bodyShade{fill:#7a7e84}
+    .bodyDeep{fill:#5a5e64}
+    .scale{fill:#3a3530}
+    .stamp{fill:#3a3530}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g transform="rotate(45 128 128)">
+    <polygon class="body" points="48,52 48,204 208,204"/>
+    <polygon class="bodyHi" points="48,52 48,58 48,52"/>
+    <polygon class="bodyHi" points="48,52 208,204 200,204 50,56"/>
+    <polygon class="bodyShade" points="48,200 208,204 48,204"/>
+  </g>
+  <g transform="rotate(45 128 128)">
+    <line x1="60" y1="60" x2="60" y2="200" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="80" y1="60" x2="80" y2="180" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="100" y1="60" x2="100" y2="160" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="120" y1="60" x2="120" y2="140" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="140" y1="60" x2="140" y2="120" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="160" y1="60" x2="160" y2="100" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="180" y1="60" x2="180" y2="80" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="50" y1="80" x2="200" y2="80" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="50" y1="100" x2="184" y2="100" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="50" y1="120" x2="168" y2="120" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="50" y1="140" x2="152" y2="140" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="50" y1="160" x2="136" y2="160" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+    <line x1="50" y1="180" x2="120" y2="180" stroke="#3a3530" stroke-width="0.4" opacity="0.7"/>
+  </g>
+  <g transform="rotate(45 128 128)">
+    <text x="100" y="74" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="700" letter-spacing="0.5" fill="#3a3530" text-anchor="middle">STONE</text>
+    <text x="100" y="80" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="0.5" fill="#3a3530" text-anchor="middle">7 IN</text>
+  </g>
+  <g transform="rotate(45 128 128)">
+    <line x1="48" y1="52" x2="48" y2="204" stroke="#3a3530" stroke-width="0.6" opacity="0.5"/>
+    <line x1="48" y1="52" x2="208" y2="204" stroke="#3a3530" stroke-width="0.6" opacity="0.5"/>
+    <line x1="48" y1="204" x2="208" y2="204" stroke="#3a3530" stroke-width="0.6" opacity="0.5"/>
+    <line x1="48" y1="52" x2="208" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+    <line x1="48" y1="60" x2="200" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+    <line x1="48" y1="80" x2="184" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+    <line x1="48" y1="100" x2="168" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+    <line x1="48" y1="120" x2="152" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+    <line x1="48" y1="140" x2="136" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+    <line x1="48" y1="160" x2="120" y2="204" stroke="#5a5e64" stroke-width="0.3" opacity="0.5"/>
+  </g>
+</svg>

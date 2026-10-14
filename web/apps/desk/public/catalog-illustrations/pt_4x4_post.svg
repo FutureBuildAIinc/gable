@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pressure treated 4x4 post lying at an angle, greenish with incising marks and square end grain</title>
+  <defs>
+    <style>
+      .faceA{fill:#7a8c5a}
+      .faceB{fill:#5e7044}
+      .faceHi{fill:#9caa74}
+      .faceShade{fill:#4a5a30}
+      .sideFace{fill:#6a7c50}
+      .sideFaceShade{fill:#4a5a30}
+      .sideFaceHi{fill:#8a9c64}
+      .endGrain{fill:#5a4824}
+      .endGrainShade{fill:#3a2e18}
+      .endGrainHi{fill:#7a6234}
+      .grain{stroke:#3a4a28;fill:none;stroke-linecap:round}
+      .incise{fill:#3a4a28}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g transform="rotate(-22 128 128)">
+    <polygon class="faceA" points="50,98 226,90 226,138 50,146"/>
+    <polygon class="sideFace" points="226,90 234,98 234,134 226,138"/>
+    <polygon class="sideFaceShade" points="226,90 234,98 230,98 226,94"/>
+    <polygon class="faceHi" points="50,98 226,90 226,94 50,102"/>
+    <line class="grain" x1="50" y1="108" x2="226" y2="100" stroke-width="0.6" opacity="0.55"/>
+    <line class="grain" x1="50" y1="118" x2="226" y2="110" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="50" y1="128" x2="226" y2="120" stroke-width="0.6" opacity="0.55"/>
+    <line class="grain" x1="50" y1="138" x2="226" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <g opacity="0.7">
+      <circle class="incise" cx="70" cy="104" r="0.9"/>
+      <circle class="incise" cx="86" cy="102" r="0.9"/>
+      <circle class="incise" cx="102" cy="100" r="0.9"/>
+      <circle class="incise" cx="118" cy="98" r="0.9"/>
+      <circle class="incise" cx="134" cy="96" r="0.9"/>
+      <circle class="incise" cx="150" cy="94" r="0.9"/>
+      <circle class="incise" cx="166" cy="92" r="0.9"/>
+      <circle class="incise" cx="182" cy="90" r="0.9"/>
+      <circle class="incise" cx="198" cy="88" r="0.9"/>
+      <circle class="incise" cx="76" cy="116" r="0.9"/>
+      <circle class="incise" cx="92" cy="114" r="0.9"/>
+      <circle class="incise" cx="108" cy="112" r="0.9"/>
+      <circle class="incise" cx="124" cy="110" r="0.9"/>
+      <circle class="incise" cx="140" cy="108" r="0.9"/>
+      <circle class="incise" cx="156" cy="106" r="0.9"/>
+      <circle class="incise" cx="172" cy="104" r="0.9"/>
+      <circle class="incise" cx="188" cy="102" r="0.9"/>
+      <circle class="incise" cx="204" cy="100" r="0.9"/>
+      <circle class="incise" cx="84" cy="128" r="0.9"/>
+      <circle class="incise" cx="100" cy="126" r="0.9"/>
+      <circle class="incise" cx="116" cy="124" r="0.9"/>
+      <circle class="incise" cx="132" cy="122" r="0.9"/>
+      <circle class="incise" cx="148" cy="120" r="0.9"/>
+      <circle class="incise" cx="164" cy="118" r="0.9"/>
+      <circle class="incise" cx="180" cy="116" r="0.9"/>
+      <circle class="incise" cx="196" cy="114" r="0.9"/>
+      <circle class="incise" cx="90" cy="140" r="0.9"/>
+      <circle class="incise" cx="106" cy="138" r="0.9"/>
+      <circle class="incise" cx="122" cy="136" r="0.9"/>
+      <circle class="incise" cx="138" cy="134" r="0.9"/>
+      <circle class="incise" cx="154" cy="132" r="0.9"/>
+      <circle class="incise" cx="170" cy="130" r="0.9"/>
+      <circle class="incise" cx="186" cy="128" r="0.9"/>
+      <circle class="incise" cx="202" cy="126" r="0.9"/>
+    </g>
+  </g>
+  <g transform="rotate(-22 128 128)">
+    <polygon class="endGrain" points="50,98 50,146 30,138 30,98"/>
+    <rect class="endGrainShade" x="30" y="106" width="22" height="2"/>
+    <rect class="endGrainShade" x="30" y="116" width="22" height="2"/>
+    <rect class="endGrainShade" x="30" y="126" width="22" height="2"/>
+    <rect class="endGrainShade" x="30" y="136" width="22" height="2"/>
+    <polygon class="endGrainHi" points="50,98 50,102 32,102 50,98"/>
+  </g>
+  <g transform="rotate(-22 128 128)">
+    <polygon class="endGrain" points="226,90 226,138 246,130 246,90"/>
+    <rect class="endGrainShade" x="226" y="100" width="20" height="2"/>
+    <rect class="endGrainShade" x="226" y="112" width="20" height="2"/>
+    <rect class="endGrainShade" x="226" y="124" width="20" height="2"/>
+  </g>
+</svg>

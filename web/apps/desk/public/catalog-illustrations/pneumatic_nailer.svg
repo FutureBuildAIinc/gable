@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>ProFrame pneumatic framing nailer</title>
+  <defs><style>
+    .body{fill:#c84a2e}
+    .bodyHi{fill:#e0685a}
+    .bodyShade{fill:#8a3024}
+    .bodyDeep{fill:#5a2418}
+    .barrel{fill:#3a3530}
+    .barrelHi{fill:#5a524a}
+    .grip{fill:#1a1d24}
+    .gripShade{fill:#3a3d44}
+    .trigger{fill:#2a2e34}
+    .nose{fill:#5a5e64}
+    .noseHi{fill:#a8acb2}
+    .noseShade{fill:#2a2e34}
+    .magazine{fill:#3a3e44}
+    .magazineHi{fill:#5a5e64}
+    .accent{fill:#2a2e34}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <rect class="body" x="40" y="64" width="170" height="76" rx="10"/>
+    <rect class="bodyHi" x="40" y="64" width="170" height="6" rx="3"/>
+    <rect class="bodyShade" x="40" y="130" width="170" height="10" rx="4"/>
+    <rect class="accent" x="40" y="92" width="170" height="14"/>
+    <text class="textBrand" x="124" y="103" font-size="11" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+  </g>
+  <g>
+    <rect class="magazine" x="200" y="74" width="22" height="62" rx="2"/>
+    <rect class="magazineHi" x="200" y="74" width="22" height="4" rx="1"/>
+    <line x1="206" y1="84" x2="216" y2="84" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="90" x2="216" y2="90" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="96" x2="216" y2="96" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="102" x2="216" y2="102" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="108" x2="216" y2="108" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="114" x2="216" y2="114" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="120" x2="216" y2="120" stroke="#1a1d24" stroke-width="0.6"/>
+    <line x1="206" y1="126" x2="216" y2="126" stroke="#1a1d24" stroke-width="0.6"/>
+  </g>
+  <g>
+    <rect class="noseShade" x="22" y="68" width="22" height="68" rx="2"/>
+    <rect class="nose" x="22" y="68" width="22" height="68" rx="2"/>
+    <rect class="noseHi" x="22" y="68" width="22" height="4" rx="1"/>
+    <rect class="noseShade" x="14" y="78" width="10" height="48" rx="1"/>
+    <rect class="nose" x="14" y="78" width="10" height="48" rx="1"/>
+    <rect class="noseHi" x="14" y="78" width="3" height="48" opacity="0.7"/>
+    <circle class="noseHi" cx="19" cy="102" r="2"/>
+  </g>
+  <g>
+    <path class="grip" d="M 80 140 L 158 140 L 152 218 L 92 218 Z"/>
+    <path class="gripShade" d="M 80 140 L 158 140 L 156 148 L 82 148 Z"/>
+    <line x1="92" y1="158" x2="148" y2="158" stroke="#5a5d66" stroke-width="0.8"/>
+    <line x1="92" y1="166" x2="148" y2="166" stroke="#5a5d66" stroke-width="0.8"/>
+    <line x1="92" y1="174" x2="148" y2="174" stroke="#5a5d66" stroke-width="0.8"/>
+    <line x1="92" y1="182" x2="148" y2="182" stroke="#5a5d66" stroke-width="0.8"/>
+    <line x1="92" y1="190" x2="148" y2="190" stroke="#5a5d66" stroke-width="0.8"/>
+    <line x1="92" y1="198" x2="148" y2="198" stroke="#5a5d66" stroke-width="0.8"/>
+    <rect class="trigger" x="76" y="146" width="8" height="18" rx="1"/>
+    <ellipse class="grip" cx="118" cy="218" rx="20" ry="3"/>
+  </g>
+  <g>
+    <rect class="barrel" x="172" y="58" width="34" height="10" rx="2"/>
+    <rect class="barrelHi" x="172" y="58" width="34" height="2" rx="1"/>
+    <ellipse class="barrel" cx="208" cy="63" rx="6" ry="5"/>
+  </g>
+  <g>
+    <circle class="noseHi" cx="68" cy="78" r="2"/>
+    <circle class="noseHi" cx="92" cy="78" r="2"/>
+    <circle class="noseHi" cx="116" cy="78" r="2"/>
+    <circle class="noseHi" cx="140" cy="78" r="2"/>
+    <circle class="noseHi" cx="164" cy="78" r="2"/>
+    <circle class="noseHi" cx="68" cy="126" r="2"/>
+    <circle class="noseHi" cx="92" cy="126" r="2"/>
+    <circle class="noseHi" cx="116" cy="126" r="2"/>
+    <circle class="noseHi" cx="140" cy="126" r="2"/>
+    <circle class="noseHi" cx="164" cy="126" r="2"/>
+  </g>
+</svg>

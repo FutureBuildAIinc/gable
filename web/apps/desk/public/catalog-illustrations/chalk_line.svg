@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Stone brand 100 ft chalk line reel</title>
+  <defs>
+    <style>
+      .bodyMain{fill:#c84a3d}
+      .bodyShade{fill:#8a3024}
+      .bodyHi{fill:#e0685a}
+      .bodyAccent{fill:#3a3d44}
+      .cord{fill:#faf3e0}
+      .cordShade{fill:#dcd0b8}
+      .handle{fill:#3a3d44}
+      .handleShade{fill:#1a1d24}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="92" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <ellipse class="bodyMain" cx="92" cy="120" rx="68" ry="64"/>
+    <ellipse class="bodyHi" cx="92" cy="120" rx="68" ry="6" opacity="0.5"/>
+    <ellipse class="bodyShade" cx="92" cy="120" rx="62" ry="58" opacity="0.6"/>
+    <circle class="bodyAccent" cx="92" cy="120" r="22"/>
+    <circle class="bodyMain" cx="92" cy="120" r="14"/>
+    <circle class="bodyAccent" cx="92" cy="120" r="6"/>
+    <circle class="bodyMain" cx="100" cy="120" r="3"/>
+    <rect class="bodyAccent" x="60" y="170" width="64" height="10" rx="2"/>
+    <text class="textBrand" x="92" y="124" font-size="9" fill="#faf3e0" text-anchor="middle">STONE</text>
+  </g>
+  <g>
+    <rect class="handle" x="156" y="106" width="64" height="28" rx="6"/>
+    <rect class="handleShade" x="156" y="106" width="6" height="28" opacity="0.6"/>
+    <rect class="handle" x="220" y="120" width="10" height="4" rx="1"/>
+    <rect class="bodyAccent" x="216" y="116" width="14" height="12" rx="2"/>
+  </g>
+  <g>
+    <path class="cord" d="M 230 122 L 240 122 L 240 138 L 230 138 Z" />
+    <line x1="234" y1="130" x2="240" y2="130" stroke="#a89878" stroke-width="0.6"/>
+    <rect class="bodyAccent" x="234" y="138" width="6" height="10" rx="1"/>
+  </g>
+</svg>

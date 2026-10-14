@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>5 lb box of deck screws in tan ceramic coating</title>
+  <defs>
+    <style>
+      .boxFront{fill:#b8884d}
+      .boxSide{fill:#8e5e2a}
+      .boxTop{fill:#cc9a5a}
+      .boxRim{fill:#7a4e22}
+      .screwShaft{fill:#c8a26a}
+      .screwShaftShade{fill:#a07a4e}
+      .screwHead{fill:#b88a52}
+      .screwDrive{fill:#5a3a1e}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+      .textWt{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="92" ry="8" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="boxTop" points="46,86 198,86 210,98 58,98"/>
+    <rect class="boxRim" x="46" y="84" width="152" height="3"/>
+    <polygon class="boxSide" points="198,86 210,98 210,202 198,190"/>
+    <rect class="boxFront" x="46" y="86" width="152" height="104"/>
+    <rect class="boxRim" x="46" y="187" width="152" height="3" opacity="0.6"/>
+  </g>
+  <text class="textBrand" x="122" y="118" font-size="14" fill="#3a2410" text-anchor="middle">ProFrame</text>
+  <rect x="62" y="128" width="120" height="1" fill="#3a2410" opacity="0.6"/>
+  <text class="textSub" x="122" y="146" font-size="9" fill="#3a2410" text-anchor="middle">DECK SCREWS</text>
+  <text class="textSub" x="122" y="160" font-size="6.5" fill="#3a2410" text-anchor="middle" opacity="0.7">CERAMIC COAT  STAR DRIVE</text>
+  <rect x="56" y="170" width="26" height="14" fill="#3a2410"/>
+  <text class="textWt" x="69" y="180.5" font-size="8" fill="#e8d4a8" text-anchor="middle">5 LB</text>
+  <g>
+    <rect class="screwShaft" x="115" y="46" width="6" height="42" rx="1"/>
+    <rect class="screwShaftShade" x="118" y="48" width="3" height="40" opacity="0.7"/>
+    <ellipse class="screwHead" cx="118" cy="46" rx="7" ry="3"/>
+    <path class="screwDrive" d="M 112 46 L 124 46 M 118 42 L 118 50" stroke="#5a3a1e" stroke-width="1.2" fill="none"/>
+    <line x1="118" y1="62" x2="118" y2="86" stroke="#7a5230" stroke-width="0.4" opacity="0.6"/>
+    <line x1="118" y1="70" x2="118" y2="86" stroke="#7a5230" stroke-width="0.4" opacity="0.6"/>
+    <line x1="118" y1="78" x2="118" y2="86" stroke="#7a5230" stroke-width="0.4" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="screwShaft" x="143" y="56" width="5" height="32" rx="1" transform="rotate(8 145.5 72)"/>
+    <ellipse class="screwHead" cx="146" cy="56" rx="5.5" ry="2.4" transform="rotate(8 146 56)"/>
+  </g>
+  <g>
+    <rect class="screwShaft" x="92" y="58" width="5" height="30" rx="1" transform="rotate(-10 94.5 73)"/>
+    <ellipse class="screwHead" cx="94" cy="58" rx="5.5" ry="2.4" transform="rotate(-10 94 58)"/>
+  </g>
+</svg>

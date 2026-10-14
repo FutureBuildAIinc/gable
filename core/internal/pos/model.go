@@ -273,6 +273,41 @@ type QuickSearchResult struct {
 	InStock        httpx.Quantity `json:"in_stock"`
 }
 
+// CounterTile is one product tile of the counter's catalogue (GET
+// /pos/tiles): the search's price and stock figures plus the category and the
+// picture path, null unless the picture setting is on and the product has one.
+type CounterTile struct {
+	ProductID      uuid.UUID      `json:"product_id"`
+	SKU            string         `json:"sku"`
+	Description    string         `json:"description"`
+	UOM            string         `json:"uom"`
+	UnitPriceCents httpx.Cents    `json:"unit_price_cents"`
+	InStock        httpx.Quantity `json:"in_stock"`
+	Category       string         `json:"category"`
+	ImageURL       *string        `json:"image_url"`
+}
+
+// TileCategory is one category chip: its name and its product count.
+type TileCategory struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+// TileSet is the tiles answer: the chips, the tiles and whether pictures are
+// on (the catalog.product_images setting). Neither array is ever null.
+type TileSet struct {
+	Categories []TileCategory `json:"categories"`
+	Items      []CounterTile  `json:"items"`
+	Images     bool           `json:"images"`
+}
+
+// TileQuery is the tiles read's parameters, already validated.
+type TileQuery struct {
+	Category string
+	Q        string
+	Limit    int
+}
+
 // CatalogProduct is a lightweight product for the offline catalog cache.
 type CatalogProduct struct {
 	ProductID      uuid.UUID      `json:"product_id"`
