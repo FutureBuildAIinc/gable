@@ -14,10 +14,17 @@ export class GableTopCustomersTable extends LitElement {
     @property({ type: Boolean }) loading = false;
 
     /** A click anywhere on the row follows the row's link; a click on the
-     *  link itself is the router's anchor interception, which navigates. */
+     *  link itself is the router's anchor interception, which navigates. A
+     *  Ctrl, Cmd or middle click opens the account in a new tab, as the
+     *  link itself would. */
     private _openAccount(e: Event, customerId: string) {
         if ((e.target as HTMLElement).closest('a')) return;
-        router.navigate(`/accounts/${customerId}`);
+        const url = `/accounts/${customerId}`;
+        if (e instanceof MouseEvent && (e.ctrlKey || e.metaKey || e.button === 1)) {
+            window.open(url, '_blank');
+            return;
+        }
+        router.navigate(url);
     }
 
     render() {
@@ -72,6 +79,7 @@ export class GableTopCustomersTable extends LitElement {
                                         <tr
                                             class="group hover:bg-white/5 transition-colors cursor-pointer"
                                             @click=${(e: Event) => this._openAccount(e, customer.customer_id)}
+                                            @auxclick=${(e: Event) => this._openAccount(e, customer.customer_id)}
                                         >
                                             <td class="px-6 py-3 font-medium text-white">
                                                 <a
