@@ -15,8 +15,9 @@ import (
 )
 
 // The stored test result names the settings revision it ran on: a result that
-// belongs to an older revision of the settings reads as untested, so a refused
-// key never reads passed because two tests finished out of order.
+// belongs to an older revision of the settings reads as untested. (Two tests
+// that finish out of order are the next leg's: the result of the older
+// revision never replaces the later one.)
 func TestWire_AStoredTestResultReadsUntestedOnceTheSettingsMoved(t *testing.T) {
 	var hits int32
 	client := anthropicAnswering(t, http.StatusOK, &hits)

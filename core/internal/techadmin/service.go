@@ -516,7 +516,17 @@ func (s *Service) readAITest(ctx context.Context, out *AISettings) error {
 // document. A provider failure is an answer, not an error; only a storage
 // failure is returned. The message is the provider's refusal in words, never
 // the key.
-func (s *Service) runAITest(ctx context.Context) (TestResult, error) {
+func (s *Service) runAITest(ctx context.Context, fromSave bool) (TestResult, error) {
+	// The revision the test runs on is read BEFORE the provider is asked: the
+	// result belongs to that revision, whenever the provider answers.
+	var rev int64
+	if s.aiTester != nil && s.repo != nil {
+		r, err := s.repo.ReadRevision(ctx, ResourceAISettings)
+		if err != nil {
+			return TestResult{}, err
+		}
+		rev = r
+	}
 	res := TestResult{OK: true, Status: AITestPassed, Message: "The provider answered."}
 	switch {
 	case s.aiTester == nil:
@@ -525,10 +535,10 @@ func (s *Service) runAITest(ctx context.Context) (TestResult, error) {
 		if err := s.aiTester.TestConnection(ctx); err != nil {
 			if words, refused := ai.RefusedMessage(err); refused {
 				res = TestResult{Status: AITestRefused, Message: words}
-			} else if words, unreachable := ai.UnreachableMessage(err); unreachable {
-				res = TestResult{Status: AITestFailed, Message: words}
+			} else if unreachable := unreachableProvider(err); unreachable != "" {
+				res = TestResult{Status: AITestFailed, Message: unreachableWords(unreachable, fromSave)}
 			} else if errors.Is(err, context.DeadlineExceeded) {
-				res = TestResult{Status: AITestFailed, Message: ai.UnreachableWords(s.aiProviderLabel(ctx))}
+				res = TestResult{Status: AITestFailed, Message: unreachableWords(s.aiProviderLabel(ctx), fromSave)}
 			} else {
 				res = TestResult{Status: AITestFailed, Message: err.Error()}
 			}
@@ -537,13 +547,17 @@ func (s *Service) runAITest(ctx context.Context) (TestResult, error) {
 	if s.aiTester == nil || s.repo == nil {
 		return res, nil
 	}
-	rev, err := s.repo.ReadRevision(ctx, ResourceAISettings)
-	if err != nil {
-		return res, err
-	}
 	stored := aiTestRow{Status: res.Status, Message: res.Message, Revision: rev}
 	if res.Status == AITestPassed {
 		stored.Message = ""
+	}
+	// A result of an older revision never replaces one of a later revision:
+	// two tests that finish out of order leave the later key's result.
+	if raw, ok, rerr := s.repo.ReadSetting(ctx, settingAITest); rerr == nil && ok {
+		var prev aiTestRow
+		if json.Unmarshal([]byte(raw), &prev) == nil && prev.Revision > rev {
+			return res, nil
+		}
 	}
 	row, err := json.Marshal(stored)
 	if err != nil {
@@ -667,7 +681,7 @@ func (s *Service) SaveAISettingsFull(ctx context.Context, in AISave, pre Precond
 	// test is the provider's answer, never a reason to refuse the save.
 	if out.Configured && s.aiTester != nil {
 		tctx, cancel := context.WithTimeout(ctx, saveTestTimeout)
-		_, terr := s.runAITest(tctx)
+		_, terr := s.runAITest(tctx, true)
 		cancel()
 		if terr != nil {
 			// The save is committed: a result that could not be stored is
@@ -685,7 +699,7 @@ func (s *Service) SaveAISettingsFull(ctx context.Context, in AISave, pre Precond
 // the last test of the saved key. A provider failure is an answer (ok false
 // and its words), not an error.
 func (s *Service) TestAIConnection(ctx context.Context) TestResult {
-	res, err := s.runAITest(ctx)
+	res, err := s.runAITest(ctx, false)
 	if err != nil {
 		slog.Error("failed to store the AI test result", "error", err)
 	}
@@ -764,6 +778,25 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		s.invalidateAI()
 	}
 	return err
+}
+
+// unreachableProvider is the provider's name when err is an unreachable
+// provider, else "".
+func unreachableProvider(err error) string {
+	var ue *ai.UnreachableError
+	if errors.As(err, &ue) {
+		return ue.ProviderName()
+	}
+	return ""
+}
+
+// unreachableWords is the sentence for a test that could not reach provider: a
+// save says the key is saved, a pressed test does not.
+func unreachableWords(provider string, fromSave bool) string {
+	if fromSave {
+		return ai.UnreachableWords(provider)
+	}
+	return ai.PressedUnreachableWords(provider)
 }
 
 // aiProviderLabel is the display name of the chosen provider.

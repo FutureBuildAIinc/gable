@@ -69,12 +69,22 @@ type UnreachableError struct {
 
 func (e *UnreachableError) Error() string { return e.Detail }
 
+// ProviderName is the display name of the provider that could not be reached.
+func (e *UnreachableError) ProviderName() string { return e.Provider }
+
 // Words is what a person reads when the saved key could not be tested.
 func (e *UnreachableError) Words() string { return UnreachableWords(e.Provider) }
 
 // UnreachableWords is the sentence for provider (a display name).
 func UnreachableWords(provider string) string {
 	return fmt.Sprintf("The key is saved. %s could not be reached to test it; press Test connection later.", provider)
+}
+
+// PressedUnreachableWords is the sentence for a pressed Test connection that
+// could not reach provider: nothing was saved by the press, so it does not say
+// the key is saved.
+func PressedUnreachableWords(provider string) string {
+	return fmt.Sprintf("%s could not be reached; try Test connection again later.", provider)
 }
 
 // UnreachableMessage reports whether err is an unreachable provider and the
