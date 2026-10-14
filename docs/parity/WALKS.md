@@ -255,4 +255,22 @@ need. Save a PDF with `curl -s <url> -o form.pdf` and read it with `pdftotext fo
     (`GET /api/v1/documents/print/purchase-order/<id>`): the quote arrives in the catcher; the purchase order shows
     the vendor, the placing yard's address and its lines.
 
+## Walk: Market check, our prices against a live store through FB Connect
+
+Needs the demo seed, a vault key (`PAYMENT_VAULT_KEY`), an FB Connect address and the pricing flow's webhook id.
+
+1. As admin open Tech Admin and find the Market check card. It says the check is off. Enter the FB Connect address and
+   the webhook id, the store label ("Home Depot, Spokane WA: nearest store with live prices"), band 5 and floor 15,
+   and Save. The card now shows the id as "Saved" with Replace and Clear, and never the value.
+   `GET /api/v1/admin/market-check/settings` answers `webhook_id_saved: true` and no id.
+2. Open Pricing, then Market check. The six top lumber products are picked. Remove one chip, add another with the
+   search, and press Run check. While it runs the rows are placeholders reading "Reading live prices through FB Connect".
+3. Read the summary line and the table: each matched row shows our price, the Home Depot title and price with its
+   confidence and unit note, the difference in percent and dollars, the position and the suggested price with its
+   reason. An unmatched or error row shows its note across the row.
+4. Check a suggestion by hand: a row above the band suggests the competitor's price plus the band, never under the
+   margin floor (cost divided by one less the floor percent).
+5. As a cashier or a sales user, `POST /api/v1/pricing/market-check` is a 403.
+6. Clear the id in Tech Admin and open Market check again: it says the check is off, with a link to Tech Admin.
+
 None of the other walks of the plan are written yet; they land with their items.
