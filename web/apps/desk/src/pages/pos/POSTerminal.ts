@@ -1268,8 +1268,9 @@ export class POSTerminal extends LitElement {
           class="mt-4 min-h-14 w-full rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
           ${label}
         </button>
+        ${completed ? nothing : html`
         <button data-testid="pos-clear-sale" @click=${() => this._clearSale()} ?disabled=${!clearable}
-          class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>
+          class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>`}
       </section>`;
   }
 

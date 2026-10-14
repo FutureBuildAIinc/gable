@@ -647,11 +647,11 @@ describe('the Panels board', () => {
   });
 
   describe('Clear sale', () => {
-    it('is off with no lines and on a completed sale', async () => {
+    it('is off with no lines and not offered on a completed sale', async () => {
       const el = await mount(sale({ lines: [] }));
       expect((q(el, 'pos-clear-sale') as HTMLButtonElement).disabled).toBe(true);
       const done = await mount(sale({ status: 'completed' }));
-      expect((q(done, 'pos-clear-sale') as HTMLButtonElement).disabled).toBe(true);
+      expect(q(done, 'pos-clear-sale')).toBeNull();
       el.remove();
       done.remove();
     });
@@ -828,6 +828,16 @@ describe('the Panels board', () => {
       expect(q(el, 'pos-account-refusal')).toBeNull();
       el.remove();
     });
+  });
+
+  it('ends the order summary at Paid in full, with no Clear sale on a completed sale', async () => {
+    const done = await mount(sale({ status: 'completed' }));
+    expect(q(done, 'pos-pay').textContent?.trim()).toBe('Paid in full');
+    expect(q(done, 'pos-clear-sale')).toBeNull();
+    const open = await mount(sale());
+    expect(q(open, 'pos-clear-sale')).toBeTruthy();
+    done.remove();
+    open.remove();
   });
 
   it('dims Clear sale with no lines as Pay is dimmed', async () => {
@@ -1447,7 +1457,9 @@ describe('the counter before the till opens, and after a sale completes', () => 
       }
     });
 
-    it('makes the card\'s New sale the one primary, lights Summary and locks Change, purchase order and job', async () => {
+    const toggle = (el: Element, key: string) => q(el, `panel-${key}-toggle`) as HTMLButtonElement;
+
+    it('makes the card\'s New sale the one primary, marks every step done and locks Change, purchase order and job', async () => {
       const el = await completeOne();
       const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
       expect(newSale.className).not.toContain('bg-gable-green');
@@ -1455,7 +1467,10 @@ describe('the counter before the till opens, and after a sale completes', () => 
       expect(cardNew.className).toContain('bg-gable-green');
       const closeTill = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Close Till') as HTMLElement;
       expect(closeTill.className).not.toContain('bg-gable-green');
-      expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('current');
+      expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('done');
+      expect(q(el, 'progress-summary').textContent).toContain('\u2713');
+      expect(toggle(el, 'summary').textContent).toContain('\u2713');
+      expect(toggle(el, 'summary').textContent).toContain('Change');
       // the clear control only exists once a customer is named; a walk in's own button is the choice
       const change = [...q(el, 'pos-customer').querySelectorAll('button:not([data-testid="pos-walk-in"])')].find((x) => x.textContent?.trim() === 'Walk-in sale') as HTMLButtonElement | undefined;
       if (change) expect(change.disabled).toBe(true);
