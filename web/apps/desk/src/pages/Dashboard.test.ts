@@ -50,10 +50,10 @@ describe('the dashboard drills in', () => {
     expect(link.getAttribute('aria-label')).toBe("Open today's sales")
   })
 
-  it('Active Orders opens the orders list', async () => {
+  it('Active Orders opens the orders list on its Confirmed tab', async () => {
     const el = await mountAsync<GableDashboard>('gable-dashboard')
-    const link = q<HTMLAnchorElement>(el, 'a[href="/orders"]')
-    expect(link.getAttribute('aria-label')).toBe('Open the active orders')
+    const link = q<HTMLAnchorElement>(el, 'a[href="/orders?status=confirmed"]')
+    expect(link.textContent).toContain('Active Orders')
   })
 
   it('Pending Dispatch opens the dispatch board', async () => {
