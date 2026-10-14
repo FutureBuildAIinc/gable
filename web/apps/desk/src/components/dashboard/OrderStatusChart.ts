@@ -4,8 +4,10 @@
 import { LitElement, html } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
+import { onThemeChange, themeColor } from '@gable/design-system';
 
-const COLORS = ['#00FFA3', '#38BDF8', '#818cf8', '#fbbf24', '#f43f5e', '#a1a1aa'];
+/** The series, by token, so they follow Industrial Dark and Gable light. */
+const SERIES = ['gable-green', 'blueprint-blue', 'indigo-400', 'amber-400', 'rose-500', 'zinc-400'];
 
 /** Helper to map status to readable names */
 function formatStatus(status: string): string {
@@ -22,6 +24,12 @@ export class GableOrderStatusChart extends LitElement {
     @state() private _totalOrders = 0;
 
     private _chart: Chart<'doughnut'> | null = null;
+    private _offTheme: (() => void) | null = null;
+
+    connectedCallback() {
+        super.connectedCallback();
+        this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
+    }
 
     updated(changedProperties: Map<string, unknown>) {
         super.updated(changedProperties);
@@ -34,6 +42,8 @@ export class GableOrderStatusChart extends LitElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        this._offTheme?.();
+        this._offTheme = null;
         this._destroyChart();
     }
 
@@ -69,7 +79,7 @@ export class GableOrderStatusChart extends LitElement {
                     labels: data.map(d => d.name),
                     datasets: [{
                         data: data.map(d => d.value),
-                        backgroundColor: data.map((_, i) => COLORS[i % COLORS.length]),
+                        backgroundColor: data.map((_, i) => themeColor(SERIES[i % SERIES.length])),
                         borderWidth: 0,
                         spacing: 4,
                     }],
@@ -82,7 +92,7 @@ export class GableOrderStatusChart extends LitElement {
                         legend: {
                             position: 'bottom',
                             labels: {
-                                color: '#a1a1aa',
+                                color: themeColor('zinc-400'),
                                 usePointStyle: true,
                                 pointStyle: 'circle',
                                 padding: 16,
@@ -90,11 +100,11 @@ export class GableOrderStatusChart extends LitElement {
                             },
                         },
                         tooltip: {
-                            backgroundColor: 'rgba(22, 24, 33, 0.9)',
-                            titleColor: '#a1a1aa',
-                            bodyColor: '#ffffff',
+                            backgroundColor: themeColor('slate-steel', 0.9),
+                            titleColor: themeColor('zinc-400'),
+                            bodyColor: themeColor('white'),
                             bodyFont: { family: 'JetBrains Mono, monospace', weight: 'bold' },
-                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderColor: themeColor('white', 0.1),
                             borderWidth: 1,
                             cornerRadius: 8,
                             padding: 8,
