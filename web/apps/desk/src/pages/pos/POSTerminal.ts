@@ -10,6 +10,7 @@ import { chargeRefusal, standingOf, money, PO_REFUSAL } from './standing';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
+import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 
@@ -95,6 +96,7 @@ export class POSTerminal extends LitElement {
     super.connectedCallback();
     window.addEventListener('gable:branch-changed', this._onYardChanged);
     this.addEventListener('pos-catalog-add', this._onCatalogAdd);
+    document.addEventListener('keydown', this._onHotkey);
     this._yardId = branchContext.currentId;
     void this._loadRegisters();
   }
@@ -299,6 +301,7 @@ export class POSTerminal extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener('gable:branch-changed', this._onYardChanged);
     this.removeEventListener('pos-catalog-add', this._onCatalogAdd);
+    document.removeEventListener('keydown', this._onHotkey);
     this._registerSeq++;
     if (this._errorTimer) clearTimeout(this._errorTimer);
     if (this._custDebounce) clearTimeout(this._custDebounce);
@@ -670,6 +673,128 @@ export class POSTerminal extends LitElement {
     this._tenderAmount = '';
   }
 
+  /* ---- Hotkeys (the roster and the chord rules are in ./hotkeys) ---- */
+
+  /** The line a quantity key lands on: the last one touched, else the last on the sale. */
+  @state() private _selectedLineId: string | null = null;
+
+  /** True while a dialog of the app is open: no key acts behind it. */
+  private get _dialogOpen(): boolean {
+    return this._showTillOpen || this._showTillClose || this._showReturn
+      || document.querySelector('[role="dialog"], [aria-modal="true"]') !== null;
+  }
+
+  /** What Pay is live on: the order summary's own predicate. */
+  private get _canPay(): boolean {
+    const sale = this._sale;
+    if (!sale || this._till === null || sale.status !== 'open' || this._loading) return false;
+    if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
+    return payPlan(sale.total_cents, this._pendingTenders, this._entry).ok;
+  }
+
+  /** The same facts the controls disable on, so a dimmed key means a disabled control. */
+  private _hotkeyLive(action: HotkeyAction): boolean {
+    const sale = this._sale;
+    const open = sale?.status === 'open';
+    const hasLines = (sale?.lines ?? []).some((l) => l.parent_line_id === null);
+    const till = this._till !== null;
+    switch (action) {
+      case 'search':
+      case 'add':
+        return till && open;
+      case 'customer':
+        // the lookup is off once the sale has a line: the customer is named first
+        return till && open && this._customer === null && !hasLines;
+      case 'quantity':
+        return open && hasLines;
+      case 'next':
+        return till && open && hasLines && (this._step === 'customer' || this._step === 'payment');
+      case 'back':
+        return open && (this._step === 'payment' || this._step === 'summary');
+      case 'tender-cash':
+      case 'tender-check':
+      case 'tender-card':
+        return till && open && hasLines;
+      case 'tender-account':
+        return till && open && hasLines && this._accountRefusal === null;
+      case 'pay':
+        return this._canPay;
+      case 'new-sale':
+        return this._register !== null && till;
+      case 'clear-sale':
+        return open && hasLines && !this._loading;
+      case 'void':
+        return this._completed !== null && sale?.id === this._completed.id;
+      default:
+        return false;
+    }
+  }
+
+  private _onHotkey = (e: KeyboardEvent) => {
+    if (e.defaultPrevented || this._dialogOpen) return;
+    const action = resolveHotkey(chordFromEvent(e));
+    if (action === null || !this._hotkeyLive(action)) return;
+    e.preventDefault();
+    void this._runHotkey(action);
+  };
+
+  private async _runHotkey(action: HotkeyAction) {
+    // the control may be on screen already; a panel that just opened is waited for
+    const focus = async (selector: string) => {
+      const here = this.querySelector(selector) as HTMLElement | null;
+      if (here) { here.focus(); return; }
+      await this.updateComplete;
+      (this.querySelector(selector) as HTMLElement | null)?.focus();
+    };
+    switch (action) {
+      case 'search':
+        return focus('[data-testid="catalog-search"]');
+      case 'add':
+        return (this.querySelector('[data-testid="catalog-add"]') as HTMLButtonElement | null)?.click();
+      case 'customer':
+        this._step = 'customer';
+        this._open = 'customer';
+        return focus('#pos-customer-search');
+      case 'quantity': {
+        const lines = (this._sale?.lines ?? []).filter((l) => l.parent_line_id === null);
+        const target = lines.find((l) => l.id === this._selectedLineId) ?? lines[lines.length - 1];
+        if (!target) return;
+        const input = this.querySelector(`input[data-line-id="${target.id}"]`) as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+        return;
+      }
+      case 'next':
+        if (this._step === 'customer') { this._step = 'payment'; this._open = 'payment'; }
+        else if (this._step === 'payment') { this._step = 'summary'; this._open = 'summary'; }
+        return;
+      case 'back':
+        if (this._step === 'payment') { this._step = 'customer'; this._open = 'customer'; }
+        else if (this._step === 'summary') { this._step = 'payment'; this._open = 'payment'; }
+        return;
+      case 'tender-cash': return this._chooseMethod('cash');
+      case 'tender-check': return this._chooseMethod('check');
+      case 'tender-card': return this._chooseMethod('card');
+      case 'tender-account': return this._chooseMethod('account');
+      case 'pay': return this._pay();
+      case 'new-sale': return this._beginFresh();
+      case 'clear-sale': return this._clearSale();
+      case 'void': return this._voidSale();
+    }
+  }
+
+  /** The legend pinned above the counter: every key at every state, the unavailable ones dimmed. */
+  private _renderHotkeyLegend() {
+    return html`
+      <div role="group" aria-label="Keyboard shortcuts" data-testid="pos-hotkey-legend"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/10 bg-slate-steel px-4 py-1.5 text-xs text-slate-300">
+        ${legendKeys((a) => this._hotkeyLive(a)).map((k) => html`
+          <span data-action=${k.action} class="inline-flex items-center gap-1 whitespace-nowrap ${k.live ? '' : 'opacity-40'}">
+            <kbd class="rounded border border-white/20 px-1.5 font-mono text-slate-200">${k.keycap}</kbd>${k.label}
+          </span>`)}
+      </div>`;
+  }
+
   /** The lines whose quantity change is on its way, so one commit is sent once. */
   private _changing = new Set<string>();
 
@@ -727,7 +852,8 @@ export class POSTerminal extends LitElement {
           ?disabled=${busy || !(Number(item.quantity) > 1)}
           @click=${() => this._stepQuantity(item, -1)} class=${button}>−</button>
         <input type="text" inputmode="decimal" autocomplete="off" aria-label="Quantity of ${item.description}"
-          .value=${item.quantity} ?disabled=${busy}
+          .value=${item.quantity} ?disabled=${busy} data-line-id=${item.id}
+          @focus=${() => { this._selectedLineId = item.id; }}
           @keydown=${(e: KeyboardEvent) => {
             if (e.key === 'Enter') { e.preventDefault(); void this._changeQuantity(item, (e.target as HTMLInputElement).value, e.target as HTMLInputElement); }
           }}
@@ -1294,7 +1420,7 @@ export class POSTerminal extends LitElement {
     const open = sale?.status === 'open';
     const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry);
-    const canPay = this._till !== null && hasLines && open && !this._loading && plan.ok;
+    const canPay = this._canPay;
     const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
@@ -1451,6 +1577,7 @@ export class POSTerminal extends LitElement {
     return html`
       <div class="flex h-screen flex-col bg-deep-space font-sans text-white" data-testid="pos-terminal">
         ${this._renderHeader(sale, progress)}
+        ${this._renderHotkeyLegend()}
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderReturnModal()}
