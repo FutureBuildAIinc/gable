@@ -1899,7 +1899,6 @@ describe('the resets after Clear tenders and Clear sale', () => {
   });
 
   it('puts a tender that was pressed but not added back to none on Clear sale', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     svc.removeItem
       .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
       .mockResolvedValueOnce(sale({ lines: [], subtotal_cents: 0, tax_cents: 0, total_cents: 0 }));
@@ -1909,6 +1908,8 @@ describe('the resets after Clear tenders and Clear sale', () => {
     await el.updateComplete;
     expect(pressed(el)).toEqual(['cash']);
     q(el, 'pos-clear-sale').click();
+    await settle();
+    await answerAppDialog(true);
     await settle();
     await el.updateComplete;
     (el as unknown as { _sale: Sale })._sale = sale({
@@ -1920,12 +1921,10 @@ describe('the resets after Clear tenders and Clear sale', () => {
     q(el, 'pos-pay').click();
     await settle();
     expect(svc.completeSale).not.toHaveBeenCalled();
-    confirm.mockRestore();
     el.remove();
   });
 
   it('drops the added tenders on Clear sale, so the next lines are not paid on them', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     svc.removeItem
       .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
       .mockResolvedValueOnce(sale({ lines: [], subtotal_cents: 0, tax_cents: 0, total_cents: 0 }));
@@ -1936,6 +1935,8 @@ describe('the resets after Clear tenders and Clear sale', () => {
     q(el, 'pos-add-tender').click();
     await el.updateComplete;
     q(el, 'pos-clear-sale').click();
+    await settle();
+    await answerAppDialog(true);
     await settle();
     await el.updateComplete;
     // a new line lands on the emptied sale
@@ -1948,7 +1949,6 @@ describe('the resets after Clear tenders and Clear sale', () => {
     q(el, 'pos-pay').click();
     await settle();
     expect(svc.completeSale).not.toHaveBeenCalled();
-    confirm.mockRestore();
     el.remove();
   });
 });
