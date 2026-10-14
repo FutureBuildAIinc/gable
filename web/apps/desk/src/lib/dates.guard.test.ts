@@ -44,7 +44,7 @@ function* sources(dir: string): Generator<string> {
 const RULES: Array<{ kind: string; pattern: RegExp }> = [
   {
     kind: 'native date/time input',
-    pattern: /(?:^|\s|\.)type\s*=\s*(?:\$\{\s*)?['"]?(?:date|datetime-local|month|time)['"]?[\s}>/]/,
+    pattern: /(?:^|\s|\.)type\s*=\s*(?:\$\{\s*)?['"]?(?:date|datetime-local|month|time)['"]?(?=[\s}>/]|$)/,
   },
   { kind: 'toLocaleDateString(', pattern: /\.toLocaleDateString\s*\(/ },
   { kind: 'toLocaleTimeString(', pattern: /\.toLocaleTimeString\s*\(/ },
