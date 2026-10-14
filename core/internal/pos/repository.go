@@ -1536,14 +1536,32 @@ func (r *PostgresRepository) LookupChargeCodes(ctx context.Context, codes []stri
 	return out, rows.Err()
 }
 
+// counterStockScope is the join condition that holds the counter's on hand to
+// the caller's yard, the inventory module's list rule (ListInventoryByProduct):
+// a context branch counts every location under that branch; with none, a bound
+// non-admin user counts the branches granted to them; an administrator, an
+// unbound key and callers with no branch context count the whole dealer's.
+// branch and grants are the positions of the two query parameters.
+func counterStockScope(branch, grants int) string {
+	return fmt.Sprintf(`
+		AND (
+			($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL)
+			OR EXISTS (SELECT 1 FROM locations l WHERE l.id = i.location_id AND (
+				($%[1]d::uuid IS NOT NULL AND l.branch_id = $%[1]d)
+				OR ($%[1]d::uuid IS NULL AND l.branch_id IN
+					(SELECT branch_id FROM user_locations WHERE user_sub = $%[2]d))))
+		)`, branch, grants)
+}
+
 func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
-		FROM products p LEFT JOIN inventory i ON i.product_id = p.id
+		FROM products p LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(3, 4)+`
 		WHERE (p.sku ILIKE $1 OR p.description ILIKE $1)
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
-		ORDER BY p.sku LIMIT $2`, "%"+query+"%", limit)
+		ORDER BY p.sku LIMIT $2`, "%"+query+"%", limit,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -1563,9 +1581,9 @@ func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogPr
 	rows, err := r.ex(ctx).Query(ctx, `
 		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
-		FROM products p LEFT JOIN inventory i ON i.product_id = p.id
+		FROM products p LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(1, 2)+`
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary
-		ORDER BY p.sku`)
+		ORDER BY p.sku`, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, err
 	}
