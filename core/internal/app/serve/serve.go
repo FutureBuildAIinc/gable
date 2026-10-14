@@ -588,7 +588,13 @@ func Run() {
 	})
 
 	// Notification Module
-	emailSvc := notification.NewLogEmailService(logger)
+	// The SMTP sender when SMTP_HOST is set, the log sender otherwise; a set
+	// host with no From address (or any bad SMTP_* value) refuses to start.
+	emailSvc, err := notification.NewEmailServiceFromEnv(os.Getenv, logger)
+	if err != nil {
+		logger.Error("Email configuration error", "error", err)
+		os.Exit(1)
+	}
 
 	// Document Module
 	docSvc := document.NewService(productRepo)
@@ -704,9 +710,9 @@ func Run() {
 
 	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
 	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
-	// recipients via emailSvc — which is the log-only LogEmailService, so the
-	// report is genuinely generated and the send is recorded in the log rather
-	// than transmitted. The schedule API publishes that distinction itself
+	// recipients via emailSvc — the SMTP sender when SMTP_HOST is set, otherwise
+	// the log-only LogEmailService, which records the send in the log rather
+	// than transmitting it. The schedule API publishes that distinction itself
 	// (execution.enabled plus execution.delivery), derived from this executor,
 	// so wiring it here is what flips the API from "saved but never run" to
 	// "runs". Stops in step 3.6 of graceful shutdown, before the DB pool closes.

@@ -24,19 +24,14 @@ type EmailService interface {
 
 // LogEmailService is a dev/demo fallback that logs emails instead of sending.
 //
-// It is the ONLY EmailService implementation in this repository, and
-// cmd/server/main.go wires it unconditionally — so every email this
-// application "sends" (invoices, delivery notifications, scheduled reports) is
-// a structured log line and nothing leaves the process. That is a deliberate
-// state, not an oversight: there is no SMTP/SendGrid configuration anywhere in
-// the tree, and a fallback that silently dropped mail without a trace would be
-// worse than one that records exactly what it would have sent.
-//
-// To deliver for real, add an SMTP- or provider-backed type implementing
-// EmailService and swap the single `notification.NewLogEmailService(logger)`
-// call in cmd/server/main.go for it. Nothing else has to change: every consumer
-// (document.Handler, DeliveryNotifier, ExposureNotifier, reporting.Scheduler)
-// depends on the interface, not on this type.
+// It is the sender serve and the worker use when SMTP_HOST is not set
+// (NewEmailServiceFromEnv); with SMTP_HOST set they use SMTPEmailService and
+// this type is not in the process. Every email it "sends" (invoices, delivery
+// notifications, scheduled reports) is a structured log line and nothing
+// leaves the process. That is a deliberate state, not an oversight: a fallback
+// that silently dropped mail without a trace would be worse than one that
+// records exactly what it would have sent. It discloses itself through
+// DeliveryDescription; the real sender does not implement that method.
 type LogEmailService struct {
 	logger *slog.Logger
 }
@@ -76,11 +71,7 @@ func (s *LogEmailService) SendDeliveryNotification(ctx context.Context, to strin
 // confirm from the log that the right report went to the right people; the file
 // itself is not written anywhere.
 //
-// Swapping in real SMTP is a matter of building a MIME multipart/mixed message
-// (text/plain body part + base64 application/octet-stream attachment part named
-// `filename`) and handing it to net/smtp or a provider SDK, plus configuration
-// for host/port/credentials/From. See the LogEmailService doc comment for where
-// the swap happens.
+// SMTPEmailService builds the real MIME message when SMTP_HOST is set.
 func (s *LogEmailService) SendEmailWithAttachment(ctx context.Context, to []string, subject string, body string, filename string, content []byte) error {
 	s.logger.Info("MOCK EMAIL WITH ATTACHMENT SENT",
 		"to", to,
