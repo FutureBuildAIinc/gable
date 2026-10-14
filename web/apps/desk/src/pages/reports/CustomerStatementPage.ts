@@ -8,6 +8,8 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
+import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
 import { FileText, Search } from 'lucide';
@@ -26,10 +28,25 @@ export class CustomerStatementPage extends LitElement {
     @state() private endDate = '';
     @state() private statement: ArStatement | null = null;
     @state() private loading = false;
+    /** Set when the statement answers 404 for a customer whose ledger is kept at another yard. */
+    @state() private yardNote = '';
     private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+    private _unsubBranch: (() => void) | null = null;
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubBranch?.();
+        this._unsubBranch = null;
+    }
 
     connectedCallback() {
         super.connectedCallback();
+        // A yard change re-reads the statement for the selected customer: the
+        // wall moved, so it may now answer the calm "kept at" note.
+        this._unsubBranch = onBranchChanged(() => {
+            if (this.selectedCustomer && this.customerId) void this._loadStatement();
+        });
         // The Account page's "Statement" action lands here with `?customer=<id>`.
         // Preselect that customer and run the statement so the user sees something
         // useful before they have to type or click anything.
@@ -47,13 +64,14 @@ export class CustomerStatementPage extends LitElement {
             this.selectedCustomer = cust;
             this.customerId = cust.id;
             this.searchTerm = cust.name;
-            await this._loadStatement();
         } catch (err) {
             console.error(err);
             ToastService.show('Failed to load the customer for this statement', 'error');
-        } finally {
             this.loading = false;
+            return;
         }
+        // The statement read owns the loading state from here, in its own turn.
+        await this._loadStatement();
     }
 
     private _onSearchInput(e: Event) {
@@ -91,19 +109,38 @@ export class CustomerStatementPage extends LitElement {
         this.searchOpen = false;
     }
 
+    /** Each statement read's turn: a later one (a yard switch, a new pick) makes an earlier answer stale. */
+    private _statementSeq = 0;
+
     private async _loadStatement() {
         if (!this.customerId.trim()) {
+            // A read still in flight was for a pick that is gone.
+            ++this._statementSeq;
+            this.loading = false;
             ToastService.show('Pick a customer first', 'error');
             return;
         }
+        const seq = ++this._statementSeq;
         this.loading = true;
+        this.yardNote = '';
         try {
-            this.statement = await ArService.statement(this.customerId.trim(), this.startDate || undefined, this.endDate || undefined);
+            const statement = await ArService.statement(this.customerId.trim(), this.startDate || undefined, this.endDate || undefined);
+            if (seq !== this._statementSeq) return;
+            this.statement = statement;
         } catch (err) {
+            if (seq !== this._statementSeq) return;
+            // The yard note is for a customer the person can read; an id that is no
+            // customer stays an honest not found.
+            if (err instanceof LedgerOutsideYardError && this.selectedCustomer) {
+                this.statement = null;
+                this.yardNote = ledgerYardNote(this.selectedCustomer.branch_ids);
+                return;
+            }
             console.error(err);
-            ToastService.show('Failed to load statement', 'error');
+            this.statement = null;
+            ToastService.show(err instanceof LedgerOutsideYardError ? 'Statement not found for that customer' : 'Failed to load statement', 'error');
         } finally {
-            this.loading = false;
+            if (seq === this._statementSeq) this.loading = false;
         }
     }
 
@@ -205,6 +242,7 @@ export class CustomerStatementPage extends LitElement {
                 </div>
             </div>
 
+            ${this.yardNote ? html`<div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="statement-yard-note">${this.yardNote}</div>` : nothing}
             ${this.statement ? this.statement.currencies.map(cur => this._renderCurrency(cur)) : nothing}
         `;
     }

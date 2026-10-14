@@ -203,6 +203,14 @@ func accountSurface(customer uuid.UUID) []string {
 	}
 }
 
+// summaryRoute is the account summary, the one of the three routes that reads
+// the customer through ruling A's reach (ADR 0007 section 5.8): a user reaches
+// every customer there, while the subledger and the statement keep the finance
+// documents' wall.
+func summaryRoute(p string) bool {
+	return !strings.HasSuffix(p, "/transactions") && !strings.HasSuffix(p, "/statement")
+}
+
 // TestNoHeader_AccountWallKeepsRowlessCustomersForTheWideCallers is the
 // account wall's both nil arm (r5 P2-1): a customer with a primary branch and
 // no customer_branches row is read on the account, transactions and AR
@@ -224,8 +232,12 @@ func TestNoHeader_AccountWallKeepsRowlessCustomersForTheWideCallers(t *testing.T
 			t.Errorf("dev caller read of the rowless customer's %s: %d, want 200", p, status)
 		}
 		for _, hdr := range []map[string]string{nil, headerA(f)} {
-			if status, buf := f.userAs(t, "finance", "GET", p, "", hdr); status != http.StatusNotFound {
-				t.Errorf("finance granted A (header %t) read of the rowless customer's %s: %d %s, want the fail closed 404", hdr != nil, p, status, buf)
+			want := http.StatusNotFound
+			if summaryRoute(p) {
+				want = http.StatusOK // ruling A: the summary is dealer wide
+			}
+			if status, buf := f.userAs(t, "finance", "GET", p, "", hdr); status != want {
+				t.Errorf("finance granted A (header %t) read of the rowless customer's %s: %d %s, want %d", hdr != nil, p, status, buf, want)
 			}
 		}
 	}

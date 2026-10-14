@@ -209,17 +209,17 @@ func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
 // accounts mounts the account and AR routes: the reads (summary, subledger,
 // aging, statement) behind the role guard and the branch middleware, the
 // reconciliation and the application reversal behind the finance guard. The
-// summary, the subledger and the statement name a customer in the path, so
-// beside the branch middleware the repository holds the customer to the
+// summary, the subledger and the statement name a customer in the path. The
+// summary reads through ruling A's reach (ADR 0007 section 5.8): every
+// customer for a user and an unbound key, a bound key only while that customer
+// holds its pin (round 6 P1-2). The subledger and the statement keep the
 // family's wall (customer_branches, r4 P2-4): a customer outside the caller's
-// reach reads as missing for a user with no header exactly as it already did
-// for a header caller, and a bound key reaches them only while that customer
-// holds its pin (round 6 P1-2). The aging reads carry the repository's branch
-// wall and name no customer, so the wall passes them; the application
-// reversal walls through the invoice its application settles (the
-// repository's wall), and the reconciliation's pure GL columns are refused to
-// a scoped caller by the service, so a bound key is refused it by the route
-// allowlist gate.
+// yards reads as missing there, with or without a header. The aging reads
+// carry the repository's branch wall and name no customer, so the wall passes
+// them; the application reversal walls through the invoice its application
+// settles (the repository's wall), and the reconciliation's pure GL columns
+// are refused to a scoped caller by the service, so a bound key is refused it
+// by the route allowlist gate.
 func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
 	customer := w.keyWall.CustomerBranch(accountCustomerPathOf())
 	account.NewHandler(svc).RegisterRoutes(mux,

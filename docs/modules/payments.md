@@ -83,7 +83,7 @@ directory).
 | POST | `/api/v1/payments/{id}/refunds` | Refund a payment's unapplied cash; reason required; revision precondition. |
 | POST | `/api/v1/credit-memos/{id}/refunds` | Pay a credit memo's open credit out; reason and method required; the precondition is the credit memo's revision. |
 | GET | `/api/v1/invoices/{id}/payments` | List an invoice's applications (the AR side). |
-| GET | `/api/v1/accounts/{id}` | One customer's account summary (balance, credit limit, available credit, unapplied cash). |
+| GET | `/api/v1/accounts/{id}` | One customer's account summary (balance, credit limit, available credit, unapplied cash). The customer record's own figures, read dealer wide (ruling A, ADR 0007 section 5.8); a key bound to a branch keeps its pin. The transactions and the statement keep the finance documents' wall. |
 | GET | `/api/v1/accounts/{id}/transactions` | The customer's AR transactions, by date. |
 | GET | `/api/v1/ar/customers/{id}/statement` | A customer's statement over a date range; opening, lines, closing, open documents. |
 | GET | `/api/v1/ar/aging` | Aging of every open document by customer and job. |

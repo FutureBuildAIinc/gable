@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents } from '../../lib/utils.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { ArService } from '../../services/ArService.ts';
 import type { ArAgingItem, ArAgingTotal, AgingGroupBy } from '../../types/account.ts';
 import { DollarSign } from 'lucide';
@@ -30,25 +31,40 @@ export class ARAgingReportPage extends LitElement {
     @state() private basis: Basis = 'due_date';
     @state() private asOf = '';
 
+    private _unsubBranch: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
+        this._unsubBranch = onBranchChanged(() => { void this._load(); });
         this._load();
     }
 
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubBranch?.();
+        this._unsubBranch = null;
+    }
+
+    /** Each load's turn: a later load (a yard switch, a group, basis or day) makes an earlier answer stale. */
+    private _loadSeq = 0;
+
     private async _load() {
+        const seq = ++this._loadSeq;
         this.loading = true;
         try {
             const [rows, summary] = await Promise.all([
                 ArService.agingAll({ groupBy: this.groupBy, basis: this.basis, asOf: this.asOf || undefined }),
                 ArService.agingSummary({ basis: this.basis, asOf: this.asOf || undefined })
             ]);
+            if (seq !== this._loadSeq) return;
             this.rows = rows;
             this.totals = summary.totals;
         } catch (err) {
+            if (seq !== this._loadSeq) return;
             console.error(err);
             ToastService.show(err instanceof WalkTruncatedError ? err.message : 'Failed to load AR aging report', 'error');
         } finally {
-            this.loading = false;
+            if (seq === this._loadSeq) this.loading = false;
         }
     }
 

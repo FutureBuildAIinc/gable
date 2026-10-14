@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -62,8 +63,12 @@ func (s *Service) Now() time.Time { return s.now() }
 
 // GetSummary is GET /api/v1/accounts/{id}: the balance (the subledger), the
 // credit limit (null for no limit), the credit left, and the open credit memos
-// plus unapplied cash as a negative figure. The customer carries the family's
-// wall: outside the caller's reach the account reads as missing.
+// plus unapplied cash as a negative figure. These are the customer's dealer wide
+// standing (ADR 0007 section 5.8; each payment and credit memo behind the
+// open credits and unapplied cash keeps its own wall): the customer is read
+// through ruling A's reach (a user and an unbound key reach every customer, a
+// key bound to a branch keeps its pin and reads a customer outside it as
+// missing). The subledger and the statement keep their wall (CustomerInWall).
 func (s *Service) GetSummary(ctx context.Context, customerID uuid.UUID) (*Summary, error) {
 	var (
 		out   Summary
@@ -81,7 +86,7 @@ func (s *Service) GetSummary(ctx context.Context, customerID uuid.UUID) (*Summar
 		       - COALESCE((SELECT SUM(ROUND(p.amount_unapplied * 100)::bigint) FROM payments p
 		                   WHERE p.customer_id = c.id AND p.status = 'POSTED'), 0)
 		FROM customers c WHERE c.id = $1 AND `+customerWall(2, 3),
-		customerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
+		customerID, branchctx.CustomerReadBranchForQuery(ctx), branchctx.CustomerReadGrantsSubForQuery(ctx)).
 		Scan(&out.CustomerID, &out.Currency, &bal, &limit, &un)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("account not found")
@@ -96,6 +101,23 @@ func (s *Service) GetSummary(ctx context.Context, customerID uuid.UUID) (*Summar
 		out.CreditLimitCents, out.AvailableCredit = &l, &a
 	}
 	return &out, nil
+}
+
+// CustomerInWall answers a missing account (404) for a customer outside the
+// caller's finance wall: the customer family's wall the subledger and the
+// statement keep, since their rows come from finance documents. It is the
+// gate the subledger route runs before it reads.
+func (s *Service) CustomerInWall(ctx context.Context, customerID uuid.UUID) error {
+	var one int
+	err := s.ex(ctx).QueryRow(ctx, `SELECT 1 FROM customers c WHERE c.id = $1 AND `+customerWall(2, 3),
+		customerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&one)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return httpx.NotFound("account not found")
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read the account: %w", err)
+	}
+	return nil
 }
 
 // TransactionFilter is the subledger list's keyset position.

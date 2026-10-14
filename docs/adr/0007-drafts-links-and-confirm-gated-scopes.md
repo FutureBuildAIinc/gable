@@ -1081,15 +1081,20 @@ repository, through `branchctx.CustomerReadBranchForQuery`):
 | user with `X-Branch-Id` | the customers linked to that yard | every customer |
 | user without the header | the customers linked to the user's grants | every customer |
 | administrator or owner | every customer | every customer |
-| finance user | as the user rows above | every customer on these reads; the account, subledger, statement, aging, reconciliation, dashboard and report routes keep the grants (5.7) |
+| finance user | as the user rows above | every customer on these reads, and on the account summary (`GET /api/v1/accounts/{id}`); the subledger, statement, aging, reconciliation, dashboard and report routes keep the grants (5.7) |
 | key bound to a branch | the customers that hold the pin | unchanged: the customers that hold the pin |
 | key bound to no branch | every customer | every customer |
 
 The customer record's standing goes dealer wide with the record: `balance_cents`
 and `credit_limit_cents` on the customer read and the list answer for every
 customer to every caller above, because a seller at a second yard needs the
-account's standing to sell on account. The finance documents behind the
-standing (the account ledger, the statement, invoices, aging, the
+account's standing to sell on account. The account summary
+(`GET /api/v1/accounts/{id}`: balance, credit limit, open credits and
+unapplied cash) is that same dealer wide standing, for a user and an unbound
+key; a key bound to a branch keeps its pin. Open credits and unapplied cash are
+the figures the counter's standing and the credit check (ADR 0005 section 5.3)
+already read dealer wide. The documents behind the standing (each payment and
+credit memo, the account subledger, the statement, invoices, aging, the
 reconciliation and the reports) keep following grants, so the same user still
 meets the module's 404 for them.
 
