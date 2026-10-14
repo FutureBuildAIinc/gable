@@ -109,7 +109,7 @@ func TestTheCustomersOwnReceiptCannotApplyToAnInterimVoidInvoice(t *testing.T) {
 	// that invoice: refused, the void must stay completable
 	r := f.do("POST", "/api/v1/payments", map[string]any{
 		"customer_id": f.customerID, "method": "check", "amount_cents": owed,
-		"reference": "CHK-72", "received_on": "2030-01-01",
+		"reference": "CHK-72", "received_on": "2020-01-01",
 		"applications": []map[string]any{{"invoice_id": f.invoiceOf(t, saleID), "amount_cents": owed}},
 	}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 	if r.status != http.StatusConflict {
