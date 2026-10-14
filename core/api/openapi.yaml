@@ -9085,6 +9085,7 @@ paths:
         "415": {$ref: "#/components/responses/UnsupportedType"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
+        "502": {$ref: "#/components/responses/AIRefused"}
   /api/partner/v1/dashboard:
     get:
       operationId: partnerDashboard
@@ -12955,6 +12956,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/AIRefused'
   /api/v1/products/{id}/pim/generate/descriptions:
     post:
       operationId: productPimGenerateDescriptions
@@ -12998,6 +13001,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/AIRefused'
   /api/v1/products/{id}/pim/generate/image:
     post:
       operationId: productPimGenerateImage
@@ -13085,6 +13090,8 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalError'
+        '502':
+          $ref: '#/components/responses/AIRefused'
   /api/v1/products/{id}/margins:
     patch:
       operationId: productUpdateMargins
@@ -15798,6 +15805,13 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/WireError"
+    AIRefused:
+      description: >-
+        The AI provider refused the saved key (code ai_refused; a 401 or 403 from the provider). It is not AI off: a key is saved and was not accepted. The message names the provider and says an administrator can enter the key again in Tech Admin, AI Settings. Nothing answers a canned result for it. ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     AIOffEither:
       description: >-
         AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer. The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope.
@@ -16578,7 +16592,7 @@ components:
           $ref: "#/components/schemas/ApiKey"
     AISettings:
       type: object
-      required: [configured, source, key_hint, base_url, revision, provider, model, anthropic_configured, anthropic_key_hint, vault_present]
+      required: [configured, source, key_hint, base_url, revision, provider, model, anthropic_configured, anthropic_key_hint, vault_present, test_status]
       description: >-
         Go type techadmin.AISettings. source is admin (a stored override), env (a key from the environment only) or none. key_hint and base_url are null when absent, never omitted.
       properties:
@@ -16604,15 +16618,26 @@ components:
           type: [string, "null"]
         vault_present:
           type: boolean
+        test_status:
+          type: string
+          enum: [none, untested, passed, refused, failed]
+          description: >-
+            The last test of the saved key: none with no key saved, untested for a key never tested, passed, refused (the provider refused the key) or failed (the test could not finish). A save runs the test.
+        test_message:
+          type: string
+          description: The plain sentence for refused and failed; absent otherwise.
     AdminTestAIResult:
       type: object
-      required: [ok, message]
+      required: [ok, message, status]
       description: Go type techadmin.TestResult. A provider failure is ok false with its words, never the key.
       properties:
         ok:
           type: boolean
         message:
           type: string
+        status:
+          type: string
+          enum: [passed, refused, failed]
     RoutingSettings:
       type: object
       required: [configured, source, key_hint, revision]
