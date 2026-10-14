@@ -90,6 +90,7 @@ var bannedSeedWords = []string{
 	"simpson", "strong-tie", "hardie", "cemtrim", "channellock", "romex",
 	"dryline", "firecode", "brownwood", "turtle", "gable.com",
 	"nordstrom", "kellogg", "zellweger",
+	"quikrete", "tyvek", "proframe angle",
 	"simp-", "ice & water shield", "speed square",
 }
 
