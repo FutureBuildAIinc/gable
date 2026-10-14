@@ -92,7 +92,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/ar/customers/{id}/statement/email":               {KeyBranchClassConfined, "CustomerBranch(path customer); TestKeyBranchPin_DocumentRoutes"},
 	"GET /api/v1/documents/print/statement/{id}":                   {KeyBranchClassConfined, "CustomerBranch(path customer); TestKeyBranchPin_DocumentRoutes"},
 	"GET /api/v1/branches/{id}/users":                              {KeyBranchClassConfined, "NamedBranch(id); TestKeyBranchPin_LocationReads"},
-	"POST /api/v1/pricing/market-check":                            {KeyBranchClassWalled, "the branch middleware holds the pin: the yard the flow is told and the caller's role come from branch context; the answer carries no cost; TestMarketCheckWire"},
+	"POST /api/v1/pricing/market-check":                            {KeyBranchClassRefused, "a run spends the dealer's FB Connect flow and reads the whole catalogue with the caller's yard as context; a bound key has no yard session"},
 	"GET /api/v1/pricing/calculate":                                {KeyBranchClassConfined, "CustomerBranch(query customer_id, and job_id to projects.customer_id); TestKeyBranchPin_CustomerConfinedReads"},
 	"GET /api/v1/pricing/category-rules":                           {KeyBranchClassConfined, "CustomerBranch(query customer_id, required); TestKeyBranchPin_CustomerConfinedReads"},
 	"GET /api/v1/pricing/category-rules/{id}/audit":                {KeyBranchClassConfined, "CustomerRowBranch, tier rows refused; TestKeyBranchPin_CategoryTierRefusals"},
