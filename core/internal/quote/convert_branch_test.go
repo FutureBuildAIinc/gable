@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/order"
@@ -345,6 +346,75 @@ func TestConvert_QuoteWithALiveOrderIsAlreadyConverted(t *testing.T) {
 	got, err := w.svc.GetQuote(ctx, q.ID)
 	if err != nil || got.Status != quote.QuoteStateDraft {
 		t.Errorf("quote after the refusals = %v (%v), want draft", got.Status, err)
+	}
+}
+
+// RULE (CONTRACT-CHANGES DEMO-1): a quote accepted first converts once. Three
+// contenders at pool size 4 convert one accepted quote at once: exactly one
+// order, the others 409 already_converted, one quote.accepted event in all (the
+// accept's own) and the quote's revision unmoved by the converts. The convert
+// no longer moves an accepted quote's revision, so the row lock and the order
+// check alone carry the one order rule.
+func TestConvert_AcceptedQuoteConvertsOnceUnderContention(t *testing.T) {
+	db := testutil.RequireDBMaxConns(t, 4)
+	w := newConvertWorld(t, db)
+	ctx := branchctx.WithSystem(context.Background())
+	q := w.otherBranchQuote(t)
+	sent, err := w.svc.Transition(ctx, q.ID, quote.QuoteStateSent, quote.Precondition{Revision: &q.Revision})
+	if err != nil {
+		t.Fatalf("send the quote: %v", err)
+	}
+	accepted, err := w.svc.Transition(ctx, q.ID, quote.QuoteStateAccepted, quote.Precondition{Revision: &sent.Revision})
+	if err != nil {
+		t.Fatalf("accept the quote: %v", err)
+	}
+
+	const contenders = 3
+	start := make(chan struct{})
+	results := make(chan error, contenders)
+	var wg sync.WaitGroup
+	for i := 0; i < contenders; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := w.svc.ConvertInProcess(ctx, q.ID)
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	won, refused := 0, 0
+	for err := range results {
+		if err == nil {
+			won++
+			continue
+		}
+		var herr *httpx.Error
+		if errors.As(err, &herr) && herr.Status == 409 && len(herr.Details) == 1 && herr.Details[0].Code == "already_converted" {
+			refused++
+			continue
+		}
+		t.Errorf("a contender answered %v, want the order or 409 already_converted", err)
+	}
+	if won != 1 || refused != contenders-1 {
+		t.Fatalf("%d converts won and %d were refused, want 1 and %d", won, refused, contenders-1)
+	}
+	var orders, accepts int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM orders WHERE quote_id = $1`, q.ID).Scan(&orders); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM events_outbox WHERE type = $1 AND entity_id = $2`, quote.EventAccepted, q.ID).Scan(&accepts); err != nil {
+		t.Fatal(err)
+	}
+	if orders != 1 || accepts != 1 {
+		t.Errorf("%d order(s) and %d %s event(s) for the quote, want one each", orders, accepts, quote.EventAccepted)
+	}
+	got, err := w.svc.GetQuote(ctx, q.ID)
+	if err != nil || got.Status != quote.QuoteStateAccepted || got.Revision != accepted.Revision {
+		t.Errorf("quote after the converts = %v revision %d (%v), want accepted at revision %d", got.Status, got.Revision, err, accepted.Revision)
 	}
 }
 

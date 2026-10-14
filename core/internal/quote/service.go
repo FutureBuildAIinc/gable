@@ -820,10 +820,12 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to QuoteState, p
 // Convert accepts the quote and creates the order in ONE transaction
 // (ADR 0005 section 5.8), answering the created order. The quote row is
 // locked first; a quote that already has an order not cancelled is 409
-// already_converted. The lines carry the conversion pair without loss (the
-// R1-15 refusal is lifted); a stocked line sold in another unit than its
-// stocking unit is still refused until cycle 3. Events: quote.accepted, then
-// order.created.
+// already_converted, and one whose order was cancelled converts again. A
+// quote already accepted converts as it is: no second transition, no second
+// quote.accepted and no second auto purchase order. The lines carry the
+// conversion pair without loss (the R1-15 refusal is lifted); a stocked line
+// sold in another unit than its stocking unit is still refused until cycle 3.
+// Events: quote.accepted (unless already accepted), then order.created.
 func (s *Service) Convert(ctx context.Context, id uuid.UUID, pre Precondition) (*order.Order, error) {
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
