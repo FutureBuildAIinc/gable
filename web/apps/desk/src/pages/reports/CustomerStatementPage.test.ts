@@ -228,6 +228,7 @@ describe('customer statement unapplied cash', () => {
       expect(body).toContain('2031-12-20')
       expect(body).toContain('$500.00')
       expect(body).toMatch(/net balance/i)
+      expect(body).toContain('Documents listed are those this yard can see; the balance covers the whole account')
     } finally {
       history.replaceState(null, '', '/')
     }
