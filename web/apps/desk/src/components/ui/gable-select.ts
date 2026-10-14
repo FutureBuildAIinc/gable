@@ -104,9 +104,12 @@ export class GableSelect extends LitElement {
         const below = window.innerHeight - rect.bottom;
         const above = rect.top;
         this._openUpward = below < 240 && above > below;
+        // The popover sheet holds top: 0, so clear the edge that is not used:
+        // top: auto when flipped up (the bottom edge carries it), bottom: auto
+        // when opening down.
         this._listStyle =
             `position:fixed;margin:0;left:${rect.left}px;width:${rect.width}px;` +
-            (this._openUpward ? `bottom:${window.innerHeight - rect.top}px;` : `top:${rect.bottom}px;`);
+            (this._openUpward ? `top:auto;bottom:${window.innerHeight - rect.top}px;` : `bottom:auto;top:${rect.bottom}px;`);
         const selected = this.options.findIndex((o) => o.value === this.value && !o.disabled);
         this._activeIndex = selected >= 0 ? selected : (this._enabledIndexes()[0] ?? -1);
         this._open = true;
