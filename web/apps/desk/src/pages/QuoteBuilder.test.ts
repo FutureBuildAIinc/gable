@@ -109,4 +109,66 @@ describe('QuoteBuilder split pane', () => {
     expect(t).toBeTruthy()
     expect(JSON.parse((t![1] as RequestInit).body as string)).toEqual({ to: 'sent', revision: 1 })
   })
+
+  it('never lets a sample result join the quote, by any path', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/parsing/upload') {
+        return jsonResponse({ items: [ITEM], source_image: '', parse_time_ms: 1, item_count: 1, synthetic: true })
+      }
+      return jsonResponse({ items: [], next_cursor: null })
+    })
+    const el = await builder()
+    const intake = q(el, 'gable-material-intake')
+    const area = q<HTMLTextAreaElement>(intake, 'textarea')
+    area.value = 'x'
+    area.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    q<HTMLButtonElement>(intake, '[data-testid="intake-parse-pasted"]').click()
+    await flush(); await flush()
+    await update(el, {})
+    expect(el.querySelector('[data-testid="intake-sample-banner"]')).not.toBeNull()
+    // No Accept anywhere; and the builder drops an accept that arrives anyway.
+    expect(el.querySelector('[data-testid="intake-accept"]')).toBeNull()
+    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [ITEM], bubbles: true }))
+    await update(el, {})
+    expect(el.querySelectorAll('[data-testid="quote-line"]').length).toBe(0)
+  })
+
+  it('puts the lines table right under the add line form and folds the material list intake away until used', async () => {
+    const el = await builder()
+    const pane = q(el, '[data-pane="products"]')
+    const order = Array.from(pane.querySelectorAll('gable-line-item-editor, table, details[data-testid="intake-section"]'))
+      .map((n) => n.tagName.toLowerCase())
+    expect(order).toEqual(['gable-line-item-editor', 'table', 'details'])
+    const section = q<HTMLDetailsElement>(el, 'details[data-testid="intake-section"]')
+    expect(section.open).toBe(false)
+    expect(text(section.querySelector('summary')!)).toContain('From a material list')
+  })
+
+  it('shows a stored Valid until as the same local day, west of UTC', async () => {
+    const prior = process.env.TZ
+    process.env.TZ = 'America/Chicago'
+    try {
+      const quote = {
+        id: 'q9', number: 'Q-0009', branch_id: 'b0000000-0000-4000-8000-000000000001', customer_id: CUSTOMER.id, job_id: null,
+        status: 'draft', revision: 2, expires_at: '2031-03-11T04:59:59Z', delivery_type: 'pickup', freight_cents: 0,
+        vehicle_id: null, source: 'manual', lines: [],
+      }
+      fetchMock.mockImplementation(async (url: string) => {
+        const path = new URL(url, 'http://localhost').pathname
+        if (path === '/api/v1/quotes/q9') return jsonResponse(quote)
+        if (path === `/api/v1/customers/${CUSTOMER.id}`) return jsonResponse(CUSTOMER)
+        if (path === `/api/v1/branches/${quote.branch_id}`) return jsonResponse({ id: quote.branch_id, name: 'North Yard' })
+        return jsonResponse({ items: [], next_cursor: null })
+      })
+      const el = await mount<GableQuoteBuilder>('gable-quote-builder', { routeId: 'q9' })
+      await flush(); await flush()
+      await update(el, {})
+      expect(q<HTMLInputElement>(el, '#quote-valid-until').value).toBe('2031-03-10')
+      expect(text(q(el, '[data-testid="quote-yard"]'))).toContain('North Yard')
+    } finally {
+      if (prior === undefined) delete process.env.TZ; else process.env.TZ = prior
+    }
+  })
 })

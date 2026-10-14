@@ -31,6 +31,7 @@ export class GableMaterialIntake extends LitElement {
   @state() private _result: ParseResponse | null = null;
   @state() private _items: ParsedItem[] = [];
   @state() private _open: Set<number> = new Set();
+  @state() private _expanded = false;
 
   private async _run(task: () => Promise<ParseResponse>) {
     this._busy = true;
@@ -40,6 +41,7 @@ export class GableMaterialIntake extends LitElement {
       this._result = result;
       this._items = [...result.items];
       this._open = new Set();
+      this._expanded = true;
       this.dispatchEvent(new CustomEvent('parse-complete', { detail: result, bubbles: true, composed: true }));
     } catch (err) {
       this._error = err instanceof Error ? err.message : 'Failed to parse the material list';
@@ -61,17 +63,21 @@ export class GableMaterialIntake extends LitElement {
   }
 
   private _emitAccept(accepted: ParsedItem[]) {
+    // A sample list is not the caller's file: it never joins a quote.
+    if (this._result?.synthetic) return;
     if (accepted.length === 0) return;
     this.dispatchEvent(new CustomEvent('accept-lines', { detail: accepted, bubbles: true, composed: true }));
   }
 
   private _accept(index: number) {
+    if (this._result?.synthetic) return;
     this._emitAccept([this._items[index]]);
     this._items = this._items.filter((_, i) => i !== index);
     this._open = new Set();
   }
 
   private _acceptConfident() {
+    if (this._result?.synthetic) return;
     const keep: ParsedItem[] = [];
     const accepted: ParsedItem[] = [];
     for (const item of this._items) {
@@ -89,6 +95,7 @@ export class GableMaterialIntake extends LitElement {
   }
 
   private _swap(index: number, alt: MatchedProduct) {
+    if (this._result?.synthetic) return;
     const item = { ...this._items[index] };
     const rest = (item.alternatives ?? []).filter((a) => a.product_id !== alt.product_id);
     if (item.matched_product) rest.push(item.matched_product);
@@ -120,6 +127,7 @@ export class GableMaterialIntake extends LitElement {
 
   private _line(item: ParsedItem, idx: number) {
     const alts = item.alternatives ?? [];
+    const sample = this._result?.synthetic === true;
     return html`
       <li data-testid="intake-line" class="rounded-lg border border-white/10 bg-black/20 p-3">
         <div class="flex flex-wrap items-center gap-2 mb-2">
@@ -138,7 +146,7 @@ export class GableMaterialIntake extends LitElement {
             <div class="min-w-0 flex-1 text-sm text-rose-300">No catalog match: order it as a special item</div>
           `}
           <div class="font-mono text-sm text-white shrink-0">${item.quantity} <span class="text-zinc-500 text-[10px]">${item.uom}</span></div>
-          <div class="flex items-center gap-1.5 shrink-0">
+          ${sample ? nothing : html`<div class="flex items-center gap-1.5 shrink-0">
             <button type="button" data-testid="intake-accept" @click=${() => this._accept(idx)}
               class="inline-flex items-center gap-1 rounded-md border border-gable-green/30 bg-gable-green/10 text-gable-green text-xs font-medium px-2.5 py-1.5 hover:bg-gable-green/20">
               ${icon(Check, 12)} Accept
@@ -147,9 +155,9 @@ export class GableMaterialIntake extends LitElement {
               class="inline-flex items-center rounded-md border border-white/10 text-zinc-400 hover:text-white px-2 py-1.5">
               ${icon(X, 12)}
             </button>
-          </div>
+          </div>`}
         </div>
-        ${alts.length > 0 ? html`
+        ${alts.length > 0 && !sample ? html`
           <div class="mt-2">
             <button type="button" data-testid="intake-alts" class="text-xs text-blueprint-blue hover:text-sky-300" @click=${() => this._toggleAlts(idx)}>
               ${alts.length} alternative${alts.length === 1 ? '' : 's'}
@@ -174,12 +182,16 @@ export class GableMaterialIntake extends LitElement {
     const result = this._result;
     const confident = this._items.filter((i) => i.matched_product && !i.is_special_order && i.confidence >= CONFIDENT).length;
     return html`
-      <section data-testid="material-intake" class="rounded-xl border border-white/10 bg-slate-steel/40 p-4">
-        <h3 class="text-sm font-medium text-white flex items-center gap-2 mb-3">
-          ${icon(ListChecks, 16, 'text-gable-green')} From a material list
-        </h3>
+      <details data-testid="intake-section" ?open=${this._expanded}
+        @toggle=${(e: Event) => { this._expanded = (e.target as HTMLDetailsElement).open; }}
+        class="rounded-xl border border-white/10 bg-slate-steel/40">
+      <summary class="cursor-pointer select-none p-4 text-sm font-medium text-white flex items-center gap-2">
+        ${icon(ListChecks, 16, 'text-gable-green')} From a material list
+      </summary>
+      <section data-testid="material-intake" class="px-4 pb-4">
         <textarea
           rows="3"
+          spellcheck="false"
           aria-label="Paste a material list"
           placeholder="Paste a list, one item per line: 50 pcs - 2x4x8 stud"
           class="w-full bg-deep-space border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-gable-green/50"
@@ -204,14 +216,14 @@ export class GableMaterialIntake extends LitElement {
           ${result.synthetic ? html`
             <div data-testid="intake-sample-banner" class="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
               <p class="text-sm font-semibold text-amber-300">No AI reader is set up on this server: these lines are a sample list</p>
-              <p class="mt-1 text-xs text-amber-200/80">They were not read from your file. Paste the list as text to have your own lines read.</p>
+              <p class="mt-1 text-xs text-amber-200/80">They were not read from your file, so they cannot be added to the quote. To read files and photos, an administrator turns AI on in Tech Admin, AI settings. A pasted text list is read without it.</p>
             </div>
           ` : nothing}
           <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p class="text-xs text-zinc-500">${this._items.length} line${this._items.length === 1 ? '' : 's'} to review</p>
             ${!result.synthetic && confident > 0 ? html`
               <button type="button" data-testid="intake-accept-confident" @click=${this._acceptConfident}
-                class="inline-flex items-center rounded-lg text-xs font-bold bg-gable-green text-deep-space px-3 py-1.5">
+                class="inline-flex items-center rounded-lg text-xs font-medium border border-gable-green/30 bg-gable-green/10 text-gable-green px-3 py-1.5 hover:bg-gable-green/20">
                 ${icon(Check, 12, 'mr-1.5')} Accept confident lines (${confident})
               </button>
             ` : nothing}
@@ -219,6 +231,7 @@ export class GableMaterialIntake extends LitElement {
           <ul class="mt-2 space-y-2">${this._items.map((item, idx) => this._line(item, idx))}</ul>
         ` : nothing}
       </section>
+      </details>
     `;
   }
 }

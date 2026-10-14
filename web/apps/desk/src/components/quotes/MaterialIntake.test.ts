@@ -120,4 +120,34 @@ describe('MaterialIntake', () => {
     expect(text(banner)).toContain('No AI reader is set up on this server: these lines are a sample list')
     expect(el.querySelector('[data-testid="intake-accept-confident"]')).toBeNull()
   })
+
+  it('shows a sample read only: no per line Accept, no swap, no accept all, and says how to turn AI on', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(result({ synthetic: true })))
+    const el = await mount<GableMaterialIntake>('gable-material-intake')
+    await paste(el, 'x')
+    let fired = false
+    el.addEventListener('accept-lines', () => { fired = true })
+    expect(el.querySelectorAll('[data-testid="intake-line"]').length).toBe(3)
+    expect(el.querySelector('[data-testid="intake-accept"]')).toBeNull()
+    expect(el.querySelector('[data-testid="intake-swap"]')).toBeNull()
+    expect(el.querySelector('[data-testid="intake-accept-confident"]')).toBeNull()
+    expect(text(q(el, '[data-testid="intake-sample-banner"]'))).toContain('administrator')
+    expect(fired).toBe(false)
+  })
+
+  it('shows Accept confident lines as a tinted secondary, never a filled primary', async () => {
+    const el = await mount<GableMaterialIntake>('gable-material-intake')
+    await paste(el, 'x')
+    const btn = q<HTMLButtonElement>(el, '[data-testid="intake-accept-confident"]')
+    expect(btn.classList.contains('bg-gable-green')).toBe(false)
+    expect(btn.classList.contains('bg-gable-green/10')).toBe(true)
+  })
+
+  it('is a collapsed section until a result is under review, then open', async () => {
+    const el = await mount<GableMaterialIntake>('gable-material-intake')
+    const section = () => q<HTMLDetailsElement>(el, 'details')
+    expect(section().open).toBe(false)
+    await paste(el, 'x')
+    expect(section().open).toBe(true)
+  })
 })

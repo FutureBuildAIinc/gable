@@ -9,6 +9,7 @@ import { ToastService } from '../lib/toast-service.ts';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../services/QuoteService.ts';
 import { ProductService } from '../services/product.service.ts';
 import { CustomerService } from '../services/CustomerService.ts';
+import { LocationService } from '../services/LocationService.ts';
 import { deliveryService } from '../services/deliveryService.ts';
 import type { Customer } from '../types/customer.ts';
 import type { Product } from '../types/product.ts';
@@ -59,6 +60,14 @@ interface LineWithEscalator {
     escalator: QuoteLineEscalator;
 }
 
+/** The local calendar day of a stored instant, so a Valid until set to a day shows that day west of UTC. */
+function localDay(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 const defaultEscalator = (): QuoteLineEscalator => ({
     enabled: false,
     escalation_type: 'PERCENTAGE',
@@ -94,6 +103,7 @@ export class GableQuoteBuilder extends LitElement {
     @state() private quoteNumber: string | null = null;
     @state() private quoteStatus = 'draft';
     @state() private validUntil = '';
+    @state() private yardName: string | null = null;
 
     // Save state: the loaded quote's revision (If-Match) and server side problems.
     @state() private revision: number | null = null;
@@ -147,7 +157,7 @@ export class GableQuoteBuilder extends LitElement {
             this.revision = quote.revision;
             this.quoteNumber = quote.number;
             this.quoteStatus = quote.status;
-            this.validUntil = quote.expires_at ? quote.expires_at.slice(0, 10) : '';
+            this.validUntil = quote.expires_at ? localDay(quote.expires_at) : '';
             this.jobId = quote.job_id;
             this.expiresAt = quote.expires_at;
             this.formError = null;
@@ -171,6 +181,9 @@ export class GableQuoteBuilder extends LitElement {
             this.freightCents = quote.freight_cents;
             this.freightText = quote.freight_cents > 0 ? centsToInput(quote.freight_cents) : '';
             this.selectedVehicleId = quote.vehicle_id ?? undefined;
+            LocationService.getBranch(quote.branch_id)
+                .then(b => { this.yardName = b.name; })
+                .catch(() => { this.yardName = null; });
         } catch (err) {
             console.error('Failed to load quote for editing', err);
             ToastService.show(`Failed to load quote: ${quoteErrorMessage(err, 'Unknown error')}`, 'error');
@@ -240,6 +253,8 @@ export class GableQuoteBuilder extends LitElement {
     }
 
     private handleAcceptParsed(parsedItems: ParsedItem[]) {
+        // A sample list is not the user's file: it never joins a quote, by any path.
+        if (this.lastParseResult?.synthetic) return;
         // The parsing API still answers in float dollars and a float quantity;
         // both are converted here, once, through the integer helpers.
         const newLines: LineWithEscalator[] = parsedItems.map(item => ({
@@ -340,7 +355,7 @@ export class GableQuoteBuilder extends LitElement {
             };
             if (delivery && this.selectedVehicleId) payload.vehicle_id = this.selectedVehicleId;
             if (this.isEditing) payload.job_id = this.jobId;
-            if (this.validUntil !== (this.expiresAt ? this.expiresAt.slice(0, 10) : '')) {
+            if (this.validUntil !== (this.expiresAt ? localDay(this.expiresAt) : '')) {
                 // A changed date is valid through the end of that day.
                 payload.expires_at = this.validUntil ? new Date(`${this.validUntil}T23:59:59`).toISOString() : null;
             } else if (this.isEditing) {
@@ -350,7 +365,7 @@ export class GableQuoteBuilder extends LitElement {
             if (!this.isEditing) payload.source = this.aiSource ? 'ai' : 'manual';
 
             // Attach AI parse data if available (a create only)
-            if (!this.isEditing && this.aiSource && this.lastParseResult) {
+            if (!this.isEditing && this.aiSource && this.lastParseResult && !this.lastParseResult.synthetic) {
                 payload.parse_map = this.lastParseResult.items as unknown as QuoteRequest['parse_map'];
                 if (this.lastParseResult.source_image) {
                     const [header, data] = this.lastParseResult.source_image.split(',');
@@ -569,6 +584,7 @@ export class GableQuoteBuilder extends LitElement {
                         <h1 class="text-2xl font-semibold text-white">${this.isEditing ? 'Edit quote' : 'New quote'}</h1>
                         <span data-testid="quote-number" class="font-mono text-sm text-zinc-300">${this.quoteNumber ?? 'Number assigned on save'}</span>
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-zinc-300 border border-white/10">${this.quoteStatus}</span>
+                        ${this.yardName ? html`<span data-testid="quote-yard" class="text-xs text-zinc-300">${this.yardName}</span>` : nothing}
                         <span class="font-mono text-xs text-zinc-500">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                     </div>
                     <div class="flex items-center gap-2">
@@ -603,13 +619,7 @@ export class GableQuoteBuilder extends LitElement {
                                 @add-line=${(e: CustomEvent) => this.handleAddLine(e.detail.product, e.detail.quantity, e.detail.uom, e.detail.unitPriceTenThousandths)}
                             ></gable-line-item-editor>
 
-                            <gable-material-intake
-                                ?disabled=${this.loading}
-                                @parse-complete=${(e: CustomEvent) => this.handleParseComplete(e.detail)}
-                                @accept-lines=${(e: CustomEvent) => this.handleAcceptParsed(e.detail)}
-                            ></gable-material-intake>
-
-                            <div class="mt-5 rounded-lg overflow-x-auto border border-white/5 bg-black/20">
+                            <div class="rounded-lg overflow-x-auto border border-white/5 bg-black/20">
                                 <table class="w-full text-sm text-left">
                                     <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
                                         <tr>
@@ -628,6 +638,14 @@ export class GableQuoteBuilder extends LitElement {
                                         ${this.lines.map((line, idx) => this.renderLineRow(line, idx))}
                                     </tbody>
                                 </table>
+                            </div>
+
+                            <div class="mt-5">
+                            <gable-material-intake
+                                ?disabled=${this.loading}
+                                @parse-complete=${(e: CustomEvent) => this.handleParseComplete(e.detail)}
+                                @accept-lines=${(e: CustomEvent) => this.handleAcceptParsed(e.detail)}
+                            ></gable-material-intake>
                             </div>
                         </div>
                     </section>
