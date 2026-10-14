@@ -990,6 +990,11 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 	}
 	fmt.Printf("Seed: history: %d days, %d orders, %d invoices posted and paid through the AR core across %d yards\n",
 		hp.Window.Days, totalOrders, totalPosted, len(historyYards))
+	if totalPosted != totalOrders {
+		// An unposted invoice stays open with no subledger, GL or payment:
+		// the books would no longer tie, so say so instead of carrying on.
+		return fmt.Errorf("%d of %d history invoices were not posted through the AR core", totalOrders-totalPosted, totalOrders)
+	}
 	return nil
 }
 
@@ -1003,11 +1008,11 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	// The order takes the currency the base seed's orders fall back to, which
 	// is the invoices' default: the documents of one sale agree.
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at,
+		INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, tax_rate, tax_amount, status, created_at,
 			delivery_type, currency, tax_source)
-		VALUES ($1, $2, $3, $4::bigint::numeric / 100, $5::bigint::numeric / 100, 'FULFILLED', $6,
-			'PICKUP', (SELECT value FROM system_settings WHERE key = 'currency.default'), 'LEGACY')`,
-		orderID, customerID, branchID, total, subtotal, day); err != nil {
+		VALUES ($1, $2, $3, $4::bigint::numeric / 100, $5::bigint::numeric / 100, $7, $8::bigint::numeric / 100,
+			'FULFILLED', $6, 'PICKUP', (SELECT value FROM system_settings WHERE key = 'currency.default'), 'LEGACY')`,
+		orderID, customerID, branchID, total, subtotal, day, historyTaxRate, taxCents); err != nil {
 		return seedInvoice{}, fmt.Errorf("order: %w", err)
 	}
 	prod, qty, unit, tot, pos := make([]string, len(lines)), make([]string, len(lines)), make([]string, len(lines)),
@@ -1033,9 +1038,10 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	// invoice is UNPAID and open at its total until the AR core settles it.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal,
-			tax_rate, tax_amount, due_date, payment_terms_id, invoice_date, created_at)
+			tax_rate, tax_amount, due_date, payment_terms_id, invoice_date, created_at, currency)
 		VALUES ($1, $2, $3, $4, 'UNPAID', $5::bigint::numeric / 100, $6::bigint::numeric / 100, $7,
-			$8::bigint::numeric / 100, $9::date, (SELECT payment_terms_id FROM customers WHERE id = $3), $10::date, $10)`,
+			$8::bigint::numeric / 100, $9::date, (SELECT payment_terms_id FROM customers WHERE id = $3), $10::date, $10,
+			(SELECT value FROM system_settings WHERE key = 'currency.default'))`,
 		invID, orderID, customerID, branchID, total, subtotal, historyTaxRate, taxCents,
 		day.AddDate(0, 1, 0), day); err != nil {
 		return seedInvoice{}, fmt.Errorf("invoice: %w", err)

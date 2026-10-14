@@ -3,7 +3,7 @@
   "_seed": 11900021,
   "_window": {
     "days": 120,
-    "_reason": "Brief calls for about 120 days; one full quarter plus spring ramp."
+    "_reason": "About 120 days: one full quarter plus the spring ramp."
   },
   "_rounding_units": "All money numbers in dollars, two decimals. Quantities as floats, scale 4. Percentages as decimals (0.0 to 1.0).",
   "_branches": ["KEL-MAIN", "WK", "LK"],

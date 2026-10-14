@@ -238,6 +238,19 @@ func TestDemoImport(t *testing.T) {
 		if off > 0 {
 			t.Errorf("%d invoices whose total is not subtotal plus tax", off)
 		}
+		// The order carries the same tax as its invoice, so the order page's
+		// tax line and total agree (its tax rate shows as a percentage).
+		var orderOff int
+		if err := db.QueryRow(`
+			SELECT COUNT(*) FROM orders o JOIN invoices i ON i.order_id = o.id JOIN customers c ON c.id = o.customer_id
+			WHERE c.account_number = ANY($1)
+			  AND (o.tax_amount <> i.tax_amount OR o.total_amount <> o.subtotal + o.tax_amount OR o.tax_rate IS NULL)`,
+			keys).Scan(&orderOff); err != nil {
+			t.Fatal(err)
+		}
+		if orderOff > 0 {
+			t.Errorf("%d history orders whose tax or total disagrees with the invoice", orderOff)
+		}
 	})
 
 	t.Run("every payment is numbered by the AR core", func(t *testing.T) {
@@ -256,7 +269,7 @@ func TestDemoImport(t *testing.T) {
 		if err := db.QueryRow(`
 			SELECT COUNT(*) FROM customers c
 			WHERE c.account_number = ANY($1)
-			  AND COALESCE((SELECT SUM(ROUND(t.amount * 100)) FROM customer_transactions t WHERE t.customer_id = c.id), 0)
+			  AND COALESCE((SELECT SUM(t.amount) FROM customer_transactions t WHERE t.customer_id = c.id), 0)
 			   <> COALESCE((SELECT SUM(ROUND(i.amount_open * 100)) FROM invoices i
 			                WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0)`, keys).Scan(&drift); err != nil {
 			t.Fatal(err)
