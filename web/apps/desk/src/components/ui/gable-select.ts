@@ -10,7 +10,10 @@
  * be chosen; options may carry a `group` that draws a heading row. The list
  * opens upward when there is more room above the button than below. A choice
  * fires a bubbling `change` event with the value on the element itself, so a
- * handler written for a native select keeps its meaning.
+ * handler written for a native select keeps its meaning. Clicks inside the
+ * list cancel their default action: in a page that wraps the select in a
+ * label element, the browser would otherwise answer an option click with a
+ * synthetic click at the button, reopening the list after every choice.
  */
 import { LitElement, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
@@ -241,6 +244,7 @@ export class GableSelect extends LitElement {
                 role="listbox"
                 aria-label=${this.label || nothing}
                 aria-activedescendant=${activeDesc}
+                @click=${(e: Event) => e.preventDefault()}
                 class="absolute z-50 left-0 right-0 max-h-60 overflow-y-auto rounded-md bg-surface-2 border border-white/10 shadow-xl py-1 ${this._openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}"
             >
                 ${rows.length > 0

@@ -174,6 +174,21 @@ describe('gable-select', () => {
     expect(el.querySelector('[role="listbox"]')).toBeNull()
   })
 
+  it('cancels the default action of clicks inside the list (label-wrapped selects)', async () => {
+    const el = await mountSelect()
+    const label = document.createElement('label')
+    el.replaceWith(label)
+    label.appendChild(el)
+    await open(el)
+    const option = options(el)[1]
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+    option.dispatchEvent(click)
+    await update(el, {})
+    expect(click.defaultPrevented).toBe(true)
+    expect(el.value).toBe('pear')
+    expect(el.querySelector('[role="listbox"]')).toBeNull()
+  })
+
   it('a page reads the chosen value from its own state through the change event', async () => {
     const el = await mountSelect()
     let pageState = ''
