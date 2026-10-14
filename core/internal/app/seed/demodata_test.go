@@ -521,6 +521,84 @@ func TestDemoImport(t *testing.T) {
 		}
 	})
 
+	t.Run("no money is dated after the seed's day and the aging agrees with the documents", func(t *testing.T) {
+		var today string
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date::text`).Scan(&today); err != nil {
+			t.Fatal(err)
+		}
+		var later, laterApps int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM payments WHERE received_on > $1::date`, today).Scan(&later); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ar_applications WHERE applied_on > $1::date`, today).Scan(&laterApps); err != nil {
+			t.Fatal(err)
+		}
+		if later != 0 || laterApps != 0 {
+			t.Errorf("%d payments are received and %d applications applied after the seed's day %s", later, laterApps, today)
+		}
+
+		// Each customer's aging total as of the seed's day is its open
+		// invoices less its open credits and unapplied cash, read from the
+		// documents themselves.
+		want := map[string]int64{}
+		rows, err := db.Query(`
+			SELECT customer_id::text, SUM(cents)::bigint FROM (
+				SELECT customer_id, ROUND(amount_open * 100) AS cents FROM invoices WHERE status <> 'VOID'
+				UNION ALL
+				SELECT customer_id, ROUND(amount_open * 100) FROM credit_memos WHERE status NOT IN ('DRAFT', 'VOID')
+				UNION ALL
+				SELECT customer_id, -ROUND(amount_unapplied * 100) FROM payments WHERE status = 'POSTED'
+			) d GROUP BY customer_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id string
+			var cents int64
+			if err := rows.Scan(&id, &cents); err != nil {
+				t.Fatal(err)
+			}
+			want[id] = cents
+		}
+		rows.Close()
+		var aging struct {
+			Items []account.AgingItem `json:"items"`
+		}
+		mux := accountMux(t, dbURL)
+		got := map[string]int64{}
+		cursor := ""
+		for {
+			var page struct {
+				Items      []account.AgingItem `json:"items"`
+				NextCursor *string             `json:"next_cursor"`
+			}
+			next := "/api/v1/ar/aging?group_by=customer&basis=due_date&as_of=" + today
+			if cursor != "" {
+				next += "&cursor=" + url.QueryEscape(cursor)
+			}
+			getJSON(t, mux, next, &page)
+			aging.Items = append(aging.Items, page.Items...)
+			if page.NextCursor == nil || *page.NextCursor == "" {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		for _, it := range aging.Items {
+			got[it.CustomerID.String()] += int64(it.TotalCents)
+		}
+		for id, w := range want {
+			if got[id] != w {
+				t.Errorf("customer %s: the aging totals %d, its documents say %d", id, got[id], w)
+			}
+		}
+		for id, g := range got {
+			if _, ok := want[id]; !ok && g != 0 {
+				t.Errorf("customer %s: the aging totals %d, it has no document", id, g)
+			}
+		}
+	})
+
 	t.Run("the tenant's currency is on every imported customer and history document", func(t *testing.T) {
 		keys := jsonlKeys(t, customersData, "account_number")
 		var bad int
