@@ -156,19 +156,35 @@ func (c *Client) IsConfigured(ctx context.Context) bool {
 	return c.getKey(ctx) != ""
 }
 
-// ImageOffMessage is what a person sees when image generation is asked of the
-// Anthropic provider, which does not offer it. Nothing falls back to another
-// provider.
-const ImageOffMessage = "Image generation is off: it needs the OpenRouter provider, which an administrator chooses in Tech Admin, AI."
+// PhotoOffMessage is what a person sees when a photo is asked of the
+// Anthropic provider, which makes no photos (it draws illustrations; see
+// ImageKind). Nothing falls back to another provider.
+const PhotoOffMessage = "Photo generation needs the OpenRouter provider, which an administrator chooses in Tech Admin, AI. With Anthropic chosen, Gable draws an illustration instead."
 
-// CheckImage reports whether image generation can run: AI off is ErrAIOff;
-// the Anthropic provider offers no image model, so it is an OffError naming
-// that reason, and no call goes to any other provider.
-func (c *Client) CheckImage(ctx context.Context) error {
+// The two things PIM's image generation can make, by provider.
+const (
+	ImageKindPhoto        = "image"        // OpenRouter: a photo model
+	ImageKindIllustration = "illustration" // Anthropic: an SVG drawing
+)
+
+// ImageKind names what image generation makes with the chosen provider: a
+// photo with OpenRouter, an illustration with Anthropic.
+func (c *Client) ImageKind(ctx context.Context) string {
 	if c.activeProvider(ctx) == ProviderAnthropic {
-		return NewOff(ImageOffMessage)
+		return ImageKindIllustration
 	}
-	if c.getKey(ctx) == "" {
+	return ImageKindPhoto
+}
+
+// ProviderName is the chosen provider ("openrouter" or "anthropic").
+func (c *Client) ProviderName(ctx context.Context) string { return c.activeProvider(ctx) }
+
+// CheckImage reports whether image generation can run with the chosen
+// provider: no key for it is ErrAIOff. With Anthropic the generation is an
+// illustration drawn by the text model; with OpenRouter, the photo model.
+// No call goes to the other provider.
+func (c *Client) CheckImage(ctx context.Context) error {
+	if !c.IsConfigured(ctx) {
 		return ErrAIOff
 	}
 	return nil
@@ -567,6 +583,9 @@ func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (strin
 	if err := c.CheckImage(ctx); err != nil {
 		return "", "", err
 	}
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return "", "", NewOff(PhotoOffMessage)
+	}
 	fullPrompt := prompt
 	if style != "" {
 		fullPrompt = fmt.Sprintf("%s. Style: %s", prompt, style)
@@ -751,6 +770,8 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 // plugin; text/plain & text/csv → a single text block with the content inlined.
 // The "unsupported content type" errors mirror the original Anthropic paths.
 func buildFileContent(fileBytes []byte, contentType, instruction string) ([]contentPart, []plugin, error) {
+	rawType := contentType
+	contentType = mediaType(contentType)
 	switch {
 	case strings.HasPrefix(contentType, "image/"):
 		return []contentPart{
@@ -775,12 +796,12 @@ func buildFileContent(fileBytes []byte, contentType, instruction string) ([]cont
 			[]plugin{{ID: "file-parser", PDF: &pdfPlugin{Engine: defaultPDFEngine}}},
 			nil
 
-	case contentType == "text/plain" || contentType == "text/csv":
+	case isTextMediaType(contentType):
 		return []contentPart{
 			{Type: "text", Text: instruction + "\n\n" + string(fileBytes)},
 		}, nil, nil
 
 	default:
-		return nil, nil, fmt.Errorf("unsupported content type: %s", contentType)
+		return nil, nil, fmt.Errorf("unsupported content type: %s", rawType)
 	}
 }

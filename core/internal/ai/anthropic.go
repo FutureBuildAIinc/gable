@@ -225,26 +225,52 @@ func (c *Client) anthropicGenerate(ctx context.Context, system, user string, max
 	return stripJSONFence(resp.text()), model, nil
 }
 
-// anthropicFileBlocks turns an upload into Messages API blocks: image/* is an
-// image block, a PDF a document block, text is inlined.
+// mediaType reduces a content type to its bare lowercase media type: the
+// detector answers "text/plain; charset=utf-8" for a text upload, and no
+// provider branch should fail on a parameter.
+func mediaType(contentType string) string {
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.Index(ct, ";"); i >= 0 {
+		ct = strings.TrimSpace(ct[:i])
+	}
+	return ct
+}
+
+// anthropicImageTypes are the image media types the Messages API reads.
+var anthropicImageTypes = map[string]string{
+	"image/jpeg": "image/jpeg", "image/jpg": "image/jpeg", "image/png": "image/png",
+	"image/gif": "image/gif", "image/webp": "image/webp",
+}
+
+// anthropicFileBlocks turns an upload into Messages API blocks: a JPEG, PNG,
+// GIF or WebP is an image block, a PDF a document block, text is inlined.
 func anthropicFileBlocks(fileBytes []byte, contentType, instruction string) ([]anthropicBlock, error) {
-	enc := base64.StdEncoding.EncodeToString(fileBytes)
+	mt := mediaType(contentType)
 	switch {
-	case strings.HasPrefix(contentType, "image/"):
+	case strings.HasPrefix(mt, "image/"):
+		media, ok := anthropicImageTypes[mt]
+		if !ok {
+			return nil, fmt.Errorf("unsupported image type: %s (use JPEG, PNG, GIF or WebP)", mt)
+		}
 		return []anthropicBlock{
-			{Type: "image", Source: &anthropicSource{Type: "base64", MediaType: contentType, Data: enc}},
+			{Type: "image", Source: &anthropicSource{Type: "base64", MediaType: media, Data: base64.StdEncoding.EncodeToString(fileBytes)}},
 			{Type: "text", Text: instruction},
 		}, nil
-	case contentType == "application/pdf":
+	case mt == "application/pdf":
 		return []anthropicBlock{
-			{Type: "document", Source: &anthropicSource{Type: "base64", MediaType: contentType, Data: enc}},
+			{Type: "document", Source: &anthropicSource{Type: "base64", MediaType: mt, Data: base64.StdEncoding.EncodeToString(fileBytes)}},
 			{Type: "text", Text: instruction},
 		}, nil
-	case contentType == "text/plain" || contentType == "text/csv":
+	case isTextMediaType(mt):
 		return []anthropicBlock{{Type: "text", Text: instruction + "\n\n" + string(fileBytes)}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported content type: %s", contentType)
 	}
+}
+
+// isTextMediaType reports the plain text types read as inline text.
+func isTextMediaType(mt string) bool {
+	return mt == "text/plain" || mt == "text/csv" || mt == "text/tab-separated-values"
 }
 
 func (c *Client) anthropicFileCall(ctx context.Context, system, instruction string, fileBytes []byte, contentType string, maxTokens int) (string, error) {

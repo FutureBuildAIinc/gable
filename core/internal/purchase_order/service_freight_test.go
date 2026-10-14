@@ -59,3 +59,39 @@ func TestExtractFreight_ConfiguredSuccess(t *testing.T) {
 		t.Error("expected raw response to be returned for the audit trail")
 	}
 }
+
+// With Anthropic chosen and only its key saved, the freight invoice is read
+// through Anthropic as a document block, and OpenRouter is never asked.
+func TestExtractFreight_AnthropicChosen(t *testing.T) {
+	var blockType string
+	an := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type string `json:"type"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		blockType = body.Messages[0].Content[0].Type
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []any{map[string]any{"type": "text", "text": "```json\n{\"total_amount\":99.5,\"carrier_name\":\"Yard Freight\",\"invoice_number\":\"FR-7\"}\n```"}},
+		})
+	}))
+	defer an.Close()
+	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("OpenRouter must not be called with Anthropic chosen")
+	}))
+	defer or.Close()
+
+	client := ai.NewClient("").WithBaseURL(or.URL).WithProvider(ai.ProviderAnthropic).
+		WithAnthropicKey("test-" + "key-not-real").WithAnthropicBaseURL(an.URL)
+	s := &Service{aiClient: client}
+	res, _, err := s.extractFreight(context.Background(), []byte("%PDF-1.4"), "application/pdf")
+	if err != nil {
+		t.Fatalf("extractFreight: %v", err)
+	}
+	if res.TotalAmount != 99.5 || res.InvoiceNumber != "FR-7" || blockType != "document" {
+		t.Errorf("result %+v, block %q", res, blockType)
+	}
+}

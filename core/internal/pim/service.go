@@ -31,7 +31,7 @@ Always be factual about product attributes. Never fabricate species, grades, or 
 type Service struct {
 	repo       Repository
 	productSvc *product.Service
-	ai         *ai.Client // unified OpenRouter client (text + image)
+	ai         *ai.Client // unified AI client (OpenRouter or Anthropic: text, image or illustration)
 }
 
 // NewService creates a new PIM service
@@ -42,7 +42,7 @@ func NewService(repo Repository, productSvc *product.Service) *Service {
 	}
 }
 
-// WithAI attaches the unified OpenRouter AI client used for both text generation
+// WithAI attaches the unified AI client used for both text generation
 // (descriptions, SEO, collateral, SVG fallback) and image generation.
 func (s *Service) WithAI(client *ai.Client) {
 	s.ai = client
@@ -292,11 +292,15 @@ Respond with ONLY valid JSON (no markdown fences):
 
 // GenerateImage kicks off ASYNCHRONOUS product-image generation. It validates the
 // AI config, inserts a placeholder media row (status "generating"), and returns it
-// immediately so the HTTP request never blocks on the 8–24s model call (which can
-// exceed the platform's request gateway timeout). A detached goroutine runs the
-// OpenRouter image model — falling back to an SVG illustration if image gen fails —
-// then flips the row to "ready" (with the data URI) or "failed". The client polls
-// the media list until the row settles. A missing AI key is still a hard error.
+// immediately so the HTTP request never blocks on the 8-24s model call (which can
+// exceed the platform's request gateway timeout). A detached goroutine makes the
+// image, then flips the row to "ready" (with the data URI) or "failed". The client
+// polls the media list until the row settles. A missing AI key is still a hard error.
+//
+// What it makes depends on the chosen provider (ai.Client.ImageKind): with
+// OpenRouter the photo model (falling back to an illustration if the photo model
+// fails); with Anthropic an SVG illustration drawn by Claude. An illustration is
+// model output, so it is stored only after SanitizeSVG has re-serialised it.
 func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style, prompt string) (*PIMMedia, error) {
 	if s.ai == nil {
 		return nil, ai.ErrAIOff
@@ -304,6 +308,7 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 	if err := s.ai.CheckImage(ctx); err != nil {
 		return nil, err
 	}
+	kind := s.ai.ImageKind(ctx)
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
 	if err != nil {
@@ -311,7 +316,11 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 	}
 
 	if prompt == "" {
-		prompt = fmt.Sprintf("Professional product photo of %s, lumber building material, clean white background, studio lighting, high resolution, product catalog style", p.Description)
+		if kind == ai.ImageKindIllustration {
+			prompt = fmt.Sprintf("Flat illustration of %s, a lumber and building material, in the Gable catalog style", p.Description)
+		} else {
+			prompt = fmt.Sprintf("Professional product photo of %s, lumber building material, clean white background, studio lighting, high resolution, product catalog style", p.Description)
+		}
 	}
 
 	// Insert the placeholder row the client will poll on.
@@ -331,14 +340,14 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 	}
 
 	// Generate off the request goroutine so the response returns immediately.
-	go s.generateImageAsync(media.ID, p, style, prompt)
+	go s.generateImageAsync(media.ID, p, style, prompt, kind)
 
 	return media, nil
 }
 
 // generateImageAsync runs on a DETACHED context (the request context is canceled
 // once GenerateImage returns) and finalizes the placeholder media row.
-func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, style, prompt string) {
+func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, style, prompt, kind string) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			slog.Error("image generation panicked", "media_id", mediaID, "recover", rec)
@@ -349,17 +358,29 @@ func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, styl
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// GenModel records the actual slug the model reports. Image gen is the only
-	// step covered by the SVG fallback.
-	dataURI, model, genErr := s.ai.GenerateImage(ctx, prompt, style)
-	if genErr != nil {
-		svgURI, svgModel, svgErr := s.generateSVGDataURI(ctx, p, style, prompt)
-		if svgErr != nil {
-			slog.Error("image generation failed (image model + SVG fallback)", "media_id", mediaID, "image_error", genErr, "svg_error", svgErr)
+	var dataURI, model string
+	if kind == ai.ImageKindIllustration {
+		var err error
+		dataURI, model, err = s.generateIllustrationDataURI(ctx, p, style, prompt)
+		if err != nil {
+			slog.Error("illustration generation failed", "media_id", mediaID, "error", err)
 			_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
 			return
 		}
-		dataURI, model = svgURI, svgModel
+	} else {
+		// GenModel records the actual slug the model reports. The photo model is
+		// the only step covered by the illustration fallback.
+		var genErr error
+		dataURI, model, genErr = s.ai.GenerateImage(ctx, prompt, style)
+		if genErr != nil {
+			svgURI, svgModel, svgErr := s.generateIllustrationDataURI(ctx, p, style, prompt)
+			if svgErr != nil {
+				slog.Error("image generation failed (image model + illustration fallback)", "media_id", mediaID, "image_error", genErr, "svg_error", svgErr)
+				_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
+				return
+			}
+			dataURI, model = svgURI, svgModel
+		}
 	}
 
 	if err := s.repo.UpdateMediaResult(context.Background(), mediaID, dataURI, model, style, "ready"); err != nil {
@@ -367,58 +388,58 @@ func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, styl
 	}
 }
 
-// generateSVGDataURI produces an SVG illustration data URI via the text model. It is
-// the fallback used when the image model is unavailable; it does not persist.
-func (s *Service) generateSVGDataURI(ctx context.Context, p *product.Product, style, prompt string) (string, string, error) {
-	styleHint := "clean, modern, professional"
-	switch style {
-	case "photographic":
-		styleHint = "photorealistic illustration style with shadows and depth"
-	case "digital-art":
-		styleHint = "vibrant digital art style with bold colors"
-	case "cinematic":
-		styleHint = "dramatic cinematic style with moody lighting and contrast"
-	case "3d-model":
-		styleHint = "3D rendered look with perspective and lighting"
-	case "isometric":
-		styleHint = "isometric 3D view with clean geometric style"
-	}
+// illustrationSystemPrompt states the house style of the drawn catalog set.
+const illustrationSystemPrompt = `You draw product illustrations for a lumber and building materials catalog, as SVG.
+Output ONLY raw SVG markup: no markdown, no explanation, no code fences.
+House style, one consistent set:
+- The root is <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"> and nothing else on it.
+- Flat illustration with gentle shading: two or three tones per material, a soft ground shadow, no outline heavier than 2 units.
+- Transparent background: no full canvas rectangle. The object's own colours carry it (warm natural wood, neutral greys for metal, one accent colour for a tool body).
+- One clear silhouette that reads small, the obvious angle, the whole object inside the canvas with at least 16 units of margin.
+- No text, except one invented brand word where a label is natural (a box, a bag, a can, a tool body). Never a real brand or logo.
+- Use only svg, g, path, rect, circle, ellipse, line, polyline, polygon, defs, linearGradient, radialGradient, stop, clipPath, text and tspan, with plain presentation attributes (fill, stroke, opacity and the like). A gradient has at most two stops.
+- Never use style, script, image, use, filter, animation, links or any external reference.
+- Keep it under 12 KB.`
 
-	userPrompt := fmt.Sprintf(`Generate an SVG product illustration for a lumber/building materials catalog.
+// generateIllustrationDataURI asks the text model for an SVG illustration,
+// sanitises it (SECURITY: it is model output the desk will render) and returns
+// the data URI of what was kept. It does not persist. The model's own text is
+// never stored.
+func (s *Service) generateIllustrationDataURI(ctx context.Context, p *product.Product, style, prompt string) (string, string, error) {
+	userPrompt := fmt.Sprintf(`Draw one catalog illustration.
 
 Product: %s
 SKU: %s
-Price: $%.2f
-Visual Style: %s
-Additional Instructions: %s
+Mood: %s
+Additional instructions: %s`, p.Description, p.SKU, illustrationMood(style), prompt)
 
-Requirements:
-- Output ONLY valid SVG markup, nothing else — no markdown fences, no explanation
-- SVG must use viewBox="0 0 400 400" with width="400" height="400"
-- Create a visually appealing product illustration showing the actual product (not just text)
-- Use a subtle gradient background
-- Include a small product label area at the bottom with the product name
-- Use professional colors appropriate for building materials
-- Keep the SVG simple and clean — no external references, no images, only SVG primitives
-- Make the illustration recognizable as the actual product`,
-		p.Description, p.SKU, p.BasePrice, styleHint, prompt)
-
-	svgSystemPrompt := `You are an SVG illustration generator for a lumber and building materials product catalog.
-You create clean, professional SVG product illustrations that visually represent building materials.
-Output ONLY raw SVG markup. No markdown, no explanation, no code fences.
-Your SVGs must be self-contained with no external dependencies.`
-
-	text, model, err := s.ai.Generate(ctx, svgSystemPrompt, userPrompt, 4096)
+	text, model, err := s.ai.Generate(ctx, illustrationSystemPrompt, userPrompt, 8192)
 	if err != nil {
-		return "", "", fmt.Errorf("generate SVG: %w", err)
+		return "", "", fmt.Errorf("generate illustration: %w", err)
 	}
-
-	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, "<svg") && !strings.HasPrefix(trimmed, "<?xml") {
-		return "", "", fmt.Errorf("AI did not return valid SVG (starts with: %.50s...)", trimmed)
+	clean, err := SanitizeSVG([]byte(strings.TrimSpace(text)))
+	if err != nil {
+		return "", "", err
 	}
+	return "data:image/svg+xml;base64," + base64Encode(clean), model, nil
+}
 
-	return "data:image/svg+xml;base64," + base64Encode([]byte(trimmed)), model, nil
+// illustrationMood turns the desk's style choice into a short hint that
+// leaves the house style in force.
+func illustrationMood(style string) string {
+	switch style {
+	case "photographic":
+		return "natural, true to life colours"
+	case "digital-art":
+		return "slightly more vivid colours"
+	case "cinematic":
+		return "a touch more contrast"
+	case "3d-model":
+		return "a little perspective and depth"
+	case "isometric":
+		return "isometric view"
+	}
+	return "clean and professional"
 }
 
 // GenerateCollateral uses Claude to generate marketing collateral

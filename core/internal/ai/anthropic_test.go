@@ -238,3 +238,57 @@ func (fakeSealer) Seal(s string) (string, error) {
 func (fakeSealer) Open(s string) (string, error) {
 	return "opened:" + strings.TrimPrefix(s, "enc:v1:"), nil
 }
+
+// The detector answers a text upload as "text/plain; charset=utf-8": both
+// providers read it as text, and an image type the Messages API does not
+// read is refused in words rather than sent.
+func TestFileContentMediaTypes(t *testing.T) {
+	for _, ct := range []string{"text/plain", "text/plain; charset=utf-8", "TEXT/CSV", "text/tab-separated-values"} {
+		blocks, err := anthropicFileBlocks([]byte("2 pcs - 2x4"), ct, "extract")
+		if err != nil || len(blocks) != 1 || !strings.Contains(blocks[0].Text, "2 pcs - 2x4") {
+			t.Errorf("anthropic %q: blocks %v err %v", ct, blocks, err)
+		}
+		parts, _, err := buildFileContent([]byte("2 pcs - 2x4"), ct, "extract")
+		if err != nil || len(parts) != 1 {
+			t.Errorf("openrouter %q: parts %v err %v", ct, parts, err)
+		}
+	}
+	blocks, err := anthropicFileBlocks([]byte("x"), "image/jpg", "extract")
+	if err != nil || blocks[0].Source.MediaType != "image/jpeg" {
+		t.Errorf("image/jpg: %v %v", blocks, err)
+	}
+	for _, ct := range []string{"image/bmp", "image/svg+xml", "image/heic"} {
+		if _, err := anthropicFileBlocks([]byte("x"), ct, "extract"); err == nil || !strings.Contains(err.Error(), "JPEG, PNG, GIF or WebP") {
+			t.Errorf("%s: err = %v, want a refusal naming the types", ct, err)
+		}
+	}
+	if _, err := anthropicFileBlocks([]byte("x"), "application/zip", "extract"); err == nil {
+		t.Error("application/zip must be unsupported")
+	}
+}
+
+// With Anthropic chosen: no key is AI off whatever OpenRouter holds, image
+// generation is an illustration (never a photo), and nothing is sent to
+// OpenRouter.
+func TestAnthropicImageKindAndCheck(t *testing.T) {
+	ctx := context.Background()
+	c := NewClient("or-test-key-not-real").WithProvider(ProviderAnthropic)
+	if err := c.CheckImage(ctx); !errorsIsOff(err) {
+		t.Errorf("no Anthropic key: CheckImage = %v, want AI off", err)
+	}
+	c = c.WithAnthropicKey(testAnthropicKey)
+	if err := c.CheckImage(ctx); err != nil {
+		t.Errorf("CheckImage = %v, want nil", err)
+	}
+	if k := c.ImageKind(ctx); k != ImageKindIllustration {
+		t.Errorf("ImageKind = %q", k)
+	}
+	if _, _, err := c.GenerateImage(ctx, "x", ""); err == nil || !strings.Contains(err.Error(), "illustration") {
+		t.Errorf("GenerateImage (photo) under Anthropic = %v, want the plain refusal", err)
+	}
+	if k := NewClient("k").ImageKind(ctx); k != ImageKindPhoto {
+		t.Errorf("OpenRouter ImageKind = %q", k)
+	}
+}
+
+func errorsIsOff(err error) bool { _, ok := OffMessage(err); return ok }
