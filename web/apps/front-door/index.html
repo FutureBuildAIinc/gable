@@ -2,6 +2,8 @@
 <html lang="en">
 
 <head>
+  <!-- Applies the stored mode before the first paint (a same origin file: the CSP refuses inline scripts) -->
+  <script src="/theme-boot.js"></script>
   <meta charset="UTF-8" />
   <!-- The door has no public/ dir on purpose: /favicon.svg belongs to the
        desk bundle in the combined nginx layout, so the door's mark is an
@@ -36,7 +38,7 @@
       align-items: center;
       justify-content: center;
       height: 100vh;
-      color: white;
+      color: rgb(var(--gb-white, 255 255 255));
     }
 
     .logo-container {
@@ -51,7 +53,7 @@
       inset: 0;
       width: 100%;
       height: 100%;
-      color: white;
+      color: rgb(var(--gb-white, 255 255 255));
     }
 
     .spinner {
@@ -61,6 +63,14 @@
       border-top-color: rgb(var(--gb-gable-green, 0 255 163));
       border-radius: 50%;
       animation: spin 1s linear infinite;
+    }
+
+    .logo-accent-stroke {
+      stroke: rgb(var(--gb-gable-green, 0 255 163));
+    }
+
+    .logo-accent-fill {
+      fill: rgb(var(--gb-gable-green, 0 255 163));
     }
 
     @keyframes spin {
@@ -96,10 +106,10 @@
         <svg class="logo-svg" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path d="M4 36 L32 8 L60 36" stroke="currentColor" stroke-width="6" stroke-linecap="round"
             stroke-linejoin="round" />
-          <path d="M32 16 V28" class="stroke-gable-green" stroke="#00FFA3" stroke-width="4" stroke-linecap="round" />
-          <path d="M22 28 C22 28 22 46 32 46 C42 46 42 28 42 28" class="stroke-gable-green" stroke="#00FFA3" stroke-width="4"
+          <path d="M32 16 V28" class="logo-accent-stroke" stroke-width="4" stroke-linecap="round" />
+          <path d="M22 28 C22 28 22 46 32 46 C42 46 42 28 42 28" class="logo-accent-stroke" stroke-width="4"
             stroke-linecap="round" fill="none" />
-          <rect x="28" y="46" width="8" height="6" rx="1" class="fill-gable-green" fill="#00FFA3" />
+          <rect x="28" y="46" width="8" height="6" rx="1" class="logo-accent-fill" />
         </svg>
       </div>
       <div class="brand">Gable<span class="accent">LBM</span></div>

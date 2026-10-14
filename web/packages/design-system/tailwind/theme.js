@@ -93,6 +93,27 @@ export const gableTheme = {
             sage: channel('sage'),
             'sage-fill': channel('sage-fill'),
             'sage-tint': channel('sage-tint'),
+            // Colours with their own dark value, so Industrial Dark draws exactly as before
+            'pale': channel('pale'),
+            // The second voice: dark draws today's neutrals, light draws sage
+            'voice': channel('voice'),
+            'voice-soft': channel('voice-soft'),
+            'voice-text': channel('voice-text'),
+            'voice-fill': channel('voice-fill'),
+            'well': channel('well'),
+            'well-hover': channel('well-hover'),
+            'till-surface': channel('till-surface'),
+            'till-edge': channel('till-edge'),
+            'till-text': channel('till-text'),
+            'till-muted': channel('till-muted'),
+            'till-soft': channel('till-soft'),
+            'till-field': channel('till-field'),
+            'till-accent': channel('till-accent'),
+            'till-go': channel('till-go'),
+            'till-ok': channel('till-ok'),
+            'till-bad': channel('till-bad'),
+            'till-warn': channel('till-warn'),
+            'till-rule': channel('till-rule'),
             // A picture plate: white as today, the modal value in light
             plate: channel('plate'),
             // A modal veil: black as today, the ink value in light
@@ -116,6 +137,12 @@ export const gableTheme = {
             'elevation-3': 'var(--gb-elevation-3)',
             'glow': 'var(--gb-glow)',
             'glow-soft': 'var(--gb-glow-soft)',
+            'glow-10-30': 'var(--gb-glow-10-30)',
+            'glow-20-10': 'var(--gb-glow-20-10)',
+            'glow-20-30': 'var(--gb-glow-20-30)',
+            'glow-30-15': 'var(--gb-glow-30-15)',
+            'glow-40-30': 'var(--gb-glow-40-30)',
+
             'glow-strong': 'var(--gb-glow-strong)',
         },
         animation: {

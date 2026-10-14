@@ -392,7 +392,7 @@ export class GablePosCatalog extends LitElement {
                         @click=${() => this._chip(c.name)}
                         class=${`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold outline-none focus-visible:ring-1 focus-visible:ring-white/60 ${on
                             ? 'border-gable-green bg-gable-green text-deep-space'
-                            : 'border-white/20 text-white hover:bg-white/10'}`}>${c.label}</button>`;
+                            : 'border-voice/20 text-voice hover:bg-voice/10'}`}>${c.label}</button>`;
                 })}
             </div>
             ${this._chipsOverflow && !this._chipsAtEnd

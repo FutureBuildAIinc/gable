@@ -166,7 +166,7 @@ export class ProductConfigurator extends LitElement {
             @click=${() => opt.allowed && this._selectOption(key, opt.value)}
             ?disabled=${!opt.allowed}
             class="relative p-6 rounded-xl border-2 text-left transition-all duration-300 group ${this._selections[key] === opt.value
-              ? 'border-gable-green bg-gable-green/10 shadow-glow-strong'
+              ? 'border-gable-green bg-gable-green/10 shadow-glow-30-15'
               : opt.allowed
                 ? 'border-white/10 hover:border-white/30 hover:bg-white/5'
                 : 'border-white/5 opacity-40 cursor-not-allowed'
@@ -201,7 +201,7 @@ export class ProductConfigurator extends LitElement {
                 @click=${() => opt.allowed && this._selectOption('Grade', opt.value)}
                 ?disabled=${!opt.allowed}
                 class="p-4 rounded-xl border-2 text-left transition-all duration-300 ${this._selections.Grade === opt.value
-                  ? 'border-gable-green bg-gable-green/10 shadow-glow-soft'
+                  ? 'border-gable-green bg-gable-green/10 shadow-glow-20-10'
                   : opt.allowed
                     ? 'border-white/10 hover:border-white/30'
                     : 'border-white/5 opacity-40 cursor-not-allowed'
@@ -264,7 +264,7 @@ export class ProductConfigurator extends LitElement {
               <button
                 @click=${() => { this._dimensionSize = dim; }}
                 class="p-4 rounded-xl border-2 text-center font-mono text-lg transition-all ${this._dimensionSize === dim
-                  ? 'border-gable-green bg-gable-green/10 text-gable-green shadow-glow-soft'
+                  ? 'border-gable-green bg-gable-green/10 text-gable-green shadow-glow-20-10'
                   : 'border-white/10 hover:border-white/30 text-gray-300'
                 }"
               >
@@ -356,7 +356,7 @@ export class ProductConfigurator extends LitElement {
         ${this._validation?.valid && !this._skuResult ? html`
           <button
             @click=${() => this._handleBuildSKU()}
-            class="w-full bg-gradient-to-r from-gable-green to-emerald-400 text-black font-bold py-4 rounded-xl hover:shadow-glow-strong transition-all duration-300 flex items-center justify-center gap-2"
+            class="w-full bg-gradient-to-r from-gable-green to-emerald-400 text-black font-bold py-4 rounded-xl hover:shadow-glow-40-30 transition-all duration-300 flex items-center justify-center gap-2"
           >
             ${icon(Sparkles, 20)}
             Generate Non-Stock SKU
@@ -542,7 +542,7 @@ export class ProductConfigurator extends LitElement {
                     @click=${() => this._handleNext()}
                     ?disabled=${!this._canProceed()}
                     class="flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${this._canProceed()
-                      ? 'bg-gable-green text-black hover:shadow-glow'
+                      ? 'bg-gable-green text-black hover:shadow-glow-20-30'
                       : 'bg-gray-800 text-gray-600 cursor-not-allowed'
                     }"
                   >

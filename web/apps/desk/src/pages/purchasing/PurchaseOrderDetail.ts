@@ -260,7 +260,7 @@ export class PurchaseOrderDetail extends LitElement {
                         <button
                             @click=${this._handleSubmitPO}
                             ?disabled=${this.isSubmitting}
-                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow transition-all disabled:opacity-50"
+                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                         >
                             ${icon(Send, 16, 'w-4 h-4')}
                             Submit to Vendor
@@ -269,7 +269,7 @@ export class PurchaseOrderDetail extends LitElement {
                     ${canReceive && !this.receiving ? html`
                         <button
                             @click=${() => this.receiving = true}
-                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow transition-all"
+                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all"
                         >
                             ${icon(PackageCheck, 16, 'w-4 h-4')}
                             Receive Items
@@ -361,7 +361,7 @@ export class PurchaseOrderDetail extends LitElement {
                     <button
                         @click=${this._handleReceive}
                         ?disabled=${this.isSubmitting}
-                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow transition-all disabled:opacity-50"
+                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                     >
                         ${icon(PackageCheck, 16, 'w-4 h-4')}
                         Confirm Receipt
@@ -482,7 +482,7 @@ export class PurchaseOrderDetail extends LitElement {
                                     <button
                                         @click=${this._handleApplyFreight}
                                         ?disabled=${this.applyingFreight}
-                                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow transition-all disabled:opacity-50"
+                                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                                     >
                                         ${icon(CheckCircle, 16, 'w-4 h-4')}
                                         Apply to Inventory Costs

@@ -231,7 +231,7 @@ export class GableDeliveryList extends LitElement {
 
           ${this._deliveries.map((delivery, index) => html`
             <div class="relative pl-12 group">
-              <div class="absolute left-6 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-deep-space border-2 border-gable-green flex items-center justify-center shadow-glow z-10 text-[10px] font-bold text-white">
+              <div class="absolute left-6 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-deep-space border-2 border-gable-green flex items-center justify-center shadow-glow-10-30 z-10 text-[10px] font-bold text-white">
                 ${index + 1}
               </div>
 

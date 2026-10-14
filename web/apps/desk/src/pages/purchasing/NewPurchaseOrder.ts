@@ -129,7 +129,7 @@ export class NewPurchaseOrder extends LitElement {
                 <button
                     @click=${this._handleSave}
                     ?disabled=${this.loading}
-                    class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow transition-all disabled:opacity-50"
+                    class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded shadow-glow hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                 >
                     ${icon(Save, 16, 'w-4 h-4')}
                     Create PO

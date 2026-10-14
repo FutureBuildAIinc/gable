@@ -58,7 +58,7 @@ export class DoorConfigurator extends LitElement {
 
     if (this._error) {
       return html`
-        <div class="flex h-full items-center justify-center bg-deep-space text-zinc-200">
+        <div class="flex h-full items-center justify-center bg-deep-space text-pale">
           <div class="text-center space-y-4">
             <p class="text-red-400">${this._error}</p>
             <button
@@ -79,7 +79,7 @@ export class DoorConfigurator extends LitElement {
     const cents = (n: number): string => (n / 100).toFixed(2);
 
     return html`
-      <div class="flex h-full bg-deep-space text-zinc-200">
+      <div class="flex h-full bg-deep-space text-pale">
         <!-- Configuration Panel -->
         <div class="w-1/3 border-r border-white/10 p-6 overflow-y-auto">
           <h2 class="text-2xl font-bold mb-6 text-gable-green">Configure Door</h2>

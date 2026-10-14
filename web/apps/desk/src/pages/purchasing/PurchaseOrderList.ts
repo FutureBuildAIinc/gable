@@ -126,7 +126,7 @@ export class PurchaseOrderList extends LitElement {
                 </div>
                 <button
                     @click=${() => router.navigate('/purchasing/new')}
-                    class="flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow transition-all"
+                    class="flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all"
                 >
                     ${icon(Plus, 16, 'w-4 h-4')}
                     New Purchase Order

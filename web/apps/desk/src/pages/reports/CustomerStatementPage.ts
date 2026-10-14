@@ -223,7 +223,7 @@ export class CustomerStatementPage extends LitElement {
                         <button
                             @click=${this._loadStatement}
                             ?disabled=${this.loading || !this.selectedCustomer}
-                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow transition-all disabled:opacity-50"
+                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                             data-testid="generate-statement"
                         >
                             ${icon(Search, 16, 'w-4 h-4')}

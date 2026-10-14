@@ -864,7 +864,7 @@ export class POSTerminal extends LitElement {
   private _overlay(inner: unknown) {
     return html`
       <div style="position:fixed;inset:0;background:rgb(var(--gb-backdrop) / 0.6);display:flex;align-items:center;justify-content:center;z-index:50">
-        <div style="width:440px;max-width:92vw;background:rgb(var(--gb-surface-3));border:1px solid rgb(var(--gb-zinc-700));border-radius:14px;padding:24px;color:rgb(var(--gb-white));font-family:'Outfit',-apple-system,sans-serif">
+        <div style="width:440px;max-width:92vw;background:rgb(var(--gb-till-surface));border:1px solid rgb(var(--gb-till-edge));border-radius:14px;padding:24px;color:rgb(var(--gb-till-text));font-family:'Outfit',-apple-system,sans-serif">
           ${inner}
         </div>
       </div>
@@ -875,14 +875,14 @@ export class POSTerminal extends LitElement {
     if (!this._showTillOpen) return nothing;
     return this._overlay(html`
       <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Open Till</h2>
-      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-zinc-400))">Count the starting cash in the drawer and enter the opening float.</p>
-      <label style="display:block;font-size:12px;color:rgb(var(--gb-zinc-400));margin-bottom:6px">Opening float ($)</label>
+      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">Count the starting cash in the drawer and enter the opening float.</p>
+      <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Opening float ($)</label>
       <input type="number" step="0.01" .value=${this._openingFloat}
         @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; }}
-        style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-deep-space));border:2px solid rgb(var(--gb-violet-600));border-radius:8px;color:rgb(var(--gb-white));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="200.00" />
+        style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-till-field));border:2px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="200.00" />
       <div style="display:flex;gap:8px;margin-top:20px">
-        <button @click=${() => { this._showTillOpen = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-zinc-400));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-violet-600));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
+        <button @click=${() => { this._showTillOpen = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
       </div>
     `);
   }
@@ -895,16 +895,16 @@ export class POSTerminal extends LitElement {
     if (this._closeResult) {
       const r = this._closeResult;
       const os = r.session.over_short_cents ?? 0;
-      const osColor = os === 0 ? 'rgb(var(--gb-green-400))' : os < 0 ? 'rgb(var(--gb-red-400))' : 'rgb(var(--gb-amber-500))';
+      const osColor = os === 0 ? 'rgb(var(--gb-till-ok))' : os < 0 ? 'rgb(var(--gb-till-bad))' : 'rgb(var(--gb-till-warn))';
       const osLabel = os === 0 ? 'BALANCED' : os < 0 ? `SHORT ${fmt(Math.abs(os))}` : `OVER ${fmt(os)}`;
       return this._overlay(html`
         <h2 style="margin:0 0 12px;font-size:18px;font-weight:700">Z-Report - Till Closed</h2>
-        <div style="text-align:center;padding:16px;background:rgb(var(--gb-deep-space));border:1px solid rgb(var(--gb-zinc-700));border-radius:10px;margin-bottom:16px">
-          <div style="font-size:12px;color:rgb(var(--gb-zinc-400));text-transform:uppercase;letter-spacing:0.5px">Over / Short</div>
+        <div style="text-align:center;padding:16px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:10px;margin-bottom:16px">
+          <div style="font-size:12px;color:rgb(var(--gb-till-muted));text-transform:uppercase;letter-spacing:0.5px">Over / Short</div>
           <div style="font-size:32px;font-weight:800;color:${osColor}">${osLabel}</div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead><tr style="color:rgb(var(--gb-zinc-400));text-align:right">
+          <thead><tr style="color:rgb(var(--gb-till-muted));text-align:right">
             <th style="text-align:left;padding:4px 0">Method</th><th>Expected</th><th>Counted</th><th>\u0394</th>
           </tr></thead>
           <tbody>
@@ -912,16 +912,16 @@ export class POSTerminal extends LitElement {
               const exp = r.session.expected_by_method?.[m] ?? 0;
               const cnt = r.session.counted_by_method?.[m] ?? 0;
               const d = cnt - exp;
-              return html`<tr style="text-align:right;border-top:1px solid rgb(var(--gb-zinc-800))">
+              return html`<tr style="text-align:right;border-top:1px solid rgb(var(--gb-till-rule))">
                 <td style="text-align:left;padding:6px 0">${m}</td>
                 <td>${fmt(exp)}</td><td>${fmt(cnt)}</td>
-                <td style="color:${d === 0 ? 'rgb(var(--gb-zinc-400))' : d < 0 ? 'rgb(var(--gb-red-400))' : 'rgb(var(--gb-amber-500))'}">${fmt(d)}</td>
+                <td style="color:${d === 0 ? 'rgb(var(--gb-till-muted))' : d < 0 ? 'rgb(var(--gb-till-bad))' : 'rgb(var(--gb-till-warn))'}">${fmt(d)}</td>
               </tr>`;
             })}
           </tbody>
         </table>
-        <div style="font-size:12px;color:rgb(var(--gb-zinc-400));margin-top:14px">${r.sale_count} sales \u00b7 ${fmt(r.sales_total_cents)} rung \u00b7 ${fmt(r.tax_total_cents)} tax \u00b7 ${fmt(r.change_cents)} change given</div>
-        <button @click=${close} style="width:100%;margin-top:18px;padding:12px;background:rgb(var(--gb-green-700));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">Done</button>
+        <div style="font-size:12px;color:rgb(var(--gb-till-muted));margin-top:14px">${r.sale_count} sales \u00b7 ${fmt(r.sales_total_cents)} rung \u00b7 ${fmt(r.tax_total_cents)} tax \u00b7 ${fmt(r.change_cents)} change given</div>
+        <button @click=${close} style="width:100%;margin-top:18px;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">Done</button>
       `);
     }
 
@@ -930,21 +930,21 @@ export class POSTerminal extends LitElement {
     const methods = Object.keys(this._counts);
     return this._overlay(html`
       <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Close Till - Blind Count</h2>
-      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-zinc-400))">
+      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">
         Count the drawer and enter actuals by tender. Expected totals stay hidden until you post - that's the blind count.
         ${rep ? html`<br>${rep.sale_count} sales rung this session.` : nothing}
       </p>
       ${methods.map((m) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <label style="width:90px;font-size:13px;color:rgb(var(--gb-zinc-300));text-transform:capitalize">${m}</label>
+          <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft));text-transform:capitalize">${m}</label>
           <input type="number" step="0.01" .value=${this._counts[m]}
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
-            style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-deep-space));border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-white));font-size:16px;text-align:right;outline:none" placeholder="0.00" />
+            style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="0.00" />
         </div>
       `)}
       <div style="display:flex;gap:8px;margin-top:20px">
-        <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-zinc-400));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-violet-600));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
+        <button @click=${close} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => this._confirmCloseTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Posting\u2026' : 'Post Count & Close'}</button>
       </div>
     `);
   }
@@ -955,21 +955,21 @@ export class POSTerminal extends LitElement {
     const productLines = sale.lines.filter(l => l.line_type === 'product' && l.parent_line_id === null);
     return this._overlay(html`
       <h2 style="margin:0 0 4px;font-size:18px;font-weight:700">Return - ${sale.number}</h2>
-      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-zinc-400))">Name the lines coming back. The return posts a credit memo, restocks what returns, and refunds out of the drawer.</p>
+      <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">Name the lines coming back. The return posts a credit memo, restocks what returns, and refunds out of the drawer.</p>
       ${productLines.map((l) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <span style="flex:1;font-size:13px;color:rgb(var(--gb-zinc-300))">${l.description}</span>
-          <span style="font-size:12px;color:rgb(var(--gb-zinc-400))">of ${l.quantity}</span>
+          <span style="flex:1;font-size:13px;color:rgb(var(--gb-till-soft))">${l.description}</span>
+          <span style="font-size:12px;color:rgb(var(--gb-till-muted))">of ${l.quantity}</span>
           <input type="number" min="0" step="0.25" .value=${this._returnQty[l.id] ?? '0'}
             @input=${(e: Event) => { this._returnQty = { ...this._returnQty, [l.id]: (e.target as HTMLInputElement).value }; }}
-            style="width:80px;padding:8px;background:rgb(var(--gb-deep-space));border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-white));font-size:14px;text-align:right;outline:none" />
+            style="width:80px;padding:8px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;text-align:right;outline:none" />
         </div>
       `)}
       <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
-        <label style="font-size:13px;color:rgb(var(--gb-zinc-400))">Refund</label>
+        <label style="font-size:13px;color:rgb(var(--gb-till-muted))">Refund</label>
         <select .value=${this._returnMethod}
           @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
-          style="flex:1;padding:10px;background:rgb(var(--gb-deep-space));border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-white));font-size:14px;outline:none">
+          style="flex:1;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;outline:none">
           <option value="cash">Cash (out of the drawer)</option>
           <option value="card">Card (back on the card)</option>
           <option value="account">Account credit</option>
@@ -977,10 +977,10 @@ export class POSTerminal extends LitElement {
       </div>
       <input type="text" .value=${this._returnReason}
         @input=${(e: Event) => { this._returnReason = (e.target as HTMLInputElement).value; }}
-        style="width:100%;box-sizing:border-box;padding:10px;background:rgb(var(--gb-deep-space));border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-white));font-size:14px;outline:none;margin-bottom:16px" placeholder="Reason" />
+        style="width:100%;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:14px;outline:none;margin-bottom:16px" placeholder="Reason" />
       <div style="display:flex;gap:8px">
-        <button @click=${() => { this._showReturn = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-zinc-700));border-radius:8px;color:rgb(var(--gb-zinc-400));font-size:14px;cursor:pointer">Cancel</button>
-        <button @click=${() => this._confirmReturn()} ?disabled=${this._loading} style="flex:2;padding:12px;background:rgb(var(--gb-green-700));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Return'}</button>
+        <button @click=${() => { this._showReturn = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => this._confirmReturn()} ?disabled=${this._loading} style="flex:2;padding:12px;background:rgb(var(--gb-till-go));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._loading ? 'Posting\u2026' : 'Take the Return'}</button>
       </div>
     `);
   }

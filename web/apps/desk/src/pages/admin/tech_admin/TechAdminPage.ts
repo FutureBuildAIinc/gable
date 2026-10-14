@@ -468,7 +468,7 @@ export class TechAdminPage extends LitElement {
                     <button
                         @click=${() => this.isCreating = true}
                         ?disabled=${this.isCreating || !!this.generatedKey}
-                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow transition-all disabled:opacity-50"
+                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                     >
                         ${icon(Plus, 16)} New API Key
                     </button>

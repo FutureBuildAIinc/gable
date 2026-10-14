@@ -131,7 +131,7 @@ export class GableStockAdjustmentModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting}
-                class="bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow transition-all disabled:opacity-50"
+                class="bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
               >
                 ${this._isSubmitting ? 'Saving...' : 'Confirm Adjustment'}
               </button>

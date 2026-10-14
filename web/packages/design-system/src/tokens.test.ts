@@ -85,6 +85,46 @@ describe('Industrial Dark is unchanged', () => {
     }
   })
 
+  it('pins every colour that has its own token so dark draws as it did', () => {
+    // The places that once collapsed onto a nearest token: each has a token
+    // whose dark value is exactly the value it drew before.
+    const exact: Record<string, string> = {
+      // the till dialogs on the counter
+      'till-surface': '#161b22',
+      'till-edge': '#30363d',
+      'till-text': '#e6edf3',
+      'till-muted': '#8b949e',
+      'till-soft': '#c9d1d9',
+      'till-field': '#0d1117',
+      'till-accent': '#8957e5',
+      'till-go': '#238636',
+      'till-ok': '#3fb950',
+      'till-bad': '#f85149',
+      'till-warn': '#d29922',
+      'till-rule': '#21262d',
+      // the configurator text, the scanner dialog, the matrix row hover
+      pale: '#E0E0E0',
+      well: '#12131A',
+      'well-hover': '#1a1c26',
+      // the second voice keeps the neutrals the chips drew
+      voice: '#ffffff',
+      'voice-soft': colors.zinc[300],
+      'voice-text': colors.zinc[400],
+      'voice-fill': colors.zinc[500],
+    }
+    for (const [name, value] of Object.entries(exact)) {
+      expect(dark[`--gb-${name}`], name).toBe(channels(value))
+    }
+    // the glow shadows by size and strength
+    expect(dark['--gb-glow-10-30']).toBe('0 0 10px rgba(0, 255, 163, 0.3)')
+    expect(dark['--gb-glow-soft']).toBe('0 0 15px rgba(0, 255, 163, 0.1)')
+    expect(dark['--gb-glow']).toBe('0 0 15px rgba(0, 255, 163, 0.3)')
+    expect(dark['--gb-glow-20-10']).toBe('0 0 20px rgba(0, 255, 163, 0.1)')
+    expect(dark['--gb-glow-20-30']).toBe('0 0 20px rgba(0, 255, 163, 0.3)')
+    expect(dark['--gb-glow-30-15']).toBe('0 0 30px rgba(0, 255, 163, 0.15)')
+    expect(dark['--gb-glow-40-30']).toBe('0 0 40px rgba(0, 255, 163, 0.3)')
+  })
+
   it('keeps the semantic HSL variables as they were', () => {
     expect(dark['--background']).toBe('230 20% 5%')
     expect(dark['--primary']).toBe('158 100% 50%')
@@ -136,6 +176,17 @@ describe('Gable light holds the palette values', () => {
           channels(LIGHT_PALETTE.status[name][step]),
         )
       }
+    }
+  })
+
+  it('sage as the second voice, and no glow of any size', () => {
+    const s = LIGHT_PALETTE.surfaces
+    for (const name of ['voice', 'voice-soft', 'voice-text']) {
+      expect(light[`--gb-${name}`], name).toBe(channels(s.sage))
+    }
+    expect(light['--gb-voice-fill']).toBe(channels(s['sage-fill']))
+    for (const key of Object.keys(light).filter((k) => k.startsWith('--gb-glow'))) {
+      expect(light[key], key).toBe('0 0 #0000')
     }
   })
 
