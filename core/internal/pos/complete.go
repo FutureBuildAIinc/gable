@@ -105,6 +105,9 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	if s.ar == nil || s.invoices == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
+	if err := s.holdSaleBranch(ctx, saleID); err != nil {
+		return nil, err
+	}
 	pre, err := s.repo.GetSale(ctx, saleID)
 	if err != nil {
 		return nil, err

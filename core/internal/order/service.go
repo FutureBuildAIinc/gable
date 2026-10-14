@@ -37,6 +37,7 @@ type TxRunner interface {
 // BranchGuard applies the payload branch rule (ADR 0007 section 2.3).
 type BranchGuard interface {
 	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
 // PriceEngine prices a stocked product line for a customer and quantity
@@ -796,13 +797,34 @@ func (s *Service) createCore(ctx context.Context, d *Draft, actor string) (*Orde
 }
 
 // branchFor resolves the order's branch: the body's, the caller's context,
-// then the deployment default.
+// then, for a user context with no branch, the user's grants (exactly one
+// granted branch: that one; several: the request must name one; none: fail
+// closed), never the deployment default, which no grant of the creator holds
+// (SEC-NOHEADER-1). Callers the grants never hold (an administrator, an
+// owner, a key, a system caller) keep the deployment default.
 func (s *Service) branchFor(ctx context.Context, branch *uuid.UUID) (uuid.UUID, error) {
 	if branch != nil && *branch != uuid.Nil {
 		return *branch, nil
 	}
 	if bid := middleware.BranchIDForQuery(ctx); bid != nil {
 		return *bid, nil
+	}
+	if s.branches != nil {
+		granted, err := s.branches.GrantsForCreate(ctx)
+		switch {
+		case err == nil && granted != nil:
+			return *granted, nil
+		case err == nil:
+		case errors.Is(err, middleware.ErrCreateBranchChoice):
+			return uuid.Nil, httpx.BadRequest("branch_id is required: this caller holds more than one branch grant",
+				httpx.FieldError{Field: "branch_id", Message: "is required: name one of the caller's granted branches"})
+		case errors.Is(err, middleware.ErrPayloadBranchRefused):
+			return uuid.Nil, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+				Message: "branch_id is outside the branches this caller may target",
+				Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+		default:
+			return uuid.Nil, err
+		}
 	}
 	return s.repo.DefaultBranchID(ctx)
 }
@@ -853,6 +875,9 @@ func (s *Service) updateCore(ctx context.Context, id uuid.UUID, d *Draft, pre Pr
 	if err != nil {
 		return nil, nil, notFound(err)
 	}
+	if err := s.checkOrderBranch(ctx, cur); err != nil {
+		return nil, nil, err
+	}
 	b, err := s.build(ctx, d, cur.BranchID, actor)
 	if err != nil {
 		return nil, nil, err
@@ -899,6 +924,14 @@ func (s *Service) GetOrder(ctx context.Context, id uuid.UUID) (*Order, error) {
 	if err != nil {
 		return nil, notFound(err)
 	}
+	// The record branch rule: with no branch in context a user is held to
+	// the user's grants (SEC-NOHEADER-1), the same rule the allocate,
+	// fulfilment and retry writes already carry; a caller that sends the
+	// header keeps the repository's wall answer (a hidden order reads as
+	// missing before this check runs).
+	if err := s.checkOrderBranch(ctx, o); err != nil {
+		return nil, err
+	}
 	return o, nil
 }
 
@@ -922,7 +955,9 @@ func ResolveRecordID(raw string) (uuid.UUID, string, error) {
 }
 
 // GetOrderByIDOrNumber reads an order by its UUID or its document number
-// (section 7): both spellings answer exactly the same body, no redirect.
+// (section 7): both spellings answer exactly the same body, no redirect, and
+// both carry the record branch rule (the number arm is the quote module's
+// twin: the read is held to the caller's grants before it answers).
 func (s *Service) GetOrderByIDOrNumber(ctx context.Context, raw string) (*Order, error) {
 	id, number, err := ResolveRecordID(raw)
 	if err != nil {
@@ -932,6 +967,9 @@ func (s *Service) GetOrderByIDOrNumber(ctx context.Context, raw string) (*Order,
 		o, err := s.repo.GetOrderByNumber(ctx, number)
 		if err != nil {
 			return nil, notFound(err)
+		}
+		if err := s.checkOrderBranch(ctx, o); err != nil {
+			return nil, err
 		}
 		return o, nil
 	}
@@ -1037,6 +1075,9 @@ func (s *Service) transition(ctx context.Context, id uuid.UUID, to OrderStatus, 
 		cur, err := s.repo.GetOrder(ctx, id)
 		if err != nil {
 			return notFound(err)
+		}
+		if err := s.checkOrderBranch(ctx, cur); err != nil {
+			return err
 		}
 		if pre != nil {
 			if err := pre.check(cur.Revision); err != nil {

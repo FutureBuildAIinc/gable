@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -155,6 +156,11 @@ type Repository interface {
 	FailRefundIntentByID(ctx context.Context, id uuid.UUID) error
 	// Lookups
 	GetRegisterBranch(ctx context.Context, registerID string) (*uuid.UUID, error)
+	// SaleBranch and TillSessionBranch read a record's own branch with no
+	// wall, for the act hold that must decide before the walled read hides
+	// the record (found false: the record does not exist).
+	SaleBranch(ctx context.Context, id uuid.UUID) (branch uuid.UUID, found bool, err error)
+	TillSessionBranch(ctx context.Context, id uuid.UUID) (branch *uuid.UUID, found bool, err error)
 	LookupProducts(ctx context.Context, ids []uuid.UUID) (map[string]salesdoc.ProductRef, error)
 	LookupKitComponents(ctx context.Context, kitIDs []uuid.UUID) (map[string][]salesdoc.KitComponent, error)
 	LookupChargeCodes(ctx context.Context, codes []string) (map[string]salesdoc.ChargeCode, error)
@@ -224,11 +230,14 @@ type SyncItemResult struct {
 
 // PostgresRepository implements Repository.
 type PostgresRepository struct {
-	db *database.DB
+	db     *database.DB
+	grants *middleware.BranchGuard
 }
 
 // NewRepository creates the counter's repository.
-func NewRepository(db *database.DB) *PostgresRepository { return &PostgresRepository{db: db} }
+func NewRepository(db *database.DB) *PostgresRepository {
+	return &PostgresRepository{db: db, grants: middleware.NewBranchGuard(db)}
+}
 
 func (r *PostgresRepository) ex(ctx context.Context) database.Executor { return r.db.GetExecutor(ctx) }
 
@@ -302,8 +311,8 @@ func (r *PostgresRepository) CreateSale(ctx context.Context, s *Sale) error {
 
 func (r *PostgresRepository) LockSale(ctx context.Context, id uuid.UUID) error {
 	var one int
-	err := r.ex(ctx).QueryRow(ctx, `SELECT 1 FROM pos_transactions WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)
-		FOR NO KEY UPDATE`, id, branchctx.IDForQuery(ctx)).Scan(&one)
+	err := r.ex(ctx).QueryRow(ctx, `SELECT 1 FROM pos_transactions WHERE id = $1 AND `+middleware.Wall("", 2, 3)+`
+		FOR NO KEY UPDATE`, id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("sale not found")
 	}
@@ -342,7 +351,7 @@ func scanSale(row pgx.Row, s *Sale) error {
 func (r *PostgresRepository) GetSale(ctx context.Context, id uuid.UUID) (*Sale, error) {
 	s := &Sale{}
 	err := scanSale(r.ex(ctx).QueryRow(ctx, `SELECT `+saleCols+` FROM pos_transactions t
-		WHERE t.id = $1 AND ($2::uuid IS NULL OR t.branch_id = $2)`, id, branchctx.IDForQuery(ctx)), s)
+		WHERE t.id = $1 AND `+middleware.Wall("t", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)), s)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("sale not found")
 	}
@@ -350,6 +359,21 @@ func (r *PostgresRepository) GetSale(ctx context.Context, id uuid.UUID) (*Sale, 
 		return nil, fmt.Errorf("failed to read the sale: %w", err)
 	}
 	return s, nil
+}
+
+// SaleBranch reads a sale's own branch with no wall, for the act hold that
+// must decide before the walled read hides the record from a caller held to
+// the grants. A sale that does not exist answers found false.
+func (r *PostgresRepository) SaleBranch(ctx context.Context, id uuid.UUID) (uuid.UUID, bool, error) {
+	var branch uuid.UUID
+	err := r.ex(ctx).QueryRow(ctx, `SELECT branch_id FROM pos_transactions WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("failed to read the sale's branch: %w", err)
+	}
+	return branch, true, nil
 }
 
 func (r *PostgresRepository) UpdateSaleTotals(ctx context.Context, id uuid.UUID, subtotal, tax, total int64) error {
@@ -405,14 +429,14 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 	predicate := `WHERE ($1 = '' OR t.register_id = $1)
 		AND ($2::text IS NULL OR t.status = $2)
 		AND t.created_at >= $3 AND t.created_at < $4
-		AND ($5::uuid IS NULL OR t.branch_id = $5)`
-	args := []any{f.RegisterID, nil, start, end, branchctx.IDForQuery(ctx)}
+		AND ` + middleware.Wall("t", 5, 6)
+	args := []any{f.RegisterID, nil, start, end, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
 	if f.Status != "" {
 		args[1] = f.Status
 	}
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleCols+`,
 		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT')
-		FROM pos_transactions t `+predicate+` ORDER BY t.created_at DESC, t.id DESC LIMIT $6`, append(args, limit)...)
+		FROM pos_transactions t `+predicate+` ORDER BY t.created_at DESC, t.id DESC LIMIT $7`, append(args, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list sales: %w", err)
 	}
@@ -1314,7 +1338,7 @@ func (r *PostgresRepository) GetReturn(ctx context.Context, id uuid.UUID) (*Retu
 		SELECT id, number, revision, branch_id, register_id, till_session_id, original_transaction_id, customer_id,
 			cashier_id, currency, ROUND(subtotal * 100)::bigint, ROUND(tax_amount * 100)::bigint, ROUND(total * 100)::bigint,
 			refund_method, reason, credit_memo_id, created_at
-		FROM pos_returns WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`, id, branchctx.IDForQuery(ctx)).
+		FROM pos_returns WHERE id = $1 AND `+middleware.Wall("", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
 		Scan(&ret.ID, &ret.Number, &ret.Revision, &ret.BranchID, &ret.RegisterID, &ret.TillSessionID, &ret.OriginalSaleID,
 			&ret.CustomerID, &ret.CashierID, &ret.Currency, &ret.SubtotalCents, &ret.TaxCents, &ret.TotalCents,
 			&method, &ret.Reason, &ret.CreditMemoID, &createdAt)
@@ -1354,8 +1378,9 @@ func (r *PostgresRepository) ListReturns(ctx context.Context, f ReturnFilter, li
 		FROM pos_returns
 		WHERE ($1 = '' OR register_id = $1)
 			AND created_at >= $2 AND created_at < $3
-			AND ($4::uuid IS NULL OR branch_id = $4)
-		ORDER BY created_at DESC, id DESC LIMIT $5`, f.RegisterID, start, end, branchctx.IDForQuery(ctx), limit)
+			AND `+middleware.Wall("", 4, 5)+`
+		ORDER BY created_at DESC, id DESC LIMIT $6`, f.RegisterID, start, end,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list returns: %w", err)
 	}
@@ -1408,6 +1433,16 @@ func (r *PostgresRepository) GetRegisterBranch(ctx context.Context, registerID s
 			return nil, httpx.Forbidden(
 				fmt.Sprintf("register %s belongs to a different branch than the request", registerID))
 		}
+	}
+	// A caller with no branch in context is held to the caller's grants
+	// (SEC-NOHEADER-1): the header caller keeps the equality check above, an
+	// administrator keeps its reach, and only a no header user is held.
+	if err := r.grants.CheckGrantsBranch(ctx, branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return nil, httpx.Forbidden(
+				fmt.Sprintf("register %s belongs to a different branch than the request", registerID))
+		}
+		return nil, err
 	}
 	return branch, nil
 }

@@ -34,6 +34,9 @@ func (s *Service) VoidSale(ctx context.Context, saleID uuid.UUID, ifMatch string
 	if s.ar == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
+	if err := s.holdSaleBranch(ctx, saleID); err != nil {
+		return nil, err
+	}
 	pre, err := s.repo.GetSale(ctx, saleID)
 	if err != nil {
 		return nil, err

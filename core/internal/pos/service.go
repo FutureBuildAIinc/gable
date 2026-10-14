@@ -19,6 +19,7 @@ import (
 	"github.com/gablelbm/gable/internal/tax"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
@@ -75,6 +76,7 @@ type TxRunner interface {
 // last (ADR 0005 sections 11 and 14.2 C2-5).
 type Service struct {
 	db        *database.DB
+	grants    *middleware.BranchGuard
 	repo      Repository
 	logger    *slog.Logger
 	now       func() time.Time
@@ -113,7 +115,48 @@ func NewService(db *database.DB, repo Repository, logger *slog.Logger) *Service 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{db: db, repo: repo, logger: logger, now: time.Now}
+	return &Service{db: db, repo: repo, logger: logger, now: time.Now, grants: middleware.NewBranchGuard(db)}
+}
+
+// holdSaleBranch refuses an act on a sale whose own branch is outside what
+// the caller may target while the context carries no branch, the record act
+// arm of the no header rule (SEC-NOHEADER-1). The branch is read with no
+// wall, because the walled read a no header user's grant hides the record
+// with would answer before the refusal could: a hidden record reads as
+// missing (404), an unheld one refuses by name (403). A sale that does not
+// exist answers the module's 404. A caller that sends the header keeps the
+// walled read's answer, and an administrator keeps its reach.
+func (s *Service) holdSaleBranch(ctx context.Context, saleID uuid.UUID) error {
+	branch, found, err := s.repo.SaleBranch(ctx, saleID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return httpx.NotFound("sale not found")
+	}
+	return s.holdRecordBranch(ctx, "sale", &branch, saleID)
+}
+
+// holdTillBranch is holdSaleBranch for a till session.
+func (s *Service) holdTillBranch(ctx context.Context, sessionID uuid.UUID) error {
+	branch, found, err := s.repo.TillSessionBranch(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return httpx.NotFound("till session not found")
+	}
+	return s.holdRecordBranch(ctx, "till session", branch, sessionID)
+}
+
+func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uuid.UUID, id uuid.UUID) error {
+	if err := s.grants.CheckGrantsBranch(ctx, branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return httpx.Forbidden(fmt.Sprintf("%s %s belongs to a branch this caller may not target", what, id))
+		}
+		return err
+	}
+	return nil
 }
 
 // WithPriceEngine wires the pricing engine.
@@ -517,6 +560,9 @@ func (s *Service) lookups(ctx context.Context, parsed []salesdoc.ParsedLine) (ma
 // AddLine adds one line to an open cart: priced, extended, with the audit
 // rows an override or a discount owes, all in the add's own transaction.
 func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesdoc.ParsedLine, actor string) (*Sale, error) {
+	if err := s.holdSaleBranch(ctx, saleID); err != nil {
+		return nil, err
+	}
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockSale(ctx, saleID); err != nil {
@@ -586,6 +632,9 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 
 // RemoveLine removes a line from an open cart.
 func (s *Service) RemoveLine(ctx context.Context, saleID, lineID uuid.UUID) (*Sale, error) {
+	if err := s.holdSaleBranch(ctx, saleID); err != nil {
+		return nil, err
+	}
 	var out *Sale
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockSale(ctx, saleID); err != nil {

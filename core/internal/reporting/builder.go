@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -16,7 +17,7 @@ import (
 var entitySchemas = map[string]map[string]string{
 	"invoices": {
 		"id":             "i.id",
-		"invoice_number": "i.invoice_number",
+		"invoice_number": "i.number",
 		"status":         "i.status",
 		"total_amount":   "i.total_amount",
 		"created_at":     "i.created_at",
@@ -25,7 +26,7 @@ var entitySchemas = map[string]map[string]string{
 	},
 	"orders": {
 		"id":            "o.id",
-		"order_number":  "o.order_number",
+		"order_number":  "o.number",
 		"status":        "o.status",
 		"total_amount":  "o.total_amount",
 		"created_at":    "o.created_at",
@@ -35,7 +36,7 @@ var entitySchemas = map[string]map[string]string{
 	"inventory": {
 		"id":           "inv.id",
 		"product_id":   "inv.product_id",
-		"product_name": "p.name",
+		"product_name": "p.description",
 		"quantity":     "inv.quantity",
 		"location_id":  "inv.location_id",
 	},
@@ -44,7 +45,16 @@ var entitySchemas = map[string]map[string]string{
 var entityBaseQuery = map[string]string{
 	"invoices":  "FROM invoices i LEFT JOIN customers c ON i.customer_id = c.id",
 	"orders":    "FROM orders o LEFT JOIN customers c ON o.customer_id = c.id",
-	"inventory": "FROM inventory inv LEFT JOIN products p ON inv.product_id = p.id",
+	"inventory": "FROM inventory inv LEFT JOIN products p ON inv.product_id = p.id LEFT JOIN locations l ON l.id = inv.location_id",
+}
+
+// entityReachWall is the reach wall each export entity's rows carry
+// (SEC-NOHEADER-1): the column the caller's branch is read through, matched
+// against middleware.Wall's parameter positions.
+var entityReachWall = map[string]string{
+	"invoices":  middleware.Wall("i", 1, 2),
+	"orders":    middleware.Wall("o", 1, 2),
+	"inventory": middleware.Wall("l", 1, 2),
 }
 
 // BuildAndExecuteQuery converts a JSON definition to SQL and executes it.
@@ -86,10 +96,14 @@ func BuildAndExecuteQuery(ctx context.Context, pool *pgxpool.Pool, def *ReportDe
 		return nil, fmt.Errorf("no columns selected")
 	}
 
-	// WHERE Clause
-	var whereClauses []string
-	var args []interface{}
-	argIdx := 1
+	// The caller's reach comes first, so the filter arguments follow it.
+	reachWall, ok := entityReachWall[entityType]
+	if !ok {
+		return nil, fmt.Errorf("no reach wall defined for: %s", entityType)
+	}
+	whereClauses := []string{reachWall}
+	args := []interface{}{middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)}
+	argIdx := 3
 
 	for _, filter := range def.Filters {
 		sqlExpr, ok := schema[filter.Field]
@@ -124,9 +138,7 @@ func BuildAndExecuteQuery(ctx context.Context, pool *pgxpool.Pool, def *ReportDe
 	// Construct Query String
 	query := fmt.Sprintf("SELECT %s\n%s", strings.Join(selectCols, ", "), baseQuery)
 
-	if len(whereClauses) > 0 {
-		query += fmt.Sprintf("\nWHERE %s", strings.Join(whereClauses, " AND "))
-	}
+	query += fmt.Sprintf("\nWHERE %s", strings.Join(whereClauses, " AND "))
 
 	if len(groupByCols) > 0 {
 		query += fmt.Sprintf("\nGROUP BY %s", strings.Join(groupByCols, ", "))

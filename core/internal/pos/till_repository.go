@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
-	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -70,11 +70,27 @@ func (r *PostgresRepository) LockTillSession(ctx context.Context, id uuid.UUID, 
 	}
 	var one int
 	err := r.ex(ctx).QueryRow(ctx, `SELECT 1 FROM till_sessions WHERE id = $1
-		AND ($2::uuid IS NULL OR branch_id = $2) `+mode, id, branchctx.IDForQuery(ctx)).Scan(&one)
+		AND `+middleware.Wall("", 2, 3)+` `+mode, id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).Scan(&one)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return httpx.NotFound("till session not found")
 	}
 	return err
+}
+
+// TillSessionBranch reads a till session's own branch with no wall, for the
+// act hold that must decide before the walled read hides the record. A
+// session that does not exist answers found false, and one that exists with
+// no branch answers found true and a nil branch.
+func (r *PostgresRepository) TillSessionBranch(ctx context.Context, id uuid.UUID) (*uuid.UUID, bool, error) {
+	var branch *uuid.UUID
+	err := r.ex(ctx).QueryRow(ctx, `SELECT branch_id FROM till_sessions WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read the till session's branch: %w", err)
+	}
+	return branch, true, nil
 }
 
 func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (*TillSession, error) {
@@ -83,7 +99,7 @@ func (r *PostgresRepository) GetTillSession(ctx context.Context, id uuid.UUID) (
 			expected_by_method, counted_by_method,
 			CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
 			gl_entry_id, notes
-		FROM till_sessions) t WHERE t.id = $1 AND ($2::uuid IS NULL OR t.branch_id = $2)`, id, branchctx.IDForQuery(ctx)))
+		FROM till_sessions) t WHERE t.id = $1 AND `+middleware.Wall("t", 2, 3), id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, httpx.NotFound("till session not found")
 	}
@@ -100,7 +116,7 @@ func (r *PostgresRepository) GetOpenTillSession(ctx context.Context, registerID 
 			CASE WHEN over_short IS NULL THEN NULL ELSE ROUND(over_short * 100)::bigint END AS over_short_cents,
 			gl_entry_id, notes
 		FROM till_sessions) t WHERE t.register_id = $1 AND t.status = 'OPEN'
-			AND ($2::uuid IS NULL OR t.branch_id = $2)`, registerID, branchctx.IDForQuery(ctx)))
+			AND `+middleware.Wall("t", 2, 3), registerID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -247,7 +263,7 @@ func (r *PostgresRepository) GetZReportBySession(ctx context.Context, sessionID 
 	var generatedAt time.Time
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT id, till_session_id, register_id, branch_id, ROUND(over_short * 100)::bigint, payload, generated_at
-		FROM till_z_reports WHERE till_session_id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`, sessionID, branchctx.IDForQuery(ctx)).
+		FROM till_z_reports WHERE till_session_id = $1 AND `+middleware.Wall("", 2, 3), sessionID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
 		Scan(&z.ID, &z.TillSessionID, &z.RegisterID, &z.BranchID, &z.OverShort, &z.Payload, &generatedAt)
 	z.GeneratedAt = httpx.TimestampOf(generatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -265,8 +281,8 @@ func (r *PostgresRepository) ListZReports(ctx context.Context, registerID string
 		FROM till_z_reports
 		WHERE ($1 = '' OR register_id = $1)
 			AND (generated_at >= $2::date AND generated_at < ($2::date + 1))
-			AND ($3::uuid IS NULL OR branch_id = $3)
-		ORDER BY generated_at DESC`, registerID, date, branchctx.IDForQuery(ctx))
+			AND `+middleware.Wall("", 3, 4)+`
+		ORDER BY generated_at DESC`, registerID, date, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list Z-reports: %w", err)
 	}

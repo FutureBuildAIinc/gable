@@ -124,6 +124,12 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 // entry inside the close's own transaction (the money rule: no GL entry
 // outside the act that causes it).
 func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByMethod map[string]int64, notes, actor string) (*TillReport, error) {
+	// An act on a session of a branch outside the caller's grants is refused
+	// by name before anything runs (SEC-NOHEADER-1); a session that does not
+	// exist, or that the caller's branch context hides, answers the 404.
+	if err := s.holdTillBranch(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	var out *TillReport
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		// The session row first, FOR UPDATE: a completion or a void holding

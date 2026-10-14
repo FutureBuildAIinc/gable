@@ -154,7 +154,10 @@ paths:
         line a note with nothing priced). A kit explodes to its component
         lines. Only an open sale takes a line (409
         invalid_state_transition). The sale's revision moves; the response is
-        the whole sale.
+        the whole sale. A sale that does not exist, or that the caller's branch context
+        or wall hides, answers 404, the same for both, and nothing is written;
+        a caller with no branch in context who holds no grant for the sale's
+        branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -199,7 +202,10 @@ paths:
       description: >-
         Removes the line (a kit's component lines go with their parent). Only
         an open sale loses a line (409 invalid_state_transition). The
-        response is the whole sale.
+        response is the whole sale. A sale that does not exist, or that the caller's branch context
+        or wall hides, answers 404, the same for both, and nothing is written;
+        a caller with no branch in context who holds no grant for the sale's
+        branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -255,7 +261,10 @@ paths:
         tax_rate_not_configured, credit_limit, insufficient_stock; 503 when
         the tax provider fails before any row is written. The completion
         carries the sale's revision (If-Match or the body's revision; 428
-        without one, 409 stale_revision on a stale one).
+        without one, 409 stale_revision on a stale one). A sale that does not exist, or that the caller's branch context
+        or wall hides, answers 404, the same for both, and nothing is written;
+        a caller with no branch in context who holds no grant for the sale's
+        branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -311,7 +320,10 @@ paths:
         session is open (409 blocker session_closed: after the session closes
         it is a return). Refused with 409 and a blocker: session_closed,
         card_terminal, card_refund, no_invoice. The void carries the sale's
-        revision (428, 409 stale_revision).
+        revision (428, 409 stale_revision). A sale that does not exist, or that the caller's branch context
+        or wall hides, answers 404, the same for both, and nothing is written;
+        a caller with no branch in context who holds no grant for the sale's
+        branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -574,7 +586,10 @@ paths:
         close's own transaction, the Z report snapshot is written and
         till.closed is the last statement. counted_by_method names the
         counted cents per lowercase method (cash, check, card, account); a
-        refusal rolls everything back.
+        refusal rolls everything back. A session that does not exist, or that
+        the caller's branch context or wall hides, answers 404, the same for
+        both, and nothing is written; a caller with no branch in context who
+        holds no grant for the session's branch is refused 403 by name.
       parameters:
         - name: id
           in: path

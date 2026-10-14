@@ -170,6 +170,31 @@ func (f *fakeRepo) DeleteReportSchedule(_ context.Context, id string) error {
 	return nil
 }
 
+// ScheduleCreatorGrants answers one grant for every sub: the scheduler's
+// fail closed leg, which the fake never drives with a real grants table.
+func (f *fakeRepo) ScheduleCreatorGrants(_ context.Context, sub string) (int, error) {
+	if sub == "" {
+		return 0, nil
+	}
+	return 1, nil
+}
+
+// MultiBranchEnabled answers the switch on, so the fake keeps the grants
+// rule the scheduler applies with several branches.
+func (f *fakeRepo) MultiBranchEnabled(_ context.Context) (bool, error) { return true, nil }
+
+// PauseReportSchedule marks the stored fake schedule PAUSED.
+func (f *fakeRepo) PauseReportSchedule(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.schedules {
+		if f.schedules[i].ID == id {
+			f.schedules[i].Status = ScheduleStatusPaused
+		}
+	}
+	return nil
+}
+
 var _ Repository = (*fakeRepo)(nil)
 
 // --- date-window handling ------------------------------------------------
