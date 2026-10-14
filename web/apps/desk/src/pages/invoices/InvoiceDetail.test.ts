@@ -100,6 +100,16 @@ describe('gable-invoice-detail', () => {
     })
   })
 
+  it('links the customer by name to its account page and shows no id fragment', async () => {
+    const inv = invoice()
+    stub(inv)
+    el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })
+    const link = el.querySelector<HTMLAnchorElement>(`a[href="/accounts/${inv.customer_id}"]`)
+    expect(link).not.toBeNull()
+    expect(link?.textContent).toContain('Ridgeview Framing')
+    expect(text(el)).not.toContain(`Account: ${inv.customer_id.slice(0, 8)}`)
+  })
+
   it('shows the Overdue badge from is_overdue and the due date in red', async () => {
     stub(invoice({ is_overdue: true, due_date: '2026-07-01' }))
     el = await mountAsync<GableInvoiceDetail>('gable-invoice-detail', { routeId: INVOICE_ID })

@@ -18,6 +18,7 @@ import { workspace } from '../../lib/workspace'
 import type { GableAppShell } from './app-shell'
 import './app-shell'
 import { mount, update, text, q, flush } from '../../test/dom'
+import { authConfig, authCustody } from '@gable/auth'
 
 const TABLE = [
   { path: '/home', load: async () => {}, layout: 'erp' as const },
@@ -46,11 +47,16 @@ beforeEach(() => {
   // Closing everything but the pinned Home tab is the only public reset.
   for (const tab of [...workspace.tabs]) workspace.close(tab.key)
   localStorage.clear()
+  sessionStorage.clear()
+  authCustody.signOut()
+  authConfig.devMode = false
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('{}', { status: 200 }))))
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  authCustody.signOut()
+  authConfig.devMode = false
 })
 
 describe('gable-app-shell — chrome', () => {
@@ -297,5 +303,51 @@ describe('gable-app-shell — connectivity and shortcuts', () => {
     expect(() =>
       window.dispatchEvent(new KeyboardEvent('keydown', { key: '?' })),
     ).not.toThrow()
+  })
+})
+
+/**
+ * The header's `_renderUser` block: a dev persona card session carries the
+ * persona's name and role (so the desk names the user the way the door did);
+ * a token session carries the claim's name and roles. The old fixed `??`
+ * avatar was a placeholder; the change has to keep its promise of persona-
+ * shaped UX end to end, including the header.
+ */
+describe('gable-app-shell: the header user block', () => {
+  it('a dev persona session renders the persona name and role in words', async () => {
+    authConfig.devMode = true
+    authCustody.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    const el = await shellAt('/orders')
+    await flush()
+    await update(el, {})
+
+    expect(text(el)).toContain('Jordan Pike')
+    expect(text(el)).toContain('Cashier')
+  })
+
+  it('a token session renders the claim name and the claim roles joined', async () => {
+    authConfig.devMode = false
+    // A structurally valid, unexpired JWT whose claims are easy to assert on.
+    function b64url(s: string): string {
+      return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    }
+    const token = [
+      b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' })),
+      b64url(JSON.stringify({
+        sub: 'u-42',
+        name: 'Robin Diaz',
+        roles: ['finance', 'sales'],
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      })),
+      'sig',
+    ].join('.')
+    authCustody.signInWithToken(token)
+    const el = await shellAt('/orders')
+    await flush()
+    await update(el, {})
+
+    expect(text(el)).toContain('Robin Diaz')
+    expect(text(el)).toContain('Finance')
+    expect(text(el)).toContain('Sales')
   })
 })

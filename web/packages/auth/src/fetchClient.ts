@@ -14,6 +14,7 @@
  */
 
 import { authCustody } from './custody.ts';
+import { BRANCH_STORAGE_KEY } from './branch.ts';
 
 const DEFAULT_TIMEOUT = 10_000; // 10 seconds
 const DEFAULT_RETRIES = 1;
@@ -68,7 +69,7 @@ export async function fetchWithAuth(
   // We read straight from localStorage to avoid a circular import with the
   // BranchContext singleton, which itself uses fetchWithAuth at init time.
   if (!headers.has('X-Branch-Id')) {
-    const branchId = localStorage.getItem('gable_current_branch_id');
+    const branchId = localStorage.getItem(BRANCH_STORAGE_KEY);
     if (branchId) {
       headers.set('X-Branch-Id', branchId);
     }
