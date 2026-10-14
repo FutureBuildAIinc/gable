@@ -335,7 +335,10 @@ export class POSTerminal extends LitElement {
       this._custResults = [];
       this._poText = '';
       this._jobId = '';
-      this._customerSettled();
+      // An account customer keeps the panel open for the purchase order and
+      // the job; Next: Payment moves on once there is a line.
+      this._step = 'customer';
+      this._open = 'customer';
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to name the customer';
     }
@@ -428,7 +431,7 @@ export class POSTerminal extends LitElement {
               ?disabled=${hasLines || finished || this._loading}
               title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
-            >Change</button>
+            >Walk-in sale</button>
           </div>
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
@@ -459,6 +462,13 @@ export class POSTerminal extends LitElement {
                 </div>
               </div>` : nothing}
           </div>
+          ${finished ? nothing : html`
+            <div class="mt-3 flex items-center justify-between gap-3">
+              <span class="text-xs text-slate-400">${hasLines ? '' : 'Add items to continue'}</span>
+              <button data-testid="pos-next-payment" ?disabled=${!hasLines || this._till === null}
+                @click=${() => { this._step = 'payment'; this._open = 'payment'; }}
+                class="min-h-11 rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Next: Payment</button>
+            </div>`}
         </div>`;
     }
     return html`
@@ -1023,7 +1033,7 @@ export class POSTerminal extends LitElement {
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
           ${this._register && this._till ? html`
           <button @click=${() => this._beginFresh()}
-            class="rounded px-4 py-1.5 text-sm ${sale?.status === 'completed' ? 'bg-gable-green font-semibold text-deep-space' : 'border border-white/20 text-slate-200'}">New Sale</button>` : nothing}
+            class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>` : nothing}
         </div>
       </header>`;
   }
@@ -1031,7 +1041,9 @@ export class POSTerminal extends LitElement {
   /** The Items card is the catalogue; it dims and locks with no till or no open sale. */
   private _renderItems() {
     return html`
-      <div class="min-w-0 xl:w-[56%] xl:shrink-0 xl:self-start ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
+      <div class="w-full min-w-0 min-[900px]:w-[58%] min-[900px]:shrink-0 xl:w-[56%] ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
+        ${this._sale?.status === 'completed' ? html`
+          <p class="mb-2 text-sm text-slate-400" data-testid="pos-next-sale-note">Add a product to start the next sale</p>` : nothing}
         <gable-pos-catalog ?disabled=${this._till === null} yard-key=${this._registerId}></gable-pos-catalog>
       </div>`;
   }
@@ -1189,13 +1201,14 @@ export class POSTerminal extends LitElement {
     const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry);
     const canPay = this._till !== null && hasLines && open && !this._loading && plan.ok;
+    const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
-      <section class="rounded-xl border border-white/10 bg-slate-steel p-4" data-testid="pos-order-summary">
+      <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
         <h2 class="text-lg font-bold text-white">Order summary</h2>
         <p class="text-sm text-slate-400" data-testid="pos-order-customer">${this._customer?.name ?? 'Walk-in sale'}</p>
         ${productLines.length === 0 ? html`
@@ -1209,10 +1222,10 @@ export class POSTerminal extends LitElement {
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
                 </div>
                 <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
+                ${open ? html`
                 <button @click=${() => this._removeItem(item.id)} title="Remove"
                   aria-label="Remove ${item.description}"
-                  ?disabled=${this._sale?.status !== 'open'}
-                  class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent">×</button>
+                  class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red">×</button>` : nothing}
               </li>`)}
           </ul>`}
         <dl class="mt-4 border-t border-white/10 pt-3 text-sm">
@@ -1238,8 +1251,8 @@ export class POSTerminal extends LitElement {
           class="mt-4 min-h-14 w-full rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
           ${label}
         </button>
-        <button data-testid="pos-clear-sale" @click=${() => this._clearSale()} ?disabled=${!open || !hasLines || this._loading}
-          class="mt-2 min-h-11 w-full rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent">Clear sale</button>
+        <button data-testid="pos-clear-sale" @click=${() => this._clearSale()} ?disabled=${!clearable}
+          class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>
       </section>`;
   }
 
@@ -1264,7 +1277,7 @@ export class POSTerminal extends LitElement {
     // sale, whatever the one before it was, offers neither.
     const followOn = this._completed !== null && sale.id === this._completed.id;
     const follow = followOn
-      ? 'border-white/30 text-slate-200 hover:bg-white/5'
+      ? 'border-white/20 text-slate-300 hover:bg-white/5'
       : 'cursor-not-allowed border-white/10 bg-white/5 text-slate-400 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
     const invoice = sale.invoice_id;
@@ -1287,13 +1300,14 @@ export class POSTerminal extends LitElement {
                 <button data-testid="pos-receipt-email" @click=${() => this._emailReceipt(invoice)}
                   class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-white/5">Email receipt</button>` : nothing}
             </div>
+            ${sale.customer_id !== null ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-contact">Email goes to the contact on the account</p>` : nothing}
             ${this._receiptNote ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-note">${this._receiptNote}</p>` : nothing}
           </div>` : nothing}
         <div class="mt-4 flex gap-2">
           <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}
-            class="min-h-11 flex-1 rounded border px-3 py-2 text-xs font-semibold ${follow}">Void</button>
+            class="min-h-9 flex-1 rounded border px-3 py-1.5 text-xs ${follow}">Void</button>
           <button @click=${() => this._beginReturn()} ?disabled=${!followOn}
-            class="min-h-11 flex-1 rounded border px-3 py-2 text-xs font-semibold ${follow}">Return</button>
+            class="min-h-9 flex-1 rounded border px-3 py-1.5 text-xs ${follow}">Return</button>
         </div>
         <button @click=${() => this._beginFresh()} ?disabled=${this._till === null}
           class="mt-3 min-h-14 w-full rounded-lg bg-gable-green px-4 py-4 text-base font-bold text-deep-space disabled:cursor-not-allowed disabled:opacity-40">New sale</button>
@@ -1341,9 +1355,9 @@ export class POSTerminal extends LitElement {
               Ask an administrator to add a register for this yard, or switch to a yard that has one.
             </p>
           </div>` : html`
-        <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 xl:flex-row xl:overflow-visible" data-testid="pos-body">
+        <div class="flex min-h-0 flex-1 flex-col items-start gap-4 overflow-y-auto p-4 min-[900px]:flex-row" data-testid="pos-body">
           ${this._renderItems()}
-          <div class="flex min-w-0 shrink-0 flex-col gap-3 xl:min-h-0 xl:flex-1 xl:overflow-y-auto" data-testid="pos-panels">
+          <div class="order-first flex w-full min-w-0 shrink-0 flex-col gap-3 min-[900px]:sticky min-[900px]:top-0 min-[900px]:order-none min-[900px]:w-auto min-[900px]:flex-1 min-[900px]:self-start" data-testid="pos-panels">
             <section class="${this._panelClass(openKey === 'customer')} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-customer">
               ${this._panelHead('customer', 1, 'Customer', progress.customer, openKey === 'customer', customerValue)}
               <div id="pos-panel-customer-body" data-testid="panel-customer-body" ?hidden=${openKey !== 'customer'} class="px-4 pb-4">
