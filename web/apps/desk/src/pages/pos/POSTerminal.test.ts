@@ -930,6 +930,28 @@ describe('the Panels board', () => {
       el.remove();
     });
 
+    it('says in words beside Print receipt when the tab is blocked and offers the document to download', async () => {
+      svc.printReceipt.mockResolvedValue({ url: 'blob:receipt-9', blocked: true });
+      const el = await mount(done({ number: 'POS-000009', invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-print').click();
+      await flush(el);
+      expect(q(el, 'pos-receipt-note').textContent).toContain('Allow pop ups for this page to print the receipt');
+      const link = q(el, 'pos-receipt-download') as HTMLAnchorElement;
+      expect(link.getAttribute('href')).toBe('blob:receipt-9');
+      expect(link.hasAttribute('download')).toBe(true);
+      expect(q(el, 'pos-complete').contains(link)).toBe(true);
+      el.remove();
+    });
+
+    it('shows no download link when the tab opened', async () => {
+      svc.printReceipt.mockResolvedValue({ url: 'blob:receipt-9', blocked: false });
+      const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
+      q(el, 'pos-receipt-print').click();
+      await flush(el);
+      expect(q(el, 'pos-receipt-download')).toBeNull();
+      el.remove();
+    });
+
     it('says in words beside Print receipt when the receipt cannot be fetched', async () => {
       svc.printReceipt.mockRejectedValue(new Error('this sale has no receipt'));
       const el = await mount(done({ invoice_id: 'inv-1', customer_id: 'cu1' }));
