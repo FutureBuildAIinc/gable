@@ -2013,3 +2013,36 @@ describe('the counter hotkeys and their pinned legend', () => {
     el.remove();
   });
 });
+
+describe('the blind count at close', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('shows one row per method and posts the counted figures under lowercase keys', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 2, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000, CHECK: 4000, CARD: 9000 },
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { over_short_cents: 0, expected_by_method: {}, counted_by_method: {} },
+      sale_count: 2, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const labels = [...el.querySelectorAll('label')].map((l) => l.textContent?.trim()).filter((t) => ['Cash', 'Check', 'Card', 'CASH', 'CHECK', 'CARD'].includes(t ?? ''));
+    expect(labels).toEqual(['Cash', 'Check', 'Card']);
+    const inputs = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    expect(inputs.length).toBe(3);
+    inputs[0].value = '250.00'; inputs[0].dispatchEvent(new Event('input'));
+    inputs[1].value = '40.00'; inputs[1].dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const post = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count')) as HTMLElement;
+    post.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.closeTill).toHaveBeenCalledTimes(1);
+    expect(svc.closeTill.mock.calls[0][1]).toEqual({ cash: 25000, check: 4000 });
+    el.remove();
+  });
+});
