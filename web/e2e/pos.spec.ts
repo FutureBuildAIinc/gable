@@ -45,10 +45,10 @@ async function stockedProduct(request: APIRequestContext): Promise<{ sku: string
   throw new Error('no stocked product for the counter run');
 }
 
-/** Opens the counter (the Panels layout) and the drawer when none is open (a run may find one open). */
+/** Opens the counter (the Panels board) and the drawer when none is open (a run may find one open). */
 async function openCounter(page: Page) {
   await page.goto('/pos');
-  await expect(page.getByRole('heading', { name: 'Counter' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New sale', level: 1 })).toBeVisible();
   const tillState = page.getByTestId('pos-till-state');
   await expect(tillState).toBeVisible();
   if ((await tillState.textContent())?.includes('No till')) {
@@ -59,19 +59,23 @@ async function openCounter(page: Page) {
   await expect(tillState).toContainText('Till open');
 }
 
-/** Adds one unit of the product through the counter's typeahead. */
+/** Adds one unit of the product through the Items card: the exact SKU in its search, then Enter. */
 async function addOne(page: Page, sku: string) {
-  const lines = page.locator('[data-testid="pos-lines"] tbody tr');
+  const lines = page.locator('[data-testid="pos-lines"] li');
   const before = await lines.count();
-  const input = page.locator('#pos-search-input');
-  await input.fill(sku.slice(0, Math.max(6, Math.min(10, sku.length))));
-  const result = page.getByTestId('pos-results').locator('button', { hasText: sku }).first();
-  await result.waitFor({ state: 'visible', timeout: 10000 });
-  await result.click();
-  await expect(lines).toHaveCount(before + 1);
+  await page.getByTestId('catalog-search').fill(sku);
+  await page.getByTestId('catalog-search').press('Enter');
+  await expect(lines).toHaveCount(before + 1, { timeout: 10000 });
 }
 
-/** The sale total in dollars, read off the summary panel. */
+/** Opens the Payment panel (one panel is open at a time; its tenders are in it). */
+async function openPayment(page: Page) {
+  const head = page.getByTestId('panel-payment-toggle');
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click();
+  await expect(head).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** The sale total in dollars, read off the Order summary. */
 async function saleTotal(page: Page): Promise<number> {
   const text = (await page.getByTestId('summary-total').textContent()) ?? '';
   return Number(text.replace(/[$,\s]/g, ''));
@@ -86,14 +90,15 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   // Ring two units of the product.
   await addOne(page, product.sku);
   await addOne(page, product.sku);
-  await expect(page.locator('[data-testid="pos-lines"] tbody tr')).toHaveCount(2);
+  await expect(page.locator('[data-testid="pos-lines"] li')).toHaveCount(2);
 
-  // Read the total off the summary panel, then pay it split: $1.00 in cash,
-  // the rest by check. The completion carries the sale's revision; the page
-  // sends the whole tender list at once.
+  // Read the total off the Order summary, then pay it split in the Payment
+  // panel: $1.00 in cash, the rest by check. The completion carries the
+  // sale's revision; the page sends the whole tender list at once.
   const total = await saleTotal(page);
   expect(total).toBeGreaterThan(1);
   await expect(page.getByTestId('pos-pay')).toContainText(`$${total.toFixed(2)}`);
+  await openPayment(page);
   await page.getByTestId('tender-cash').click();
   await page.getByLabel('Tender amount').fill('1.00');
   await page.getByRole('button', { name: 'Add as split tender' }).click();
@@ -110,7 +115,11 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-split-tender.png'), fullPage: true });
 
   await page.getByTestId('pos-pay').click();
-  await expect(page.getByText(/POS-\d+ complete/)).toBeVisible({ timeout: 15000 });
+  // The Sale complete card carries the sale's number and what it took.
+  const card = page.getByTestId('pos-complete');
+  await expect(card).toContainText('Sale complete', { timeout: 15000 });
+  await expect(card).toContainText(/POS-\d+/);
+  await expect(card).toContainText(`$${total.toFixed(2)}`);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-sale-completed.png'), fullPage: true });
 
   // Return one unit of the first line: a credit memo posts, the stock comes
@@ -125,14 +134,17 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   // A second sale paid in cash with change, then voided: the ledger returns
   // to zero and the stock comes back.
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
-  await expect(page.getByTestId('pos-empty')).toBeVisible();
+  await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await addOne(page, product.sku);
+  await openPayment(page);
   await page.getByTestId('tender-cash').click();
   await page.getByLabel('Tender amount').fill('100.00');
   await expect(page.getByTestId('pos-change')).toBeVisible();
   await page.getByRole('button', { name: 'Add as split tender' }).click();
   await page.getByTestId('pos-pay').click();
-  await expect(page.getByText(/CHANGE DUE/)).toBeVisible({ timeout: 15000 });
+  // The change is given: the card says it and the Order summary shows it.
+  await expect(page.getByTestId('pos-complete')).toContainText(/change \$\d/, { timeout: 15000 });
+  await expect(page.getByTestId('pos-order-summary')).toContainText('Change given');
 
   page.once('dialog', (dialog) => void dialog.accept('e2e: wrong customer'));
   await page.getByRole('button', { name: 'Void', exact: true }).click();
@@ -176,22 +188,29 @@ test('the counter: a charge sale to an account that asks for a purchase order', 
   await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(held.account_number) }).click();
   await expect(page.getByTestId('pos-customer-standing')).toHaveText('On hold: this account has no credit');
   await addOne(page, product.sku);
+  await page.getByTestId('pos-next-payment').click();
   const charge = page.getByRole('button', { name: 'Charge to account' });
   await expect(charge).toBeDisabled();
+  await expect(page.getByTestId('pos-account-refusal')).toContainText('no credit');
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-account-on-hold.png'), fullPage: true });
 
   // A new sale for the account with credit: its standing in words, the PO asked.
   await page.getByRole('button', { name: 'New Sale', exact: true }).click();
-  await expect(page.getByTestId('pos-empty')).toBeVisible();
+  await expect(page.getByTestId('pos-no-lines')).toBeVisible();
   await expect(page.getByTestId('pos-customer')).toContainText('Walk-in sale');
   await page.locator('#pos-customer-search').fill(account.name);
   await page.getByTestId('pos-customer-results').getByRole('button', { name: new RegExp(account.account_number) }).click();
   await expect(page.getByTestId('pos-customer-name')).toHaveText(account.name);
   await expect(page.getByTestId('pos-customer-standing')).toContainText('Credit available $50,000.00 of $50,000.00');
   await addOne(page, product.sku);
+  // Payment: the charge is off for want of the purchase order, and says so with the way on.
+  await page.getByTestId('pos-next-payment').click();
   await expect(page.getByRole('button', { name: 'Charge to account' })).toBeDisabled();
+  await expect(page.getByTestId('pos-account-refusal')).toContainText(/purchase order/i);
+  await page.getByTestId('pos-refusal-customer').click();
   await page.getByLabel(/Purchase order/).fill('PO-E2E-4471');
   await page.getByLabel(/Purchase order/).blur();
+  await openPayment(page);
   await expect(page.getByRole('button', { name: 'Charge to account' })).toBeEnabled();
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-account-charge.png'), fullPage: true });
 
@@ -199,7 +218,8 @@ test('the counter: a charge sale to an account that asks for a purchase order', 
   await page.getByRole('button', { name: 'Add as split tender' }).click();
   await expect(page.getByTestId('pos-added-tenders')).toContainText('Covered');
   await page.getByTestId('pos-pay').click();
-  await expect(page.getByText(/POS-\d+ complete/)).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('pos-complete')).toContainText('Sale complete', { timeout: 15000 });
+  await expect(page.getByTestId('pos-complete')).toContainText(/POS-\d+/);
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-account-charged.png'), fullPage: true });
 
   // The books: the sale is the account's, the invoice is open on it with the
