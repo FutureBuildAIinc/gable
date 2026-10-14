@@ -325,9 +325,9 @@
             "sku": "LUM-166-WRC"
           },
           {
-            "avg_daily": 2.98,
-            "new_point": 32,
-            "new_qty": 90,
+            "avg_daily": 4.09,
+            "new_point": 43,
+            "new_qty": 123,
             "old_point": 60,
             "old_qty": 150,
             "product_id": "<id-29>",
@@ -550,9 +550,9 @@
             "sku": "PLY-12-CDX"
           },
           {
-            "avg_daily": 5.91,
-            "new_point": 63,
-            "new_qty": 178,
+            "avg_daily": 10.36,
+            "new_point": 109,
+            "new_qty": 311,
             "old_point": 80,
             "old_qty": 200,
             "product_id": "<id-54>",
@@ -959,9 +959,9 @@
             "sku": "LUM-166-WRC"
           },
           {
-            "avg_daily": 8.93,
-            "new_point": 94,
-            "new_qty": 268,
+            "avg_daily": 12.27,
+            "new_point": 129,
+            "new_qty": 368,
             "old_point": 60,
             "old_qty": 150,
             "product_id": "<id-29>",
@@ -1184,9 +1184,9 @@
             "sku": "PLY-12-CDX"
           },
           {
-            "avg_daily": 17.73,
-            "new_point": 187,
-            "new_qty": 532,
+            "avg_daily": 31.07,
+            "new_point": 327,
+            "new_qty": 932,
             "old_point": 80,
             "old_qty": 200,
             "product_id": "<id-54>",
@@ -1590,9 +1590,9 @@
             "sku": "LUM-166-WRC"
           },
           {
-            "avg_daily": 2.98,
-            "new_point": 32,
-            "new_qty": 90,
+            "avg_daily": 4.09,
+            "new_point": 43,
+            "new_qty": 123,
             "old_point": 60,
             "old_qty": 150,
             "product_id": "<id-29>",
@@ -1815,9 +1815,9 @@
             "sku": "PLY-12-CDX"
           },
           {
-            "avg_daily": 5.91,
-            "new_point": 63,
-            "new_qty": 178,
+            "avg_daily": 10.36,
+            "new_point": 109,
+            "new_qty": 311,
             "old_point": 80,
             "old_qty": 200,
             "product_id": "<id-54>",

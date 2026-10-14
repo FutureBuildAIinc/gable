@@ -182,6 +182,37 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 					VALUES ($1, $2, $3, $4, 'UNPAID', 18816.00, 16800.00, 0.12, 2016.00, $5::date,
 						(SELECT payment_terms_id FROM customers WHERE id = $3), $6::date, $6)`,
 					invID, orderID, cid, branch, on.AddDate(0, 1, 0), on.AddDate(0, 0, 1))
+				// The two lines the subtotal is made of, in the shared line shape
+				// seed.go writes, billed on the invoice. Both products or neither:
+				// never a document whose lines disagree with its subtotal.
+				lines := []struct {
+					SKU   string
+					Qty   float64
+					Price float64
+				}{{"PLY-34-CDX", 400, 36.00}, {"LUM-21012-NO2", 100, 24.00}}
+				ready := true
+				for _, l := range lines {
+					if _, ok := skuToID[l.SKU]; !ok {
+						ready = false
+						log.Printf("Seed: Ridgeline Formwork lines not written: product %s is missing", l.SKU)
+					}
+				}
+				if ready {
+					for j, l := range lines {
+						seedExec(db, "Ridgeline order line "+l.SKU, `INSERT INTO order_lines (order_id, product_id, quantity, unit_price, line_type, position,
+								description, sku, uom, price_uom, uom_qty, price_uom_qty, priced_unit_price, price_source, line_total, taxable,
+								quantity_allocated, quantity_fulfilled)
+							SELECT $1, p.id, $3, $4, 'PRODUCT', $5,
+								COALESCE(p.description, ''), COALESCE(p.sku, ''), p.uom_primary::text, p.uom_primary::text, 1, 1, $4, 'PRICE_LIST', ROUND($3::numeric * $4::numeric, 2), TRUE,
+								0, $3
+							FROM products p WHERE p.id = $2`, orderID, skuToID[l.SKU], l.Qty, l.Price, j)
+					}
+					seedExec(db, "Ridgeline invoice lines", `INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
+							quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable)
+						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
+							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
+						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
+				}
 				ar.post(ctx, []seedInvoice{{ID: invID, CustomerID: cid, BranchID: branch, Date: on.AddDate(0, 0, 1), Subtotal: 1680000, Tax: 201600}})
 			}
 		}
