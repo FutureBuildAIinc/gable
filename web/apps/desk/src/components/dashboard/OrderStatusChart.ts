@@ -127,7 +127,7 @@ export class GableOrderStatusChart extends LitElement {
                 <div class="flex-1 min-h-0 relative p-4">
                     <div class="absolute inset-0 flex items-center justify-center flex-col pointer-events-none z-10">
                         <span class="text-4xl font-bold text-white font-mono">${this._totalOrders}</span>
-                        <span class="text-xs text-zinc-500 uppercase tracking-widest">Active</span>
+                        <span class="text-xs text-zinc-500 uppercase tracking-widest">Orders</span>
                     </div>
                     <canvas id="orderStatusCanvas" class="w-full h-full"></canvas>
                 </div>
