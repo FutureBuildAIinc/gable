@@ -274,7 +274,7 @@ export interface paths {
         get: operations["adminGetAISettings"];
         /**
          * Save the AI provider, model and keys
-         * @description Admin or owner, or a key holding admin:settings. api_key (the OpenRouter key) is required unless provider is anthropic or anthropic_api_key is given. The Anthropic key is sealed at rest and refused with a 400 naming anthropic_api_key when the server has no vault key; a model below Sonnet 5.5 is a 400 naming model. The audit row and event record the provider and model, never a key. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
+         * @description Admin or owner, or a key holding admin:settings. A save must change something: api_key (the OpenRouter key) is required only when the body names no provider, model, base_url or anthropic_api_key, so a provider alone switches back to OpenRouter and keeps both keys. The settings take effect at once, no cached value outlives the save. The Anthropic key is sealed at rest and refused with a 400 naming anthropic_api_key when the server has no vault key; a model below Sonnet 5.5 is a 400 naming model. The audit row and event record the provider and model, never a key. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
          */
         put: operations["adminSaveAISettings"];
         post?: never;
@@ -3612,7 +3612,7 @@ export interface paths {
         put?: never;
         /**
          * Parse a material list upload into catalog matched items
-         * @description Accepts multipart/form-data with one file field named file: an image, a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose sniffed type is octet-stream or zip is treated as a spreadsheet and converted to tab separated text before extraction; an unreadable spreadsheet is a 400). The whole request body is capped at 10 MiB by the server's request size middleware and the file read at 10 MiB; a body over the cap, an unparseable form or a missing file field is a 400. Requires the role admin, owner or sales. Extracted lines are matched against the whole product catalog. When the AI extractor is unavailable (OPENROUTER_API_KEY unset, the default, or the call failed) the response is still 200 but items is a fixed demo list, not the file's contents, and synthetic is true with synthetic_reason filled. source_image is always a base64 data URI of the real upload. A catalog or extraction failure is a 500.
+         * @description Accepts multipart/form-data with one file field named file: an image, a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose sniffed type is octet-stream or zip is treated as a spreadsheet and converted to tab separated text before extraction; an unreadable spreadsheet is a 400). The whole request body is capped at 10 MiB by the server's request size middleware and the file read at 10 MiB; a body over the cap, an unparseable form or a missing file field is a 400. Requires the role admin, owner or sales. Extracted lines are matched against the whole product catalog. When the AI extractor is unavailable (AI is off, the default until an administrator enters a key in Tech Admin, AI, or the call failed) the response is still 200 but items is a fixed demo list, not the file's contents, and synthetic is true with synthetic_reason filled. source_image is always a base64 data URI of the real upload. A catalog or extraction failure is a 500.
          */
         post: operations["parsingUpload"];
         delete?: never;
@@ -5398,7 +5398,7 @@ export interface paths {
         put?: never;
         /**
          * Generate PIM collateral
-         * @description Answers 500 when no AI client is configured.
+         * @description Answers 409 with code ai_off when AI is off.
          */
         post: operations["productPimGenerateCollateral"];
         delete?: never;
@@ -5418,7 +5418,7 @@ export interface paths {
         put?: never;
         /**
          * Generate PIM descriptions
-         * @description Answers 500 when no AI client is configured.
+         * @description Answers 409 with code ai_off when AI is off.
          */
         post: operations["productPimGenerateDescriptions"];
         delete?: never;
@@ -5455,7 +5455,7 @@ export interface paths {
         put?: never;
         /**
          * Generate PIM SEO content
-         * @description Answers 500 when no AI client is configured.
+         * @description Answers 409 with code ai_off when AI is off.
          */
         post: operations["productPimGenerateSeo"];
         delete?: never;
@@ -5776,7 +5776,7 @@ export interface paths {
         put?: never;
         /**
          * Upload a freight invoice
-         * @description Roles admin, owner, purchasing. Multipart form with a file field, 10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction must be configured. Every service failure (wrong status, no AI, bad extraction, nothing received) is a 400, not a 500. Returns 200, not 201.
+         * @description Roles admin, owner, purchasing. Multipart form with a file field, 10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction must be configured. A wrong status, a bad extraction or nothing received is a 400, not a 500; AI off (no key for the chosen provider) is a 409 with code ai_off and a message saying an administrator turns it on in Tech Admin, AI. Returns 200, not 201.
          */
         post: operations["purchaseOrderFreightUpload"];
         delete?: never;
@@ -6637,7 +6637,7 @@ export interface components {
         WireError: {
             error: {
                 /** @enum {string} */
-                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "ai_off" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
                 message: string;
                 details?: components["schemas"]["WireErrorDetail"][];
             };
@@ -13863,6 +13863,15 @@ export interface components {
         };
         /** @description The Idempotency-Key is already in progress under a concurrent request (code idempotency_in_progress). Written by the idempotency layer, so the ADR 0001 envelope. The operation raises no 409 of its own. */
         IdempotencyConflict: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer (image generation under the Anthropic provider). The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope. */
+        AIOffEither: {
             headers: {
                 [name: string]: unknown;
             };
@@ -25405,7 +25414,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["AIOffEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -25443,7 +25452,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["AIOffEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -25481,7 +25490,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["AIOffEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -25519,7 +25528,7 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["AIOffEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
