@@ -63,6 +63,20 @@ describe('Tech Admin AI words follow the chosen provider', () => {
     expect(body).not.toContain('AI Features Active')
   })
 
+  it('dims the features grid for a key the provider refused and lights it for a passed one', async () => {
+    const card = (body: string) => {
+      const span = Array.from(document.querySelectorAll('span')).find((s) => text(s) === 'Product Illustrations')
+      return span?.closest('div.border') as HTMLElement
+    }
+    serve({ ...BASE, provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true, anthropic_configured: true, anthropic_key_hint: '****dmin', source: 'admin', test_status: 'refused' })
+    await openAITab()
+    expect(card('refused').className).toContain('opacity-60')
+    document.body.innerHTML = ''
+    serve({ ...BASE, provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true, anthropic_configured: true, anthropic_key_hint: '****dmin', source: 'admin', test_status: 'passed' })
+    await openAITab()
+    expect(card('passed').className).not.toContain('opacity-60')
+  })
+
   it('says a saved key was not tested yet', async () => {
     serve({ ...BASE, provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true, anthropic_configured: true, anthropic_key_hint: '****real', source: 'admin', test_status: 'untested' })
     const body = text(await openAITab())

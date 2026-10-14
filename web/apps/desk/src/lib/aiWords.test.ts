@@ -45,6 +45,15 @@ describe('aiWords', () => {
         expect(providerLabel('anthropic')).toBe('Anthropic');
     });
 
+    it('never tells a person to try again with a key the provider refused', () => {
+        for (const p of ['anthropic', 'openrouter'] as const) {
+            const w = imageWords(p);
+            expect(w.failed).not.toContain('try again');
+            expect(w.failed).toContain('Tech Admin, AI Settings');
+            expect(w.refused).toBe(`${providerLabel(p)} refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.`);
+        }
+    });
+
     it('says which image kind the button makes', () => {
         expect(imageWords('anthropic').button).toBe('Generate illustration');
         expect(imageWords('anthropic').kind).toBe('illustration');

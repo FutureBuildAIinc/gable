@@ -11,6 +11,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import './ProductMediaTab'
 import type { GableProductMediaTab } from './ProductMediaTab'
 import { mountAsync, text } from '../../../test/dom'
+import type { PIMMedia } from '../../../types/pim'
 
 function stubSettings(provider: 'openrouter' | 'anthropic' | null) {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -49,5 +50,15 @@ describe('the product media tab generation words', () => {
     stubSettings(null)
     const el = await mountAsync<GableProductMediaTab>('gable-product-media-tab', { productId: 'p1' })
     expect(text(el)).toContain('Generate image')
+  })
+
+  it('says in words that the provider refused the key when an image row settled refused', async () => {
+    stubSettings('anthropic')
+    const refused = { id: 'm1', product_id: 'p1', media_type: 'hero', url: '', alt_text: '', status: 'refused', is_primary: false } as unknown as PIMMedia
+    const el = await mountAsync<GableProductMediaTab>('gable-product-media-tab', { productId: 'p1', media: [refused] })
+    const notice = el.querySelector('[data-testid="pim-ai-notice"]')
+    expect(text(notice)).toContain('Anthropic refused the saved key')
+    expect(text(notice)).toContain('Tech Admin, AI Settings')
+    expect(text(el)).not.toContain('Please try again')
   })
 })
