@@ -11,6 +11,7 @@ import (
 
 type PurchaseOrder struct {
 	ID             uuid.UUID           `json:"id"`
+	Number         string              `json:"number"`
 	BranchID       uuid.UUID           `json:"branch_id"`
 	VendorID       *uuid.UUID          `json:"vendor_id,omitempty"`
 	VendorName     string              `json:"vendor_name,omitempty"`

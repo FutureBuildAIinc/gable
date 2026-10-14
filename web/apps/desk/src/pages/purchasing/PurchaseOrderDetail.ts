@@ -5,7 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state, property, query } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
-import { formatCents, formatDollars } from '../../lib/utils.ts';
+import { formatCents, formatDollars, poLabel } from '../../lib/utils.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import { LocationService } from '../../services/LocationService';
@@ -239,7 +239,7 @@ export class PurchaseOrderDetail extends LitElement {
                     ${icon(ArrowLeft, 20, 'w-5 h-5')}
                 </button>
                 <div class="flex-1">
-                    <h1 class="text-2xl font-bold text-white">PO #${this.po.id.slice(0, 8)}</h1>
+                    <h1 class="text-2xl font-bold text-white">${poLabel(this.po)}</h1>
                     <p class="text-sm text-zinc-400 flex items-center gap-2 flex-wrap">
                         <span>Status: <span class="font-bold uppercase">${this.po.status}</span></span>
                         <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border border-white/10 bg-white/5">
