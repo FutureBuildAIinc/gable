@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- Migration: 116_customer_branches_open_documents
+-- Migration: 117_customer_branches_open_documents
 -- Description: ruling A (ADR 0007 section 5.8) makes customer_branches the
 -- record of the yards a customer trades at, and every create from now on adds
 -- the link with its first document. Documents written before that never did,
@@ -58,7 +58,7 @@ BEGIN
         INSERT INTO audit_log (action, entity_type, entity_id, user_id, changes, actor_kind, actor_id)
         SELECT 'customer.branch_linked', 'customer', p.customer_id, 'system',
                jsonb_build_object('branch_id', p.branch_id::text, 'document_type', p.document_type,
-                                  'document_id', p.document_id, 'source', 'migration 116'),
+                                  'document_id', p.document_id, 'source', 'migration 117'),
                'user', 'system'
           FROM picked p JOIN linked l ON l.customer_id = p.customer_id AND l.branch_id = p.branch_id
         RETURNING 1
@@ -80,8 +80,8 @@ BEGIN
            AND customer_id IS NOT NULL AND branch_id IS NULL
     ) x;
 
-    RAISE NOTICE '116: set % customer_branches link(s) for open documents, % audit row(s) written', set_count, audit_count;
+    RAISE NOTICE '117: set % customer_branches link(s) for open documents, % audit row(s) written', set_count, audit_count;
     IF no_branch > 0 THEN
-        RAISE NOTICE '116: % open document(s) name a customer and no branch and were left as they are', no_branch;
+        RAISE NOTICE '117: % open document(s) name a customer and no branch and were left as they are', no_branch;
     END IF;
 END $$;

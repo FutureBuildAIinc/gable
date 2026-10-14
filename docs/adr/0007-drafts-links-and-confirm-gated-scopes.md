@@ -1096,7 +1096,7 @@ quote and reorder) adds the `customer_branches` row in the same transaction
 and writes one `customer.branch_linked` audit row naming the actor, the
 document and the yard; a customer already linked adds nothing. The insert is
 the arbiter, so concurrent first documents at one yard write one link and one
-audit row (`internal/customer/customerlink`). Migration 116 adds the missing
+audit row (`internal/customer/customerlink`). Migration 117 adds the missing
 link for open documents only, from each document's own branch, idempotent,
 with a system audit row per link; its down removes nothing.
 

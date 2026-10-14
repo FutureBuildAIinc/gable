@@ -3,11 +3,11 @@
 
 package customer_test
 
-// Migration 116 (ruling A): a customer with OPEN documents at a yard it holds
+// Migration 117 (ruling A): a customer with OPEN documents at a yard it holds
 // no customer_branches row for gets the link, with one system audit row each;
 // closed documents, a customer already linked and a document with no branch
 // add nothing. The schema up to 115 is built in a scratch database, rows are
-// made the old way (no link written), and 116 is applied. Replacing the file
+// made the old way (no link written), and 117 is applied. Replacing the file
 // with SELECT 1 fails every count here.
 
 import (
@@ -20,16 +20,16 @@ import (
 	"github.com/google/uuid"
 )
 
-func notice116(notices []string, fragment string) bool {
+func notice117(notices []string, fragment string) bool {
 	for _, n := range notices {
-		if strings.HasPrefix(n, "116:") && strings.Contains(n, fragment) {
+		if strings.HasPrefix(n, "117:") && strings.Contains(n, fragment) {
 			return true
 		}
 	}
 	return false
 }
 
-func TestMigration116_LinksOpenDocumentsOnly(t *testing.T) {
+func TestMigration117_LinksOpenDocumentsOnly(t *testing.T) {
 	conn, notices := scratch113(t)
 	all, err := filepath.Glob("../../migrations/*.sql")
 	if err != nil || len(all) == 0 {
@@ -41,19 +41,19 @@ func TestMigration116_LinksOpenDocumentsOnly(t *testing.T) {
 		base := filepath.Base(f)
 		switch {
 		case strings.HasSuffix(base, "_down.sql"):
-		case strings.HasPrefix(base, "116_"):
+		case strings.HasPrefix(base, "117_"):
 			target = f
-		case base < "116_":
+		case base < "117_":
 			applyFile113(t, conn, f)
 		}
 	}
 	if target == "" {
-		t.Fatal("migration 116 not found")
+		t.Fatal("migration 117 not found")
 	}
 	ctx := context.Background()
 	home, yard := uuid.New(), uuid.New()
 	if _, err := conn.Exec(ctx, `INSERT INTO locations (id, type, code, name) VALUES
-		($1, 'BRANCH', 'M116H', 'm116 home'), ($2, 'BRANCH', 'M116Y', 'm116 yard')`, home, yard); err != nil {
+		($1, 'BRANCH', 'M117H', 'm117 home'), ($2, 'BRANCH', 'M117Y', 'm117 yard')`, home, yard); err != nil {
 		t.Fatal(err)
 	}
 	// The migrated schema forbids a quote with no branch; the legacy shape the
@@ -64,7 +64,7 @@ func TestMigration116_LinksOpenDocumentsOnly(t *testing.T) {
 	mk := func(label string) uuid.UUID {
 		id := uuid.New()
 		if _, err := conn.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id, balance_due)
-			VALUES ($1, $2, $3, $4, 10)`, id, "m116 "+label, "M116-"+id.String()[:8], home); err != nil {
+			VALUES ($1, $2, $3, $4, 10)`, id, "m117 "+label, "M117-"+id.String()[:8], home); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := conn.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, id); err != nil {
@@ -100,7 +100,7 @@ func TestMigration116_LinksOpenDocumentsOnly(t *testing.T) {
 	exec(`INSERT INTO invoices (id, customer_id, status, total_amount, subtotal, tax_rate, tax_amount, branch_id, amount_open)
 		VALUES ($1, $2, 'PAID', 50, 50, 0, 0, $3, 0)`, uuid.New(), closedOnly, yard)
 	exec(`INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, amount, status, subtotal, tax_amount, total_amount, tax_rate, memo_date)
-		VALUES ($1, $2, $3, 'USD', 'OTHER', 'm116', -5, 'DRAFT', -5, 0, -5, 0, CURRENT_DATE)`, uuid.New(), openMemo, yard)
+		VALUES ($1, $2, $3, 'USD', 'OTHER', 'm117', -5, 'DRAFT', -5, 0, -5, 0, CURRENT_DATE)`, uuid.New(), openMemo, yard)
 	exec(`INSERT INTO payments (id, customer_id, branch_id, currency, method, amount, amount_unapplied, received_on)
 		VALUES ($1, $2, $3, 'USD', 'CASH', 20, 20, CURRENT_DATE)`, uuid.New(), openPayment, yard)
 
@@ -131,7 +131,7 @@ func TestMigration116_LinksOpenDocumentsOnly(t *testing.T) {
 		AND changes->>'branch_id' = $1`, yard.String()); got != 5 {
 		t.Errorf("%d audit rows name the yard, want 5", got)
 	}
-	if !notice116(*notices, "set 5 customer_branches link(s)") || !notice116(*notices, "1 open document(s) name a customer and no branch") {
+	if !notice117(*notices, "set 5 customer_branches link(s)") || !notice117(*notices, "1 open document(s) name a customer and no branch") {
 		t.Errorf("the NOTICEs do not count the five links and the one branchless document: %v", *notices)
 	}
 	if got := scalar113[int64](t, conn, `SELECT SUM(ROUND(balance_due * 100))::bigint FROM customers`); got != balances {
@@ -145,12 +145,12 @@ func TestMigration116_LinksOpenDocumentsOnly(t *testing.T) {
 	// A second run, the down file and up again add nothing.
 	*notices = nil
 	applyFile113(t, conn, target)
-	if !notice116(*notices, "set 0 customer_branches link(s)") {
+	if !notice117(*notices, "set 0 customer_branches link(s)") {
 		t.Errorf("the second run does not report zero links: %v", *notices)
 	}
-	down, err := filepath.Glob("../../migrations/down/116_*_down.sql")
+	down, err := filepath.Glob("../../migrations/down/117_*_down.sql")
 	if err != nil || len(down) != 1 {
-		t.Fatalf("migration 116 down file: %v %v", down, err)
+		t.Fatalf("migration 117 down file: %v %v", down, err)
 	}
 	applyFile113(t, conn, down[0])
 	applyFile113(t, conn, target)
