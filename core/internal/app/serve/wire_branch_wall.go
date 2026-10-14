@@ -214,12 +214,12 @@ func (w *branchWall) invoices(mux *http.ServeMux, svc *invoice.Service) {
 // customer for a user and an unbound key, a bound key only while that customer
 // holds its pin (round 6 P1-2). The subledger and the statement keep the
 // family's wall (customer_branches, r4 P2-4): a customer outside the caller's
-// yards reads as missing there, with or without a header. The aging reads carry the repository's branch
-// wall and name no customer, so the wall passes them; the application
-// reversal walls through the invoice its application settles (the
-// repository's wall), and the reconciliation's pure GL columns are refused to
-// a scoped caller by the service, so a bound key is refused it by the route
-// allowlist gate.
+// yards reads as missing there, with or without a header. The aging reads
+// carry the repository's branch wall and name no customer, so the wall passes
+// them; the application reversal walls through the invoice its application
+// settles (the repository's wall), and the reconciliation's pure GL columns
+// are refused to a scoped caller by the service, so a bound key is refused it
+// by the route allowlist gate.
 func (w *branchWall) accounts(mux *http.ServeMux, svc *account.Service) {
 	customer := w.keyWall.CustomerBranch(accountCustomerPathOf())
 	account.NewHandler(svc).RegisterRoutes(mux,

@@ -179,6 +179,87 @@ describe('an account kept at another yard', () => {
     expect(note).not.toContain('Switch')
   })
 
+  const payment = (id: string, number: string) => ({ id, number, customer_id: CUSTOMER_ID, customer_name: 'Other Yard Co',
+    branch_id: YARD_A, status: 'posted', revision: 1, currency: 'USD', method: 'check', amount_cents: 7500,
+    unapplied_cents: 7500, received_on: '', reference: null, notes: null })
+
+  it('reads the Payments tab again after a yard switch while it is open', async () => {
+    ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
+    let switched = false
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => ({ items: [], next_cursor: null }),
+      '/api/v1/payments': () => ({ items: [switched ? payment('p2', 'PAY-000002') : payment('p1', 'PAY-000001')], next_cursor: null }),
+      '/api/v1/invoices': () => ({ items: [], next_cursor: null }),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    await openTab(el, 'Payments')
+    expect(text(el)).toContain('PAY-000001')
+    switched = true
+    window.dispatchEvent(new CustomEvent('gable:branch-changed'))
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+    await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    expect(text(el)).toContain('PAY-000002')
+    expect(text(el)).not.toContain('No unapplied cash on this account')
+  })
+
+  it('drops a payments answer for the yard the person has just left', async () => {
+    ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
+    const held: Array<() => void> = []
+    let holdPayments = false
+    let switched = false
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => ({ items: [], next_cursor: null }),
+      '/api/v1/payments': () => ({ items: [switched ? payment('p2', 'PAY-000002') : payment('p1', 'PAY-000001')], next_cursor: null }),
+      '/api/v1/invoices': () => ({ items: [], next_cursor: null }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (raw: string, init?: RequestInit) => {
+      if (holdPayments && raw.includes('/api/v1/payments') && !switched) {
+        const answer = await state.fn(raw, init)
+        await new Promise<void>(resolve => held.push(resolve))
+        return answer
+      }
+      return state.fn(raw, init)
+    }))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    holdPayments = true
+    await openTab(el, 'Payments')
+    switched = true
+    window.dispatchEvent(new CustomEvent('gable:branch-changed'))
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+    held.splice(0).forEach(release => release())
+    for (let i = 0; i < 4; i++) await new Promise(r => setTimeout(r, 0))
+    await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    expect(text(el)).toContain('PAY-000002')
+    expect(text(el)).not.toContain('PAY-000001')
+  })
+
+  it('a cleared pick retires a statement read still in flight', async () => {
+    const held: Array<() => void> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/statement')) {
+        await new Promise<void>(resolve => held.push(resolve))
+        return new Response(JSON.stringify({ customer_id: CUSTOMER_ID, customer_name: 'Old pick', from: '', to: '', job_id: null, currencies: [] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ items: [], next_cursor: null }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    const el = await mountAsync('gable-customer-statement')
+    const anyEl = el as unknown as { customerId: string; statement: { customer_name: string } | null; _loadStatement: () => Promise<void> }
+    anyEl.customerId = CUSTOMER_ID
+    const first = anyEl._loadStatement()
+    await new Promise(r => setTimeout(r, 0))
+    anyEl.customerId = ''
+    await anyEl._loadStatement()
+    held.splice(0).forEach(release => release())
+    await first
+    expect(anyEl.statement).toBeNull()
+  })
+
   it('keeps an unknown customer id on the statement page an honest error, not a yard note', async () => {
     const toast = vi.spyOn(ToastService, 'show')
     window.history.pushState({}, '', '/reports/customer-statement')

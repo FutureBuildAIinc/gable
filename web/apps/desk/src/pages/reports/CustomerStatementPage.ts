@@ -64,13 +64,14 @@ export class CustomerStatementPage extends LitElement {
             this.selectedCustomer = cust;
             this.customerId = cust.id;
             this.searchTerm = cust.name;
-            await this._loadStatement();
         } catch (err) {
             console.error(err);
             ToastService.show('Failed to load the customer for this statement', 'error');
-        } finally {
             this.loading = false;
+            return;
         }
+        // The statement read owns the loading state from here, in its own turn.
+        await this._loadStatement();
     }
 
     private _onSearchInput(e: Event) {
@@ -113,6 +114,9 @@ export class CustomerStatementPage extends LitElement {
 
     private async _loadStatement() {
         if (!this.customerId.trim()) {
+            // A read still in flight was for a pick that is gone.
+            ++this._statementSeq;
+            this.loading = false;
             ToastService.show('Pick a customer first', 'error');
             return;
         }
