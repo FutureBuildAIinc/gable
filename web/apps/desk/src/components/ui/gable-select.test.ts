@@ -113,6 +113,35 @@ describe('gable-select', () => {
     expect(button.getAttribute('aria-activedescendant')).toBe(options(el)[1].id)
   })
 
+  it('takes its name from the label property: aria-label on the combobox', async () => {
+    const el = await mountSelect({ label: 'Fruit' })
+    expect(buttonOf(el).getAttribute('aria-label')).toBe('Fruit')
+    expect(buttonOf(el).getAttribute('aria-labelledby')).toBeNull()
+  })
+
+  it('takes its name from a label[for] pointing at it, and the label click focuses it', async () => {
+    const fieldLabel = document.createElement('label')
+    fieldLabel.setAttribute('for', 'bin-picker')
+    fieldLabel.textContent = 'Bin'
+    document.body.appendChild(fieldLabel)
+    const el = document.createElement('gable-select') as GableSelect
+    el.id = 'bin-picker'
+    document.body.appendChild(el)
+    Object.assign(el, { options: FRUITS, value: 'pear' })
+    await update(el, {})
+    const button = buttonOf(el)
+    const labelledby = (button.getAttribute('aria-labelledby') ?? '').split(' ')
+    expect(labelledby.length).toBe(2)
+    const [nameEl, valueEl] = labelledby.map((id) => document.getElementById(id))
+    expect(nameEl?.textContent).toBe('Bin')
+    expect(valueEl?.textContent?.trim()).toBe('Pear')
+    expect(button.getAttribute('aria-label')).toBeNull()
+    fieldLabel.click()
+    expect(document.activeElement).toBe(button)
+    el.remove()
+    fieldLabel.remove()
+  })
+
   it('Escape closes without choosing and returns focus to the button', async () => {
     const el = await mountSelect()
     const onChange = vi.fn()
