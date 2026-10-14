@@ -187,7 +187,7 @@ export class POSTerminal extends LitElement {
     // until a till is: opening the till starts it (and reuses a remembered
     // empty one), so the till opening never leaves a second sale behind.
     if (this._till === null) return;
-    await this._startNewSale();
+    await this._beginFresh();
   }
 
   /**
@@ -245,7 +245,7 @@ export class POSTerminal extends LitElement {
       this._success = `Till opened with ${fmt(this._till.opening_float_cents)} float`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
       // Re-start the sale so it attaches to the new session.
-      void this._startNewSale();
+      void this._beginFresh();
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to open till';
     } finally {
@@ -468,13 +468,18 @@ export class POSTerminal extends LitElement {
   /** Saves the purchase order and the job the charge will carry. */
   private async _saveAccountRefs() {
     if (!this._sale || !this._customer || this._sale.status !== 'open') return;
+    const sent = this._sale;
     try {
       this._error = null;
-      this._sale = await posService.attachCustomer(this._sale.id, {
+      const answer = await posService.attachCustomer(sent.id, {
         customer_id: this._customer.id,
         customer_po: this._poText.trim() || null,
         job_id: this._jobId || null,
       });
+      // an answer for a sale that has moved on, or an older revision, is dropped
+      const now = this._sale;
+      if (!now || now.id !== answer.id || answer.revision < now.revision) return;
+      this._sale = answer;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to save the purchase order';
     }
@@ -507,7 +512,7 @@ export class POSTerminal extends LitElement {
             <button
               @click=${() => this._clearCustomer()}
               ?disabled=${hasLines || finished || this._loading}
-              title=${hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
+              title=${finished ? 'Start a new sale to change the customer' : hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
               class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Change</button>
           </div>
@@ -643,16 +648,31 @@ export class POSTerminal extends LitElement {
    */
   private _fresh: Promise<void> | null = null;
 
+  /** Every sale start goes through this one promise, so two never run at once. */
+  private _beginFresh(): Promise<void> {
+    // a start still in flight for a register no longer selected is not joined
+    if (this._fresh && this._freshReg === this._registerId) return this._fresh;
+    const flight: Promise<void> = this._startNewSale().finally(() => {
+      if (this._fresh === flight) this._fresh = null;
+    });
+    this._fresh = flight;
+    this._freshReg = this._registerId;
+    return flight;
+  }
+  private _freshReg = '';
+
   private async _readySale(): Promise<boolean> {
     if (this._till === null) {
       this._needTill();
       return false;
     }
+    // A start already in flight (New Sale, the till opening, a quick add)
+    // is awaited whatever the sale on screen says, so no second sale starts.
+    if (this._fresh) await this._fresh;
     const st = this._sale?.status;
     if (st === 'completed' || st === 'voided') {
       // Two quick adds share one fresh sale: the second waits on the first's start.
-      this._fresh ??= this._startNewSale().finally(() => { this._fresh = null; });
-      await this._fresh;
+      await this._beginFresh();
     }
     return this._sale !== null && this._sale.status === 'open';
   }
@@ -1069,7 +1089,7 @@ export class POSTerminal extends LitElement {
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
           ${this._register && this._till ? html`
-          <button @click=${() => this._startNewSale()}
+          <button @click=${() => this._beginFresh()}
             class="rounded px-4 py-1.5 text-sm ${sale?.status === 'completed' ? 'bg-gable-green font-semibold text-deep-space' : 'border border-white/20 text-slate-200'}">New Sale</button>` : nothing}
         </div>
       </header>`;

@@ -1086,6 +1086,69 @@ describe('the counter before the till opens, and after a sale completes', () => 
       el.remove();
     });
 
+    it('New Sale then a quick add starts one sale and puts the line on the sale on screen', async () => {
+      const el = await completeOne();
+      const anyEl = el as unknown as { _addItem(p: unknown, q: string): Promise<void> };
+      svc.startSale.mockClear();
+      svc.startSale.mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(sale({ id: 'new1', number: 'S-N1', lines: [] })), 40)));
+      svc.startSale.mockResolvedValue(sale({ id: 'new2', number: 'S-N2', lines: [] }));
+      svc.addItem.mockImplementation(async (id: string) => sale({ id, number: id === 'new1' ? 'S-N1' : 'S-N2', lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
+      newSale.click();
+      const p = { product_id: 'p-z', sku: 'SKU-z', description: 'Item z', uom: 'EA', unit_price_cents: 700, in_stock: '5' };
+      await anyEl._addItem(p, '1');
+      await new Promise((r) => setTimeout(r, 60));
+      await el.updateComplete;
+      expect(svc.startSale).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledWith('new1', 'p-z', '1', 'EA');
+      expect(q(el, 'pos-header').textContent).toContain('S-N1');
+      expect(q(el, 'pos-lines').textContent).toContain('Item z');
+      el.remove();
+    });
+
+    it('locks Change, purchase order and job on a completed account sale', async () => {
+      const withJob = { ...account, jobs: [{ id: 'j1', name: 'Back patio' }] } as unknown as CounterCustomer;
+      svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', customer_id: 'cu1' }));
+      const el = await mount(sale({ customer_id: 'cu1' }));
+      (el as unknown as { _customer: CounterCustomer | null })._customer = withJob;
+      await el.updateComplete;
+      await typeInto(el, '100.00');
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Change') as HTMLButtonElement;
+      expect(change.disabled).toBe(true);
+      expect(change.title).toBe('Start a new sale to change the customer');
+      expect((el.querySelector('#pos-po') as HTMLInputElement).disabled).toBe(true);
+      expect((el.querySelector('#pos-job') as HTMLSelectElement).disabled).toBe(true);
+      el.remove();
+    });
+
+    it('ignores an attach answer for a sale no longer on screen or an older revision', async () => {
+      const el = await completeOne();
+      const anyEl = el as unknown as { _customer: CounterCustomer | null; _sale: Sale; _poText: string; _saveAccountRefs(): Promise<void> };
+      anyEl._sale = sale({ id: 'open1', status: 'open', revision: 5 } as Partial<Sale>);
+      anyEl._customer = account;
+      anyEl._poText = 'PO-1';
+      let answer!: (s: Sale) => void;
+      svc.attachCustomer.mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+      const saving = anyEl._saveAccountRefs();
+      // the screen moves on to another sale before the answer
+      const moved = sale({ id: 'open2', number: 'S-2', status: 'open', revision: 1 } as Partial<Sale>);
+      anyEl._sale = moved;
+      answer(sale({ id: 'open1', status: 'open', revision: 6 } as Partial<Sale>));
+      await saving;
+      expect(anyEl._sale).toBe(moved);
+      // the same sale, an older revision than the one on screen
+      const newer = sale({ id: 'open2', status: 'open', revision: 9 } as Partial<Sale>);
+      anyEl._sale = newer;
+      svc.attachCustomer.mockResolvedValueOnce(sale({ id: 'open2', status: 'open', revision: 8 } as Partial<Sale>));
+      await anyEl._saveAccountRefs();
+      expect(anyEl._sale).toBe(newer);
+      el.remove();
+    });
+
     it('never sends a customer change for a completed or voided sale', async () => {
       const el = await completeOne();
       const anyEl = el as unknown as { _customer: CounterCustomer | null; _sale: Sale; _saveAccountRefs(): Promise<void>; _clearCustomer(): Promise<void> };
