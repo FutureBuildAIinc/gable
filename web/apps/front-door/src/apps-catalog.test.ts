@@ -122,6 +122,18 @@ describe('tilesFor role filter', () => {
     expect(tilesFor(custom, ['warehouse']).map((t) => t.key)).toEqual(['desk', 'quote']);
     expect(tilesFor(custom, ['sales']).map((t) => t.key)).toEqual(['desk']);
   });
+
+  it('a cashier persona sees the counter and not purchasing (the door carries the persona role)', () => {
+    const wider = [
+      app({ key: 'pos' }),
+      app({ key: 'purchase_order' }),
+      app({ key: 'vendor' }),
+      app({ key: 'quote' }),
+      app({ key: 'invoice' }),
+    ];
+    expect(tilesFor(wider, ['cashier']).map((t) => t.key)).toEqual(['desk', 'pos']);
+    expect(tilesFor(wider, ['purchasing']).map((t) => t.key)).toEqual(['desk', 'purchase_order', 'vendor']);
+  });
 });
 
 describe('loadAppsCatalog', () => {

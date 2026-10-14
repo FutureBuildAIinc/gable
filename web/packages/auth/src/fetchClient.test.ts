@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { fetchWithAuth, SESSION_EXPIRED_EVENT } from './fetchClient'
 import { authCustody } from './custody'
+import { BRANCH_STORAGE_KEY } from './branch'
 
 let fetchMock: ReturnType<typeof vi.fn>
 
@@ -82,7 +83,7 @@ describe('fetchWithAuth — header construction', () => {
   })
 
   it('attaches the selected branch for multi-branch installs', async () => {
-    localStorage.setItem('gable_current_branch_id', 'branch-7')
+    localStorage.setItem(BRANCH_STORAGE_KEY, 'branch-7')
     await fetchWithAuth('/api/v1/orders')
     expect(sentHeaders().get('X-Branch-Id')).toBe('branch-7')
   })
@@ -154,10 +155,10 @@ describe('fetchWithAuth — HTTP error handling', () => {
   })
 
   it('leaves the branch selection intact across a 401', async () => {
-    localStorage.setItem('gable_current_branch_id', 'branch-7')
+    localStorage.setItem(BRANCH_STORAGE_KEY, 'branch-7')
     fetchMock.mockResolvedValue(new Response('', { status: 401 }))
     await expect(fetchWithAuth('/api/v1/orders', { retries: 0 })).rejects.toThrow()
-    expect(localStorage.getItem('gable_current_branch_id')).toBe('branch-7')
+    expect(localStorage.getItem(BRANCH_STORAGE_KEY)).toBe('branch-7')
   })
 
   /**
