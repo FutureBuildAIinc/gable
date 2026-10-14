@@ -87,6 +87,13 @@ const ScheduleStatusStored = "STORED"
 // cmd/server/main.go wires. Scheduler.Start registers exactly these rows.
 const ScheduleStatusActive = "ACTIVE"
 
+// ScheduleStatusPaused is the status of a schedule that must not fire:
+// Scheduler.Start skips it. A run the fail closed rule refuses (no creator
+// recorded, a creator holding no branch grant) sets it, once, so the
+// schedule neither fires nor audits again until a caller with report access
+// recreates it.
+const ScheduleStatusPaused = "PAUSED"
+
 type ReportSchedule struct {
 	ID             string   `json:"id"`
 	ReportID       string   `json:"report_id"`
@@ -98,6 +105,16 @@ type ReportSchedule struct {
 	NextRunAt      *string  `json:"next_run_at,omitempty"`
 	CreatedAt      string   `json:"created_at"`
 	UpdatedAt      string   `json:"updated_at"`
+
+	// CreatedBy is the creating caller's subject, the same text
+	// user_locations keys grants by, and CreatorIsAdmin records that the
+	// creator held the administrator or owner role when the schedule was
+	// made (the repository has no users table, so the role cannot be
+	// re-read at run time). The scheduled run resolves its reach from
+	// these two facts afresh at every run (SEC-NOHEADER-1): a schedule
+	// with no creator recorded never runs.
+	CreatedBy      string `json:"created_by,omitempty"`
+	CreatorIsAdmin bool   `json:"creator_is_admin"`
 }
 
 // ScheduleExecution tells a client whether stored schedules actually run, and

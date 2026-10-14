@@ -5,6 +5,7 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -18,7 +19,9 @@ import (
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // PriceCalculator resolves customer-specific pricing for a product.
@@ -59,6 +62,57 @@ type Service struct {
 	tillLedger   TillLedgerPoster
 	auditLog     *audit.Logger
 	logger       *slog.Logger
+	grants       *middleware.BranchGuard
+}
+
+// holdRecordBranch refuses an act on a record whose own branch is outside
+// what the caller may target while the context carries no branch, the
+// record act arm of the no header rule (SEC-NOHEADER-1): a caller that
+// sends the header keeps the repository's equality answer, an administrator
+// keeps its reach, and a record that does not exist never reaches this
+// hold (the branch readers answer it separately, so the act serves the
+// module's 404 rather than a refusal naming a branch a missing record
+// cannot carry). A record of no branch is refused for a no header user,
+// because no grant decides it (the same clause that refuses a user with no
+// grants at all); an administrator and a header caller keep the reach the
+// rule gives them.
+func (s *Service) holdRecordBranch(ctx context.Context, what string, branch *uuid.UUID, id uuid.UUID) error {
+	if err := s.grants.CheckGrantsBranch(ctx, branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return &RecordBranchRefusedError{What: what, ID: id}
+		}
+		return err
+	}
+	return nil
+}
+
+// holdSaleBranch holds a sale's own branch to the caller before any act on
+// it runs. The branch is read with no wall, because the walled read a
+// no header user's grant hides the record with would answer before the
+// refusal could (a hidden record reads as missing, an unheld one must
+// refuse by name, SEC-NOHEADER-1). A sale that does not exist answers the
+// module's 404.
+func (s *Service) holdSaleBranch(ctx context.Context, txID uuid.UUID) error {
+	branch, found, err := s.repo.TransactionBranch(ctx, txID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return &MissingRecordError{What: "transaction", ID: txID}
+	}
+	return s.holdRecordBranch(ctx, "transaction", branch, txID)
+}
+
+// getTransaction reads a sale for an act, answering a sale the caller's
+// wall hides exactly like one that does not exist: the module's 404, so a
+// hidden record is missing (never the record refusal's 403, which would
+// name a branch, and never the bare 500 a raw no rows error maps to).
+func (s *Service) getTransaction(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
+	tx, err := s.repo.GetTransaction(ctx, txID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, &MissingRecordError{What: "transaction", ID: txID}
+	}
+	return tx, err
 }
 
 // WithTillLedger wires GL posting of till drawer over/short at close.
@@ -111,6 +165,7 @@ func NewService(
 		invoiceSvc:   invoiceSvc,
 		paymentSvc:   paymentSvc,
 		logger:       logger,
+		grants:       middleware.NewBranchGuard(db),
 	}
 }
 
@@ -143,12 +198,17 @@ func (s *Service) StartTransaction(ctx context.Context, registerID string, cashi
 
 // AddItem adds a product to the transaction cart.
 func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRequest) (*POSTransaction, error) {
+	// An act on a record of a branch outside the caller's grants is refused
+	// by name before anything runs (SEC-NOHEADER-1).
+	if err := s.holdSaleBranch(ctx, txID); err != nil {
+		return nil, err
+	}
 	// The transaction must be visible before anything is written: the read
 	// carries the branch predicate, so a transaction of a branch the caller's
 	// branch context may not target (or a missing one) names nothing the
 	// caller may add to, and the line insert never happens (round 6 P1-2:
 	// the insert used to land and the recalculation fail after it).
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	tx, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -193,6 +253,14 @@ func (s *Service) AddItem(ctx context.Context, txID uuid.UUID, req AddLineItemRe
 
 // RemoveItem removes a line item from the transaction.
 func (s *Service) RemoveItem(ctx context.Context, txID uuid.UUID, itemID uuid.UUID) (*POSTransaction, error) {
+	if err := s.holdSaleBranch(ctx, txID); err != nil {
+		return nil, err
+	}
+	// The sale must be visible before a line goes: a sale the caller's wall
+	// hides is a missing record (the module's 404), and nothing is deleted.
+	if _, err := s.getTransaction(ctx, txID); err != nil {
+		return nil, err
+	}
 	if err := s.repo.RemoveLineItem(ctx, itemID); err != nil {
 		return nil, err
 	}
@@ -205,11 +273,15 @@ func (s *Service) RemoveItem(ctx context.Context, txID uuid.UUID, itemID uuid.UU
 func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tenders []AddTenderRequest) (*POSTransaction, error) {
 	var result *POSTransaction
 
+	if err := s.holdSaleBranch(ctx, txID); err != nil {
+		return nil, err
+	}
+
 	// Phase 0 — pre-transaction validation + card charging. Gateway calls
 	// happen OUTSIDE the DB transaction: they're slow, non-transactional,
 	// and must not hold row locks. A post-charge DB failure is logged
 	// CRITICAL for manual reconciliation (same policy as payment.Service).
-	pre, err := s.repo.GetTransaction(ctx, txID)
+	pre, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +351,7 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID, tende
 
 	err = s.db.RunInTx(ctx, func(ctx context.Context) error {
 		// 1. Re-read inside the transaction
-		tx, err := s.repo.GetTransaction(ctx, txID)
+		tx, err := s.getTransaction(ctx, txID)
 		if err != nil {
 			return err
 		}
@@ -456,8 +528,12 @@ func (s *Service) buildAccountInvoice(tx *POSTransaction, accountPortionCents in
 func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
 	var result *POSTransaction
 
+	if err := s.holdSaleBranch(ctx, txID); err != nil {
+		return nil, err
+	}
+
 	err := s.db.RunInTx(ctx, func(ctx context.Context) error {
-		tx, err := s.repo.GetTransaction(ctx, txID)
+		tx, err := s.getTransaction(ctx, txID)
 		if err != nil {
 			return err
 		}
@@ -521,7 +597,7 @@ func (s *Service) VoidTransaction(ctx context.Context, txID uuid.UUID) (*POSTran
 
 // GetTransaction returns a full transaction with line items and tenders.
 func (s *Service) GetTransaction(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	tx, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -546,7 +622,7 @@ func (s *Service) SearchProducts(ctx context.Context, query string) ([]QuickSear
 
 // recalculateTotals sums line items and updates the transaction.
 func (s *Service) recalculateTotals(ctx context.Context, txID uuid.UUID) (*POSTransaction, error) {
-	tx, err := s.repo.GetTransaction(ctx, txID)
+	tx, err := s.getTransaction(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -652,6 +728,13 @@ func (s *Service) SyncOfflineTransactions(ctx context.Context, req OfflineSyncRe
 	}
 	if reqBranch := branchctx.IDForQuery(ctx); reqBranch != nil && *reqBranch != *branch {
 		return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
+	}
+	// A caller with no branch in context is held to the caller's grants.
+	if err := s.grants.CheckGrantsBranch(ctx, branch); err != nil {
+		if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+			return nil, &RegisterBranchRefusedError{RegisterID: req.RegisterID}
+		}
+		return nil, err
 	}
 
 	syncTag := "offline-v1"

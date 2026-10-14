@@ -393,7 +393,8 @@ func (r *PostgresRepository) GetOrder(ctx context.Context, id uuid.UUID) (*Order
 // GetOrderByNumber reads an order by its document number, behind the same
 // branch wall the id read carries, for the record URLs that name the number
 // (ADR 0007 section 7). It resolves the id and reads through GetOrder, so
-// both spellings answer exactly the same body.
+// both spellings answer exactly the same body; a caller with no context
+// branch is held by the service's record check, the quote module's twin.
 func (r *PostgresRepository) GetOrderByNumber(ctx context.Context, number string) (*Order, error) {
 	var id uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
@@ -730,14 +731,20 @@ func holdReasonArg(h *HoldReason) any {
 	return string(*h)
 }
 
-const listFilters = `
-	WHERE ($1::uuid IS NULL OR o.branch_id = $1)
+// listFilters is the list and count predicate; the grants parameter sits at
+// the tail of each caller's argument list, whose position the caller passes
+// in (the no header rule, SEC-NOHEADER-1: a user with no branch in context
+// lists the granted branches' orders only).
+func listFilters(grants int) string {
+	return `
+	WHERE ` + middleware.Wall("o", 1, grants) + `
 	  AND (cardinality($2::text[]) = 0 OR o.status = ANY($2))
 	  AND ($3::uuid IS NULL OR o.customer_id = $3)
 	  AND ($4::uuid IS NULL OR o.project_id = $4)
 	  AND ($5::uuid IS NULL OR o.ship_to_id = $5)
 	  AND ($6::text IS NULL OR o.delivery_type = $6)
 	  AND ($7::uuid IS NULL OR o.quote_id = $7)`
+}
 
 func statusStrings(states []OrderStatus) []string {
 	out := make([]string, len(states))
@@ -753,12 +760,13 @@ func (r *PostgresRepository) ListOrders(ctx context.Context, f ListFilter) ([]Or
 		delivery = string(*f.DeliveryType)
 	}
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
-		SELECT `+summaryColumns+summaryFrom+listFilters+`
+		SELECT `+summaryColumns+summaryFrom+listFilters(11)+`
 		  AND ($8::timestamptz IS NULL OR (o.created_at, o.id) < ($8, $9::uuid))
 		ORDER BY o.created_at DESC, o.id DESC
 		LIMIT $10`,
 		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, f.JobID, f.ShipToID,
-		delivery, f.QuoteID, f.AfterTime, f.AfterID, f.Limit)
+		delivery, f.QuoteID, f.AfterTime, f.AfterID, f.Limit,
+		middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list orders: %w", err)
 	}
@@ -781,9 +789,9 @@ func (r *PostgresRepository) CountOrders(ctx context.Context, f ListFilter) (int
 	}
 	var n int64
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT count(*) FROM orders o`+listFilters,
+		`SELECT count(*) FROM orders o`+listFilters(8),
 		middleware.BranchIDForQuery(ctx), statusStrings(f.Statuses), f.CustomerID, f.JobID, f.ShipToID,
-		delivery, f.QuoteID).Scan(&n)
+		delivery, f.QuoteID, middleware.GrantsSubForQuery(ctx)).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("failed to count orders: %w", err)
 	}
@@ -1347,12 +1355,13 @@ func (r *PostgresRepository) ListFulfillmentRequests(ctx context.Context, f Requ
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT q.delivery_id, q.order_id, q.position, q.attempts, q.last_error, q.parked_at, q.created_at
 		FROM order_fulfillment_requests q JOIN orders o ON o.id = q.order_id
-		WHERE ($1::uuid IS NULL OR o.branch_id = $1)
+		WHERE `+middleware.Wall("o", 1, 6)+`
 		  AND ($2::bool IS NULL OR (q.parked_at IS NOT NULL) = $2)
 		  AND ($3::uuid IS NULL OR q.order_id = $3)
 		  AND ($4::bigint IS NULL OR q.position > $4)
 		ORDER BY q.position LIMIT $5`,
-		middleware.BranchIDForQuery(ctx), f.Parked, f.OrderID, f.AfterPosition, f.Limit)
+		middleware.BranchIDForQuery(ctx), f.Parked, f.OrderID, f.AfterPosition, f.Limit,
+		middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to list the fulfilment requests: %w", err)
 	}

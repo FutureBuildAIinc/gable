@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -382,8 +383,10 @@ type ExposureFilter struct {
 	Offset        int
 }
 
-// ListExposureForOwner returns the at-risk-quotes table. When SalespersonID is
-// nil it returns across all owners (caller must enforce role).
+// ListExposureForOwner returns the at-risk-quotes table, walled to the
+// caller's reach (SEC-NOHEADER-1): the branch a header names, or a no header
+// user's grants. When SalespersonID is nil it returns across all owners
+// (caller must enforce role).
 func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, f ExposureFilter) ([]ExposureRow, error) {
 	limit := f.Limit
 	if limit <= 0 {
@@ -392,6 +395,11 @@ func (r *PostgresExposureRepository) ListExposureForOwner(ctx context.Context, f
 
 	pb := &paramBuilder{}
 	clauses := []string{"q.state IN ('SENT','ACCEPTED')"}
+	_ = pb.add(middleware.BranchIDForQuery(ctx))
+	branchN := len(pb.args)
+	_ = pb.add(middleware.GrantsSubForQuery(ctx))
+	grantsN := len(pb.args)
+	clauses = append(clauses, middleware.Wall("q", branchN, grantsN))
 	if f.SalespersonID != nil {
 		clauses = append(clauses, "c.salesperson_id = "+pb.add(*f.SalespersonID))
 	}
@@ -497,8 +505,10 @@ func availableActionsForState(state string) []string {
 	}
 }
 
-// PortfolioRollup computes the owner's exposure portfolio. If salespersonFilter
-// is non-nil, the rollup is scoped to that salesperson's book.
+// PortfolioRollup computes the owner's exposure portfolio, walled to the
+// caller's reach (SEC-NOHEADER-1) through each quote's branch. If
+// salespersonFilter is non-nil, the rollup is scoped to that salesperson's
+// book.
 func (r *PostgresExposureRepository) PortfolioRollup(ctx context.Context, salespersonFilter *uuid.UUID) (*PortfolioSummary, error) {
 	exec := r.db.GetExecutor(ctx)
 
@@ -510,6 +520,11 @@ func (r *PostgresExposureRepository) PortfolioRollup(ctx context.Context, salesp
 		args = append(args, *salespersonFilter)
 		idx++
 	}
+	args = append(args, middleware.BranchIDForQuery(ctx))
+	branchN := len(args)
+	args = append(args, middleware.GrantsSubForQuery(ctx))
+	grantsN := len(args)
+	quoteWall := " AND " + middleware.Wall("q", branchN, grantsN)
 
 	summaryQ := fmt.Sprintf(`
 		SELECT
@@ -518,7 +533,7 @@ func (r *PostgresExposureRepository) PortfolioRollup(ctx context.Context, salesp
 			COUNT(DISTINCT q.customer_id)                      AS total_customers
 		FROM quotes q
 		JOIN customers c ON c.id = q.customer_id
-		WHERE q.state IN ('SENT', 'ACCEPTED') AND q.exposure_state <> 'OK'%s`, salespersonClause)
+		WHERE q.state IN ('SENT', 'ACCEPTED') AND q.exposure_state <> 'OK'%s%s`, salespersonClause, quoteWall)
 
 	out := &PortfolioSummary{ByCustomer: []PortfolioCustomerRow{}, BySalesperson: []PortfolioSalespersonRow{}}
 	if err := exec.QueryRow(ctx, summaryQ, args...).Scan(&out.TotalExposureDollars, &out.TotalQuotes, &out.TotalCustomers); err != nil {
@@ -545,10 +560,10 @@ func (r *PostgresExposureRepository) PortfolioRollup(ctx context.Context, salesp
 			MAX(q.exposure_last_checked_at) AS last_activity_at
 		FROM customers c
 		JOIN quotes q ON q.customer_id = c.id
-		WHERE q.state IN ('SENT','ACCEPTED') AND q.exposure_state <> 'OK'%s
+		WHERE q.state IN ('SENT','ACCEPTED') AND q.exposure_state <> 'OK'%s%s
 		GROUP BY c.id, c.name, c.price_escalation_policy
 		ORDER BY SUM(q.exposure_dollars) DESC
-		LIMIT 50`, salespersonClause)
+		LIMIT 50`, salespersonClause, quoteWall)
 	rows, err := exec.Query(ctx, byCustomerQ, args...)
 	if err != nil {
 		return nil, fmt.Errorf("portfolio by customer: %w", err)
@@ -579,10 +594,10 @@ func (r *PostgresExposureRepository) PortfolioRollup(ctx context.Context, salesp
 			FROM sales_team st
 			JOIN customers c ON c.salesperson_id = st.id
 			JOIN quotes q ON q.customer_id = c.id
-			WHERE q.state IN ('SENT','ACCEPTED') AND q.exposure_state <> 'OK'
+			WHERE q.state IN ('SENT','ACCEPTED') AND q.exposure_state <> 'OK' AND ` + middleware.Wall("q", 1, 2) + `
 			GROUP BY st.id, st.name
 			ORDER BY SUM(q.exposure_dollars) DESC`
-		spRows, err := exec.Query(ctx, bySpQ)
+		spRows, err := exec.Query(ctx, bySpQ, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 		if err != nil {
 			return nil, fmt.Errorf("portfolio by salesperson: %w", err)
 		}

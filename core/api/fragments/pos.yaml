@@ -119,6 +119,11 @@ paths:
       tags:
       - pos
       summary: Add a line item
+      description: >-
+        A transaction that does not exist, or sits outside the caller's
+        branch context or wall, answers 404, the same for both; nothing is
+        written. A caller with no branch in context who holds no grant for
+        the transaction's branch is refused 403 by name.
       parameters:
       - name: id
         in: path
@@ -147,6 +152,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
@@ -161,6 +168,10 @@ paths:
       tags:
       - pos
       summary: Remove a line item
+      description: >-
+        A transaction that does not exist, or sits outside the caller's
+        branch context or wall, answers 404, the same for both, and no line
+        is removed.
       parameters:
       - name: id
         in: path
@@ -188,6 +199,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}/complete:
@@ -196,8 +209,9 @@ paths:
       tags:
       - pos
       summary: Complete a transaction with tenders
-      description: An empty tenders list answers 400. Every service failure (an under-tendered sale, a
-        declined card, a transaction not OPEN) answers 422.
+      description: An empty tenders list answers 400. A transaction that does not exist, or sits outside
+        the caller's branch context or wall, answers 404, the same for both. Every other service failure
+        (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
       parameters:
       - name: id
         in: path
@@ -242,12 +256,18 @@ paths:
                 oneOf:
                   - $ref: '#/components/schemas/Error'
                   - $ref: '#/components/schemas/WireError'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/pos/transactions/{id}/void:
     post:
       operationId: posTransactionVoid
       tags:
       - pos
       summary: Void a transaction
+      description: >-
+        A transaction that does not exist, or sits outside the caller's
+        branch context or wall, answers 404, the same for both; nothing is
+        written.
       parameters:
       - name: id
         in: path
@@ -276,6 +296,8 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/products/search:
@@ -475,7 +497,12 @@ paths:
       tags:
       - pos
       summary: Close a till session
-      description: Every service failure, such as a session not OPEN, answers 409.
+      description: >-
+        Every service failure, such as a session not OPEN, answers 409; a
+        session that does not exist, or sits outside the caller's branch
+        context or wall, answers 404, the same for both; nothing is written.
+        A caller with no branch in context who holds no grant for the
+        session's branch is refused 403 by name.
       parameters:
       - name: id
         in: path
@@ -510,6 +537,8 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /api/v1/pos/till/{id}/zreport:
     get:
       operationId: posTillZReport

@@ -156,7 +156,7 @@ paths:
       tags: [accounts]
       summary: Get account summary
       description: >-
-        The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404.
+        The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404, and so is a customer outside the caller's branches (customer_branches held to the reach, header or no header).
       parameters:
         - name: id
           in: path
@@ -184,7 +184,7 @@ paths:
       tags: [accounts]
       summary: List account transactions
       description: >-
-        The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope.
+        The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope. A customer outside the caller's branches is 404, header or no header.
       parameters:
         - name: id
           in: path
@@ -293,7 +293,7 @@ paths:
       tags: [ar]
       summary: Customer statement
       description: >-
-        Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today.
+        Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today. A customer outside the caller's branches is 404, header or no header.
       parameters:
         - name: id
           in: path
@@ -10284,6 +10284,8 @@ paths:
       tags:
         - pos
       summary: Add a line item
+      description: >-
+        A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both; nothing is written. A caller with no branch in context who holds no grant for the transaction's branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -10312,6 +10314,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
@@ -10326,6 +10330,8 @@ paths:
       tags:
         - pos
       summary: Remove a line item
+      description: >-
+        A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both, and no line is removed.
       parameters:
         - name: id
           in: path
@@ -10353,6 +10359,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/pos/transactions/{id}/complete:
@@ -10361,7 +10369,7 @@ paths:
       tags:
         - pos
       summary: Complete a transaction with tenders
-      description: An empty tenders list answers 400. Every service failure (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
+      description: An empty tenders list answers 400. A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both. Every other service failure (an under-tendered sale, a declined card, a transaction not OPEN) answers 422.
       parameters:
         - name: id
           in: path
@@ -10390,6 +10398,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
@@ -10409,6 +10419,8 @@ paths:
       tags:
         - pos
       summary: Void a transaction
+      description: >-
+        A transaction that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both; nothing is written.
       parameters:
         - name: id
           in: path
@@ -10431,6 +10443,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '413':
@@ -10634,7 +10648,8 @@ paths:
       tags:
         - pos
       summary: Close a till session
-      description: Every service failure, such as a session not OPEN, answers 409.
+      description: >-
+        Every service failure, such as a session not OPEN, answers 409; a session that does not exist, or sits outside the caller's branch context or wall, answers 404, the same for both; nothing is written. A caller with no branch in context who holds no grant for the session's branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -10663,6 +10678,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/ForbiddenEither'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/ConflictEither'
         '413':
@@ -12838,7 +12855,7 @@ paths:
       tags: [purchaseOrder]
       summary: Create a manual purchase order
       description: >-
-        Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400. Any service failure (unknown vendor, bad line product id) is a 500.
+        Roles admin, owner, purchasing. Creates a DRAFT order with source MANUAL. A vendor_id that is not a UUID is a 400, and so is a branch_id that is not a UUID. With no X-Branch-Id the branch comes from the caller's grants (one granted branch writes there; several answer a 400 naming branch_id; none answer a 403 naming branch_id, SEC-NOHEADER-1), never the deployment default; a body branch_id the caller may not target is a 403 naming branch_id. Any other service failure (unknown vendor, bad line product id) is a 500.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -14141,7 +14158,7 @@ paths:
       tags: [reporting]
       summary: Schedule a saved report for emailed delivery
       description: >-
-        Roles admin, owner, finance. report_id, cron_expression and at least one recipient are required (400 otherwise). format defaults to CSV and is case insensitive; anything outside CSV, XLSX and PDF is a 400. The cron expression is six fields with seconds first; a five field expression is a 400. The status in the request is ignored: the row is ACTIVE when a scheduler is attached (the shipped server) and STORED otherwise. A report_id that is not a saved report violates the foreign key and is a 500, as is a scheduler that cannot register the row (the row stays saved).
+        Roles admin, owner, finance. report_id, cron_expression and at least one recipient are required (400 otherwise). format defaults to CSV and is case insensitive; anything outside CSV, XLSX and PDF is a 400. The cron expression is six fields with seconds first; a five field expression is a 400. The status in the request is ignored: the row is ACTIVE when a scheduler is attached (the shipped server) and STORED otherwise. A report_id that is not a saved report violates the foreign key and is a 500, as is a scheduler that cannot register the row (the row stays saved). The schedule records its creator from the caller's token subject (created_by and creator_is_admin in a body are ignored); a caller with no identity (an unbound key, the dev caller, a token with an empty subject) is a 409 naming the missing caller identity, because a schedule with no creator recorded can never run. A run the fail closed rule refuses pauses the schedule (status PAUSED) and writes one audit row.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -14400,7 +14417,7 @@ paths:
       tags: [tax]
       summary: Create a tax exemption
       description: >-
-        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500.
+        Roles admin, owner, finance. customer_id and exempt_reason are required (400). The exemption is created active and effective now. expiry_date is a YYYY-MM-DD string; any other format is a 500. A customer outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -14429,7 +14446,7 @@ paths:
       tags: [tax]
       summary: List a customer's tax exemptions
       description: >-
-        Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer.
+        Roles admin, owner, finance. Every exemption of the customer, active or not, newest first; an array that is empty, never null, for an unknown customer. A user whose reach does not hold the customer (the context branch, or the granted branches when no header is sent) gets 404, as the customer's own route answers.
       parameters:
         - name: customerID
           in: path
@@ -14449,6 +14466,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/exemptions/{id}:
     delete:
@@ -14456,7 +14474,7 @@ paths:
       tags: [tax]
       summary: Delete a tax exemption
       description: >-
-        Roles admin, owner, finance. A hard delete. An unknown id still answers 204.
+        Roles admin, owner, finance. A hard delete. An unknown id still answers 204. An exemption whose customer is outside the user's reach answers 404 and is not deleted.
       parameters:
         - name: id
           in: path
@@ -14470,6 +14488,7 @@ paths:
         "400": {$ref: "#/components/responses/BadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/v1/tax/preview:
     post:
@@ -14477,7 +14496,7 @@ paths:
       tags: [tax]
       summary: Preview tax on a cart or invoice
       description: >-
-        Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents.
+        Roles admin, owner, finance. At least one line is required (400). document_type defaults to SalesInvoice. An exempt customer gets a zero tax result; otherwise Avalara is used when configured and a flat rate estimate (is_estimate true) when not. Amounts are int64 cents. A customer_id, or a ship_to_id of a customer, outside the user's reach is refused 403 naming customer_id.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -15574,15 +15593,33 @@ components:
         documents_cents: {type: integer, format: int64}
     ArLedgerRow:
       type: object
-      required: [currency, receivable_ledger_cents, balance_sum_cents, deposits_ledger_cents, unapplied_sum_cents, receivable_in_sync, deposits_in_sync]
+      description: >-
+        One currency's ledger comparison. For a scoped caller (a branch a header names, or a user whose grants scope a no header read) the two GL account balances and their in sync flags are absent: they are pure books figures no branch fact can divide, and the two sums cover the caller's reach only.
+      required: [currency, balance_sum_cents, unapplied_sum_cents]
       properties:
         currency: {type: string}
-        receivable_ledger_cents: {type: integer, format: int64}
-        balance_sum_cents: {type: integer, format: int64}
-        deposits_ledger_cents: {type: integer, format: int64}
-        unapplied_sum_cents: {type: integer, format: int64}
-        receivable_in_sync: {type: boolean}
-        deposits_in_sync: {type: boolean}
+        receivable_ledger_cents:
+          type: integer
+          format: int64
+          description: Account 1020's posted balance; absent for a scoped caller.
+        balance_sum_cents:
+          type: integer
+          format: int64
+          description: The sum of the customers' balance_due over the caller's reach.
+        deposits_ledger_cents:
+          type: integer
+          format: int64
+          description: Account 2200's posted balance; absent for a scoped caller.
+        unapplied_sum_cents:
+          type: integer
+          format: int64
+          description: The sum of posted unapplied cash over the caller's reach.
+        receivable_in_sync:
+          type: boolean
+          description: Whether 1020 equals the balance sum; absent for a scoped caller.
+        deposits_in_sync:
+          type: boolean
+          description: Whether 2200 equals the unapplied sum; absent for a scoped caller.
     ArReconciliation:
       type: object
       required: [customers, currencies]
@@ -25428,6 +25465,11 @@ components:
           type: string
           format: uuid
           description: Required in effect; a non UUID value is a 400.
+        branch_id:
+          type: string
+          format: uuid
+          description: >-
+            The branch the order is bought for. Required in effect for a caller whose grants hold several branches and sends no X-Branch-Id; with no branch anywhere the caller's grants decide (one grant writes there, none is a 403), never the deployment default.
         lines:
           type: array
           items:
@@ -26357,8 +26399,9 @@ components:
           description: CSV, XLSX or PDF, case insensitive; empty means CSV.
     ReportingSchedule:
       type: object
-      description: reporting.ReportSchedule. The timestamps are Postgres ::text strings.
-      required: [id, report_id, cron_expression, recipients, status, format, created_at, updated_at]
+      description: >-
+        reporting.ReportSchedule. The timestamps are Postgres ::text strings. created_by and creator_is_admin record the creating caller the run resolves its reach from (SEC-NOHEADER-1): a schedule with no creator never runs.
+      required: [id, report_id, cron_expression, recipients, status, format, creator_is_admin, created_at, updated_at]
       properties:
         id:
           type: string
@@ -26374,7 +26417,7 @@ components:
             type: string
         status:
           type: string
-          description: ACTIVE when a scheduler is attached, STORED when none is.
+          description: ACTIVE when a scheduler is attached, STORED when none is, PAUSED once a run was refused for its creator's reach, after which it no longer fires.
         format:
           type: string
           enum: [CSV, XLSX, PDF]
@@ -26384,6 +26427,14 @@ components:
         next_run_at:
           type: string
           description: Absent until the first run. Postgres timestamptz text.
+        created_by:
+          type: string
+          description: >-
+            The creating caller's subject, the same text user_locations keys grants by; empty when no caller identity was recorded (the run refuses such a schedule).
+        creator_is_admin:
+          type: boolean
+          description: >-
+            True when the creator held the administrator or owner role when the schedule was made, whose run keeps the every branch view.
         created_at:
           type: string
           description: Postgres timestamptz text.

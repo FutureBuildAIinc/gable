@@ -9,17 +9,22 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
 // Repository defines the data access interface for dashboard metrics.
-// All methods accept a branchID; pass nil for the admin "all branches" view.
+// branchID and grantsSub are the caller's reach (SEC-NOHEADER-1, the
+// principal's ruling on the reporting surface): pass the branch a header
+// names, or the user sub whose user_locations grants scope a no header
+// caller, or both nil for the every branch view an administrator or owner
+// keeps.
 type Repository interface {
-	GetDashboardSummary(ctx context.Context, branchID *uuid.UUID) (*DashboardSummary, error)
-	GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, limit int) ([]InventoryAlert, error)
-	GetTopCustomers(ctx context.Context, branchID *uuid.UUID, limit int, days int) ([]TopCustomer, error)
-	GetOrderActivity(ctx context.Context, branchID *uuid.UUID, limit int) (*OrderActivity, error)
-	GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, days int) ([]RevenueTrendPoint, error)
+	GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error)
+	GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) ([]InventoryAlert, error)
+	GetTopCustomers(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int, days int) ([]TopCustomer, error)
+	GetOrderActivity(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) (*OrderActivity, error)
+	GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, grantsSub *string, days int) ([]RevenueTrendPoint, error)
 }
 
 // PostgresRepository implements Repository for Postgres.
@@ -33,8 +38,9 @@ func NewRepository(db *database.DB) *PostgresRepository {
 }
 
 // GetDashboardSummary returns all aggregate KPIs in a single query using a CTE.
-// When branchID is nil, the query aggregates across all branches.
-func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID) (*DashboardSummary, error) {
+// The caller's reach walls every arm (the payments arms through the order or
+// the invoice their payment settles, the rest through their own branch).
+func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	summary := &DashboardSummary{}
 
 	now := time.Now()
@@ -42,8 +48,9 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	todayEnd := todayStart.Add(24 * time.Hour)
 	yesterdayStart := todayStart.AddDate(0, 0, -1)
 
-	// Payments are joined to invoices→orders so we can filter by the order's
-	// branch_id without adding a branch column to the payments table.
+	// Payments are joined to invoices→orders so the reach covers the payment
+	// through either document's branch, the pair the header rule read before.
+	paymentWall := "(" + middleware.Wall("o", 4, 5) + " OR " + middleware.Wall("i", 4, 5) + ")"
 	query := `
 		WITH today_rev AS (
 			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
@@ -51,7 +58,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			LEFT JOIN invoices i ON i.id = p.invoice_id
 			LEFT JOIN orders o ON o.id = i.order_id
 			WHERE p.created_at >= $1 AND p.created_at < $2
-			  AND ($4::uuid IS NULL OR o.branch_id = $4 OR i.branch_id = $4)
+			  AND ` + paymentWall + `
 		),
 		yesterday_rev AS (
 			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
@@ -59,26 +66,26 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			LEFT JOIN invoices i ON i.id = p.invoice_id
 			LEFT JOIN orders o ON o.id = i.order_id
 			WHERE p.created_at >= $3 AND p.created_at < $1
-			  AND ($4::uuid IS NULL OR o.branch_id = $4 OR i.branch_id = $4)
+			  AND ` + paymentWall + `
 		),
 		active_ord AS (
 			SELECT COUNT(*) AS val
 			FROM orders
 			WHERE status IN ('PENDING', 'CONFIRMED', 'PROCESSING', 'READY', 'ALLOCATED')
-			  AND ($4::uuid IS NULL OR branch_id = $4)
+			  AND ` + middleware.Wall("", 4, 5) + `
 		),
 		pending_disp AS (
 			SELECT COUNT(*) AS val
 			FROM deliveries d
 			LEFT JOIN orders o ON o.id = d.order_id
 			WHERE d.status IN ('PENDING', 'ASSIGNED')
-			  AND ($4::uuid IS NULL OR o.branch_id = $4)
+			  AND ` + middleware.Wall("o", 4, 5) + `
 		),
 		outstanding AS (
 			SELECT (COALESCE(SUM(total_amount), 0) * 100)::bigint AS amount, COUNT(*) AS cnt
 			FROM invoices
 			WHERE status IN ('UNPAID', 'PARTIAL')
-			  AND ($4::uuid IS NULL OR branch_id = $4)
+			  AND ` + middleware.Wall("", 4, 5) + `
 		)
 		SELECT
 			(SELECT val FROM today_rev),
@@ -90,7 +97,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	`
 
 	var todayRevenue, yesterdayRevenue int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID, grantsSub).Scan(
 		&todayRevenue,
 		&yesterdayRevenue,
 		&summary.ActiveOrders,
@@ -110,9 +117,9 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	return summary, nil
 }
 
-// GetInventoryAlerts returns products with low or zero stock.
-// Filters by the location's branch_id when branchID is non-nil.
-func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, limit int) ([]InventoryAlert, error) {
+// GetInventoryAlerts returns products with low or zero stock, walled to the
+// caller's reach through the stocking location's branch.
+func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) ([]InventoryAlert, error) {
 	query := `
 		SELECT
 			p.id, p.sku, p.description,
@@ -127,11 +134,11 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 		LEFT JOIN inventory i ON p.id = i.product_id
 		LEFT JOIN locations l ON l.id = i.location_id
 		WHERE COALESCE(i.quantity, 0) <= COALESCE(p.reorder_point, 10)
-		  AND ($2::uuid IS NULL OR l.branch_id = $2)
+		  AND ` + middleware.Wall("l", 2, 3) + `
 		ORDER BY COALESCE(i.quantity, 0) ASC, p.sku ASC, i.location_id ASC
 		LIMIT $1
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, branchID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, branchID, grantsSub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query inventory alerts: %w", err)
 	}
@@ -152,9 +159,9 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 	return alerts, nil
 }
 
-// GetTopCustomers returns top customers by revenue in the given period.
-// Filters by the order's branch_id when branchID is non-nil.
-func (r *PostgresRepository) GetTopCustomers(ctx context.Context, branchID *uuid.UUID, limit int, days int) ([]TopCustomer, error) {
+// GetTopCustomers returns top customers by revenue in the given period,
+// walled to the caller's reach through each order's branch.
+func (r *PostgresRepository) GetTopCustomers(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int, days int) ([]TopCustomer, error) {
 	cutoff := time.Now().AddDate(0, 0, -days)
 	query := `
 		SELECT
@@ -163,14 +170,14 @@ func (r *PostgresRepository) GetTopCustomers(ctx context.Context, branchID *uuid
 			COUNT(DISTINCT o.id) as order_count
 		FROM customers c
 		LEFT JOIN orders o ON c.id = o.customer_id AND o.created_at >= $1
-			AND ($3::uuid IS NULL OR o.branch_id = $3)
+			AND ` + middleware.Wall("o", 3, 4) + `
 		LEFT JOIN invoices inv ON o.id = inv.order_id
 		GROUP BY c.id, c.name
 		HAVING COALESCE(SUM(inv.total_amount), 0) > 0
 		ORDER BY total_revenue DESC, c.name ASC, c.id ASC
 		LIMIT $2
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, cutoff, limit, branchID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, cutoff, limit, branchID, grantsSub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query top customers: %w", err)
 	}
@@ -191,8 +198,9 @@ func (r *PostgresRepository) GetTopCustomers(ctx context.Context, branchID *uuid
 	return customers, nil
 }
 
-// GetOrderActivity returns recent orders and status breakdown.
-func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uuid.UUID, limit int) (*OrderActivity, error) {
+// GetOrderActivity returns recent orders and status breakdown, walled to the
+// caller's reach.
+func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) (*OrderActivity, error) {
 	activity := &OrderActivity{
 		RecentOrders:    make([]RecentOrder, 0),
 		StatusBreakdown: make(map[string]int),
@@ -203,11 +211,11 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 		SELECT o.id, c.name, (o.total_amount * 100)::bigint, o.status, o.created_at
 		FROM orders o
 		LEFT JOIN customers c ON o.customer_id = c.id
-		WHERE ($2::uuid IS NULL OR o.branch_id = $2)
+		WHERE ` + middleware.Wall("o", 2, 3) + `
 		ORDER BY o.created_at DESC, o.id DESC
 		LIMIT $1
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryRecent, limit, branchID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, queryRecent, limit, branchID, grantsSub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query recent orders: %w", err)
 	}
@@ -235,10 +243,10 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 		SELECT status, COUNT(*)
 		FROM orders
 		WHERE created_at >= NOW() - INTERVAL '30 days'
-		  AND ($1::uuid IS NULL OR branch_id = $1)
+		  AND ` + middleware.Wall("", 1, 2) + `
 		GROUP BY status
 	`
-	statusRows, err := r.db.GetExecutor(ctx).Query(ctx, queryStatus, branchID)
+	statusRows, err := r.db.GetExecutor(ctx).Query(ctx, queryStatus, branchID, grantsSub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query order status breakdown: %w", err)
 	}
@@ -259,8 +267,9 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 	return activity, nil
 }
 
-// GetRevenueTrend returns daily revenue for the last N days.
-func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, days int) ([]RevenueTrendPoint, error) {
+// GetRevenueTrend returns daily revenue for the last N days, walled to the
+// caller's reach through the order or the invoice each payment settles.
+func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, grantsSub *string, days int) ([]RevenueTrendPoint, error) {
 	query := `
 		SELECT
 			DATE(p.created_at) as date,
@@ -269,11 +278,11 @@ func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, branchID *uuid
 		LEFT JOIN invoices i ON i.id = p.invoice_id
 		LEFT JOIN orders o ON o.id = i.order_id
 		WHERE p.created_at >= NOW() - MAKE_INTERVAL(days => $1)
-		  AND ($2::uuid IS NULL OR o.branch_id = $2 OR i.branch_id = $2)
+		  AND (` + middleware.Wall("o", 2, 3) + " OR " + middleware.Wall("i", 2, 3) + `)
 		GROUP BY DATE(p.created_at)
 		ORDER BY date ASC
 	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, days, branchID)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, days, branchID, grantsSub)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query revenue trend: %w", err)
 	}
