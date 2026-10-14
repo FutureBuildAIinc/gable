@@ -102,6 +102,15 @@ async function setValue(host: GablePricingMatrix, value: string) {
 }
 
 describe('PricingMatrix', () => {
+  it('reads as switched off, not as a failure, when the server runs without category pricing (404)', async () => {
+    respond = () => new Response('404 page not found', { status: 404, headers: { 'Content-Type': 'text/plain' } })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const el = await open()
+    expect(text(el)).toContain('Category pricing is off on this server')
+    expect(text(el)).not.toContain('Failed to load pricing matrix')
+    expect(consoleError).not.toHaveBeenCalled()
+  })
+
   it('renders the rule value from value_pct and reads the matrix with a plain GET', async () => {
     const el = await open()
     expect(calls[0].method).toBe('GET')
