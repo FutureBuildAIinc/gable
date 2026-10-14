@@ -264,7 +264,9 @@ export class POSTerminal extends LitElement {
       this._tillBusy = true;
       this._tillReport = await posService.tillReport(this._till.id);
       // Seed blind-count inputs for every method the drawer expects (+ cash).
-      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {})]);
+      // The report answers in storage spelling (CASH, CHECK); the close route
+      // takes the wire's lowercase, so each method is one lowercase row.
+      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {}).map((m) => m.toLowerCase())]);
       const seed: Record<string, string> = {};
       methods.forEach((m) => { seed[m] = ''; });
       this._counts = seed;
@@ -1136,7 +1138,7 @@ export class POSTerminal extends LitElement {
       </p>
       ${methods.map((m) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <label style="width:90px;font-size:13px;color:#c9d1d9;text-transform:capitalize">${m}</label>
+          <label style="width:90px;font-size:13px;color:#c9d1d9">${methodLabel(m as TenderMethod)}</label>
           <input type="number" step="0.01" .value=${this._counts[m]}
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
             style="flex:1;box-sizing:border-box;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;text-align:right;outline:none" placeholder="0.00" />
