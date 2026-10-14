@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -97,6 +98,17 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, ErrCountNeedsLocation) {
 			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "location_required",
 				Message: "This product is held in more than one location here. Count each location and name the one you counted."})
+			return
+		}
+		if errors.Is(err, ErrWouldGoNegative) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "insufficient_stock",
+				Message: "That adjustment would take the location below zero. Name the location the stock is in and adjust that one."})
+			return
+		}
+		var below *BelowAllocatedError
+		if errors.As(err, &below) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "below_allocated",
+				Message: fmt.Sprintf("The count of %g is below the %g allocated to orders at this location. Count at least the allocated figure, or release the orders first.", below.Counted, below.Allocated)})
 			return
 		}
 		slog.Error("AdjustStock failed", "error", err)

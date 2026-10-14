@@ -32,6 +32,19 @@ var ErrLocationOutsideBranch = errors.New("inventory: the named location is not 
 // the caller names the location it counted.
 var ErrCountNeedsLocation = errors.New("inventory: this product is held in more than one location here; name the location you counted")
 
+// ErrWouldGoNegative refuses an adjustment whose result would be below zero at
+// the row it lands on; a delta that names no location lands on the oldest row,
+// which can be empty while the yard holds plenty.
+var ErrWouldGoNegative = errors.New("inventory: the adjustment would take the location below zero")
+
+// BelowAllocatedError refuses an absolute count under the figure already
+// allocated to orders at that location: allocated stock is promised.
+type BelowAllocatedError struct{ Counted, Allocated float64 }
+
+func (e *BelowAllocatedError) Error() string {
+	return fmt.Sprintf("inventory: a count of %g is below the %g allocated to orders at this location", e.Counted, e.Allocated)
+}
+
 type Service struct {
 	repo   Repository
 	levels LevelStore // the levels read's store (C3-1b), when the repo can serve it
@@ -51,10 +64,16 @@ func NewService(repo Repository) *Service {
 // AdjustStock handles receipt (Add) or cycle count (Set/Adjust)
 func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) error {
 	// A count is an absolute figure for one location. With no location named
-	// it can only be a guess when the product sits in several, so it is
-	// refused in words, never written to the oldest row.
+	// it is a guess: refused in words where the caller has no branch context
+	// (it would create a row with no location beside the real one), and where
+	// the product sits in more than one location in the caller's reach (it
+	// would overwrite the oldest row). The reach is the read that applies the
+	// caller's branch or grants.
 	if req.LocationID == nil && !req.IsDelta {
-		rows, err := s.repo.ListInventoryByProductAndBranch(ctx, req.ProductID, branchctx.IDForQuery(ctx))
+		if branchctx.IDForQuery(ctx) == nil {
+			return ErrCountNeedsLocation
+		}
+		rows, err := s.repo.ListInventoryByProduct(ctx, req.ProductID)
 		if err != nil {
 			return err
 		}
@@ -88,6 +107,9 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 	if req.IsDelta {
 		inv.Quantity += req.Quantity
 	} else {
+		if req.Quantity >= 0 && req.Quantity < inv.Allocated {
+			return &BelowAllocatedError{Counted: req.Quantity, Allocated: inv.Allocated}
+		}
 		inv.Quantity = req.Quantity
 	}
 
@@ -96,7 +118,7 @@ func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) e
 	// than persist negative inventory, which corrupts availability math
 	// downstream (Allocate/Fulfill) and the double-entry move total.
 	if inv.Quantity < 0 {
-		return fmt.Errorf("adjustment would drive stock negative for product %s (resulting quantity %g)", req.ProductID, inv.Quantity)
+		return fmt.Errorf("%w: product %s (resulting quantity %g)", ErrWouldGoNegative, req.ProductID, inv.Quantity)
 	}
 
 	return s.repo.UpdateInventory(ctx, inv)
