@@ -63,10 +63,6 @@ export class GableKPICard extends LitElement {
 
         return html`
             <div class="rounded-xl border border-white/10 bg-slate-steel/50 hover:bg-slate-steel/70 hover:border-white/20 transition-all duration-300 cursor-pointer group relative overflow-hidden">
-                <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity duration-300 transform group-hover:scale-110">
-                    ${this.iconHtml ? html`<div class="text-current scale-150">${this.iconHtml}</div>` : nothing}
-                </div>
-
                 <div class="p-6 relative z-10">
                     <div class="flex items-center justify-between mb-2">
                         <h3 class="text-sm font-medium text-zinc-400 font-sans tracking-wide">${this.cardTitle}</h3>
