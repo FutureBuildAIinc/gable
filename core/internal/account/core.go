@@ -56,10 +56,10 @@ func NewService(db *database.DB, glSvc *gl.Service, logger *slog.Logger) *Servic
 	return &Service{db: db, gl: glSvc, logger: logger, now: time.Now}
 }
 
-// WithClock sets the clock the business day of the acts is read on (the
+// WithClockForTest sets the clock the business day of the acts is read on (the
 // service reads time.Now otherwise); a test that moves the time of a whole
 // flow sets the same clock on every service of the flow.
-func (s *Service) WithClock(now func() time.Time) *Service { s.now = now; return s }
+func (s *Service) WithClockForTest(now func() time.Time) *Service { s.now = now; return s }
 
 // conflict is a 409 with a blocker, the shape the refusals of section 9 take.
 func conflict(code, message string) *httpx.Error {

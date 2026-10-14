@@ -212,7 +212,7 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 		return nil, err
 	}
 	pays, err := s.ex(ctx).Query(ctx, `
-		SELECT p.id, p.number, p.currency, to_char(p.received_on, 'YYYY-MM-DD'),
+		SELECT p.id, p.number, p.currency, to_char(p.received_on, 'YYYY-MM-DD'), (`+wall("p", 4, 5)+`) AS visible,
 		       ROUND(p.amount * 100)::bigint
 		       - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
 		            WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.applied_on <= $2::date AND (a.reversed_on IS NULL OR a.reversed_on > $2::date)), 0)
@@ -221,7 +221,7 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 		FROM payments p
 		WHERE p.customer_id = $1 AND p.received_on <= $2::date AND (p.voided_on IS NULL OR p.voided_on > $2::date)
 		  AND ($3::uuid IS NULL OR p.project_id = $3)
-		ORDER BY p.received_on, p.number`, q.CustomerID, date(q.To), q.JobID)
+		ORDER BY p.received_on, p.number`, q.CustomerID, date(q.To), q.JobID, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read the unapplied cash: %w", err)
 	}
@@ -229,7 +229,8 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 		var u UnappliedPayment
 		var cur string
 		var open int64
-		if err := pays.Scan(&u.ID, &u.Number, &cur, &u.ReceivedOn, &open); err != nil {
+		var visible bool
+		if err := pays.Scan(&u.ID, &u.Number, &cur, &u.ReceivedOn, &visible, &open); err != nil {
 			pays.Close()
 			return nil, fmt.Errorf("failed to scan an unapplied payment: %w", err)
 		}
@@ -243,7 +244,11 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 			byCur[cur] = sc
 			order = append(order, cur)
 		}
-		sc.UnappliedPayments = append(sc.UnappliedPayments, u)
+		// the documents listed follow the caller's reach; the balances cover
+		// the whole account behind the customer wall (FROM-PRINCIPAL 117)
+		if visible {
+			sc.UnappliedPayments = append(sc.UnappliedPayments, u)
+		}
 		sc.UnappliedCents += u.UnappliedCents
 	}
 	pays.Close()
