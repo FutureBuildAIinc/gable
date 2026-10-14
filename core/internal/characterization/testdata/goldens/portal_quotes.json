@@ -697,7 +697,7 @@
           "lines": [
             {
               "customer_note": "",
-              "description": "5/8 Drywall Firecode 4x8",
+              "description": "5/8 Drywall Type X 4x8",
               "id": "<id-37>",
               "is_special_order": false,
               "line_total": 819,
@@ -847,7 +847,7 @@
             },
             {
               "customer_note": "",
-              "description": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
+              "description": "Vented Soffit Fibre Cement Textured 1/4 X 24 X 8",
               "id": "<id-59>",
               "is_special_order": false,
               "line_total": 2703.75,
@@ -873,7 +873,7 @@
             },
             {
               "customer_note": "",
-              "description": "Cemtrim Textured 7/16 X 6 X 12",
+              "description": "Composite Trim Textured 7/16 X 6 X 12",
               "id": "<id-62>",
               "is_special_order": false,
               "line_total": 1504.44,
@@ -919,7 +919,7 @@
             },
             {
               "customer_note": "",
-              "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
+              "description": "Vented Soffit Fibre Cement Textured 1/4 X 16 X 12",
               "id": "<id-67>",
               "is_special_order": false,
               "line_total": 3687.62,
@@ -932,7 +932,7 @@
             },
             {
               "customer_note": "",
-              "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
+              "description": "Vented Soffit Fibre Cement Textured 1/4 X 16 X 12",
               "id": "<id-69>",
               "is_special_order": false,
               "line_total": 274.61,
@@ -945,7 +945,7 @@
             },
             {
               "customer_note": "",
-              "description": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
+              "description": "Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier",
               "id": "<id-70>",
               "is_special_order": false,
               "line_total": 463.32,

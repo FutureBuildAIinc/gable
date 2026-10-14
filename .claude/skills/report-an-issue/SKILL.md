@@ -41,8 +41,7 @@ Then help them write the *private* report using the same evidence-gathering belo
 here — do not draft a public issue.
 
 **The one exception people trip over:** the demo and staging deployments run with
-`AUTH_MODE=dev`, which intentionally disables login and treats everyone as the seeded
-`demo@gable.com` admin. On a deployment that is *deliberately* a demo or staging sandbox
+`AUTH_MODE=dev`, which intentionally disables login and treats everyone as an admin. On a deployment that is *deliberately* a demo or staging sandbox
 that is expected and safe (the data is fake). It is only a security issue if you find it on
 a host that is meant to be real. See `SECURITY.md` § "`AUTH_MODE=dev` must never reach production".
 

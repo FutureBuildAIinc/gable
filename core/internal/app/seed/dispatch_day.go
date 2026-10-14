@@ -144,7 +144,7 @@ var productGeometry = []geometry{
 	noGeometry("HANGER-28"),
 	noGeometry("HANGER-210"),
 	noGeometry("TIE-H1"),
-	noGeometry("SIMP-LUS28"),
+	noGeometry("HANGER-28FM"),
 
 	// --- Insulation: compressed bags ---
 	dims("INS-R13-15", 48, 16, 20, true),

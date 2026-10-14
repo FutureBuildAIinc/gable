@@ -228,25 +228,25 @@ func fixtureOrders() []IntegrationOrderResponse {
 
 func fixtureStaff() map[string]*staffLookup {
 	return map[string]*staffLookup{
-		"dispatcher@gable.com": {
-			Found: true, ID: staffUUID, Email: "dispatcher@gable.com",
+		"dispatcher@gablebuildingsupply.example": {
+			Found: true, ID: staffUUID, Email: "dispatcher@gablebuildingsupply.example",
 			Name: "Dana Ramirez", Role: "dispatcher", Active: true,
 			Modules: []string{"ai_lm"},
 		},
-		"onleave@gable.com": {
+		"onleave@gablebuildingsupply.example": {
 			// Granted the module but deactivated: entitlement must be false.
-			Found: true, ID: staffUUID, Email: "onleave@gable.com",
+			Found: true, ID: staffUUID, Email: "onleave@gablebuildingsupply.example",
 			Name: "Sam Vega", Role: "dispatcher", Active: false,
 			Modules: []string{"ai_lm"},
 		},
-		"yard@gable.com": {
+		"yard@gablebuildingsupply.example": {
 			// Active, but AI_LM is not among their effective modules.
-			Found: true, ID: staffUUID, Email: "yard@gable.com",
+			Found: true, ID: staffUUID, Email: "yard@gablebuildingsupply.example",
 			Name: "Yuki Tan", Role: "yard", Active: true,
 			Modules: []string{"pos"},
 		},
-		"noroles@gable.com": {
-			Found: true, ID: staffUUID, Email: "noroles@gable.com",
+		"noroles@gablebuildingsupply.example": {
+			Found: true, ID: staffUUID, Email: "noroles@gablebuildingsupply.example",
 			Name: "Pat Doe", Role: "", Active: true, Modules: nil,
 		},
 	}
@@ -337,7 +337,7 @@ func TestAILMEndpointsRequireIntegrationKey(t *testing.T) {
 		{http.MethodGet, "/api/integration/locations", ""},
 		{http.MethodGet, "/api/integration/orders?date=2026-08-21&status=CONFIRMED", ""},
 		{http.MethodPost, "/api/integration/delivery-routes", `{"vehicle_id":"` + vehicleUUID + `"}`},
-		{http.MethodPost, "/api/integration/validate-staff", `{"email":"dispatcher@gable.com"}`},
+		{http.MethodPost, "/api/integration/validate-staff", `{"email":"dispatcher@gablebuildingsupply.example"}`},
 	}
 
 	cases := []struct {
@@ -1043,45 +1043,45 @@ func TestValidateStaff(t *testing.T) {
 	}{
 		{
 			name:     "entitled staff member",
-			body:     `{"email":"dispatcher@gable.com"}`,
+			body:     `{"email":"dispatcher@gablebuildingsupply.example"}`,
 			wantCode: http.StatusOK,
-			wantJSON: `{"staff_id":"` + staffUUID + `","email":"dispatcher@gable.com",
+			wantJSON: `{"staff_id":"` + staffUUID + `","email":"dispatcher@gablebuildingsupply.example",
 			            "name":"Dana Ramirez","entitled":true,
 			            "roles":["dispatcher"],"modules":["ai_lm"]}`,
 		},
 		{
 			name:     "email lookup is case-insensitive",
-			body:     `{"email":"Dispatcher@Gable.com"}`,
+			body:     `{"email":"Dispatcher@GableBuildingSupply.Example"}`,
 			wantCode: http.StatusOK,
-			wantJSON: `{"staff_id":"` + staffUUID + `","email":"dispatcher@gable.com",
+			wantJSON: `{"staff_id":"` + staffUUID + `","email":"dispatcher@gablebuildingsupply.example",
 			            "name":"Dana Ramirez","entitled":true,
 			            "roles":["dispatcher"],"modules":["ai_lm"]}`,
 		},
 		{
 			name: "granted but deactivated staff member is not entitled",
-			body: `{"email":"onleave@gable.com"}`,
+			body: `{"email":"onleave@gablebuildingsupply.example"}`,
 			// 200, not 401: AI_LM's client turns any non-2xx into a transport
 			// error and would report "GableLBM is down" for a failed login.
 			wantCode: http.StatusOK,
-			wantJSON: `{"staff_id":"` + staffUUID + `","email":"onleave@gable.com",
+			wantJSON: `{"staff_id":"` + staffUUID + `","email":"onleave@gablebuildingsupply.example",
 			            "name":"Sam Vega","entitled":false,
 			            "roles":["dispatcher"],"modules":["ai_lm"]}`,
 		},
 		{
 			name:     "active staff member without the ai_lm module is not entitled",
-			body:     `{"email":"yard@gable.com"}`,
+			body:     `{"email":"yard@gablebuildingsupply.example"}`,
 			wantCode: http.StatusOK,
-			wantJSON: `{"staff_id":"` + staffUUID + `","email":"yard@gable.com",
+			wantJSON: `{"staff_id":"` + staffUUID + `","email":"yard@gablebuildingsupply.example",
 			            "name":"Yuki Tan","entitled":false,
 			            "roles":["yard"],"modules":["pos"]}`,
 		},
 		{
 			name: "roles and modules are never null",
-			body: `{"email":"noroles@gable.com"}`,
+			body: `{"email":"noroles@gablebuildingsupply.example"}`,
 			// AI_LM copies Roles straight into a JWT claim; a null would
 			// marshal as `null` in the token instead of an empty array.
 			wantCode: http.StatusOK,
-			wantJSON: `{"staff_id":"` + staffUUID + `","email":"noroles@gable.com",
+			wantJSON: `{"staff_id":"` + staffUUID + `","email":"noroles@gablebuildingsupply.example",
 			            "name":"Pat Doe","entitled":false,"roles":[],"modules":[]}`,
 		},
 		{
