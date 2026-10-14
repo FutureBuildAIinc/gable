@@ -588,7 +588,7 @@ Rules:
 // 400); the no-key guard here is a backstop that preserves the helpful message.
 func (c *Client) ExtractFreightInvoice(ctx context.Context, fileBytes []byte, contentType string) (*FreightInvoiceResult, string, error) {
 	if !c.IsConfigured(ctx) {
-		return nil, "", fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key; enter the freight total manually")
+		return nil, "", fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key; please enter the freight total manually")
 	}
 
 	if c.activeProvider(ctx) == ProviderAnthropic {
