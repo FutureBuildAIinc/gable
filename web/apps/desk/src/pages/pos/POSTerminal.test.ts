@@ -2488,3 +2488,28 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     el.remove();
   });
 });
+
+describe('PR 150 round 4: one rule for splits', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('pays a card added then cash added above what is owed, with 3.50 change', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    for (const [m, amt] of [['card', '40.00'], ['cash', '50.00']] as const) {
+      q(el, `tender-${m}`).click();
+      await el.updateComplete;
+      await typeInto(el, amt);
+      q(el, 'pos-add-tender').click();
+      await el.updateComplete;
+    }
+    expect(q(el, 'pos-tenders-over')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$3.50');
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 5000 },
+    ]);
+    el.remove();
+  });
+});

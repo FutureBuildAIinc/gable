@@ -46,3 +46,55 @@ describe('panelProgress', () => {
     expect(panelProgress('customer', true)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
   });
 });
+
+describe('payPlan, the one rule for splits', () => {
+  // card, check and account together never exceed the total; the change
+  // never exceeds the cash tendered; everything else pays
+  const t = (method: 'cash' | 'card' | 'check' | 'account', amount_cents: number) => ({ method, amount_cents });
+  const TOTAL = 8650;
+
+  it('pays a card added then cash added above what is owed, with the change from the cash', () => {
+    const plan = payPlan(TOTAL, [t('card', 4000), t('cash', 5000)], null);
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.changeCents).toBe(350);
+  });
+
+  const pays: [string, ReturnType<typeof t>[], ReturnType<typeof t> | null, number][] = [
+    ['two cards that fill the total', [t('card', 4000)], t('card', 4650), 0],
+    ['a card added and a check typed that fill it', [t('card', 4000)], t('check', 4650), 0],
+    ['cash, card added and cash typed above', [t('cash', 2000), t('card', 3000)], t('cash', 5000), 1350],
+    ['an account portion and cash above', [t('account', 4000)], t('cash', 6000), 1350],
+    ['an account charge for the whole total', [], t('account', 8650), 0],
+    ['cash above the total', [], t('cash', 10000), 1350],
+    ['the whole total added as a card, a card typed beside it ignored', [t('card', 8650)], t('card', 1000), 0],
+  ];
+  for (const [name, added, entry, change] of pays) {
+    it(`pays ${name}`, () => {
+      const plan = payPlan(TOTAL, added, entry);
+      expect(plan.ok).toBe(true);
+      if (plan.ok) expect(plan.changeCents).toBe(change);
+    });
+  }
+
+  const refuses: [string, ReturnType<typeof t>[], ReturnType<typeof t> | null, string][] = [
+    ['two cards above the total', [t('card', 4000)], t('card', 5000), 'typed'],
+    ['a card and a check above it', [t('card', 4000)], t('check', 5000), 'typed'],
+    ['a card typed above the total', [], t('card', 10000), 'typed'],
+    ['an account amount typed above it', [t('cash', 2000)], t('account', 9000), 'typed'],
+    ['added non cash tenders above a reduced total', [t('card', 6000)], null, 'added'],
+  ];
+  for (const [name, added, entry, kind] of refuses) {
+    it(`refuses ${name}`, () => {
+      const plan = payPlan(name.includes('reduced') ? 5000 : TOTAL, added, entry);
+      expect(plan.ok).toBe(false);
+      if (!plan.ok) expect(plan.over).toBe(kind);
+    });
+  }
+
+  it('still pays cash added above a reduced total, and non cash that fits it', () => {
+    expect(payPlan(5000, [t('cash', 8650)], null).ok).toBe(true);
+    const plan = payPlan(5000, [t('card', 4000), t('cash', 4650)], null);
+    expect(plan.ok).toBe(true);
+    if (plan.ok) expect(plan.changeCents).toBe(3650);
+  });
+});
