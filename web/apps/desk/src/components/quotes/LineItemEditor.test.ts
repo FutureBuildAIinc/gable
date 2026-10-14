@@ -45,6 +45,7 @@ const PRODUCT: Product = {
   board_length_ft: null,
   random_length: false,
   units: [],
+  image_url: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
@@ -140,5 +141,31 @@ describe('LineItemEditor', () => {
     price.dispatchEvent(new Event('change', { bubbles: true }))
     await update(el, {})
     expect(price.value).toBe('4.675')
+  })
+})
+
+describe('LineItemEditor search result pictures', () => {
+  it('shows a thumb beside a result whose product has a picture', async () => {
+    const withPic = { ...PRODUCT, id: 'p-pic', sku: 'PIC-1', image_url: '/catalog-illustrations/a.svg' }
+    const noPic = { ...PRODUCT, id: 'p-none', sku: 'PIC-2', image_url: null }
+    const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [withPic, noPic] })
+    const input = q<HTMLInputElement>(el, 'input[type="text"]')
+    input.value = 'PIC'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    const results = Array.from(el.querySelectorAll('.cursor-pointer'))
+    expect(results.length).toBe(2)
+    expect(results[0].querySelector('gable-product-thumb img')?.getAttribute('src')).toBe('/catalog-illustrations/a.svg')
+    expect(results[1].querySelector('gable-product-thumb img')).toBeNull()
+  })
+
+  it('draws no thumb element while no product has a picture', async () => {
+    const el = await mount<GableLineItemEditor>('gable-line-item-editor', { products: [{ ...PRODUCT, sku: 'NOPIC-1' }] })
+    const input = q<HTMLInputElement>(el, 'input[type="text"]')
+    input.value = 'NOPIC'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    expect(el.querySelectorAll('.cursor-pointer').length).toBe(1)
+    expect(el.querySelector('gable-product-thumb')).toBeNull()
   })
 })

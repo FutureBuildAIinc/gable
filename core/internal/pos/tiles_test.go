@@ -88,6 +88,7 @@ func (w *tileWorld) setting(value string) {
 
 func newTileWorld(t *testing.T) *tileWorld {
 	t.Helper()
+	testutil.LockProductImageSetting(t)
 	db := testutil.RequireDB(t)
 	w := &tileWorld{twoYards: seedTwoYards(t), t: t, tag: uuid.NewString()[:6], products: map[string]uuid.UUID{}}
 	// nine categories ranked by the units yard A sold, so the chip list must

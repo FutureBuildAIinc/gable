@@ -5791,7 +5791,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate PIM image */
+        /**
+         * Generate PIM image
+         * @description Starts product image generation and answers 202 with a media row in status generating. With the OpenRouter provider chosen the row becomes a photo; with the Anthropic provider chosen it becomes an SVG illustration drawn by Claude, stored only after a strict sanitiser has re-serialised it (a drawing it refuses settles the row as failed).
+         */
         post: operations["productPimGenerateImage"];
         delete?: never;
         options?: never;
@@ -9686,6 +9689,8 @@ export interface components {
             sku: string;
             description: string;
             stock_uom: components["schemas"]["UOM"];
+            /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
+            image_url: string | null;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         InventoryLevelPage: {
@@ -13124,6 +13129,8 @@ export interface components {
             random_length: boolean;
             /** @description The product's unit set (ADR 0006 sections 3.1 and 3.2). */
             units: components["schemas"]["UnitSetRow"][];
+            /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
+            image_url: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -14539,7 +14546,16 @@ export interface components {
                 "application/json": components["schemas"]["WireError"];
             };
         };
-        /** @description AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer (image generation under the Anthropic provider). The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope. */
+        /** @description The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope. */
+        UnsupportedType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer. The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope. */
         AIOffEither: {
             headers: {
                 [name: string]: unknown;
@@ -23067,6 +23083,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -27500,6 +27517,7 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };

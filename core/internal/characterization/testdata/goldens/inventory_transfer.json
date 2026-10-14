@@ -178,6 +178,7 @@
             "product": {
               "description": "Golden item stud",
               "id": "<id-4>",
+              "image_url": null,
               "sku": "GOLD-A-STUD",
               "stock_uom": "PCS"
             },
@@ -195,6 +196,7 @@
             "product": {
               "description": "Golden item stud",
               "id": "<id-4>",
+              "image_url": null,
               "sku": "GOLD-A-STUD",
               "stock_uom": "PCS"
             },

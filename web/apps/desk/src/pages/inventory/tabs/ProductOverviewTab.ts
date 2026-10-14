@@ -9,6 +9,7 @@ import type { ProductDetail, PIMMedia } from '../../../types/pim.ts';
 import type { Product } from '../../../types/product.ts';
 import { formatPrice4 } from '../../../lib/utils.ts';
 import { formatQuantity, isPositiveQuantity } from '../../../lib/money.ts';
+import { isDrawablePath } from '../../../components/ProductThumb.ts';
 
 @customElement('gable-product-overview-tab')
 export class GableProductOverviewTab extends LitElement {
@@ -81,6 +82,8 @@ export class GableProductOverviewTab extends LitElement {
                     <div class="bg-zinc-900 border border-white/10 rounded-xl overflow-hidden aspect-square flex items-center justify-center">
                         ${this.primaryImage
                             ? html`<img src="${this.primaryImage.url}" alt="${this.primaryImage.alt_text || this.product.description}" class="w-full h-full object-cover" />`
+                            : isDrawablePath(this.product.image_url)
+                            ? html`<img data-testid="overview-picture" src="${this.product.image_url}" alt="" class="w-full h-full object-contain p-6" />`
                             : html`
                                 <div class="flex flex-col items-center gap-3 text-zinc-500">
                                     ${icon(Package, 64, 'w-16 h-16')}

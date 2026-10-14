@@ -296,6 +296,7 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/ForbiddenEither" }
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
+        "415": { $ref: "#/components/responses/UnsupportedType" }
         "500": { $ref: "#/components/responses/InternalError" }
         "409": { $ref: "#/components/responses/ConflictEither" }
         "422":

@@ -9005,6 +9005,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedType"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/partner/v1/dashboard:
@@ -12926,6 +12927,8 @@ paths:
       tags:
         - product
       summary: Generate PIM image
+      description: >-
+        Starts product image generation and answers 202 with a media row in status generating. With the OpenRouter provider chosen the row becomes a photo; with the Anthropic provider chosen it becomes an SVG illustration drawn by Claude, stored only after a strict sanitiser has re-serialised it (a drawing it refuses settles the row as failed).
       parameters:
         - name: id
           in: path
@@ -13786,6 +13789,7 @@ paths:
         "403": {$ref: "#/components/responses/ForbiddenEither"}
         "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedType"}
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500": {$ref: "#/components/responses/InternalError"}
@@ -15710,9 +15714,16 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/WireError"
+    UnsupportedType:
+      description: >-
+        The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     AIOffEither:
       description: >-
-        AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer (image generation under the Anthropic provider). The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope.
+        AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer. The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope.
       content:
         application/json:
           schema:
@@ -20339,6 +20350,7 @@ components:
         - sku
         - description
         - stock_uom
+        - image_url
       properties:
         id:
           type: string
@@ -20349,6 +20361,10 @@ components:
           type: string
         stock_uom:
           $ref: '#/components/schemas/UOM'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none.
     InventoryLevelPage:
       type: object
       required: [items, next_cursor, limit]
@@ -25300,7 +25316,7 @@ components:
       type: object
       description: >-
         The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit.
-      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units]
+      required: [id, sku, description, stock_uom, base_price_ten_thousandths, average_unit_cost_ten_thousandths, target_margin, commission_rate, vendor, vendor_id, upc, weight_lbs, length_in, width_in, height_in, stackable, geometry_source, lead_time_days, reorder_point, reorder_qty, on_hand, allocated, available, revision, created_at, updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in, board_width_in, board_length_ft, random_length, units, image_url]
       properties:
         id:
           type: string
@@ -25388,6 +25404,10 @@ components:
           description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
           items:
             $ref: '#/components/schemas/UnitSetRow'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none.
         created_at:
           type: string
           format: date-time

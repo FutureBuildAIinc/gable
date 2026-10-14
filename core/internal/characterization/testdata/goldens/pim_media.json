@@ -42,6 +42,7 @@
           "geometry_source": "parametric",
           "height_in": 1.5,
           "id": "<id-1>",
+          "image_url": null,
           "lead_time_days": null,
           "length_in": 96,
           "on_hand": "427",

@@ -205,6 +205,7 @@ components:
       - sku
       - description
       - stock_uom
+      - image_url
       properties:
         id:
           type: string
@@ -215,6 +216,11 @@ components:
           type: string
         stock_uom:
           $ref: '#/components/schemas/UOM'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images
+            setting is on; null while it is off or the product has none.
     InventoryLevelPage:
       type: object
       required: [items, next_cursor, limit]
