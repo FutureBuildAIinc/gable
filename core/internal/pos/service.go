@@ -256,6 +256,11 @@ func (s *Service) RemoveItem(ctx context.Context, txID uuid.UUID, itemID uuid.UU
 	if err := s.holdSaleBranch(ctx, txID); err != nil {
 		return nil, err
 	}
+	// The sale must be visible before a line goes: a sale the caller's wall
+	// hides is a missing record (the module's 404), and nothing is deleted.
+	if _, err := s.getTransaction(ctx, txID); err != nil {
+		return nil, err
+	}
 	if err := s.repo.RemoveLineItem(ctx, itemID); err != nil {
 		return nil, err
 	}

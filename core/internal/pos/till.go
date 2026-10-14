@@ -5,11 +5,13 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // TillSessionStatus is the drawer lifecycle state.
@@ -169,6 +171,11 @@ func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByM
 		return nil, err
 	}
 	report, err := s.TillReport(ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The walled read hides a session outside the caller's branch
+		// context: it is missing for this caller, the module's 404.
+		return nil, &MissingRecordError{What: "till session", ID: sessionID}
+	}
 	if err != nil {
 		return nil, err
 	}

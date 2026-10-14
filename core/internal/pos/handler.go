@@ -433,6 +433,9 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.AddItem(r.Context(), txID, req)
 	if err != nil {
+		if answerMissingRecord(w, r, err) {
+			return
+		}
 		if refuseRecordBranch(w, r, err) {
 			return
 		}
@@ -459,6 +462,9 @@ func (h *Handler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.RemoveItem(r.Context(), txID, itemID)
 	if err != nil {
+		if answerMissingRecord(w, r, err) {
+			return
+		}
 		if refuseRecordBranch(w, r, err) {
 			return
 		}
@@ -490,6 +496,9 @@ func (h *Handler) CompleteTransaction(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.service.CompleteTransaction(r.Context(), txID, req.Tenders)
 	if err != nil {
+		if answerMissingRecord(w, r, err) {
+			return
+		}
 		if refuseRecordBranch(w, r, err) {
 			return
 		}

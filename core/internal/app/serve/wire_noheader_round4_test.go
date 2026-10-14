@@ -428,3 +428,83 @@ func TestNoHeader_ReportScheduleGuardsHold(t *testing.T) {
 		}
 	}
 }
+
+// posHiddenLegs is the acts on a branch B record a header A cashier and a key
+// bound to A can reach: each answers what a missing record answers.
+func posHiddenLegs(f *keyPinFixture) []struct{ label, method, path, body string } {
+	tx, till, line := f.txnB.String(), f.tillB.String(), f.lineB.String()
+	return []struct{ label, method, path, body string }{
+		{"close the till session", "POST", "/api/v1/pos/till/" + till + "/close", `{"counted_by_method":{"CASH":50}}`},
+		{"add a line", "POST", "/api/v1/pos/transactions/" + tx + "/items", `{"product_id":"` + f.posProd.String() + `","quantity":1,"uom":"EA"}`},
+		{"remove a line", "DELETE", "/api/v1/pos/transactions/" + tx + "/items/" + line, ""},
+		{"complete the sale", "POST", "/api/v1/pos/transactions/" + tx + "/complete", `{"tenders":[{"method":"CASH","amount":50}]}`},
+		{"void the sale", "POST", "/api/v1/pos/transactions/" + tx + "/void", ""},
+	}
+}
+
+// posBState is everything the hidden legs could write on B's session and
+// live sale: the session's status and Z reports, the sale's status and total
+// and its lines.
+func posBState(t *testing.T, f *keyPinFixture) string {
+	t.Helper()
+	var state string
+	if err := f.db.Pool.QueryRow(context.Background(), `
+		SELECT (SELECT status FROM till_sessions WHERE id = $1) || '/' ||
+		       (SELECT COUNT(*) FROM till_z_reports WHERE till_session_id = $1)::text || '/' ||
+		       (SELECT status || ':' || total::text FROM pos_transactions WHERE id = $2) || '/' ||
+		       (SELECT COUNT(*) FROM pos_line_items WHERE transaction_id = $2)::text`,
+		f.tillB, f.txnB).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+// TestNoHeader_PosHiddenRecordsAnswerMissing is the pos hidden record family
+// (r6 P2-4, r5 P3-3): a header A cashier and a key bound to A, acting on B's
+// open session and B's live sale, meet the module's 404 that a missing record
+// meets (close, add, remove, complete, void), with nothing written.
+func TestNoHeader_PosHiddenRecordsAnswerMissing(t *testing.T) {
+	f := newKeyPinFixture(t)
+	noheaderGrant(t, f, "pin-cashier", f.branchA)
+	missing := uuid.NewString()
+	before := posBState(t, f)
+	for _, l := range posHiddenLegs(f) {
+		missingPath := strings.NewReplacer(f.tillB.String(), missing, f.txnB.String(), missing, f.lineB.String(), missing).Replace(l.path)
+		for who, send := range map[string]func(path string) (int, []byte){
+			"header A cashier": func(path string) (int, []byte) { return f.userAs(t, "cashier", l.method, path, l.body, headerA(f)) },
+			"key bound to A":   func(path string) (int, []byte) { return f.key(t, f.bound, l.method, path, l.body, nil) },
+		} {
+			status, buf := send(l.path)
+			if status != http.StatusNotFound {
+				t.Errorf("%s: %s of B's record: %d %s, want the missing record's 404", who, l.label, status, buf)
+			}
+			if mStatus, _ := send(missingPath); mStatus != http.StatusNotFound {
+				t.Errorf("%s: %s of a missing record: %d, want 404", who, l.label, mStatus)
+			}
+		}
+	}
+	if after := posBState(t, f); after != before {
+		t.Errorf("the hidden legs changed B's session or sale: %s, was %s", after, before)
+	}
+}
+
+// TestNoHeader_PosVoidOfAHiddenSaleIsMissing is the named leg for the void
+// mapping 0bc985c2 made (r5 and r6 disagreed whether any test pinned it): a
+// header A cashier voids B's live sale and meets the missing sale's 404, with
+// nothing written. Red when getTransaction's no rows mapping is reverted
+// alone (the answer is the bare 500 then).
+func TestNoHeader_PosVoidOfAHiddenSaleIsMissing(t *testing.T) {
+	f := newKeyPinFixture(t)
+	noheaderGrant(t, f, "pin-cashier", f.branchA)
+	before := posBState(t, f)
+	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", "", headerA(f))
+	if status != http.StatusNotFound {
+		t.Errorf("header A cashier void of B's live sale: %d %s, want the missing sale's 404", status, buf)
+	}
+	if mStatus, _ := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+uuid.NewString()+"/void", "", headerA(f)); mStatus != status {
+		t.Errorf("a missing sale answers %d, B's hidden sale %d, want the same", mStatus, status)
+	}
+	if after := posBState(t, f); after != before {
+		t.Errorf("the void changed B's sale: %s, was %s", after, before)
+	}
+}
