@@ -814,6 +814,7 @@ func Run() {
 		if branchID == uuid.Nil {
 			branchID = kelMainID
 		}
+		seedDay := seedToday(db)
 		for i := 0; i < numOrders; i++ {
 			status := "FULFILLED"
 			r := rand.Float32()
@@ -874,6 +875,11 @@ func Run() {
 					paidShare = 0.4
 				}
 				dueDate := orderDate.AddDate(0, 1, 0)
+				// the day after the order, never after the day the seed runs
+				invoiceDay := orderDate.AddDate(0, 0, 1)
+				if dayOf(invoiceDay) > dayOf(seedDay) {
+					invoiceDay = seedDay
+				}
 				taxRate := 0.12 // BC: GST 5% + PST 7% on building materials.
 				subCents := cents(orderTotal)
 				taxCents := cents(float64(subCents) / 100 * taxRate)
@@ -884,7 +890,7 @@ func Run() {
 				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
 						due_date, payment_terms_id, invoice_date, created_at)
 					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,(SELECT payment_terms_id FROM customers WHERE id = $3),$11::date,$11)`,
-					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, orderDate.AddDate(0, 0, 1))
+					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, invoiceDay)
 				if err == nil {
 					invoiceIDs = append(invoiceIDs, invID)
 					// the billed lines: the order's, in the shared line shape
@@ -893,7 +899,7 @@ func Run() {
 						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
 							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
-					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: orderDate.AddDate(0, 0, 1),
+					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: invoiceDay,
 						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
 				}
 			}
