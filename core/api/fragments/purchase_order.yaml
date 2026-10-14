@@ -298,6 +298,7 @@ paths:
         "413": { $ref: "#/components/responses/PayloadTooLarge" }
         "415": { $ref: "#/components/responses/UnsupportedType" }
         "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/AIRefused" }
         "409": { $ref: "#/components/responses/ConflictEither" }
         "422":
           $ref: "#/components/responses/UnprocessableEntity"

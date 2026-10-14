@@ -450,6 +450,11 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnsupportedMediaType, Code: "unsupported_type", Message: msg})
 			return
 		}
+		if msg, ok := ai.RefusedMessage(err); ok {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusBadGateway, Code: ai.CodeAIRefused,
+				Message: msg + " Until then, enter the freight total by hand.", Operator: true})
+			return
+		}
 		httputil.RespondError(w, r, "failed to upload freight invoice", http.StatusBadRequest, err)
 		return
 	}
