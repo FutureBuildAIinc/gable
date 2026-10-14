@@ -22,8 +22,8 @@ DEMO_SEED_IMPORT=1 PAYMENT_VAULT_KEY=$(openssl rand -hex 32) make up
 ```
 
 Then open <http://127.0.0.1:8080>. It builds and starts Postgres, migrates and seeds the demo dealer with its larger
-invented catalogue and a 120 day trading history, and serves the API, the worker and the web app, waiting until all
-are healthy. `make down` removes it and its data. Where ports 8080 or 5434 are taken, move them:
+invented catalogue and an invented trading history through today, and serves the API, the worker and the web app,
+waiting until all are healthy. `make down` removes it and its data. Where ports 8080 or 5434 are taken, move them:
 `GABLE_WEB_PORT=18080 GABLE_PG_PORT=15434`, and give the stack its own name with `STACK_PROJECT` and
 `GABLE_PG_CONTAINER` (the same settings on `make down`).
 
