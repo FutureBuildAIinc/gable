@@ -208,7 +208,7 @@ export class SavedReports extends LitElement {
         if (!this.execution || this.execution.enabled) return nothing;
         return html`
             <div
-                class="bg-amber-50 border border-amber-300 text-amber-900 rounded p-4 mb-4"
+                class="bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded p-4 mb-4"
                 data-testid="schedule-execution-notice"
                 role="status"
             >
@@ -240,7 +240,7 @@ export class SavedReports extends LitElement {
         if (!this.execution?.enabled || !this.execution.delivery) return nothing;
         return html`
             <div
-                class="bg-blue-50 border border-blue-300 text-blue-900 rounded p-4 mb-4"
+                class="bg-blue-500/10 border border-blue-500/30 text-blue-400 rounded p-4 mb-4"
                 data-testid="schedule-delivery-notice"
                 role="status"
             >
@@ -254,15 +254,15 @@ export class SavedReports extends LitElement {
         if (!this.scheduleFor) return nothing;
         return html`
             <div class="fixed inset-0 bg-backdrop/50 flex items-center justify-center p-4 z-50">
-                <div class="bg-white rounded shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto">
+                <div class="bg-slate-steel rounded shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto">
                     <div class="flex justify-between items-center px-6 py-4 border-b">
                         <div>
                             <h3 class="text-lg font-bold">Schedule delivery</h3>
-                            <p class="text-sm text-gray-500">${this.scheduleFor.name}</p>
+                            <p class="text-sm text-zinc-400">${this.scheduleFor.name}</p>
                         </div>
                         <button
                             @click=${this._closeScheduleModal}
-                            class="text-gray-500 hover:text-gray-900 px-2"
+                            class="text-zinc-400 hover:text-white px-2"
                             aria-label="Close"
                         >&times;</button>
                     </div>
@@ -272,13 +272,13 @@ export class SavedReports extends LitElement {
                         ${this._renderDeliveryNotice()}
 
                         <div>
-                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                            <h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">
                                 Existing schedules
                             </h4>
                             ${this.loadingSchedules ? html`
-                                <p class="text-gray-500 text-sm">Loading schedules...</p>
+                                <p class="text-zinc-400 text-sm">Loading schedules...</p>
                             ` : this.schedules.length === 0 ? html`
-                                <p class="text-gray-500 text-sm border border-dashed rounded p-4 text-center">
+                                <p class="text-zinc-400 text-sm border border-dashed rounded p-4 text-center">
                                     No schedules configured for this report.
                                 </p>
                             ` : html`
@@ -288,14 +288,14 @@ export class SavedReports extends LitElement {
                                             <div>
                                                 <div class="font-medium text-sm">
                                                     ${this._describeCron(s.cron_expression)}
-                                                    <span class="ml-2 text-xs font-mono bg-gray-100 px-2 py-0.5 rounded">${s.format}</span>
-                                                    <span class="ml-2 text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">${s.status}</span>
+                                                    <span class="ml-2 text-xs font-mono bg-white/10 px-2 py-0.5 rounded">${s.format}</span>
+                                                    <span class="ml-2 text-xs px-2 py-0.5 rounded bg-white/10 text-zinc-400">${s.status}</span>
                                                 </div>
-                                                <div class="text-xs text-gray-500 mt-1">${s.recipients.join(', ')}</div>
+                                                <div class="text-xs text-zinc-400 mt-1">${s.recipients.join(', ')}</div>
                                             </div>
                                             <button
                                                 @click=${() => this._handleDeleteSchedule(s.id)}
-                                                class="text-red-600 hover:text-red-900 text-sm"
+                                                class="text-red-400 hover:text-red-400 text-sm"
                                             >Delete</button>
                                         </li>
                                     `)}
@@ -304,19 +304,19 @@ export class SavedReports extends LitElement {
                         </div>
 
                         <form @submit=${this._handleAddSchedule} class="space-y-4 border-t pt-6">
-                            <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                            <h4 class="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                                 Add a schedule
                             </h4>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-sm text-gray-700 mb-1" for="schedule-format">Output format</label>
+                                    <label class="block text-sm text-zinc-300 mb-1" for="schedule-format">Output format</label>
                                     <select
                                         id="schedule-format"
                                         aria-label="Output format"
                                         .value=${this.newFormat}
                                         @change=${(e: Event) => this.newFormat = (e.target as HTMLSelectElement).value as ReportScheduleFormat}
-                                        class="w-full border rounded p-2"
+                                        class="w-full border bg-zinc-800 text-white rounded p-2"
                                     >
                                         <option value="CSV">CSV</option>
                                         <option value="XLSX">Excel (XLSX)</option>
@@ -324,13 +324,13 @@ export class SavedReports extends LitElement {
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="block text-sm text-gray-700 mb-1" for="schedule-frequency">Frequency</label>
+                                    <label class="block text-sm text-zinc-300 mb-1" for="schedule-frequency">Frequency</label>
                                     <select
                                         id="schedule-frequency"
                                         aria-label="Frequency"
                                         .value=${this.newFrequency}
                                         @change=${this._handleFrequencyChange}
-                                        class="w-full border rounded p-2"
+                                        class="w-full border bg-zinc-800 text-white rounded p-2"
                                     >
                                         <option value="daily">Daily at 9:00 AM</option>
                                         <option value="weekly">Weekly on Sunday at 9:00 AM</option>
@@ -341,7 +341,7 @@ export class SavedReports extends LitElement {
                             </div>
 
                             <div>
-                                <label class="block text-sm text-gray-700 mb-1" for="schedule-cron">Cron expression</label>
+                                <label class="block text-sm text-zinc-300 mb-1" for="schedule-cron">Cron expression</label>
                                 <input
                                     id="schedule-cron"
                                     type="text"
@@ -349,40 +349,40 @@ export class SavedReports extends LitElement {
                                     .value=${this.newCron}
                                     ?readonly=${this.newFrequency !== 'custom'}
                                     @input=${(e: Event) => this.newCron = (e.target as HTMLInputElement).value}
-                                    class="w-full border rounded p-2 font-mono text-sm ${this.newFrequency !== 'custom' ? 'bg-gray-100' : ''}"
+                                    class="w-full border bg-zinc-800 text-white rounded p-2 font-mono text-sm ${this.newFrequency !== 'custom' ? 'bg-white/10' : ''}"
                                     placeholder="0 0 9 * * *"
                                 />
-                                <p class="text-xs text-gray-500 mt-1">
+                                <p class="text-xs text-zinc-400 mt-1">
                                     ${this.execution?.cron_dialect ??
                                         'Six fields, seconds first (e.g. "0 0 9 * * *"). Five-field crontab expressions are rejected.'}
                                 </p>
                             </div>
 
                             <div>
-                                <label class="block text-sm text-gray-700 mb-1" for="schedule-recipients">Recipients</label>
+                                <label class="block text-sm text-zinc-300 mb-1" for="schedule-recipients">Recipients</label>
                                 <input
                                     id="schedule-recipients"
                                     type="text"
                                     aria-label="Recipients"
                                     .value=${this.newRecipients}
                                     @input=${(e: Event) => this.newRecipients = (e.target as HTMLInputElement).value}
-                                    class="w-full border rounded p-2"
+                                    class="w-full border bg-zinc-800 text-white rounded p-2"
                                     placeholder="controller@example.com, gm@example.com"
                                     required
                                 />
-                                <p class="text-xs text-gray-500 mt-1">Separate multiple addresses with a comma.</p>
+                                <p class="text-xs text-zinc-400 mt-1">Separate multiple addresses with a comma.</p>
                             </div>
 
                             <div class="flex justify-end gap-2">
                                 <button
                                     type="button"
                                     @click=${this._closeScheduleModal}
-                                    class="px-4 py-2 border rounded text-gray-700 hover:bg-gray-50"
+                                    class="px-4 py-2 border rounded text-zinc-300 hover:bg-white/5"
                                 >Cancel</button>
                                 <button
                                     type="submit"
                                     ?disabled=${this.savingSchedule}
-                                    class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                                    class="px-4 py-2 bg-blue-600 text-plate rounded hover:bg-blue-700 disabled:opacity-50"
                                 >${this.savingSchedule ? 'Saving...' : 'Add schedule'}</button>
                             </div>
                         </form>
@@ -403,61 +403,61 @@ export class SavedReports extends LitElement {
                     <h1 class="text-2xl font-bold">Saved Reports</h1>
                     <a
                         href="/reports/builder"
-                        class="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
+                        class="bg-blue-600 text-plate px-4 py-2 rounded shadow hover:bg-blue-700"
                     >
                         Create New Report
                     </a>
                 </div>
 
                 ${this.error ? html`
-                    <div class="bg-red-50 text-red-700 p-4 rounded mb-6">
+                    <div class="bg-red-500/10 text-red-400 p-4 rounded mb-6">
                         ${this.error}
                     </div>
                 ` : nothing}
 
                 ${this.reports.length === 0 ? html`
-                    <div class="text-center text-gray-500 py-12 bg-white rounded shadow">
+                    <div class="text-center text-zinc-400 py-12 bg-slate-steel rounded shadow">
                         <p>No reports saved yet.</p>
-                        <a href="/reports/builder" class="text-blue-600 hover:underline mt-2 inline-block">
+                        <a href="/reports/builder" class="text-blue-400 hover:underline mt-2 inline-block">
                             Build your first report
                         </a>
                     </div>
                 ` : html`
-                    <div class="bg-white shadow rounded overflow-hidden">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
+                    <div class="bg-slate-steel shadow rounded overflow-hidden">
+                        <table class="min-w-full divide-y divide-white/10">
+                            <thead class="bg-white/5">
                                 <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Entity Type</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Name</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Entity Type</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-zinc-400 uppercase tracking-wider">Description</th>
+                                    <th class="px-6 py-3 text-right text-xs font-medium text-zinc-400 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
+                            <tbody class="bg-slate-steel divide-y divide-white/10">
                                 ${this.reports.map((report) => html`
                                     <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap font-medium text-gray-900">${report.name}</td>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 capitalize">${report.entity_type}</td>
-                                        <td class="px-6 py-4 text-sm text-gray-500 truncate max-w-xs">${report.description}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap font-medium text-white">${report.name}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm text-zinc-400 capitalize">${report.entity_type}</td>
+                                        <td class="px-6 py-4 text-sm text-zinc-400 truncate max-w-xs">${report.description}</td>
                                         <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <button
-                                                class="text-indigo-600 hover:text-indigo-900 mr-4"
+                                                class="text-indigo-400 hover:text-indigo-400 mr-4"
                                                 @click=${() => this._handleRun(report.id)}
                                             >
                                                 Run
                                             </button>
                                             <button
-                                                class="text-indigo-600 hover:text-indigo-900 mr-4"
+                                                class="text-indigo-400 hover:text-indigo-400 mr-4"
                                                 @click=${() => this._openScheduleModal(report)}
                                             >
                                                 Schedule
                                             </button>
-                                            <a href="/reports/builder?id=${report.id}" class="text-blue-600 hover:text-blue-900 mr-4">
+                                            <a href="/reports/builder?id=${report.id}" class="text-blue-400 hover:text-blue-400 mr-4">
                                                 Edit
                                             </a>
                                             <button
                                                 @click=${() => this._handleDelete(report.id)}
-                                                class="text-red-600 hover:text-red-900"
+                                                class="text-red-400 hover:text-red-400"
                                             >
                                                 Delete
                                             </button>
