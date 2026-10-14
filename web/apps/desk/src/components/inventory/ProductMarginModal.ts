@@ -139,7 +139,7 @@ export class GableProductMarginModal extends LitElement {
                     step="0.1"
                     .value=${String(this._targetMargin)}
                     @input=${(e: InputEvent) => this._targetMargin = Number((e.target as HTMLInputElement).value)}
-                    class="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white font-mono focus:border-gable-green/50 focus:outline-none transition-colors"
+                    class="w-full bg-deep-space/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white font-mono focus:border-gable-green/50 focus:outline-none transition-colors"
                   />
                 </div>
                 <p class="text-xs text-zinc-500 mt-1">Suggested Price: <span class="text-emerald-400 font-mono">${formatPrice4(this._projectedPrice)}</span></p>
@@ -159,7 +159,7 @@ export class GableProductMarginModal extends LitElement {
                     step="0.1"
                     .value=${String(this._commissionRate)}
                     @input=${(e: InputEvent) => this._commissionRate = Number((e.target as HTMLInputElement).value)}
-                    class="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white font-mono focus:border-gable-green/50 focus:outline-none transition-colors"
+                    class="w-full bg-deep-space/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-white font-mono focus:border-gable-green/50 focus:outline-none transition-colors"
                   />
                 </div>
                 <p class="text-xs text-zinc-500 mt-1">Projected Commission: <span class="text-emerald-400 font-mono">${formatPrice4(this._projectedCommission)}</span></p>

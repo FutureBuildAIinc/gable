@@ -208,7 +208,7 @@ export class GableDeliveryList extends LitElement {
             ` : nothing}
             ${this._deliveries.length > 0 && this.routeStatus !== 'completed' && this.routeStatus !== 'cancelled' ? html`
               ${this.routeStatus === 'in_transit' && this._allTerminal ? html`
-                <button class="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center justify-center rounded-lg font-medium transition-all" @click=${this._completeRoute} ?disabled=${this._completing}>
+                <button class="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-plate inline-flex items-center justify-center rounded-lg font-medium transition-all" @click=${this._completeRoute} ?disabled=${this._completing}>
                   ${icon(CheckCircle2, 12, 'mr-1')} ${this._completing ? 'Completing...' : 'Complete Route'}
                 </button>
               ` : html`

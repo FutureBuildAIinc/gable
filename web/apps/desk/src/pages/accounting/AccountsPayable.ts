@@ -399,7 +399,7 @@ export class AccountsPayable extends LitElement {
                         </button>
                         <button
                             @click=${this._openPayVendorModal}
-                            class="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold transition-colors"
+                            class="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-plate rounded-lg text-sm font-semibold transition-colors"
                         >
                             ${icon(CheckCircle2, 16)} Record Payment
                         </button>
@@ -818,7 +818,7 @@ export class AccountsPayable extends LitElement {
                                     </button>
                                     <button
                                         type="submit"
-                                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20"
+                                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-plate rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20"
                                     >
                                         Log Bill
                                     </button>
@@ -969,7 +969,7 @@ export class AccountsPayable extends LitElement {
                                     </button>
                                     <button
                                         type="submit"
-                                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20"
+                                        class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-plate rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-emerald-900/20"
                                     >
                                         Record Payment
                                     </button>
@@ -1083,7 +1083,7 @@ export class AccountsPayable extends LitElement {
                                     ${this.selectedInvoice.status === 'pending' ? html`
                                         <button
                                             @click=${() => this._handleApproveInvoice(this.selectedInvoice!)}
-                                            class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-semibold transition-colors"
+                                            class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-plate rounded-lg text-sm font-semibold transition-colors"
                                         >
                                             Approve & Post to GL
                                         </button>

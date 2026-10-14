@@ -74,7 +74,7 @@ export class GableSalesDialog extends LitElement {
                         <button
                             type="submit"
                             ?disabled=${disabled}
-                            class="px-4 py-2 rounded text-sm font-bold whitespace-nowrap disabled:opacity-50 ${this.danger ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-gable-green text-black hover:bg-gable-green/90'}"
+                            class="px-4 py-2 rounded text-sm font-bold whitespace-nowrap disabled:opacity-50 ${this.danger ? 'bg-red-500 text-plate hover:bg-red-600' : 'bg-gable-green text-black hover:bg-gable-green/90'}"
                         >
                             ${this.busy ? 'Working...' : this.confirmLabel}
                         </button>

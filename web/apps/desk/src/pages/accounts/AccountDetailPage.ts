@@ -386,7 +386,7 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-8 flex justify-end gap-3">
                             <button type="button" @click=${() => { this.applying = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
-                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
+                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-plate rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
                                 ${this.paymentBusy ? 'Applying...' : 'Apply'}
                             </button>
                         </div>
@@ -415,7 +415,7 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-8 flex justify-end gap-3">
                             <button type="button" @click=${() => { this.voiding = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
-                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
+                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-plate rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
                                 ${this.paymentBusy ? 'Voiding...' : 'Void payment'}
                             </button>
                         </div>
@@ -719,7 +719,7 @@ export class GableAccountDetail extends LitElement {
                                                         <td class="px-4 py-3 text-right font-mono text-amber-400">${formatCents(pay.unapplied_cents)}</td>
                                                         <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                                                             <button
-                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-white font-medium"
+                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-plate font-medium"
                                                                 data-testid="apply-payment"
                                                                 @click=${() => this.openApply(pay)}
                             ?disabled=${this.openInvoices.length === 0}

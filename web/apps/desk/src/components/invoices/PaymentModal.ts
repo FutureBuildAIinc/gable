@@ -129,7 +129,7 @@ export class GablePaymentModal extends LitElement {
 
             <div class="mt-8 flex justify-end gap-3">
               <button type="button" @click=${this._close} class="px-4 py-2 text-sm text-zinc-300 hover:text-white transition-colors">Cancel</button>
-              <button type="submit" ?disabled=${this._isSubmitting} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium transition-colors disabled:opacity-50">
+              <button type="submit" ?disabled=${this._isSubmitting} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-plate rounded text-sm font-medium transition-colors disabled:opacity-50">
                 ${this._isSubmitting ? 'Processing...' : 'Record Payment'}
               </button>
             </div>
