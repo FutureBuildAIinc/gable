@@ -250,12 +250,20 @@ func (r *PostgresRepository) ContactBelongsTo(ctx context.Context, contactID, cu
 	return ok, nil
 }
 
+// CustomerVisible holds the customer to the file's three arm wall: the
+// context branch when there is one, the no header user's grants when there
+// is none, and every customer when both are nil (an administrator or owner
+// with no header, an unbound key).
 func (r *PostgresRepository) CustomerVisible(ctx context.Context, customerID uuid.UUID) (bool, error) {
 	var ok bool
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM customers c WHERE c.id = $1 AND ($2::uuid IS NULL OR EXISTS (
-			SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $2)))`,
-		customerID, branchctx.IDForQuery(ctx)).Scan(&ok)
+		SELECT EXISTS (SELECT 1 FROM customers c WHERE c.id = $1 AND (
+		    ($2::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id = $2))
+		    OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $3)))
+		    OR ($2::uuid IS NULL AND $3::text IS NULL)))`,
+		customerID, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("failed to check the customer: %w", err)
 	}
