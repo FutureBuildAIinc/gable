@@ -95,6 +95,24 @@ describe('gable-select', () => {
     expect(el.value).toBe('pear')
   })
 
+  it('is a combobox: the focused button carries controls, expanded and activedescendant', async () => {
+    const el = await mountSelect({ label: 'Fruit' })
+    const button = buttonOf(el)
+    expect(button.getAttribute('role')).toBe('combobox')
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await open(el)
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    const list = q<HTMLElement>(el, '[role="listbox"]')
+    expect(list.id).toBeTruthy()
+    expect(button.getAttribute('aria-controls')).toBe(list.id)
+    button.focus()
+    keydown(el, 'ArrowDown')
+    await update(el, {})
+    // The element with the focus announces the active option.
+    expect(document.activeElement).toBe(button)
+    expect(button.getAttribute('aria-activedescendant')).toBe(options(el)[1].id)
+  })
+
   it('Escape closes without choosing and returns focus to the button', async () => {
     const el = await mountSelect()
     const onChange = vi.fn()
