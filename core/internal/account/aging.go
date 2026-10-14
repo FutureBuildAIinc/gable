@@ -109,6 +109,10 @@ GROUP BY d.customer_id, c.name, d.currency, 4, 5`
 // id, group id, currency): the caller pages through it with the keyset.
 func (s *Service) Aging(ctx context.Context, q AgingQuery) ([]AgingItem, error) {
 	branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+	if q.WholeAccount && q.CustomerID == nil {
+		// both walls would drop for every customer
+		return nil, fmt.Errorf("a whole account aging names its customer")
+	}
 	if q.WholeAccount {
 		branch, grants = nil, nil
 	}
