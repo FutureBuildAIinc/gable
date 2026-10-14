@@ -6,8 +6,12 @@ import { customElement, property, state } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
 import { onThemeChange, themeColor } from '@gable/design-system';
 
-/** The series, by token, so they follow Industrial Dark and Gable light. */
-const SERIES = ['gable-green', 'blueprint-blue', 'indigo-400', 'amber-400', 'rose-500', 'zinc-400'];
+/**
+ * The series, by token, so they follow Industrial Dark and Gable light. The
+ * third (the fulfilled share, nearly the whole ring) is indigo 400 in dark and
+ * the deep sage in light, so the donut stays in the warm family.
+ */
+const SERIES = ['gable-green', 'blueprint-blue', 'chart-fulfilled', 'amber-400', 'rose-500', 'zinc-400'];
 
 /** Helper to map status to readable names */
 function formatStatus(status: string): string {

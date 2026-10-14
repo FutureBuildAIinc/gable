@@ -125,7 +125,7 @@ export class PortalInvoices extends LitElement {
                         <div class="space-y-3">
                             ${this.invoices.map(inv => html`
                                 <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
-                                    <div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
+                                    <div class="flex items-center justify-between p-4 hover:bg-hover-row transition-colors">
                                         <div class="flex items-center gap-4">
                                             <div
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center"

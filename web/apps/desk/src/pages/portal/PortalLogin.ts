@@ -9,7 +9,7 @@ import { LogIn, AlertCircle, Loader2 } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalConfig } from '../../types/portal';
 import { onThemeChange } from '@gable/design-system';
-import { themeHex } from '../../lib/theme-colors.ts';
+import { themeHex, brandOnCard } from '../../lib/theme-colors.ts';
 
 @customElement('gable-portal-login')
 export class PortalLogin extends LitElement {
@@ -56,7 +56,7 @@ export class PortalLogin extends LitElement {
     }
 
     private _onFocus(e: FocusEvent) {
-        const primaryColor = this.config?.primary_color || themeHex('gable-green');
+        const primaryColor = brandOnCard(this.config?.primary_color || themeHex('gable-green'));
         (e.target as HTMLInputElement).style.borderColor = primaryColor;
     }
 
@@ -65,11 +65,11 @@ export class PortalLogin extends LitElement {
     }
 
     render() {
-        const primaryColor = this.config?.primary_color || themeHex('gable-green');
+        const primaryColor = brandOnCard(this.config?.primary_color || themeHex('gable-green'));
 
         return html`
             <div
-                class="min-h-screen flex items-center justify-center font-sans bg-deep-space"
+                class="min-h-screen flex items-center justify-center font-sans bg-portal-ground"
             >
                 <!-- Background glow -->
                 <div
@@ -97,7 +97,7 @@ export class PortalLogin extends LitElement {
 
                     <!-- Login Card -->
                     <div
-                        class="rounded-2xl border border-white/10 p-8 backdrop-blur-xl shadow-2xl bg-slate-steel"
+                        class="rounded-2xl border border-white/10 p-8 backdrop-blur-xl shadow-2xl bg-portal-panel"
                     >
                         <form @submit=${(e: Event) => this._handleSubmit(e)} class="space-y-6">
                             ${this.error

@@ -4,7 +4,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
-import { currentTheme, onThemeChange, themeColor } from '@gable/design-system';
+import { onThemeChange, themeColor } from '@gable/design-system';
 import type { RevenueTrendPoint } from '../../types/dashboard.ts';
 
 @customElement('gable-revenue-trend-chart')
@@ -118,7 +118,7 @@ export class GableRevenueTrendChart extends LitElement {
                         x: {
                             grid: { display: false },
                             ticks: {
-                                color: themeColor(currentTheme() === 'light' ? 'zinc-500' : 'zinc-600'),
+                                color: themeColor('chart-tick'),
                                 font: { size: 12 },
                                 padding: 10,
                             },
@@ -129,7 +129,7 @@ export class GableRevenueTrendChart extends LitElement {
                                 color: themeColor('white', 0.05),
                             },
                             ticks: {
-                                color: themeColor(currentTheme() === 'light' ? 'zinc-500' : 'zinc-600'),
+                                color: themeColor('chart-tick'),
                                 font: { size: 12 },
                                 padding: 10,
                                 callback: (value) => `$${Number(value).toLocaleString()}`,

@@ -136,7 +136,7 @@ export class PortalDeliveries extends LitElement {
         return html`
             <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                 <!-- Header row -->
-                <button @click=${() => { this.expandedId = expanded ? null : del.id; }} class="w-full text-left p-4 hover:bg-white/5 transition-colors">
+                <button @click=${() => { this.expandedId = expanded ? null : del.id; }} class="w-full text-left p-4 hover:bg-hover-row transition-colors">
                     <div class="flex items-center justify-between">
                         <div class="flex items-center gap-4">
                             <div

@@ -318,9 +318,9 @@ export class GablePosCatalog extends LitElement {
 
     private _picture(item: CatalogItem) {
         const shown = item.image_url && !this._brokenImages.has(item.product_id);
-        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-plate">
+        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-picture-plate">
             ${shown
-                ? html`<img src=${item.image_url!} alt="" loading="lazy" class="h-full w-full object-cover"
+                ? html`<img src=${item.image_url!} alt="" loading="lazy" class="h-full w-full object-cover mix-blend-multiply"
                       @error=${() => { this._brokenImages = new Set(this._brokenImages).add(item.product_id); }} />`
                 : html`<svg data-testid="catalog-no-picture" viewBox="0 0 24 24" fill="none" aria-label="No picture"
                       class="h-8 w-8 text-slate-500">
@@ -333,7 +333,7 @@ export class GablePosCatalog extends LitElement {
 
     private _tile(item: CatalogItem, on: boolean) {
         return html`<li data-testid="catalog-tile" aria-current=${on ? 'true' : 'false'}
-            class=${`flex flex-col gap-2 rounded-lg border p-3 ${on ? 'border-gable-green/60 bg-white/5' : 'border-white/10 bg-deep-space'}`}>
+            class=${`flex flex-col gap-2 rounded-lg border p-3 ${on ? 'border-gable-green/60 bg-white/5' : 'border-white/10 bg-tile shadow-tile'}`}>
             ${this._picture(item)}
             <div class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold text-white">${item.description}</div>
             <div class="font-mono text-xs text-slate-300">${item.sku} · ${item.in_stock} on hand</div>

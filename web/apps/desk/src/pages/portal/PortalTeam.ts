@@ -144,7 +144,7 @@ export class PortalTeam extends LitElement {
                                             ${user.status === 'Active' ? html`
                                                 <button
                                                     @click=${() => this._handleStatusChange(user.id, 'Inactive')}
-                                                    class="p-2 text-zinc-500 hover:text-red-400 hover:bg-white/5 rounded-lg transition-colors"
+                                                    class="p-2 text-zinc-500 hover:text-red-400 hover:bg-hover-row rounded-lg transition-colors"
                                                     title="Deactivate User"
                                                 >
                                                     ${icon(XCircle, 18)}
@@ -152,7 +152,7 @@ export class PortalTeam extends LitElement {
                                             ` : html`
                                                 <button
                                                     @click=${() => this._handleStatusChange(user.id, 'Active')}
-                                                    class="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-white/5 rounded-lg transition-colors"
+                                                    class="p-2 text-zinc-500 hover:text-emerald-400 hover:bg-hover-row rounded-lg transition-colors"
                                                     title="Reactivate User"
                                                 >
                                                     ${icon(CheckCircle2, 18)}

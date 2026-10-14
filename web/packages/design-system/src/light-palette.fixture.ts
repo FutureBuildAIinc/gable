@@ -249,3 +249,22 @@ export const LIGHT_PALETTE = {
     }
   }
 } as const
+
+/**
+ * The fuchsia ramp is derived, not part of the palette file: the purple
+ * ramp's lightness and chroma at fuchsia's hue, so the status steps keep 4.6:1
+ * or better on the ground and card and the tints keep ink at 12:1 or better.
+ */
+export const LIGHT_FUCHSIA = {
+  "50": "#772e82",
+  "100": "#7a3185",
+  "200": "#7d3488",
+  "300": "#80378c",
+  "400": "#863d91",
+  "500": "#894094",
+  "600": "#833a8f",
+  "700": "#7a3185",
+  "800": "#eddaef",
+  "900": "#f4e1f6",
+  "950": "#f8e8fa"
+} as const

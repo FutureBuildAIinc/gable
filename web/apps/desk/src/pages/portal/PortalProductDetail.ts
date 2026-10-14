@@ -167,7 +167,7 @@ export class PortalProductDetail extends LitElement {
                             <div class="flex items-center border border-white/10 rounded-xl overflow-hidden">
                                 <button
                                     @click=${() => { this.quantity = Math.max(1, this.quantity - 1); }}
-                                    class="px-3 py-2.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                    class="px-3 py-2.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                 >
                                     ${icon(Minus, 16)}
                                 </button>
@@ -180,7 +180,7 @@ export class PortalProductDetail extends LitElement {
                                 />
                                 <button
                                     @click=${() => { this.quantity = this.quantity + 1; }}
-                                    class="px-3 py-2.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                    class="px-3 py-2.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                 >
                                     ${icon(Plus, 16)}
                                 </button>

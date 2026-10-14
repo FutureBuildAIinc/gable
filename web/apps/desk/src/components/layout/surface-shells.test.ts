@@ -163,7 +163,7 @@ describe('gable-portal-layout — chrome and branding', () => {
       const el = await mount<GablePortalLayout>('gable-portal-layout')
       const primary = () => q(el, 'div[style*="--portal-primary"]').getAttribute('style')
       expect(primary()).toContain('--portal-primary: #046c43')
-      expect(q(el, 'aside').className).toContain('bg-slate-steel')
+      expect(q(el, 'aside').className).toContain('bg-portal-panel')
 
       document.documentElement.style.setProperty('--gb-gable-green', '0 255 163')
       window.dispatchEvent(new CustomEvent('gable-theme-changed', { detail: 'dark' }))

@@ -139,7 +139,7 @@ export class PortalDashboard extends LitElement {
                                 <div class="space-y-3">
                                     ${this.data.recent_orders.map(order => html`
                                         <div
-                                            class="flex justify-between items-center p-3 rounded-lg hover:bg-white/5 transition-colors border border-transparent hover:border-white/5"
+                                            class="flex justify-between items-center p-3 rounded-lg hover:bg-hover-row transition-colors border border-transparent hover:border-white/5"
                                         >
                                             <div>
                                                 <div class="font-medium text-white font-mono text-sm">
@@ -158,7 +158,7 @@ export class PortalDashboard extends LitElement {
                                                 </div>
                                                 <a
                                                     href="/portal/orders"
-                                                    class="p-1.5 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-white transition-colors"
+                                                    class="p-1.5 rounded-lg hover:bg-hover-row text-zinc-500 hover:text-white transition-colors"
                                                 >
                                                     ${icon(ShoppingCart, 14)}
                                                 </a>

@@ -12,8 +12,6 @@
 
 @layer base {
   :root {
-    color-scheme: dark;
-
     /* Industrial Dark: colour channels read by the Tailwind theme */
     --gb-white: 255 255 255;
     --gb-black: 0 0 0;
@@ -226,6 +224,17 @@
     --gb-lime-800: 63 98 18;
     --gb-lime-900: 54 83 20;
     --gb-lime-950: 26 46 5;
+    --gb-fuchsia-50: 253 244 255;
+    --gb-fuchsia-100: 250 232 255;
+    --gb-fuchsia-200: 245 208 254;
+    --gb-fuchsia-300: 240 171 252;
+    --gb-fuchsia-400: 232 121 249;
+    --gb-fuchsia-500: 217 70 239;
+    --gb-fuchsia-600: 192 38 211;
+    --gb-fuchsia-700: 162 28 175;
+    --gb-fuchsia-800: 134 25 143;
+    --gb-fuchsia-900: 112 26 117;
+    --gb-fuchsia-950: 74 4 78;
     --gb-gable-green: 0 255 163;
     --gb-gable-green-hover: 0 229 147;
     --gb-deep-space: 10 11 16;
@@ -242,6 +251,19 @@
     --gb-sage-tint: 39 39 42;
     --gb-glow: 0 0 15px rgba(0, 255, 163, 0.3);
     --gb-pale: 224 224 224;
+    --gb-portal-ground: 12 14 20;
+    --gb-portal-panel: 17 19 32;
+    --gb-chip-ground: 0 0 0;
+    --gb-shade: 0 0 0;
+    --gb-photo-btn: 255 255 255;
+    --gb-map-note: 102 102 102;
+    --gb-chart-tick: 82 82 91;
+    --gb-hover-row: 255 255 255;
+    --gb-hover-row-a: 0.05;
+    --gb-chart-fulfilled: 129 140 248;
+    --gb-picture-plate: 255 255 255;
+    --gb-tile: 10 11 16;
+    --gb-tile-shadow: 0 0 #0000;
     --gb-voice: 255 255 255;
     --gb-voice-soft: 212 212 216;
     --gb-voice-text: 161 161 170;
@@ -539,6 +561,17 @@
     --gb-lime-800: 217 230 207;
     --gb-lime-900: 224 237 213;
     --gb-lime-950: 230 244 220;
+    --gb-fuchsia-50: 119 46 130;
+    --gb-fuchsia-100: 122 49 133;
+    --gb-fuchsia-200: 125 52 136;
+    --gb-fuchsia-300: 128 55 140;
+    --gb-fuchsia-400: 134 61 145;
+    --gb-fuchsia-500: 137 64 148;
+    --gb-fuchsia-600: 131 58 143;
+    --gb-fuchsia-700: 122 49 133;
+    --gb-fuchsia-800: 237 218 239;
+    --gb-fuchsia-900: 244 225 246;
+    --gb-fuchsia-950: 248 232 250;
     --gb-gable-green: 4 108 67;
     --gb-gable-green-hover: 4 92 56;
     --gb-deep-space: 240 232 224;
@@ -555,6 +588,19 @@
     --gb-sage-tint: 226 234 213;
     --gb-glow: 0 0 #0000;
     --gb-pale: 53 49 44;
+    --gb-portal-ground: 240 232 224;
+    --gb-portal-panel: 248 243 236;
+    --gb-chip-ground: 248 243 236;
+    --gb-shade: 240 232 224;
+    --gb-photo-btn: 252 250 246;
+    --gb-map-note: 109 104 99;
+    --gb-chart-tick: 109 104 99;
+    --gb-hover-row: 240 232 224;
+    --gb-hover-row-a: 0.7;
+    --gb-chart-fulfilled: 86 100 61;
+    --gb-picture-plate: 240 232 224;
+    --gb-tile: 251 249 244;
+    --gb-tile-shadow: 0 1px 2px rgb(34 31 29 / 0.14);
     --gb-voice: 86 100 61;
     --gb-voice-soft: 86 100 61;
     --gb-voice-text: 86 100 61;

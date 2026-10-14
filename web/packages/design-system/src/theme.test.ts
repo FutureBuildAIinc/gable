@@ -66,11 +66,29 @@ describe('theme switch', () => {
     expect(currentTheme()).toBe('light')
   })
 
-  it('gives a person with no stored choice the last used value, and keeps it', () => {
+  it('shows a person with no choice of their own the last used value, without storing it as theirs', () => {
     setTheme('light') // the front door, nobody signed in
     useThemeSubject('person-c')
     expect(currentTheme()).toBe('light')
-    expect(localStorage.getItem(themeKeyFor('person-c'))).toBe('light')
+    expect(localStorage.getItem(themeKeyFor('person-c'))).toBeNull()
+    // their own choice is written only when they make one
+    setTheme('dark')
+    expect(localStorage.getItem(themeKeyFor('person-c'))).toBe('dark')
+  })
+
+  it('follows a change made in another tab, for the key that applies here', () => {
+    useThemeSubject('person-e')
+    localStorage.setItem(themeKeyFor('person-e'), 'light')
+    window.dispatchEvent(new StorageEvent('storage', { key: themeKeyFor('person-e'), newValue: 'light' }))
+    expect(currentTheme()).toBe('light')
+    // another person's key, or a value that is not a theme, changes nothing
+    window.dispatchEvent(new StorageEvent('storage', { key: themeKeyFor('person-x'), newValue: 'dark' }))
+    window.dispatchEvent(new StorageEvent('storage', { key: themeKeyFor('person-e'), newValue: 'purple' }))
+    expect(currentTheme()).toBe('light')
+    // signed out: the last used key applies
+    useThemeSubject(null)
+    window.dispatchEvent(new StorageEvent('storage', { key: THEME_KEY, newValue: 'dark' }))
+    expect(currentTheme()).toBe('dark')
   })
 
   it('ignores a stored value that is not a theme', () => {

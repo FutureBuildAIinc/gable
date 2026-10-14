@@ -109,7 +109,7 @@ export class GableBarcodeScanner extends LitElement {
           </div>
 
           <!-- Body -->
-          <div class="p-4 bg-deep-space/40 min-h-[300px] flex items-center justify-center">
+          <div class="p-4 bg-shade/40 min-h-[300px] flex items-center justify-center">
             ${this._error ? html`
               <div class="text-center p-4 text-rose-400 bg-rose-500/10 rounded-lg border border-rose-500/20">
                 <p class="mb-2">${this._error}</p>
@@ -125,7 +125,7 @@ export class GableBarcodeScanner extends LitElement {
                 <div id="reader-container" class="w-full overflow-hidden rounded-lg bg-backdrop border border-white/10 [&>div]:!border-none [&>div>video]:!rounded-lg [&_button]:!bg-gable-green [&_button]:!text-black [&_button]:!border-none [&_button]:!rounded [&_button]:!px-3 [&_button]:!py-1.5 [&_button]:!font-medium [&_button]:!text-sm hover:[&_button]:!bg-gable-green-hover [&_select]:!bg-well [&_select]:!text-white [&_select]:!border-white/20 [&_select]:!rounded [&_select]:!px-2 [&_select]:!py-1 [&_select]:!text-sm [&_a]:hidden pb-2"></div>
 
                 ${this._isScanning ? html`
-                  <div class="absolute top-4 right-4 flex items-center gap-2 bg-slate-steel/90 backdrop-blur px-2 py-1 rounded text-xs text-gable-green font-mono border border-gable-green/20">
+                  <div class="absolute top-4 right-4 flex items-center gap-2 bg-chip-ground/60 backdrop-blur px-2 py-1 rounded text-xs text-gable-green font-mono border border-gable-green/20">
                     <span class="w-2 h-2 rounded-full bg-gable-green animate-pulse"></span>
                     Scanning
                   </div>

@@ -117,7 +117,7 @@ export class PortalOrders extends LitElement {
                                 <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                                     <!-- Order Row -->
                                     <div
-                                        class="flex items-center justify-between p-4 cursor-pointer hover:bg-white/5 transition-colors"
+                                        class="flex items-center justify-between p-4 cursor-pointer hover:bg-hover-row transition-colors"
                                         @click=${() => this._toggleExpand(order.id)}
                                     >
                                         <div class="flex items-center gap-4">

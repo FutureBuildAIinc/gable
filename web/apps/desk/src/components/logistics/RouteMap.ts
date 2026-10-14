@@ -156,7 +156,7 @@ export class GableRouteMap extends LitElement {
           ${delivery.customer_name}
         </div>
         <div style="font-size:12px;margin-top:4px">${delivery.address}</div>
-        <div style="font-size:12px;color:${cssVarColor('zinc-500')};margin-top:4px">Order #${delivery.order_number} &middot; ${delivery.status}</div>
+        <div style="font-size:12px;color:${cssVarColor('map-note')};margin-top:4px">Order #${delivery.order_number} &middot; ${delivery.status}</div>
       `);
 
       this._markers.push(marker);

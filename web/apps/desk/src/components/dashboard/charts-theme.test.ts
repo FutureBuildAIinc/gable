@@ -45,7 +45,7 @@ describe('dashboard charts follow the mode', () => {
     built.length = 0
     localStorage.clear()
     setTheme('dark')
-    setVars({ 'zinc-400': '161 161 170', 'gable-green': '0 255 163', 'zinc-600': '82 82 91', 'zinc-500': '113 113 122' })
+    setVars({ 'zinc-400': '161 161 170', 'gable-green': '0 255 163', 'chart-tick': '82 82 91' })
   })
   afterEach(() => {
     root.removeAttribute('style')
@@ -80,7 +80,7 @@ describe('dashboard charts follow the mode', () => {
     expect(stops).toEqual(['rgb(0 255 163 / 0.3)', 'rgb(0 255 163 / 0)'])
     expect(cfg.options.scales.y.ticks.color).toBe('rgb(82 82 91 / 1)')
 
-    setVars({ 'zinc-500': '109 104 99', 'gable-green': '4 108 67' })
+    setVars({ 'chart-tick': '109 104 99', 'gable-green': '4 108 67' })
     setTheme('light')
     await frame()
     const light = built.at(-1)!

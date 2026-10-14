@@ -17,7 +17,7 @@ const STEPS = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '90
 const PALETTES = [
     'zinc', 'slate', 'gray',
     'emerald', 'green', 'red', 'rose', 'amber', 'yellow', 'orange', 'blue',
-    'sky', 'teal', 'indigo', 'violet', 'purple', 'pink', 'cyan', 'lime',
+    'sky', 'teal', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'cyan', 'lime',
 ];
 
 /** rgb(var(--gb-<name>) / <alpha-value>): one colour that follows the mode. */
@@ -95,6 +95,19 @@ export const gableTheme = {
             'sage-tint': channel('sage-tint'),
             // Colours with their own dark value, so Industrial Dark draws exactly as before
             'pale': channel('pale'),
+            'portal-ground': channel('portal-ground'),
+            'portal-panel': channel('portal-panel'),
+            'chip-ground': channel('chip-ground'),
+            'shade': channel('shade'),
+            'photo-btn': channel('photo-btn'),
+            'map-note': channel('map-note'),
+            'chart-tick': channel('chart-tick'),
+            'chart-fulfilled': channel('chart-fulfilled'),
+            // A picture's plate (white in dark, the warm ground in light) and a tile on a card
+            'picture-plate': channel('picture-plate'),
+            tile: channel('tile'),
+            // A row hover: white at 5 percent in dark, a warm stone step in light
+            'hover-row': 'rgb(var(--gb-hover-row) / var(--gb-hover-row-a))',
             // The second voice: dark draws today's neutrals, light draws sage
             'voice': channel('voice'),
             'voice-soft': channel('voice-soft'),
@@ -135,6 +148,7 @@ export const gableTheme = {
             'elevation-1': 'var(--gb-elevation-1)',
             'elevation-2': 'var(--gb-elevation-2)',
             'elevation-3': 'var(--gb-elevation-3)',
+            'tile': 'var(--gb-tile-shadow)',
             'glow': 'var(--gb-glow)',
             'glow-soft': 'var(--gb-glow-soft)',
             'glow-10-30': 'var(--gb-glow-10-30)',

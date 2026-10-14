@@ -9,7 +9,7 @@ import { clearToken } from '../../services/PortalService.ts';
 import type { PortalConfig, PortalUser } from '../../types/portal.ts';
 import '@gable/design-system';
 import { onThemeChange } from '@gable/design-system';
-import { themeHex } from '../../lib/theme-colors.ts';
+import { themeHex, brandOnCard } from '../../lib/theme-colors.ts';
 import { icon } from '../../lib/icons.ts';
 import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Users, FolderGit2 } from 'lucide';
 
@@ -61,7 +61,7 @@ export class GablePortalLayout extends LitElement {
   }
 
   private get _primaryColor() {
-    return this._config?.primary_color || themeHex('gable-green');
+    return brandOnCard(this._config?.primary_color || themeHex('gable-green'));
   }
 
   private get _navItems() {
@@ -80,13 +80,13 @@ export class GablePortalLayout extends LitElement {
     const path = router.currentPath;
 
     return html`
-      <div class="min-h-screen text-foreground flex font-sans selection:bg-gable-green/30 bg-deep-space" style="--portal-primary: ${primary};">
+      <div class="min-h-screen text-foreground flex font-sans selection:bg-gable-green/30 bg-portal-ground" style="--portal-primary: ${primary};">
         <!-- Mobile overlay -->
         ${this._sidebarOpen ? html`<div class="fixed inset-0 z-40 bg-backdrop/50 md:hidden" @click=${() => { this._sidebarOpen = false; }}></div>` : nothing}
 
         <!-- Sidebar -->
         <aside class="${cn(
-          'border-r border-white/10 transition-all duration-300 flex flex-col fixed inset-y-0 left-0 z-50 shadow-2xl bg-slate-steel',
+          'border-r border-white/10 transition-all duration-300 flex flex-col fixed inset-y-0 left-0 z-50 shadow-2xl bg-portal-panel',
           this._sidebarOpen ? 'w-64 translate-x-0' : '-translate-x-full md:translate-x-0 md:w-20'
         )}">
           <!-- Brand Header -->
@@ -111,7 +111,7 @@ export class GablePortalLayout extends LitElement {
               return html`
                 <a href="${item.path}" class="${cn(
                   'flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group relative overflow-hidden',
-                  isActive ? 'text-white shadow-lg' : 'text-zinc-400 hover:text-zinc-100 hover:bg-white/5'
+                  isActive ? 'text-white shadow-lg' : 'text-zinc-400 hover:text-zinc-100 hover:bg-hover-row'
                 )}" style="${isActive ? `background-color: ${primary}15; color: ${primary}; box-shadow: 0 0 20px ${primary}15;` : ''}">
                   ${isActive ? html`<div class="absolute inset-y-0 left-0 w-1 rounded-r-full" style="background-color: ${primary}"></div>` : nothing}
                   <span class="${cn('transition-transform duration-200 group-hover:scale-110', isActive && 'scale-110')}">
@@ -129,13 +129,13 @@ export class GablePortalLayout extends LitElement {
           <div class="p-4 border-t border-white/5 bg-white/5">
             <button @click=${() => { this._sidebarOpen = !this._sidebarOpen; }}
                     aria-label="${this._sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}"
-                    class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-white transition-colors">
+                    class="w-full flex items-center justify-center p-2 rounded-lg hover:bg-hover-row text-zinc-500 hover:text-white transition-colors">
               ${icon(this._sidebarOpen ? ChevronLeft : ChevronRight, 20)}
             </button>
 
             <div class="${cn('mt-4 flex items-center gap-3 transition-all duration-300', !this._sidebarOpen && 'justify-center')}">
               <div class="h-8 w-8 rounded-full p-[1px] shrink-0" style="background: linear-gradient(135deg, ${primary}, ${primary}80)">
-                <div class="h-full w-full rounded-full flex items-center justify-center bg-slate-steel">
+                <div class="h-full w-full rounded-full flex items-center justify-center bg-portal-panel">
                   <span class="font-bold text-xs text-white">
                     ${this._user?.name?.split(' ').map((n: string) => n[0]).join('') || '??'}
                   </span>
@@ -147,7 +147,7 @@ export class GablePortalLayout extends LitElement {
                   <div class="text-xs text-zinc-500 truncate">${this._user?.email || ''}</div>
                 </div>
                 <button @click=${() => this._handleLogout()} aria-label="Sign out"
-                        class="p-1.5 rounded-lg hover:bg-white/5 text-zinc-500 hover:text-red-400 transition-colors" title="Sign Out">
+                        class="p-1.5 rounded-lg hover:bg-hover-row text-zinc-500 hover:text-red-400 transition-colors" title="Sign Out">
                   ${icon(LogOut, 16)}
                 </button>
               ` : nothing}
@@ -158,9 +158,9 @@ export class GablePortalLayout extends LitElement {
         <!-- Main Content -->
         <main class="${cn('flex-1 flex flex-col min-h-screen transition-all duration-300', this._sidebarOpen ? 'md:ml-64' : 'md:ml-20')}">
           <!-- Header -->
-          <header class="h-16 border-b border-white/10 backdrop-blur-md sticky top-0 z-40 px-8 flex items-center justify-between shadow-sm bg-slate-steel/80">
+          <header class="h-16 border-b border-white/10 backdrop-blur-md sticky top-0 z-40 px-8 flex items-center justify-between shadow-sm bg-portal-panel/80">
             <div class="flex items-center gap-4">
-              <button aria-label="Toggle navigation menu" class="md:hidden p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
+              <button aria-label="Toggle navigation menu" class="md:hidden p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-hover-row transition-colors"
                       @click=${() => { this._sidebarOpen = !this._sidebarOpen; }}>
                 <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
               </button>

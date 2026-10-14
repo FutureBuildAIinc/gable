@@ -45,7 +45,7 @@ export class PortalInvite extends LitElement {
                 <div class="mb-6 flex items-center gap-4">
                     <button
                         @click=${() => router.navigate('/portal/team')}
-                        class="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                        class="p-2 text-zinc-400 hover:text-white hover:bg-hover-row rounded-lg transition-colors"
                     >
                         ${icon(ArrowLeft, 20)}
                     </button>
@@ -80,7 +80,7 @@ export class PortalInvite extends LitElement {
                                         <label
                                             class="relative flex flex-col p-4 cursor-pointer rounded-xl border transition-all ${this._selectedRole === r
                                                 ? 'bg-gable-green/10 border-gable-green shadow-glow-soft'
-                                                : 'bg-black/20 border-white/5 hover:bg-white/5 hover:border-white/20'
+                                                : 'bg-black/20 border-white/5 hover:bg-hover-row hover:border-white/20'
                                             }"
                                         >
                                             <input
@@ -107,7 +107,7 @@ export class PortalInvite extends LitElement {
                                 <button
                                     type="button"
                                     @click=${() => router.navigate('/portal/team')}
-                                    class="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                                    class="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white hover:bg-hover-row rounded-lg transition-colors"
                                 >
                                     Cancel
                                 </button>

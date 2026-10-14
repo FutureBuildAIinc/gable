@@ -64,8 +64,9 @@ function apply(theme: Theme): void {
 
 /**
  * Pick the subject whose choice applies (null = nobody signed in) and apply
- * it. A subject with no stored choice keeps the last used value, which is
- * then stored for them.
+ * it. A subject with no stored choice of their own is shown the last used
+ * value, which is NOT written under their key: a person's key only ever
+ * holds that person's own choice (setTheme writes it).
  */
 export function useThemeSubject(subject: string | null): Theme {
   activeSubject = subject !== null && subject !== '' ? subject : null
@@ -74,9 +75,7 @@ export function useThemeSubject(subject: string | null): Theme {
   if (activeSubject === null) {
     theme = lastUsed ?? 'dark'
   } else {
-    const own = read(themeKeyFor(activeSubject))
-    theme = own ?? lastUsed ?? 'dark'
-    if (own === null) write(themeKeyFor(activeSubject), theme)
+    theme = read(themeKeyFor(activeSubject)) ?? lastUsed ?? 'dark'
   }
   apply(theme)
   write(THEME_KEY, theme)
@@ -100,6 +99,20 @@ export function toggleTheme(): Theme {
   setTheme(next)
   return next
 }
+
+/**
+ * Another tab changed the choice: follow it. Only the key that applies to
+ * this tab is followed (the signed in person's own, else the last used), and
+ * the value is applied without being written again.
+ */
+function onStorage(e: StorageEvent): void {
+  const key = activeSubject !== null ? themeKeyFor(activeSubject) : THEME_KEY
+  if (e.key !== key) return
+  const theme = parse(e.newValue)
+  if (theme !== null) apply(theme)
+}
+
+if (typeof window !== 'undefined') window.addEventListener('storage', onStorage)
 
 /** Subscribe to theme changes; returns the unsubscribe. */
 export function onThemeChange(listener: (theme: Theme) => void): () => void {

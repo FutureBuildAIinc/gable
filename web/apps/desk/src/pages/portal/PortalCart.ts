@@ -135,7 +135,7 @@ export class PortalCart extends LitElement {
                                             <div class="flex items-center border border-white/10 rounded-lg overflow-hidden">
                                                 <button
                                                     @click=${() => this._handleUpdateQty(item.id, item.quantity - 1)}
-                                                    class="px-2.5 py-1.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                                    class="px-2.5 py-1.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                                 >
                                                     ${icon(Minus, 14)}
                                                 </button>
@@ -144,7 +144,7 @@ export class PortalCart extends LitElement {
                                                 </span>
                                                 <button
                                                     @click=${() => this._handleUpdateQty(item.id, item.quantity + 1)}
-                                                    class="px-2.5 py-1.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                                    class="px-2.5 py-1.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                                 >
                                                     ${icon(Plus, 14)}
                                                 </button>
