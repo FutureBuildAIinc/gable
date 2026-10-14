@@ -325,6 +325,7 @@ export class GableDateField extends LitElement {
             <div
                 role="dialog"
                 aria-label="Choose a date"
+                popover="manual"
                 style="position: fixed; top: ${this._popTop}px; left: ${this._popLeft}px;"
                 class="z-50 w-64 rounded-xl bg-slate-steel border border-white/10 p-3 shadow-xl"
             >
@@ -396,6 +397,19 @@ export class GableDateField extends LitElement {
     /** After the grid re-renders, keep the focused day's button focused. */
     updated() {
         if (this._open) {
+            // The dialog carries popover="manual": on a real engine this puts
+            // it in the top layer, which no ancestor's transform, filter or
+            // overflow can offset or clip. Manual keeps the dismissal ours
+            // (the outside click and the Escape handlers). A popover not yet
+            // shown is display:none, so show it on every render while open.
+            const pop = this.querySelector('[popover]') as (HTMLElement & { showPopover?: () => void }) | null;
+            if (pop && typeof pop.showPopover === 'function') {
+                try {
+                    pop.showPopover();
+                } catch {
+                    // already showing
+                }
+            }
             const btn = this.querySelector(`#${this._id}-grid button[tabindex="0"]`) as HTMLElement | null;
             // Pull focus to the landed day when the grid had it before the
             // render (the month turned and the old node went away), or when
