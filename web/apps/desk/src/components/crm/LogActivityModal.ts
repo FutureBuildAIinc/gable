@@ -8,13 +8,13 @@ import { crmApi } from '../../services/crmApi';
 import { ToastService } from '../../lib/toast-service';
 import { todayDay } from '../../lib/dates.ts';
 
-// The current hour and minute, HH:MM, as the time entry's default.
+// The current hour and minute, as the time entry's default.
 function nowTime(): string {
   const n = new Date();
   return `${String(n.getHours()).padStart(2, '0')}:${String(n.getMinutes()).padStart(2, '0')}`;
 }
 
-// The app's own time entry takes HH:MM and nothing else.
+// The app's own time entry takes hours and minutes (09:30) and nothing else.
 function parseTime(text: string): string | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(text.trim());
   if (!m) return null;
@@ -51,7 +51,7 @@ export class GableLogActivityModal extends LitElement {
       }
       const time = parseTime(this._activityTime);
       if (!time) {
-        ToastService.show('Enter the time as HH:MM, for example 09:30', 'error');
+        ToastService.show('Enter the time as hours and minutes, for example 09:30', 'error');
         return;
       }
       this._loading = true;
@@ -123,7 +123,7 @@ export class GableLogActivityModal extends LitElement {
                     type="text"
                     inputmode="numeric"
                     aria-label="Activity time"
-                    placeholder="HH:MM"
+                    placeholder="09:30"
                     .value=${this._activityTime}
                     @input=${(e: InputEvent) => this._activityTime = (e.target as HTMLInputElement).value}
                     class="w-full px-3 py-2 border border-zinc-300 rounded-md text-zinc-900 focus:ring-2 focus:ring-blueprint-blue/50 focus:border-blueprint-blue"

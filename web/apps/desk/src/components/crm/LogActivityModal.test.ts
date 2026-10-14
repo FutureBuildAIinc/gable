@@ -4,7 +4,7 @@
 /**
  * The Log Activity modal's payload leg (PR 156 review P2-4): an activity is
  * an event with a time. The form keeps the day's field and adds the app's own
- * time entry (HH:MM, the current hour and minute by default, refused in words
+ * time entry (hours and minutes, the current time by default, refused in words
  * when it is not a time); the wire's activity_date is the picked day at the
  * picked time, in the person's own zone.
  */
