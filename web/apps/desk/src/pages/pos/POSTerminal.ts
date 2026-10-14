@@ -405,6 +405,11 @@ export class POSTerminal extends LitElement {
   /* ---- Sale management ---- */
 
   private async _startNewSale() {
+    // A completion's own timer must not start a second sale over this one.
+    if (this._newTxTimer) {
+      clearTimeout(this._newTxTimer);
+      this._newTxTimer = null;
+    }
     try {
       this._loading = true;
       this._error = null;

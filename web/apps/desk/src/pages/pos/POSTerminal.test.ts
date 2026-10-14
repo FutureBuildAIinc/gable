@@ -384,6 +384,20 @@ describe('the counter as the Panels layout', () => {
     expect(text).not.toContain('$5.0000');
   });
 
+  it('does not start a second sale over the one the cashier began after a completion', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await typeInto(el, '100.00');
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    // The cashier starts the next sale at once; the completion's own timer must not start another.
+    const newSale = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'New Sale') as HTMLElement;
+    newSale.click();
+    await new Promise((r) => setTimeout(r, 2300));
+    expect(svc.startSale).toHaveBeenCalledTimes(2);
+  });
+
   it('tells the cashier to name the customer first, from the start of an empty sale', async () => {
     const el = await mount(sale({ lines: [] }));
     expect(q(el, 'panel-customer').textContent).toContain('Name the customer before the first line');
