@@ -80,8 +80,8 @@ type SaveAISettingsRequest struct {
 
 // Parse validates the save, collecting every problem into one 400. A bad
 // base URL or model is reported here, before anything is written, so a
-// refused save never leaves half the settings behind. The OpenRouter key is
-// required unless the save names the Anthropic provider or key.
+// refused save never leaves half the settings behind. An OpenRouter key
+// is required only when the save names nothing else.
 func (r *SaveAISettingsRequest) Parse() (save AISave, revision *int64, err error) {
 	v := &httpx.Validator{}
 	var apiKey, provider, model, akey string
@@ -103,7 +103,10 @@ func (r *SaveAISettingsRequest) Parse() (save AISave, revision *int64, err error
 	if verr := ai.ValidateAnthropicModel(model); verr != nil {
 		v.Check(false, "model", verr.Error())
 	}
-	if strings.TrimSpace(apiKey) == "" && akey == "" && provider != ai.ProviderAnthropic {
+	// A save must change something: an OpenRouter key is required only when
+	// the body names nothing else, so a provider or model alone (switching
+	// back to OpenRouter) is a valid save.
+	if strings.TrimSpace(apiKey) == "" && akey == "" && provider == "" && model == "" && r.BaseURL == nil {
 		v.Check(false, "api_key", "is required")
 	}
 	var baseURL *string

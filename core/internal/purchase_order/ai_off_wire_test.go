@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-package purchase_order
+package purchase_order_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -13,13 +14,35 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ai"
+	"github.com/gablelbm/gable/internal/purchase_order"
+	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
 // With no key the freight invoice upload answers the plain AI off sentence
 // in the error envelope (stable code ai_off), not a bare "Bad Request".
 func TestWire_FreightUploadSaysAIOffWithNoKey(t *testing.T) {
-	h := NewHandler(&Service{aiClient: ai.NewClient("")}, nil)
+	db := testutil.RequireDB(t)
+	ctx := branchctx.WithSystem(context.Background())
+	vendor, po := uuid.New(), uuid.New()
+	branch := `(SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')`
+	must := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	must(`INSERT INTO vendors (id, name) VALUES ($1, $2)`, vendor, "ai-off-"+vendor.String()[:6])
+	must(`INSERT INTO purchase_orders (id, vendor_id, status, source, branch_id) VALUES ($1, $2, 'RECEIVED', 'MANUAL', `+branch+`)`, po, vendor)
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM purchase_orders WHERE id = $1`, po)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM vendors WHERE id = $1`, vendor)
+	})
+
+	svc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, nil, nil)
+	svc.WithAIClient(ai.NewClient(""))
+	h := purchase_order.NewHandler(svc, nil)
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -29,7 +52,7 @@ func TestWire_FreightUploadSaysAIOffWithNoKey(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/purchase-orders/x/freight", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.SetPathValue("id", uuid.New().String())
+	req.SetPathValue("id", po.String())
 	rec := httptest.NewRecorder()
 	h.HandleUploadFreight(rec, req)
 

@@ -266,7 +266,9 @@ func Run() {
 	// credentials use; the Anthropic key has no environment fallback.
 	aiVault, aiVaultErr := payment.NewVault(cfg.PaymentVaultKey)
 	if aiVaultErr != nil {
-		logger.Error("PAYMENT_VAULT_KEY invalid; AI keys cannot be sealed or opened", "error", aiVaultErr)
+		// The error text is not logged: a parse error can echo a character of
+		// the value.
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key (64 hex characters); AI keys cannot be sealed or opened")
 		aiVault = &payment.Vault{}
 	}
 	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey).WithSealer(aiVault)

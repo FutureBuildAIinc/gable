@@ -207,6 +207,21 @@ func (c *Client) activeProvider(ctx context.Context) string {
 	return ProviderOpenRouter
 }
 
+// Invalidate drops every cached setting the client reads (keys, base URL,
+// provider, models), so the next call uses what an admin just saved.
+func (c *Client) Invalidate() {
+	for _, ks := range []*KeyStore{c.keyStore, c.baseURLStore, c.providerStore, c.anthropicKeyStore, c.anthropicModelStore} {
+		if ks != nil {
+			ks.Invalidate()
+		}
+	}
+	if c.models != nil {
+		for _, ks := range []*KeyStore{c.models.text, c.models.vision, c.models.cheap, c.models.image} {
+			ks.Invalidate()
+		}
+	}
+}
+
 func (c *Client) anthropicKeyValue(ctx context.Context) string {
 	if c.anthropicKeyStore != nil {
 		return c.anthropicKeyStore.Get(ctx)
@@ -476,7 +491,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("AI request failed: %w", err)
+		return nil, fmt.Errorf("AI request failed: %s", providerWords(err.Error(), apiKey))
 	}
 	defer resp.Body.Close()
 
@@ -486,11 +501,12 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		msg := string(respBody)
 		var errResp chatResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
-			return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, errResp.Error.Message)
+			msg = errResp.Error.Message
 		}
-		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, providerWords(msg, apiKey))
 	}
 
 	var cr chatResponse
@@ -498,7 +514,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	if cr.Error != nil {
-		return nil, fmt.Errorf("OpenRouter error: %s", cr.Error.Message)
+		return nil, fmt.Errorf("OpenRouter error: %s", providerWords(cr.Error.Message, apiKey))
 	}
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from AI (no choices)")

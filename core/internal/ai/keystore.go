@@ -70,6 +70,8 @@ type KeyStore struct {
 	ttl      time.Duration
 
 	sealer Sealer // optional: opens values sealed at rest
+
+	unreadableLogged bool // the "cannot be opened" line is written once per unreadable value
 }
 
 // WithSealer attaches the vault that opens sealed values on read. Values that
@@ -109,6 +111,17 @@ func (ks *KeyStore) Get(ctx context.Context) string {
 	ks.mu.Unlock()
 
 	return val
+}
+
+// Invalidate drops the cached value so the next read goes to the database. A
+// save or delete of the setting calls it, so the very next call uses what was
+// saved rather than what was cached.
+func (ks *KeyStore) Invalidate() {
+	ks.mu.Lock()
+	ks.cached = ""
+	ks.cachedAt = time.Time{}
+	ks.unreadableLogged = false
+	ks.mu.Unlock()
 }
 
 // Set stores a new key in the DB and updates the cache immediately.
@@ -172,7 +185,15 @@ func (ks *KeyStore) loadFromDB(ctx context.Context) string {
 		opened, oerr := openValue(ks.sealer, val)
 		if oerr != nil {
 			// Never fall back to the sealed text, and never log the value.
-			slog.Error("AI setting could not be opened", "key", ks.settingKey, "error", oerr)
+			// An unreadable stored key reads as AI off; the line is written
+			// once, not on every read.
+			ks.mu.Lock()
+			first := !ks.unreadableLogged
+			ks.unreadableLogged = true
+			ks.mu.Unlock()
+			if first {
+				slog.Error("a stored AI setting cannot be opened with the vault key (the vault key changed or is missing); AI reads as off for it until it is entered again", "setting", ks.settingKey)
+			}
 			return ks.envDefault
 		}
 		return opened

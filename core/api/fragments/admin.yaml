@@ -138,9 +138,11 @@ paths:
       tags: [admin]
       summary: Save the AI provider, model and keys
       description: >-
-        Admin or owner, or a key holding admin:settings. api_key (the
-        OpenRouter key) is required unless provider is anthropic or
-        anthropic_api_key is given. The Anthropic key is sealed at rest and
+        Admin or owner, or a key holding admin:settings. A save must change
+        something: api_key (the OpenRouter key) is required only when the
+        body names no provider, model, base_url or anthropic_api_key, so a
+        provider alone switches back to OpenRouter and keeps both keys. The
+        settings take effect at once, no cached value outlives the save. The Anthropic key is sealed at rest and
         refused with a 400 naming anthropic_api_key when the server has no
         vault key; a model below Sonnet 5.5 is a 400 naming model. The audit
         row and event record the provider and model, never a key. base_url is absent (leave the override as it is), a URL

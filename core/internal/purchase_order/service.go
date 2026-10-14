@@ -725,12 +725,6 @@ func (s *Service) extractFreight(ctx context.Context, fileBytes []byte, contentT
 }
 
 func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, fileBytes []byte, contentType string, filename string) (*FreightUploadResponse, error) {
-	// AI off is answered first, before the PO is read or the file saved: a
-	// person with no key enters the freight total by hand.
-	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
-		return nil, ai.ErrAIOff
-	}
-
 	po, err := s.repo.GetPO(ctx, poID)
 	if err != nil {
 		return nil, fmt.Errorf("PO not found: %w", err)
@@ -738,6 +732,12 @@ func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, file
 
 	if po.Status != StatusReceived && po.Status != StatusPartialReceive {
 		return nil, fmt.Errorf("PO must be in RECEIVED or PARTIAL status to upload freight (current: %s)", po.Status)
+	}
+
+	// AI off is answered before the file is saved: a person with no key
+	// enters the freight total by hand.
+	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		return nil, ai.ErrAIOff
 	}
 
 	// Save the file to disk

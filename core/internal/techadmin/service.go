@@ -11,12 +11,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gablelbm/gable/internal/ai"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -410,12 +410,12 @@ func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 		return nil, err
 	}
 	if hasKey {
-		// A sealed key that cannot be opened still reads as configured; it
-		// just has no hint.
+		// A sealed key the vault cannot open (the vault key changed) reads
+		// as not stored: AI is off for it, as the client treats it.
 		if opened, oerr := ai.OpenValue(s.vault, key); oerr == nil {
 			key = opened
 		} else {
-			key = "****"
+			key, hasKey = s.envAIKey, false
 		}
 	} else {
 		key = s.envAIKey
@@ -434,8 +434,8 @@ func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 		VaultPresent: s.vault != nil && s.vault.Present(),
 	}
 	if hasAKey && akey != "" {
-		out.AnthropicConfigured = true
-		if opened, oerr := ai.OpenValue(s.vault, akey); oerr == nil {
+		if opened, oerr := ai.OpenValue(s.vault, akey); oerr == nil && opened != "" {
+			out.AnthropicConfigured = true
 			out.AnthropicKeyHint = keyHint(opened)
 		}
 	}
@@ -573,6 +573,7 @@ func (s *Service) SaveAISettingsFull(ctx context.Context, in AISave, pre Precond
 	if err != nil {
 		return nil, err
 	}
+	s.invalidateAI()
 	return out, nil
 }
 
@@ -620,7 +621,7 @@ func (s *Service) SealLegacySettings(ctx context.Context) (int, error) {
 // DeleteAISettings removes the admin override (key and base URL together, so
 // both revert to their environment defaults) on the client's revision.
 func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error {
-	return s.inTx(ctx, func(ctx context.Context) error {
+	err := s.inTx(ctx, func(ctx context.Context) error {
 		rev, err := s.repo.LockRevision(ctx, ResourceAISettings)
 		if err != nil {
 			return err
@@ -656,6 +657,20 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		}
 		return s.record(ctx, "admin_settings.deleted", "admin_settings", settingsEntityID(ResourceAISettings), changes, next)
 	})
+	if err == nil {
+		s.invalidateAI()
+	}
+	return err
+}
+
+// invalidateAI drops the AI client's cached settings after a committed save
+// or delete, so the very next call (the test connection included) uses what
+// was saved. The tester is the AI client in serve; a tester with no cache has
+// nothing to drop.
+func (s *Service) invalidateAI() {
+	if r, ok := s.aiTester.(interface{ Invalidate() }); ok {
+		r.Invalidate()
+	}
 }
 
 // GetRoutingSettings reads the routing settings document, the AI settings'

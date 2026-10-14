@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Save, Loader2, Search, X, Globe } from 'lucide';
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { apiErrorMessage } from '../../../services/apiError';
 import type { PIMContent } from '../../../types/pim.ts';
 
 @customElement('gable-product-seo-tab')
@@ -43,7 +44,7 @@ export class GableProductSEOTab extends LitElement {
             this.dispatchEvent(new CustomEvent('content-update', { detail: result, bubbles: true, composed: true }));
         } catch (err) {
             console.error('Generate SEO failed:', err);
-            ToastService.show('Failed to generate SEO content', 'error');
+            ToastService.show(apiErrorMessage(err, 'Failed to generate SEO content'), 'error');
         } finally {
             this.generating = false;
         }

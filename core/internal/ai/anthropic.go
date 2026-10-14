@@ -140,6 +140,21 @@ func (c *Client) anthropicBase() string {
 	return defaultAnthropicBaseURL
 }
 
+// maxProviderWords caps a provider's words in an error the admin reads.
+const maxProviderWords = 500
+
+// providerWords makes a provider's error text safe to show: the key (if the
+// provider echoes it) is replaced and the length capped.
+func providerWords(s, key string) string {
+	if key != "" {
+		s = strings.ReplaceAll(s, key, "[key]")
+	}
+	if len(s) > maxProviderWords {
+		s = strings.ToValidUTF8(s[:maxProviderWords], "") + "..."
+	}
+	return s
+}
+
 // anthropicMessages performs one POST {base}/v1/messages. Errors carry the
 // provider's own words and never the key (a provider that echoes it back is
 // scrubbed).
@@ -163,7 +178,7 @@ func (c *Client) anthropicMessages(ctx context.Context, req anthropicRequest) (*
 	httpReq.Header.Set("x-api-key", key)
 	httpReq.Header.Set("anthropic-version", anthropicVersion)
 
-	scrub := func(s string) string { return strings.ReplaceAll(s, key, "[key]") }
+	scrub := func(s string) string { return providerWords(s, key) }
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

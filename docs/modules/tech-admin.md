@@ -126,13 +126,20 @@ document: a singleton with a revision anchor in `admin_revisions`.
 
 | Field | Wire form | Note |
 |---|---|---|
-| `configured` | boolean | True when a key is in effect (admin override or env). |
+| `configured` | boolean | True when the chosen provider has a key in effect (admin override or env for OpenRouter; the sealed admin key for Anthropic). A stored key the vault cannot open reads as not configured. |
 | `source` | text enum | `admin`, `env`, or `none`. |
-| `key_hint` | text, nullable | The first 10 and last 4 characters joined by three dots, or four asterisks for a key of 12 characters or fewer; null when no key is configured. |
+| `key_hint` | text, nullable | The OpenRouter key's hint: four asterisks and its last four characters; null when no key is configured. |
+| `provider` | text enum | `openrouter` (the default) or `anthropic`. |
+| `model` | text | The Anthropic model, `claude-sonnet-5-5` by default. |
+| `anthropic_configured` | boolean | True when an Anthropic key is stored and the vault can open it. |
+| `anthropic_key_hint` | text, nullable | Four asterisks and the key's last four characters. |
+| `vault_present` | boolean | True when the server holds a vault key, so a key can be saved. |
 | `base_url` | text, nullable | The admin override of the OpenRouter base URL; present only when the override is stored, null otherwise. |
 | `revision` | integer | The admin_revisions row for `admin.settings.ai`. |
 
-`AdminSaveAISettingsRequest` carries `api_key` (required),
+`AdminSaveAISettingsRequest` carries `api_key` (required only when the
+body names no `provider`, `model`, `base_url` or `anthropic_api_key`; a
+provider alone is a valid save), `provider`, `model`, `anthropic_api_key`,
 `base_url` (pointer: absent leaves the override, empty clears it, a URL
 sets it; non host URLs are refused, plaintext http is allowed only for
 loopback hosts, the rest must use https) and `revision` (the body
@@ -369,6 +376,26 @@ for the Anthropic key.
 - **Test connection.** `POST /api/v1/admin/settings/ai/test` makes a one
   token call and answers `{ok, message}`; a provider failure is `ok: false`
   with its words, never the key.
-- **AI off.** With no key for the chosen provider every AI feature says AI is
-  off and how an admin turns it on; nothing fakes a result (the material list
-  intake keeps its labelled sample for images and PDFs).
+- **A save takes effect at once.** Saving or deleting a provider, model or
+  key drops the AI client's cached settings, so the next call, the test
+  connection included, uses what was saved.
+- **Switching back.** The page switches the provider back to OpenRouter with
+  the provider alone; both stored keys are kept. Only the delete removes them.
+- **AI off.** With no key for the chosen provider, or a stored key the vault
+  cannot open (the vault key changed; one log line names the setting, never
+  its value), every AI feature answers the same plain refusal: a 409 in the
+  error envelope with the stable code `ai_off` and a message saying AI is off
+  and that an administrator turns it on in Tech Admin, AI. That covers the
+  four PIM generate routes and the freight invoice upload. Nothing fakes a
+  result: the material list intake keeps its labelled sample for images and
+  PDFs, and its reason says the same.
+- **No silent fallback.** With Anthropic chosen no feature calls OpenRouter.
+  The Anthropic provider offers no image model, so image generation answers
+  `ai_off` with a message that it needs the OpenRouter provider.
+- **The local stack takes a vault key from the shell.** `make up` passes
+  `PAYMENT_VAULT_KEY` from the shell to core and the worker (empty by
+  default, so nothing changes without it). Start the stack with it set to 64
+  hex characters, the same value each run, and never write it to a file:
+  `PAYMENT_VAULT_KEY=$(openssl rand -hex 32) make up` once, then keep that
+  value for later runs (a different value leaves the stored keys unreadable,
+  which reads as AI off until they are entered again).
