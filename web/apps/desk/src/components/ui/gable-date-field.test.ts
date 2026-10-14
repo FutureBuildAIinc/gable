@@ -165,6 +165,25 @@ describe('the calendar', () => {
     expect(el.textContent).toContain('November 2026')
   })
 
+  it('keeps focus on the day it lands on when the month turns', async () => {
+    // Jan 31, ArrowRight into February: the old cell's node goes away; the
+    // focus must land on the Feb 1 button, not the body.
+    const el = await mount<GableDateField>(TAG, { value: '2026-01-31' })
+    await openCalendar(el)
+    const start = gridDays(el).find((b) => b.tabIndex === 0)
+    if (!start) throw new Error('no focused cell')
+    start.focus()
+    expect(document.activeElement).toBe(start)
+    await key(el, 'ArrowRight')
+    const landed = gridDays(el).find((b) => b.tabIndex === 0)
+    expect(el.textContent).toContain('February 2026')
+    expect(landed?.textContent).toBe('1')
+    expect(document.activeElement).toBe(landed)
+    // From there the keys still reach the grid: Escape closes.
+    await key(el, 'Escape')
+    expect(el.querySelector('[role="dialog"]')).toBeNull()
+  })
+
   it('the week starts as the locale starts it', async () => {
     // Oct 2026 starts on a Thursday: four blanks under en-US, three under en-GB.
     const el = await mount<GableDateField>(TAG, { value: '2026-10-01' })
