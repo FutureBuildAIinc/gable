@@ -725,3 +725,18 @@ func actorPtr(actor string) *string {
 }
 
 var errNotConfigured = errors.New("the counter's money path is not wired")
+
+// ReceiptInvoice is the invoice behind a completed sale's receipt. The sale is
+// read exactly as GetSale reads it, so a sale outside the caller's reach is
+// the missing sale; an open, held or voided sale, and a sale with no invoice,
+// is a 409 no_receipt.
+func (s *Service) ReceiptInvoice(ctx context.Context, saleID uuid.UUID) (uuid.UUID, error) {
+	sale, err := s.repo.GetSale(ctx, saleID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if sale.Status != StatusCompleted || sale.InvoiceID == nil {
+		return uuid.Nil, conflict("no_receipt", "this sale has no receipt: only a completed sale with an invoice has one")
+	}
+	return *sale.InvoiceID, nil
+}

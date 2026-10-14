@@ -10696,6 +10696,72 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/receipt:
+    get:
+      operationId: posTransactionReceipt
+      tags: [pos]
+      summary: Print the sale's receipt
+      description: >-
+        The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The sale's invoice as a PDF document.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/receipt/email:
+    post:
+      operationId: posTransactionReceiptEmail
+      tags: [pos]
+      summary: Email the sale's receipt
+      description: >-
+        Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale, or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "202":
+          description: Email queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEmailResponse"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/customers:
     get:
       operationId: posCustomerFind
@@ -11008,7 +11074,7 @@ paths:
       tags: [pos]
       summary: The counter's catalogue tiles
       description: >-
-        The counter's catalogue for the caller's yard (its branch context, as the product search takes it): up to eight category chips, the yard's categories by units sold, then by product count, then by name, and the product tiles. With neither category nor q the tiles are the yard's top sellers by quantity sold (completed counter sale lines and the lines of invoices at the yard that are not void), then by description; category keeps one category's products in that order; q (two characters or more, sku or description) puts an exact sku first. unit_price_cents and in_stock mean what the product search answers. image_url is null unless the catalog.product_images setting is on and the product has a picture; images is that setting. Never null arrays.
+        The counter's catalogue for the caller's yard (its branch context, as the product search takes it): up to eight category chips, the yard's categories by units sold, then by product count, then by name, and the product tiles. With neither category nor q the tiles are the yard's top sellers by quantity sold (completed counter sale lines and the lines of invoices at the yard that are not void; a counter sale's own invoice, origin POS, is not counted), then by description; category keeps one category's products in that order; q (two characters or more, sku or description) puts an exact sku first. unit_price_cents and in_stock mean what the product search answers. image_url is null unless the catalog.product_images setting is on and the product has a picture; images is that setting. Never null arrays.
       parameters:
         - name: category
           in: query
