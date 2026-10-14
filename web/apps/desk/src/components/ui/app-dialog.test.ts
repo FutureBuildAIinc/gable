@@ -3,7 +3,9 @@
 
 import { describe, it, expect } from 'vitest'
 import { confirmDialog, promptDialog, type GableAppDialog } from './app-dialog.ts'
-import { q, flush } from '../../test/dom.ts'
+import { mount, update, q, flush } from '../../test/dom.ts'
+import type { GableSelect } from './gable-select.ts'
+import './gable-select.ts'
 
 function dialogEl(): GableAppDialog {
   return q<GableAppDialog>(document.body, 'gable-app-dialog')
@@ -158,6 +160,49 @@ describe('gable-app-dialog confirmDialog', () => {
     expect(document.body.querySelectorAll('gable-app-dialog').length).toBe(1)
     clickConfirm()
     await expect(second).resolves.toBe(true)
+  })
+})
+
+describe('a select pick that opens the dialog', () => {
+  async function pickerThatAsks(): Promise<GableSelect> {
+    const el = await mount<GableSelect>('gable-select', {
+      options: [
+        { value: 'a', label: 'Apple' },
+        { value: 'b', label: 'Berry' },
+      ],
+    })
+    el.addEventListener('change', () => { void confirmDialog({ title: 'Leave the open sale?' }) })
+    return el
+  }
+
+  function focusInsideDialog(): boolean {
+    const dlg = document.body.querySelector('gable-app-dialog')
+    return dlg !== null && dlg.contains(document.activeElement)
+  }
+
+  it('takes the focus when the pick was a click', async () => {
+    const el = await pickerThatAsks()
+    q<HTMLButtonElement>(el, 'button').click()
+    await update(el, {})
+    q<HTMLElement>(el, '[role="option"]').click()
+    await flush()
+    await settleDialog()
+    expect(focusInsideDialog(), 'focus must be inside the dialog, not back on the select behind the veil').toBe(true)
+    clickConfirm()
+    await flush()
+  })
+
+  it('takes the focus when the pick was Enter', async () => {
+    const el = await pickerThatAsks()
+    const button = q<HTMLButtonElement>(el, 'button')
+    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    await update(el, {})
+    button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await flush()
+    await settleDialog()
+    expect(focusInsideDialog(), 'focus must be inside the dialog, not back on the select behind the veil').toBe(true)
+    clickConfirm()
+    await flush()
   })
 })
 
