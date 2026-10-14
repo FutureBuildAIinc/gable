@@ -194,10 +194,11 @@ type poCall struct {
 	quantity  float64
 	unitCost  float64
 	lineID    uuid.UUID
+	branch    uuid.UUID
 }
 
-func (f *fakePO) CreatePOFromSpecialOrderLine(_ context.Context, productID *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID) error {
-	f.calls = append(f.calls, poCall{productID, qty, unitCost, lineID})
+func (f *fakePO) CreatePOFromSpecialOrderLine(_ context.Context, productID *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID) error {
+	f.calls = append(f.calls, poCall{productID, qty, unitCost, lineID, branch})
 	return f.err
 }
 
@@ -523,6 +524,9 @@ func TestTransition_AutoPOOnlyForCostedLines(t *testing.T) {
 	got := po.calls[0]
 	if got.productID != nil || got.quantity != 3 || got.unitCost != 88.25 || got.lineID != special.ID {
 		t.Errorf("PO call = %+v, want the plain accept's inert line (no product) at 3 and 88.25", got)
+	}
+	if got.branch != q.BranchID {
+		t.Errorf("PO call branch = %s, want the quote's own branch %s, never one resolved from the caller's grants", got.branch, q.BranchID)
 	}
 }
 

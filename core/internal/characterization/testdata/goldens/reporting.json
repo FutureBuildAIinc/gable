@@ -70,26 +70,15 @@
       }
     },
     "response": {
-      "status": 201,
+      "status": 409,
       "content_type": "application/json",
       "body": {
-        "execution": {
-          "cron_dialect": "Six fields, seconds first: \"second minute hour day-of-month month day-of-week\" (e.g. \"0 0 9 * * *\" for 09:00 daily). Five-field crontab expressions are rejected. Descriptors such as @daily and @every 1h are accepted.",
-          "delivery": "Email is log-only in this deployment: the report is generated and handed to notification.LogEmailService, which records the recipients, subject, filename and size in the server log instead of sending. Replace the NewLogEmailService call in cmd/server/main.go with an SMTP-backed EmailService to deliver for real.",
-          "enabled": true,
-          "summary": "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV."
+        "error": {
+          "code": "conflict",
+          "message": "a schedule needs a caller identity: this caller carries no subject, so the scheduled run could never resolve its reach"
         },
-        "schedule": {
-          "created_at": "<ts+0d>",
-          "cron_expression": "0 6 * * * *",
-          "format": "CSV",
-          "id": "<id-2>",
-          "recipients": [
-            "goldens@example.com"
-          ],
-          "report_id": "<id-1>",
-          "status": "ACTIVE",
-          "updated_at": "<ts+0d>"
+        "meta": {
+          "request_id": "<id-2>"
         }
       }
     }
@@ -110,20 +99,7 @@
           "enabled": true,
           "summary": "Schedules run on the server's cron engine: each run executes the saved report and renders it to CSV."
         },
-        "schedules": [
-          {
-            "created_at": "<ts+0d>",
-            "cron_expression": "0 6 * * * *",
-            "format": "CSV",
-            "id": "<id-2>",
-            "recipients": [
-              "goldens@example.com"
-            ],
-            "report_id": "<id-1>",
-            "status": "ACTIVE",
-            "updated_at": "<ts+0d>"
-          }
-        ]
+        "schedules": []
       }
     }
   },

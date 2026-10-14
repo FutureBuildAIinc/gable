@@ -192,14 +192,16 @@ func TestConvert_OrderTakesTheQuotesBranch(t *testing.T) {
 }
 
 type poRecorder struct {
-	calls []uuid.UUID // the quote line ids it was asked about
-	qty   []float64
-	cost  []float64
-	err   error
+	calls    []uuid.UUID // the quote line ids it was asked about
+	branches []uuid.UUID // the branch each call was given
+	qty      []float64
+	cost     []float64
+	err      error
 }
 
-func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID) error {
+func (p *poRecorder) CreatePOFromSpecialOrderLine(_ context.Context, _ *uuid.UUID, _ *uuid.UUID, qty, unitCost float64, lineID uuid.UUID, branch uuid.UUID) error {
 	p.calls = append(p.calls, lineID)
+	p.branches = append(p.branches, branch)
 	p.qty = append(p.qty, qty)
 	p.cost = append(p.cost, unitCost)
 	return p.err
@@ -551,7 +553,7 @@ func TestCreateFromSOLineLinksToTheOrderLine(t *testing.T) {
 	}
 	// A special order line's call, as the auto PO path makes it.
 	soProduct := w.f.productID
-	if err := poSvc.CreateFromSOLine(ctx, o.Lines[0].ID, &soProduct, nil, "2x4x8 SPF", 10, 3.25); err != nil {
+	if err := poSvc.CreateFromSOLine(ctx, o.Lines[0].ID, o.BranchID, &soProduct, nil, "2x4x8 SPF", 10, 3.25); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

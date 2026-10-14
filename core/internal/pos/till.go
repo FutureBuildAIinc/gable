@@ -5,11 +5,13 @@ package pos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // TillSessionStatus is the drawer lifecycle state.
@@ -153,7 +155,27 @@ func (s *Service) TillReport(ctx context.Context, sessionID uuid.UUID) (*TillRep
 // CloseTill closes the session: computes expected per method from the
 // session's completed sales, records counted amounts, and stores over/short.
 func (s *Service) CloseTill(ctx context.Context, sessionID uuid.UUID, countedByMethodCents map[string]int64, notes string) (*TillReport, error) {
+	// An act on a session of a branch outside the caller's grants is refused
+	// by name before anything runs (SEC-NOHEADER-1); the branch is read with
+	// no wall, because the walled read would hide the session before the
+	// refusal could name it. A session that does not exist answers the
+	// module's 404 (r4 P3-1), never the refusal.
+	branch, found, err := s.repo.TillSessionBranch(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, &MissingRecordError{What: "till session", ID: sessionID}
+	}
+	if err := s.holdRecordBranch(ctx, "till session", branch, sessionID); err != nil {
+		return nil, err
+	}
 	report, err := s.TillReport(ctx, sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The walled read hides a session outside the caller's branch
+		// context: it is missing for this caller, the module's 404.
+		return nil, &MissingRecordError{What: "till session", ID: sessionID}
+	}
 	if err != nil {
 		return nil, err
 	}

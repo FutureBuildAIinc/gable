@@ -235,6 +235,16 @@ is registered at the serve layer as `admin`, `owner`, `sales` (see
 A key without the scope is `403 forbidden`; the route names the path
 segment of the scope so the audit row carries it.
 
+A user who sends no `X-Branch-Id` while `default_branch_required` is off
+is held to the user's own grants (ADR 0007 section 5.7): the by id and by
+number reads answer the module's `403 forbidden` naming `id` ("quote is
+outside the branches this caller may target") for a quote of a branch the
+user does not hold, the lists carry only the granted branches' rows, and a
+create whose body names no `branch_id` takes its branch from the user's
+grants (exactly one granted branch writes there; several refuse with a
+`400 validation_failed` naming `branch_id`; none is refused), never the
+deployment default.
+
 A key bound to one branch (ADR 0007 section 5.5) may create or update a
 quote only for a customer its branch holds, and only for a job that
 customer owns (`POST /quotes`, `PUT /quotes/{id}`: `403 forbidden` naming

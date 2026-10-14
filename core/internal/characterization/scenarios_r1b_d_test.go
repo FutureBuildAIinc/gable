@@ -174,12 +174,13 @@ func r1bDReportingGroups() []groupDef {
 					body: map[string]any{"entity_type": "orders", "format": "pdf", "definition": ordersDef}},
 				{name: "reporting.builder.export.bad_body", method: "POST",
 					path: "/api/v1/reporting/builder/export", body: "nope"},
-				// At this base every BI entity schema names a column that does not
-				// exist (i.invoice_number, o.order_number, p.name): all three
-				// well formed exports answer 500.
-				{name: "reporting.bi_export.invoices", method: "GET", path: "/api/v1/reporting/export/invoices"},
-				{name: "reporting.bi_export.orders", method: "GET", path: "/api/v1/reporting/export/orders"},
-				{name: "reporting.bi_export.inventory", method: "GET", path: "/api/v1/reporting/export/inventory"},
+				// The three well formed exports answer 200 (the entity schemas'
+				// column expressions were fixed to the real columns); the bodies
+				// are the seeded dealer's whole dumps, which move with the seed,
+				// so the steps pin status and content type with the body masked.
+				{name: "reporting.bi_export.invoices", method: "GET", path: "/api/v1/reporting/export/invoices", maskBody: true},
+				{name: "reporting.bi_export.orders", method: "GET", path: "/api/v1/reporting/export/orders", maskBody: true},
+				{name: "reporting.bi_export.inventory", method: "GET", path: "/api/v1/reporting/export/inventory", maskBody: true},
 				{name: "reporting.bi_export.invalid_entity", method: "GET", path: "/api/v1/reporting/export/no_such_entity"},
 			},
 		},
@@ -222,9 +223,12 @@ func r1bDReportingGroups() []groupDef {
 						"report_id": "{d_saved}", "cron_expression": "0 30 6 * * *",
 						"recipients": []any{"goldens-d@example.com"}, "format": "XLSX",
 					},
-					extract: map[string]string{"d_schedule": "/schedule/id"},
 				},
-				{name: "reporting.schedule.delete", method: "DELETE", path: "/api/v1/reporting/schedules/{d_schedule}"},
+				// The dev caller's create is refused (no caller identity), so
+				// the delete steps run against a legacy schedule row, the
+				// shape every schedule made before migration 112 has.
+				{name: "reporting.schedule.delete", method: "DELETE", path: "/api/v1/reporting/schedules/{d_schedule}",
+					setup: seedLegacySchedule},
 				{name: "reporting.schedule.delete.again", method: "DELETE", path: "/api/v1/reporting/schedules/{d_schedule}"},
 				{name: "reporting.schedule.delete.unknown", method: "DELETE",
 					path: "/api/v1/reporting/schedules/" + zeroUUID},

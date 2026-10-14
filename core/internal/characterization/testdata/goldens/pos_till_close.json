@@ -170,12 +170,12 @@
       }
     },
     "response": {
-      "status": 409,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "CONFLICT",
-          "message": "Conflict"
+          "code": "NOT_FOUND",
+          "message": "Not Found"
         },
         "meta": {
           "request_id": "<id-11>"

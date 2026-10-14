@@ -40,6 +40,15 @@ func seedSharedCustomer(t *testing.T, f *keyPinFixture, branches ...uuid.UUID) *
 	for _, b := range branches {
 		exec(`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, s.id, b)
 	}
+	// The no header user callers of these tests (pin-sales, pin-finance) hold
+	// the customer's first branch, as the desk they act at: the customer
+	// family's wall holds a customer's branches to a no header caller's
+	// grants (SEC-NOHEADER-1), so a caller with no grant would read the
+	// shared customer as missing rather than exercise the shared rule.
+	if len(branches) > 0 {
+		noheaderGrant(t, f, "pin-sales", branches[0])
+		noheaderGrant(t, f, "pin-finance", branches[0])
+	}
 	exec(`INSERT INTO customer_ship_tos (id, customer_id, code, name, line1, is_default) VALUES ($1, $2, 'shared', 'pin shared', 'pin', TRUE)`, s.shipTo, s.id)
 	exec(`INSERT INTO customer_contacts (id, customer_id, first_name, last_name) VALUES ($1, $2, 'pin', 'shared')`, s.contact, s.id)
 	exec(`INSERT INTO sales_team (id, name, email, phone, role) VALUES ($1, 'pin rep', $2, '555-0100', 'sales')`, s.salesperson, "pin-rep-"+s.salesperson.String()[:8]+"@example.com")

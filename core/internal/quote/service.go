@@ -29,7 +29,7 @@ import (
 type AutoPOService interface {
 	// productID is nil for a line that carries no product on its purchase
 	// order line (the plain accept path, whose lines are inert on receipt).
-	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error
+	CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error
 }
 
 // OrderCreator is the order module's conversion seam (ADR 0005 section 5.8):
@@ -61,6 +61,7 @@ type TxRunner interface {
 // *middleware.BranchGuard satisfies it.
 type BranchGuard interface {
 	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
 // Event types the module writes to the outbox.
@@ -489,6 +490,9 @@ func (r ProductUnitRow) rowPair() units.Pair {
 // the sequence and stores it, writing quote.created as the transaction's last
 // statement. A create that fails anywhere leaves no quote and no event.
 func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
+	if err := s.resolveCreateBranch(ctx, d); err != nil {
+		return nil, err
+	}
 	if err := s.checkPayloadBranch(ctx, d); err != nil {
 		return nil, err
 	}
@@ -1046,8 +1050,15 @@ func (s *Service) triggerAutoPO(ctx context.Context, q *Quote, created *order.Or
 				s.logger.Info("auto-PO skipped: the quote line has no order line", "quote_id", q.ID, "line_id", line.ID)
 				continue
 			}
+			// The draft sits at the branch of the order the line belongs to
+			// (the quote's own when no order was created), never at a branch
+			// resolved from the caller's grants.
+			branch := q.BranchID
+			if created != nil {
+				branch = created.BranchID
+			}
 			err := s.poSvc.CreatePOFromSpecialOrderLine(
-				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked,
+				ctx, product, nil, float64(line.Quantity)/10000, float64(line.UnitCost)/10000, linked, branch,
 			)
 			if err != nil {
 				s.logger.Warn("auto-PO failed for quote line",
@@ -1111,6 +1122,36 @@ func (s *Service) checkPayloadBranch(ctx context.Context, d *Draft) error {
 			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
 	}
 	return err
+}
+
+// resolveCreateBranch settles the branch a create that names no branch_id
+// writes at (SEC-NOHEADER-1): with no context branch a user's create takes
+// its branch from the user's grants (exactly one granted branch: that one;
+// several: the request must name one; none: fail closed), never the
+// deployment default the insert would otherwise fall back to, which no grant
+// of the creator holds. Callers the grants never hold (a context branch, an
+// administrator, an owner, a key, a system caller) keep the insert's own
+// fallback.
+func (s *Service) resolveCreateBranch(ctx context.Context, d *Draft) error {
+	if s.branches == nil || d.BranchID != nil {
+		return nil
+	}
+	granted, err := s.branches.GrantsForCreate(ctx)
+	switch {
+	case err == nil && granted != nil:
+		d.BranchID = granted
+	case err == nil:
+	case errors.Is(err, middleware.ErrCreateBranchChoice):
+		return httpx.BadRequest("branch_id is required: this caller holds more than one branch grant",
+			httpx.FieldError{Field: "branch_id", Message: "is required: name one of the caller's granted branches"})
+	case errors.Is(err, middleware.ErrPayloadBranchRefused):
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	default:
+		return err
+	}
+	return nil
 }
 
 // checkQuoteBranch is the record branch rule (ADR 0007 section 2.3) for a
