@@ -184,7 +184,14 @@ func TestKeyBranchPin_QuoteConvertCustomerWall(t *testing.T) {
 		t.Helper()
 		body := fmt.Sprintf(`{"customer_id":%q,"branch_id":%q,"lines":[%s]}`,
 			customer.String(), f.branchA.String(), f.quoteLine())
-		return f.made(t, "user", "quotes", "POST", "/api/v1/quotes", body, http.StatusCreated)
+		id := f.made(t, "user", "quotes", "POST", "/api/v1/quotes", body, http.StatusCreated)
+		// Ruling A: the user's create linked the customer to the quote's
+		// yard. The shape under test is the legacy one, a quote at A whose
+		// customer A does not hold, so the link is taken back.
+		if customer != f.custID {
+			unlink(t, f, customer, f.branchA)
+		}
+		return id
 	}
 	convert := func(id uuid.UUID) (int, []byte) {
 		t.Helper()
