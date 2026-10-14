@@ -360,6 +360,10 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                     ` : nothing}
 
+                    ${cur.unapplied_payments.length > 0 || cur.open_documents.length > 0 ? html`
+                        <p class="text-xs text-zinc-500 mt-4" data-testid="statement-scope">Documents listed are those this yard can see; the balance covers the whole account.</p>
+                    ` : nothing}
+
                     <div class="flex justify-end gap-8 mt-4 pt-4 border-t border-white/10">
                         <div class="text-right">
                             <p class="text-xs text-zinc-500">Closing Balance</p>
