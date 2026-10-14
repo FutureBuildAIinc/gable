@@ -83,6 +83,7 @@ export const routes: RouteConfig[] = [
   { path: '/admin/branches', load: () => import('./pages/admin/branches/Branches.ts'), layout: 'erp' },
   { path: '/admin/market-indices', load: () => import('./pages/admin/MarketIndices.ts'), layout: 'erp' },
   { path: '/admin', load: () => import('./pages/admin/tech_admin/TechAdminPage.ts'), layout: 'erp' },
+  { path: '/pricing/market-check', load: () => import('./pages/admin/pricing/MarketCheck.ts'), layout: 'erp' },
   { path: '/pricing', load: () => import('./pages/admin/pricing/PricingMatrix.ts'), layout: 'erp' },
   { path: '/accounts/:id', load: () => import('./pages/accounts/AccountDetailPage.ts'), layout: 'erp' },
   { path: '/accounts', load: () => import('./pages/accounts/AccountsPage.ts'), layout: 'erp' },

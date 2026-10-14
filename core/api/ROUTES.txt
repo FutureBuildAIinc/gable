@@ -79,6 +79,8 @@ POST	/api/v1/admin/exposure-scan	internal/pricing	h.HandleAdminScan
 GET	/api/v1/admin/keys	internal/techadmin	h.ListKeys
 POST	/api/v1/admin/keys	internal/techadmin	h.CreateKey
 DELETE	/api/v1/admin/keys/{id}	internal/techadmin	h.RevokeKey
+GET	/api/v1/admin/market-check/settings	internal/marketcheck	wrap(settingsGuard, h.getSettings)
+PUT	/api/v1/admin/market-check/settings	internal/marketcheck	wrap(settingsGuard, h.putSettings)
 GET	/api/v1/admin/modules	internal/staff	h.ListModules
 PUT	/api/v1/admin/modules/{id}	internal/staff	h.SetModuleEnabled
 DELETE	/api/v1/admin/settings/ai	internal/techadmin	h.DeleteAISettings
@@ -339,6 +341,7 @@ POST	/api/v1/pricing/category-rules/bulk	internal/pricing	h.HandleBulkUpsertRule
 DELETE	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleDeleteCategoryRule
 PUT	/api/v1/pricing/category-rules/{id}	internal/pricing	h.HandleUpdateCategoryRule
 GET	/api/v1/pricing/category-rules/{id}/audit	internal/pricing	h.HandleGetRuleAudit
+POST	/api/v1/pricing/market-check	internal/marketcheck	wrap(runGuard, h.run)
 GET	/api/v1/pricing/matrix	internal/pricing	h.HandleGetMatrix
 GET	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleListPrograms
 POST	/api/v1/pricing/rebates/programs	internal/pricing	h.HandleCreateProgram

@@ -48,6 +48,7 @@ import (
 	"github.com/gablelbm/gable/internal/invoice"
 	"github.com/gablelbm/gable/internal/links"
 	"github.com/gablelbm/gable/internal/location"
+	"github.com/gablelbm/gable/internal/marketcheck"
 	"github.com/gablelbm/gable/internal/matching"
 	"github.com/gablelbm/gable/internal/millwork"
 	"github.com/gablelbm/gable/internal/notification"
@@ -400,6 +401,14 @@ func Run() {
 		WithAudit(pricingAuditAdapter{l: auditLog})
 	pricingHandler := pricing.NewHandler(pricingSvc, customerSvc, productSvc)
 	pricingHandler.RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
+
+	// Market check: our prices against a live store through an FB Connect
+	// pricing flow (item 112 c). Settings are Tech Admin's; the run sits behind
+	// the pricing rules' walls.
+	marketCheckSvc := marketcheck.NewService(marketcheck.NewPostgresStore(db), marketcheck.NewPostgresCatalog(db)).
+		WithVault(aiVault).WithTxRunner(db).WithLogger(logger).
+		WithAudit(marketcheck.AuditRecorder{L: auditLog})
+	registerMarketCheck(mux, marketCheckSvc, wall.keyWall, db)
 
 	// Category Pricing Engine (feature-flagged)
 	if strings.EqualFold(os.Getenv("CATEGORY_PRICING_ENABLED"), "true") {
@@ -1382,4 +1391,14 @@ func rowOrNone(r links.Row, ok bool) links.Row {
 		panic("links: the declarative table names no such row")
 	}
 	return r
+}
+
+// registerMarketCheck mounts the Market check's three routes with their
+// walls: the settings behind the admin and owner role guard, the run behind
+// the pricing rules' wall. One function, so serve and the wire test mount the
+// same guards.
+func registerMarketCheck(mux *http.ServeMux, svc *marketcheck.Service, keyWall *middleware.KeyBranchWall, db *database.DB) {
+	marketcheck.NewHandler(svc).RegisterRoutes(mux,
+		middleware.RequireRole("admin", "owner"),
+		pricingRulesCustomerWall(keyWall, db, "admin", "owner"))
 }

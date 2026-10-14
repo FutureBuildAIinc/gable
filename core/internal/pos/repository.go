@@ -1564,7 +1564,7 @@ func counterStockScope(branch, grants int) string {
 
 func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
-		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
+		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), `+WalkInPriceCentsSQL+`,
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
 		FROM products p LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(3, 4)+`
 		WHERE (p.sku ILIKE $1 OR p.description ILIKE $1)
@@ -1680,7 +1680,7 @@ func (r *PostgresRepository) CounterTiles(ctx context.Context, q TileQuery) (Til
 
 func (r *PostgresRepository) GetProductCatalog(ctx context.Context) ([]CatalogProduct, error) {
 	rows, err := r.ex(ctx).Query(ctx, `
-		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(ROUND(p.base_price * 100)::bigint, 0),
+		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), `+WalkInPriceCentsSQL+`,
 			COALESCE(p.uom_primary::text, 'EA'), COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0)
 		FROM products p LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(1, 2)+`
 		GROUP BY p.id, p.sku, p.description, p.base_price, p.uom_primary

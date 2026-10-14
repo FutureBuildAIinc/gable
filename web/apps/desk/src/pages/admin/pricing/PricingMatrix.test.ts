@@ -111,6 +111,16 @@ describe('PricingMatrix', () => {
     expect(consoleError).not.toHaveBeenCalled()
   })
 
+  it('links to the Market check, switched off or on', async () => {
+    respond = () => new Response('404 page not found', { status: 404, headers: { 'Content-Type': 'text/plain' } })
+    const off = await open()
+    expect(q<HTMLAnchorElement>(off, '[data-testid="market-check-link"]').getAttribute('href')).toBe('/pricing/market-check')
+    off.remove()
+    respond = (method) => (method === 'GET' ? jsonResponse(matrix([DIRECT])) : jsonResponse({}))
+    const on = await open()
+    expect(q<HTMLAnchorElement>(on, '[data-testid="market-check-link"]').getAttribute('href')).toBe('/pricing/market-check')
+  })
+
   it.each([500, 403])('keeps the failure banner, and logs it, for a %i (only a 404 means switched off)', async (status) => {
     respond = () => new Response(JSON.stringify({ error: { code: 'internal_error', message: 'boom' }, meta: { request_id: 'r' } }), { status, headers: { 'Content-Type': 'application/json' } })
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})

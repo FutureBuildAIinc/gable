@@ -185,8 +185,11 @@ func RequiredScope(module string, method string) string {
 // read/write split is the module level rule, not the area's.
 var adminAreaScopes = map[string]string{
 	"settings": "admin:settings",
-	"staff":    "admin:staff",
-	"modules":  "admin:modules",
+	// The Market check's address and sealed webhook id are settings: the
+	// same authority that saves the AI key saves them.
+	"market-check": "admin:settings",
+	"staff":        "admin:staff",
+	"modules":      "admin:modules",
 }
 
 // writeScopeOverrides replaces a module's write scope name with a finer one

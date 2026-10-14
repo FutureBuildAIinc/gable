@@ -236,6 +236,8 @@ var adminUsersRouteExpectations = map[string]string{
 	"GET /api/v1/admin/keys":                              scopeUserOnly,
 	"POST /api/v1/admin/keys":                             scopeUserOnly,
 	"DELETE /api/v1/admin/keys/{id}":                      scopeUserOnly,
+	"GET /api/v1/admin/market-check/settings":             "admin:settings",
+	"PUT /api/v1/admin/market-check/settings":             "admin:settings",
 	"GET /api/v1/admin/modules":                           "admin:modules",
 	"PUT /api/v1/admin/modules/{id}":                      "admin:modules",
 	"DELETE /api/v1/admin/settings/ai":                    "admin:settings",
