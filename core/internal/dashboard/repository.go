@@ -30,6 +30,17 @@ type Repository interface {
 // PostgresRepository implements Repository for Postgres.
 type PostgresRepository struct {
 	db *database.DB
+	// now is the server's clock (time.Now unless a test sets it); the
+	// revenue days read it, while the open receivable's day is the default
+	// branch's business date read in the database, as the aging's default.
+	now func() time.Time
+}
+
+func (r *PostgresRepository) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // NewRepository creates a new dashboard repository.
@@ -48,7 +59,7 @@ func NewRepository(db *database.DB) *PostgresRepository {
 func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	summary := &DashboardSummary{}
 
-	now := time.Now()
+	now := r.clock()
 	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	todayEnd := todayStart.Add(24 * time.Hour)
 	yesterdayStart := todayStart.AddDate(0, 0, -1)
@@ -57,7 +68,14 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	// through either document's branch, the pair the header rule read before.
 	paymentWall := "(" + middleware.Wall("o", 4, 5) + " OR " + middleware.Wall("i", 4, 5) + ")"
 	query := `
-		WITH today_rev AS (
+		WITH asof AS (
+			-- The open receivable's day: the default branch's business date,
+			-- the aging's default (account.todayInDefaultBranch), never the
+			-- server process's local day.
+			SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			        WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date AS d
+		),
+		today_rev AS (
 			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
 			FROM payments p
 			LEFT JOIN invoices i ON i.id = p.invoice_id
@@ -88,26 +106,26 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 		),
 		open_docs AS (
 			SELECT ROUND(i.total_amount * 100)::bigint - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
-			            WHERE a.invoice_id = i.id AND a.applied_on <= $6::date AND (a.reversed_on IS NULL OR a.reversed_on > $6::date)), 0) AS amt
+			            WHERE a.invoice_id = i.id AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0) AS amt
 			FROM invoices i
-			WHERE i.invoice_date <= $6::date AND (i.voided_on IS NULL OR i.voided_on > $6::date)
+			WHERE i.invoice_date <= (SELECT d FROM asof) AND (i.voided_on IS NULL OR i.voided_on > (SELECT d FROM asof))
 			  AND ` + middleware.Wall("i", 4, 5) + `
 			UNION ALL
 			SELECT ROUND(m.total_amount * 100)::bigint
 			       + COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
-			            WHERE a.credit_memo_id = m.id AND a.applied_on <= $6::date AND (a.reversed_on IS NULL OR a.reversed_on > $6::date)), 0)
-			       + COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.credit_memo_id = m.id AND f.refunded_on <= $6::date), 0)
+			            WHERE a.credit_memo_id = m.id AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0)
+			       + COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.credit_memo_id = m.id AND f.refunded_on <= (SELECT d FROM asof)), 0)
 			FROM credit_memos m
-			WHERE m.number IS NOT NULL AND m.memo_date <= $6::date AND (m.voided_on IS NULL OR m.voided_on > $6::date)
+			WHERE m.number IS NOT NULL AND m.memo_date <= (SELECT d FROM asof) AND (m.voided_on IS NULL OR m.voided_on > (SELECT d FROM asof))
 			  AND ` + middleware.Wall("m", 4, 5) + `
 			UNION ALL
 			SELECT -GREATEST(0, ROUND(p.amount * 100)::bigint
 			       - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
-			            WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.applied_on <= $6::date AND (a.reversed_on IS NULL OR a.reversed_on > $6::date)), 0)
-			       - COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.payment_id = p.id AND f.refunded_on <= $6::date), 0)
+			            WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0)
+			       - COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.payment_id = p.id AND f.refunded_on <= (SELECT d FROM asof)), 0)
 			       - ROUND(p.migrated_excess * 100)::bigint)
 			FROM payments p
-			WHERE p.received_on <= $6::date AND (p.voided_on IS NULL OR p.voided_on > $6::date)
+			WHERE p.received_on <= (SELECT d FROM asof) AND (p.voided_on IS NULL OR p.voided_on > (SELECT d FROM asof))
 			  AND ` + middleware.Wall("p", 4, 5) + `
 		),
 		outstanding AS (
@@ -126,7 +144,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	`
 
 	var todayRevenue, yesterdayRevenue int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID, grantsSub, todayStart.Format("2006-01-02")).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID, grantsSub).Scan(
 		&todayRevenue,
 		&yesterdayRevenue,
 		&summary.ActiveOrders,
