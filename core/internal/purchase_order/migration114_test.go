@@ -3,7 +3,7 @@
 
 package purchase_order_test
 
-// Migration 100 on rows that exist (the recipe's migration step): the schema
+// Migration 114 on rows that exist (the recipe's migration step): the schema
 // up to 098 is built in a scratch database of its own, legacy rows are
 // written in the shape the base commit left them (purchase orders with no
 // created_at, lines with a two-decimal cost, vendors with no created_at,
@@ -63,7 +63,7 @@ func scratchDB(t *testing.T) *pgx.Conn {
 	return conn
 }
 
-func migration100Files(t *testing.T) (before []string, target, down string) {
+func migration114Files(t *testing.T) (before []string, target, down string) {
 	t.Helper()
 	all, err := filepath.Glob("../../migrations/*.sql")
 	if err != nil || len(all) == 0 {
@@ -80,11 +80,11 @@ func migration100Files(t *testing.T) (before []string, target, down string) {
 		}
 	}
 	if target == "" {
-		t.Fatal("migration 100 not found")
+		t.Fatal("migration 114 not found")
 	}
-	down = "../../migrations/down/100_inventory_purchasing_wire_contract_down.sql"
+	down = "../../migrations/down/114_inventory_purchasing_wire_contract_down.sql"
 	if _, err := os.Stat(down); err != nil {
-		t.Fatal("migration 100 down not found")
+		t.Fatal("migration 114 down not found")
 	}
 	return before, target, down
 }
@@ -102,7 +102,7 @@ func applyMigrationFile(t *testing.T, conn *pgx.Conn, file string) {
 
 func TestMigration100_BackfillsRowsThatExist(t *testing.T) {
 	conn := scratchDB(t)
-	before, target, downFile := migration100Files(t)
+	before, target, downFile := migration114Files(t)
 	for _, f := range before {
 		applyMigrationFile(t, conn, f)
 	}
@@ -128,7 +128,7 @@ func TestMigration100_BackfillsRowsThatExist(t *testing.T) {
 		}
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price, reorder_point, reorder_qty)
-		VALUES ($1, 'M100-1', 'migration 100', 'EA', 1, 4, 9)`, product); err != nil {
+		VALUES ($1, 'M114-1', 'migration 114', 'EA', 1, 4, 9)`, product); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO vendors (id, name) VALUES ($1, 'm100 vendor')`, vendor); err != nil {
@@ -306,7 +306,7 @@ func TestMigration100_BackfillsRowsThatExist(t *testing.T) {
 // so instead of discarding it.
 func TestMigration100_DownRefusesNewShapeData(t *testing.T) {
 	conn := scratchDB(t)
-	before, target, downFile := migration100Files(t)
+	before, target, downFile := migration114Files(t)
 	for _, f := range before {
 		applyMigrationFile(t, conn, f)
 	}
@@ -317,7 +317,7 @@ func TestMigration100_DownRefusesNewShapeData(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO products (id, sku, description, uom_primary, base_price, reorder_point, reorder_qty)
-		VALUES ($1, 'M100-2', 'migration 100 refuse', 'EA', 1, 4, 9)`, product); err != nil {
+		VALUES ($1, 'M114-2', 'migration 114 refuse', 'EA', 1, 4, 9)`, product); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conn.Exec(ctx, `INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, $2, 'm100b', 3)`,

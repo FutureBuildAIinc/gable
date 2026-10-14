@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- 100: inventory, purchase orders, vendors and EDI partners onto the wire
+-- 114: inventory, purchase orders, vendors and EDI partners onto the wire
 -- contract (item C4-1a, docs/adr/0008-inventory-identity-and-vendor-intake.md
 -- section 12; the number planned as 097 there was taken, so this takes the
 -- next free). The migration note of ADR 0001 for the purchasing modules:
