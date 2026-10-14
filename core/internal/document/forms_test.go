@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -375,4 +376,28 @@ func TestUnembeddableStoredLogoPrintsWithoutTheImage(t *testing.T) {
 	}
 	mustContain(t, doc, "Test Yard")
 	mustNotContain(t, doc, "/Subtype /Image")
+}
+
+// The open documents follow the printing yard's reach while the aging covers
+// the account: a statement printed under a yard says so.
+func TestStatementSaysItsOpenDocumentsFollowTheYard(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
+	st := &account.Statement{CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
+		Currencies: []account.StatementCurrency{{Currency: "CAD", Lines: []account.StatementLine{},
+			OpenDocuments: []account.OpenDocument{{Kind: "invoice", Number: "IN-000007", Date: "2026-02-10", TotalCents: 5500, OpenCents: 5500}}}}}
+	svc := brandedService(t).WithStatements(&fakeStatements{st: st})
+
+	yard := yardSouth
+	scoped := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{BranchID: &yard, IsAdmin: true})
+	doc, err := svc.GenerateStatementPDF(scoped, st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "Open documents at this yard")
+
+	doc, err = svc.GenerateStatementPDF(context.Background(), st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustNotContain(t, doc, "Open documents at this yard")
 }
