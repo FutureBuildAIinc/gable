@@ -221,15 +221,16 @@ func (h *Handler) HandleEmailInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The refusal is in words: the legacy responder below replaces a message
+	// with its generic one, so this one answers the wire envelope.
+	email := cust.EmailOrEmpty()
+	if email == "" {
+		httpx.WriteError(w, r, noEmail())
+		return
+	}
 	pdfBytes, err := h.docSvc.GenerateInvoicePDF(r.Context(), inv, cust)
 	if err != nil {
 		httputil.RespondError(w, r, "failed to generate pdf", http.StatusInternalServerError, err)
-		return
-	}
-
-	email := cust.EmailOrEmpty()
-	if email == "" {
-		httputil.RespondError(w, r, "customer has no email address on file", http.StatusBadRequest, nil)
 		return
 	}
 	// Async dispatch: the HTTP thread never waits on the mail server. The

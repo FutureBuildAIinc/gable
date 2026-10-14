@@ -35,7 +35,7 @@ func demoLogo() []byte {
 	return b.Bytes()
 }
 
-// seedDealerProfile sets the demo's invented dealer profile (migration 114's
+// seedDealerProfile sets the demo's invented dealer profile (migration 115's
 // single row) and logo. It writes only a profile that is still blank, so a
 // profile an operator has filled in is never overwritten by a re-seed.
 func seedDealerProfile(db *sql.DB) {

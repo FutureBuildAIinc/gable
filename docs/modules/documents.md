@@ -11,8 +11,8 @@ the quote, and the purchase order that goes to a vendor. Each form carries the
 dealer's identity and the identity of the yard that issued it, and each send
 by email is recorded. The Go code is `core/internal/document/` (the forms and
 their routes), `core/internal/dealerprofile/` (the profile and its logo) and
-`core/internal/emaildelivery/` (the record). Migration 114
-`core/migrations/114_dealer_profile_email_deliveries.sql` adds the two tables.
+`core/internal/emaildelivery/` (the record). Migration 115
+`core/migrations/115_dealer_profile_email_deliveries.sql` adds the two tables.
 The sender itself is described in [notification.md](notification.md).
 
 ## What a form shows

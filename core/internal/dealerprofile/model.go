@@ -3,7 +3,7 @@
 
 // Package dealerprofile holds the one dealer wide profile every printed form
 // shows: the dealer's legal and trading name, contact lines, remit to address
-// and logo. It is a single row (migration 114).
+// and logo. It is a single row (migration 115).
 package dealerprofile
 
 import (

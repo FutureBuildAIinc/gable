@@ -1741,6 +1741,47 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 	}
 	f.docHandler.Wait()
 
+	// A customer with no email address is refused in words, never a 500, and
+	// nothing is recorded: the statement and the quote answer the wire 400
+	// naming the customer, the invoice its legacy 400.
+	bare, bareQuote, bareInv, bareOrder := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'wall no email', $2, $3)`,
+		bare, "WLNE-"+bare.String()[:8], f.branchA); err != nil {
+		t.Fatalf("seed customer without email: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, bare, f.branchA); err != nil {
+		t.Fatalf("seed customer branch: %v", err)
+	}
+	seedWallQuote(t, db, bareQuote, f.branchA, bare, "WLN-"+bareQuote.String()[:8])
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO orders (id, customer_id, branch_id, status, total_amount, delivery_type, currency) VALUES ($1, $2, $3, 'CONFIRMED', 10, 'PICKUP', 'USD')`, bareOrder, bare, f.branchA); err != nil {
+		t.Fatalf("seed order: %v", err)
+	}
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, order_id, customer_id, status, total_amount, branch_id, currency) VALUES ($1, $2, $3, 'UNPAID', 10, $4, 'USD')`, bareInv, bareOrder, bare, f.branchA); err != nil {
+		t.Fatalf("seed invoice: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM invoices WHERE id = $1`, bareInv)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM orders WHERE id = $1`, bareOrder)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id = $1`, bareQuote)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, bare)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, bare)
+	})
+	for _, c := range []struct{ name, path string }{
+		{"statement", "/api/v1/ar/customers/" + bare.String() + "/statement/email"},
+		{"quote", "/api/v1/quotes/" + bareQuote.String() + "/email"},
+		{"invoice", "/api/v1/invoices/" + bareInv.String() + "/email"},
+	} {
+		status, body := f.callBody(t, "POST", c.path, "", "finance", "u-a", A)
+		if status != http.StatusBadRequest || !strings.Contains(string(body), "no email address") {
+			t.Errorf("%s email for a customer with no address: %d %s, want a 400 in words", c.name, status, body)
+		}
+	}
+	f.docHandler.Wait()
+	var sent int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id IN ($1, $2, $3)`, bare, bareQuote, bareInv).Scan(&sent); err != nil || sent != 0 {
+		t.Errorf("a refused email left %d delivery rows (%v), want 0", sent, err)
+	}
+
 	// The statement of a customer whose primary branch is A, read by a caller
 	// held to branch B, is not served.
 	B := f.branchB.String()

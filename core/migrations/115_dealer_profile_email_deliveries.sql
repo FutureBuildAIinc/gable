@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 -- SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
--- Migration: 114_dealer_profile_email_deliveries
+-- Migration: 115_dealer_profile_email_deliveries
 -- Description: two tables for the printed forms and the real email sender.
 --
 -- dealer_profile: the one dealer wide profile every printed form shows (legal
