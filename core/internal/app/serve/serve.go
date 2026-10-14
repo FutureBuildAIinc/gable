@@ -260,16 +260,36 @@ func Run() {
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
 	// product image generation. Base URL and per-task model slugs are admin-overridable.
-	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey)
+	//
+	// The provider (OpenRouter or the native Anthropic one) is chosen in Tech
+	// Admin. AI keys are sealed at rest with the same vault key the payment
+	// credentials use; the Anthropic key has no environment fallback.
+	aiVault, aiVaultErr := payment.NewVault(cfg.PaymentVaultKey)
+	if aiVaultErr != nil {
+		// The error text is not logged: a parse error can echo a character of
+		// the value.
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key (64 hex characters); AI keys cannot be sealed or opened")
+		aiVault = &payment.Vault{}
+	}
+	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey).WithSealer(aiVault)
 	aiBaseURLStore := ai.NewKeyStore(db.Pool, "openrouter_base_url", cfg.OpenRouterBaseURL)
 	aiClient := ai.NewClientWithKeyStore(aiKeyStore).
 		WithBaseURLStore(aiBaseURLStore).
+		WithProviderStore(ai.NewKeyStore(db.Pool, ai.SettingProvider, ai.ProviderOpenRouter)).
+		WithAnthropicKeyStore(ai.NewKeyStore(db.Pool, ai.SettingAnthropicKey, "").WithSealer(aiVault)).
+		WithAnthropicModelStore(ai.NewKeyStore(db.Pool, ai.SettingAnthropicModel, ai.DefaultAnthropicModel)).
 		WithModels(ai.NewModelRouter(db.Pool, ai.ModelDefaults{
 			Text:   cfg.AIModelText,
 			Vision: cfg.AIModelVision,
 			Cheap:  cfg.AIModelCheap,
 			Image:  cfg.AIModelImage,
 		}))
+	techAdminSvc.WithVault(aiVault).WithAITester(aiClient)
+	if n, err := techAdminSvc.SealLegacySettings(context.Background()); err != nil {
+		logger.Error("sealing stored AI keys failed", "error", err)
+	} else if n > 0 {
+		logger.Info("sealed stored AI keys at rest", "count", n)
+	}
 	if cfg.OpenRouterAPIKey != "" {
 		logger.Info("AI initialized via OpenRouter (env key present, admin can override via Tech Admin > AI Settings)")
 	} else {

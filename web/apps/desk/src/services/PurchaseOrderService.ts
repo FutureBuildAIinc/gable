@@ -89,10 +89,7 @@ export const PurchaseOrderService = {
             body: formData,
             timeout: 120_000, // AI vision OCR of a freight invoice can take 10–60s
         });
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(errorText || 'Failed to upload freight invoice');
-        }
+        if (!response.ok) throw await parseApiError(response, 'Failed to upload freight invoice');
         return response.json();
     },
 

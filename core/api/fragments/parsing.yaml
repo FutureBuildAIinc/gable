@@ -23,7 +23,7 @@ paths:
         body over the cap, an unparseable form or a missing file field is a
         400. Requires the role admin, owner or sales. Extracted lines are
         matched against the whole product catalog. When the AI extractor is
-        unavailable (OPENROUTER_API_KEY unset, the default, or the call
+        unavailable (AI is off, the default until an administrator enters a key in Tech Admin, AI, or the call
         failed) the response is still 200 but items is a fixed demo list, not
         the file's contents, and synthetic is true with synthetic_reason
         filled. source_image is always a base64 data URI of the real upload.
