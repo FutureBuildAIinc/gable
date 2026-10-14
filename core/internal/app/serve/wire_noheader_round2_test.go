@@ -185,8 +185,11 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	billRun := uuid.NewString()[:8]
+	// The dates come from the current date,, not a literal one.
+	billInvoiceDate := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+	billDueDate := time.Now().AddDate(0, 0, 23).Format("2006-01-02")
 	billBody := `{"vendor_id":"` + w.vendor.String() + `","vendor_invoice_number":"PIN-NH3-` + billRun +
-		`","invoice_date":"2026-01-10","due_date":"2026-02-10","lines":[{"description":"pin noheader","quantity":"1",` +
+		`","invoice_date":"` + billInvoiceDate + `","due_date":"` + billDueDate + `","lines":[{"description":"pin noheader","quantity":"1",` +
 		`"unit_price_ten_thousandths":10000,"gl_account_id":"` + expense + `"}]}`
 	billCreate := func() (int, []byte) {
 		return f.userAs(t, "finance", "POST", "/api/v1/ap/invoices", billBody, nil)

@@ -968,8 +968,14 @@ every branch:
 - an act on a register, till, sale, return or claim of a branch the user
   does not hold is 403 with nothing written;
 - where no grant decides it, the caller is refused: a user with no grants
-  at all reads nothing and writes nothing, a record of no branch reads as
-  missing, and an act on one is the same 403 the record rule names;
+  at all reads no branch scoped row and writes none, a record of no branch
+  reads as missing, and an act on one is the same 403 the record rule
+  names. The sentence is about branch scoped rows. The reference reads
+  (the branch directory, the product, vendor and unit catalogues, the
+  charge codes) carry no branch and stay open to the roles their guards
+  admit, and the delivery route create (`POST /delivery/routes`) writes a
+  route, which carries no branch fact of its own, so it is open to the
+  roles its guard admits with or without a grant;
 - a create whose body names no `branch_id` takes its branch from the
   user's grants, never the deployment default: exactly one granted branch
   writes there, several granted branches refuse with a 400 naming
