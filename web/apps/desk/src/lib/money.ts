@@ -77,6 +77,20 @@ export function normalizeQuantity(text: string): string | null {
     return scaledToQuantity(scaled);
 }
 
+/**
+ * The seed's units of dimension COUNT (migration 099): sold in whole pieces, so a fractional
+ * quantity is a slip of the decimal point. Length, area, volume, weight and board measure take
+ * decimals. Until the quick search carries the unit's dimension, this list stands in for it.
+ */
+const COUNTED_UNITS = new Set([
+    'EA', 'PCS', 'PAIR', 'DOZ', 'C', 'M', 'SET', 'BOX', 'CTN', 'BAG', 'BUNDLE', 'RL',
+]);
+
+/** True for a unit counted in whole pieces (the units class COUNT). */
+export function isCountedUnit(uom: string): boolean {
+    return COUNTED_UNITS.has(uom.trim().toUpperCase());
+}
+
 /** A JS number (a parsing API's float quantity) to a decimal string; null unless positive. */
 export function numberToQuantity(value: number): string | null {
     if (!Number.isFinite(value) || value <= 0) return null;

@@ -205,6 +205,35 @@ func demoSeedRequested() bool {
 	}
 }
 
+// demoImportEnv opts the seed into the invented demo catalogue and its 120 day
+// history (section 22b). It needs DEMO_SEED as well; without it the seed stays
+// the smaller one the characterization goldens record.
+const demoImportEnv = "DEMO_SEED_IMPORT"
+
+// demoImportRequested reports whether the operator asked for the demo import.
+func demoImportRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoImportEnv))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// demoHistoryEnv turns the import's 120 day history (section 22c) off when set
+// to 0, false, no or off; the history is on whenever the import is.
+const demoHistoryEnv = "DEMO_SEED_HISTORY"
+
+// demoHistoryRequested reports whether the import's history runs.
+func demoHistoryRequested() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(demoHistoryEnv))) {
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return true
+	}
+}
+
 // Run seeds the demo data and returns. Behaviour is unchanged from the old
 // entry point: without DEMO_SEED set it logs and returns without touching
 // any database.
@@ -1381,6 +1410,54 @@ func Run() {
 	// The multi yard world (multi_yard.go): personas, a register and stock per
 	// yard, a purchase order to receive, cross yard quotes.
 	seedMultiYard(seedCtx, db, ar, branchIDs, skuToID, customerIDs, vendorIDs, custToBranch, priceLevelIDs)
+
+	// =========================================================================
+	// 22b. DEMO DATA IMPORT (opt in: DEMO_SEED_IMPORT=1)
+	//    The invented catalogue (categories, vendors, products, customers,
+	//    staff) and a 120 day operations history. Reference tables use ON
+	//    CONFLICT (natural key) DO UPDATE so a redeploy adopts new names and
+	//    the seed's own rows are preserved on collision. Off by default, so the
+	//    characterization goldens and CI's local stack keep the smaller seed.
+	// =========================================================================
+	if demoImportRequested() {
+		importSKUs, importCust, _ := seedDemoImport(seedCtx, db, branchIDs, priceLevelIDs)
+		// Merge the imported SKUs into the SKU map the rest of the seed writes
+		// (seedDispatchDay samples the SKU picker; cross yard quotes sample by
+		// name). Imported customers extend customerIDs for downstream sections.
+		for sku, id := range importSKUs {
+			if _, exists := skuToID[sku]; !exists {
+				skuToID[sku] = id
+			}
+		}
+		for name, id := range importCust {
+			if _, exists := customerIDs[name]; !exists {
+				customerIDs[name] = id
+				// Imported customers default their home branch for the yard grant
+				// references later sections make.
+				var bid uuid.UUID
+				if err := db.QueryRow(`SELECT primary_branch_id FROM customers WHERE id = $1`, id).Scan(&bid); err == nil {
+					custToBranch[id] = bid
+				}
+			}
+		}
+		fmt.Printf("Seed: demo data import: %d vendors, %d categories, %d SKUs, %d customers, %d staff (last run totals)\n",
+			lastImport.Vendors, lastImport.Categories, lastImport.Products, lastImport.Customers, lastImport.Staff)
+
+		// =========================================================================
+		// 22c. 120 DAY HISTORY
+		//    Orders, invoices and payments spread across the three yards over the
+		//    last 120 days so the revenue trend query answers more than one period
+		//    across the three yards. Only the imported customers trade in it, each
+		//    order and invoice with its lines, every invoice posted and paid in
+		//    full through the AR core on the day the generator picked, so the
+		//    statements, the ledger and the aging agree with the documents.
+		// =========================================================================
+		if !demoHistoryRequested() {
+			fmt.Printf("Seed: history skipped (%s=0)\n", demoHistoryEnv)
+		} else if err := seedHistory(seedCtx, db, ar, importCust, branchIDs, skuToID); err != nil {
+			log.Printf("Seed: history: %v", err)
+		}
+	}
 
 	// =========================================================================
 	// 23. EDI TRADING PARTNERS
