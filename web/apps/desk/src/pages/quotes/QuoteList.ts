@@ -6,7 +6,7 @@ import { customElement, state, property } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { ArrowRight, ShoppingCart, BarChart3, Sparkles, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
+import { ArrowRight, ShoppingCart, BarChart3, ListChecks, Send, Check, X, List, FilePlus, Pencil, Truck, Package } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
@@ -241,8 +241,8 @@ export class GableQuoteList extends LitElement {
                                         <td class="p-4 text-white font-medium">${quote.customer_name || quote.customer_id.slice(0, 8)}</td>
                                         <td class="p-4">
                                             ${quote.source === 'ai' ? html`
-                                                <span class="inline-flex items-center gap-1 text-xs text-violet-400">
-                                                    ${icon(Sparkles, 12)} AI
+                                                <span class="inline-flex items-center gap-1 text-xs text-zinc-300">
+                                                    ${icon(ListChecks, 12)} Material list
                                                 </span>
                                             ` : html`
                                                 <span class="text-xs text-zinc-500">Manual</span>

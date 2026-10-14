@@ -16,6 +16,7 @@ import type { Product } from '../types/product.ts';
 import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
+import { resolveLinePrice } from '../lib/line-price.ts';
 import {
     dollarsToCents,
     dollarsToTenThousandths,
@@ -252,22 +253,64 @@ export class GableQuoteBuilder extends LitElement {
         this.lineErrors = errs;
     }
 
-    private handleAcceptParsed(parsedItems: ParsedItem[]) {
+    /**
+     * Every Accept joins this chain, so a batch accepted while an earlier one is still
+     * pricing waits its turn: each batch is priced, then joined, in the order accepted.
+     * The intake removes a line the moment it emits it; that is safe because the chain
+     * holds the batch until it joins and a pricing failure falls back, never throws.
+     */
+    private acceptQueue: Promise<void> = Promise.resolve();
+
+    /** Batches accepted and not yet joined: saving waits for this to reach zero, so no accepted line is lost. */
+    @state() private pendingAccepts = 0;
+
+    private handleAcceptParsed(parsedItems: ParsedItem[]): Promise<void> {
         // A sample list is not the user's file: it never joins a quote, by any path.
-        if (this.lastParseResult?.synthetic) return;
+        if (this.lastParseResult?.synthetic) return Promise.resolve();
+        this.pendingAccepts += 1;
+        this.acceptQueue = this.acceptQueue.then(() => this.priceAndJoin(parsedItems)).catch((err) => {
+            console.error('Failed to add accepted lines', err);
+            ToastService.show('Some accepted lines could not be added; read the material list again to add them', 'error');
+        }).finally(() => { this.pendingAccepts -= 1; });
+        return this.acceptQueue;
+    }
+
+    /** Price a batch for one customer: the price a hand added line takes (the customer's, else the base price). */
+    private priceBatch(parsedItems: ParsedItem[], customerId: string | undefined) {
         // The parsing API still answers in float dollars and a float quantity;
         // both are converted here, once, through the integer helpers.
-        const newLines: LineWithEscalator[] = parsedItems.map(item => ({
+        return Promise.all(parsedItems.map(item => {
+            const uom = (item.matched_product?.uom || item.uom || '').toUpperCase();
+            const base = floatDollarsToTenThousandths(item.matched_product?.base_price || 0);
+            return item.matched_product
+                ? resolveLinePrice(customerId, item.matched_product.product_id, uom, base)
+                : Promise.resolve({ unitPriceTenThousandths: base, details: null, failed: false });
+        }));
+    }
+
+    private async priceAndJoin(parsedItems: ParsedItem[]) {
+        let customerId = this.customer?.id;
+        let priced = await this.priceBatch(parsedItems, customerId);
+        // The customer changed while pricing ran: price again for the one the quote has now.
+        while (this.customer?.id !== customerId) {
+            customerId = this.customer?.id;
+            priced = await this.priceBatch(parsedItems, customerId);
+        }
+        const newLines: LineWithEscalator[] = parsedItems.map((item, i) => ({
             product_id: item.matched_product?.product_id || null,
             sku: item.matched_product?.sku || 'SPECIAL-ORDER',
             description: item.matched_product?.description || item.raw_text,
             quantity: numberToQuantity(item.quantity) ?? '1',
             uom: (item.matched_product?.uom || item.uom || '').toUpperCase(),
-            unit_price_ten_thousandths: floatDollarsToTenThousandths(item.matched_product?.base_price || 0),
+            unit_price_ten_thousandths: priced[i].unitPriceTenThousandths,
             escalator: defaultEscalator(),
         }));
         this.lines = [...this.lines, ...newLines];
         this.aiSource = true;
+        const failed = priced.filter(p => p.failed).length;
+        if (failed > 0) {
+            ToastService.show(`Customer prices could not be read for ${failed} ${failed === 1 ? 'line' : 'lines'}; the base price is on them`, 'error');
+        }
         ToastService.show(`${parsedItems.length} items added from material list`, 'success');
     }
 
@@ -334,7 +377,7 @@ export class GableQuoteBuilder extends LitElement {
 
     /** Saves the draft; with `send` it then marks the quote sent at the revision the save returned. */
     private async handleSave(send = false) {
-        if (!this.customer) return;
+        if (!this.customer || this.pendingAccepts > 0) return;
         if (this.saveBlockedReason) {
             this.formError = this.saveBlockedReason;
             return;
@@ -571,7 +614,8 @@ export class GableQuoteBuilder extends LitElement {
             `;
         }
 
-        const blocked = !this.customer || this.lines.length === 0 || this.loading || this.saveBlockedReason !== null;
+        const adding = this.pendingAccepts > 0;
+        const blocked = !this.customer || this.lines.length === 0 || this.loading || adding || this.saveBlockedReason !== null;
         const secondary = 'inline-flex items-center justify-center rounded-lg text-sm font-medium border border-white/10 text-zinc-200 hover:bg-white/5 px-3 py-2 disabled:opacity-50';
         const card = 'bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl';
 
@@ -591,7 +635,7 @@ export class GableQuoteBuilder extends LitElement {
                         <button type="button" class=${secondary} @click=${() => window.print()}>${icon(Printer, 16, 'mr-2')} Print</button>
                         <button type="button" data-testid="save-draft" class=${secondary} ?disabled=${blocked}
                             @click=${() => this.handleSave(false)}>
-                            ${icon(Save, 16, 'mr-2')} ${this.isEditing ? 'Save changes' : 'Save draft'}
+                            ${icon(Save, 16, 'mr-2')} ${adding ? 'Adding lines...' : this.isEditing ? 'Save changes' : 'Save draft'}
                         </button>
                         <button type="button" data-primary="true" ?disabled=${blocked} @click=${() => this.handleSave(true)}
                             class="inline-flex items-center justify-center rounded-lg text-sm font-bold bg-gable-green text-deep-space hover:bg-gable-green/90 px-5 py-2 shadow-glow disabled:opacity-50">
