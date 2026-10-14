@@ -14,6 +14,7 @@ const svc = vi.hoisted(() => ({
   attachCustomer: vi.fn(),
   addItem: vi.fn(),
   removeItem: vi.fn(),
+  changeQuantity: vi.fn(),
   getSale: vi.fn(),
   openTill: vi.fn(),
   tillReport: vi.fn(),
@@ -1848,6 +1849,80 @@ describe('no tender until the cashier chooses one', () => {
     await el.updateComplete;
     expect(pressed(el)).toEqual([]);
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+});
+
+describe('a quantity on each counter line', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const byLabel = (el: Element, label: string) => el.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const lineQty = (id: string, qty: string, cents: number) => ({ ...line(id, cents), quantity: qty });
+
+  it('sends the change on the sale revision and shows the repriced line', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({
+      revision: 4, subtotal_cents: 13000, tax_cents: 1054, total_cents: 14054,
+      lines: [lineQty('a', '2', 10000), line('b', 3000)] as unknown as Sale['lines'],
+    }));
+    const el = await mount(sale());
+    byLabel(el, 'Increase quantity of Item a').click();
+    await settle();
+    await el.updateComplete;
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '2', 3);
+    expect((byLabel(el, 'Quantity of Item a') as HTMLInputElement).value).toBe('2');
+    expect(q(el, 'pos-lines').textContent).toContain('$100.00');
+    expect(q(el, 'summary-total').textContent?.trim()).toBe('$140.54');
+    el.remove();
+  });
+
+  it('turns minus off at one and sends one less above it', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({ lines: [lineQty('a', '2', 10000), line('b', 3000)] as unknown as Sale['lines'] }));
+    const el = await mount(sale({ lines: [lineQty('a', '3', 15000), line('b', 3000)] as unknown as Sale['lines'] }));
+    expect((byLabel(el, 'Decrease quantity of Item b') as HTMLButtonElement).disabled).toBe(true);
+    const minus = byLabel(el, 'Decrease quantity of Item a') as HTMLButtonElement;
+    expect(minus.disabled).toBe(false);
+    minus.click();
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '2', 3);
+    el.remove();
+  });
+
+  it('commits a typed number on Enter and when the field is left', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({ lines: [lineQty('a', '12', 60000), line('b', 3000)] as unknown as Sale['lines'] }));
+    const el = await mount(sale());
+    const input = byLabel(el, 'Quantity of Item a') as HTMLInputElement;
+    input.value = '12';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledTimes(1);
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '12', 3);
+    const second = byLabel(el, 'Quantity of Item b') as HTMLInputElement;
+    second.value = '4';
+    second.dispatchEvent(new Event('change'));
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledTimes(2);
+    el.remove();
+  });
+
+  it('says why a change failed and puts the number back', async () => {
+    svc.changeQuantity.mockRejectedValue(new Error('only 3 in stock at this yard'));
+    const el = await mount(sale());
+    const input = byLabel(el, 'Quantity of Item a') as HTMLInputElement;
+    input.value = '9';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    await el.updateComplete;
+    expect(el.textContent).toContain('only 3 in stock at this yard');
+    expect((byLabel(el, 'Quantity of Item a') as HTMLInputElement).value).toBe('1');
+    el.remove();
+  });
+
+  it('sizes each control for touch', async () => {
+    const el = await mount(sale());
+    for (const l of ['Decrease quantity of Item a', 'Increase quantity of Item a', 'Quantity of Item a']) {
+      expect(byLabel(el, l).className).toMatch(/min-h-11|h-11/);
+    }
     el.remove();
   });
 });
