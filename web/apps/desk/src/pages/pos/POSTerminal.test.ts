@@ -31,6 +31,7 @@ import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
 import { branchContext } from '../../services/BranchContext';
 import { authCustody } from '@gable/auth';
+import { openAppDialog, answerAppDialog, chooseOption } from '../../test/dom';
 import type { CounterRegister } from '../../types/pos';
 
 const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
@@ -682,28 +683,28 @@ describe('the Panels board', () => {
     });
 
     it('asks first, and declining removes nothing', async () => {
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
       const el = await mount(sale());
       q(el, 'pos-clear-sale').click();
       await flush(el);
-      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(openAppDialog()).toBeTruthy();
+      await answerAppDialog(false);
+      await flush(el);
       expect(svc.removeItem).not.toHaveBeenCalled();
-      confirm.mockRestore();
       el.remove();
     });
 
     it('removes every line through the line removal once confirmed', async () => {
-      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
       svc.removeItem
         .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
         .mockResolvedValueOnce(sale({ lines: [] }));
       const el = await mount(sale());
       q(el, 'pos-clear-sale').click();
       await flush(el);
+      await answerAppDialog(true);
+      await flush(el);
       await flush(el);
       expect(svc.removeItem.mock.calls).toEqual([['s1', 'a'], ['s1', 'b']]);
       expect(q(el, 'pos-lines')).toBeNull();
-      confirm.mockRestore();
       el.remove();
     });
   });
@@ -1103,8 +1104,9 @@ describe('the counter opens on its own yard\'s register', () => {
     document.body.appendChild(el);
     await settle(el);
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-01');
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     branchContext.setCurrent('b-wk');
+    await settle(el);
+    await answerAppDialog(true);
     await settle(el);
     expect(svc.currentTill).toHaveBeenLastCalledWith('REG-WK');
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK');
@@ -1135,11 +1137,10 @@ describe('the counter opens on its own yard\'s register', () => {
     await settle(el);
     // the first by name: Front till
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK');
-    const picker = q(el, 'pos-register-picker') as HTMLSelectElement;
+    const picker = q(el, 'pos-register-picker') as HTMLElement & { value: string };
     expect(picker).toBeTruthy();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    picker.value = 'REG-WK2';
-    picker.dispatchEvent(new Event('change'));
+    await chooseOption(picker, 'REG-WK2');
+    await answerAppDialog(true);
     await settle(el);
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK2');
     el.remove();
@@ -1216,19 +1217,20 @@ describe('the register and the sale when the cashier moves', () => {
     const el = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(el);
     await settle(el);
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     branchContext.setCurrent('b-wk');
     await settle(el);
-    expect(ask).toHaveBeenCalledTimes(1);
+    expect(openAppDialog()).toBeTruthy();
+    await answerAppDialog(false);
+    await settle(el);
     expect(branchContext.currentId).toBe('b-lk');
     expect(q(el, 'pos-register').textContent).toContain('REG-LK');
     expect(svc.startSale).toHaveBeenCalledTimes(1);
-    ask.mockReturnValue(true);
     branchContext.setCurrent('b-wk');
     await settle(el);
-    expect(ask).toHaveBeenCalledTimes(2);
+    expect(openAppDialog()).toBeTruthy();
+    await answerAppDialog(true);
+    await settle(el);
     expect(q(el, 'pos-register').textContent).toContain('REG-WK');
-    ask.mockRestore();
     el.remove();
   });
 
@@ -1237,12 +1239,10 @@ describe('the register and the sale when the cashier moves', () => {
     const el = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(el);
     await settle(el);
-    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
     branchContext.setCurrent('b-wk');
     await settle(el);
-    expect(ask).not.toHaveBeenCalled();
+    expect(openAppDialog()).toBeNull();
     expect(q(el, 'pos-register').textContent).toContain('REG-WK');
-    ask.mockRestore();
     el.remove();
   });
 
@@ -1742,15 +1742,15 @@ describe('closing the till', () => {
 
   it('asks first over a sale with lines, and declining keeps the till and the sale', async () => {
     const el = await mount(sale());
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
     close.click();
     await el.updateComplete;
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(openAppDialog()).toBeTruthy();
+    await answerAppDialog(false);
+    await el.updateComplete;
     expect(svc.tillReport).not.toHaveBeenCalled();
     expect(q(el, 'pos-till-state').textContent).toContain('Till open');
     expect((el as unknown as { _sale: Sale })._sale.id).toBe('s1');
-    confirm.mockRestore();
     el.remove();
   });
 

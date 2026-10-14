@@ -21,6 +21,7 @@ import './PurchaseOrderDetail'
 import type { PurchaseOrderDetail } from './PurchaseOrderDetail'
 import { branchContext } from '../../services/BranchContext'
 import { mountAsync, q, text as textOf, flush, jsonResponse } from '../../test/dom'
+import type { GableSelect } from '../../components/ui/gable-select.ts'
 
 const PO_ID = '00000000-0000-4000-8000-0000000000a1'
 const PO_BRANCH_ID = '00000000-0000-4000-8000-0000000000b1'
@@ -169,10 +170,8 @@ describe('purchase order detail receive form', () => {
     await flush()
     await el.updateComplete
 
-    const select = q<HTMLSelectElement>(el, 'select')
-    const optionValues = Array.from(select.querySelectorAll('option'))
-      .map((o) => (o as HTMLOptionElement).value)
-      .filter((v) => v !== '')
+    const select = q<GableSelect>(el, 'gable-select')
+    const optionValues = select.options.map((o) => o.value).filter((v) => v !== '')
     expect(optionValues).toContain('loc-po-1')
     expect(optionValues).toContain('loc-po-2')
     expect(optionValues).not.toContain('loc-other-1')
