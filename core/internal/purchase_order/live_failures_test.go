@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"math"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -96,10 +98,9 @@ func newLiveFixture(t *testing.T) *liveFixture {
 	invSvc := inventory.NewService(inventory.NewRepository(db))
 	prodSvc := product.NewService(product.NewRepository(db))
 	vendSvc := vendor.NewService(vendor.NewRepository(db))
-	f.svc = purchase_order.NewService(repo, db, nil, invSvc, prodSvc, vendSvc)
-	recSvc := purchase_order.NewRecommendationService(repo, invSvc, prodSvc, vendSvc).
+	f.svc = purchase_order.NewService(repo, db, nil, invSvc, prodSvc, vendSvc).
 		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
-	h := purchase_order.NewHandler(f.svc, recSvc)
+	h := purchase_order.NewHandler(f.svc)
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
 	f.srv = httptest.NewServer(middleware.Idempotency(db)(mux))
@@ -129,18 +130,19 @@ func (f *liveFixture) call(method, path, body string) (int, []byte) {
 
 // sentPOWithLine creates a purchase order of one line for quantity ordered,
 // submits it, and returns the purchase order and its line id.
-func (f *liveFixture) sentPOWithLine(t *testing.T, ordered float64) (poID, lineID string) {
+func (f *liveFixture) sentPOWithLine(t *testing.T, ordered float64) (poID, lineID string, revision int64) {
 	t.Helper()
-	po, err := f.svc.CreateManualPOFromHandler(context.Background(), f.vendor, []purchase_order.CreatePOLineInput{
-		{ProductID: f.product.String(), Description: "live failure", Quantity: ordered, Cost: 2},
-	}, purchase_order.SourceManual)
+	quantity := httpx.Quantity(math.Round(ordered * 10000))
+	po, err := f.svc.CreateFromLines(context.Background(), f.vendor, purchase_order.SourceManual,
+		[]purchase_order.LineInput{{ProductID: &f.product, Description: "live failure", Quantity: quantity, UnitCost: 20000}}, nil)
 	if err != nil {
 		t.Fatalf("create PO: %v", err)
 	}
-	if err := f.svc.SubmitPO(context.Background(), po.ID); err != nil {
+	submitted, err := f.svc.SubmitPO(context.Background(), po.ID, "", &po.Revision)
+	if err != nil {
 		t.Fatalf("submit PO: %v", err)
 	}
-	return po.ID.String(), po.Lines[0].ID.String()
+	return submitted.ID.String(), submitted.Lines[0].ID.String(), submitted.Revision
 }
 
 // TestOverReceiptRefused: the base commit's receive accepts more than was
@@ -149,9 +151,9 @@ func (f *liveFixture) sentPOWithLine(t *testing.T, ordered float64) (poID, lineI
 // 409 blocker over_receipt naming the line.
 func TestOverReceiptRefused(t *testing.T) {
 	f := newLiveFixture(t)
-	poID, lineID := f.sentPOWithLine(t, 5)
+	poID, lineID, revision := f.sentPOWithLine(t, 5)
 
-	body := fmt.Sprintf(`{"lines":[{"line_id":%q,"qty_received":10,"location_id":%q}]}`, lineID, f.yard)
+	body := fmt.Sprintf(`{"revision":%d,"lines":[{"line_id":%q,"qty_received":"10","location_id":%q}]}`, revision, lineID, f.yard)
 	status, raw := f.call("POST", "/api/v1/purchase-orders/"+poID+"/receive", body)
 	if status != http.StatusConflict {
 		t.Fatalf("receiving 10 against an ordered 5: %d %s, want 409", status, raw)
@@ -296,6 +298,7 @@ func TestA2AOnePurchaseOrderPerKeyUnderConcurrency(t *testing.T) {
 func TestRecommendationsCountOnOrder(t *testing.T) {
 	f := newLiveFixture(t)
 	ctx := context.Background()
+	_ = f
 
 	// Stock 1 against a reorder point of 5, and a sent purchase order of 50
 	// on order for the same product at this branch.
@@ -304,8 +307,7 @@ func TestRecommendationsCountOnOrder(t *testing.T) {
 		f.product, f.yard); err != nil {
 		t.Fatalf("seed stock: %v", err)
 	}
-	poID, _ := f.sentPOWithLine(t, 50)
-	_ = poID
+	_, _, _ = f.sentPOWithLine(t, 50)
 
 	status, raw := f.call("GET", "/api/v1/purchase-orders/recommendations", "")
 	if status != http.StatusOK {

@@ -32,9 +32,9 @@ type Repository interface {
 	ListProductsPage(ctx context.Context, after *time.Time, afterID *uuid.UUID, limit int) ([]Product, error)
 	CountProducts(ctx context.Context) (int64, error)
 	ListBelowReorder(ctx context.Context) ([]ReorderAlert, error)
-	UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error
+	UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) (int64, error)
 	UpdateMarginRules(ctx context.Context, id uuid.UUID, targetMargin float64, commissionRate float64, revision int64) (int64, error)
-	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error
+	UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) (int64, error)
 	UpdateVendor(ctx context.Context, id uuid.UUID, vendorName *string, vendorID *uuid.UUID) error
 	UpdateDimensions(ctx context.Context, id uuid.UUID, g Geometry, revision int64) (int64, error)
 	UpdateLeadTime(ctx context.Context, id uuid.UUID, leadTimeDays *int, revision int64) (int64, error)
@@ -358,10 +358,16 @@ func (r *PostgresRepository) UpdateVendor(ctx context.Context, id uuid.UUID, ven
 	return err
 }
 
-func (r *PostgresRepository) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) error {
-	query := `UPDATE products SET average_unit_cost = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, avgCost, id)
-	return err
+// UpdateAverageCost moves the moving weighted average a receipt set, and
+// with it the product revision: a system writer moves the revision like any
+// writer (ADR 0001 section 11), so the product.updated event its caller
+// records names the revision that is now current.
+func (r *PostgresRepository) UpdateAverageCost(ctx context.Context, id uuid.UUID, avgCost float64) (int64, error) {
+	var revision int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`UPDATE products SET average_unit_cost = $1, revision = revision + 1, updated_at = NOW()
+		 WHERE id = $2 RETURNING revision`, avgCost, id).Scan(&revision)
+	return revision, err
 }
 
 // conditionalUpdate runs one revision-carrying update: the check and the
@@ -395,10 +401,12 @@ func (r *PostgresRepository) UpdateMarginRules(ctx context.Context, id uuid.UUID
 // UpdateReorderTargets writes the recomputed reorder_point and reorder_qty
 // produced by the auto-reorder scheduler's RefreshReorderTargets job. The
 // scheduler is a system writer and carries no revision.
-func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) error {
-	query := `UPDATE products SET reorder_point = $1, reorder_qty = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, query, reorderPoint, reorderQty, id)
-	return err
+func (r *PostgresRepository) UpdateReorderTargets(ctx context.Context, id uuid.UUID, reorderPoint, reorderQty float64) (int64, error) {
+	var revision int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`UPDATE products SET reorder_point = $1, reorder_qty = $2, revision = revision + 1, updated_at = NOW()
+		 WHERE id = $3 RETURNING revision`, reorderPoint, reorderQty, id).Scan(&revision)
+	return revision, err
 }
 
 // UpdateLeadTime writes the dealer-published lead time (migration 084).

@@ -37,7 +37,6 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/testutil"
-	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -123,7 +122,7 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 			t.Fatalf("seed purchase order: %v", err)
 		}
 		if _, err := db.Pool.Exec(ctx,
-			`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost) VALUES ($1, $2, $3, 'wall', 5, 1)`,
+			`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, unit_cost, line_total) VALUES ($1, $2, $3, 'wall', 5, 1, 5)`,
 			po.line, po.po, f.productID); err != nil {
 			t.Fatalf("seed purchase order line: %v", err)
 		}
@@ -189,23 +188,13 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
 	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
-	// The recommendation service is wired as serve wires it (serve.go), so
-	// the recommendations route answers from the real stock and velocity
-	// reads instead of 503: the route is behind the branch middleware and
-	// both reads must scope to the same branches.
-	poRecSvc := purchase_order.NewRecommendationService(purchase_order.NewRepository(db), invSvc,
-		product.NewService(product.NewRepository(db)), vendor.NewService(vendor.NewRepository(db))).
-		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
-	// The PO service wires its velocity repo too: the refresh-reorder-targets
-	// route shares the same compute-from-every-branch path the cron runs
-	// (serve.go wires the velocity repo on the PO service; the recommendation
-	// service has its own copy). The product service is what the recompute
-	// reads products from and writes the recomputed targets to; the wire test
-	// for refresh-reorder-targets needs it on the PO service too.
+	// The PO service is wired as serve wires it (serve.go): the reorder scan
+	// reads every branch's stock and sales per product and branch, and the
+	// product service is what the recompute reads products from.
 	poProductSvc := product.NewService(product.NewRepository(db))
-	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, poProductSvc, nil).
+	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, invSvc, poProductSvc, nil).
 		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
-	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
+	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
 	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())

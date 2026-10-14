@@ -1013,8 +1013,18 @@ func Run() {
 				} else if poStatus == "PARTIAL" {
 					qtyRcvd = float64(qty) * (0.3 + rand.Float64()*0.5)
 				}
-				db.Exec(`INSERT INTO purchase_order_lines (po_id, description, quantity, cost, product_id, qty_received)
-					VALUES ($1,$2,$3,$4,$5,$6)`, pid, prod.Desc, qty, prod.Cost, skuToID[prod.SKU], qtyRcvd)
+				// The purchase line carries the wire contract's line shape
+				// (ADR 0008 section 1): the stocking unit, the pair 1 and 1,
+				// and the line's own extension.
+				db.Exec(`INSERT INTO purchase_order_lines (po_id, description, quantity, unit_cost, product_id, qty_received,
+						uom, price_uom, uom_qty, price_uom_qty, stock_uom, stock_quantity, position, line_total)
+					VALUES ($1,$2,$3,$4,$5,$6,
+						(SELECT uom_primary::text FROM products WHERE id = $5),
+						(SELECT uom_primary::text FROM products WHERE id = $5),
+						1, 1,
+						(SELECT uom_primary::text FROM products WHERE id = $5),
+						$3, $7, ROUND($3 * $4, 2))`,
+					pid, prod.Desc, qty, prod.Cost, skuToID[prod.SKU], qtyRcvd, l+1)
 			}
 			poCount++
 		}

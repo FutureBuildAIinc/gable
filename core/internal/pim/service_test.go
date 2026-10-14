@@ -36,12 +36,12 @@ func (r *stubProductRepo) CountProducts(context.Context) (int64, error) { return
 func (r *stubProductRepo) ListBelowReorder(context.Context) ([]product.ReorderAlert, error) {
 	return nil, nil
 }
-func (r *stubProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) error { return nil }
+func (r *stubProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) (int64, error) { return 1, nil }
 func (r *stubProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64, int64) (int64, error) {
 	return 0, nil
 }
-func (r *stubProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) error {
-	return nil
+func (r *stubProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) (int64, error) {
+	return 1, nil
 }
 func (r *stubProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uuid.UUID) error {
 	return nil

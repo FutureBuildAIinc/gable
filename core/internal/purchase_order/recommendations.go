@@ -6,389 +6,490 @@ package purchase_order
 import (
 	"context"
 	"fmt"
-	"math"
-	"sort"
+	"math/big"
+	"strconv"
+	"time"
 
-	"github.com/gablelbm/gable/internal/inventory"
-	"github.com/gablelbm/gable/internal/product"
-	"github.com/gablelbm/gable/internal/vendor"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
-// RecommendationConfig holds tunable parameters for the recommendation engine.
+// RecommendationConfig holds the reorder job's tunable parameters.
 type RecommendationConfig struct {
-	// ZScore for safety stock calculation (1.65 = 95% service level)
-	ZScore float64
-	// DefaultLeadTimeDays used when vendor lead time is unknown
+	// DefaultLeadTimeDays used when the vendor's measured lead time is empty.
 	DefaultLeadTimeDays float64
-	// MinOrderQty minimum quantity per PO line
-	MinOrderQty float64
-	// LookbackDays number of days to analyze sales velocity
+	// LookbackDays the velocity window.
 	LookbackDays int
 }
 
-// DefaultRecommendationConfig returns production-ready defaults.
+// DefaultRecommendationConfig returns the production defaults.
 func DefaultRecommendationConfig() RecommendationConfig {
 	return RecommendationConfig{
-		ZScore:              1.65,
 		DefaultLeadTimeDays: 7,
-		MinOrderQty:         1,
 		LookbackDays:        90,
 	}
 }
 
-// UrgencyLevel indicates how urgently a product needs reordering.
-type UrgencyLevel string
+// ReorderRecommendation is one due product and branch of ADR 0008 section
+// 10.3's payload: the stock figures, the on order quantity the base
+// commit's engine ignored, the velocity with its lookback, the lead time
+// with its source, and the suggested quantity. Stored per run, served by
+// GET /purchase-orders/recommendations, and carried whole as the
+// reorder.recommended event's data.
+type ReorderRecommendation struct {
+	ID         uuid.UUID  `json:"id"`
+	RunID      uuid.UUID  `json:"run_id"`
+	ProductID  uuid.UUID  `json:"product_id"`
+	BranchID   uuid.UUID  `json:"branch_id"`
+	VendorID   *uuid.UUID `json:"vendor_id"`
+	SKU        string     `json:"sku"`
+	Description string    `json:"description"`
 
-const (
-	UrgencyCritical UrgencyLevel = "CRITICAL" // Below reorder point, stock may run out before delivery
-	UrgencyHigh     UrgencyLevel = "HIGH"     // At or near reorder point
-	UrgencyMedium   UrgencyLevel = "MEDIUM"   // Will hit reorder point within lead time
-	UrgencyLow      UrgencyLevel = "LOW"      // Approaching reorder point
+	OnHand     httpx.Quantity `json:"on_hand"`
+	Allocated  httpx.Quantity `json:"allocated"`
+	Available  httpx.Quantity `json:"available"`
+	OnOrder    httpx.Quantity `json:"on_order"`
+	Backordered httpx.Quantity `json:"backordered"`
+
+	Velocity    httpx.Quantity `json:"velocity"`
+	LookbackDays int            `json:"lookback_days"`
+	LeadTimeDays httpx.Quantity `json:"lead_time_days"`
+	LeadTimeSource string       `json:"lead_time_source"`
+
+	ReorderPoint     *httpx.Quantity `json:"reorder_point"`
+	ReorderQuantity  *httpx.Quantity `json:"reorder_quantity"`
+	SuggestedQuantity float64         `json:"suggested_quantity"`
+
+	VendorItemID *uuid.UUID `json:"vendor_item_id"`
+	Unit         string     `json:"unit"`
+	Status       string     `json:"status"`
+	PurchaseOrderLineID *uuid.UUID `json:"purchase_order_line_id"`
+	CreatedAt    httpx.Timestamp `json:"created_at"`
+
+	// OldPointF and OldQtyF carry the target pair the run read; they are
+	// internal, not on the wire.
+	OldPointF float64 `json:"-"`
+	OldQtyF   float64 `json:"-"`
+}
+
+// EventData is the recommendation's whole payload as the event carries it.
+func (r ReorderRecommendation) EventData() map[string]any {
+	return map[string]any{
+		"product_id": r.ProductID, "branch_id": r.BranchID, "vendor_id": r.VendorID,
+		"on_hand": r.OnHand.WireString(), "allocated": r.Allocated.WireString(),
+		"available": r.Available.WireString(), "on_order": r.OnOrder.WireString(),
+		"backordered": r.Backordered.WireString(), "velocity": r.Velocity.WireString(),
+		"lookback_days": r.LookbackDays, "lead_time_days": r.LeadTimeDays.WireString(),
+		"lead_time_source": r.LeadTimeSource, "reorder_point": r.ReorderPoint,
+		"reorder_quantity": r.ReorderQuantity, "suggested_quantity": r.SuggestedQuantity,
+		"vendor_item_id": r.VendorItemID, "unit": r.Unit,
+	}
+}
+
+// reorderScanRow is one product and branch of the reorder scan.
+type reorderScanRow struct {
+	ProductID, BranchID uuid.UUID
+	OnHand, Allocated, Available,
+	OnOrder, Backordered, UnitsSold httpx.Quantity
+	OldPointF, OldQtyF float64
+	AvailableF, OnOrderF, BackorderedF float64
+	VendorID    *uuid.UUID
+	Unit, SKU, Description string
+}
+
+// reorderScanQuery computes, per product and branch, the stock figures, the
+// on order quantity (purchase lines of sent or partial purchase orders,
+// ordered less received), the backordered quantity, and the velocity over
+// the lookback from the sales history (actual issue moves arrive with the
+// stock ledger in C4-2 A). It reads as a system caller: the refresh runs
+// per branch over every branch, the way the cron path always did.
+const reorderScanQuery = `
+WITH stock AS (
+  SELECT i.product_id, l.branch_id,
+         SUM(i.quantity) AS on_hand, SUM(i.allocated) AS allocated,
+         SUM(i.quantity - i.allocated) AS available
+  FROM inventory i JOIN locations l ON l.id = i.location_id
+  WHERE l.branch_id IS NOT NULL
+  GROUP BY i.product_id, l.branch_id
+),
+sales AS (
+  SELECT ol.product_id, o.branch_id, SUM(ol.quantity) AS units
+  FROM order_lines ol JOIN orders o ON o.id = ol.order_id
+  WHERE ol.product_id IS NOT NULL AND o.status <> 'CANCELLED'
+    AND ol.created_at >= now() - ($1::int * INTERVAL '1 day')
+  GROUP BY ol.product_id, o.branch_id
+),
+onorder AS (
+  SELECT po.branch_id, pol.product_id,
+         SUM(COALESCE(pol.stock_quantity, pol.quantity) - COALESCE(pol.qty_received, 0)) AS qty
+  FROM purchase_order_lines pol JOIN purchase_orders po ON po.id = pol.po_id
+  WHERE pol.product_id IS NOT NULL AND po.status IN ('SENT', 'PARTIAL')
+  GROUP BY po.branch_id, pol.product_id
+),
+backorder AS (
+  SELECT o.branch_id, ol.product_id, SUM(COALESCE(ol.quantity_backordered, 0)) AS qty
+  FROM order_lines ol JOIN orders o ON o.id = ol.order_id
+  WHERE ol.product_id IS NOT NULL AND o.status <> 'CANCELLED'
+  GROUP BY o.branch_id, ol.product_id
+),
+combos AS (
+  SELECT product_id, branch_id FROM stock
+  UNION SELECT product_id, branch_id FROM sales
+  UNION SELECT product_id, branch_id FROM onorder
+  UNION SELECT product_id, branch_id FROM backorder
 )
+SELECT c.product_id, c.branch_id,
+       COALESCE(st.on_hand, 0)::text, COALESCE(st.allocated, 0)::text, COALESCE(st.available, 0)::text,
+       COALESCE(oo.qty, 0)::text, COALESCE(bo.qty, 0)::text, COALESCE(sa.units, 0)::text,
+       COALESCE(sl.reorder_point, p.reorder_point)::float8, COALESCE(sl.reorder_quantity, p.reorder_qty)::float8,
+       p.vendor_id, p.uom_primary::text, p.sku, p.description
+FROM combos c
+LEFT JOIN stock st ON st.product_id = c.product_id AND st.branch_id = c.branch_id
+LEFT JOIN sales sa ON sa.product_id = c.product_id AND sa.branch_id = c.branch_id
+LEFT JOIN onorder oo ON oo.product_id = c.product_id AND oo.branch_id = c.branch_id
+LEFT JOIN backorder bo ON bo.product_id = c.product_id AND bo.branch_id = c.branch_id
+LEFT JOIN stock_levels sl ON sl.product_id = c.product_id AND sl.branch_id = c.branch_id
+JOIN products p ON p.id = c.product_id
+ORDER BY c.product_id, c.branch_id`
 
-// PurchaseRecommendation represents a suggested purchase order for a product.
-type PurchaseRecommendation struct {
-	ProductID     uuid.UUID    `json:"product_id"`
-	ProductSKU    string       `json:"product_sku"`
-	ProductName   string       `json:"product_name"`
-	VendorName    string       `json:"vendor_name,omitempty"`
-	CurrentStock  float64      `json:"current_stock"`
-	AvgDailySales float64      `json:"avg_daily_sales"`
-	StdDevSales   float64      `json:"std_dev_sales"`
-	LeadTimeDays  float64      `json:"lead_time_days"`
-	ReorderPoint  float64      `json:"reorder_point"`
-	SafetyStock   float64      `json:"safety_stock"`
-	SuggestedQty  float64      `json:"suggested_qty"`
-	EstimatedCost float64      `json:"estimated_cost"`
-	Urgency       UrgencyLevel `json:"urgency"`
-	DaysUntilOut  float64      `json:"days_until_out"`
-	CatalogPrice  *float64     `json:"catalog_price,omitempty"`
-}
-
-// RecommendationSummary provides aggregate stats for the dashboard.
-type RecommendationSummary struct {
-	TotalItems    int                      `json:"total_items"`
-	CriticalCount int                      `json:"critical_count"`
-	HighCount     int                      `json:"high_count"`
-	MediumCount   int                      `json:"medium_count"`
-	LowCount      int                      `json:"low_count"`
-	TotalEstCost  float64                  `json:"total_estimated_cost"`
-	Items         []PurchaseRecommendation `json:"items"`
-}
-
-// RecommendationService generates purchasing recommendations based on
-// sales velocity, current stock levels, and vendor lead times.
-type RecommendationService struct {
-	repo         *Repository
-	inventorySvc *inventory.Service
-	productSvc   *product.Service
-	vendorSvc    *vendor.Service
-	velocityRepo salesVelocityLister
-	config       RecommendationConfig
-}
-
-// NewRecommendationService creates a new recommendation engine.
-func NewRecommendationService(
-	repo *Repository,
-	inventorySvc *inventory.Service,
-	productSvc *product.Service,
-	vendorSvc *vendor.Service,
-) *RecommendationService {
-	return &RecommendationService{
-		repo:         repo,
-		inventorySvc: inventorySvc,
-		productSvc:   productSvc,
-		vendorSvc:    vendorSvc,
-		config:       DefaultRecommendationConfig(),
-	}
-}
-
-// WithConfig overrides the default recommendation configuration.
-func (rs *RecommendationService) WithConfig(cfg RecommendationConfig) *RecommendationService {
-	rs.config = cfg
-	return rs
-}
-
-// WithVelocityRepo wires the real sales-velocity reader; when set,
-// GenerateRecommendations pulls demand from order_lines instead of using the
-// synthetic reorder-point proxy. Falls back to the synthetic estimate per-SKU
-// when a product has zero sales history in the lookback window.
-func (rs *RecommendationService) WithVelocityRepo(v salesVelocityLister) *RecommendationService {
-	rs.velocityRepo = v
-	return rs
-}
-
-// CalculateReorderPoint computes: (Avg Daily Sales x Lead Time Days) + Safety Stock
-func CalculateReorderPoint(avgDailySales, leadTimeDays, safetyStock float64) float64 {
-	return (avgDailySales * leadTimeDays) + safetyStock
-}
-
-// CalculateSafetyStock computes: Z-score x StdDev(Daily Sales) x sqrt(Lead Time Days)
-func CalculateSafetyStock(zScore, stdDevDailySales, leadTimeDays float64) float64 {
-	if leadTimeDays <= 0 {
-		return 0
-	}
-	return zScore * stdDevDailySales * math.Sqrt(leadTimeDays)
-}
-
-// CalculateEOQ computes the Economic Order Quantity.
-// EOQ = sqrt((2 x Annual Demand x Order Cost) / Holding Cost per unit)
-// Uses simplified defaults: order cost = $50, holding cost = 20% of unit cost.
-func CalculateEOQ(annualDemand, unitCost float64) float64 {
-	if annualDemand <= 0 || unitCost <= 0 {
-		return 0
-	}
-	orderCost := 50.0
-	holdingCost := unitCost * 0.20
-	if holdingCost <= 0 {
-		holdingCost = 1.0
-	}
-	eoq := math.Sqrt((2 * annualDemand * orderCost) / holdingCost)
-	return math.Ceil(eoq)
-}
-
-// ClassifyUrgency determines the urgency level based on stock vs reorder point.
-func ClassifyUrgency(currentStock, reorderPoint, avgDailySales, leadTimeDays float64) UrgencyLevel {
-	if avgDailySales <= 0 {
-		return UrgencyLow
-	}
-
-	daysOfStock := currentStock / avgDailySales
-
-	if currentStock <= 0 || daysOfStock < leadTimeDays*0.5 {
-		return UrgencyCritical
-	}
-	if currentStock <= reorderPoint {
-		return UrgencyHigh
-	}
-	if currentStock <= reorderPoint*1.5 {
-		return UrgencyMedium
-	}
-	return UrgencyLow
-}
-
-// DaysUntilStockout estimates days until stock runs out at current velocity.
-func DaysUntilStockout(currentStock, avgDailySales float64) float64 {
-	if avgDailySales <= 0 {
-		return 999
-	}
-	days := currentStock / avgDailySales
-	if days < 0 {
-		return 0
-	}
-	return math.Round(days*10) / 10
-}
-
-// GenerateRecommendations analyzes all products and returns purchase recommendations
-// for items that are at or approaching their reorder point.
-func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*RecommendationSummary, error) {
-	// 1. Get all products
-	products, err := rs.productSvc.ListProducts(ctx)
+// ReorderScan runs the reorder scan.
+func (r *Repository) ReorderScan(ctx context.Context, lookbackDays int) ([]reorderScanRow, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, reorderScanQuery, lookbackDays)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load products: %w", err)
+		return nil, err
 	}
-
-	// 2. Build vendor lookup by UUID (primary) and name (legacy fallback) for lead times
-	vendorByID := make(map[uuid.UUID]*vendor.Vendor)
-	vendorByName := make(map[string]*vendor.Vendor)
-	vendors, err := rs.vendorSvc.ListVendors(ctx)
-	if err == nil {
-		for i := range vendors {
-			vendorByID[vendors[i].ID] = &vendors[i]
-			vendorByName[vendors[i].Name] = &vendors[i]
+	defer rows.Close()
+	var out []reorderScanRow
+	for rows.Next() {
+		var row reorderScanRow
+		var onHand, allocated, available, onOrder, backordered, units string
+		if err := rows.Scan(&row.ProductID, &row.BranchID,
+			&onHand, &allocated, &available, &onOrder, &backordered, &units,
+			&row.OldPointF, &row.OldQtyF,
+			&row.VendorID, &row.Unit, &row.SKU, &row.Description); err != nil {
+			return nil, err
 		}
-	}
-
-	// 2.5. Pull real sales velocity from order_lines once for the whole
-	// catalog. Indexed by product UUID for an O(1) per-product lookup below.
-	// If the velocity repo isn't wired (older test harness), the map is
-	// empty and every product falls through to the synthetic estimate.
-	velByProduct := make(map[uuid.UUID]float64)
-	if rs.velocityRepo != nil {
-		velocity, vErr := rs.velocityRepo.ListSalesVelocity(ctx, rs.config.LookbackDays)
-		if vErr == nil {
-			for _, v := range velocity {
-				velByProduct[v.ProductID] = v.UnitsSold
+		q := func(s string) httpx.Quantity {
+			v, err := httpx.ParseQuantity(s)
+			if err != nil {
+				return 0
 			}
+			return v
 		}
+		row.OnHand, row.Allocated, row.Available = q(onHand), q(allocated), q(available)
+		row.OnOrder, row.Backordered, row.UnitsSold = q(onOrder), q(backordered), q(units)
+		row.AvailableF = float64(int64(row.Available)) / 10000
+		row.OnOrderF = float64(int64(row.OnOrder)) / 10000
+		row.BackorderedF = float64(int64(row.Backordered)) / 10000
+		out = append(out, row)
 	}
+	return out, rows.Err()
+}
 
-	var recommendations []PurchaseRecommendation
-	totalEstCost := 0.0
+// WriteStockLevelTarget upserts the per branch target pair (ADR 0008 10.2).
+func (r *Repository) WriteStockLevelTarget(ctx context.Context, productID, branchID uuid.UUID, point, qty float64) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO stock_levels (product_id, branch_id, reorder_point, reorder_quantity, revision, updated_at)
+		VALUES ($1, $2, $3, $4, 1, NOW())
+		ON CONFLICT (product_id, branch_id) DO UPDATE
+		SET reorder_point = EXCLUDED.reorder_point, reorder_quantity = EXCLUDED.reorder_quantity,
+		    revision = stock_levels.revision + 1, updated_at = NOW()`,
+		productID, branchID, point, qty)
+	return err
+}
 
-	for _, p := range products {
-		// 3. Get current inventory level
-		invItems, err := rs.inventorySvc.ListByProduct(ctx, p.ID.String())
+// StartBranchReorderRun opens a reorder run row stamped with its branch.
+func (r *Repository) StartBranchReorderRun(ctx context.Context, job string, dryRun bool, branch uuid.UUID) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		INSERT INTO reorder_runs (job, dry_run, status, branch_id)
+		VALUES ($1, $2, 'RUNNING', $3) RETURNING id`, job, dryRun, branch).Scan(&id)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("insert reorder_runs: %w", err)
+	}
+	return id, nil
+}
+
+// InsertRecommendation stores one recommendation of a run.
+func (r *Repository) InsertRecommendation(ctx context.Context, runID uuid.UUID, rec ReorderRecommendation) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		INSERT INTO reorder_recommendations (run_id, product_id, branch_id, vendor_id,
+			on_hand, allocated, available, on_order, backordered,
+			velocity, lookback_days, lead_time_days, lead_time_source,
+			reorder_point, reorder_quantity, suggested_quantity, unit, status)
+		VALUES ($1, $2, $3, $4,
+			$5::numeric, $6::numeric, $7::numeric, $8::numeric, $9::numeric,
+			$10::numeric, $11, $12::numeric, $13,
+			$14::numeric, $15::numeric, $16, $17, 'OPEN')`,
+		runID, rec.ProductID, rec.BranchID, rec.VendorID,
+		rec.OnHand.DecimalString(), rec.Allocated.DecimalString(), rec.Available.DecimalString(),
+		rec.OnOrder.DecimalString(), rec.Backordered.DecimalString(),
+		rec.Velocity.DecimalString(), rec.LookbackDays, rec.LeadTimeDays.DecimalString(), rec.LeadTimeSource,
+		recPoint(rec.ReorderPoint), recPoint(rec.ReorderQuantity), rec.SuggestedQuantity, rec.Unit)
+	return err
+}
+
+func recPoint(q *httpx.Quantity) any {
+	if q == nil {
+		return nil
+	}
+	return q.DecimalString()
+}
+
+// RecommendationFilter is the stored recommendations list's filters.
+type RecommendationFilter struct {
+	BranchID  *uuid.UUID
+	VendorID  *uuid.UUID
+	Status    string
+	AfterTime *time.Time
+	AfterID   *uuid.UUID
+	Limit     int
+}
+
+// recListFilters is the list's shared predicate: the three arm branch wall
+// on the recommendation's own branch, the vendor and status filters.
+const recListFilters = `
+	WHERE (
+	    ($1::uuid IS NOT NULL AND rr.branch_id = $1)
+	    OR ($1::uuid IS NULL AND $%d::text IS NOT NULL AND rr.branch_id IN
+	        (SELECT branch_id FROM user_locations WHERE user_sub = $%d))
+	    OR ($1::uuid IS NULL AND $%d::text IS NULL)
+	  )
+	  AND ($2::uuid IS NULL OR rr.vendor_id = $2)
+	  AND ($3::text IS NULL OR rr.status = $3)`
+
+// ListRecommendationsPage reads one page of the stored recommendations.
+func (r *Repository) ListRecommendationsPage(ctx context.Context, f RecommendationFilter) ([]ReorderRecommendation, bool, error) {
+	q := `
+		SELECT rr.id, rr.run_id, rr.product_id, rr.branch_id, rr.vendor_id,
+		       rr.on_hand::text, rr.allocated::text, rr.available::text, rr.on_order::text, rr.backordered::text,
+		       rr.velocity::text, rr.lookback_days, rr.lead_time_days::text, rr.lead_time_source,
+		       rr.reorder_point::text, rr.reorder_quantity::text, rr.suggested_quantity::text,
+		       rr.vendor_item_id, rr.unit, rr.status, rr.purchase_order_line_id, rr.created_at,
+		       p.sku, p.description
+		FROM reorder_recommendations rr
+		JOIN products p ON p.id = rr.product_id` +
+		fmt.Sprintf(recListFilters, 7, 7, 7) + `
+		  AND ($4::timestamptz IS NULL OR (rr.created_at, rr.id) < ($4, $5::uuid))
+		ORDER BY rr.created_at DESC, rr.id DESC
+		LIMIT $6`
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, q,
+		middleware.BranchIDForQuery(ctx), f.VendorID, statusPtr(f.Status), f.AfterTime, f.AfterID, f.Limit+1,
+		middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	var out []ReorderRecommendation
+	for rows.Next() {
+		rec, err := scanRecommendation(rows.Scan)
 		if err != nil {
-			continue // Skip products with inventory errors
+			return nil, false, err
 		}
-
-		currentStock := 0.0
-		for _, inv := range invItems {
-			currentStock += inv.Quantity - inv.Allocated
-		}
-
-		// 4. Compute sales velocity. Prefer real order_lines velocity; fall
-		// back to the synthetic reorder-point proxy when a new SKU has no
-		// sales history yet so brand-new products still surface in the list.
-		avgDailySales := rs.dailySalesFor(p, velByProduct)
-		stdDevSales := avgDailySales * 0.3 // 30% coefficient of variation
-
-		if avgDailySales <= 0 {
-			continue // No sales velocity, skip
-		}
-
-		// 5. Get lead time from vendor or use default. Prefer canonical
-		// vendor_id; fall back to display-name lookup for legacy rows.
-		leadTime := rs.config.DefaultLeadTimeDays
-		vendorName := ""
-		var matchedVendor *vendor.Vendor
-		if p.VendorID != nil {
-			if v, ok := vendorByID[*p.VendorID]; ok {
-				matchedVendor = v
-			}
-		}
-		if matchedVendor == nil && p.Vendor != nil && *p.Vendor != "" {
-			if v, ok := vendorByName[*p.Vendor]; ok {
-				matchedVendor = v
-			}
-		}
-		if matchedVendor != nil {
-			vendorName = matchedVendor.Name
-			if matchedVendor.AverageLeadTimeDays > 0 {
-				leadTime = matchedVendor.AverageLeadTimeDays
-			}
-		} else if p.Vendor != nil {
-			vendorName = *p.Vendor
-		}
-
-		// 6. Calculate reorder metrics
-		safetyStock := CalculateSafetyStock(rs.config.ZScore, stdDevSales, leadTime)
-		reorderPoint := CalculateReorderPoint(avgDailySales, leadTime, safetyStock)
-
-		// 7. Only recommend if stock is at or below 2x reorder point
-		if currentStock > reorderPoint*2 {
-			continue
-		}
-
-		// 8. Calculate suggested quantity
-		annualDemand := avgDailySales * 365
-		vendorCostEstimate := p.BasePrice * 0.6 // Estimate vendor cost at 60% of base price
-		eoq := CalculateEOQ(annualDemand, vendorCostEstimate)
-		suggestedQty := math.Max(eoq, rs.config.MinOrderQty)
-
-		// Ensure we order enough to get back above reorder point + buffer
-		minNeeded := reorderPoint*1.5 - currentStock
-		if minNeeded > suggestedQty {
-			suggestedQty = math.Ceil(minNeeded)
-		}
-
-		estimatedCost := suggestedQty * vendorCostEstimate
-
-		// 9. Classify urgency
-		urgency := ClassifyUrgency(currentStock, reorderPoint, avgDailySales, leadTime)
-		daysOut := DaysUntilStockout(currentStock, avgDailySales)
-
-		rec := PurchaseRecommendation{
-			ProductID:     p.ID,
-			ProductSKU:    p.SKU,
-			ProductName:   p.Description,
-			VendorName:    vendorName,
-			CurrentStock:  math.Round(currentStock*100) / 100,
-			AvgDailySales: math.Round(avgDailySales*100) / 100,
-			StdDevSales:   math.Round(stdDevSales*100) / 100,
-			LeadTimeDays:  leadTime,
-			ReorderPoint:  math.Round(reorderPoint*100) / 100,
-			SafetyStock:   math.Round(safetyStock*100) / 100,
-			SuggestedQty:  suggestedQty,
-			EstimatedCost: math.Round(estimatedCost*100) / 100,
-			Urgency:       urgency,
-			DaysUntilOut:  daysOut,
-		}
-
-		recommendations = append(recommendations, rec)
-		totalEstCost += estimatedCost
+		out = append(out, rec)
 	}
-
-	// Sort by urgency (critical first) then by days until stockout
-	sort.Slice(recommendations, func(i, j int) bool {
-		ui := urgencyRank(recommendations[i].Urgency)
-		uj := urgencyRank(recommendations[j].Urgency)
-		if ui != uj {
-			return ui < uj
-		}
-		return recommendations[i].DaysUntilOut < recommendations[j].DaysUntilOut
-	})
-
-	// Build summary
-	summary := &RecommendationSummary{
-		TotalItems:   len(recommendations),
-		TotalEstCost: math.Round(totalEstCost*100) / 100,
-		Items:        recommendations,
+	if err := rows.Err(); err != nil {
+		return nil, false, err
 	}
-
-	for _, r := range recommendations {
-		switch r.Urgency {
-		case UrgencyCritical:
-			summary.CriticalCount++
-		case UrgencyHigh:
-			summary.HighCount++
-		case UrgencyMedium:
-			summary.MediumCount++
-		case UrgencyLow:
-			summary.LowCount++
-		}
+	more := len(out) > f.Limit
+	if more {
+		out = out[:f.Limit]
 	}
-
-	return summary, nil
+	return out, more, nil
 }
 
-// dailySalesFor returns avg daily sales for a product. Prefers the real
-// velocity map (units sold / lookback days); falls back to the synthetic
-// estimator for products with no sales history. The synthetic fallback is
-// preserved so a brand-new SKU still gets a usable estimate before the
-// first sale, and so the recommendation engine works in test harnesses
-// that don't wire the velocity repo.
-func (rs *RecommendationService) dailySalesFor(p product.Product, velByProduct map[uuid.UUID]float64) float64 {
-	if units, ok := velByProduct[p.ID]; ok && units > 0 {
-		lookback := float64(rs.config.LookbackDays)
-		if lookback <= 0 {
-			lookback = 90
+// CountRecommendations counts the filtered set.
+func (r *Repository) CountRecommendations(ctx context.Context, f RecommendationFilter) (int64, error) {
+	var n int64
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT count(*) FROM reorder_recommendations rr`+fmt.Sprintf(recListFilters, 4, 4, 4),
+		middleware.BranchIDForQuery(ctx), f.VendorID, statusPtr(f.Status),
+		middleware.GrantsSubForQuery(ctx)).Scan(&n)
+	return n, err
+}
+
+func statusPtr(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func scanRecommendation(scan func(dest ...any) error) (ReorderRecommendation, error) {
+	var rec ReorderRecommendation
+	var onHand, allocated, available, onOrder, backordered, velocity, lead, suggested string
+	var reorderPoint, reorderQty *string
+	var created time.Time
+	err := scan(&rec.ID, &rec.RunID, &rec.ProductID, &rec.BranchID, &rec.VendorID,
+		&onHand, &allocated, &available, &onOrder, &backordered,
+		&velocity, &rec.LookbackDays, &lead, &rec.LeadTimeSource,
+		&reorderPoint, &reorderQty, &suggested,
+		&rec.VendorItemID, &rec.Unit, &rec.Status, &rec.PurchaseOrderLineID, &created,
+		&rec.SKU, &rec.Description)
+	if err != nil {
+		return rec, err
+	}
+	q := func(s string) httpx.Quantity {
+		v, err := httpx.ParseQuantity(s)
+		if err != nil {
+			return 0
 		}
-		return units / lookback
+		return v
 	}
-	return rs.estimateDailySales(p)
+	rec.OnHand, rec.Allocated, rec.Available = q(onHand), q(allocated), q(available)
+	rec.OnOrder, rec.Backordered, rec.Velocity = q(onOrder), q(backordered), q(velocity)
+	rec.LeadTimeDays = q(lead)
+	if reorderPoint != nil {
+		v := q(*reorderPoint)
+		rec.ReorderPoint = &v
+	}
+	if reorderQty != nil {
+		v := q(*reorderQty)
+		rec.ReorderQuantity = &v
+	}
+	if f, err := strconv.ParseFloat(suggested, 64); err != nil {
+		return rec, err
+	} else {
+		rec.SuggestedQuantity = f
+	}
+	rec.CreatedAt = httpx.TimestampOf(created)
+	return rec, nil
 }
 
-// estimateDailySales provides a deterministic synthetic sales velocity for
-// products with no sales history in the lookback window. Used by
-// dailySalesFor as a fallback so new SKUs don't drop out of the
-// recommendation list before they've had their first sale.
-func (rs *RecommendationService) estimateDailySales(p product.Product) float64 {
-	// Use reorder point as a proxy for sales velocity
-	if p.ReorderPoint > 0 {
-		// Approximate: daily sales ~ reorder_point / (lead_time + safety_buffer)
-		return p.ReorderPoint / (rs.config.DefaultLeadTimeDays + 3)
+// OpenRecommendations lists the recommendations CreateReorders turns into
+// purchase lines, oldest first.
+func (r *Repository) OpenRecommendations(ctx context.Context) ([]ReorderRecommendation, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT rr.id, rr.run_id, rr.product_id, rr.branch_id, rr.vendor_id,
+		       rr.on_hand::text, rr.allocated::text, rr.available::text, rr.on_order::text, rr.backordered::text,
+		       rr.velocity::text, rr.lookback_days, rr.lead_time_days::text, rr.lead_time_source,
+		       rr.reorder_point::text, rr.reorder_quantity::text, rr.suggested_quantity::text,
+		       rr.vendor_item_id, rr.unit, rr.status, rr.purchase_order_line_id, rr.created_at,
+		       p.sku, p.description
+		FROM reorder_recommendations rr
+		JOIN products p ON p.id = rr.product_id
+		WHERE rr.status = 'OPEN'
+		ORDER BY rr.created_at, rr.id`)
+	if err != nil {
+		return nil, err
 	}
-	// Fallback: derive from base price (cheaper items sell more)
-	if p.BasePrice > 0 {
-		return 100.0 / p.BasePrice // Inverse relationship as proxy
+	defer rows.Close()
+	var out []ReorderRecommendation
+	for rows.Next() {
+		rec, err := scanRecommendation(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
 	}
-	return 0
+	return out, rows.Err()
 }
 
-func urgencyRank(u UrgencyLevel) int {
-	switch u {
-	case UrgencyCritical:
-		return 0
-	case UrgencyHigh:
-		return 1
-	case UrgencyMedium:
-		return 2
-	case UrgencyLow:
-		return 3
-	default:
-		return 4
+// MarkRecommendationOrdered records the purchase line a recommendation
+// became and closes it.
+func (r *Repository) MarkRecommendationOrdered(ctx context.Context, id, lineID uuid.UUID) error {
+	_, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE reorder_recommendations SET status = 'ORDERED', purchase_order_line_id = $2 WHERE id = $1 AND status = 'OPEN'`,
+		id, lineID)
+	return err
+}
+
+// GetDraftPOByVendorBranch is CreateReorders' draft lookup: the vendor's
+// open draft at the recommendation's branch.
+func (r *Repository) GetDraftPOByVendorBranch(ctx context.Context, vendorID *uuid.UUID, branch uuid.UUID) (*PurchaseOrder, error) {
+	po, err := scanPOHeader(r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT id, number, vendor_id, status, source, currency, revision, branch_id, created_at, updated_at, sent_at
+		FROM purchase_orders
+		WHERE vendor_id = $1 AND status = 'DRAFT' AND branch_id = $2
+		ORDER BY created_at, id LIMIT 1`, vendorID, branch).Scan)
+	if err != nil {
+		return nil, nil
 	}
+	return po, nil
+}
+
+// SettingFloat reads a numeric system setting with a default.
+func (r *Repository) SettingFloat(ctx context.Context, key string, fallback float64) (float64, error) {
+	var value *string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT value FROM system_settings WHERE key = $1`, key).Scan(&value)
+	if err != nil {
+		return fallback, nil
+	}
+	if value == nil || *value == "" {
+		return fallback, nil
+	}
+	var f float64
+	if _, err := fmt.Sscanf(*value, "%g", &f); err != nil || f <= 0 {
+		return fallback, nil
+	}
+	return f, nil
+}
+
+// MoveAverageUnderLock takes the product row FOR UPDATE, reads the current
+// average and Q (the sum of the product's inventory quantities, BEFORE the
+// receipt's stock write, so the received quantity is never counted twice),
+// and computes the new average exactly, rounded once to scale 4 (ADR 0008
+// section 3.5): avg' = (Q x avg + v) / (Q + q); avg' = v / q when Q <= 0 or
+// avg is null.
+func (r *Repository) MoveAverageUnderLock(ctx context.Context, productID uuid.UUID, received httpx.Quantity, value httpx.Cents) (float64, error) {
+	var avgText *string
+	var qText string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+		SELECT p.average_unit_cost::text,
+		       COALESCE((SELECT SUM(i.quantity)::text FROM inventory i WHERE i.product_id = p.id), '0')
+		FROM products p WHERE p.id = $1 FOR UPDATE OF p`, productID).Scan(&avgText, &qText)
+	if err != nil {
+		return 0, err
+	}
+	avg4 := new(big.Rat)
+	hasAvg := false
+	if avgText != nil {
+		if v, err := httpx.ParsePrice(*avgText); err == nil && v > 0 {
+			avg4.SetInt64(int64(v))
+			hasAvg = true
+		}
+	}
+	q4 := new(big.Rat)
+	if v, err := httpx.ParseQuantity(qText); err == nil {
+		q4.SetInt64(int64(v))
+	}
+	received4 := new(big.Rat).SetInt64(int64(received))
+	// The received value in dollars at scale 4: cents x 100.
+	v4 := new(big.Rat).SetInt64(int64(value) * 100)
+
+	zero := new(big.Rat)
+	num := new(big.Rat).Mul(q4, avg4)
+	num.Add(num, v4)
+	den := new(big.Rat).Add(q4, received4)
+	var next *big.Rat
+	if !hasAvg || q4.Cmp(zero) <= 0 {
+		next = new(big.Rat).Quo(v4, received4)
+	} else {
+		next = new(big.Rat).Quo(num, den)
+	}
+	// Round once, half away from zero, to scale 4.
+	scaled := new(big.Rat).Mul(next, new(big.Rat).SetInt64(10000))
+	units := roundRatHalfAway(scaled)
+	f := new(big.Rat).SetFrac(units, big.NewInt(10000))
+	out, _ := f.Float64()
+	return out, nil
+}
+
+// roundRatHalfAway rounds a rational to the nearest integer, half away from
+// zero, in exact integer arithmetic.
+func roundRatHalfAway(r *big.Rat) *big.Int {
+	neg := r.Sign() < 0
+	abs := new(big.Rat).Abs(r)
+	// floor(abs + 1/2) = (2 x num + den) / (2 x den), den > 0.
+	num := new(big.Int).Set(abs.Num())
+	den := new(big.Int).Set(abs.Denom())
+	q := new(big.Int).Lsh(num, 1)
+	q.Add(q, den)
+	q.Div(q, new(big.Int).Lsh(den, 1))
+	if neg {
+		q.Neg(q)
+	}
+	return q
 }

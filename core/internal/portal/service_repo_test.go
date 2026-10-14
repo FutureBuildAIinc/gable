@@ -404,12 +404,12 @@ func (f *fakeProductRepo) CountProducts(context.Context) (int64, error) { return
 func (f *fakeProductRepo) ListBelowReorder(context.Context) ([]product.ReorderAlert, error) {
 	return nil, nil
 }
-func (f *fakeProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) error { return nil }
+func (f *fakeProductRepo) UpdateAverageCost(context.Context, uuid.UUID, float64) (int64, error) { return 1, nil }
 func (f *fakeProductRepo) UpdateMarginRules(context.Context, uuid.UUID, float64, float64, int64) (int64, error) {
 	return 0, nil
 }
-func (f *fakeProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) error {
-	return nil
+func (f *fakeProductRepo) UpdateReorderTargets(context.Context, uuid.UUID, float64, float64) (int64, error) {
+	return 1, nil
 }
 func (f *fakeProductRepo) UpdateVendor(context.Context, uuid.UUID, *string, *uuid.UUID) error {
 	return nil

@@ -5,11 +5,15 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
 )
 
@@ -20,9 +24,25 @@ import (
 // mismatch it should survive; the second is not.
 var ErrNothingAllocated = errors.New("inventory: no allocated stock")
 
+// The stock level events of ADR 0008 section 10.2: edge triggered, written
+// by the stock-levels job when a product and branch crosses its reorder
+// point, never by the money paths.
+const (
+	EventStockLow       = "stock.low"
+	EventStockRecovered = "stock.recovered"
+)
+
+// EventRecorder writes a domain event into the transactional outbox (ADR
+// 0003 section 2).
+type EventRecorder interface {
+	Write(ctx context.Context, ev outbox.Event) error
+}
+
 type Service struct {
 	repo   Repository
 	levels LevelStore // the levels read's store (C3-1b), when the repo can serve it
+	stock  StockWriter
+	events EventRecorder
 }
 
 func NewService(repo Repository) *Service {
@@ -33,6 +53,17 @@ func NewService(repo Repository) *Service {
 	if ls, ok := any(repo).(LevelStore); ok {
 		s.levels = ls
 	}
+	if sw, ok := any(repo).(StockWriter); ok {
+		s.stock = sw
+	}
+	return s
+}
+
+// WithOutbox wires the outbox the stock level job writes its edge triggered
+// events to, and the adjust and transfer routes theirs. Optional: nil writes
+// no event (unit tests).
+func (s *Service) WithOutbox(events EventRecorder) *Service {
+	s.events = events
 	return s
 }
 
@@ -316,4 +347,144 @@ func (s *Service) RevertFulfillment(ctx context.Context, productID uuid.UUID, qu
 func createError(err error) error {
 	// Helper to handle error wrapping
 	return err
+}
+
+// ReceiveIntoLocation is the purchase order receive's stock write (C4-1a,
+// until the stock ledger of C4-2 A): the row is created where absent and the
+// update takes the row lock; the stock level goes dirty for the job.
+func (s *Service) ReceiveIntoLocation(ctx context.Context, productID, locationID uuid.UUID, quantity httpx.Quantity) error {
+	if s.stock == nil {
+		return fmt.Errorf("inventory service has no stock writer")
+	}
+	return s.stock.ReceiveStockQty(ctx, productID, locationID, int64(quantity))
+}
+
+// RefreshStockLevels serves the stock level job's queue (ADR 0008 section
+// 10.2): one dirty product and branch per transaction, available = the sum
+// of quantity - allocated over the branch's rows, and the edge triggered
+// events: crossing to available <= reorder_point with low_since null sets it
+// and writes stock.low; crossing back above clears it and writes
+// stock.recovered. A level that stays low writes no further events. It
+// returns how many dirty rows it served.
+func (s *Service) RefreshStockLevels(ctx context.Context, batch int) (int, error) {
+	served := 0
+	for i := 0; batch <= 0 || i < batch; i++ {
+		done := false
+		err := s.repo.ExecuteInTx(ctx, func(txCtx context.Context) error {
+			productID, branchID, ok, err := s.levelsNext(txCtx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				done = true
+				return nil
+			}
+			availableText, err := s.levelsAvailable(txCtx, productID, branchID)
+			if err != nil {
+				return err
+			}
+			available, err := httpx.ParseQuantity(availableText)
+			if err != nil {
+				available = 0
+			}
+			level, err := s.levelsGet(txCtx, productID, branchID)
+			if err != nil {
+				return err
+			}
+			var point *httpx.Quantity
+			if level != nil && level.ReorderPoint != nil {
+				p := httpx.Quantity(int64(*level.ReorderPoint * 10000))
+				point = &p
+			}
+			low := point != nil && available <= *point
+			wasLow := level != nil && level.LowSince != nil
+			if low && !wasLow {
+				now := time.Now().UTC()
+				if err := s.levelsUpsert(txCtx, productID, branchID, &now); err != nil {
+					return err
+				}
+				if err := s.writeLevelEvent(txCtx, EventStockLow, productID, branchID, available, point); err != nil {
+					return err
+				}
+			} else if !low && wasLow {
+				if err := s.levelsUpsert(txCtx, productID, branchID, nil); err != nil {
+					return err
+				}
+				if err := s.writeLevelEvent(txCtx, EventStockRecovered, productID, branchID, available, point); err != nil {
+					return err
+				}
+			}
+			return s.levelsClear(txCtx, productID, branchID)
+		})
+		if err != nil {
+			return served, err
+		}
+		if done {
+			break
+		}
+		served++
+	}
+	return served, nil
+}
+
+// levelStore is the stock level job's store, beside the Repository
+// interface so the test fakes keep compiling.
+type levelStore interface {
+	NextDirtyStockLevel(ctx context.Context) (uuid.UUID, uuid.UUID, bool, error)
+	SumAvailable(ctx context.Context, productID, branchID uuid.UUID) (string, error)
+	GetStockLevel(ctx context.Context, productID, branchID uuid.UUID) (*StockLevel, error)
+	UpsertStockLevel(ctx context.Context, productID, branchID uuid.UUID, lowSince *time.Time) error
+	ClearDirtyStockLevel(ctx context.Context, productID, branchID uuid.UUID) error
+	ProductStockingUnit(ctx context.Context, productID uuid.UUID) (string, error)
+}
+
+func (s *Service) levelsNext(ctx context.Context) (uuid.UUID, uuid.UUID, bool, error) {
+	ls, ok := any(s.repo).(levelStore)
+	if !ok {
+		return uuid.Nil, uuid.Nil, false, fmt.Errorf("inventory service has no stock level store")
+	}
+	return ls.NextDirtyStockLevel(ctx)
+}
+
+func (s *Service) levelsAvailable(ctx context.Context, productID, branchID uuid.UUID) (string, error) {
+	ls, _ := any(s.repo).(levelStore)
+	return ls.SumAvailable(ctx, productID, branchID)
+}
+
+func (s *Service) levelsGet(ctx context.Context, productID, branchID uuid.UUID) (*StockLevel, error) {
+	ls, _ := any(s.repo).(levelStore)
+	return ls.GetStockLevel(ctx, productID, branchID)
+}
+
+func (s *Service) levelsUpsert(ctx context.Context, productID, branchID uuid.UUID, lowSince *time.Time) error {
+	ls, _ := any(s.repo).(levelStore)
+	return ls.UpsertStockLevel(ctx, productID, branchID, lowSince)
+}
+
+func (s *Service) levelsClear(ctx context.Context, productID, branchID uuid.UUID) error {
+	ls, _ := any(s.repo).(levelStore)
+	return ls.ClearDirtyStockLevel(ctx, productID, branchID)
+}
+
+func (s *Service) writeLevelEvent(ctx context.Context, eventType string, productID, branchID uuid.UUID, available httpx.Quantity, point *httpx.Quantity) error {
+	if s.events == nil {
+		return nil
+	}
+	ls, _ := any(s.repo).(levelStore)
+	unit, _ := ls.ProductStockingUnit(ctx, productID)
+	data := map[string]any{
+		"product_id": productID, "branch_id": branchID,
+		"available": available.WireString(), "unit": unit,
+	}
+	if point != nil {
+		data["reorder_point"] = point.WireString()
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	branch := branchID
+	return s.events.Write(ctx, outbox.Event{
+		Type: eventType, EntityType: "product", EntityID: productID, BranchID: &branch, Data: raw,
+	})
 }

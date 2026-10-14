@@ -663,7 +663,7 @@ func TestNonStockLineCostComesFromTheReceivedPurchaseOrderLine(t *testing.T) {
 
 	// Not received yet: no cost, no error, even with an estimate on the line.
 	o1, l1 := mk(30000)
-	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, 'special', 2, 4.00, 0, $3)`, poLine, po, l1)
+	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, unit_cost, line_total, qty_received, linked_so_line_id) VALUES ($1, $2, 'special', 2, 4.00, 8.00, 0, $3)`, poLine, po, l1)
 	g := f.do("GET", "/api/v1/orders/"+o1, nil)
 	r := f.fulfil(o1, revision(t, g), map[string]any{"picked_up_by": "Counter"})
 	if r.status != 201 {
@@ -724,8 +724,8 @@ func TestNonStockReliefComesFromTheLinkedReceiptsProRata(t *testing.T) {
 	}
 	id := str(t, r.body, "id")
 	lineID := str(t, r.body["lines"].([]any)[0].(map[string]any), "id")
-	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id, created_at) VALUES ($1, $2, 'first', 1, 3.33, 1, $3, now() - interval '1 minute')`, uuid.New(), po, lineID)
-	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, 'second', 2, 5.00, 2, $3)`, uuid.New(), po, lineID)
+	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, unit_cost, line_total, qty_received, linked_so_line_id, created_at) VALUES ($1, $2, 'first', 1, 3.33, 3.33, 1, $3, now() - interval '1 minute')`, uuid.New(), po, lineID)
+	must(`INSERT INTO purchase_order_lines (id, po_id, description, quantity, unit_cost, line_total, qty_received, linked_so_line_id) VALUES ($1, $2, 'second', 2, 5.00, 10.00, 2, $3)`, uuid.New(), po, lineID)
 	r = f.transition(id, 1, "confirmed")
 	if r.status != 200 {
 		t.Fatalf("confirm = %d: %s", r.status, r.raw)
@@ -792,7 +792,7 @@ func TestStockedSpecialOrderRelievesCOGSAtTheMovingAverage(t *testing.T) {
 	// The state its receipt left: the received purchase order line (10 at
 	// 9.00) linked to the order line, 20 on hand (10 at 5.00 plus the 10
 	// received) and the average moved to 7.00.
-	must(`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, cost, qty_received, linked_so_line_id) VALUES ($1, $2, $3, 'special', 10, 9.00, 10, $4)`, poLine, po, f.productID, lineID)
+	must(`INSERT INTO purchase_order_lines (id, po_id, product_id, description, quantity, unit_cost, line_total, qty_received, linked_so_line_id) VALUES ($1, $2, $3, 'special', 10, 9.00, 90.00, 10, $4)`, poLine, po, f.productID, lineID)
 	f.stock(f.productID, "20")
 	f.setCost(f.productID, "7")
 
