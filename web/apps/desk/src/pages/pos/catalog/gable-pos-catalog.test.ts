@@ -82,6 +82,28 @@ describe('gable-pos-catalog', () => {
     warn.mockRestore();
   });
 
+  it('fades the chip row at its right edge whenever it overflows, and not once scrolled to the end', async () => {
+    await open();
+    const row = el.querySelector<HTMLElement>('[data-testid="catalog-chips"]')!;
+    expect(el.querySelector('[data-testid="catalog-chips-fade"]')).toBeNull();
+    Object.defineProperty(row, 'scrollWidth', { configurable: true, value: 900 });
+    Object.defineProperty(row, 'clientWidth', { configurable: true, value: 400 });
+    Object.defineProperty(row, 'scrollLeft', { configurable: true, writable: true, value: 0 });
+    row.dispatchEvent(new Event('scroll'));
+    await tick(el);
+    expect(el.querySelector('[data-testid="catalog-chips-fade"]')).not.toBeNull();
+    row.scrollLeft = 500;
+    row.dispatchEvent(new Event('scroll'));
+    await tick(el);
+    expect(el.querySelector('[data-testid="catalog-chips-fade"]')).toBeNull();
+  });
+
+  it('shows the page\'s note in its own header row', async () => {
+    await open({ note: 'Add a product to start the next sale' } as Partial<GablePosCatalog>);
+    expect(q<HTMLElement>(el, '[data-testid="catalog-note"]').textContent).toContain('start the next sale');
+    expect(q<HTMLElement>(el, '#pos-catalog-title').parentElement?.contains(q<HTMLElement>(el, '[data-testid="catalog-note"]'))).toBe(true);
+  });
+
   it('shows no tile highlight while the card is disabled', async () => {
     await open({ disabled: true });
     const tiles = el.querySelectorAll('[data-testid="catalog-tile"]');

@@ -47,6 +47,8 @@ export class GablePosCatalog extends LitElement {
     @property({ type: Boolean }) disabled = false;
     /** Any change re-reads the grid (the counter sets it when the yard changes). */
     @property({ attribute: 'yard-key' }) yardKey = '';
+    /** One line the page wants beside the card's heading (empty for none). */
+    @property() note = '';
 
     @state() private _categories: CatalogCategory[] = [];
     @state() private _items: CatalogItem[] = [];
@@ -61,6 +63,7 @@ export class GablePosCatalog extends LitElement {
     @state() private _notice = '';
     @state() private _scanning = false;
     @state() private _chipsOverflow = false;
+    @state() private _chipsAtEnd = false;
 
     private _seq = 0;
     private _lastKey = '';
@@ -92,7 +95,9 @@ export class GablePosCatalog extends LitElement {
         const row = this.querySelector<HTMLElement>('[data-testid="catalog-chips"]');
         if (!row) return;
         const over = row.scrollWidth > row.clientWidth + 1;
+        const atEnd = row.scrollLeft + row.clientWidth >= row.scrollWidth - 1;
         if (over !== this._chipsOverflow) this._chipsOverflow = over;
+        if (atEnd !== this._chipsAtEnd) this._chipsAtEnd = atEnd;
     }
 
     /** A typed search looks across every category; the chip returns when it is cleared. */
@@ -116,9 +121,9 @@ export class GablePosCatalog extends LitElement {
         }
     }
 
-    protected updated(changed: Map<string, unknown>): void {
+    protected updated(): void {
         // Measured after this update has completed, so the result never schedules one inside it.
-        if (changed.has('_categories')) queueMicrotask(() => this._measureChips());
+        queueMicrotask(() => this._measureChips());
     }
 
     private _clearTimer(): void {
@@ -345,7 +350,10 @@ export class GablePosCatalog extends LitElement {
     render() {
         const chips = [{ name: '', label: 'All' }, ...this._categories.map((c) => ({ name: c.name, label: c.name }))];
         return html`<section class="rounded-lg border border-white/10 bg-slate-steel p-4" data-testid="pos-catalog" aria-labelledby="pos-catalog-title">
-            <h2 id="pos-catalog-title" class="text-lg font-bold text-white">Items</h2>
+            <div class="flex min-h-7 items-baseline justify-between gap-3">
+                <h2 id="pos-catalog-title" class="text-lg font-bold text-white">Items</h2>
+                ${this.note !== '' ? html`<span class="text-xs text-slate-400" data-testid="catalog-note">${this.note}</span>` : nothing}
+            </div>
             <div class="mt-3 flex gap-2">
                 <input data-testid="catalog-search" type="text" autocomplete="off" placeholder="Search by name, SKU or scan"
                     aria-label="Search by name, SKU or scan" .value=${this._query}
@@ -375,8 +383,9 @@ export class GablePosCatalog extends LitElement {
                       @scan=${(e: CustomEvent) => { void this._onScan(e.detail); }}
                       @close=${() => { this._scanning = false; }}></gable-barcode-scanner>`
                 : nothing}
-            <div data-testid="catalog-chips" role="group" aria-label="Categories"
-                class=${`mt-3 flex flex-nowrap gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${this._chipsOverflow ? '[mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]' : ''}`}>
+            <div class="relative mt-3">
+            <div data-testid="catalog-chips" role="group" aria-label="Categories" @scroll=${() => this._measureChips()}
+                class="flex flex-nowrap gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 ${chips.map((c) => {
                     const on = c.name === this._activeCategory;
                     return html`<button type="button" data-testid="catalog-chip" aria-pressed=${on ? 'true' : 'false'}
@@ -385,6 +394,11 @@ export class GablePosCatalog extends LitElement {
                             ? 'border-gable-green bg-gable-green text-deep-space'
                             : 'border-white/20 text-white hover:bg-white/10'}`}>${c.label}</button>`;
                 })}
+            </div>
+            ${this._chipsOverflow && !this._chipsAtEnd
+                ? html`<span data-testid="catalog-chips-fade" aria-hidden="true"
+                      class="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-slate-steel to-transparent"></span>`
+                : nothing}
             </div>
             ${this._failed
                 ? html`<p class="mt-4 flex items-center gap-3 text-sm text-slate-400" role="status">

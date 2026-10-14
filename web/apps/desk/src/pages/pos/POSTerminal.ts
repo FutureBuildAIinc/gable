@@ -1048,10 +1048,9 @@ export class POSTerminal extends LitElement {
   /** The Items card is the catalogue; it dims and locks with no till or no open sale. */
   private _renderItems() {
     return html`
-      <div class="w-full min-w-0 min-[900px]:min-h-0 min-[900px]:w-[58%] min-[900px]:shrink-0 min-[900px]:overflow-y-auto xl:w-[56%] ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
-        ${this._sale?.status === 'completed' ? html`
-          <p class="mb-2 text-sm text-slate-400" data-testid="pos-next-sale-note">Add a product to start the next sale</p>` : nothing}
-        <gable-pos-catalog ?disabled=${this._till === null} yard-key=${this._registerId}></gable-pos-catalog>
+      <div class="w-full min-w-0 min-[900px]:w-[58%] min-[900px]:shrink-0 xl:w-[56%] ${this._till === null ? 'opacity-60' : ''}" data-testid="pos-items">
+        <gable-pos-catalog ?disabled=${this._till === null} yard-key=${this._registerId}
+          note=${this._sale?.status === 'completed' ? 'Add a product to start the next sale' : ''}></gable-pos-catalog>
       </div>`;
   }
 
@@ -1226,8 +1225,7 @@ export class POSTerminal extends LitElement {
       : plan.ok ? `Pay ${fmt(total)}`
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
-      <div class="contents" data-testid="pos-order-summary">
-      <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-lines">
+      <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
         <h2 class="text-lg font-bold text-white">Order summary</h2>
         <p class="text-sm text-slate-400" data-testid="pos-order-customer">${this._customer?.name ?? 'Walk-in sale'}</p>
         ${productLines.length === 0 ? html`
@@ -1247,9 +1245,7 @@ export class POSTerminal extends LitElement {
                   class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red">×</button>` : nothing}
               </li>`)}
           </ul>`}
-      </section>
-      <div class="sticky bottom-0 z-10 order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-footer">
-        <dl class="text-sm">
+        <dl class="mt-4 border-t border-white/10 pt-3 text-sm">
           <div class="flex justify-between py-1 text-slate-400"><dt>Items</dt>
             <dd class="font-mono" data-testid="summary-lines">${productLines.length}</dd></div>
           <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
@@ -1275,8 +1271,7 @@ export class POSTerminal extends LitElement {
         ${completed ? nothing : html`
         <button data-testid="pos-clear-sale" @click=${() => this._clearSale()} ?disabled=${!clearable}
           class="mt-2 min-h-11 w-full rounded border px-3 py-2 text-sm font-semibold ${clearable ? 'border-white/20 text-slate-200 hover:bg-white/5' : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40'}">Clear sale</button>`}
-      </div>
-      </div>`;
+      </section>`;
   }
 
   /** Sends the sale's receipt to the contact on the account; the server says in words if there is none. */
@@ -1313,8 +1308,8 @@ export class POSTerminal extends LitElement {
     // sale, whatever the one before it was, offers neither.
     const followOn = this._completed !== null && sale.id === this._completed.id;
     const follow = followOn
-      ? 'border-transparent text-slate-400 underline underline-offset-2 hover:text-white'
-      : 'cursor-not-allowed border-transparent text-slate-500 underline underline-offset-2 opacity-40';
+      ? 'border-white/10 text-slate-400 hover:bg-white/5 hover:text-white'
+      : 'cursor-not-allowed border-white/10 text-slate-400 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
     const invoice = sale.invoice_id;
     return html`
@@ -1391,9 +1386,9 @@ export class POSTerminal extends LitElement {
               Ask an administrator to add a register for this yard, or switch to a yard that has one.
             </p>
           </div>` : html`
-        <div class="flex min-h-0 flex-1 flex-col items-start gap-4 overflow-y-auto p-4 min-[900px]:flex-row min-[900px]:items-stretch min-[900px]:overflow-hidden" data-testid="pos-body">
+        <div class="flex min-h-0 flex-1 flex-col items-start gap-4 overflow-y-auto p-4 min-[900px]:flex-row" data-testid="pos-body">
           ${this._renderItems()}
-          <div class="order-first flex w-full min-w-0 shrink-0 flex-col gap-3 min-[900px]:order-none min-[900px]:min-h-0 min-[900px]:w-auto min-[900px]:flex-1 min-[900px]:overflow-y-auto" data-testid="pos-panels">
+          <div class="order-first flex w-full min-w-0 shrink-0 flex-col gap-3 min-[900px]:order-none min-[900px]:w-auto min-[900px]:flex-1" data-testid="pos-panels">
             <section class="${this._panelClass(openKey === 'customer')} ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-customer">
               ${this._panelHead('customer', 1, 'Customer', progress.customer, openKey === 'customer', customerValue)}
               <div id="pos-panel-customer-body" data-testid="panel-customer-body" ?hidden=${openKey !== 'customer'} class="px-4 pb-4">

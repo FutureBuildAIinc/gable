@@ -380,29 +380,28 @@ describe('the counter as the Panels layout', () => {
       expect(input.value).toBe('150.50');
     });
 
-    it('gives Pay a pinned place: the right column scrolls its own panels above a sticky totals and Pay block', async () => {
+    it('flows the right column with the page: one scroller, no sticky column, no inner region, no pinned block', async () => {
       const el = await mount(sale());
-      const column = q(el, 'pos-panels');
-      expect(q(el, 'pos-body').className).toContain('min-[900px]:overflow-hidden');
-      expect(column.className).toContain('min-[900px]:overflow-y-auto');
-      expect(column.className).toContain('min-[900px]:min-h-0');
-      expect(column.className).not.toContain('sticky');
-      expect(q(el, 'pos-items').className).toContain('min-[900px]:overflow-y-auto');
-      const footer = q(el, 'pos-order-footer');
-      // the wrapper lays out as its parent's own children (display: contents)
-      const wrapper = q(el, 'pos-order-summary');
-      expect(wrapper.className).toContain('contents');
-      expect(wrapper.parentElement).toBe(column);
-      expect(footer.parentElement).toBe(wrapper);
-      expect(footer.className).toContain('sticky');
-      expect(footer.className).toContain('bottom-0');
-      for (const id of ['pos-pay', 'pos-clear-sale', 'summary-total']) expect(footer.contains(q(el, id))).toBe(true);
-      expect(q(el, 'pos-order-lines').parentElement).toBe(wrapper);
-      expect(q(el, 'pos-order-lines').contains(q(el, 'pos-lines'))).toBe(true);
-      expect(column.contains(q(el, 'panel-customer'))).toBe(true);
-      for (const n of column.querySelectorAll('*')) {
-        expect(n.className.toString()).not.toMatch(/overflow-y-auto|overflow-auto|max-h-/);
+      const body = q(el, 'pos-body');
+      expect(body.className).toMatch(/(^|\s)overflow-y-auto(\s|$)/);
+      expect(body.className).not.toContain('overflow-hidden');
+      for (const id of ['pos-panels', 'pos-items']) {
+        const n = q(el, id);
+        expect(n.className).not.toMatch(/sticky|overflow-y-auto|overflow-auto|overflow-hidden|max-h-/);
       }
+      for (const n of q(el, 'pos-panels').querySelectorAll('*')) {
+        expect(n.className.toString()).not.toMatch(/sticky|overflow-y-auto|overflow-auto|max-h-/);
+      }
+    });
+
+    it('keeps the order summary as one card holding the lines, the totals, Pay and Clear sale', async () => {
+      const el = await mount(sale());
+      const card = q(el, 'pos-order-summary');
+      expect(card.tagName).toBe('SECTION');
+      for (const id of ['pos-lines', 'summary-total', 'pos-pay', 'pos-clear-sale']) expect(card.contains(q(el, id))).toBe(true);
+      expect(card.parentElement).toBe(q(el, 'pos-panels'));
+      expect(q(el, 'pos-order-footer')).toBeNull();
+      expect(q(el, 'pos-order-lines')).toBeNull();
     });
 
     it('holds Payment and the order summary with Pay in the one right column', async () => {
@@ -419,10 +418,8 @@ describe('the counter as the Panels layout', () => {
       expect(q(el, 'pos-items').className).toMatch(/min-\[900px\]:w-\[/);
       expect(q(el, 'pos-panels').className).toContain('order-first');
       expect(q(el, 'pos-panels').className).toContain('min-[900px]:order-none');
-      for (const id of ['pos-order-lines', 'pos-order-footer']) {
-        expect(q(el, id).className).toContain('order-first');
-        expect(q(el, id).className).toContain('min-[900px]:order-none');
-      }
+      expect(q(el, 'pos-order-summary').className).toContain('order-first');
+      expect(q(el, 'pos-order-summary').className).toContain('min-[900px]:order-none');
     });
 
     it('lists every line of the order summary, never in a clipped scroller', async () => {
@@ -887,12 +884,15 @@ describe('the Panels board', () => {
     el.remove();
   });
 
-  it('notes under the catalogue that the next product starts the next sale, only once a sale is complete', async () => {
+  it('puts the next sale note in the card\'s own header row, only once a sale is complete', async () => {
     const open = await mount(sale());
+    const catOpen = open.querySelector('gable-pos-catalog') as HTMLElement & { note: string; disabled: boolean };
+    expect(catOpen.note).toBe('');
     expect(q(open, 'pos-next-sale-note')).toBeNull();
     const done = await mount(sale({ status: 'completed' }));
-    expect(q(done, 'pos-next-sale-note').textContent).toContain('Add a product to start the next sale');
-    expect((done.querySelector('gable-pos-catalog') as HTMLElement & { disabled: boolean }).disabled).toBe(false);
+    const cat = done.querySelector('gable-pos-catalog') as HTMLElement & { note: string; disabled: boolean };
+    expect(cat.note).toBe('Add a product to start the next sale');
+    expect(cat.disabled).toBe(false);
     open.remove();
     done.remove();
   });
@@ -978,8 +978,11 @@ describe('the Panels board', () => {
         expect(b.className).toContain('text-xs');
         expect(b.className).not.toContain('text-sm');
         // a text button, not the same outlined box as Print and Email
-        expect(b.className).not.toContain('border-white/20');
-        expect(b.className).toContain('underline');
+        // a small outlined secondary button, at least 36 pixels high, in the quieter text colour
+        expect(b.className).toContain('min-h-9');
+        expect(b.className).toContain('border-white/10');
+        expect(b.className).toContain('text-slate-400');
+        expect(b.className).not.toContain('underline');
       }
       expect(print.className).toContain('text-sm');
       expect(q(el, 'pos-receipt-contact').textContent).toContain('contact on the account');
