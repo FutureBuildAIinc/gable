@@ -640,6 +640,32 @@ func TestConvert_HandsTheLinesToTheOrderCreator(t *testing.T) {
 	}
 }
 
+// A quote accepted first (on the desk or by the customer) still converts: the
+// convert keeps it accepted and hands the order module its lines, and the one
+// order per quote rule still guards it (TestConvert_RefusesAnAlreadyConvertedQuote).
+func TestConvert_AnAcceptedQuoteConverts(t *testing.T) {
+	svc, repo, _ := newTestService()
+	plain := QuoteLine{
+		ID: uuid.New(), Quantity: 100000, UOM: product.UOM_PCS, PriceUOM: "PCS",
+		UOMQty: one, PriceUOMQty: one, UnitPrice: 26667,
+	}
+	q := repo.seed(QuoteStateAccepted, plain)
+	creator := &fakeOrderCreator{}
+	svc.WithOrderCreator(creator)
+
+	rev := int64(1)
+	o, err := svc.Convert(context.Background(), q.ID, Precondition{Revision: &rev})
+	if err != nil {
+		t.Fatalf("convert of an accepted quote: %v, want the order", err)
+	}
+	if o == nil || o.QuoteID == nil || *o.QuoteID != q.ID || len(creator.sources) != 1 {
+		t.Fatalf("convert returned %+v with %d sources, want one order of the quote", o, len(creator.sources))
+	}
+	if after, err := svc.GetQuote(context.Background(), q.ID); err != nil || after.Status != QuoteStateAccepted {
+		t.Errorf("quote after convert = %v (%v), want accepted", after.Status, err)
+	}
+}
+
 // A quote that already has an order not cancelled is refused with
 // already_converted, and the quote stays as it was.
 func TestConvert_RefusesAnAlreadyConvertedQuote(t *testing.T) {

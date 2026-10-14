@@ -863,6 +863,7 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 
 	var created *order.Order
 	var accepted *Quote
+	var alreadyAccepted bool
 	err = s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockQuote(ctx, id); err != nil {
 			return notFound(err)
@@ -879,8 +880,15 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 				return err
 			}
 		}
-		if err := validateStateTransition(cur.Status, QuoteStateAccepted); err != nil {
-			return err
+		// A quote accepted first (on the desk or by the customer) converts
+		// as it is: the acceptance already happened, so the convert neither
+		// repeats it nor records it again. The one order per quote rule
+		// below still guards it.
+		alreadyAccepted = cur.Status == QuoteStateAccepted
+		if !alreadyAccepted {
+			if err := validateStateTransition(cur.Status, QuoteStateAccepted); err != nil {
+				return err
+			}
 		}
 		if has, err := s.orders.QuoteHasOrder(ctx, id); err != nil {
 			return err
@@ -891,18 +899,20 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 					"the quote already has an order that is not cancelled")}}
 		}
 		src := quoteSourceFor(cur)
-		from := cur.Status
-		now := httpx.TimestampOf(s.now().UTC())
-		cur.Status = QuoteStateAccepted
-		cur.AcceptedAt = &now
-		if err := s.repo.SetStatus(ctx, cur); err != nil {
-			return err
-		}
-		if cur, err = s.repo.GetQuote(ctx, id); err != nil {
-			return err
-		}
-		if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
-			return err
+		if !alreadyAccepted {
+			from := cur.Status
+			now := httpx.TimestampOf(s.now().UTC())
+			cur.Status = QuoteStateAccepted
+			cur.AcceptedAt = &now
+			if err := s.repo.SetStatus(ctx, cur); err != nil {
+				return err
+			}
+			if cur, err = s.repo.GetQuote(ctx, id); err != nil {
+				return err
+			}
+			if err := s.record(ctx, cur, EventAccepted, from.Status()); err != nil {
+				return err
+			}
 		}
 		accepted = cur
 		created, err = s.orders.CreateFromQuote(ctx, src, priced)
@@ -916,7 +926,8 @@ func (s *Service) convert(ctx context.Context, id uuid.UUID, pre *Precondition) 
 	// outside the transaction because the purchase order service writes
 	// through its own pool connection, and a purchase order the convert's
 	// rollback could not take back would be orphaned.
-	if s.poSvc != nil {
+	// A quote accepted before its convert already ran the accept's auto PO.
+	if s.poSvc != nil && !alreadyAccepted {
 		s.triggerAutoPO(ctx, accepted, created)
 	}
 	return created, nil
