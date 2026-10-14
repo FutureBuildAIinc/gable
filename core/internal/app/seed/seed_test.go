@@ -473,7 +473,7 @@ func TestDealerProfileSeed_SetsOnlyABlankProfile(t *testing.T) {
 	blank()
 	seedDealerProfile(sqlDB)
 	legal, remit, hasLogo := read()
-	if legal != "Gable Lumber & Supply Ltd" || !strings.Contains(remit, "Accounts Receivable") || !hasLogo {
+	if legal != "Gable Building Supply Ltd" || !strings.Contains(remit, "Accounts Receivable") || !hasLogo {
 		t.Fatalf("a blank profile was not seeded: %q %q logo=%v", legal, remit, hasLogo)
 	}
 	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name = 'Edited By The Operator Ltd' WHERE id = 1`); err != nil {

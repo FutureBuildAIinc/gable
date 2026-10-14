@@ -41,12 +41,12 @@ func demoLogo() []byte {
 func seedDealerProfile(db *sql.DB) {
 	res, err := db.Exec(`
 		UPDATE dealer_profile
-		   SET legal_name = 'Gable Lumber & Supply Ltd',
-		       trading_name = 'Gable Lumber & Supply',
+		   SET legal_name = 'Gable Building Supply Ltd',
+		       trading_name = 'Gable Building Supply',
 		       phone = '250-555-1000',
-		       email = 'accounts@gablelumber.example',
-		       website = 'https://gablelumber.example',
-		       remit_to = 'Gable Lumber & Supply, Accounts Receivable' || E'\n' || 'PO Box 4100, Kelowna BC V1Y 7R7',
+		       email = 'accounts@gablebuildingsupply.example',
+		       website = 'https://gablebuildingsupply.example',
+		       remit_to = 'Gable Building Supply, Accounts Receivable' || E'\n' || 'PO Box 4100, Kelowna BC V1Y 7R7',
 		       logo = $1, logo_content_type = 'image/png',
 		       revision = revision + 1, updated_at = NOW()
 		 WHERE id = 1 AND legal_name = '' AND trading_name = '' AND logo IS NULL`, demoLogo())
