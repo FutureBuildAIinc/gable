@@ -128,7 +128,7 @@ func newLogger() (*slog.Logger, *logCapture) {
 }
 
 // configured returns a service pointed at the stub, with settings saved.
-func configured(t *testing.T, stub *httptest.Server, cat *memCatalog, mod func(*marketcheck.SettingsInput)) (*marketcheck.Service, *memStore, *logCapture) {
+func configured(t *testing.T, stub *flowStub, cat *memCatalog, mod func(*marketcheck.SettingsInput)) (*marketcheck.Service, *memStore, *logCapture) {
 	t.Helper()
 	st := newMemStore()
 	lg, cap := newLogger()
