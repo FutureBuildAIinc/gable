@@ -286,3 +286,65 @@ describe('customer statement unapplied cash', () => {
     }
   })
 })
+
+describe('customer statement print when the tab is blocked', () => {
+  it('saves the document as a download instead of dropping it', async () => {
+    localStorage.setItem('token', 'test-token')
+    URL.createObjectURL = vi.fn(() => 'blob:statement')
+    URL.revokeObjectURL = vi.fn()
+    const saved: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(`${this.getAttribute('href')}|${this.download}`)
+    })
+    vi.stubGlobal('open', vi.fn(() => null))
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/documents/print/statement/')) return new Response('%PDF', { status: 200 })
+      if (String(url).includes(`/api/v1/customers/${CUSTOMER_ID}`)) return jsonResponse(customer({ id: CUSTOMER_ID }))
+      if (String(url).includes('/statement')) return jsonResponse(statement(CUSTOMER_ID))
+      return jsonResponse([])
+    }))
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).trim() === 'Print') as HTMLButtonElement
+      button.click()
+      for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0))
+      expect(saved).toEqual(['blob:statement|statement.pdf'])
+    } finally {
+      click.mockRestore()
+      history.replaceState(null, '', '/')
+      localStorage.removeItem('token')
+    }
+  })
+})
+
+describe('customer statement open documents scope', () => {
+  it('says the open documents follow the yard while the balance covers the account', async () => {
+    const st = statement(CUSTOMER_ID)
+    st.currencies[0] = {
+      ...st.currencies[0],
+      open_documents: [{ kind: 'invoice', id: '00000000-0000-4000-8000-0000000000i1', number: 'IN-000001', date: '2031-12-01',
+        due_date: '2031-12-31', job_id: null, total_cents: 1000, open_cents: 1000 }],
+    } as never
+    stubRoutes({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+      [`/ar/customers/${CUSTOMER_ID}/statement`]: st,
+    })
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      expect(textOf(el)).toMatch(/open documents follow the yard/i)
+    } finally {
+      history.replaceState(null, '', '/')
+    }
+  })
+})
+
