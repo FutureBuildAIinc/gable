@@ -30,7 +30,7 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 12,
           "location_id": "<id-2>",
-          "name": "Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX",
+          "name": "Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier",
           "product_id": "<id-4>",
           "reorder_qty": 40,
           "sku": "CORNSHTGR49"
@@ -39,10 +39,10 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 12,
           "location_id": "<id-2>",
-          "name": "Simpson Strong-Tie LUS28",
+          "name": "Face Mount Joist Hanger 2x8",
           "product_id": "<id-5>",
           "reorder_qty": 150,
-          "sku": "SIMP-LUS28"
+          "sku": "HANGER-28FM"
         },
         {
           "alert_type": "LOW_STOCK",
@@ -75,7 +75,7 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 17,
           "location_id": "<id-2>",
-          "name": "Vented Soffit Hardie Textured 1/4 X 24 X 8",
+          "name": "Vented Soffit Fibre Cement Textured 1/4 X 24 X 8",
           "product_id": "<id-9>",
           "reorder_qty": 20,
           "sku": "CORNSFT2408V"
