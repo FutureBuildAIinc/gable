@@ -52,7 +52,7 @@ func TestFailingEventWriteRollsTheSaleBack(t *testing.T) {
 		{"payments", f.counterPayments(t), paymentsBefore},
 		{"tenders", countOf(t, f.db, `SELECT count(*) FROM pos_tenders WHERE transaction_id = $1`, saleID), 0},
 		{"entries", f.counterEntries(t), entriesBefore},
-		{"events", countOf(t, f.db, `SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction'`), 0},
+		{"events", countOf(t, f.db, `SELECT count(*) FROM events_outbox WHERE entity_type = 'pos_transaction' AND entity_id = $1`, saleID), 0},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %d, want %d", c.what, c.got, c.want)

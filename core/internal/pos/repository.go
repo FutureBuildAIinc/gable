@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
@@ -191,7 +192,8 @@ type Repository interface {
 }
 
 // CustomerFacts is what the counter reads about the sale's customer: the
-// effective currency and the credit limit the ACCOUNT tender checks.
+// effective currency and the credit limit the ACCOUNT tender checks. The read
+// is unwalled: a caller applies the customer wall first (Service.namedCustomer).
 type CustomerFacts struct {
 	CreditLimitCents *int64
 	Name             string
@@ -1714,6 +1716,9 @@ func counterCustomerReach(ctx context.Context) (*uuid.UUID, *string) {
 }
 
 func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string, limit int) ([]CounterCustomer, error) {
+	// the query is text to find, never a pattern: %, _ and the escape itself
+	// match only themselves
+	q = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
 	branch, grants := counterCustomerReach(ctx)
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE COALESCE(c.is_active, TRUE) AND c.account_number <> 'WALK-IN'
