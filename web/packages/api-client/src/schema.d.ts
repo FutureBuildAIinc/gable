@@ -12662,6 +12662,11 @@ export interface components {
         PurchaseOrder: {
             /** Format: uuid */
             id: string;
+            /**
+             * @description The document number, assigned on create and never taken from the body.
+             * @example PO-000042
+             */
+            readonly number: string;
             /** Format: uuid */
             branch_id: string;
             /** Format: uuid */

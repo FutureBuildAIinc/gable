@@ -56,3 +56,10 @@ export function formatDay(day: string | null | undefined): string {
     if (!m) return day;
     return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
 }
+
+// A purchase order's label on every desk surface: its document number
+// (PO-000042), or the first eight characters of its id when a response from
+// an older core carries none.
+export function poLabel(po: { id: string; number?: string | null }): string {
+    return po.number || po.id.slice(0, 8);
+}

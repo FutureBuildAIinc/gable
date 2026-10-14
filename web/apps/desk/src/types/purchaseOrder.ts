@@ -9,6 +9,7 @@ export type POSource = 'MANUAL' | 'REORDER' | 'SPECIAL_ORDER' | 'A2A';
 
 export interface PurchaseOrder {
     id: string;
+    number?: string;
     vendor_id?: string;
     vendor_name?: string;
     status: POStatus;
