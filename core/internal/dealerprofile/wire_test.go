@@ -13,9 +13,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
-	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -285,15 +283,27 @@ func TestDealerProfileLogoRefusals(t *testing.T) {
 		t.Errorf("a clean image: %d %s", r.status, r.raw)
 	}
 
-	// An interlaced PNG: Go cannot encode one, so the header's interlace
-	// byte is patched and the chunk's CRC fixed, which still decodes.
-	inter := append([]byte{}, good...)
-	inter[28] = 1
-	binary.BigEndian.PutUint32(inter[29:33], crc32.ChecksumIEEE(inter[12:29]))
+	// A real interlaced PNG (Adam7): the full decode accepts it, so only the
+	// interlace check refuses it (the answer is the generic 400).
+	inter, err := base64.StdEncoding.DecodeString(interlacedPNG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := png.Decode(bytes.NewReader(inter)); err != nil {
+		t.Fatalf("the interlaced fixture must decode: %v", err)
+	}
 	if r := put(inter); r.status != http.StatusBadRequest {
 		t.Errorf("interlaced png: %d %s", r.status, r.raw)
 	}
 }
+
+// interlacedPNG is a 16 by 16 Adam7 interlaced 8 bit PNG, which Go's encoder
+// cannot write.
+const interlacedPNG = "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAMAAAFfKj/FAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAzUExURf8AAO4AEd0AIswAM7sARKoAVZkAZogAd3cAiGYAmVUAqkQAuzMAzCIA3REA7gAA/////97bxooAAAABYktHRBCVsg0sAAAAB3RJTUUH6goOBh4rrRRH+wAAAElJREFUGNNdzNEOgCAMQ9Grok5F+f+/lUADSc/DkjXrACLoM1XkiqatUfVsFQ7hFj5hGMdJZitk1rPMP4thM+yG03AZHsNrKOYHbTsHgZT46VsAAAAASUVORK5CYII="
+
+// restartJPEG is a 24 by 16 baseline JPEG with a restart interval (a DRI and
+// an RST marker inside its scan), which Go's encoder cannot write.
+const restartJPEG = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAQABgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/90ABAAB/9oADAMBAAIRAxEAPwDx+x8P9Pk/SugsvD/T5P0rvrHw/wBPk/SugsfD/T5P0r0MTnXmeRkvEO2p/9DnrHw/0+T9KK9fsfD/AE+T9KK5amde9ufcYPiH92tT/9k="
 
 // progressiveJPEG is a 24 by 16 progressive JPEG (ten scans), which Go's
 // encoder cannot write.
@@ -330,6 +340,57 @@ func TestDealerProfileLogoJPEGEnd(t *testing.T) {
 	}
 	if r := put(plain.Bytes()); r.status != http.StatusOK {
 		t.Errorf("a clean jpeg: %d %s", r.status, r.raw)
+	}
+	rst, err := base64.StdEncoding.DecodeString(restartJPEG)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := put(rst); r.status != http.StatusOK {
+		t.Errorf("a jpeg with restart markers: %d %s", r.status, r.raw)
+	}
+}
+
+// TestDealerProfileLogoJPEGReencoded: a JPEG upload is stored as its decoded
+// image written again, so a payload hidden inside the last scan (the image's
+// own end marker cut off, bytes, then FF D9: a segment walk cannot tell those
+// bytes from image data) does not survive, and the picture is the same size.
+func TestDealerProfileLogoJPEGReencoded(t *testing.T) {
+	f := newFixture(t, 0)
+	img := image.NewRGBA(image.Rect(0, 0, 40, 40))
+	for x := 0; x < 40; x++ {
+		for y := 0; y < 40; y++ {
+			img.Set(x, y, color.RGBA{R: uint8(x * 6), G: uint8(y * 6), B: 90, A: 255})
+		}
+	}
+	var plain bytes.Buffer
+	if err := jpeg.Encode(&plain, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte("PK\x03\x04 <script>evil</script> MZ")
+	raw := append(append([]byte{}, plain.Bytes()[:plain.Len()-2]...), payload...)
+	raw = append(raw, 0xff, 0xd9)
+
+	r := f.do("PUT", "/api/v1/dealer-profile/logo", bytes.NewReader(raw), "Content-Type", "image/jpeg",
+		"If-Match", `"`+strconv.FormatInt(f.revision(), 10)+`"`)
+	if r.status != http.StatusOK {
+		t.Fatalf("the upload: %d %s", r.status, r.raw)
+	}
+	got := f.do("GET", "/api/v1/dealer-profile/logo", nil)
+	if got.status != http.StatusOK {
+		t.Fatalf("the read: %d %s", got.status, got.raw)
+	}
+	if bytes.Contains(got.raw, payload) || bytes.Contains(got.raw, []byte("<script>")) {
+		t.Errorf("the stored logo still carries the payload")
+	}
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(got.raw))
+	if err != nil {
+		t.Fatalf("the stored logo must decode: %v", err)
+	}
+	if cfg.Width != 40 || cfg.Height != 40 {
+		t.Errorf("stored size %dx%d, want 40x40", cfg.Width, cfg.Height)
+	}
+	if ct := got.header.Get("Content-Type"); ct != "image/jpeg" {
+		t.Errorf("content type %q", ct)
 	}
 }
 
