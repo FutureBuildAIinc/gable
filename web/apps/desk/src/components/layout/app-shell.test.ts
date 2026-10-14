@@ -351,3 +351,88 @@ describe('gable-app-shell: the header user block', () => {
     expect(text(el)).toContain('Sales')
   })
 })
+
+/**
+ * The header's person menu (walk note: there is no obvious way to sign
+ * out). The name chip opens a menu with the person's name and role and
+ * Sign out; signing out clears the session custody and leaves the desk
+ * for the front door. The menu is a real menu: arrows move, Escape
+ * closes and returns the focus, a click outside closes.
+ */
+describe('gable-app-shell: the person menu', () => {
+  async function signedInShell(): Promise<GableAppShell> {
+    authConfig.devMode = true
+    authCustody.signInDev('Jordan Pike', { role: 'cashier', homeYardCode: 'KEL-MAIN' })
+    const el = await shellAt('/orders')
+    await flush()
+    await update(el, {})
+    return el
+  }
+
+  it('the name chip is a menu button holding the name, the role and Sign out', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    expect(chip.getAttribute('aria-expanded')).toBe('false')
+
+    chip.click()
+    await update(el, {})
+
+    expect(chip.getAttribute('aria-expanded')).toBe('true')
+    const menu = q(el, '[role="menu"]')
+    expect(text(menu)).toContain('Jordan Pike')
+    expect(text(menu)).toContain('Cashier')
+    const item = q<HTMLButtonElement>(menu, '[role="menuitem"]')
+    expect(text(item)).toBe('Sign out')
+  })
+
+  it('Sign out clears the session and leaves the desk for the door', async () => {
+    const el = await signedInShell()
+    const goToDoor = vi.spyOn(el as unknown as { _goToDoor: () => void }, '_goToDoor')
+      .mockImplementation(() => {})
+
+    q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]').click()
+    await update(el, {})
+    q<HTMLButtonElement>(el, '[role="menuitem"]').click()
+    await flush()
+
+    expect(authCustody.session).toBeNull()
+    expect(goToDoor).toHaveBeenCalled()
+  })
+
+  it('Escape closes the menu and returns the focus to the chip', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    chip.click()
+    await update(el, {})
+
+    q(el, '[role="menu"]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await update(el, {})
+    await flush()
+
+    expect(el.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(chip)
+  })
+
+  it('a click outside closes the menu', async () => {
+    const el = await signedInShell()
+    q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]').click()
+    await update(el, {})
+    expect(el.querySelector('[role="menu"]')).not.toBeNull()
+
+    document.body.click()
+    await update(el, {})
+
+    expect(el.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('ArrowDown on the chip opens the menu and moves to Sign out', async () => {
+    const el = await signedInShell()
+    const chip = q<HTMLButtonElement>(el, 'button[aria-haspopup="menu"]')
+    chip.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    await update(el, {})
+    await flush()
+
+    const item = q<HTMLButtonElement>(el, '[role="menuitem"]')
+    expect(document.activeElement).toBe(item)
+  })
+})
