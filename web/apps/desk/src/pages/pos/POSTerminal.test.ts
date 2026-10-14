@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Sale, CounterCustomer } from '../../types/pos';
 
 const svc = vi.hoisted(() => ({
+  listRegisters: vi.fn(),
   currentTill: vi.fn(),
   startSale: vi.fn(),
   completeSale: vi.fn(),
@@ -22,6 +23,13 @@ vi.mock('../../services/POSService', async (orig) => {
 
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
+import { branchContext } from '../../services/BranchContext';
+import type { CounterRegister } from '../../types/pos';
+
+const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
+  id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`,
+});
+const REG_01 = reg('REG-01', 'main');
 
 const line = (id: string, cents: number) => ({
   id, position: 1, line_type: 'product', parent_line_id: null, product_id: `p-${id}`,
@@ -46,6 +54,7 @@ const account: CounterCustomer = {
 } as unknown as CounterCustomer;
 
 async function mount(s: Sale): Promise<POSTerminal> {
+  svc.listRegisters.mockResolvedValue([REG_01]);
   svc.currentTill.mockResolvedValue({ id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 });
   svc.startSale.mockResolvedValue(s);
   const el = document.createElement('gable-pos-terminal') as POSTerminal;
@@ -458,5 +467,87 @@ describe('the counter as the Panels layout', () => {
     const el = await mount(sale());
     expect(q(el, 'tender-account').textContent?.trim()).toBe('Charge to account');
     expect(q(el, 'tender-account').className).not.toContain('capitalize');
+  });
+});
+
+describe('the counter opens on its own yard\'s register', () => {
+  const lk = reg('REG-LK', 'lk');
+  const wk = reg('REG-WK', 'wk');
+  const wk2 = reg('REG-WK2', 'wk', 'Yard till');
+  const settle = async (el: POSTerminal) => {
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    svc.currentTill.mockResolvedValue(null);
+    svc.startSale.mockResolvedValue(sale());
+  });
+
+  it('opens a cashier at Lake Country on that yard\'s register and shows its code', async () => {
+    branchContext.setCurrent('b-lk');
+    svc.listRegisters.mockResolvedValue([REG_01, lk, wk]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(svc.currentTill).toHaveBeenCalledWith('REG-LK');
+    expect(svc.startSale).toHaveBeenCalledWith('REG-LK');
+    expect(q(el, 'pos-register').textContent).toContain('REG-LK');
+    el.remove();
+  });
+
+  it('moves to the new yard\'s register when the yard changes', async () => {
+    branchContext.setCurrent('b-main');
+    svc.listRegisters.mockResolvedValue([REG_01, lk, wk]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-01');
+    branchContext.setCurrent('b-wk');
+    await settle(el);
+    expect(svc.currentTill).toHaveBeenLastCalledWith('REG-WK');
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK');
+    expect(q(el, 'pos-register').textContent).toContain('REG-WK');
+    el.remove();
+  });
+
+  it('says so plainly and offers no till or sale action when the yard has no register', async () => {
+    branchContext.setCurrent('b-none');
+    svc.listRegisters.mockResolvedValue([REG_01, lk]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(q(el, 'pos-no-register').textContent).toContain('no register');
+    expect(svc.startSale).not.toHaveBeenCalled();
+    expect(svc.currentTill).not.toHaveBeenCalled();
+    expect(q(el, 'pos-pay')).toBeNull();
+    expect(el.textContent).not.toContain('Open Till');
+    expect(el.textContent).not.toContain('New Sale');
+    el.remove();
+  });
+
+  it('offers a picker when the yard has more than one register and remembers the choice per yard', async () => {
+    branchContext.setCurrent('b-wk');
+    svc.listRegisters.mockResolvedValue([REG_01, wk, wk2]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    // the first by name: Front till
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK');
+    const picker = q(el, 'pos-register-picker') as HTMLSelectElement;
+    expect(picker).toBeTruthy();
+    picker.value = 'REG-WK2';
+    picker.dispatchEvent(new Event('change'));
+    await settle(el);
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK2');
+    el.remove();
+
+    const again = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(again);
+    await settle(again);
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK2');
+    again.remove();
   });
 });

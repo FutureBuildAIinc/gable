@@ -4,7 +4,8 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
-import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer } from '../../types/pos';
+import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
+import { branchContext } from '../../services/BranchContext';
 import { chargeRefusal, standingOf, money } from './standing';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
@@ -12,7 +13,7 @@ import { payPlan, panelProgress, type PanelState } from './panels';
 import { authCustody } from '@gable/auth';
 import '../../components/BarcodeScanner.ts';
 
-const REGISTER_ID = 'REG-01';
+const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
 
@@ -65,6 +66,15 @@ export class POSTerminal extends LitElement {
   @state() private _closeResult: TillReport | null = null;
   @state() private _tillBusy = false;
 
+  // The register the counter works on: the current yard's, chosen from the
+  // registers the caller may use. registersLoaded stays false until the first
+  // answer, so the screen never claims a yard has none before it asked.
+  @state() private _registers: CounterRegister[] = [];
+  @state() private _register: CounterRegister | null = null;
+  @state() private _registersLoaded = false;
+  /** Counts register loads; an answer to an older one is dropped. */
+  private _registerSeq = 0;
+
   @query('#pos-search-input') private _searchInput!: HTMLInputElement;
 
   private _newTxTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,15 +88,70 @@ export class POSTerminal extends LitElement {
 
   connectedCallback() {
     super.connectedCallback();
-    void this._loadTill();
-    this._startNewSale();
+    window.addEventListener('gable:branch-changed', this._onYardChanged);
+    void this._loadRegisters();
+  }
+
+  private _onYardChanged = () => { void this._loadRegisters(); };
+
+  /* ---- The register: the current yard's ---- */
+
+  private get _registerId(): string {
+    return this._register?.id ?? '';
+  }
+
+  private _storageKey(): string {
+    return REGISTER_STORAGE_PREFIX + (branchContext.currentId ?? 'all');
+  }
+
+  /**
+   * Lists the registers and takes the current yard's: the one this yard last
+   * used, else the first by name. With no yard selected (all yards) every
+   * register is in reach. Then the till and a fresh sale follow.
+   */
+  private async _loadRegisters() {
+    const seq = ++this._registerSeq;
+    let all: CounterRegister[] = [];
+    try {
+      all = await posService.listRegisters();
+    } catch (err: unknown) {
+      if (seq !== this._registerSeq) return;
+      this._error = err instanceof Error ? err.message : 'Failed to list the registers';
+    }
+    if (seq !== this._registerSeq) return;
+    const yard = branchContext.currentId;
+    const here = all
+      .filter((r) => yard === null || r.branch_id === yard)
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    this._registers = here;
+    this._registersLoaded = true;
+    const remembered = localStorage.getItem(this._storageKey());
+    this._register = here.find((r) => r.id === remembered) ?? here[0] ?? null;
+    await this._openRegister();
+  }
+
+  /** Reads the till of the chosen register and starts a sale on it. */
+  private async _openRegister() {
+    this._till = null;
+    this._sale = null;
+    if (!this._register) return;
+    await this._loadTill();
+    await this._startNewSale();
+  }
+
+  private _chooseRegister(id: string) {
+    const next = this._registers.find((r) => r.id === id);
+    if (!next || next.id === this._registerId) return;
+    localStorage.setItem(this._storageKey(), next.id);
+    this._register = next;
+    void this._openRegister();
   }
 
   /* ---- Till (drawer) lifecycle ---- */
 
   private async _loadTill() {
     try {
-      this._till = await posService.currentTill(REGISTER_ID);
+      this._till = await posService.currentTill(this._registerId);
     } catch {
       this._till = null;
     }
@@ -100,7 +165,7 @@ export class POSTerminal extends LitElement {
     }
     try {
       this._tillBusy = true;
-      this._till = await posService.openTill(REGISTER_ID, cents);
+      this._till = await posService.openTill(this._registerId, cents);
       this._showTillOpen = false;
       this._openingFloat = '';
       this._success = `Till opened with ${fmt(this._till.opening_float_cents)} float`;
@@ -153,6 +218,8 @@ export class POSTerminal extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    window.removeEventListener('gable:branch-changed', this._onYardChanged);
+    this._registerSeq++;
     if (this._newTxTimer) clearTimeout(this._newTxTimer);
     if (this._errorTimer) clearTimeout(this._errorTimer);
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
@@ -422,7 +489,7 @@ export class POSTerminal extends LitElement {
       this._jobId = '';
       // The last completed sale stays offerable for a void or a return
       // until the next completion replaces it.
-      const sale = await posService.startSale(REGISTER_ID);
+      const sale = await posService.startSale(this._registerId);
       this._sale = sale;
       this._tenderAmount = '';
       this._tenderMethod = 'cash';
@@ -626,7 +693,7 @@ export class POSTerminal extends LitElement {
     try {
       this._loading = true;
       const ret = await posService.createReturn({
-        register_id: REGISTER_ID,
+        register_id: this._registerId,
         original_sale_id: sale.id,
         customer_id: sale.customer_id ?? undefined,
         refund_method: this._returnMethod,
@@ -793,7 +860,14 @@ export class POSTerminal extends LitElement {
       <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-white/10 bg-slate-steel px-6 py-3" data-testid="pos-header">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-lg font-bold text-white">Counter</h1>
-          <span class="rounded-full bg-white/10 px-2 py-0.5 font-mono text-xs text-slate-200" data-testid="pos-register">${REGISTER_ID}</span>
+          <span class="rounded-full bg-white/10 px-2 py-0.5 font-mono text-xs text-slate-200" data-testid="pos-register">${this._registerId}</span>
+          ${this._registers.length > 1 ? html`
+            <label class="sr-only" for="pos-register-picker">Register</label>
+            <select id="pos-register-picker" data-testid="pos-register-picker"
+              @change=${(e: Event) => this._chooseRegister((e.target as HTMLSelectElement).value)}
+              class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
+              ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.name}</option>`)}
+            </select>` : nothing}
           ${this._till ? html`
             <span title="Drawer open" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">
               Till open &middot; float ${fmt(this._till.opening_float_cents)}
@@ -808,14 +882,15 @@ export class POSTerminal extends LitElement {
           ${this._progressChip('Summary', 3, progress.summary)}
         </nav>
         <div class="flex gap-2">
-          ${this._till ? html`
+          ${!this._register ? nothing : this._till ? html`
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
               title="Count the drawer and close the till with its Z report"
               class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till</button>` : html`
             <button @click=${() => { this._showTillOpen = true; }}
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
+          ${this._register ? html`
           <button @click=${() => this._startNewSale()}
-            class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>
+            class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>` : nothing}
         </div>
       </header>`;
   }
@@ -1017,6 +1092,13 @@ export class POSTerminal extends LitElement {
             ${this._success}
           </div>` : nothing}
 
+        ${this._registersLoaded && !this._register ? html`
+          <div class="flex flex-1 items-center justify-center p-8">
+            <p class="max-w-md text-center text-base text-slate-200" data-testid="pos-no-register" role="status">
+              This yard has no register, so the counter cannot take a sale or open a till here.
+              Ask an administrator to add a register for this yard, or switch to a yard that has one.
+            </p>
+          </div>` : html`
         <div class="flex min-h-0 flex-1 flex-col xl:flex-row">
           ${this._renderItems(productLines)}
           <div class="flex max-h-[70%] min-h-0 flex-col border-t border-white/10 bg-slate-steel xl:max-h-none xl:w-[420px] xl:border-t-0"
@@ -1031,7 +1113,7 @@ export class POSTerminal extends LitElement {
               ${this._renderSummaryPanel(sale, hasLines)}
             </div>
           </div>
-        </div>
+        </div>`}
       </div>
     `;
   }
