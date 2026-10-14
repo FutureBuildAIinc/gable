@@ -746,7 +746,7 @@ func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID
 
 // importStaff reads demodata/staff.jsonl and upserts each row into staff
 // and user_locations (the staff-home / yard grant). The legacy seed's three
-// AI_LM demo rows (dispatcher@gable.com, yard@gable.com, admin@gable.com)
+// AI_LM demo rows (dispatcher@gablebuildingsupply.example, yard@gablebuildingsupply.example, admin@gablebuildingsupply.example)
 // and the nine multi yard personas live in the same table and are preserved.
 func importStaff(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID) error {
 	scanner := bufio.NewScanner(bytes.NewReader(staffData))

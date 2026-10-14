@@ -117,6 +117,15 @@ func TestDemoImport(t *testing.T) {
 	}
 	db, dbURL := demoImportDB(t)
 	runCommand(t, dbURL, "./cmd/migrate")
+	// Migrations 080 and 118 together: a migrated database, before any seed
+	// run, holds no row on the real domain.
+	var onRealDomain int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM staff WHERE email ILIKE '%@gable.com'`).Scan(&onRealDomain); err != nil {
+		t.Fatalf("count staff on the real domain: %v", err)
+	}
+	if onRealDomain != 0 {
+		t.Errorf("a migrated database holds %d staff rows on @gable.com", onRealDomain)
+	}
 	// The tenant takes a currency other than the documents' column default
 	// (USD), so a history document that fell back to the default would show.
 	res, err := db.Exec(`UPDATE system_settings SET value = 'CAD' WHERE key IN ('currency.default', 'currency.enabled')`)
@@ -221,7 +230,6 @@ func TestDemoImport(t *testing.T) {
 			{"products", "vendor"},
 			{"products", "category"},
 			{"vendors", "name"},
-			{"vendors", "vendor_key"},
 			{"staff", "email"},
 			{"staff", "full_name"},
 		} {

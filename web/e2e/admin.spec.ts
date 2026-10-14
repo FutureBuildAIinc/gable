@@ -94,8 +94,8 @@ test.describe('Tech admin flow on the new contract', () => {
     // The seeded roster renders with each member's grant state once the
     // tab's own loads finish.
     await expect(page.getByText('Staff & Module Access')).toBeVisible();
-    await expect(page.getByText('dispatcher@gable.com')).toBeVisible();
-    const yuki = page.locator('tr', { hasText: 'yard@gable.com' });
+    await expect(page.getByText('dispatcher@gablebuildingsupply.example')).toBeVisible();
+    const yuki = page.locator('tr', { hasText: 'yard@gablebuildingsupply.example' });
     await expect(yuki).toContainText('Yuki Tan');
 
     // Grant AI_LM to the inactive yard member: the write carries the staff
@@ -128,7 +128,7 @@ test.describe('Tech admin flow on the new contract', () => {
     await toggle.click();
     expect((await flip).status()).toBe(200);
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
-    const dana = page.locator('tr', { hasText: 'dispatcher@gable.com' });
+    const dana = page.locator('tr', { hasText: 'dispatcher@gablebuildingsupply.example' });
     await expect(dana.locator('input[type="checkbox"]')).toBeChecked();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-staff-disabled.png') });
 
