@@ -44,4 +44,9 @@ describe('panelProgress', () => {
     expect(panelProgress({ hasLines: true, customerNamed: true, tendered: true })).toEqual(
       { customer: 'done', payment: 'done', summary: 'current' });
   });
+
+  it('lights Summary and nothing else on a completed sale', () => {
+    expect(panelProgress({ hasLines: true, customerNamed: false, tendered: false, completed: true })).toEqual(
+      { customer: 'done', payment: 'done', summary: 'current' });
+  });
 });

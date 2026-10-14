@@ -524,7 +524,7 @@ describe('the counter as the Panels layout', () => {
 
   it('tells the cashier to name the customer first, from the start of an empty sale', async () => {
     const el = await mount(sale({ lines: [] }));
-    expect(q(el, 'panel-customer').textContent).toContain('Name the customer before the first line');
+    expect(q(el, 'panel-customer').textContent).toContain('Name the customer, then add products');
   });
 
   it('words the account tender in sentence case', async () => {
@@ -957,7 +957,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
     const scan = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Scan') as HTMLButtonElement;
     expect(scan.disabled).toBe(true);
     expect(q(el, 'panel-payment').className).toContain('opacity-50');
-    expect(q(el, 'panel-customer').textContent).toContain('Open the till to start a sale');
+    expect(q(el, 'panel-customer').textContent).not.toContain('Open the till to start a sale');
     expect((q(el, 'pos-void') as HTMLButtonElement).className).toContain('text-slate-400');
     el.remove();
   });
@@ -1000,6 +1000,19 @@ describe('the counter before the till opens, and after a sale completes', () => 
     el.remove();
   });
 
+  it('dims Void and Return as the locked tenders are, and shows the tender unselected with no till', async () => {
+    const el = await mountNoTill();
+    for (const b of [q(el, 'pos-void'), q(el, 'pos-pay')]) {
+      expect(b.className).toContain('opacity-40');
+      expect(b.className).toContain('border-white/10');
+      expect(b.className).not.toContain('hover:');
+    }
+    expect(q(el, 'tender-cash').className).not.toContain('border-gable-green');
+    expect(q(el, 'tender-cash').getAttribute('aria-pressed')).toBe('false');
+    expect(el.textContent?.split('Open the till to start a sale').length).toBe(2);
+    el.remove();
+  });
+
   describe('a completed sale', () => {
     async function completeOne(): Promise<POSTerminal> {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
@@ -1032,6 +1045,53 @@ describe('the counter before the till opens, and after a sale completes', () => 
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it('marks New Sale the one primary, lights Summary and locks Change, purchase order and job', async () => {
+      const el = await completeOne();
+      const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
+      expect(newSale.className).toContain('bg-gable-green');
+      const closeTill = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Close Till') as HTMLElement;
+      expect(closeTill.className).not.toContain('bg-gable-green');
+      expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('current');
+      const change = [...q(el, 'pos-customer').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Change') as HTMLButtonElement | undefined;
+      if (change) expect(change.disabled).toBe(true);
+      const po = el.querySelector('#pos-po') as HTMLInputElement | null;
+      if (po) expect(po.disabled).toBe(true);
+      const job = el.querySelector('#pos-job') as HTMLSelectElement | null;
+      if (job) expect(job.disabled).toBe(true);
+      expect(q(el, 'pos-panel-foot').className).toContain('xl:static');
+      el.remove();
+    });
+
+    it('gives way to a fresh sale after a void, and for two quick adds starts only one', async () => {
+      const el = await completeOne();
+      const anyEl = el as unknown as { _sale: Sale; _addItem(p: unknown, q: string): Promise<void> };
+      anyEl._sale = sale({ status: 'voided', number: 'POS-000001' });
+      await el.updateComplete;
+      svc.startSale.mockClear();
+      svc.startSale.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [] }));
+      svc.addItem.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const p = { product_id: 'p-z', sku: 'SKU-z', description: 'Item z', uom: 'EA', unit_price_cents: 700, in_stock: '5' };
+      await Promise.all([anyEl._addItem(p, '1'), anyEl._addItem(p, '1')]);
+      expect(svc.startSale).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledWith('s2', 'p-z', '1', 'EA');
+      el.remove();
+    });
+
+    it('never sends a customer change for a completed or voided sale', async () => {
+      const el = await completeOne();
+      const anyEl = el as unknown as { _customer: CounterCustomer | null; _sale: Sale; _saveAccountRefs(): Promise<void>; _clearCustomer(): Promise<void> };
+      anyEl._customer = account;
+      for (const status of ['completed', 'voided'] as const) {
+        anyEl._sale = sale({ status });
+        await el.updateComplete;
+        await anyEl._saveAccountRefs();
+        await anyEl._clearCustomer();
+        expect((el.querySelector('#pos-po') as HTMLInputElement).disabled).toBe(true);
+      }
+      expect(svc.attachCustomer).not.toHaveBeenCalled();
+      el.remove();
     });
 
     it('gives way to a new sale carrying the product added next', async () => {

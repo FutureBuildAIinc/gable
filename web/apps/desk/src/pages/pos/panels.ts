@@ -40,7 +40,8 @@ export interface PanelProgress {
 }
 
 /** The three panels as the sale's linear progress; all three stay visible. */
-export function panelProgress(s: { hasLines: boolean; customerNamed: boolean; tendered: boolean }): PanelProgress {
+export function panelProgress(s: { hasLines: boolean; customerNamed: boolean; tendered: boolean; completed?: boolean }): PanelProgress {
+    if (s.completed) return { customer: 'done', payment: 'done', summary: 'current' };
     return {
         customer: s.customerNamed ? 'done' : 'current',
         payment: s.tendered ? 'done' : s.hasLines ? 'current' : 'upcoming',

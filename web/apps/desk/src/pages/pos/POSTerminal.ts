@@ -453,7 +453,7 @@ export class POSTerminal extends LitElement {
 
   /** Back to a walk-in sale (only before the first line). */
   private async _clearCustomer() {
-    if (!this._sale) return;
+    if (!this._sale || this._sale.status !== 'open') return;
     try {
       this._error = null;
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: null });
@@ -467,7 +467,7 @@ export class POSTerminal extends LitElement {
 
   /** Saves the purchase order and the job the charge will carry. */
   private async _saveAccountRefs() {
-    if (!this._sale || !this._customer) return;
+    if (!this._sale || !this._customer || this._sale.status !== 'open') return;
     try {
       this._error = null;
       this._sale = await posService.attachCustomer(this._sale.id, {
@@ -491,6 +491,7 @@ export class POSTerminal extends LitElement {
     const sale = this._sale;
     // A completed sale's lines are no bar: naming a customer starts the next sale.
     const hasLines = sale?.status === 'open' && (sale?.lines.length ?? 0) > 0;
+    const finished = sale !== null && sale.status !== 'open';
     const c = this._customer;
     const toneClass = (tone: string) =>
       tone === 'stop' ? 'text-safety-red' : tone === 'warn' ? 'text-amber-400' : 'text-gable-green';
@@ -505,9 +506,9 @@ export class POSTerminal extends LitElement {
             </div>
             <button
               @click=${() => this._clearCustomer()}
-              ?disabled=${hasLines || this._loading}
+              ?disabled=${hasLines || finished || this._loading}
               title=${hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
-              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent"
+              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent"
             >Change</button>
           </div>
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
@@ -521,18 +522,22 @@ export class POSTerminal extends LitElement {
               <input id="pos-po" type="text" maxlength="100" .value=${this._poText}
                 @input=${(e: Event) => { this._poText = (e.target as HTMLInputElement).value; }}
                 @change=${() => this._saveAccountRefs()}
-                class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none"
+                ?disabled=${finished}
+                class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40"
                 placeholder="PO number" />
             </div>
             ${c.jobs.length > 0 ? html`
               <div>
                 <label class="block text-xs text-slate-400" for="pos-job">Job</label>
-                <select id="pos-job" .value=${this._jobId}
-                  @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
-                  class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none">
-                  <option value="">No job</option>
-                  ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
-                </select>
+                <div class="relative mt-1">
+                  <select id="pos-job" .value=${this._jobId} ?disabled=${finished}
+                    @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
+                    class="w-full appearance-none rounded border border-white/10 bg-slate-steel py-2 pl-2 pr-7 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40">
+                    <option value="">No job</option>
+                    ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
+                  </select>
+                  <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-slate-400" aria-hidden="true">&#9662;</span>
+                </div>
               </div>` : nothing}
           </div>
         </div>`;
@@ -550,7 +555,7 @@ export class POSTerminal extends LitElement {
           ?disabled=${hasLines || this._till === null}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40" />
-        <div class="mt-1 text-xs text-slate-400">${this._till === null ? 'Open the till to start a sale' : 'Name the customer before the first line'}</div>
+        ${this._till === null ? nothing : html`<div class="mt-1 text-xs text-slate-400">Name the customer, then add products</div>`}
         ${this._custResults.length > 0 ? html`
           <div class="mt-2 rounded border border-white/10" data-testid="pos-customer-results">
             ${this._custResults.map((r) => {
@@ -636,12 +641,19 @@ export class POSTerminal extends LitElement {
    * sale on screen gives way to a fresh one in this till session. True when an
    * open sale is there to act on.
    */
+  private _fresh: Promise<void> | null = null;
+
   private async _readySale(): Promise<boolean> {
     if (this._till === null) {
       this._needTill();
       return false;
     }
-    if (this._sale?.status === 'completed') await this._startNewSale();
+    const st = this._sale?.status;
+    if (st === 'completed' || st === 'voided') {
+      // Two quick adds share one fresh sale: the second waits on the first's start.
+      this._fresh ??= this._startNewSale().finally(() => { this._fresh = null; });
+      await this._fresh;
+    }
     return this._sale !== null && this._sale.status === 'open';
   }
 
@@ -1019,6 +1031,7 @@ export class POSTerminal extends LitElement {
       hasLines: (sale?.lines.length ?? 0) > 0,
       customerNamed: this._customer !== null,
       tendered: this._pendingTenders.length > 0,
+      completed: sale?.status === 'completed',
     });
     return html`
       <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-white/10 bg-slate-steel px-6 py-3" data-testid="pos-header">
@@ -1057,7 +1070,7 @@ export class POSTerminal extends LitElement {
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
           ${this._register && this._till ? html`
           <button @click=${() => this._startNewSale()}
-            class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>` : nothing}
+            class="rounded px-4 py-1.5 text-sm ${sale?.status === 'completed' ? 'bg-gable-green font-semibold text-deep-space' : 'border border-white/20 text-slate-200'}">New Sale</button>` : nothing}
         </div>
       </header>`;
   }
@@ -1166,7 +1179,7 @@ export class POSTerminal extends LitElement {
         <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
           ${METHODS.map((m) => {
             const refused = m === 'account' ? this._accountRefusal : null;
-            const chosen = this._tenderMethod === m;
+            const chosen = this._tenderMethod === m && this._till !== null;
             return html`
               <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
                 ?disabled=${!hasLines || !open || refused !== null}
@@ -1214,7 +1227,7 @@ export class POSTerminal extends LitElement {
       && sale.status === 'completed';
     const follow = followOn
       ? 'border-white/30 text-slate-200 hover:bg-white/5'
-      : 'cursor-not-allowed border-white/10 bg-white/5 text-slate-400';
+      : 'cursor-not-allowed border-white/10 bg-white/5 text-slate-400 opacity-40';
     const label = this._loading ? 'Processing...'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
@@ -1229,14 +1242,14 @@ export class POSTerminal extends LitElement {
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
           <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Tax</dt>
             <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
-          <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
+          <div class="mt-1 flex items-baseline justify-between gap-4 font-bold text-white xl:border-t xl:border-white/10 xl:pt-2"><dt>Total</dt>
             <dd class="font-mono text-2xl text-gable-green" data-testid="summary-total">${fmt(total)}</dd></div>
           ${this._pendingTenders.length > 0 ? html`
             <div class="flex justify-between py-1 text-slate-400"><dt>Still owed</dt>
               <dd class="font-mono">${fmt(owed)}</dd></div>` : nothing}
         </dl>
         <button data-testid="pos-pay" @click=${() => this._pay()} ?disabled=${!canPay}
-          class="min-w-0 flex-1 rounded-lg px-4 py-4 text-base font-bold xl:mt-3 xl:w-full ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400'}">
+          class="min-w-0 flex-1 rounded-lg px-4 py-4 text-base font-bold xl:mt-3 xl:w-full ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400 opacity-40'}">
           ${label}
         </button>
         <div class="flex gap-2 xl:mt-3">
@@ -1295,7 +1308,7 @@ export class POSTerminal extends LitElement {
                 ${this._renderPaymentPanel(sale, hasLines)}
               </div>
             </div>
-            <div class="sticky bottom-0 mt-auto shrink-0 border-t border-white/10 bg-slate-steel p-4" data-testid="pos-panel-foot">
+            <div class="sticky bottom-0 mt-auto shrink-0 border-t xl:static border-white/10 bg-slate-steel p-4" data-testid="pos-panel-foot">
               ${this._renderSummaryPanel(sale, hasLines)}
             </div>
           </div>
