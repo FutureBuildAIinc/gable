@@ -412,6 +412,9 @@ jobs:
         working-directory: core
         env:
           DEMO_SEED: "1"
+          # The seed turns the multi yard switch on for the demo; the browser
+          # specs read the whole seed through one desk, so they run with it off.
+          DEMO_MULTI_YARD: "0"
         run: |
           go run ./cmd/migrate
           go run ./cmd/seed

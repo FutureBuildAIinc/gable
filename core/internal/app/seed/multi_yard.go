@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
@@ -92,10 +93,15 @@ func upsertPersonas(db *sql.DB, yards map[string]uuid.UUID) error {
 func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[string]uuid.UUID, skuToID map[string]uuid.UUID,
 	customerIDs map[string]uuid.UUID, vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID, priceLevelIDs map[string]uuid.UUID) {
 
-	// The single branch switch on: the desk's yard switcher shows the yards.
-	if _, err := db.Exec(`INSERT INTO system_settings (key, value) VALUES ('multi_branch_enabled', 'true')
-		ON CONFLICT (key) DO UPDATE SET value = 'true'`); err != nil {
-		log.Printf("Seed: multi_branch_enabled: %v", err)
+	// The single branch switch on: the desk's yard switcher shows the yards and
+	// each yard's desk reads its own yard's documents. DEMO_MULTI_YARD=0 leaves
+	// the switch where it is (the browser end to end run sends no yard of its
+	// own and reads the whole seed).
+	if v := os.Getenv("DEMO_MULTI_YARD"); v != "0" && v != "false" {
+		if _, err := db.Exec(`INSERT INTO system_settings (key, value) VALUES ('multi_branch_enabled', 'true')
+			ON CONFLICT (key) DO UPDATE SET value = 'true'`); err != nil {
+			log.Printf("Seed: multi_branch_enabled: %v", err)
+		}
 	}
 
 	if err := upsertPersonas(db, yards); err != nil {

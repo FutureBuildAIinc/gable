@@ -27,7 +27,8 @@ walk here when it merges; a row is not done until its walk passes.
 
 Proves: MY-01 (a dealer with several yards), AR-01 (customers across yards). The tenant is Gable Building Supply,
 three yards: `KEL-MAIN` Kelowna Main Yard, `WK` West Kelowna Satellite, `LK` Lake Country Outpost. The multi yard
-switch is on in the seed (`multi_branch_enabled`).
+switch is on in the seed (`multi_branch_enabled`; the seed leaves it as it was when run with `DEMO_MULTI_YARD=0`, which
+the browser specs' CI job does).
 
 Note on who is signed in: the local stack runs `AUTH_MODE=dev`, where the server enforces no role, so a persona shapes
 what the screens offer, not what the server allows. The persona's subject, name, role, home yard and granted yards are
