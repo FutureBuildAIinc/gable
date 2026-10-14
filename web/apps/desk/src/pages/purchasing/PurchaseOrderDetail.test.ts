@@ -198,10 +198,13 @@ describe('purchase order detail receive form', () => {
 
   it('lists the receive bins in path order, first bin first, however the wire serves them', async () => {
     // The walk saw the bins in reverse (KEL-D first). The picker must list
-    // them by their path, in order, whatever order the locations call returns.
+    // them by their path, in order, whatever order the locations call returns,
+    // and the order is numeric inside a prefix (BIN-2 before BIN-10).
     const locations = [
       loc('loc-d', PO_BRANCH_ID, 'bin', 'KEL-D'),
+      loc('bin-10', PO_BRANCH_ID, 'bin', 'BIN-10'),
       loc('loc-c', PO_BRANCH_ID, 'bin', 'KEL-C'),
+      loc('bin-2', PO_BRANCH_ID, 'bin', 'BIN-2'),
       loc('loc-b', PO_BRANCH_ID, 'bin', 'KEL-B'),
       loc('loc-a', PO_BRANCH_ID, 'bin', 'KEL-A'),
     ]
@@ -227,7 +230,7 @@ describe('purchase order detail receive form', () => {
     const optionLabels = Array.from(select.querySelectorAll('option'))
       .map((o) => textOf(o as Element))
       .filter((label) => label !== 'Select...')
-    expect(optionLabels).toEqual(['KEL-A', 'KEL-B', 'KEL-C', 'KEL-D'])
+    expect(optionLabels).toEqual(['BIN-2', 'BIN-10', 'KEL-A', 'KEL-B', 'KEL-C', 'KEL-D'])
   })
 })
 
@@ -304,12 +307,9 @@ describe('purchase order receipt confirmation', () => {
 
     const page = textOf(el)
     expect(page).toContain('This purchase order is now received')
-    expect(page).toContain('2x4x8 SPF Premium')
-    expect(page).toContain('Joist Hanger 2x8')
-    expect(page).toContain('50')
-    expect(page).toContain('30')
-    expect(page).toContain('into KEL-A')
-    expect(page).toContain('into KEL-B')
+    // The receipt's own words, pinned: quantity, line, bin, one phrase each.
+    expect(page).toContain('50 × 2x4x8 SPF Premium (LUM-2X4-08) into KEL-A')
+    expect(page).toContain('30 × Joist Hanger 2x8 (LUM-2X4-08) into KEL-B')
   })
 
   it('a purchase order already received says so in words on the page', async () => {

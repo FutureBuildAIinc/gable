@@ -44,27 +44,36 @@ afterEach(() => {
 })
 
 describe('the dashboard drills in', () => {
+  // A card's accessible name keeps its visible content (the title and the
+  // figure); the action rides along as visually hidden text, not an
+  // aria-label that would hide the figure.
   it("Today's Revenue opens the day's till", async () => {
     const el = await mountAsync<GableDashboard>('gable-dashboard')
     const link = q<HTMLAnchorElement>(el, 'a[href="/reports/daily-till"]')
-    expect(link.getAttribute('aria-label')).toBe("Open today's sales")
+    expect(link.getAttribute('aria-label')).toBeNull()
+    expect(link.textContent).toContain("Open today's sales")
+    expect(link.textContent).toContain('$3,134.94')
   })
 
   it('Active Orders opens the orders list on its Confirmed tab', async () => {
     const el = await mountAsync<GableDashboard>('gable-dashboard')
     const link = q<HTMLAnchorElement>(el, 'a[href="/orders?status=confirmed"]')
+    expect(link.getAttribute('aria-label')).toBeNull()
     expect(link.textContent).toContain('Active Orders')
+    expect(link.textContent).toContain('Open the active orders')
   })
 
   it('Pending Dispatch opens the dispatch board', async () => {
     const el = await mountAsync<GableDashboard>('gable-dashboard')
     const link = q<HTMLAnchorElement>(el, 'a[href="/dispatch"]')
-    expect(link.getAttribute('aria-label')).toBe('Open the deliveries waiting for dispatch')
+    expect(link.getAttribute('aria-label')).toBeNull()
+    expect(link.textContent).toContain('Open the deliveries waiting for dispatch')
   })
 
   it('Outstanding AR opens the AR Aging page', async () => {
     const el = await mountAsync<GableDashboard>('gable-dashboard')
     const link = q<HTMLAnchorElement>(el, 'a[href="/reports/ar-aging"]')
-    expect(link.getAttribute('aria-label')).toBe('Open AR Aging')
+    expect(link.getAttribute('aria-label')).toBeNull()
+    expect(link.textContent).toContain('Open AR Aging')
   })
 })

@@ -379,10 +379,13 @@ describe('gable-app-shell: the person menu', () => {
 
     expect(chip.getAttribute('aria-expanded')).toBe('true')
     const menu = q(el, '[role="menu"]')
-    expect(text(menu)).toContain('Jordan Pike')
-    expect(text(menu)).toContain('Cashier')
     const item = q<HTMLButtonElement>(menu, '[role="menuitem"]')
     expect(text(item)).toBe('Sign out')
+    // The menu owns only menu items; the name and role sit beside it in the dropdown.
+    expect(Array.from(menu.children).every((c) => c.getAttribute('role') === 'menuitem')).toBe(true)
+    const dropdown = q(el, '[data-user-menu]')
+    expect(text(dropdown)).toContain('Jordan Pike')
+    expect(text(dropdown)).toContain('Cashier')
   })
 
   it('Sign out clears the session and leaves the desk for the door', async () => {
