@@ -94,7 +94,7 @@ export class StopList extends LitElement {
                                 <div class="absolute left-0 top-6 -translate-y-1/2 w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-xs z-10 bg-deep-space transition-colors ${
                                     isCompleted ? 'border-gable-green text-gable-green' :
                                     isFailed ? 'border-rose-500 text-rose-500' :
-                                    isNext ? 'border-white text-white shadow-[0_0_10px_rgba(255,255,255,0.3)]' :
+                                    isNext ? 'border-white text-white shadow-[0_0_10px_rgb(var(--gb-white)/0.3)]' :
                                     'border-zinc-700 text-zinc-500'
                                 }">
                                     ${isCompleted ? icon(CheckCircle, 16) : String(index + 1)}

@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import type { MillworkOption, MillworkConfiguration } from '../../types/millwork';
 import { MillworkService } from '../../services/MillworkService';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 @customElement('gable-door-configurator')
 export class DoorConfigurator extends LitElement {
@@ -183,7 +184,7 @@ export class DoorConfigurator extends LitElement {
           <!-- Placeholder Visualizer -->
           <div
             class="border-4 bg-deep-space relative shadow-2xl mb-8 transition-all duration-500"
-            style="width: ${this._config.width * 2}px; height: ${this._config.height * 2}px; border-color: ${this._config.material?.name === 'Mahogany' ? '#6D2E15' : '#38BDF8'}"
+            style="width: ${this._config.width * 2}px; height: ${this._config.height * 2}px; border-color: ${this._config.material?.name === 'Mahogany' ? '#6D2E15' : cssVarColor('blueprint-blue')}"
           >
             <div class="absolute inset-0 flex items-center justify-center text-white/20 font-mono text-4xl">
               ${this._config.doorType?.name || "Select Style"}

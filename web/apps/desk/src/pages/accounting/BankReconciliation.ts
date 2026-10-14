@@ -17,6 +17,7 @@ import {
     unmatchTransaction,
     completeSession,
 } from '../../services/BankReconService';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 @customElement('gable-bank-reconciliation')
 export class BankReconciliation extends LitElement {
@@ -180,7 +181,7 @@ export class BankReconciliation extends LitElement {
     }
 
     private _statusColor(status: string) {
-        return status === 'MATCHED' ? '#22c55e' : status === 'EXCLUDED' ? '#6b7280' : '#eab308';
+        return cssVarColor(status === 'MATCHED' ? 'green-500' : status === 'EXCLUDED' ? 'gray-500' : 'yellow-500');
     }
 
     render() {
@@ -305,7 +306,7 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300">${txn.description}</td>
                                         <td class="px-3 py-2.5 text-slate-500 text-xs font-mono">${txn.reference}</td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${this._statusColor(txn.status)}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${this._statusColor(txn.status)}">
                                                 ${txn.status}
                                             </span>
                                         </td>
@@ -439,7 +440,7 @@ export class BankReconciliation extends LitElement {
                                             ${this._formatBalance(s.difference)}
                                         </td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${s.status === 'COMPLETED' ? '#22c55e' : '#3b82f6'}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${s.status === 'COMPLETED' ? cssVarColor('green-500') : cssVarColor('blue-500')}">
                                                 ${s.status}
                                             </span>
                                         </td>
@@ -523,7 +524,7 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${a.account_number || '---'}</td>
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${a.routing_number || '---'}</td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${a.is_active ? '#22c55e' : '#6b7280'}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${a.is_active ? cssVarColor('green-500') : cssVarColor('gray-500')}">
                                                 ${a.is_active ? 'Active' : 'Inactive'}
                                             </span>
                                         </td>

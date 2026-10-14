@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { FileText, Download, RefreshCw, AlertTriangle } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalInvoice } from '../../types/portal';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 // Portal invoice amounts arrive as float64 DOLLARS (see backend portal/model.go),
 // unlike ERP /api/v1 cents. Format directly — do NOT divide by 100.
@@ -15,11 +16,11 @@ const formatCurrency = (dollars: number): string =>
 
 const statusConfig = (status: string): { color: string; bgColor: string } => {
     const map: Record<string, { color: string; bgColor: string }> = {
-        PAID: { color: '#00FFA3', bgColor: 'rgba(0,255,163,0.1)' },
-        UNPAID: { color: '#F59E0B', bgColor: 'rgba(245,158,11,0.1)' },
-        PARTIAL: { color: '#38BDF8', bgColor: 'rgba(56,189,248,0.1)' },
-        VOID: { color: '#71717A', bgColor: 'rgba(113,113,122,0.1)' },
-        WRITTEN_OFF: { color: '#71717A', bgColor: 'rgba(113,113,122,0.1)' },
+        PAID: { color: cssVarColor('gable-green'), bgColor: cssVarColor('gable-green', 0.1) },
+        UNPAID: { color: cssVarColor('amber-500'), bgColor: cssVarColor('amber-500', 0.1) },
+        PARTIAL: { color: cssVarColor('blueprint-blue'), bgColor: cssVarColor('blueprint-blue', 0.1) },
+        VOID: { color: cssVarColor('zinc-500'), bgColor: cssVarColor('zinc-500', 0.1) },
+        WRITTEN_OFF: { color: cssVarColor('zinc-500'), bgColor: cssVarColor('zinc-500', 0.1) },
     };
     return map[status] || map.UNPAID;
 };

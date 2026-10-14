@@ -9,6 +9,7 @@ import { ConfiguratorService } from '../../services/ConfiguratorService';
 import { icon } from '../../lib/icons.ts';
 import { ChevronRight, ChevronLeft, Check, AlertTriangle, Package, TreePine, Gauge, Ruler, Eye, Sparkles, X } from 'lucide';
 import { ToastService } from '../../lib/toast-service.ts';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 const STEP_ICONS = [Package, TreePine, Gauge, Ruler, Eye];
 
@@ -482,7 +483,7 @@ export class ProductConfigurator extends LitElement {
                     <div class="w-full aspect-square relative flex items-center justify-center">
                       <div
                         class="border-2 rounded-sm transition-all duration-500"
-                        style="width: 80%; height: 60%; border-color: ${this._selections.Treatment === 'Treatable' ? '#22c55e' : '#38BDF8'}; background-color: ${getSpeciesColor(this._selections.Species)}"
+                        style="width: 80%; height: 60%; border-color: ${this._selections.Treatment === 'Treatable' ? cssVarColor('green-500') : cssVarColor('blueprint-blue')}; background-color: ${getSpeciesColor(this._selections.Species)}"
                       >
                         <div class="absolute inset-0 flex flex-col items-center justify-center text-center p-2">
                           <div class="text-xs text-white/40 font-mono">

@@ -8,6 +8,8 @@ import { router } from '../../lib/router.ts';
 import { clearToken } from '../../services/PortalService.ts';
 import type { PortalConfig, PortalUser } from '../../types/portal.ts';
 import '@gable/design-system';
+import { onThemeChange } from '@gable/design-system';
+import { themeHex } from '../../lib/theme-colors.ts';
 import { icon } from '../../lib/icons.ts';
 import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Users, FolderGit2 } from 'lucide';
 
@@ -37,13 +39,18 @@ export class GablePortalLayout extends LitElement {
       router.replace('/portal/login');
     }
     router.addEventListener('route-changed', this._boundRouteChanged);
+    this._offTheme = onThemeChange(() => { this.requestUpdate(); });
   }
+
+  private _offTheme: (() => void) | null = null;
 
   private _boundRouteChanged = () => { this.requestUpdate(); };
 
   disconnectedCallback() {
     super.disconnectedCallback();
     router.removeEventListener('route-changed', this._boundRouteChanged);
+    this._offTheme?.();
+    this._offTheme = null;
   }
 
   private async _handleLogout() {
@@ -54,7 +61,7 @@ export class GablePortalLayout extends LitElement {
   }
 
   private get _primaryColor() {
-    return this._config?.primary_color || '#00FFA3';
+    return this._config?.primary_color || themeHex('gable-green');
   }
 
   private get _navItems() {
@@ -73,15 +80,15 @@ export class GablePortalLayout extends LitElement {
     const path = router.currentPath;
 
     return html`
-      <div class="min-h-screen text-foreground flex font-sans selection:bg-gable-green/30" style="--portal-primary: ${primary}; background-color: #0C0E14;">
+      <div class="min-h-screen text-foreground flex font-sans selection:bg-gable-green/30 bg-deep-space" style="--portal-primary: ${primary};">
         <!-- Mobile overlay -->
         ${this._sidebarOpen ? html`<div class="fixed inset-0 z-40 bg-backdrop/50 md:hidden" @click=${() => { this._sidebarOpen = false; }}></div>` : nothing}
 
         <!-- Sidebar -->
         <aside class="${cn(
-          'border-r border-white/10 transition-all duration-300 flex flex-col fixed inset-y-0 left-0 z-50 shadow-2xl',
+          'border-r border-white/10 transition-all duration-300 flex flex-col fixed inset-y-0 left-0 z-50 shadow-2xl bg-slate-steel',
           this._sidebarOpen ? 'w-64 translate-x-0' : '-translate-x-full md:translate-x-0 md:w-20'
-        )}" style="background-color: #111320;">
+        )}">
           <!-- Brand Header -->
           <div class="h-16 flex items-center justify-between px-6 border-b border-white/5 bg-white/5 backdrop-blur-sm">
             ${this._sidebarOpen ? html`
@@ -128,7 +135,7 @@ export class GablePortalLayout extends LitElement {
 
             <div class="${cn('mt-4 flex items-center gap-3 transition-all duration-300', !this._sidebarOpen && 'justify-center')}">
               <div class="h-8 w-8 rounded-full p-[1px] shrink-0" style="background: linear-gradient(135deg, ${primary}, ${primary}80)">
-                <div class="h-full w-full rounded-full flex items-center justify-center" style="background-color: #111320">
+                <div class="h-full w-full rounded-full flex items-center justify-center bg-slate-steel">
                   <span class="font-bold text-xs text-white">
                     ${this._user?.name?.split(' ').map((n: string) => n[0]).join('') || '??'}
                   </span>
@@ -151,7 +158,7 @@ export class GablePortalLayout extends LitElement {
         <!-- Main Content -->
         <main class="${cn('flex-1 flex flex-col min-h-screen transition-all duration-300', this._sidebarOpen ? 'md:ml-64' : 'md:ml-20')}">
           <!-- Header -->
-          <header class="h-16 border-b border-white/10 backdrop-blur-md sticky top-0 z-40 px-8 flex items-center justify-between shadow-sm" style="background-color: #111320cc;">
+          <header class="h-16 border-b border-white/10 backdrop-blur-md sticky top-0 z-40 px-8 flex items-center justify-between shadow-sm bg-slate-steel/80">
             <div class="flex items-center gap-4">
               <button aria-label="Toggle navigation menu" class="md:hidden p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-white/5 transition-colors"
                       @click=${() => { this._sidebarOpen = !this._sidebarOpen; }}>

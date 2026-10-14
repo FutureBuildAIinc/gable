@@ -338,7 +338,7 @@ export class DeliveryDetail extends LitElement {
                                                 ${this.podPhotos.map((photo, idx) => html`
                                                     <div class="relative group rounded-lg overflow-hidden border border-white/10">
                                                         <img src="${photo.preview}" alt="POD ${idx}" class="w-full h-20 object-cover" />
-                                                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                                        <div class="absolute inset-0 bg-backdrop/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                                                             <button
                                                                 @click=${() => this._togglePhotoType(idx)}
                                                                 class="px-1.5 py-0.5 rounded text-[10px] font-bold ${photo.type === 'damage' ? 'bg-rose-500 text-plate' : 'bg-blue-500 text-plate'}"
@@ -347,12 +347,12 @@ export class DeliveryDetail extends LitElement {
                                                             </button>
                                                             <button
                                                                 @click=${() => this._removePhoto(idx)}
-                                                                class="p-1 rounded bg-rose-500/80 text-white"
+                                                                class="p-1 rounded bg-rose-500/80 text-plate"
                                                             >
                                                                 ${icon(Trash2, 12)}
                                                             </button>
                                                         </div>
-                                                        <div class="absolute bottom-0 left-0 right-0 text-center text-[9px] font-bold py-0.5 ${photo.type === 'damage' ? 'bg-rose-500/80 text-white' : 'bg-blue-500/80 text-white'}">
+                                                        <div class="absolute bottom-0 left-0 right-0 text-center text-[9px] font-bold py-0.5 ${photo.type === 'damage' ? 'bg-rose-500/80 text-plate' : 'bg-blue-500/80 text-plate'}">
                                                             ${photo.type.toUpperCase()}
                                                         </div>
                                                     </div>

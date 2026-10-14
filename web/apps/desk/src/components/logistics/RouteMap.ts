@@ -6,6 +6,8 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { Delivery } from '../../types/delivery';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { currentTheme, onThemeChange, themeColor } from '@gable/design-system';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 export function makeStopIcon(index: number, status: string): L.DivIcon {
   // The wire carries the lowercase vocabulary: 'delivered', 'failed' or
@@ -14,9 +16,10 @@ export function makeStopIcon(index: number, status: string): L.DivIcon {
   // the storage spelling and every stop rendered as the default colour.
   const isDelivered = status === 'delivered';
   const isFailed = status === 'failed' || status === 'partial';
-  const bg = isDelivered ? '#10b981' : isFailed ? '#ef4444' : '#00FFA3';
-  const text = isDelivered || isFailed ? '#fff' : '#000';
-  const shadow = isDelivered ? 'rgba(16,185,129,0.5)' : isFailed ? 'rgba(239,68,68,0.4)' : 'rgba(0,255,163,0.5)';
+  const fill = isDelivered ? 'emerald-500' : isFailed ? 'red-500' : 'gable-green';
+  const bg = cssVarColor(fill);
+  const text = isDelivered || isFailed ? cssVarColor('plate') : cssVarColor('black');
+  const shadow = cssVarColor(fill, isFailed ? 0.4 : 0.5);
 
   return L.divIcon({
     className: '',
@@ -28,8 +31,8 @@ export function makeStopIcon(index: number, status: string): L.DivIcon {
       background:${bg};color:${text};
       display:flex;align-items:center;justify-content:center;
       font-weight:700;font-size:12px;font-family:monospace;
-      border:2px solid rgba(255,255,255,0.3);
-      box-shadow:0 0 12px ${shadow}, 0 2px 6px rgba(0,0,0,0.4);
+      border:2px solid ${cssVarColor('white', 0.3)};
+      box-shadow:0 0 12px ${shadow}, 0 2px 6px ${cssVarColor('backdrop', 0.4)};
     ">${index + 1}</div>`,
   });
 }
@@ -45,6 +48,18 @@ export class GableRouteMap extends LitElement {
   private _map: L.Map | null = null;
   private _markers: L.Marker[] = [];
   private _polylines: L.Polyline[] = [];
+  private _offTheme: (() => void) | null = null;
+
+  connectedCallback() {
+    super.connectedCallback();
+    // The route line is an SVG stroke attribute, which cannot hold var():
+    // it is read from the variables when drawn, so it is drawn again when
+    // the mode changes, and the tile filter follows the mode too.
+    this._offTheme = onThemeChange(() => {
+      this._updateMap();
+      this.requestUpdate();
+    });
+  }
 
   firstUpdated() {
     this._initMap();
@@ -58,6 +73,8 @@ export class GableRouteMap extends LitElement {
 
   disconnectedCallback() {
     super.disconnectedCallback();
+    this._offTheme?.();
+    this._offTheme = null;
     if (this._map) {
       this._map.remove();
       this._map = null;
@@ -103,10 +120,11 @@ export class GableRouteMap extends LitElement {
     const routePath: L.LatLngExpression[] = validDeliveries.map(d => [d.latitude!, d.longitude!]);
 
     // Draw polylines
+    const routeColor = themeColor('gable-green');
     if (routePath.length >= 2) {
       // Glow line
       const glow = L.polyline(routePath, {
-        color: '#00FFA3',
+        color: routeColor,
         weight: 6,
         opacity: 0.2,
         lineCap: 'round',
@@ -116,7 +134,7 @@ export class GableRouteMap extends LitElement {
 
       // Main route line
       const main = L.polyline(routePath, {
-        color: '#00FFA3',
+        color: routeColor,
         weight: 3,
         opacity: 0.8,
         dashArray: '8, 12',
@@ -134,11 +152,11 @@ export class GableRouteMap extends LitElement {
 
       marker.bindPopup(`
         <div style="font-weight:bold;display:flex;align-items:center;gap:8px">
-          <span style="background:#00FFA3;color:#000;border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${idx + 1}</span>
+          <span style="background:${cssVarColor('gable-green')};color:${cssVarColor('black')};border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${idx + 1}</span>
           ${delivery.customer_name}
         </div>
         <div style="font-size:12px;margin-top:4px">${delivery.address}</div>
-        <div style="font-size:12px;color:#666;margin-top:4px">Order #${delivery.order_number} &middot; ${delivery.status}</div>
+        <div style="font-size:12px;color:${cssVarColor('zinc-500')};margin-top:4px">Order #${delivery.order_number} &middot; ${delivery.status}</div>
       `);
 
       this._markers.push(marker);
@@ -153,10 +171,10 @@ export class GableRouteMap extends LitElement {
 
   render() {
     return html`
-      <div id="${this._mapContainerId}" style="height:100%;width:100%;background:#161821" class="z-0 [&_.leaflet-tile]:opacity-60 [&_.leaflet-tile]:saturate-0 [&_.leaflet-tile]:invert">
+      <div id="${this._mapContainerId}" style="height:100%;width:100%" class="z-0 bg-slate-steel ${currentTheme() === 'light' ? '' : '[&_.leaflet-tile]:opacity-60 [&_.leaflet-tile]:saturate-0 [&_.leaflet-tile]:invert'}">
         ${this.deliveries.filter(d => d.latitude && d.longitude).length === 0 ? html`
           <div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;z-index:1000;pointer-events:none">
-            <div style="background:rgba(10,11,16,0.8);padding:12px 20px;border-radius:8px;color:#71717a;font-size:13px;border:1px solid rgba(255,255,255,0.05)">
+            <div style="background:${cssVarColor('deep-space', 0.8)};padding:12px 20px;border-radius:8px;color:${cssVarColor('zinc-500')};font-size:13px;border:1px solid ${cssVarColor('white', 0.05)}">
               Select a route to view stops on the map
             </div>
           </div>
