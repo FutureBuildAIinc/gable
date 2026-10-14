@@ -181,7 +181,11 @@ Every push to this repository is published. So:
 
 - No secret, token, key or password in any file, commit message or pull request. The docker compose dev defaults already in the repository are fine to reuse.
 - No real dealer's name, figures or data, and no person's name in code, tests, seed data or docs. Test data is the repository's own seed or invented.
-- No code, function or test copied from another product's repository. Patterns may inform a design; text is never copied.
+- No code, function or test copied from another product's repository, with one exception: FutureBuild, which owns this
+  repository, may adapt code, functions and tests from its own internal codebases into it. Adapted code follows this
+  repository's conventions and design system, carries the SPDX header `LICENSE-MAP.md` gives its path, names its
+  source only as "an internal FutureBuild codebase", and never brings in a secret, an internal host, a dealer's or
+  person's name or data, or an internal note. From anywhere else, patterns may inform a design; text is never copied.
 - Every new file carries the SPDX header its directory's row in `LICENSE-MAP.md` gives (copy the two header lines from a neighbouring file of the same kind). Never change the SPDX identifier of an existing file. The REUSE job is a merge gate.
 - Documents carry no calendar dates or durations, and no em or en dashes.
 - Never commit build binaries or generated artefacts that have a generator, and never leave scratch files (for example `pr-body.txt`) in the repository root.
