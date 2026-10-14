@@ -746,8 +746,8 @@ func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, file
 		aiContentType = http.DetectContentType(fileBytes)
 	}
 
-	// Extract freight data via AI. The degradation contract — unconfigured AI is a
-	// hard error so the user enters the total manually — lives in extractFreight,
+	// Extract freight data via AI. The degradation contract (unconfigured AI is a
+	// hard error so the user enters the total manually) lives in extractFreight,
 	// which is unit-tested independently of the DB-backed PO lookup above.
 	result, aiRaw, err := s.extractFreight(ctx, fileBytes, aiContentType)
 	if err != nil {
