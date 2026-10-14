@@ -804,7 +804,7 @@ export class POSTerminal extends LitElement {
    */
   private async _changeQuantity(item: SaleLine, text: string, input: HTMLInputElement | null) {
     const sale = this._sale;
-    const restore = () => { if (input) input.value = item.quantity; };
+    const restore = () => { if (input) input.value = item.quantity ?? ''; };
     if (!sale || sale.status !== 'open' || this._changing.has(item.id)) return;
     const qty = normalizeQuantity(text);
     if (qty === null) {
@@ -812,7 +812,7 @@ export class POSTerminal extends LitElement {
       restore();
       return;
     }
-    if (qty.includes('.') && isCountedUnit(item.uom)) {
+    if (qty.includes('.') && isCountedUnit(item.uom ?? '')) {
       this._error = `${item.uom} is counted in whole units`;
       restore();
       return;
