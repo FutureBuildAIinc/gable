@@ -1290,6 +1290,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dealer-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the dealer profile
+         * @description The profile every printed form shows. Role gated admin, owner, sales, finance and purchasing. The ETag is the profile's revision.
+         */
+        get: operations["dealerProfileGet"];
+        /**
+         * Replace the dealer profile
+         * @description Replaces the writable fields (the logo has its own route). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
+         */
+        put: operations["dealerProfilePut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dealer-profile/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the dealer logo
+         * @description The uploaded image, with the content type it was uploaded under. A 404 when none is set.
+         */
+        get: operations["dealerProfileLogoGet"];
+        /**
+         * Upload the dealer logo
+         * @description The image is the raw request body, PNG or JPEG, at most 524288 bytes, and its bytes must decode as the type the Content-Type names. Role gated admin and owner; the revision precondition applies as on the profile; a branch bound machine key is refused. The audit row holds the image's size and digest, never its bytes.
+         */
+        put: operations["dealerProfileLogoPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/delivery/vehicles": {
         parameters: {
             query?: never;
@@ -1715,6 +1763,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/print/statement/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Print a customer statement as PDF
+         * @description Renders the customer's account statement, as GET /api/v1/ar/customers/{id}/statement computes it for the same from, to and job_id, under the identity of the customer's primary yard. {id} is the customer. from and to are YYYY-MM-DD business dates in the primary branch's time zone (to defaults to today, from to a month before to). Role gated admin, owner, sales and finance; a branch bound machine key reaches it only while the customer holds its pin. A customer the caller may not see (the customer read is the wall) is a 404; a role refusal is a 403.
+         */
+        get: operations["documentsPrintStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/customers/{id}/statement/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a customer statement
+         * @description Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+         */
+        post: operations["arStatementEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/print/quote/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Print a quote as PDF
+         * @description Renders the quote and its customer under the identity of the quote's yard. Role gated admin, owner, sales and finance. A quote of another branch is the quote module's own 404 under the branch wall.
+         */
+        get: operations["documentsPrintQuote"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/{id}/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a quote to its customer
+         * @description Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+         */
+        post: operations["quoteEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/print/purchase-order/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Print a purchase order as PDF
+         * @description Renders the purchase order under the identity of the yard that placed it. Role gated admin, owner and purchasing. The number printed is PO- followed by the first block of the id, upper case, until the purchase order carries a number of its own.
+         */
+        get: operations["documentsPrintPurchaseOrder"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/drafts/orders": {
         parameters: {
             query?: never;
@@ -2017,6 +2165,26 @@ export interface paths {
          * @description Roles admin, owner. The request body is the raw file (50 MiB limit), not multipart. format=x12 (default, an 832 document) or format=csv; any other value is treated as x12 but echoed back as given. An unreadable file is a 422. Entries upsert on (partner, vendor_sku). The partner id is not looked up first, but catalog entries carry a foreign key to the partner: an unknown partner id answers 500 when at least one entry parses, and 200 with saved_count 0 when none does.
          */
         post: operations["ediPartnerCatalogImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/email-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List email deliveries
+         * @description Newest first. Role gated admin, owner and finance, behind the branch wall: each row carries the branch of the document it sent, a caller held to a branch lists that branch's rows, and a row of no branch is hidden from a walled caller. Query parameters are exactly cursor, limit, include, document_type, status and document_id.
+         */
+        get: operations["emailDeliveryList"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2784,7 +2952,7 @@ export interface paths {
         put?: never;
         /**
          * Email invoice to customer
-         * @description Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately; the email is dispatched asynchronously. Fails if the customer has no email address on file.
+         * @description Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
          */
         post: operations["invoiceEmail"];
         delete?: never;
@@ -8300,6 +8468,35 @@ export interface components {
              */
             revenue: number;
         };
+        DealerProfile: {
+            legal_name: string;
+            trading_name: string;
+            phone: string;
+            email: string;
+            website: string;
+            /** @description The address payments are sent to; invoices and statements print it. */
+            remit_to: string;
+            /** @description /api/v1/dealer-profile/logo when a logo is set, otherwise null. */
+            logo_url: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DealerProfileRequest: {
+            legal_name: string;
+            trading_name?: string;
+            phone?: string;
+            email?: string;
+            /** @description An http or https address, or empty. */
+            website?: string;
+            remit_to?: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
         /** @enum {string} */
         DeliveryVehicleType: "box_truck" | "flatbed" | "pickup" | "van" | "crane";
         /** @description A fleet vehicle. Business dates are YYYY-MM-DD. */
@@ -8630,6 +8827,10 @@ export interface components {
              */
             photo_type: "signature" | "site" | "damage";
         };
+        DocumentEmailQueued: {
+            /** @enum {string} */
+            status: "queued";
+        };
         /**
          * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
          * @enum {string}
@@ -8818,6 +9019,40 @@ export interface components {
             pack_qty: number;
             /** Format: date-time */
             synced_at: string;
+        };
+        EmailDelivery: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            branch_id: string | null;
+            recipient: string;
+            subject: string;
+            /** @enum {string} */
+            document_type: "invoice" | "statement" | "quote" | "purchase_order";
+            /**
+             * Format: uuid
+             * @description The invoice, quote or purchase order id; the customer id for a statement.
+             */
+            document_id: string | null;
+            /** @description The document's number; the account number for a statement. */
+            document_number: string | null;
+            /** @enum {string} */
+            status: "sent" | "failed";
+            /** @description The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send. */
+            sender_answer: string | null;
+            error: string | null;
+            /** @description The actor that triggered the send. */
+            sent_by: string | null;
+        };
+        /** @description The list envelope of ADR 0001 section 1. */
+        EmailDeliveryPage: {
+            items: components["schemas"]["EmailDelivery"][];
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         /** @description The ADR 0001 list envelope with the feed's exception: next_cursor is always a string, the last served position or the request's cursor echoed back when the page is empty, so a poller keeps its place. */
         EventPage: {
@@ -17484,6 +17719,139 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    dealerProfileGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dealer profile. */
+            200: {
+                headers: {
+                    /** @description The profile's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealerProfile"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    dealerProfilePut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DealerProfileRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved profile. */
+            200: {
+                headers: {
+                    /** @description The new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealerProfile"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    dealerProfileLogoGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo image. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    dealerProfileLogoPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "image/png": string;
+                "image/jpeg": string;
+            };
+        };
+        responses: {
+            /** @description The profile with its logo set. */
+            200: {
+                headers: {
+                    /** @description The new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealerProfile"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            /** @description The Content-Type is not image/png or image/jpeg (the ADR 0001 error envelope). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     deliveryVehicleList: {
         parameters: {
             query?: {
@@ -18497,6 +18865,155 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    documentsPrintStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                job_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement as a PDF document. */
+            200: {
+                headers: {
+                    /** @description Always "inline; filename=statement.pdf". */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    arStatementEmail: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                job_id?: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The email was queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentEmailQueued"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    documentsPrintQuote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The quote as a PDF document. */
+            200: {
+                headers: {
+                    /** @description Always "inline; filename=quote.pdf". */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quoteEmail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The email was queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentEmailQueued"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    documentsPrintPurchaseOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The purchase order as a PDF document. */
+            200: {
+                headers: {
+                    /** @description Always "inline; filename=purchase-order.pdf". */
+                    "Content-Disposition"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
     ordersDraftList: {
         parameters: {
             query?: {
@@ -19282,6 +19799,43 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntityEither"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    emailDeliveryList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+                document_type?: "invoice" | "statement" | "quote" | "purchase_order";
+                status?: "sent" | "failed";
+                document_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of deliveries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmailDeliveryPage"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     eventsList: {

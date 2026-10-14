@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
+# SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+#
+# The email delivery record (item M3): one row per customer or vendor facing
+# send, written by the route that sent it. Read only, on the contract from
+# birth.
+paths:
+  /api/v1/email-deliveries:
+    get:
+      operationId: emailDeliveryList
+      tags: [email-deliveries]
+      summary: List email deliveries
+      description: >-
+        Newest first. Role gated admin, owner and finance, behind the branch
+        wall: each row carries the branch of the document it sent, a caller
+        held to a branch lists that branch's rows, and a row of no branch is
+        hidden from a walled caller. Query parameters are exactly cursor,
+        limit, include, document_type, status and document_id.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
+        - name: document_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [invoice, statement, quote, purchase_order]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [sent, failed]
+        - name: document_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: One page of deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDeliveryPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+components:
+  schemas:
+    EmailDelivery:
+      type: object
+      required: [id, created_at, branch_id, recipient, subject, document_type, document_id, document_number, status, sender_answer, error, sent_by]
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+        recipient:
+          type: string
+        subject:
+          type: string
+        document_type:
+          type: string
+          enum: [invoice, statement, quote, purchase_order]
+        document_id:
+          type: [string, "null"]
+          format: uuid
+          description: The invoice, quote or purchase order id; the customer id for a statement.
+        document_number:
+          type: [string, "null"]
+          description: The document's number; the account number for a statement.
+        status:
+          type: string
+          enum: [sent, failed]
+        sender_answer:
+          type: [string, "null"]
+          description: The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send.
+        error:
+          type: [string, "null"]
+        sent_by:
+          type: [string, "null"]
+          description: The actor that triggered the send.
+    EmailDeliveryPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailDelivery"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64

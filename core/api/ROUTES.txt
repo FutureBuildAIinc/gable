@@ -108,6 +108,7 @@ GET	/api/v1/ar/aging	internal/account	wrap(guard, h.HandleAging)
 GET	/api/v1/ar/aging/summary	internal/account	wrap(guard, h.HandleAgingSummary)
 POST	/api/v1/ar/applications/{id}/reverse	internal/account	wrap(finance, h.HandleReverse)
 GET	/api/v1/ar/customers/{id}/statement	internal/account	wrap(guard, h.HandleStatement)
+POST	/api/v1/ar/customers/{id}/statement/email	internal/document	h.HandleEmailStatement
 GET	/api/v1/ar/reconciliation	internal/account	wrap(finance, h.HandleReconciliation)
 GET	/api/v1/bankrecon/accounts	internal/bankrecon	h.ListBankAccounts
 POST	/api/v1/bankrecon/accounts	internal/bankrecon	h.CreateBankAccount
@@ -162,6 +163,10 @@ GET	/api/v1/dashboard/order-activity	internal/dashboard	h.HandleOrderActivity
 GET	/api/v1/dashboard/revenue-trend	internal/dashboard	h.HandleRevenueTrend
 GET	/api/v1/dashboard/summary	internal/dashboard	h.HandleSummary
 GET	/api/v1/dashboard/top-customers	internal/dashboard	h.HandleTopCustomers
+GET	/api/v1/dealer-profile	internal/dealerprofile	guarded(g.Read, h.Get)
+PUT	/api/v1/dealer-profile	internal/dealerprofile	guarded(g.Write, h.Put)
+GET	/api/v1/dealer-profile/logo	internal/dealerprofile	guarded(g.Read, h.GetLogo)
+PUT	/api/v1/dealer-profile/logo	internal/dealerprofile	guarded(g.Write, h.PutLogo)
 POST	/api/v1/delivery/deliveries	internal/delivery	h.HandleAssignOrder
 GET	/api/v1/delivery/deliveries/{id}	internal/delivery	h.HandleGetDelivery
 POST	/api/v1/delivery/deliveries/{id}/adjust-qty	internal/delivery	h.HandleAdjustQuantity
@@ -189,6 +194,9 @@ PUT	/api/v1/delivery/vehicles/{id}	internal/delivery	h.HandleUpdateVehicle
 POST	/api/v1/delivery/vehicles/{id}/photo	internal/delivery	h.HandleUploadVehiclePhoto
 GET	/api/v1/documents/print/invoice/{id}	internal/document	h.HandlePrintInvoice
 GET	/api/v1/documents/print/pickticket/{id}	internal/document	h.HandlePrintPickTicket
+GET	/api/v1/documents/print/purchase-order/{id}	internal/document	h.HandlePrintPurchaseOrder
+GET	/api/v1/documents/print/quote/{id}	internal/document	h.HandlePrintQuote
+GET	/api/v1/documents/print/statement/{id}	internal/document	h.HandlePrintStatement
 GET	/api/v1/drafts/orders	internal/order	k
 POST	/api/v1/drafts/orders	internal/order	k
 GET	/api/v1/drafts/orders/feed	internal/order	k
@@ -210,6 +218,7 @@ GET	/api/v1/edi/partners/{id}	internal/edi	h.GetPartner
 PUT	/api/v1/edi/partners/{id}	internal/edi	h.UpdatePartner
 GET	/api/v1/edi/partners/{id}/catalog	internal/edi	h.ListCatalog
 POST	/api/v1/edi/partners/{id}/import-catalog	internal/edi	h.ImportCatalog
+GET	/api/v1/email-deliveries	internal/emaildelivery	list
 GET	/api/v1/events	internal/events	h.List
 GET	/api/v1/gl/accounts	internal/gl	h.HandleListAccounts
 POST	/api/v1/gl/accounts	internal/gl	h.HandleCreateAccount
@@ -379,6 +388,7 @@ GET	/api/v1/quotes/exposure	internal/pricing	h.HandleListExposure
 GET	/api/v1/quotes/{id}	internal/quote	h.HandleGetQuotePath
 PUT	/api/v1/quotes/{id}	internal/quote	h.HandleUpdateQuote
 POST	/api/v1/quotes/{id}/convert	internal/quote	h.HandleConvertToOrder
+POST	/api/v1/quotes/{id}/email	internal/document	h.HandleEmailQuote
 GET	/api/v1/quotes/{id}/exposure	internal/pricing	h.HandleGetQuoteExposure
 POST	/api/v1/quotes/{id}/exposure/acknowledge	internal/pricing	h.HandleAcknowledge
 POST	/api/v1/quotes/{id}/exposure/escalate-now	internal/pricing	h.HandleEscalateNow

@@ -239,6 +239,13 @@ func TestMigration103_ReportMatchesTheGoGrammar(t *testing.T) {
 		if scope == middleware.CustomerRestrictedScope {
 			continue
 		}
+		// The dealer-profile and email-deliveries modules (PR 125) joined
+		// the Go grammar after migration 103 froze, so 103's report names
+		// a key carrying them as outside its grant grammar; migration 103
+		// is applied and is not edited.
+		if strings.HasPrefix(scope, "dealer-profile:") || strings.HasPrefix(scope, "email-deliveries:") {
+			continue
+		}
 		scopes = append(scopes, scope)
 	}
 	sort.Strings(scopes)

@@ -179,10 +179,15 @@ func Run() {
 
 // newOutboxDrain builds the drain with its subscribers registered. The
 // exposure notifier receives every quote.exposure.* event; its email service
-// is the log-only LogEmailService, as in serve, until a real sender exists.
+// is chosen as in serve: SMTP when SMTP_HOST is set, otherwise the log sender.
 func newOutboxDrain(db *database.DB, logger *slog.Logger, orderSvc *order.Service) *outbox.DrainRunner {
 	drain := outbox.NewDrainRunner(db, logger)
-	notifier := notification.NewExposureNotifier(notification.NewLogEmailService(logger), db, logger)
+	emailSvc, err := notification.NewEmailServiceFromEnv(os.Getenv, logger)
+	if err != nil {
+		logger.Error("Email configuration error", "error", err)
+		os.Exit(1)
+	}
+	notifier := notification.NewExposureNotifier(emailSvc, db, logger)
 	drain.Subscribe(eventbus.SubjectExposureAll, "exposure-notifier", notifier.Handle)
 	// The order module's subscriber for purchase_order.received queues the
 	// back ordered orders that wait on the received products and does nothing

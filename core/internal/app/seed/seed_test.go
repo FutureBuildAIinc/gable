@@ -5,10 +5,13 @@ package seed
 
 import (
 	"context"
+	"database/sql"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
@@ -419,6 +422,66 @@ func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 	}
 	if bName != "operator counter" {
 		t.Errorf("a re-seed renamed the branch only re-pointed register to %q, want the operator's name kept", bName)
+	}
+}
+
+// The demo seed sets an invented dealer profile and logo, once: a profile the
+// operator has filled in is not overwritten by a re-seed.
+//
+// DB-gated: it runs the seeder's actual statement against the single row.
+func TestDealerProfileSeed_SetsOnlyABlankProfile(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	type snap struct {
+		legal, trading, phone, email, website, remit string
+		logo                                         []byte
+		ctype                                        *string
+		revision                                     int64
+	}
+	var orig snap
+	if err := db.Pool.QueryRow(ctx, `SELECT legal_name, trading_name, phone, email, website, remit_to, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
+		Scan(&orig.legal, &orig.trading, &orig.phone, &orig.email, &orig.website, &orig.remit, &orig.logo, &orig.ctype, &orig.revision); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, logo=$7, logo_content_type=$8, revision=$9 WHERE id = 1`,
+			orig.legal, orig.trading, orig.phone, orig.email, orig.website, orig.remit, orig.logo, orig.ctype, orig.revision)
+	})
+	blank := func() {
+		t.Helper()
+		if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name='', trading_name='', phone='', email='', website='', remit_to='', logo=NULL, logo_content_type=NULL WHERE id = 1`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() (legal, remit string, hasLogo bool) {
+		t.Helper()
+		if err := db.Pool.QueryRow(ctx, `SELECT legal_name, remit_to, logo IS NOT NULL FROM dealer_profile WHERE id = 1`).Scan(&legal, &remit, &hasLogo); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := sql.Open("pgx", cfg.DatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlDB.Close()
+
+	blank()
+	seedDealerProfile(sqlDB)
+	legal, remit, hasLogo := read()
+	if legal != "Gable Building Supply Ltd" || !strings.Contains(remit, "Accounts Receivable") || !hasLogo {
+		t.Fatalf("a blank profile was not seeded: %q %q logo=%v", legal, remit, hasLogo)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name = 'Edited By The Operator Ltd' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	seedDealerProfile(sqlDB)
+	if legal, _, _ := read(); legal != "Edited By The Operator Ltd" {
+		t.Errorf("a re-seed overwrote the operator's profile: %q", legal)
 	}
 }
 
