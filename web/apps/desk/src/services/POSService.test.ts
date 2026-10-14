@@ -18,8 +18,8 @@ describe('the counter receipt routes', () => {
     open.mockRestore();
   });
 
-  it('posts the email to the sale\'s receipt route', async () => {
-    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  it('posts the email to the sale\'s receipt route and takes the queued 202', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ status: 'queued' }), { status: 202 }));
     await posService.emailReceipt('sale-1');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/pos/transactions/sale-1/receipt/email');
