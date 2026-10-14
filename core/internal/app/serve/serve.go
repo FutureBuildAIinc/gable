@@ -33,10 +33,12 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
@@ -609,11 +611,24 @@ func Run() {
 	})
 
 	// Notification Module
-	emailSvc := notification.NewLogEmailService(logger)
+	// The SMTP sender when SMTP_HOST is set, the log sender otherwise; a set
+	// host with no From address (or any bad SMTP_* value) refuses to start.
+	emailSvc, err := notification.NewEmailServiceFromEnv(os.Getenv, logger)
+	if err != nil {
+		logger.Error("Email configuration error", "error", err)
+		os.Exit(1)
+	}
 
 	// Document Module
-	docSvc := document.NewService(productRepo)
-	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
+	emailDeliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
+	wall.emailDeliveries(mux, emaildelivery.NewHandler(emailDeliverySvc))
+	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, auditLog)
+	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	docStore := document.NewStore(db)
+	docSvc := document.NewService(productRepo).
+		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
+	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(emailDeliverySvc)
 	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before
@@ -744,9 +759,9 @@ func Run() {
 
 	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
 	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
-	// recipients via emailSvc — which is the log-only LogEmailService, so the
-	// report is genuinely generated and the send is recorded in the log rather
-	// than transmitted. The schedule API publishes that distinction itself
+	// recipients via emailSvc: the SMTP sender when SMTP_HOST is set, otherwise
+	// the log-only LogEmailService, which records the send in the log rather
+	// than transmitting it. The schedule API publishes that distinction itself
 	// (execution.enabled plus execution.delivery), derived from this executor,
 	// so wiring it here is what flips the API from "saved but never run" to
 	// "runs". Each run executes under its creator's recorded reach
@@ -1174,6 +1189,16 @@ func Run() {
 		os.Exit(1)
 	}
 	logger.Info("Shutdown step 1/4: HTTP server stopped")
+
+	// Step 1.5: let the document emails still in flight finish and write
+	// their email_deliveries rows, bounded by the shutdown deadline; the
+	// pool closes only after this.
+	logger.Info("Shutdown step 1.5/4: waiting for document emails in flight...")
+	if docHandler.WaitContext(ctx) {
+		logger.Info("Shutdown step 1.5/4: document emails recorded")
+	} else {
+		logger.Warn("Shutdown step 1.5/4: document emails still in flight at the deadline")
+	}
 
 	// Step 2: Cancel metrics collector goroutine
 	logger.Info("Shutdown step 2/4: stopping metrics collector...")

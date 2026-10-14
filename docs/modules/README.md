@@ -59,6 +59,8 @@ The pages:
 | Tech admin | [tech-admin.md](tech-admin.md) | Machine API keys, the AI and routing settings, the apps catalog and toggles, and the finer admin scopes of ADR 0009. | C5-1a. |
 | Staff roster and module grants | [staff.md](staff.md) | The dealer roster the integrations surface authenticates against, the per staff module grants, and the global module kill switches. | C5-1a. |
 | Governance (RFCs) | [governance.md](governance.md) | The RFC drafting, review and status surface; the operator-installed governance app. | C5-1a. |
+| Documents, dealer profile and delivery record | [documents.md](documents.md) | The printed forms (invoice, pick ticket, statement, quote, purchase order) with the dealer's and the issuing yard's identity, the dealer profile and logo, the email routes and the record of every send. | M3. |
+| Notification (email sender) | [notification.md](notification.md) | The SMTP sender chosen by `SMTP_HOST`, the log sender it replaces, the environment settings and the local mail catcher. | M3. |
 | Delivery | [delivery.md](delivery.md) | The fleet, the day's routes, the stops and proof of delivery, the dispatch board, the delivered stop to fulfilment link. | C5-1d. |
 
 ## Conventions every page uses

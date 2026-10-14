@@ -182,8 +182,10 @@ paths:
       tags:
       - invoice
       summary: Email invoice to customer
-      description: Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately;
-        the email is dispatched asynchronously. Fails if the customer has no email address on file.
+      description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender
+        (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched
+        asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET
+        /api/v1/email-deliveries). Fails if the customer has no email address on file.
       parameters:
       - name: id
         in: path

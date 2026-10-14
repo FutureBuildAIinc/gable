@@ -59,6 +59,13 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
       # The smoke run and the desk make many calls from one address.
       RATE_LIMIT_PER_MINUTE: "5000"
+      # Empty keeps the log sender. To send into the mailpit service below:
+      # GABLE_SMTP_HOST=mailpit GABLE_SMTP_PORT=1025 GABLE_SMTP_TLS=none
+      # GABLE_SMTP_FROM=<an address> docker compose --profile mail up
+      SMTP_HOST: ${GABLE_SMTP_HOST:-}
+      SMTP_PORT: ${GABLE_SMTP_PORT:-}
+      SMTP_TLS: ${GABLE_SMTP_TLS:-}
+      SMTP_FROM: ${GABLE_SMTP_FROM:-}
       # Seals the AI keys an admin enters in Tech Admin. Empty by default (no
       # key can then be stored); set it in the shell to 64 hex characters,
       # the same value each run, never in a file. See docs/modules/tech-admin.md.
@@ -110,6 +117,17 @@ services:
     depends_on:
       core:
         condition: service_healthy
+    restart: unless-stopped
+
+  # A local mail catcher, off unless the `mail` profile is asked for. It
+  # accepts any message and shows it in a page; nothing it receives leaves the
+  # machine. Both ports bind 127.0.0.1. The CI stack never starts it.
+  mailpit:
+    image: axllent/mailpit:latest
+    profiles: ["mail"]
+    ports:
+      - "127.0.0.1:${GABLE_MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${GABLE_MAILPIT_UI_PORT:-8025}:8025"
     restart: unless-stopped
 
 # NOTE: a NATS container used to live here, but no Go code imports a NATS

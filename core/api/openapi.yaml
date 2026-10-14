@@ -29,10 +29,12 @@ tags:
   - name: credit-memo
   - name: customer
   - name: dashboard
+  - name: dealer-profile
   - name: delivery
   - name: documents
   - name: draft
   - name: edi
+  - name: email-deliveries
   - name: events
   - name: gl
   - name: governance
@@ -3208,6 +3210,158 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/dealer-profile:
+    get:
+      operationId: dealerProfileGet
+      tags: [dealer-profile]
+      summary: Read the dealer profile
+      description: >-
+        The profile every printed form shows. Role gated admin, owner, sales, finance and purchasing. The ETag is the profile's revision.
+      security:
+        - BearerJWT: []
+      responses:
+        "200":
+          description: The dealer profile.
+          headers:
+            ETag:
+              description: The profile's revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DealerProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    put:
+      operationId: dealerProfilePut
+      tags: [dealer-profile]
+      summary: Replace the dealer profile
+      description: >-
+        Replaces the writable fields (the logo has its own route). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DealerProfileRequest"
+      responses:
+        "200":
+          description: The saved profile.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DealerProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/dealer-profile/logo:
+    get:
+      operationId: dealerProfileLogoGet
+      tags: [dealer-profile]
+      summary: Read the dealer logo
+      description: The uploaded image, with the content type it was uploaded under. A 404 when none is set.
+      security:
+        - BearerJWT: []
+      responses:
+        "200":
+          description: The logo image.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+    put:
+      operationId: dealerProfileLogoPut
+      tags: [dealer-profile]
+      summary: Upload the dealer logo
+      description: >-
+        The image is the raw request body, PNG or JPEG, at most 524288 bytes, and its bytes must decode as the type the Content-Type names. Role gated admin and owner; the revision precondition applies as on the profile; a branch bound machine key is refused. The audit row holds the image's size and digest, never its bytes.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema:
+              type: string
+              format: binary
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: The profile with its logo set.
+          headers:
+            ETag:
+              description: The new revision.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DealerProfile"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/WireConflict"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          description: The Content-Type is not image/png or image/jpeg (the ADR 0001 error envelope).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WireError"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
   /api/v1/delivery/vehicles:
     get:
       operationId: deliveryVehicleList
@@ -4338,6 +4492,200 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/documents/print/statement/{id}:
+    get:
+      operationId: documentsPrintStatement
+      tags: [documents]
+      summary: Print a customer statement as PDF
+      description: >-
+        Renders the customer's account statement, as GET /api/v1/ar/customers/{id}/statement computes it for the same from, to and job_id, under the identity of the customer's primary yard. {id} is the customer. from and to are YYYY-MM-DD business dates in the primary branch's time zone (to defaults to today, from to a month before to). Role gated admin, owner, sales and finance; a branch bound machine key reaches it only while the customer holds its pin. A customer the caller may not see (the customer read is the wall) is a 404; a role refusal is a 403.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: job_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The statement as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=statement.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/ar/customers/{id}/statement/email:
+    post:
+      operationId: arStatementEmail
+      tags: [documents]
+      summary: Email a customer statement
+      description: >-
+        Renders the statement as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries (GET /api/v1/email-deliveries) with the sender's answer or its error. A customer with no email address is a 400 naming customer. Same parameters, roles and branch rules as the print route.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: job_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: The email was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEmailQueued"
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/documents/print/quote/{id}:
+    get:
+      operationId: documentsPrintQuote
+      tags: [documents]
+      summary: Print a quote as PDF
+      description: >-
+        Renders the quote and its customer under the identity of the quote's yard. Role gated admin, owner, sales and finance. A quote of another branch is the quote module's own 404 under the branch wall.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The quote as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=quote.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/quotes/{id}/email:
+    post:
+      operationId: quoteEmail
+      tags: [documents]
+      summary: Email a quote to its customer
+      description: >-
+        Renders the quote as the print route does and sends it to the customer's email address from a background task, answering 202 at once. The send is recorded in email_deliveries. A customer with no email address is a 400 naming customer.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "202":
+          description: The email was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DocumentEmailQueued"
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/documents/print/purchase-order/{id}:
+    get:
+      operationId: documentsPrintPurchaseOrder
+      tags: [documents]
+      summary: Print a purchase order as PDF
+      description: >-
+        Renders the purchase order under the identity of the yard that placed it. Role gated admin, owner and purchasing. The number printed is PO- followed by the first block of the id, upper case, until the purchase order carries a number of its own.
+      security:
+        - BearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The purchase order as a PDF document.
+          headers:
+            Content-Disposition:
+              description: Always "inline; filename=purchase-order.pdf".
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400": {$ref: "#/components/responses/WireBadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/WireNotFound"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
   /api/v1/drafts/orders:
     get:
       operationId: ordersDraftList
@@ -5212,6 +5560,53 @@ paths:
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
         "422": {$ref: "#/components/responses/UnprocessableEntityEither"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /api/v1/email-deliveries:
+    get:
+      operationId: emailDeliveryList
+      tags: [email-deliveries]
+      summary: List email deliveries
+      description: >-
+        Newest first. Role gated admin, owner and finance, behind the branch wall: each row carries the branch of the document it sent, a caller held to a branch lists that branch's rows, and a row of no branch is hidden from a walled caller. Query parameters are exactly cursor, limit, include, document_type, status and document_id.
+      security:
+        - BearerJWT: []
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/Include"
+        - name: document_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [invoice, statement, quote, purchase_order]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [sent, failed]
+        - name: document_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: One page of deliveries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDeliveryPage"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
   /api/v1/events:
     get:
       operationId: eventsList
@@ -6617,7 +7012,7 @@ paths:
       tags:
         - invoice
       summary: Email invoice to customer
-      description: Queues an email to the customer with the invoice PDF attached. Returns 202 Accepted immediately; the email is dispatched asynchronously. Fails if the customer has no email address on file.
+      description: Queues an email to the customer with the invoice PDF attached, sent through the configured sender (SMTP when SMTP_HOST is set, otherwise the log sender). Returns 202 Accepted immediately; the email is dispatched asynchronously and its outcome, the sender's answer or its error, is written to email_deliveries (GET /api/v1/email-deliveries). Fails if the customer has no email address on file.
       parameters:
         - name: id
           in: path
@@ -17678,6 +18073,58 @@ components:
           type: integer
           format: int64
           description: Cents.
+    DealerProfile:
+      type: object
+      required: [legal_name, trading_name, phone, email, website, remit_to, logo_url, revision, updated_at]
+      properties:
+        legal_name:
+          type: string
+        trading_name:
+          type: string
+        phone:
+          type: string
+        email:
+          type: string
+        website:
+          type: string
+        remit_to:
+          type: string
+          description: The address payments are sent to; invoices and statements print it.
+        logo_url:
+          type: [string, "null"]
+          description: /api/v1/dealer-profile/logo when a logo is set, otherwise null.
+        revision:
+          type: integer
+          format: int64
+          minimum: 1
+        updated_at:
+          type: string
+          format: date-time
+    DealerProfileRequest:
+      type: object
+      required: [legal_name]
+      properties:
+        legal_name:
+          type: string
+          maxLength: 200
+        trading_name:
+          type: string
+          maxLength: 200
+        phone:
+          type: string
+          maxLength: 50
+        email:
+          type: string
+        website:
+          type: string
+          description: An http or https address, or empty.
+        remit_to:
+          type: string
+          maxLength: 1000
+        revision:
+          type: integer
+          format: int64
+          description: The precondition, beside If-Match.
     DeliveryVehicleType:
       type: string
       enum: [box_truck, flatbed, pickup, van, crane]
@@ -18448,6 +18895,13 @@ components:
           type: string
           enum: [signature, site, damage]
           default: site
+    DocumentEmailQueued:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [queued]
     OrdersDraftStatus:
       type: string
       enum: [open, promoted, discarded]
@@ -18756,6 +19210,60 @@ components:
         min_order_qty: {type: number}
         pack_qty: {type: number}
         synced_at: {type: string, format: date-time}
+    EmailDelivery:
+      type: object
+      required: [id, created_at, branch_id, recipient, subject, document_type, document_id, document_number, status, sender_answer, error, sent_by]
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        branch_id:
+          type: [string, "null"]
+          format: uuid
+        recipient:
+          type: string
+        subject:
+          type: string
+        document_type:
+          type: string
+          enum: [invoice, statement, quote, purchase_order]
+        document_id:
+          type: [string, "null"]
+          format: uuid
+          description: The invoice, quote or purchase order id; the customer id for a statement.
+        document_number:
+          type: [string, "null"]
+          description: The document's number; the account number for a statement.
+        status:
+          type: string
+          enum: [sent, failed]
+        sender_answer:
+          type: [string, "null"]
+          description: The sender's own answer; the SMTP server's reply, or a note that the log sender logged and did not send.
+        error:
+          type: [string, "null"]
+        sent_by:
+          type: [string, "null"]
+          description: The actor that triggered the send.
+    EmailDeliveryPage:
+      type: object
+      required: [items, next_cursor, limit]
+      description: The list envelope of ADR 0001 section 1.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailDelivery"
+        next_cursor:
+          type: [string, "null"]
+        limit:
+          type: integer
+        total:
+          type: integer
+          format: int64
     EventPage:
       type: object
       required: [items, next_cursor, limit]
