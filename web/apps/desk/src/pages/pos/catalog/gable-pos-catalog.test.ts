@@ -317,9 +317,13 @@ describe('gable-pos-catalog', () => {
       expect(el.textContent).toContain('Product not found for barcode: 9999999');
     });
 
-    it('does not offer the scan while disabled', async () => {
+    it('answers a scan with no till in words and adds nothing', async () => {
       await open({ disabled: true });
-      expect(q<HTMLButtonElement>(el, '[data-testid="catalog-scan"]').disabled).toBe(true);
+      await scan('LUM-248-PREM');
+      await new Promise((r) => setTimeout(r, 20));
+      await el.updateComplete;
+      expect(added).toHaveLength(0);
+      expect(el.textContent).toContain('Open the till to start a sale');
     });
   });
 
@@ -340,5 +344,116 @@ describe('gable-pos-catalog', () => {
     const row = q<HTMLElement>(el, '[data-testid="catalog-chips"]');
     expect(row.className).toContain('flex-nowrap');
     expect(row.className).toContain('overflow-x-auto');
+  });
+
+  it('answers Enter in either field with no till in words and adds nothing', async () => {
+    await open({ disabled: true });
+    type(el, 'LUM-248');
+    enter(el);
+    qty(el).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    await el.updateComplete;
+    expect(added).toHaveLength(0);
+    expect(el.textContent).toContain('Open the till to start a sale');
+  });
+
+  it('adds on Enter in the quantity field as Enter in the search does', async () => {
+    await open();
+    svc.tiles.mockResolvedValue({ ...FIXTURE, items: [FIXTURE.items[1]] });
+    type(el, 'LUM-248-PREM');
+    qty(el).value = '6';
+    qty(el).dispatchEvent(new Event('input', { bubbles: true }));
+    qty(el).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(added).toHaveLength(1);
+    expect(added[0].product.sku).toBe('LUM-248-PREM');
+    expect(added[0].qty).toBe('6');
+  });
+
+  describe('the highlight over the tiles', () => {
+    const key = (target: HTMLElement, k: string) =>
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+    const current = () => [...el.querySelectorAll('[data-testid="catalog-tile"]')]
+      .map((t, i) => (t.getAttribute('aria-current') === 'true' ? i : -1)).filter((i) => i >= 0);
+    // lay the six tiles out as three across, two rows
+    const six = { ...FIXTURE, items: ['A1', 'A2', 'A3', 'B1', 'B2', 'B3'].map((s) => item(s)) };
+    async function openSix() {
+      svc.tiles.mockResolvedValue(six);
+      await open();
+      el.querySelectorAll<HTMLElement>('[data-testid="catalog-tile"]').forEach((t, i) => {
+        Object.defineProperty(t, 'offsetTop', { value: i < 3 ? 0 : 100, configurable: true });
+      });
+    }
+
+    it('starts on the first tile and moves by one and by a row', async () => {
+      await openSix();
+      expect(current()).toEqual([0]);
+      key(qty(el), 'ArrowRight');
+      await el.updateComplete;
+      expect(current()).toEqual([1]);
+      key(qty(el), 'ArrowDown');
+      await el.updateComplete;
+      expect(current()).toEqual([4]);
+      key(qty(el), 'ArrowLeft');
+      key(qty(el), 'ArrowUp');
+      await el.updateComplete;
+      expect(current()).toEqual([0]);
+      key(qty(el), 'End');
+      await el.updateComplete;
+      expect(current()).toEqual([5]);
+      key(qty(el), 'Home');
+      await el.updateComplete;
+      expect(current()).toEqual([0]);
+    });
+
+    it('moves on Up and Down from the search field and leaves the caret keys alone', async () => {
+      await openSix();
+      key(search(el), 'ArrowDown');
+      await el.updateComplete;
+      expect(current()).toEqual([3]);
+      key(search(el), 'ArrowRight');
+      await el.updateComplete;
+      expect(current()).toEqual([3]);
+    });
+
+    it('adds the highlighted tile on Enter with the typed quantity', async () => {
+      await openSix();
+      key(qty(el), 'ArrowDown');
+      qty(el).value = '5';
+      qty(el).dispatchEvent(new Event('input', { bubbles: true }));
+      key(qty(el), 'Enter');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(added).toHaveLength(1);
+      expect(added[0].product.sku).toBe('B1');
+      expect(added[0].qty).toBe('5');
+    });
+
+    it('returns to the first tile on a new answer and has none for an empty grid', async () => {
+      await openSix();
+      key(qty(el), 'End');
+      await el.updateComplete;
+      expect(current()).toEqual([5]);
+      svc.tiles.mockResolvedValue(six);
+      el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-chip"]')[1].click();
+      await tick(el);
+      expect(current()).toEqual([0]);
+      svc.tiles.mockResolvedValue({ ...six, items: [] });
+      el.querySelectorAll<HTMLButtonElement>('[data-testid="catalog-chip"]')[2].click();
+      await tick(el);
+      expect(current()).toEqual([]);
+    });
+  });
+
+  it('adds the fresh read when Enter lands before the debounce and the screen tiles lack the SKU', async () => {
+    await open();
+    expect(el.textContent).not.toContain('ZZZ-900');
+    svc.tiles.mockClear();
+    svc.tiles.mockResolvedValue({ ...FIXTURE, items: [item('ZZZ-900')] });
+    type(el, 'ZZZ-900');
+    enter(el);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(svc.tiles).toHaveBeenCalledWith({ category: undefined, q: 'ZZZ-900' });
+    expect(added).toHaveLength(1);
+    expect(added[0].product.sku).toBe('ZZZ-900');
   });
 });

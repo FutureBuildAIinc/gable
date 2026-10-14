@@ -54,6 +54,8 @@ export class GablePosCatalog extends LitElement {
     @state() private _loading = true;
     @state() private _failed = false;
     @state() private _brokenImages = new Set<string>();
+    @state() private _highlight = 0;
+    @state() private _touched = false;
     @state() private _notice = '';
     @state() private _scanning = false;
     @state() private _chipsOverflow = false;
@@ -141,6 +143,8 @@ export class GablePosCatalog extends LitElement {
                 if (seq !== this._seq) return;
                 this._categories = res.categories ?? [];
                 this._items = res.items ?? [];
+                this._highlight = 0;
+                this._touched = false;
                 this._failed = false;
             } catch {
                 if (seq !== this._seq) return;
@@ -205,7 +209,10 @@ export class GablePosCatalog extends LitElement {
                 this._clearTimer();
                 if (this._readKey() !== this._lastKey) void this._read();
             }
-            this._notice = 'Type at least two characters';
+            // A tile chosen with the arrow keys is added without a search.
+            const chosen = this._touched ? this._items[this._highlight] : undefined;
+            if (chosen) this._emit(chosen);
+            else this._notice = 'Type at least two characters';
             return;
         }
         if (this._timer !== null) {
@@ -217,7 +224,7 @@ export class GablePosCatalog extends LitElement {
         const term = this._query.trim();
         if (this._failed) return;
         const exact = this._items.find((i) => i.sku.toLowerCase() === term.toLowerCase());
-        const pick = exact ?? this._items[0];
+        const pick = exact ?? this._items[Math.min(this._highlight, this._items.length - 1)];
         if (!pick) return;
         this._emit(pick);
     }
@@ -258,10 +265,45 @@ export class GablePosCatalog extends LitElement {
         }
     }
 
-    private _onKey(e: KeyboardEvent): void {
-        if (e.key !== 'Enter') return;
-        e.preventDefault();
-        void this._addFromSearch();
+    /** Tiles across in the first row of the grid as laid out (one when it cannot be measured). */
+    private _columns(): number {
+        const tiles = [...this.querySelectorAll<HTMLElement>('[data-testid="catalog-tile"]')];
+        if (tiles.length === 0) return 1;
+        const top = tiles[0].offsetTop;
+        return Math.max(1, tiles.filter((t) => t.offsetTop === top).length);
+    }
+
+    private _moveHighlight(key: string): boolean {
+        const n = this._items.length;
+        if (n === 0) return false;
+        const cols = this._columns();
+        const at = this._highlight;
+        const next: Record<string, number> = {
+            ArrowLeft: at - 1,
+            ArrowRight: at + 1,
+            ArrowUp: at - cols,
+            ArrowDown: at + cols,
+            Home: 0,
+            End: n - 1,
+        };
+        if (!(key in next)) return false;
+        this._highlight = Math.max(0, Math.min(next[key], n - 1));
+        this._touched = true;
+        return true;
+    }
+
+    /**
+     * Enter adds; the arrow keys, Home and End move the highlight. In the search
+     * field only Up and Down move it, so the caret keys keep their meaning.
+     */
+    private _onKey(e: KeyboardEvent, inSearch: boolean): void {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            void this._addFromSearch();
+            return;
+        }
+        if (inSearch && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+        if (this._moveHighlight(e.key)) e.preventDefault();
     }
 
     private _picture(item: CatalogItem) {
@@ -279,8 +321,9 @@ export class GablePosCatalog extends LitElement {
         </div>`;
     }
 
-    private _tile(item: CatalogItem) {
-        return html`<li data-testid="catalog-tile" class="flex flex-col gap-2 rounded-lg border border-white/10 bg-deep-space p-3">
+    private _tile(item: CatalogItem, on: boolean) {
+        return html`<li data-testid="catalog-tile" aria-current=${on ? 'true' : 'false'}
+            class=${`flex flex-col gap-2 rounded-lg border p-3 ${on ? 'border-gable-green/60 bg-white/5' : 'border-white/10 bg-deep-space'}`}>
             ${this._picture(item)}
             <div class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold text-white">${item.description}</div>
             <div class="font-mono text-xs text-slate-300">${item.sku} · ${item.in_stock} on hand</div>
@@ -302,16 +345,16 @@ export class GablePosCatalog extends LitElement {
                 <input data-testid="catalog-search" type="text" autocomplete="off" placeholder="Search by name, SKU or scan"
                     aria-label="Search by name, SKU or scan" .value=${this._query}
                     ?disabled=${this.disabled}
-                    @input=${this._onSearch} @keydown=${this._onKey}
+                    @input=${this._onSearch} @keydown=${(e: KeyboardEvent) => this._onKey(e, true)}
                     class="min-w-0 flex-1 rounded border border-white/10 bg-deep-space px-3 py-2 text-sm text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40" />
                 <input data-testid="catalog-qty" type="text" inputmode="decimal" autocomplete="off" aria-label="Quantity"
                     .value=${this._qty} ?disabled=${this.disabled}
                     aria-invalid=${this._qtyValid ? 'false' : 'true'}
-                    @input=${this._onQty}
+                    @input=${this._onQty} @keydown=${(e: KeyboardEvent) => this._onKey(e, false)}
                     class="w-16 rounded border border-white/10 bg-deep-space px-2 py-2 text-center font-mono text-sm text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40 aria-[invalid=true]:border-safety-red" />
-                <button type="button" data-testid="catalog-scan" ?disabled=${this.disabled}
+                <button type="button" data-testid="catalog-scan"
                     @click=${() => { this._scanning = true; }}
-                    class="rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Scan</button>
+                    class="rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green">Scan</button>
                 <button type="button" data-testid="catalog-add" ?disabled=${this.disabled}
                     @click=${() => void this._addFromSearch()}
                     class="rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Add</button>
@@ -348,9 +391,10 @@ export class GablePosCatalog extends LitElement {
                     ? html`<p class="mt-4 text-sm text-slate-400" role="status">Loading products</p>`
                 : this._items.length === 0
                     ? html`<p class="mt-4 text-sm text-slate-400">No products match</p>`
-                    : html`<ul data-testid="catalog-grid" class=${`mt-4 grid grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-3 ${this.disabled ? 'opacity-50' : ''}`}
+                    : html`<ul data-testid="catalog-grid"
+                          @keydown=${(e: KeyboardEvent) => { if (e.key !== 'Enter') this._onKey(e, false); }} class=${`mt-4 grid grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-3 ${this.disabled ? 'opacity-50' : ''}`}
                           aria-busy=${this._loading ? 'true' : 'false'}>
-                          ${this._items.map((i) => this._tile(i))}
+                          ${this._items.map((i, n) => this._tile(i, n === this._highlight))}
                       </ul>`}
         </section>`;
     }
