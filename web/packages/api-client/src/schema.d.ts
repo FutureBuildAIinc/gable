@@ -13348,7 +13348,7 @@ export interface components {
             report_id: string;
             cron_expression: string;
             recipients: string[];
-            /** @description ACTIVE when a scheduler is attached, STORED when none is. */
+            /** @description ACTIVE when a scheduler is attached, STORED when none is, PAUSED once a run was refused for its creator's reach, after which it no longer fires. */
             status: string;
             /** @enum {string} */
             format: "CSV" | "XLSX" | "PDF";
