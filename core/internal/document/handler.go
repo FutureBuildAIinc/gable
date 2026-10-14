@@ -27,8 +27,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// sendTimeout bounds one background send, dial to answer.
-const sendTimeout = 60 * time.Second
+// defaultSendTimeout bounds one background send, dial to answer.
+const defaultSendTimeout = 60 * time.Second
 
 type Handler struct {
 	docSvc      *Service
@@ -42,6 +42,8 @@ type Handler struct {
 	poSvc      *purchase_order.Service // optional; see WithPurchaseOrders
 	deliveries emaildelivery.Recorder  // optional; see WithDeliveries
 	sends      sync.WaitGroup
+
+	sendTimeout time.Duration // zero means the package's sendTimeout; tests shorten it
 }
 
 // WithQuotes mounts the quote print and email routes.
@@ -303,7 +305,11 @@ func (h *Handler) dispatch(reqCtx context.Context, o outgoing) {
 					slog.Error("panic sending document email", "recover", rec, "document_type", entry.DocumentType)
 				}
 			}()
-			sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
+			limit := h.sendTimeout
+			if limit <= 0 {
+				limit = defaultSendTimeout
+			}
+			sendCtx, cancel := context.WithTimeout(ctx, limit)
 			defer cancel()
 			answer, err := notification.SendWithAnswer(sendCtx, h.emailSvc, []string{o.to}, o.subject, o.body, o.filename, o.pdf)
 			if err != nil {

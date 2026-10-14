@@ -5,6 +5,7 @@ package notification
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -14,6 +15,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"mime"
 	"net"
@@ -391,5 +393,76 @@ func TestLogSenderAnswerSaysNothingWasSent(t *testing.T) {
 	ans, err := SendWithAnswer(context.Background(), NewLogEmailService(testLogger()), []string{"c@example.test"}, "s", "b", "f.pdf", []byte("x"))
 	if err != nil || !strings.Contains(ans, "not sent") {
 		t.Errorf("ans=%q err=%v", ans, err)
+	}
+}
+
+// The password reaches the wire only as the AUTH PLAIN line: not an error, not
+// a log line, so not the delivery row built from the error.
+func TestSMTPPasswordNeverReachesAnErrorOrALog(t *testing.T) {
+	const secret = "teststub-password-teststub"
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	f := newFakeSMTP(t, nil, false)
+	f.failData = true
+	s := senderFor(t, f, SMTPTLSNone, nil, "ops", secret)
+	_, err := s.SendWithAnswer(context.Background(), []string{"c@example.test"}, "s", "b", "r.csv", []byte("x"))
+	if err == nil || !strings.Contains(err.Error(), "554") {
+		t.Fatalf("err = %v, want the server's 554", err)
+	}
+	if f.authed != "|ops|"+secret {
+		t.Fatalf("the send never authenticated, so the test proved nothing: %q", f.authed)
+	}
+	if strings.Contains(err.Error(), secret) || strings.Contains(logs.String(), secret) {
+		t.Errorf("the password leaked: error %q, log %q", err, logs.String())
+	}
+}
+
+// PLAIN credentials over SMTP_TLS=none are refused to a host that is not
+// loopback, before AUTH goes out.
+func TestSMTPRefusesPlainAuthInClearTextToANonLoopbackHost(t *testing.T) {
+	addrs, _ := net.InterfaceAddrs()
+	var host string
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok && ipn.IP.To4() != nil && !ipn.IP.IsLoopback() {
+			host = ipn.IP.String()
+			break
+		}
+	}
+	if host == "" {
+		t.Skip("no non loopback IPv4 address on this machine")
+	}
+	ln, err := net.Listen("tcp", host+":0")
+	if err != nil {
+		t.Skipf("cannot listen on %s: %v", host, err)
+	}
+	f := &fakeSMTP{ln: ln}
+	f.wg.Add(1)
+	go func() {
+		defer f.wg.Done()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			f.handle(c)
+		}
+	}()
+	t.Cleanup(func() { ln.Close(); f.wg.Wait() })
+
+	_, p := f.hostPort()
+	port, _ := strconv.Atoi(p)
+	s, err := NewSMTPEmailService(SMTPConfig{Host: host, Port: port, Username: "ops", Password: "teststub", From: "d@example.test", TLS: SMTPTLSNone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.SendDeliveryNotification(context.Background(), "c@example.test", "s", "b")
+	if err == nil || !strings.Contains(err.Error(), "clear text") {
+		t.Fatalf("err = %v, want the clear text refusal", err)
+	}
+	if f.authed != "" || f.data != "" {
+		t.Errorf("credentials or a message went out: auth %q data %q", f.authed, f.data)
 	}
 }
