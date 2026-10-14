@@ -220,6 +220,18 @@ describe('the counter as the Panels layout', () => {
       await pay(el);
       expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
     });
+    it('rechecks at Pay an account tender already added to the list, after the PO is cleared', async () => {
+      const el = await withCustomer(needsPO, 'PO-7');
+      q(el, 'tender-account').click();
+      await el.updateComplete;
+      // The account tender goes onto the added list in full, as a split would.
+      (el as unknown as { _pendingTenders: { method: string; amount_cents: number }[] })._pendingTenders = [{ method: 'account', amount_cents: 8650 }];
+      inner(el)._poText = '';
+      await el.updateComplete;
+      await pay(el);
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('purchase order');
+      expect(svc.completeSale).not.toHaveBeenCalled();
+    });
   });
 
   describe('a quantity on a line', () => {

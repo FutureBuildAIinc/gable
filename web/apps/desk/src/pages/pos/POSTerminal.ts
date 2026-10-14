@@ -469,17 +469,20 @@ export class POSTerminal extends LitElement {
   /** Pay: the added tenders plus the entry when they do not cover the total. */
   private async _pay() {
     if (!this._sale) return;
-    if (this._tenderedSoFar < this._sale.total_cents && this._entry?.method === 'account') {
+    const plan = payPlan(this._sale.total_cents, this._pendingTenders, this._entry);
+    if (!plan.ok) {
+      this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
+      return;
+    }
+    // Every account tender on its way out is rechecked here, whether it was just
+    // entered or added to the list earlier: the customer's standing or the PO may
+    // have changed since it was chosen.
+    if (plan.tenders.some((t) => t.method === 'account')) {
       const refusal = this._accountRefusal;
       if (refusal) {
         this._error = refusal;
         return;
       }
-    }
-    const plan = payPlan(this._sale.total_cents, this._pendingTenders, this._entry);
-    if (!plan.ok) {
-      this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
-      return;
     }
     await this._completeSale(plan.tenders);
   }
