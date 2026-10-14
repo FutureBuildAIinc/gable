@@ -26,6 +26,8 @@ export interface CatalogAddDetail {
     product: CatalogProduct;
     /** The quantity field's value as typed, a positive decimal string. */
     qty: string;
+    /** The search text the add was made under, so the page can say what was submitted. */
+    query: string;
 }
 
 const DEBOUNCE_MS = 250;
@@ -88,7 +90,9 @@ export class GablePosCatalog extends LitElement {
 
     private _measureChips(): void {
         const row = this.querySelector<HTMLElement>('[data-testid="catalog-chips"]');
-        if (row) this._chipsOverflow = row.scrollWidth > row.clientWidth + 1;
+        if (!row) return;
+        const over = row.scrollWidth > row.clientWidth + 1;
+        if (over !== this._chipsOverflow) this._chipsOverflow = over;
     }
 
     /** A typed search looks across every category; the chip returns when it is cleared. */
@@ -105,18 +109,16 @@ export class GablePosCatalog extends LitElement {
         if (changed.has('yardKey') && changed.get('yardKey') !== undefined) {
             this._items = [];
             this._failed = false;
-            this._loading = true;
-        }
-    }
-
-    protected updated(changed: Map<string, unknown>): void {
-        if (changed.has('_categories')) this._measureChips();
-        // The first value arrives with the first read; only a later change re-reads.
-        if (changed.has('yardKey') && changed.get('yardKey') !== undefined) {
+            // The first value arrives with the first read; only a later change re-reads.
             this._category = '';
             this._clearTimer();
             void this._read();
         }
+    }
+
+    protected updated(changed: Map<string, unknown>): void {
+        // Measured after this update has completed, so the result never schedules one inside it.
+        if (changed.has('_categories')) queueMicrotask(() => this._measureChips());
     }
 
     private _clearTimer(): void {
@@ -197,6 +199,7 @@ export class GablePosCatalog extends LitElement {
                 image_url: item.image_url,
             },
             qty: this._qty.trim(),
+            query: this._query,
         };
         this.dispatchEvent(new CustomEvent<CatalogAddDetail>('pos-catalog-add', { detail, bubbles: true, composed: true }));
     }
@@ -231,12 +234,14 @@ export class GablePosCatalog extends LitElement {
 
     /**
      * The page calls this once it has accepted an add: the quantity returns to 1
-     * and the search is cleared. A refused add leaves both as typed.
+     * and the search is cleared. A refused add leaves both as typed. Given what
+     * the add submitted, only a field that still holds it is reset, so something
+     * typed while the add was in flight is kept.
      */
-    resetQuantity(): void {
-        this._qty = '1';
+    resetQuantity(sent?: { qty?: string; query?: string }): void {
         this._notice = '';
-        if (this._query !== '') {
+        if (sent?.qty === undefined || this._qty.trim() === sent.qty) this._qty = '1';
+        if (this._query !== '' && (sent?.query === undefined || this._query === sent.query)) {
             this._clearTimer();
             this._query = '';
             void this._read();

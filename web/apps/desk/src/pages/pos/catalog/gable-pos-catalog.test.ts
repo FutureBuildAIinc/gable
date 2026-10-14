@@ -68,6 +68,47 @@ afterEach(() => {
 });
 
 describe('gable-pos-catalog', () => {
+  it('sets no state while an update is completing, through a chip, a yard change and a read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await open({ yardKey: 'main' });
+    const chips = el.querySelectorAll<HTMLElement>('[data-testid="catalog-chip"]');
+    chips[1].click();
+    await tick(el);
+    el.yardKey = 'other';
+    await tick(el);
+    await tick(el);
+    const messages = warn.mock.calls.map((c) => String(c[0]));
+    expect(messages.filter((m) => m.includes('scheduled an update'))).toEqual([]);
+    warn.mockRestore();
+  });
+
+  it('resets only what the accepted add submitted', async () => {
+    await open();
+    qty(el).value = '5';
+    qty(el).dispatchEvent(new Event('input', { bubbles: true }));
+    type(el, 'LUM');
+    await tick(el);
+    // the add carried 3 and "LU": the field and the search now hold something newer
+    el.resetQuantity({ qty: '3', query: 'LU' });
+    await el.updateComplete;
+    expect(qty(el).value).toBe('5');
+    expect(search(el).value).toBe('LUM');
+    // the add carried exactly what is there now
+    el.resetQuantity({ qty: '5', query: 'LUM' });
+    await tick(el);
+    expect(qty(el).value).toBe('1');
+    expect(search(el).value).toBe('');
+  });
+
+  it('carries the search text with the add so the page can say what was submitted', async () => {
+    await open();
+    type(el, 'LUM-248');
+    await new Promise((r) => setTimeout(r, 300));
+    enter(el);
+    await tick(el);
+    expect((added[0] as unknown as { query: string }).query).toBe('LUM-248');
+  });
+
   it('reads the yard top sellers and renders the chips and tiles', async () => {
     await open();
     expect(svc.tiles).toHaveBeenCalledTimes(1);
