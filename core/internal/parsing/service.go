@@ -50,6 +50,13 @@ func NewService(productRepo product.Repository, aiClient *ai.Client) *Service {
 // failure mode this signature exists to prevent.
 func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, contentType string) (items []extractedLine, synthetic bool, err error) {
 	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		// Text needs no AI reader: a pasted list, a text or csv file, or a
+		// spreadsheet the handler already turned into text is read by the
+		// rule-based reader, so the caller's own lines come back and the
+		// result is not synthetic.
+		if isTextContent(contentType) {
+			return s.ExtractItems(string(fileBytes)), false, nil
+		}
 		slog.Warn("AI client not configured; returning the canned demo material list, NOT the uploaded file's contents",
 			"content_type", contentType, "bytes_discarded", len(fileBytes))
 		return s.ExtractItems(generateFallbackMaterialList()), true, nil
@@ -63,6 +70,50 @@ func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, cont
 	}
 
 	return s.ExtractItems(rawText), false, nil
+}
+
+// isTextContent reports whether contentType names plain text the rule-based
+// reader can parse without an AI reader.
+func isTextContent(contentType string) bool {
+	media := strings.ToLower(strings.TrimSpace(contentType))
+	if i := strings.Index(media, ";"); i >= 0 {
+		media = strings.TrimSpace(media[:i])
+	}
+	switch media {
+	case "text/plain", "text/csv", "text/tab-separated-values":
+		return true
+	}
+	// A spreadsheet reaches the service as text the handler already read out
+	// of its cells; the type names are kept so a caller may name either.
+	return strings.Contains(media, "spreadsheet") || media == "application/vnd.ms-excel"
+}
+
+// headerWords are the column titles a list's first row may carry.
+var headerWords = map[string]bool{
+	"qty": true, "quantity": true, "item": true, "items": true, "description": true, "desc": true,
+	"sku": true, "product": true, "unit": true, "uom": true, "name": true, "material": true,
+	"materials": true, "amount": true, "price": true, "notes": true,
+}
+
+// isHeaderRow reports whether a line is a delimited row of column titles (no
+// digit, every cell a known title word), such as "qty,item".
+func isHeaderRow(line string) bool {
+	if !strings.ContainsAny(line, ",\t;|") || strings.ContainsAny(line, "0123456789") {
+		return false
+	}
+	cells := strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == '\t' || r == ';' || r == '|' })
+	known := 0
+	for _, c := range cells {
+		c = strings.ToLower(strings.Trim(strings.TrimSpace(c), "\"'"))
+		if c == "" {
+			continue
+		}
+		if !headerWords[c] {
+			return false
+		}
+		known++
+	}
+	return known > 0
 }
 
 // generateFallbackMaterialList returns a fixed demo material list that stands
@@ -110,12 +161,19 @@ var sheetGoodPattern = regexp.MustCompile(`(?i)(osb|cdx|plywood|drywall|sheathin
 func (s *Service) ExtractItems(rawText string) []extractedLine {
 	lines := strings.Split(rawText, "\n")
 	var results []extractedLine
+	first := true
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || len(line) < 3 {
 			continue
 		}
+		// A header row is not a line of the list.
+		if first && isHeaderRow(line) {
+			first = false
+			continue
+		}
+		first = false
 
 		extracted := extractedLine{
 			rawText:  line,

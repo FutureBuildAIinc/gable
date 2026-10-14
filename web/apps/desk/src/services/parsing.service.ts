@@ -31,4 +31,12 @@ export const ParsingService = {
 
         return response.json();
     },
+
+    /**
+     * Parse a pasted list. It goes to the same route as a text file, so a list
+     * a person types is read by the server's own reader with no AI key.
+     */
+    async uploadPastedList(text: string): Promise<ParseResponse> {
+        return ParsingService.uploadMaterialList(new File([text], 'pasted-list.txt', { type: 'text/plain' }));
+    },
 };
