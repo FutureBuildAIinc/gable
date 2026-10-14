@@ -14,6 +14,7 @@ const svc = vi.hoisted(() => ({
   attachCustomer: vi.fn(),
   addItem: vi.fn(),
   removeItem: vi.fn(),
+  getSale: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -72,7 +73,7 @@ const typeInto = async (el: POSTerminal, v: string) => {
 };
 
 describe('the counter as the Panels layout', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
 
   it('shows the three panels and Pay as the one primary action carrying the summary total', async () => {
     const el = await mount(sale());
@@ -441,20 +442,59 @@ describe('the counter as the Panels layout', () => {
       expect(input.value).toBe('150.50');
     });
 
-    it('keeps Void and Return and Pay in the foot of the right column, outside its scrolling area', async () => {
+    it('keeps the right column as one scrolling region holding Payment, with Summary and Pay at its foot', async () => {
       const el = await mount(sale());
+      const column = q(el, 'pos-panels');
+      const scrollers = [...column.querySelectorAll('*')].filter((n) => n.className.toString().includes('overflow-y-auto'));
+      expect(scrollers.length + (column.className.includes('overflow-y-auto') ? 1 : 0)).toBe(1);
+      const region = column.className.includes('overflow-y-auto') ? column : scrollers[0];
+      expect(region.contains(q(el, 'panel-payment'))).toBe(true);
+      expect(region.contains(q(el, 'pos-pay'))).toBe(true);
       const foot = q(el, 'pos-panel-foot');
-      expect(foot.contains(q(el, 'pos-pay'))).toBe(true);
+      expect(foot.className).toContain('sticky');
       expect(foot.textContent).toContain('Void');
       expect(foot.textContent).toContain('Return');
-      expect(foot.contains(q(el, 'panel-payment'))).toBe(false);
     });
 
-    it('gives the line remove control a 40 pixel hit area', async () => {
+    it('leaves the items area room for four lines below the desktop width', async () => {
+      const el = await mount(sale());
+      expect(q(el, 'pos-items').className).toMatch(/min-h-\[2[0-9]rem\]/);
+    });
+
+    it('draws Void as a plain secondary action, never a red outline', async () => {
+      svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+      const el = await mount(sale());
+      await typeInto(el, '100.00');
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      const voidBtn = q(el, 'pos-void') as HTMLButtonElement;
+      expect(voidBtn.disabled).toBe(false);
+      expect(voidBtn.className).not.toContain('safety-red');
+    });
+
+    it('shows no live remove control on a completed sale', async () => {
+      const el = await mount(sale({ status: 'completed' }));
+      const removes = [...el.querySelectorAll('[data-testid="pos-lines"] button[aria-label^="Remove"]')] as HTMLButtonElement[];
+      expect(removes.length).toBe(2);
+      for (const b of removes) expect(b.disabled).toBe(true);
+    });
+
+    it('words the completion band with a colon', async () => {
+      svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000002', total_cents: 13810, change_cents: 0 }));
+      const el = await mount(sale());
+      await typeInto(el, '86.50');
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      expect(el.querySelector('[role="status"]')?.textContent?.trim()).toBe('Sale POS-000002 complete: $138.10');
+    });
+
+    it('gives the line remove control a 44 pixel touch target', async () => {
       const el = await mount(sale());
       const remove = el.querySelector('[data-testid="pos-lines"] button[aria-label^="Remove"]') as HTMLElement;
-      expect(remove.className).toContain('h-10');
-      expect(remove.className).toContain('w-10');
+      expect(remove.className).toContain('h-11');
+      expect(remove.className).toContain('w-11');
     });
   });
 
@@ -480,6 +520,7 @@ describe('the counter opens on its own yard\'s register', () => {
     await el.updateComplete;
   };
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     localStorage.clear();
     svc.currentTill.mockResolvedValue(null);
@@ -510,6 +551,7 @@ describe('the counter opens on its own yard\'s register', () => {
     document.body.appendChild(el);
     await settle(el);
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-01');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     branchContext.setCurrent('b-wk');
     await settle(el);
     expect(svc.currentTill).toHaveBeenLastCalledWith('REG-WK');
@@ -543,6 +585,7 @@ describe('the counter opens on its own yard\'s register', () => {
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK');
     const picker = q(el, 'pos-register-picker') as HTMLSelectElement;
     expect(picker).toBeTruthy();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     picker.value = 'REG-WK2';
     picker.dispatchEvent(new Event('change'));
     await settle(el);
@@ -553,6 +596,202 @@ describe('the counter opens on its own yard\'s register', () => {
     document.body.appendChild(again);
     await settle(again);
     expect(svc.startSale).toHaveBeenLastCalledWith('REG-WK2');
+    again.remove();
+  });
+});
+
+describe('the account customer after a charge', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+  type Inner = { _customer: CounterCustomer | null; _sale: Sale };
+
+  it('reloads the standing once a sale that charged the account completes', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed', customer_id: 'cu1' }));
+    const charged = {
+      ...account, available_credit_cents: 400000 - 8650, open_receivable_cents: 100000 + 8650,
+    } as unknown as CounterCustomer;
+    svc.findCustomers.mockResolvedValue([{ ...account, id: 'other', account_number: 'A-1000' } as never, charged]);
+    const el = await mount(sale({ customer_id: 'cu1' }));
+    (el as unknown as Inner)._customer = account;
+    await el.updateComplete;
+    q(el, 'tender-account').click();
+    await el.updateComplete;
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.findCustomers).toHaveBeenCalledWith('A-100');
+    const text = q(el, 'pos-customer').textContent ?? '';
+    expect(text).toContain('Credit available $3,913.50 of $5,000.00');
+    expect(text).toContain('Open $1,086.50');
+  });
+
+  it('does not look the customer up again after a cash sale', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed', customer_id: 'cu1' }));
+    const el = await mount(sale({ customer_id: 'cu1' }));
+    (el as unknown as Inner)._customer = account;
+    await el.updateComplete;
+    await typeInto(el, '100.00');
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.findCustomers).not.toHaveBeenCalled();
+  });
+});
+
+describe('the register and the sale when the cashier moves', () => {
+  const lk = reg('REG-LK', 'lk');
+  const wk = reg('REG-WK', 'wk');
+  const settle = async (el: POSTerminal) => {
+    for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+  };
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    svc.currentTill.mockResolvedValue(null);
+    svc.startSale.mockResolvedValue(sale({ lines: [] }));
+    svc.getSale.mockRejectedValue(new Error('not found'));
+    branchContext.setCurrent('b-lk');
+  });
+  const serve = (all: CounterRegister[]) =>
+    svc.listRegisters.mockImplementation(async () =>
+      all.filter((r) => branchContext.currentId === null || r.branch_id === branchContext.currentId));
+
+  it('asks before a yard change leaves an open sale that has lines, and stays when declined', async () => {
+    serve([lk, wk]);
+    svc.startSale.mockResolvedValue(sale({ register_id: 'REG-LK' }));
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    branchContext.setCurrent('b-wk');
+    await settle(el);
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(branchContext.currentId).toBe('b-lk');
+    expect(q(el, 'pos-register').textContent).toContain('REG-LK');
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    ask.mockReturnValue(true);
+    branchContext.setCurrent('b-wk');
+    await settle(el);
+    expect(ask).toHaveBeenCalledTimes(2);
+    expect(q(el, 'pos-register').textContent).toContain('REG-WK');
+    ask.mockRestore();
+    el.remove();
+  });
+
+  it('does not ask when the open sale has no lines', async () => {
+    serve([lk, wk]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    branchContext.setCurrent('b-wk');
+    await settle(el);
+    expect(ask).not.toHaveBeenCalled();
+    expect(q(el, 'pos-register').textContent).toContain('REG-WK');
+    ask.mockRestore();
+    el.remove();
+  });
+
+  it('drops a till answer that arrives for a register no longer selected', async () => {
+    serve([lk, wk]);
+    let lateTill: (v: unknown) => void = () => {};
+    svc.currentTill.mockImplementationOnce(() => new Promise((r) => { lateTill = r; }));
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    svc.currentTill.mockResolvedValue({ id: 'wk-till', register_id: 'REG-WK', cashier_id: 'c', status: 'open', opening_float_cents: 5000 });
+    branchContext.setCurrent('b-wk');
+    await settle(el);
+    lateTill({ id: 'lk-till', register_id: 'REG-LK', cashier_id: 'c', status: 'open', opening_float_cents: 99900 });
+    await settle(el);
+    expect(q(el, 'pos-till-state').textContent).toContain('$50.00');
+    expect(q(el, 'pos-register').textContent).toContain('REG-WK');
+    el.remove();
+  });
+
+  it('drops a sale answer that arrives for a register no longer selected', async () => {
+    serve([lk, wk]);
+    let lateSale: (v: unknown) => void = () => {};
+    svc.startSale.mockImplementationOnce(() => new Promise((r) => { lateSale = r; }));
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    svc.startSale.mockResolvedValue(sale({ id: 'wk-sale', register_id: 'REG-WK', number: 'S-WK', lines: [] }));
+    branchContext.setCurrent('b-wk');
+    await settle(el);
+    lateSale(sale({ id: 'lk-sale', register_id: 'REG-LK', number: 'S-LK', lines: [] }));
+    await settle(el);
+    const header = q(el, 'pos-header').textContent ?? '';
+    expect(header).toContain('S-WK');
+    expect(header).not.toContain('S-LK');
+    el.remove();
+  });
+
+  it('says the register list failed, not that the yard has none', async () => {
+    svc.listRegisters.mockRejectedValue(new Error('Failed to list the registers'));
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(q(el, 'pos-no-register')).toBeNull();
+    expect(q(el, 'pos-registers-failed').textContent).toContain('could not be loaded');
+    expect(el.textContent).not.toContain('has no register');
+    el.remove();
+  });
+
+  it('orders a mixed list by yard name first, then register name', async () => {
+    branchContext.setCurrent(null);
+    const zed = reg('REG-Z', 'aaa', 'Zed till');
+    const mid = reg('REG-M', 'mmm', 'Alpha till');
+    svc.listRegisters.mockResolvedValue([mid, zed]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-Z');
+    el.remove();
+  });
+
+  it('with the yard switch off the server lists every register and the counter takes the first by yard and name', async () => {
+    branchContext.setCurrent('b-wk');
+    svc.listRegisters.mockResolvedValue([wk, lk]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    expect(svc.startSale).toHaveBeenLastCalledWith('REG-LK');
+    el.remove();
+  });
+
+  it('reuses the cashier\'s empty open sale on the register instead of opening another', async () => {
+    serve([lk]);
+    const empty = sale({ id: 'empty-1', register_id: 'REG-LK', lines: [], customer_id: null, till_session_id: null });
+    svc.startSale.mockResolvedValue(empty);
+    const first = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(first);
+    await settle(first);
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    first.remove();
+    svc.getSale.mockResolvedValue(empty);
+    const again = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(again);
+    await settle(again);
+    expect(svc.getSale).toHaveBeenCalledWith('empty-1');
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    expect(q(again, 'pos-header').textContent).toContain('S-1');
+    again.remove();
+  });
+
+  it('opens a new sale when the remembered one has lines or is no longer open', async () => {
+    serve([lk]);
+    svc.startSale.mockResolvedValue(sale({ id: 'empty-1', register_id: 'REG-LK', lines: [], till_session_id: null }));
+    const first = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(first);
+    await settle(first);
+    first.remove();
+    svc.getSale.mockResolvedValue(sale({ id: 'empty-1', register_id: 'REG-LK', till_session_id: null }));
+    const again = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(again);
+    await settle(again);
+    expect(svc.startSale).toHaveBeenCalledTimes(2);
     again.remove();
   });
 });

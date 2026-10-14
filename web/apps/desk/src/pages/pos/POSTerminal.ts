@@ -14,6 +14,8 @@ import { authCustody } from '@gable/auth';
 import '../../components/BarcodeScanner.ts';
 
 const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
+// The sale each register last opened, so a visit that left it empty reuses it.
+const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
 
@@ -72,8 +74,12 @@ export class POSTerminal extends LitElement {
   @state() private _registers: CounterRegister[] = [];
   @state() private _register: CounterRegister | null = null;
   @state() private _registersLoaded = false;
+  @state() private _registersFailed = false;
   /** Counts register loads; an answer to an older one is dropped. */
   private _registerSeq = 0;
+  /** The yard the counter last settled on, to go back to when a change is declined. */
+  private _yardId: string | null = null;
+  private _revertingYard = false;
 
   @query('#pos-search-input') private _searchInput!: HTMLInputElement;
 
@@ -89,10 +95,39 @@ export class POSTerminal extends LitElement {
   connectedCallback() {
     super.connectedCallback();
     window.addEventListener('gable:branch-changed', this._onYardChanged);
+    this._yardId = branchContext.currentId;
     void this._loadRegisters();
   }
 
-  private _onYardChanged = () => { void this._loadRegisters(); };
+  /**
+   * A yard change moves the counter to that yard's register. An open sale
+   * with lines stays open on its own register, so the cashier is asked first;
+   * declining puts the yard back.
+   */
+  private _onYardChanged = () => {
+    if (this._revertingYard) return;
+    if (this._saleHasLines && !window.confirm(this._leaveSaleQuestion())) {
+      this._revertingYard = true;
+      try {
+        branchContext.setCurrent(this._yardId);
+      } finally {
+        this._revertingYard = false;
+      }
+      return;
+    }
+    this._yardId = branchContext.currentId;
+    void this._loadRegisters();
+  };
+
+  private get _saleHasLines(): boolean {
+    const sale = this._sale;
+    return sale !== null && sale.status === 'open' && sale.lines.some((l) => l.parent_line_id === null);
+  }
+
+  private _leaveSaleQuestion(): string {
+    const sale = this._sale;
+    return `Sale ${sale?.number ?? ''} has lines and stays open on ${this._registerId}. Leave it and move on?`;
+  }
 
   /* ---- The register: the current yard's ---- */
 
@@ -118,11 +153,22 @@ export class POSTerminal extends LitElement {
       all = await posService.listRegisters();
     } catch (err: unknown) {
       if (seq !== this._registerSeq) return;
+      // A failed list is not an empty one: say it failed and offer a retry.
       this._error = err instanceof Error ? err.message : 'Failed to list the registers';
+      this._registers = [];
+      this._register = null;
+      this._till = null;
+      this._sale = null;
+      this._registersFailed = true;
+      return;
     }
     if (seq !== this._registerSeq) return;
-    const here = [...all].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    // The server's order is yard then name; keep it when the list mixes yards.
+    const here = [...all].sort((a, b) =>
+      a.branch_name.localeCompare(b.branch_name) || a.branch_code.localeCompare(b.branch_code)
+      || a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
     this._registers = here;
+    this._registersFailed = false;
     this._registersLoaded = true;
     const remembered = localStorage.getItem(this._storageKey());
     this._register = here.find((r) => r.id === remembered) ?? here[0] ?? null;
@@ -134,26 +180,37 @@ export class POSTerminal extends LitElement {
     this._till = null;
     this._sale = null;
     if (!this._register) return;
+    const reg = this._registerId;
     await this._loadTill();
+    // a later change of register or yard owns the screen now
+    if (reg !== this._registerId) return;
     await this._startNewSale();
   }
 
-  private _chooseRegister(id: string) {
+  /** False when the cashier declined to leave the open sale. */
+  private _chooseRegister(id: string): boolean {
     const next = this._registers.find((r) => r.id === id);
-    if (!next || next.id === this._registerId) return;
+    if (!next || next.id === this._registerId) return true;
+    if (this._saleHasLines && !window.confirm(this._leaveSaleQuestion())) return false;
     localStorage.setItem(this._storageKey(), next.id);
     this._register = next;
     void this._openRegister();
+    return true;
   }
 
   /* ---- Till (drawer) lifecycle ---- */
 
   private async _loadTill() {
+    const reg = this._registerId;
+    let till: TillSession | null = null;
     try {
-      this._till = await posService.currentTill(this._registerId);
+      till = await posService.currentTill(reg);
     } catch {
-      this._till = null;
+      till = null;
     }
+    // a late answer for a register no longer selected is dropped
+    if (reg !== this._registerId) return;
+    this._till = till;
   }
 
   private async _openTill() {
@@ -420,22 +477,28 @@ export class POSTerminal extends LitElement {
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
           ${c.standing === 'good' || c.standing === 'over_limit' ? html`
             <div class="mt-1 font-mono text-xs text-slate-400">Open ${money(c.open_receivable_cents)}</div>` : nothing}
-          <label class="mt-3 block text-xs text-slate-400" for="pos-po">
-            Purchase order${c.po_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}
-          </label>
-          <input id="pos-po" type="text" maxlength="100" .value=${this._poText}
-            @input=${(e: Event) => { this._poText = (e.target as HTMLInputElement).value; }}
-            @change=${() => this._saveAccountRefs()}
-            class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none"
-            placeholder="PO number" />
-          ${c.jobs.length > 0 ? html`
-            <label class="mt-3 block text-xs text-slate-400" for="pos-job">Job</label>
-            <select id="pos-job" .value=${this._jobId}
-              @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
-              class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none">
-              <option value="">No job</option>
-              ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
-            </select>` : nothing}
+          <div class="mt-3 grid grid-cols-2 items-start gap-2">
+            <div class="${c.jobs.length > 0 ? '' : 'col-span-2'}">
+              <label class="block text-xs text-slate-400" for="pos-po">
+                Purchase order${c.po_required ? html` <span class="text-safety-red">(required for a charge)</span>` : ''}
+              </label>
+              <input id="pos-po" type="text" maxlength="100" .value=${this._poText}
+                @input=${(e: Event) => { this._poText = (e.target as HTMLInputElement).value; }}
+                @change=${() => this._saveAccountRefs()}
+                class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 font-mono text-sm text-white outline-none"
+                placeholder="PO number" />
+            </div>
+            ${c.jobs.length > 0 ? html`
+              <div>
+                <label class="block text-xs text-slate-400" for="pos-job">Job</label>
+                <select id="pos-job" .value=${this._jobId}
+                  @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
+                  class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none">
+                  <option value="">No job</option>
+                  ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
+                </select>
+              </div>` : nothing}
+          </div>
         </div>`;
     }
     return html`
@@ -453,7 +516,7 @@ export class POSTerminal extends LitElement {
           class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:opacity-40" />
         <div class="mt-1 text-xs text-slate-400">Name the customer before the first line</div>
         ${this._custResults.length > 0 ? html`
-          <div class="mt-2 max-h-56 overflow-y-auto rounded border border-white/10" data-testid="pos-customer-results">
+          <div class="mt-2 rounded border border-white/10" data-testid="pos-customer-results">
             ${this._custResults.map((r) => {
               const st = standingOf(r);
               return html`
@@ -488,7 +551,10 @@ export class POSTerminal extends LitElement {
       this._jobId = '';
       // The last completed sale stays offerable for a void or a return
       // until the next completion replaces it.
-      const sale = await posService.startSale(this._registerId);
+      const reg = this._registerId;
+      const sale = await this._emptyOrNewSale(reg);
+      // a late answer for a register no longer selected is dropped
+      if (reg !== this._registerId) return;
       this._sale = sale;
       this._tenderAmount = '';
       this._tenderMethod = 'cash';
@@ -501,6 +567,31 @@ export class POSTerminal extends LitElement {
     } finally {
       this._loading = false;
     }
+  }
+
+  /**
+   * Each visit to the counter used to open a new empty sale, so abandoned empty
+   * sales piled up on the register. The sale this register last opened is
+   * reused while it is still open, empty, a walk-in and on the till session now
+   * open; otherwise a new one is started and remembered.
+   */
+  private async _emptyOrNewSale(reg: string): Promise<Sale> {
+    const key = SALE_STORAGE_PREFIX + reg;
+    const remembered = localStorage.getItem(key);
+    if (remembered) {
+      try {
+        const s = await posService.getSale(remembered);
+        const empty = s.status === 'open' && s.register_id === reg && s.customer_id === null
+          && !s.lines.some((l) => l.parent_line_id === null)
+          && (s.till_session_id ?? null) === (this._till?.id ?? null);
+        if (empty) return s;
+      } catch {
+        // gone or refused: a new sale is opened below
+      }
+    }
+    const sale = await posService.startSale(reg);
+    localStorage.setItem(key, sale.id);
+    return sale;
   }
 
   private async _addItem(product: QuickSearchResult, quantity = this._qtyText) {
@@ -630,10 +721,11 @@ export class POSTerminal extends LitElement {
       this._completed = completed;
       const change = completed.change_cents || 0;
       this._success = change > 0
-        ? `Sale ${completed.number} complete - ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
-        : `Sale ${completed.number} complete - ${fmt(completed.total_cents)}`;
+        ? `Sale ${completed.number} complete: ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
+        : `Sale ${completed.number} complete: ${fmt(completed.total_cents)}`;
       this._pendingTenders = [];
       this._tenderAmount = '';
+      if (tenders.some((t) => t.method === 'account')) void this._refreshStanding();
 
       // Auto-start the next sale after 2 seconds
       this._newTxTimer = setTimeout(() => {
@@ -643,6 +735,19 @@ export class POSTerminal extends LitElement {
       this._error = err instanceof Error ? err.message : 'Failed to complete sale';
     } finally {
       this._loading = false;
+    }
+  }
+
+  /** The charge moved the account's credit and open balance: read them again. */
+  private async _refreshStanding() {
+    const named = this._customer;
+    if (!named) return;
+    try {
+      const found = await posService.findCustomers(named.account_number);
+      const fresh = found.find((c) => c.id === named.id);
+      if (fresh && this._customer?.id === named.id) this._customer = fresh;
+    } catch {
+      // the figures on screen stay; the next lookup reads them afresh
     }
   }
 
@@ -863,7 +968,10 @@ export class POSTerminal extends LitElement {
           ${this._registers.length > 1 ? html`
             <label class="sr-only" for="pos-register-picker">Register</label>
             <select id="pos-register-picker" data-testid="pos-register-picker"
-              @change=${(e: Event) => this._chooseRegister((e.target as HTMLSelectElement).value)}
+              @change=${(e: Event) => {
+                const picker = e.target as HTMLSelectElement;
+                if (!this._chooseRegister(picker.value)) picker.value = this._registerId;
+              }}
               class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
               ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.branch_code} ${r.name}</option>`)}
             </select>` : nothing}
@@ -897,7 +1005,7 @@ export class POSTerminal extends LitElement {
   private _renderItems(productLines: SaleLine[]) {
     const th = 'border-b border-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400';
     return html`
-      <section class="flex min-h-0 flex-1 flex-col border-white/10 xl:border-r" data-testid="pos-items">
+      <section class="flex min-h-[22rem] flex-1 flex-col border-white/10 xl:min-h-0 xl:border-r" data-testid="pos-items">
         <div class="relative border-b border-white/10 p-4">
           <div class="flex gap-2">
             <input id="pos-search-input" type="text" autocomplete="off"
@@ -946,7 +1054,7 @@ export class POSTerminal extends LitElement {
                 <th class="${th} text-center">Qty</th>
                 <th class="${th} text-right">Price</th>
                 <th class="${th} text-right">Total</th>
-                <th class="${th} w-12"></th>
+                <th class="${th} w-14"></th>
               </tr></thead>
               <tbody>
                 ${productLines.map((item) => html`
@@ -960,7 +1068,8 @@ export class POSTerminal extends LitElement {
                     <td class="px-3 py-3">
                       <button @click=${() => this._removeItem(item.id)} title="Remove"
                         aria-label="Remove ${item.description}"
-                        class="inline-flex h-10 w-10 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red">×</button>
+                        ?disabled=${this._sale?.status !== 'open'}
+                        class="inline-flex h-11 w-11 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red disabled:cursor-not-allowed disabled:text-slate-400 disabled:opacity-40 disabled:hover:bg-transparent">×</button>
                     </td>
                   </tr>`)}
               </tbody>
@@ -1040,9 +1149,9 @@ export class POSTerminal extends LitElement {
       : plan.ok ? `Pay ${fmt(total)}`
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
-      <section class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="panel-summary">
+      <section class="flex items-center gap-3 rounded-lg border border-white/10 bg-deep-space p-3 xl:block" data-testid="panel-summary">
         <div class="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 xl:block">Summary</div>
-        <dl class="mt-2 text-sm">
+        <dl class="text-sm xl:mt-2">
           <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Lines</dt>
             <dd class="font-mono" data-testid="summary-lines">${(sale?.lines ?? []).filter((l) => l.parent_line_id === null).length}</dd></div>
           <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Subtotal</dt>
@@ -1056,12 +1165,12 @@ export class POSTerminal extends LitElement {
               <dd class="font-mono">${fmt(owed)}</dd></div>` : nothing}
         </dl>
         <button data-testid="pos-pay" @click=${() => this._pay()} ?disabled=${!canPay}
-          class="mt-3 w-full rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400'}">
+          class="min-w-0 flex-1 rounded-lg px-4 py-4 text-base font-bold xl:mt-3 xl:w-full ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400'}">
           ${label}
         </button>
-        <div class="mt-3 flex gap-2">
-          <button @click=${() => this._voidSale()} ?disabled=${!this._completed}
-            class="flex-1 rounded border border-safety-red/60 px-3 py-2 text-xs font-semibold text-safety-red hover:bg-safety-red/10 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Void</button>
+        <div class="flex gap-2 xl:mt-3">
+          <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!this._completed}
+            class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Void</button>
           <button @click=${() => this._beginReturn()} ?disabled=${!this._completed}
             class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Return</button>
         </div>
@@ -1091,7 +1200,14 @@ export class POSTerminal extends LitElement {
             ${this._success}
           </div>` : nothing}
 
-        ${this._registersLoaded && !this._register ? html`
+        ${this._registersFailed ? html`
+          <div class="flex flex-1 flex-col items-center justify-center gap-3 p-8">
+            <p class="max-w-md text-center text-base text-slate-200" data-testid="pos-registers-failed" role="status">
+              The registers could not be loaded, so the counter cannot take a sale yet.
+            </p>
+            <button @click=${() => { void this._loadRegisters(); }}
+              class="rounded border border-white/20 px-4 py-2 text-sm font-semibold text-slate-200">Try again</button>
+          </div>` : this._registersLoaded && !this._register ? html`
           <div class="flex flex-1 items-center justify-center p-8">
             <p class="max-w-md text-center text-base text-slate-200" data-testid="pos-no-register" role="status">
               This yard has no register, so the counter cannot take a sale or open a till here.
@@ -1100,15 +1216,15 @@ export class POSTerminal extends LitElement {
           </div>` : html`
         <div class="flex min-h-0 flex-1 flex-col xl:flex-row">
           ${this._renderItems(productLines)}
-          <div class="flex max-h-[70%] min-h-0 flex-col border-t border-white/10 bg-slate-steel xl:max-h-none xl:w-[420px] xl:border-t-0"
+          <div class="flex max-h-[45%] min-h-0 flex-col overflow-y-auto border-t border-white/10 bg-slate-steel xl:max-h-none xl:w-[420px] xl:border-t-0"
             data-testid="pos-panels">
-            <div class="min-h-0 flex-1 overflow-y-auto p-4">
+            <div class="p-4">
               <div class="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-1">
                 <section data-testid="panel-customer">${this._renderCustomerPanel()}</section>
                 ${this._renderPaymentPanel(sale, hasLines)}
               </div>
             </div>
-            <div class="shrink-0 border-t border-white/10 bg-slate-steel p-4" data-testid="pos-panel-foot">
+            <div class="sticky bottom-0 mt-auto shrink-0 border-t border-white/10 bg-slate-steel p-4" data-testid="pos-panel-foot">
               ${this._renderSummaryPanel(sale, hasLines)}
             </div>
           </div>
