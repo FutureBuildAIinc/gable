@@ -55,6 +55,7 @@ type JobReader interface {
 // branch calendar the statement's default period is read on.
 type StatementReader interface {
 	Statement(ctx context.Context, q account.StatementQuery) (*account.Statement, error)
+	AgingSummary(ctx context.Context, q account.AgingQuery) (*account.AgingSummary, error)
 	LocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	Now() time.Time
 }
@@ -427,6 +428,31 @@ func (s *Service) GeneratePickTicketPDF(ctx context.Context, o *order.Order, cus
 	return finish(m)
 }
 
+// statementAging reads the customer's aging as of the statement's last day,
+// the buckets the AR Aging page shows, per currency. A statement for one job
+// carries none (the aging is the account's), and a form built without a
+// statement reader prints what it has.
+func (s *Service) statementAging(ctx context.Context, st *account.Statement) map[string]*account.AgingTotal {
+	out := map[string]*account.AgingTotal{}
+	if s.statements == nil || st.JobID != nil {
+		return out
+	}
+	asOf, err := time.Parse("2006-01-02", st.To)
+	if err != nil {
+		return out
+	}
+	cust := st.CustomerID
+	sum, err := s.statements.AgingSummary(ctx, account.AgingQuery{GroupBy: "customer", AsOf: asOf, Basis: "due_date", CustomerID: &cust})
+	if err != nil {
+		slog.Warn("document: statement aging unreadable", "customer_id", cust, "error", err)
+		return out
+	}
+	for i := range sum.Totals {
+		out[sum.Totals[i].Currency] = &sum.Totals[i]
+	}
+	return out
+}
+
 // GenerateStatementPDF renders the customer's statement, in the shape the AR
 // statement route computes it, under the identity of the customer's primary
 // yard.
@@ -440,6 +466,7 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 		left = append(left, "Job: "+n)
 	}
 	block(m, left, joinLines(fmt.Sprintf("From: %s", st.From), fmt.Sprintf("To: %s", st.To)), 10)
+	aging := s.statementAging(ctx, st)
 
 	for _, c := range st.Currencies {
 		m.AddRow(10, text.NewCol(12, "Currency: "+c.Currency, props.Text{Style: fontstyle.Bold, Top: 3}))
@@ -459,6 +486,25 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 			)
 		}
 		m.AddRow(10, text.NewCol(12, "Closing balance: "+money(c.ClosingBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
+		if t := aging[c.Currency]; t != nil {
+			m.AddRow(10, text.NewCol(12, "Aging as of "+st.To, props.Text{Style: fontstyle.Bold, Top: 3}))
+			m.AddRow(8,
+				text.NewCol(2, "Current", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+				text.NewCol(2, "1-30", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+				text.NewCol(2, "31-60", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+				text.NewCol(2, "61-90", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+				text.NewCol(2, "Over 90", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+				text.NewCol(2, "Total", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+			)
+			m.AddRow(8,
+				text.NewCol(2, money(t.CurrentCents), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, money(t.Days1To30), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, money(t.Days31To60), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, money(t.Days61To90), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, money(t.Over90), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, money(t.TotalCents), props.Text{Size: 9, Align: align.Right}),
+			)
+		}
 		if len(c.OpenDocuments) > 0 {
 			m.AddRow(10, text.NewCol(12, "Open documents", props.Text{Style: fontstyle.Bold, Top: 3}))
 			for _, d := range c.OpenDocuments {

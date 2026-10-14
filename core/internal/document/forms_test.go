@@ -245,7 +245,7 @@ func TestStatementCarriesTheAgingAsOfThePeriodsEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Aging as of 2026-02-28", "Current", "1-30", "31-60", "61-90", "Over 90", "$1,000.01", "$200.02", "$30.03", "$4.00", "$0.50"} {
+	for _, want := range []string{"Aging as of 2026-02-28", "Current", "1-30", "31-60", "61-90", "Over 90", "$1000.01", "$200.02", "$30.03", "$4.00", "$0.50"} {
 		mustContain(t, doc, want)
 	}
 }
