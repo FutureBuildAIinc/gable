@@ -7,6 +7,7 @@
 
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
+import '../../../components/BarcodeScanner.ts';
 import { posService } from '../../../services/POSService';
 import type { CatalogCategory, CatalogItem } from '../../../services/POSService';
 
@@ -53,11 +54,15 @@ export class GablePosCatalog extends LitElement {
     @state() private _loading = true;
     @state() private _failed = false;
     @state() private _brokenImages = new Set<string>();
+    @state() private _notice = '';
+    @state() private _scanning = false;
+    @state() private _chipsOverflow = false;
 
     private _seq = 0;
     private _lastKey = '';
     private _timer: ReturnType<typeof setTimeout> | null = null;
     private _pending: Promise<void> = Promise.resolve();
+    private _resizer: ResizeObserver | null = null;
 
     connectedCallback(): void {
         super.connectedCallback();
@@ -67,9 +72,34 @@ export class GablePosCatalog extends LitElement {
     disconnectedCallback(): void {
         super.disconnectedCallback();
         this._clearTimer();
+        this._resizer?.disconnect();
+        this._resizer = null;
+    }
+
+    protected firstUpdated(): void {
+        if (typeof ResizeObserver === 'undefined') return;
+        const row = this.querySelector('[data-testid="catalog-chips"]');
+        if (!row) return;
+        this._resizer = new ResizeObserver(() => this._measureChips());
+        this._resizer.observe(row);
+    }
+
+    private _measureChips(): void {
+        const row = this.querySelector<HTMLElement>('[data-testid="catalog-chips"]');
+        if (row) this._chipsOverflow = row.scrollWidth > row.clientWidth + 1;
+    }
+
+    /** A typed search looks across every category; the chip returns when it is cleared. */
+    private get _searching(): boolean {
+        return this._query.trim().length >= 2;
+    }
+
+    private get _activeCategory(): string {
+        return this._searching ? '' : this._category;
     }
 
     protected updated(changed: Map<string, unknown>): void {
+        if (changed.has('_categories')) this._measureChips();
         // The first value arrives with the first read; only a later change re-reads.
         if (changed.has('yardKey') && changed.get('yardKey') !== undefined) {
             this._category = '';
@@ -85,7 +115,7 @@ export class GablePosCatalog extends LitElement {
 
     private _readKey(): string {
         const term = this._query.trim();
-        return JSON.stringify([this._category, term.length >= 2 ? term : '']);
+        return JSON.stringify([this._activeCategory, term.length >= 2 ? term : '']);
     }
 
     private _read(): Promise<void> {
@@ -96,7 +126,7 @@ export class GablePosCatalog extends LitElement {
         this._pending = (async () => {
             try {
                 const res = await posService.tiles({
-                    category: this._category || undefined,
+                    category: this._activeCategory || undefined,
                     q: term.length >= 2 ? term : undefined,
                 });
                 if (seq !== this._seq) return;
@@ -114,14 +144,17 @@ export class GablePosCatalog extends LitElement {
     }
 
     private _chip(name: string): void {
-        if (name === this._category) return;
+        if (name === this._activeCategory) return;
         this._category = name;
+        this._query = '';
+        this._notice = '';
         this._clearTimer();
         void this._read();
     }
 
     private _onSearch(e: Event): void {
         this._query = (e.target as HTMLInputElement).value;
+        this._notice = '';
         this._clearTimer();
         this._timer = setTimeout(() => {
             this._timer = null;
@@ -159,6 +192,14 @@ export class GablePosCatalog extends LitElement {
     /** Enter or the Add button: the exact SKU among the results, else the first. */
     private async _addFromSearch(): Promise<void> {
         if (this.disabled) return;
+        if (!this._searching) {
+            if (this._timer !== null) {
+                this._clearTimer();
+                if (this._readKey() !== this._lastKey) void this._read();
+            }
+            this._notice = 'Type at least two characters';
+            return;
+        }
         if (this._timer !== null) {
             this._clearTimer();
             await this._read();
@@ -166,13 +207,35 @@ export class GablePosCatalog extends LitElement {
             await this._pending;
         }
         const term = this._query.trim();
-        if (term === '' || this._failed) return;
+        if (this._failed) return;
         const exact = this._items.find((i) => i.sku.toLowerCase() === term.toLowerCase());
         const pick = exact ?? this._items[0];
         if (!pick) return;
         this._emit(pick);
         this._query = '';
         void this._read();
+    }
+
+    /** A scanned code is looked up across the whole catalogue and added only on an exact match. */
+    private async _onScan(code: string): Promise<void> {
+        this._scanning = false;
+        if (this.disabled) return;
+        const barcode = String(code).trim();
+        try {
+            const res = await posService.tiles({ q: barcode });
+            const lower = barcode.toLowerCase();
+            const hit = (res.items ?? []).find(
+                (i) => i.sku.toLowerCase() === lower || i.product_id === barcode,
+            );
+            if (!hit) {
+                this._notice = `Product not found for barcode: ${barcode}`;
+                return;
+            }
+            this._notice = '';
+            this._emit(hit);
+        } catch {
+            this._notice = 'Error scanning barcode';
+        }
     }
 
     private _onKey(e: KeyboardEvent): void {
@@ -183,12 +246,12 @@ export class GablePosCatalog extends LitElement {
 
     private _picture(item: CatalogItem) {
         const shown = item.image_url && !this._brokenImages.has(item.product_id);
-        return html`<div class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-deep-space">
+        return html`<div data-testid="catalog-picture" class="flex h-[72px] w-[72px] shrink-0 items-center justify-center overflow-hidden rounded-md border border-white/10 bg-white">
             ${shown
                 ? html`<img src=${item.image_url!} alt="" loading="lazy" class="h-full w-full object-cover"
                       @error=${() => { this._brokenImages = new Set(this._brokenImages).add(item.product_id); }} />`
                 : html`<svg data-testid="catalog-no-picture" viewBox="0 0 24 24" fill="none" aria-label="No picture"
-                      class="h-7 w-7 text-slate-400 opacity-70">
+                      class="h-8 w-8 text-slate-500">
                       <rect x="2" y="14" width="20" height="5" rx="1" stroke="currentColor" stroke-width="1.5" />
                       <rect x="4" y="9" width="16" height="5" rx="1" stroke="currentColor" stroke-width="1.5" />
                       <rect x="7" y="4" width="10" height="5" rx="1" stroke="currentColor" stroke-width="1.5" />
@@ -200,7 +263,7 @@ export class GablePosCatalog extends LitElement {
         return html`<li data-testid="catalog-tile" class="flex flex-col gap-2 rounded-lg border border-white/10 bg-deep-space p-3">
             ${this._picture(item)}
             <div class="line-clamp-2 min-h-[2.5rem] text-sm font-semibold text-white">${item.description}</div>
-            <div class="font-mono text-xs text-slate-400">${item.sku} · ${item.in_stock} on hand</div>
+            <div class="font-mono text-xs text-slate-300">${item.sku} · ${item.in_stock} on hand</div>
             <div class="mt-auto flex items-center justify-between gap-2">
                 <span class="font-mono text-sm font-semibold text-white">${price(item.unit_price_cents, item.uom)}</span>
                 <button type="button" data-testid="catalog-tile-add" ?disabled=${this.disabled}
@@ -226,6 +289,9 @@ export class GablePosCatalog extends LitElement {
                     aria-invalid=${this._qtyValid ? 'false' : 'true'}
                     @input=${this._onQty}
                     class="w-16 rounded border border-white/10 bg-deep-space px-2 py-2 text-center font-mono text-sm text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40 aria-[invalid=true]:border-safety-red" />
+                <button type="button" data-testid="catalog-scan" ?disabled=${this.disabled}
+                    @click=${() => { this._scanning = true; }}
+                    class="rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Scan</button>
                 <button type="button" data-testid="catalog-add" ?disabled=${this.disabled}
                     @click=${() => void this._addFromSearch()}
                     class="rounded border border-white/20 px-4 py-2 text-sm font-semibold text-white hover:border-gable-green hover:text-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/20 disabled:hover:text-white">Add</button>
@@ -233,14 +299,23 @@ export class GablePosCatalog extends LitElement {
             ${this.disabled
                 ? html`<p class="mt-2 text-xs text-slate-400" data-testid="catalog-closed">Open the till to start a sale</p>`
                 : nothing}
-            <div class="mt-3 flex flex-wrap gap-2" role="group" aria-label="Categories">
+            ${this._notice
+                ? html`<p class="mt-2 text-xs text-slate-300" role="status" data-testid="catalog-notice">${this._notice}</p>`
+                : nothing}
+            ${this._scanning
+                ? html`<gable-barcode-scanner
+                      @scan=${(e: CustomEvent) => { void this._onScan(e.detail); }}
+                      @close=${() => { this._scanning = false; }}></gable-barcode-scanner>`
+                : nothing}
+            <div data-testid="catalog-chips" role="group" aria-label="Categories"
+                class=${`mt-3 flex flex-nowrap gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${this._chipsOverflow ? '[mask-image:linear-gradient(to_right,black_calc(100%-2.5rem),transparent)]' : ''}`}>
                 ${chips.map((c) => {
-                    const on = c.name === this._category;
+                    const on = c.name === this._activeCategory;
                     return html`<button type="button" data-testid="catalog-chip" aria-pressed=${on ? 'true' : 'false'}
                         @click=${() => this._chip(c.name)}
-                        class=${`rounded-full border px-3 py-1 text-xs font-semibold ${on
+                        class=${`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-xs font-semibold outline-none focus-visible:ring-1 focus-visible:ring-white/60 ${on
                             ? 'border-gable-green bg-gable-green text-deep-space'
-                            : 'border-white/20 text-white hover:border-gable-green hover:text-gable-green'}`}>${c.label}</button>`;
+                            : 'border-white/20 text-white hover:bg-white/10'}`}>${c.label}</button>`;
                 })}
             </div>
             ${this._failed
@@ -251,7 +326,7 @@ export class GablePosCatalog extends LitElement {
                   </p>`
                 : this._items.length === 0 && !this._loading
                     ? html`<p class="mt-4 text-sm text-slate-400">No products match</p>`
-                    : html`<ul class=${`mt-4 grid grid-cols-1 gap-3 lg:grid-cols-2 xl:grid-cols-3 ${this.disabled ? 'opacity-50' : ''}`}
+                    : html`<ul data-testid="catalog-grid" class=${`mt-4 grid grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-3 ${this.disabled ? 'opacity-50' : ''}`}
                           aria-busy=${this._loading ? 'true' : 'false'}>
                           ${this._items.map((i) => this._tile(i))}
                       </ul>`}
