@@ -158,15 +158,29 @@ describe('gable-select', () => {
     expect(list.style.width).toBe('160px')
   })
 
-  it('flips up when the room is above the button', async () => {
+  it("flips up when the room is above the button, its bottom edge at the button's top", async () => {
     const el = await mountSelect()
     const button = buttonOf(el)
     const rect = { left: 10, right: 170, top: 680, bottom: 700, width: 160, height: 20, x: 10, y: 680, toJSON: () => ({}) } as DOMRect
     button.getBoundingClientRect = () => rect
     await open(el)
     const list = q<HTMLElement>(el, '[role="listbox"]')
-    expect(list.style.top).toBe('')
+    // The popover's own stylesheet holds top at 0 unless it is cleared: a
+    // flipped list with only `bottom` set lands at the top of the screen.
+    expect(list.style.top).toBe('auto')
     expect(list.style.bottom).toBe(`${window.innerHeight - 680}px`)
+    expect(list.style.left).toBe('10px')
+  })
+
+  it('opens downward with the bottom edge cleared', async () => {
+    const el = await mountSelect()
+    const button = buttonOf(el)
+    const rect = { left: 100, right: 260, top: 180, bottom: 200, width: 160, height: 20, x: 100, y: 180, toJSON: () => ({}) } as DOMRect
+    button.getBoundingClientRect = () => rect
+    await open(el)
+    const list = q<HTMLElement>(el, '[role="listbox"]')
+    expect(list.style.bottom).toBe('auto')
+    expect(list.style.top).toBe('200px')
   })
 
   it('reads as required and as invalid when the page marks it', async () => {
