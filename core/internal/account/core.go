@@ -84,6 +84,21 @@ func (s *Service) refuseDayToCome(ctx context.Context, branchID uuid.UUID, on ti
 	return nil
 }
 
+// refuseDayToComeOf is refuseDayToCome for an act that names a document, not
+// a branch: the day is the document's own branch's. A document that is not
+// there is left to the act's own refusal.
+func (s *Service) refuseDayToComeOf(ctx context.Context, table string, id uuid.UUID, on time.Time, field string) error {
+	var branch uuid.UUID
+	err := s.ex(ctx).QueryRow(ctx, `SELECT branch_id FROM `+table+` WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read the document's branch: %w", err)
+	}
+	return s.refuseDayToCome(ctx, branch, on, field)
+}
+
 // ErrNoTransaction is the refusal to run an act with no transaction open.
 var ErrNoTransaction = gl.ErrNoTransaction
 
