@@ -25,10 +25,10 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('PIMService with AI off', () => {
     it.each([
-        ['descriptions', () => PIMService.generateDescriptions('p', {})],
+        ['descriptions', () => PIMService.generateDescriptions('p', { tone: 'plain', audience: 'builders' })],
         ['seo', () => PIMService.generateSEO('p', { target_keywords: [] })],
-        ['image', () => PIMService.generateImage('p', {})],
-        ['collateral', () => PIMService.generateCollateral('p', { type: 'sell_sheet' })],
+        ['image', () => PIMService.generateImage('p', { style: 'photographic', prompt: '' })],
+        ['collateral', () => PIMService.generateCollateral('p', { type: 'sell_sheet', tone: 'plain', audience: 'builders' })],
     ])('%s throws the ai_off message', async (_name, call) => {
         const err = await call().catch((e: unknown) => e);
         expect(err).toBeInstanceOf(ApiError);
