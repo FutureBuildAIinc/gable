@@ -131,15 +131,16 @@ func (r *Repository) CreatePO(ctx context.Context, po *PurchaseOrder) error {
 // lineColumns is the line read shared by the document and the reorder
 // dedup. The unit columns are NULL on a line no product names (a raw SQL
 // writer's row); they read as the empty string.
+// The scaled columns read as text and parse through the package's fixed
+// scale helpers, never through float64.
 const lineColumns = `
-	id, po_id, product_id, description, quantity, COALESCE(qty_received, 0),
-	unit_cost, COALESCE(uom, ''), COALESCE(price_uom, ''), uom_qty, price_uom_qty,
-	stock_uom, stock_quantity, line_total, position, linked_so_line_id`
+	id, po_id, product_id, description, quantity::text, COALESCE(qty_received, 0)::text,
+	unit_cost::text, COALESCE(uom, ''), COALESCE(price_uom, ''), uom_qty::text, price_uom_qty::text,
+	stock_uom, stock_quantity::text, line_total::text, position, linked_so_line_id`
 
 func scanLine(scan func(dest ...any) error) (*PurchaseOrderLine, error) {
 	var l PurchaseOrderLine
-	var quantity, qtyReceived, uomQty, priceUOMQty string
-	var unitCost, lineTotal int64
+	var quantity, qtyReceived, uomQty, priceUOMQty, unitCost, lineTotal string
 	var stockQty *string
 	err := scan(&l.ID, &l.POID, &l.ProductID, &l.Description,
 		&quantity, &qtyReceived, &unitCost, &l.UOM, &l.PriceUOM,
@@ -160,6 +161,16 @@ func scanLine(scan func(dest ...any) error) (*PurchaseOrderLine, error) {
 	if l.PriceUOMQty, err = httpx.ParseQuantity(priceUOMQty); err != nil {
 		return nil, err
 	}
+	price, err := httpx.ParsePrice(unitCost)
+	if err != nil {
+		return nil, err
+	}
+	l.UnitCostTenThousandths = price
+	cents, err := httpx.ParseCents(lineTotal)
+	if err != nil {
+		return nil, err
+	}
+	l.LineTotalCents = cents
 	if stockQty != nil {
 		q, err := httpx.ParseQuantity(*stockQty)
 		if err != nil {
@@ -167,8 +178,6 @@ func scanLine(scan func(dest ...any) error) (*PurchaseOrderLine, error) {
 		}
 		l.StockQuantity = &q
 	}
-	l.UnitCostTenThousandths = httpx.Price(unitCost)
-	l.LineTotalCents = httpx.Cents(lineTotal)
 	return &l, nil
 }
 
@@ -280,16 +289,19 @@ const summaryColumns = `
 	po.id, po.number, po.vendor_id, po.status, po.source, po.currency, po.revision,
 	po.branch_id, po.created_at, po.updated_at, po.sent_at,
 	COUNT(pol.id) AS line_count,
-	(COALESCE(SUM(pol.line_total), 0) * 100)::bigint AS total_cents`
+	COALESCE(SUM(pol.line_total), 0)::text AS total_cents`
 
 func scanSummary(scan func(dest ...any) error) (PurchaseOrderSummary, error) {
 	var s PurchaseOrderSummary
-	var status, source string
+	var status, source, total string
 	var created, updated time.Time
 	var sentAt *time.Time
 	err := scan(&s.ID, &s.Number, &s.VendorID, &status, &source, &s.Currency, &s.Revision,
-		&s.BranchID, &created, &updated, &sentAt, &s.LineCount, &s.TotalCents)
+		&s.BranchID, &created, &updated, &sentAt, &s.LineCount, &total)
 	if err != nil {
+		return s, err
+	}
+	if s.TotalCents, err = httpx.ParseCents(total); err != nil {
 		return s, err
 	}
 	s.Status = Status(status).Wire()
