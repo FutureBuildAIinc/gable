@@ -284,6 +284,7 @@ export class GablePricingMatrix extends LitElement {
             ${icon(LayoutGrid, 32, 'w-8 h-8 text-gable-green')}
             Pricing Matrix
           </h1>
+          <a href="/pricing/market-check" data-testid="market-check-link" class="text-blueprint-blue underline text-sm">Market check</a>
           <div class="bg-slate-steel border border-white/10 rounded-lg px-6 py-5 max-w-2xl">
             <p class="text-white font-medium">Category pricing is off on this server</p>
             <p class="text-sm text-slate-400 mt-1">
@@ -309,6 +310,10 @@ export class GablePricingMatrix extends LitElement {
             </p>
           </div>
           <div class="flex items-center gap-2">
+            <a href="/pricing/market-check" data-testid="market-check-link"
+              class="inline-flex items-center gap-2 px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 text-sm">
+              Market check
+            </a>
             ${this._activeTab === 'matrix' && !this._bulkMode ? html`
               <button
                 @click=${() => { this._bulkMode = true; }}

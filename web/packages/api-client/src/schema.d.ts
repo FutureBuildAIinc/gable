@@ -3456,6 +3456,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/market-check/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show the Market check settings
+         * @description Admin or owner. The FB Connect address, whether a webhook id is saved (never the id), the flow's name, the comparison store's label, id and ZIP, the band percent and the margin floor percent. configured is true when the address and the id are both saved.
+         */
+        get: operations["marketCheckGetSettings"];
+        /**
+         * Save the Market check settings
+         * @description Admin or owner. A field left out keeps what is saved. webhook_id absent keeps the saved id, an empty string clears it; a new id is sealed with the vault (refused in words when no vault key is configured). The address is https://host[:port] with no user info, path, query or fragment (http only for a loopback host). Answers the GET shape.
+         */
+        put: operations["marketCheckSaveSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pricing/market-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check picked products against the live store
+         * @description Admin or owner. Runs the FB Connect pricing flow for one to twelve distinct products in batches of three. Per product: our walk in price, the competitor's matched title and price, the difference and position recomputed from our own figures, and a suggested price that keeps the margin floor. A batch that fails marks only its own items error. 409 not_configured when the address or the webhook id is not saved. Cost is never in the answer and is never sent to the flow.
+         */
+        post: operations["marketCheckRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/matching/config": {
         parameters: {
             query?: never;
@@ -10445,6 +10489,73 @@ export interface components {
             branch_id: string;
         };
         StringList: string[];
+        MarketCheckSettings: {
+            connect_url: string;
+            webhook_id_saved: boolean;
+            flow_name: string;
+            store_label: string;
+            store_id: string;
+            store_zip: string;
+            /** @description A decimal percent from 0 to 50. */
+            band_pct: string;
+            /** @description A decimal percent from 0 to 90. */
+            margin_floor_pct: string;
+            configured: boolean;
+        };
+        MarketCheckSettingsRequest: {
+            connect_url?: string;
+            /** @description Write only. Absent keeps the saved id; an empty string clears it. */
+            webhook_id?: string;
+            flow_name?: string;
+            store_label?: string;
+            store_id?: string;
+            store_zip?: string;
+            band_pct?: string;
+            margin_floor_pct?: string;
+        };
+        MarketCheckRunRequest: {
+            product_ids: string[];
+        };
+        MarketCheckCompetitor: {
+            title: string;
+            /** Format: int64 */
+            price_cents: number;
+            /** Format: int64 */
+            listed_price_cents: number;
+            /** @description Kept only when it starts with https://www.homedepot.com/ */
+            link: string;
+            confidence: number;
+            unit_note: string;
+        };
+        MarketCheckRow: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            uom: string;
+            /** Format: int64 */
+            our_price_cents: number;
+            cost_known: boolean;
+            /** @enum {string} */
+            status: "matched" | "unmatched" | "error";
+            competitor: components["schemas"]["MarketCheckCompetitor"] | null;
+            diff_pct: number | null;
+            /** @enum {string} */
+            position: "" | "above" | "below" | "in_line";
+            /** Format: int64 */
+            suggested_price_cents: number | null;
+            /** @enum {string} */
+            reason: "" | "lower_to_band" | "raise_to_band" | "held_at_floor" | "keep" | "no_cost";
+            note: string;
+        };
+        MarketCheckResult: {
+            flow_name: string;
+            store_label: string;
+            store_seen: string | null;
+            band_pct: string;
+            margin_floor_pct: string;
+            rows: components["schemas"]["MarketCheckRow"][];
+        };
         /** @enum {string} */
         MatchingStatus: "PENDING" | "MATCHED" | "PARTIAL" | "EXCEPTION";
         MatchingResult: {
@@ -22248,6 +22359,94 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    marketCheckGetSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketCheckSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    marketCheckSaveSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketCheckSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description The settings after the save. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketCheckSettings"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    marketCheckRun: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketCheckRunRequest"];
+            };
+        };
+        responses: {
+            /** @description One row per picked product, in request order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketCheckResult"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     matchingConfigGet: {
