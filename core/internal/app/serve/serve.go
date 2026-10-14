@@ -33,10 +33,12 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
@@ -597,8 +599,15 @@ func Run() {
 	}
 
 	// Document Module
-	docSvc := document.NewService(productRepo)
-	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc)
+	emailDeliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
+	wall.emailDeliveries(mux, emaildelivery.NewHandler(emailDeliverySvc))
+	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, auditLog)
+	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	docStore := document.NewStore(db)
+	docSvc := document.NewService(productRepo).
+		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
+	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customerSvc, emailSvc).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(emailDeliverySvc)
 	wall.documents(mux, docHandler)
 
 	// Sales Tax Module (exemptions + Avalara when configured; wired before

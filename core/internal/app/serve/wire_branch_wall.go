@@ -11,8 +11,10 @@ import (
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerguard"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -305,5 +307,30 @@ func (w *branchWall) matching(mux *http.ServeMux, svc *matching.Service) {
 // record checks on the invoice and order modules' own routes arrive with
 // their seam.)
 func (w *branchWall) documents(mux *http.ServeMux, h *document.Handler) {
-	h.WithBranchWall(w.guard).RegisterRoutes(mux, w.scoped("admin", "owner", "sales", "finance"))
+	// The statement routes name a customer in the path, so a branch bound key
+	// reaches them only while that customer holds its pin, as the AR
+	// statement read does.
+	base := w.scoped("admin", "owner", "sales", "finance")
+	guard := w.patternWall(base, w.keyWall.CustomerBranch(accountCustomerPathOf()),
+		"GET /api/v1/documents/print/statement/{id}", "POST /api/v1/ar/customers/{id}/statement/email")
+	// A purchase order is the purchasing roles' document.
+	h.WithBranchWall(w.guard).RegisterRoutes(mux, guard, w.scoped("admin", "owner", "purchasing"))
+}
+
+// emailDeliveries mounts the delivery record behind the branch middleware:
+// each row carries the branch of the document it sent, and the list is held
+// to the caller's branches.
+func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handler) {
+	h.RegisterRoutes(mux, w.scoped("admin", "owner", "finance"))
+}
+
+// dealerProfile mounts the dealer profile: every role that prints reads it
+// and its logo, and only admin and owner write them. The profile is one
+// dealer wide row, so it runs behind the role guard alone and a branch bound
+// key is refused the writes by the route allowlist gate.
+func (w *branchWall) dealerProfile(mux *http.ServeMux, h *dealerprofile.Handler) {
+	h.RegisterRoutes(mux, dealerprofile.Guards{
+		Read:  middleware.RequireRole("admin", "owner", "sales", "finance", "purchasing"),
+		Write: middleware.RequireRole("admin", "owner"),
+	})
 }

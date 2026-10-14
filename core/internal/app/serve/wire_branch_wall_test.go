@@ -26,7 +26,9 @@ import (
 	"github.com/gablelbm/gable/internal/chargecode"
 	"github.com/gablelbm/gable/internal/crm"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/document"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/gl"
 	glint "github.com/gablelbm/gable/internal/integrations/gl"
 	"github.com/gablelbm/gable/internal/inventory"
@@ -74,6 +76,7 @@ func asRole(next http.Handler) http.Handler {
 
 type wallFixture struct {
 	srv                *httptest.Server
+	docHandler         *document.Handler
 	branchA, branchB   uuid.UUID
 	yardA, yardB       uuid.UUID
 	productID          uuid.UUID
@@ -235,7 +238,8 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 	wall.products(mux, product.NewHandler(product.NewService(product.NewRepository(db))))
 	wall.chargeCodes(mux, chargecode.NewService(chargecode.NewRepository(db)))
 	wall.customers(mux, customer.NewService(customer.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
-	wall.quotes(mux, quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db))
+	quoteSvc := quote.NewService(quote.NewRepository(db)).WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
+	wall.quotes(mux, quoteSvc)
 	// The crm mount, driven here as serve wires it: the activity routes
 	// behind the branch middleware, their writes one transaction with the
 	// audit row and the activity.* event.
@@ -259,13 +263,21 @@ func newWallFixture(t *testing.T, db *database.DB, multiBranch bool) *wallFixtur
 		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
 	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 	wall.matching(mux, matching.NewService(db, matching.NewRepository(db), fixturePOSource{f: f}, fixtureAPSource{}, slog.Default()))
-	docSvc := document.NewService(product.NewRepository(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
 	accountSvc := account.NewService(db, glSvc, slog.Default())
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db)
 	orderSvc := order.NewService(order.NewRepository(db)).WithTxRunner(db)
-	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default()))
+	docStore := document.NewStore(db)
+	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
+	docSvc := document.NewService(product.NewRepository(db)).
+		WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc)
+	deliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
+	docHandler := document.NewHandler(docSvc, orderSvc, invoiceSvc, customer.NewService(customer.NewRepository(db)), notification.NewLogEmailService(slog.Default())).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc)
 	wall.documents(mux, docHandler)
+	wall.emailDeliveries(mux, emaildelivery.NewHandler(deliverySvc))
+	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
+	f.docHandler = docHandler
 	wall.invoices(mux, invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).WithOutbox(outbox.NewWriter(db, "")).WithOrders(orderSvc).WithStock(invSvc))
 	f.srv = httptest.NewServer(asRole(mux))
 	t.Cleanup(f.srv.Close)
@@ -1672,5 +1684,84 @@ func TestBranchWall_InvoiceAndCreditMemoRoutes(t *testing.T) {
 		if got := strings.Contains(string(body), c.idB); got != c.wantB {
 			t.Errorf("%s: branch B's record present = %v, want %v", c.name, got, c.wantB)
 		}
+	}
+}
+
+// The forms added by item M3 follow the same wall as the invoice and pick
+// ticket: a quote or purchase order of another branch is that module's own 404
+// with a context branch and a 403 with none; a statement is held to the
+// customer's primary branch; the delivery record lists only the caller's
+// branch; and an email route that sends writes its delivery row.
+func TestBranchWall_FormsAndDeliveries(t *testing.T) {
+	testutil.LockOutboxTables(t) // the route calls record outbox events
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+	A := f.branchA.String()
+	ctx := context.Background()
+
+	quoteA, quoteB := uuid.New(), uuid.New()
+	seedWallQuote(t, db, quoteA, f.branchA, f.docCust, "WLF-"+quoteA.String()[:8])
+	seedWallQuote(t, db, quoteB, f.branchB, f.docCust, "WLF-"+quoteB.String()[:8])
+	delA, delB := uuid.New(), uuid.New()
+	for _, d := range []struct{ id, branch uuid.UUID }{{delA, f.branchA}, {delB, f.branchB}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO email_deliveries (id, branch_id, recipient, subject, document_type, status)
+			VALUES ($1, $2, $3, 'wall', 'invoice', 'sent')`, d.id, d.branch, "wall-"+d.id.String()+"@example.test"); err != nil {
+			t.Fatalf("seed delivery: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		f.docHandler.Wait()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM email_deliveries WHERE id IN ($1, $2) OR document_id IN ($3, $4, $5)`, delA, delB, quoteA, quoteB, f.docCust)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
+	})
+
+	const ok = http.StatusOK
+	for _, c := range []struct {
+		name, method, path, role, sub, header string
+		want                                  int
+	}{
+		{"sales prints foreign quote", "GET", "/api/v1/documents/print/quote/" + quoteB.String(), "sales", "u-a", A, http.StatusNotFound},
+		{"sales prints foreign quote, no header", "GET", "/api/v1/documents/print/quote/" + quoteB.String(), "sales", "u-a", "", http.StatusForbidden},
+		{"sales prints own quote", "GET", "/api/v1/documents/print/quote/" + quoteA.String(), "sales", "u-a", A, ok},
+		{"sales emails foreign quote", "POST", "/api/v1/quotes/" + quoteB.String() + "/email", "sales", "u-a", A, http.StatusNotFound},
+		{"sales emails own quote", "POST", "/api/v1/quotes/" + quoteA.String() + "/email", "sales", "u-a", A, http.StatusAccepted},
+		{"purchasing prints foreign purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poB.String(), "purchasing", "u-a", A, http.StatusNotFound},
+		{"purchasing prints foreign purchase order, no header", "GET", "/api/v1/documents/print/purchase-order/" + f.poB.String(), "purchasing", "u-a", "", http.StatusForbidden},
+		{"purchasing prints own purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poA.String(), "purchasing", "u-a", A, ok},
+		{"sales may not print a purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poA.String(), "sales", "u-a", A, http.StatusForbidden},
+		{"sales prints the statement of a customer of branch A", "GET", "/api/v1/documents/print/statement/" + f.docCust.String(), "sales", "u-a", A, ok},
+		{"finance emails the statement", "POST", "/api/v1/ar/customers/" + f.docCust.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
+		{"a bad statement date is a 400", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=nope", "sales", "u-a", A, http.StatusBadRequest},
+		{"an unknown statement customer is a 404", "GET", "/api/v1/documents/print/statement/" + uuid.NewString(), "sales", "u-a", A, http.StatusNotFound},
+		{"warehouse may not read deliveries", "GET", "/api/v1/email-deliveries", "warehouse", "u-a", A, http.StatusForbidden},
+	} {
+		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {
+			t.Errorf("%s: %d, want %d", c.name, got, c.want)
+		}
+	}
+	f.docHandler.Wait()
+
+	// The statement of a customer whose primary branch is A, read by a caller
+	// held to branch B, is not served.
+	B := f.branchB.String()
+	if got := f.call(t, "GET", "/api/v1/documents/print/statement/"+f.docCust.String(), "", "sales", "u-b", B); got == ok {
+		t.Errorf("a caller held to branch B printed branch A's customer statement: %d", got)
+	}
+
+	// The delivery record: a finance caller held to A lists A's row and not B's.
+	status, body := f.callBody(t, "GET", "/api/v1/email-deliveries?limit=200", "", "finance", "u-a", A)
+	if status != ok || !strings.Contains(string(body), delA.String()) || strings.Contains(string(body), delB.String()) {
+		t.Errorf("deliveries held to A: %d, want 200 with A's row and not B's: %s", status, body)
+	}
+	// The sends the routes made are recorded with the log sender's answer.
+	var n int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'quote' AND status = 'sent' AND sender_answer LIKE '%not sent%'`, quoteA).Scan(&n); err != nil || n != 1 {
+		t.Errorf("the emailed quote left %d delivery rows (%v), want 1", n, err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1 AND document_type = 'statement'`, f.docCust).Scan(&n); err != nil || n != 1 {
+		t.Errorf("the emailed statement left %d delivery rows (%v), want 1", n, err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM email_deliveries WHERE document_id = $1`, quoteB).Scan(&n); err != nil || n != 0 {
+		t.Errorf("the refused foreign quote email left %d delivery rows (%v), want 0", n, err)
 	}
 }

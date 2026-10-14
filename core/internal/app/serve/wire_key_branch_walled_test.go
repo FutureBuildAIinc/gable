@@ -43,6 +43,7 @@ type walledTwins struct {
 	poA, poB, poLineA, poLineB, freightA, freightB uuid.UUID
 	appA, appB                                     uuid.UUID
 	shipA, shipB                                   uuid.UUID
+	dlvA, dlvB                                     uuid.UUID
 	vendor                                         uuid.UUID
 }
 
@@ -58,7 +59,7 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		draftQA: uuid.New(), draftQB: uuid.New(), draftOA: uuid.New(), draftOB: uuid.New(),
 		poA: uuid.New(), poB: uuid.New(), poLineA: uuid.New(), poLineB: uuid.New(),
 		freightA: uuid.New(), freightB: uuid.New(), appA: uuid.New(), appB: uuid.New(),
-		shipA: uuid.New(), shipB: uuid.New(),
+		shipA: uuid.New(), shipB: uuid.New(), dlvA: uuid.New(), dlvB: uuid.New(),
 	}
 	vendor := uuid.New()
 	w.vendor = vendor
@@ -186,10 +187,18 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 			t.Fatalf("seed application: %v", err)
 		}
 	}
+	for _, d := range []struct{ id, branch uuid.UUID }{{w.dlvA, f.branchA}, {w.dlvB, f.branchB}} {
+		if _, err := f.db.Pool.Exec(ctx,
+			`INSERT INTO email_deliveries (id, branch_id, recipient, subject, document_type, status)
+			 VALUES ($1, $2, 'pin@example.test', 'pin twin', 'invoice', 'sent')`, d.id, d.branch); err != nil {
+			t.Fatalf("seed email delivery: %v", err)
+		}
+	}
 	t.Cleanup(func() {
 		exec := func(stmt string, args ...any) {
 			_, _ = f.db.Pool.Exec(ctx, stmt, args...)
 		}
+		exec(`DELETE FROM email_deliveries WHERE id IN ($1, $2) OR document_id IN ($3, $4)`, w.dlvA, w.dlvB, f.quoteA, f.quoteB)
 		exec(`DELETE FROM inventory WHERE product_id = $1 AND location_id IN ($2, $3)`, f.posProd, f.yardA, f.yardB)
 		exec(`DELETE FROM ar_applications WHERE id IN ($1, $2)`, w.appA, w.appB)
 		exec(`DELETE FROM po_freight_charges WHERE po_id IN ($1, $2)`, w.poA, w.poB)
@@ -400,6 +409,9 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{method: "POST", path: "/api/v1/invoices/%s/write-offs", body: fixed(`{"amount_cents":1,"reason":"pin","revision":1}`), twin: w.invB, own: w.invA},
 		{method: "GET", path: "/api/v1/documents/print/invoice/%s", twin: w.invB, own: w.invA},
 		{method: "GET", path: "/api/v1/documents/print/pickticket/%s", twin: w.ordB, own: w.ordA},
+		{method: "GET", path: "/api/v1/documents/print/quote/%s", twin: f.quoteB, own: f.quoteA},
+		{method: "POST", path: "/api/v1/quotes/%s/email", twin: f.quoteB, own: f.quoteA},
+		{method: "GET", path: "/api/v1/documents/print/purchase-order/%s", twin: w.poB, own: w.poA},
 		{method: "GET", path: "/api/v1/payments/%s", twin: w.payB, own: w.payA},
 		{method: "POST", path: "/api/v1/payments/%s/applications", twin: w.payB, own: w.payA,
 			body: func(uuid.UUID) string {
@@ -637,6 +649,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		{path: "/api/v1/drafts/quotes", absent: []string{w.draftQB.String()}, present: []string{w.draftQA.String()}},
 		{path: "/api/v1/drafts/orders", absent: []string{w.draftOB.String()}, present: []string{w.draftOA.String()}},
 		{path: "/api/v1/purchase-orders", absent: []string{w.poB.String()}, present: []string{w.poA.String()}},
+		{path: "/api/v1/email-deliveries?limit=200", absent: []string{w.dlvB.String()}, present: []string{w.dlvA.String()}},
 		{path: "/api/v1/purchase-orders/recommendations", absent: []string{}, present: nil},
 		{path: "/api/v1/purchase-orders/reorder-runs", absent: []string{}, present: nil},
 		{path: "/api/v1/purchase-orders/source-summary", absent: []string{}, present: nil},

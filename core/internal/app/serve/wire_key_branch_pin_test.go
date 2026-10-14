@@ -34,10 +34,12 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customeraudit"
 	"github.com/gablelbm/gable/internal/dashboard"
+	"github.com/gablelbm/gable/internal/dealerprofile"
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/document"
 	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/edi"
+	"github.com/gablelbm/gable/internal/emaildelivery"
 	"github.com/gablelbm/gable/internal/events"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/governance"
@@ -162,6 +164,7 @@ var pinDocumentScopes = []string{
 	"products:read", "branches:read", "documents:read", "activities:read", "activities:write", "ar:read", "ar:write",
 	"matching:read", "matching:write", "delivery:read", "delivery:write",
 	"purchase-orders:read", "purchase-orders:write", "quotes:read", "quotes:write",
+	"email-deliveries:read", "dealer-profile:read", "dealer-profile:write",
 }
 
 var pinKeyScopes = []string{
@@ -519,8 +522,16 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	wall.payments(mux, paymentSvc.WithBranchGuard(wall.guard))
 	wall.crm(mux, crm.NewService(crm.NewRepository(db)).
 		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db).WithAudit(audit.NewLogger(db)))
-	wall.documents(mux, document.NewHandler(document.NewService(product.NewRepository(db)),
-		orderSvc, invoiceSvc, customerSvc, notification.NewLogEmailService(slog.Default())))
+	docStore := document.NewStore(db)
+	profileSvc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
+	deliverySvc := emaildelivery.NewService(emaildelivery.NewRepository(db))
+	wall.documents(mux, document.NewHandler(
+		document.NewService(product.NewRepository(db)).
+			WithProfile(profileSvc).WithYards(docStore).WithJobs(docStore).WithStatements(accountSvc),
+		orderSvc, invoiceSvc, customerSvc, notification.NewLogEmailService(slog.Default())).
+		WithQuotes(quoteSvc).WithPurchaseOrders(poSvc).WithDeliveries(deliverySvc))
+	wall.emailDeliveries(mux, emaildelivery.NewHandler(deliverySvc))
+	wall.dealerProfile(mux, dealerprofile.NewHandler(profileSvc))
 	quoteKind := quote.NewDraftKind(quoteSvc)
 	orderKind := order.NewDraftKind(orderSvc)
 	draftsRegistry, derr := drafts.NewRegistry(quoteKind, orderKind)
