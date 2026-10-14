@@ -1539,6 +1539,18 @@ describe('the counter before the till opens, and after a sale completes', () => 
     el.remove();
   });
 
+  it('cannot press a tender while no till is open', async () => {
+    const el = await mountNoTill();
+    (el as unknown as { _sale: Sale })._sale = sale();
+    await el.updateComplete;
+    for (const m of ['cash', 'check', 'card', 'account']) {
+      expect((q(el, `tender-${m}`) as HTMLButtonElement).disabled).toBe(true);
+    }
+    (el as unknown as { _chooseMethod(m: string): void })._chooseMethod('cash');
+    expect((el as unknown as { _tenderMethod: string | null })._tenderMethod).toBeNull();
+    el.remove();
+  });
+
   describe('a completed sale', () => {
     async function completeOne(): Promise<POSTerminal> {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
