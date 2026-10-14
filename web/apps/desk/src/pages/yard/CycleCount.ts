@@ -9,6 +9,7 @@ import { ClipboardCheck, MapPin, ChevronRight, Check, AlertTriangle, Loader2, Sc
 import type { Product } from '../../types/product';
 import { InventoryService } from '../../services/InventoryService';
 import { LocationService } from '../../services/LocationService';
+import { apiErrorMessage } from '../../services/apiError';
 import { ProductService } from '../../services/product.service';
 import type { Location } from '../../types/location';
 import '../../components/BarcodeScanner.ts';
@@ -19,6 +20,8 @@ interface CountLocation {
     location_id: string;
     name: string;
     expected: number;
+    /** The figure already promised to orders here; a count may not go under it. */
+    allocated: number;
     counted: string;
 }
 
@@ -26,6 +29,8 @@ interface CountLocation {
 interface CountItem {
     product: Product;
     locations: CountLocation[];
+    /** The location the person is counting at; a scan adds to it. Null until chosen when there are several. */
+    chosen: string | null;
     /** The locations a found pallet may be added from, loaded on first use. */
     picking: boolean;
 }
@@ -71,18 +76,21 @@ export class CycleCount extends LitElement {
             // every zone or bin that holds it, each with its own expected figure.
             this.items = await Promise.all(subset.map(async (p): Promise<CountItem> => {
                 const rows = await InventoryService.getInventoryByProduct(p.id);
+                const locations = rows
+                    .filter(r => r.location_id)
+                    .map(r => ({
+                        location_id: r.location_id as string,
+                        name: r.location_name || (r.location_id as string),
+                        // The inventory adjust route counts in numbers, so the quantity string is read once, here.
+                        expected: Number(r.quantity),
+                        allocated: Number(r.allocated) || 0,
+                        counted: '',
+                    }));
                 return {
                     product: p,
                     picking: false,
-                    locations: rows
-                        .filter(r => r.location_id)
-                        .map(r => ({
-                            location_id: r.location_id as string,
-                            name: r.location_name || (r.location_id as string),
-                            // The inventory adjust route counts in numbers, so the quantity string is read once, here.
-                            expected: Number(r.quantity),
-                            counted: '',
-                        })),
+                    locations,
+                    chosen: locations.length === 1 ? locations[0].location_id : null,
                 };
             }));
         } catch {
@@ -104,11 +112,15 @@ export class CycleCount extends LitElement {
                 ToastService.show(`${item.product.description} has no location here: add the one you found it in`, 'error');
                 return;
             }
-            // A scan adds one to the first location listed; the person moves it with the count field.
-            const first = item.locations[0];
-            const currentCount = parseFloat(first.counted);
+            // A scan adds one at the location the person chose, never at whichever the list puts first.
+            const locIdx = item.locations.findIndex(l => l.location_id === item.chosen);
+            if (locIdx < 0) {
+                ToastService.show(`Choose the location you are counting ${item.product.description} at, then scan again`, 'error');
+                return;
+            }
+            const currentCount = parseFloat(item.locations[locIdx].counted);
             const newCount = isNaN(currentCount) ? 1 : currentCount + 1;
-            this._setCount(index, 0, newCount.toString());
+            this._setCount(index, locIdx, newCount.toString());
             ToastService.show(`Scanned: ${item.product.description} (+1)`, 'success');
         } else {
             ToastService.show(`Item not found in current zone: ${barcode}`, 'error');
@@ -121,6 +133,30 @@ export class CycleCount extends LitElement {
         locations[locIdx] = { ...locations[locIdx], counted: value };
         next[idx] = { ...next[idx], locations };
         this.items = next;
+    }
+
+    private _choose(idx: number, locationId: string) {
+        const next = [...this.items];
+        next[idx] = { ...next[idx], chosen: locationId };
+        this.items = next;
+    }
+
+    /**
+     * The locations a found pallet may be counted at: those of the yard the page is counting,
+     * read from the yards of the locations already listed (the whole list when none is).
+     */
+    private _offeredLocations(item: CountItem): Location[] {
+        const yardOf = new Map(this.yardLocations.map(l => [l.id, l.branch_id]));
+        const yards = new Set<string>();
+        for (const it of this.items) {
+            for (const l of it.locations) {
+                const y = yardOf.get(l.location_id);
+                if (y) yards.add(y);
+            }
+        }
+        return this.yardLocations
+            .filter(l => !item.locations.some(x => x.location_id === l.id))
+            .filter(l => yards.size === 0 || (l.branch_id !== null && yards.has(l.branch_id)));
     }
 
     /** A found pallet: add a location the product was not listed in, to count it there. */
@@ -142,7 +178,7 @@ export class CycleCount extends LitElement {
         const next = [...this.items];
         const item = next[idx];
         if (!item.locations.some(l => l.location_id === loc.id)) {
-            item.locations = [...item.locations, { location_id: loc.id, name: loc.path || loc.code, expected: 0, counted: '' }];
+            item.locations = [...item.locations, { location_id: loc.id, name: loc.path || loc.code, expected: 0, allocated: 0, counted: '' }];
         }
         next[idx] = { ...item, picking: false };
         this.items = next;
@@ -151,6 +187,7 @@ export class CycleCount extends LitElement {
     private async _handleSubmit() {
         this.submitting = true;
         let failCount = 0;
+        let firstFailure: string | null = null;
         for (const item of this.items) {
             for (const loc of item.locations) {
                 const counted = parseFloat(loc.counted);
@@ -165,20 +202,28 @@ export class CycleCount extends LitElement {
                         reason: `Cycle count - Zone ${this.selectedZone}`,
                         is_delta: false,
                     });
-                } catch {
+                } catch (err) {
                     failCount++;
+                    firstFailure ??= apiErrorMessage(err, 'Failed to adjust stock');
                     console.error('Failed to adjust stock');
                 }
             }
         }
         if (failCount > 0) {
-            ToastService.show(`${failCount} adjustment(s) failed to save`, 'error');
+            ToastService.show(`${failCount} adjustment(s) failed to save: ${firstFailure}`, 'error');
         }
         this.submitting = false;
         this.submitted = true;
     }
 
     private get _allLocations() { return this.items.flatMap(i => i.locations); }
+    /** True while any count is under the figure already allocated to orders: it would be refused. */
+    private get _belowAllocated() {
+        return this._allLocations.some(l => {
+            const c = parseFloat(l.counted);
+            return !isNaN(c) && c < l.allocated;
+        });
+    }
     private get _countedCount() { return this._allLocations.filter(l => l.counted !== '').length; }
     private get _discrepancies() {
         return this._allLocations.filter(l => {
@@ -303,7 +348,13 @@ export class CycleCount extends LitElement {
                                             const hasDiscrep = !isNaN(counted) && counted !== loc.expected;
                                             return html`
                                                 <div data-testid="count-location" class="flex items-center gap-3">
-                                                    <div class="flex-1 min-w-0 text-xs font-mono text-zinc-400 truncate">${loc.name}</div>
+                                                    <button
+                                                        data-testid="count-choose"
+                                                        aria-label="Counting at ${loc.name}"
+                                                        aria-pressed=${item.chosen === loc.location_id ? 'true' : 'false'}
+                                                        @click=${() => this._choose(idx, loc.location_id)}
+                                                        class="flex-1 min-w-0 text-left text-xs font-mono truncate ${item.chosen === loc.location_id ? 'text-amber-400' : 'text-zinc-400 hover:text-white'}"
+                                                    >${loc.name}</button>
                                                     <div class="text-right shrink-0 mr-2">
                                                         <div class="text-[10px] text-zinc-500 font-mono">Expected</div>
                                                         <div class="font-mono text-sm text-zinc-300">${loc.expected}</div>
@@ -324,11 +375,16 @@ export class CycleCount extends LitElement {
                                                         }"
                                                     />
                                                 </div>
+                                                ${!isNaN(counted) && counted < loc.allocated ? html`
+                                                    <p data-testid="count-allocated-warning" class="text-xs text-rose-400">
+                                                        ${counted} is below the ${loc.allocated} allocated to orders here. Count at least the allocated figure, or release the orders first.
+                                                    </p>
+                                                ` : nothing}
                                             `;
                                         })}
                                         ${item.picking ? html`
                                             <div class="rounded-lg border border-white/10 p-2 max-h-40 overflow-y-auto space-y-1">
-                                                ${this.yardLocations.filter(l => !item.locations.some(x => x.location_id === l.id)).map(l => html`
+                                                ${this._offeredLocations(item).map(l => html`
                                                     <button
                                                         @click=${() => this._addLocation(idx, l)}
                                                         class="block w-full text-left text-xs font-mono text-zinc-300 hover:text-amber-400 py-1"
@@ -345,7 +401,7 @@ export class CycleCount extends LitElement {
                         <div class="sticky bottom-20 pt-4">
                             <button
                                 @click=${() => this._handleSubmit()}
-                                ?disabled=${this._countedCount === 0 || this.submitting}
+                                ?disabled=${this._countedCount === 0 || this.submitting || this._belowAllocated}
                                 class="w-full py-4 rounded-xl font-bold text-lg font-mono uppercase tracking-wider transition-all ${this._countedCount > 0
                                     ? 'bg-amber-400 text-black hover:bg-amber-300 active:scale-[0.98] shadow-lg shadow-amber-400/20'
                                     : 'bg-white/5 text-zinc-600 border border-white/10 cursor-not-allowed'
