@@ -29,8 +29,8 @@
         },
         "media": [],
         "product": {
-          "allocated": "14",
-          "available": "413",
+          "allocated": "0",
+          "available": "427",
           "average_unit_cost_ten_thousandths": 35000,
           "base_price_ten_thousandths": 55000,
           "board_length_ft": null,
@@ -59,7 +59,7 @@
           "units": [],
           "upc": null,
           "updated_at": "<ts+0d>",
-          "vendor": "Gable Lumber & Supply",
+          "vendor": "Gable Building Supply",
           "vendor_id": null,
           "weight_lbs": 9,
           "width_in": 3.5

@@ -60,7 +60,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "MANUAL": 13
+        "MANUAL": 14
       }
     }
   },
@@ -2763,7 +2763,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "MANUAL": 15
+        "MANUAL": 16
       }
     }
   },
@@ -2804,7 +2804,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "MANUAL": 15,
+        "MANUAL": 16,
         "REORDER": 1
       }
     }

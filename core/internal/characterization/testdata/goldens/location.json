@@ -902,7 +902,18 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": []
+      "body": [
+        "demo-cashier-kel",
+        "demo-cashier-lk",
+        "demo-driver-kel",
+        "demo-finance",
+        "demo-owner",
+        "demo-purchasing",
+        "demo-sales-kel",
+        "demo-sales-wk",
+        "demo-warehouse-kel",
+        "system"
+      ]
     }
   },
   {
@@ -971,7 +982,17 @@
       "status": 200,
       "content_type": "application/json",
       "body": [
-        "golden-user-1"
+        "demo-cashier-kel",
+        "demo-cashier-lk",
+        "demo-driver-kel",
+        "demo-finance",
+        "demo-owner",
+        "demo-purchasing",
+        "demo-sales-kel",
+        "demo-sales-wk",
+        "demo-warehouse-kel",
+        "golden-user-1",
+        "system"
       ]
     }
   },

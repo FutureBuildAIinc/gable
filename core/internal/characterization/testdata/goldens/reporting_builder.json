@@ -37,7 +37,11 @@
           "status": "DRAFT"
         },
         {
-          "id": 22,
+          "id": 2,
+          "status": "ON_HOLD"
+        },
+        {
+          "id": 20,
           "status": "CONFIRMED"
         },
         {
@@ -137,7 +141,7 @@
       "content_type": "text/csv",
       "body": {
         "binary": {
-          "length": 61,
+          "length": 71,
           "text_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       }

@@ -235,7 +235,11 @@
           "status": "DRAFT"
         },
         {
-          "id": 22,
+          "id": 2,
+          "status": "ON_HOLD"
+        },
+        {
+          "id": 20,
           "status": "CONFIRMED"
         },
         {
