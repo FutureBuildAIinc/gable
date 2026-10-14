@@ -162,6 +162,32 @@ describe('custody — the sessionStorage handoff', () => {
   })
 })
 
+describe('custody — the counter\'s remembered sale keys', () => {
+  it('sign out removes them and leaves other keys', () => {
+    localStorage.setItem('gable.pos.sale.user-1.REG-01', 's1')
+    localStorage.setItem('gable.pos.register.main', 'REG-01')
+    const c = new AuthCustody(memoryStorage())
+    c.signInWithToken(TOKEN)
+    c.signOut()
+    expect(localStorage.getItem('gable.pos.sale.user-1.REG-01')).toBeNull()
+    expect(localStorage.getItem('gable.pos.register.main')).toBe('REG-01')
+    localStorage.removeItem('gable.pos.register.main')
+  })
+})
+
+describe('custody: the desk\'s open apps', () => {
+  it('sign out closes them, so the next person starts on their own home', () => {
+    localStorage.setItem('gable_workspace', JSON.stringify({ tabs: [{ key: 'reporting', path: '/reports/ar-aging' }], active: 'reporting' }))
+    localStorage.setItem('gable.pos.register.main', 'REG-01')
+    const c = new AuthCustody(memoryStorage())
+    c.signInWithToken(TOKEN)
+    c.signOut()
+    expect(localStorage.getItem('gable_workspace')).toBeNull()
+    expect(localStorage.getItem('gable.pos.register.main')).toBe('REG-01')
+    localStorage.removeItem('gable.pos.register.main')
+  })
+})
+
 describe('custody — the handoff value is removed', () => {
   it('on sign out', () => {
     const store = memoryStorage()

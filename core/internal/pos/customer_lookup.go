@@ -47,7 +47,8 @@ func standOf(c *CounterCustomer, open int64) {
 }
 
 // FindCustomers is the counter's customer lookup: by name or account number,
-// the account's standing beside each. The wall is the repository's.
+// the account's standing beside each. The reach is the repository's: every
+// customer to a user (ruling A at the counter), a bound key's pin to a key.
 func (s *Service) FindCustomers(ctx context.Context, q string) ([]CounterCustomer, error) {
 	q = strings.TrimSpace(q)
 	if len(q) < 2 {
@@ -76,8 +77,9 @@ type AttachCustomerIn struct {
 }
 
 // namedCustomer is the counter's one rule for which customers a caller may
-// name: the customer wall (the same predicate the lookup filters by), a
-// hidden or inactive customer answered with the module's 404 and nothing
+// name: ruling A (a user names any yard's customer; a branch bound key only its
+// pin's, the same predicate the lookup filters by), a hidden or inactive
+// customer answered with the module's 404 and nothing
 // written. The attach, the create, the offline sync and the completion all
 // name a customer through it, so a change of rule is a change here only.
 func (s *Service) namedCustomer(ctx context.Context, id uuid.UUID) (*CounterCustomer, CustomerFacts, error) {
@@ -181,4 +183,10 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		return nil, err
 	}
 	return out, nil
+}
+
+// ListRegisters is the counter's register list: the registers the caller's
+// branch reach holds. The wall is the repository's.
+func (s *Service) ListRegisters(ctx context.Context) ([]CounterRegister, error) {
+	return s.repo.ListRegisters(ctx)
 }

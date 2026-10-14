@@ -203,3 +203,12 @@ export interface QuickSearchResult {
     uom: string;
     in_stock: string;
 }
+
+/** A register the caller may use, with its branch (GET /api/v1/pos/registers). */
+export interface CounterRegister {
+    id: string;
+    name: string;
+    branch_id: string;
+    branch_code: string;
+    branch_name: string;
+}

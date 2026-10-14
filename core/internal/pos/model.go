@@ -285,3 +285,12 @@ type CatalogProduct struct {
 
 // now is the service's clock, replaceable in tests.
 var saleNow = time.Now
+
+// CounterRegister is a register the caller may use, with its branch.
+type CounterRegister struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	BranchID   uuid.UUID `json:"branch_id"`
+	BranchCode string    `json:"branch_code"`
+	BranchName string    `json:"branch_name"`
+}

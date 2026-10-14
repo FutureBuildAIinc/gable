@@ -17,6 +17,7 @@ import type {
     TillSession,
     TillReport,
     CounterCustomer,
+    CounterRegister,
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
@@ -140,6 +141,16 @@ export const posService = {
     },
 
     // --- The counter's customer ---
+
+    /** The registers the caller may use, by branch then name. */
+    async listRegisters(): Promise<CounterRegister[]> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/registers`),
+            'Failed to list the registers',
+        );
+        const page: { items: CounterRegister[] } = await response.json();
+        return page.items;
+    },
 
     /** Customers by name or account number, each with the account's standing. */
     async findCustomers(query: string): Promise<CounterCustomer[]> {
