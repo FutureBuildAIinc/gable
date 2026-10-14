@@ -72,6 +72,8 @@ export interface ImageWords {
     feature: string;
     featureDescription: string;
     failed: string;
+    /** A generation the provider refused the saved key for: no retry can work. */
+    refused: string;
     empty: string;
 }
 
@@ -85,7 +87,8 @@ export function imageWords(provider: AIProvider | null | undefined): ImageWords 
             heading: 'AI Illustration',
             feature: 'Product Illustrations',
             featureDescription: 'Claude draws a flat product illustration in the catalog style for each product',
-            failed: 'The illustration could not be drawn or was refused. Please try again.',
+            failed: 'The illustration could not be drawn. If it keeps failing, an administrator checks the key in Tech Admin, AI Settings.',
+            refused: 'Anthropic refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.',
             empty: 'No images yet. Generate an illustration using AI above.',
         };
     }
@@ -96,7 +99,8 @@ export function imageWords(provider: AIProvider | null | undefined): ImageWords 
         heading: 'AI Image Generation',
         feature: 'Product Image Generation',
         featureDescription: 'Generate professional product images for your catalog',
-        failed: 'Image generation failed. Please try again.',
+        failed: 'Image generation failed. If it keeps failing, an administrator checks the key in Tech Admin, AI Settings.',
+        refused: 'OpenRouter refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.',
         empty: 'No images yet. Generate one using AI above.',
     };
 }

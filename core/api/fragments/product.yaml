@@ -1488,6 +1488,11 @@ components:
           - generating
           - ready
           - failed
+          - refused
+          description: >-
+            refused is a generation the provider refused for the saved key
+            (a retry cannot work; an administrator enters the key again in
+            Tech Admin, AI Settings).
         gen_model:
           type: string
         gen_prompt:
