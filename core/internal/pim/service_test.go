@@ -145,8 +145,8 @@ func TestPIMGenerateDescriptions_NilAIHardError(t *testing.T) {
 func TestPIMGenerateImage_NilAIHardError(t *testing.T) {
 	s := newPIMTestService(&stubPIMRepo{}, nil)
 	_, err := s.GenerateImage(context.Background(), uuid.New(), "", "")
-	if err == nil || !strings.Contains(err.Error(), "no AI configured") {
-		t.Fatalf("want hard 'no AI configured' error, got %v", err)
+	if !errors.Is(err, ai.ErrAIOff) {
+		t.Fatalf("want the AI off error, got %v", err)
 	}
 }
 

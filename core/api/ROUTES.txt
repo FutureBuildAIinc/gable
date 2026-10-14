@@ -84,6 +84,7 @@ PUT	/api/v1/admin/modules/{id}	internal/staff	h.SetModuleEnabled
 DELETE	/api/v1/admin/settings/ai	internal/techadmin	h.DeleteAISettings
 GET	/api/v1/admin/settings/ai	internal/techadmin	h.GetAISettings
 PUT	/api/v1/admin/settings/ai	internal/techadmin	h.SaveAISettings
+POST	/api/v1/admin/settings/ai/test	internal/techadmin	h.TestAIConnection
 DELETE	/api/v1/admin/settings/routing	internal/techadmin	h.DeleteRoutingSettings
 GET	/api/v1/admin/settings/routing	internal/techadmin	h.GetRoutingSettings
 PUT	/api/v1/admin/settings/routing	internal/techadmin	h.SaveRoutingSettings

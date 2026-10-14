@@ -356,11 +356,16 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "anthropic_configured": false,
+        "anthropic_key_hint": null,
         "base_url": null,
         "configured": false,
         "key_hint": null,
+        "model": "claude-sonnet-5-5",
+        "provider": "openrouter",
         "revision": 1,
-        "source": "none"
+        "source": "none",
+        "vault_present": false
       }
     }
   },

@@ -19,7 +19,7 @@ import (
 // total manually (never a silent success). extractFreight isolates that contract
 // so it can be tested without the DB-backed PO lookup.
 
-const freightManualMsg = "please enter the freight total manually"
+const freightManualMsg = "AI is off"
 
 func TestExtractFreight_NilClientHardError(t *testing.T) {
 	s := &Service{} // aiClient nil

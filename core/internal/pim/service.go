@@ -125,8 +125,8 @@ func (s *Service) UpdateContent(ctx context.Context, productID uuid.UUID, req Up
 
 // GenerateDescriptions uses Claude to generate product descriptions and extract attributes
 func (s *Service) GenerateDescriptions(ctx context.Context, productID uuid.UUID, tone, audience string) (*PIMContent, error) {
-	if s.ai == nil {
-		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
+	if s.ai == nil || !s.ai.IsConfigured(ctx) {
+		return nil, ai.ErrAIOff
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -218,8 +218,8 @@ Only include attribute keys where the value can be reasonably inferred from the 
 
 // GenerateSEO uses Claude to generate SEO metadata
 func (s *Service) GenerateSEO(ctx context.Context, productID uuid.UUID, targetKeywords []string) (*PIMContent, error) {
-	if s.ai == nil {
-		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
+	if s.ai == nil || !s.ai.IsConfigured(ctx) {
+		return nil, ai.ErrAIOff
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -298,8 +298,11 @@ Respond with ONLY valid JSON (no markdown fences):
 // then flips the row to "ready" (with the data URI) or "failed". The client polls
 // the media list until the row settles. A missing AI key is still a hard error.
 func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style, prompt string) (*PIMMedia, error) {
-	if s.ai == nil || !s.ai.IsConfigured(ctx) {
-		return nil, fmt.Errorf("no AI configured — set the OpenRouter key in Admin > AI Settings")
+	if s.ai == nil {
+		return nil, ai.ErrAIOff
+	}
+	if err := s.ai.CheckImage(ctx); err != nil {
+		return nil, err
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -420,8 +423,8 @@ Your SVGs must be self-contained with no external dependencies.`
 
 // GenerateCollateral uses Claude to generate marketing collateral
 func (s *Service) GenerateCollateral(ctx context.Context, productID uuid.UUID, collateralType, tone, audience string) (*PIMCollateral, error) {
-	if s.ai == nil {
-		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
+	if s.ai == nil || !s.ai.IsConfigured(ctx) {
+		return nil, ai.ErrAIOff
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
