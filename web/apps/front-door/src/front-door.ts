@@ -337,7 +337,7 @@ export class GableFrontDoor extends LitElement {
             .value=${this._devName}
             @input=${(e: Event) => { this._devName = (e.target as HTMLInputElement).value; }}
             @keydown=${(e: KeyboardEvent) => { if (e.key === 'Enter') this._signIn(); }}
-            aria-label="Sign in with another name"
+            aria-label="Display name"
             class="w-full bg-slate-steel/50 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50 focus:bg-slate-steel transition-all"
           />
         </label>

@@ -7,7 +7,7 @@
  * card with a "Your session expired" line (retrying could only 401 again).
  * The persona cards on the dev sign in are tested below: one per the
  * DEMO-PERSONAS table, the persona's role shapes the tiles, and the existing
- * "Display name" field becomes "Sign in with another name".
+ * "Display name" field sits under a "Sign in with another name" heading.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { authConfig, authCustody } from '@gable/auth';
@@ -122,7 +122,8 @@ describe('front door persona cards (dev mode)', () => {
     const el = await mount();
     const label = [...el.querySelectorAll('span')].find((s) => s.textContent?.trim() === 'Sign in with another name');
     expect(label).toBeDefined();
-    const input = el.querySelector('input[aria-label="Sign in with another name"]');
+    // The field's accessible name stays "Display name": the e2e suite signs in through it.
+    const input = el.querySelector('input[aria-label="Display name"]');
     expect(input).not.toBeNull();
   });
 
