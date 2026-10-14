@@ -262,15 +262,92 @@ describe('the counter as the Panels layout', () => {
       expect(el.querySelector('[data-testid="pos-lines"]')?.textContent).toContain('$42.00');
     });
 
-    it('allows a decimal quantity and defaults to one', async () => {
+    it('allows a decimal quantity for a length unit and defaults to one', async () => {
       svc.addItem.mockResolvedValue(sale());
       const el = await mount(sale({ lines: [] }));
       expect((el.querySelector('#pos-qty') as HTMLInputElement).value).toBe('1');
+      (el as unknown as Inner)._searchResults = [{ ...result, product_id: 'p-trim', sku: 'TRIM-LF', uom: 'LF' }];
+      await el.updateComplete;
+      await setQty(el, '2.5');
+      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-trim', '2.5', 'LF');
+    });
+
+    it('refuses a decimal quantity for a unit counted whole and sends nothing', async () => {
+      const el = await mount(sale({ lines: [] }));
       await setResults(el);
       await setQty(el, '2.5');
       (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
       await flush(el);
-      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '2.5', 'EA');
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('EA is counted in whole units');
+      expect(svc.addItem).not.toHaveBeenCalled();
+    });
+
+    it('adds a whole quantity of a unit counted whole, written with a zero fraction', async () => {
+      svc.addItem.mockResolvedValue(sale());
+      const el = await mount(sale({ lines: [] }));
+      await setResults(el);
+      await setQty(el, '3.0');
+      (el.querySelector('[data-testid="pos-results"] button') as HTMLElement).click();
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '3', 'EA');
+    });
+
+    it('on Enter right after typing, adds a result of the current query, never the earlier one', async () => {
+      svc.addItem.mockResolvedValue(sale());
+      const ten = { ...result, product_id: 'p-10', sku: '2X4-10' };
+      // The search answers "2X4-8" with the longer board first and the exact SKU second.
+      svc.searchProducts.mockResolvedValue([ten, result]);
+      const el = await mount(sale({ lines: [] }));
+      (el as unknown as Inner)._searchResults = [ten, result];
+      await el.updateComplete;
+      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
+      input.value = '2X4-8';
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await flush(el);
+      expect(svc.searchProducts).toHaveBeenCalledWith('2X4-8');
+      expect(svc.addItem).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-2x4', '1', 'EA');
+    });
+
+    it('on Enter with no exact SKU match, adds the top result of the current search', async () => {
+      svc.addItem.mockResolvedValue(sale());
+      const board = { ...result, product_id: 'p-board', sku: 'STUD-92' };
+      svc.searchProducts.mockResolvedValue([board]);
+      const el = await mount(sale({ lines: [] }));
+      (el as unknown as Inner)._searchResults = [result];
+      await el.updateComplete;
+      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
+      input.value = 'stud';
+      input.dispatchEvent(new Event('input'));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+      await flush(el);
+      expect(svc.addItem).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledWith('s1', 'p-board', '1', 'EA');
+    });
+
+    it('drops a search answer that arrives after a newer query', async () => {
+      let late: (v: unknown) => void = () => {};
+      svc.searchProducts
+        .mockImplementationOnce(() => new Promise((r) => { late = r; }))
+        .mockResolvedValueOnce([result]);
+      const el = await mount(sale({ lines: [] }));
+      const input = el.querySelector('#pos-search-input') as HTMLInputElement;
+      input.value = 'old';
+      input.dispatchEvent(new Event('input'));
+      await el.updateComplete;
+      await new Promise((r) => setTimeout(r, 250));
+      input.value = '2X4-8';
+      input.dispatchEvent(new Event('input'));
+      await el.updateComplete;
+      await new Promise((r) => setTimeout(r, 250));
+      late([{ ...result, product_id: 'p-old', sku: 'OLD-1' }]);
+      await flush(el);
+      const shown = el.querySelector('[data-testid="pos-results"]')?.textContent ?? '';
+      expect(shown).toContain('2X4-8');
+      expect(shown).not.toContain('OLD-1');
     });
 
     it('refuses a zero or negative quantity and adds nothing', async () => {

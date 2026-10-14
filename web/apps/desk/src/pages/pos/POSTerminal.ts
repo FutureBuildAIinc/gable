@@ -7,7 +7,7 @@ import { posService, dollarsToCents, type TenderIn } from '../../services/POSSer
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer } from '../../types/pos';
 import { chargeRefusal, standingOf, money } from './standing';
 import { formatPrice4 } from '../../lib/utils';
-import { normalizeQuantity } from '../../lib/money';
+import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState } from './panels';
 import { authCustody } from '@gable/auth';
 import '../../components/BarcodeScanner.ts';
@@ -70,6 +70,10 @@ export class POSTerminal extends LitElement {
   private _newTxTimer: ReturnType<typeof setTimeout> | null = null;
   private _errorTimer: ReturnType<typeof setTimeout> | null = null;
   private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
+  /** Counts searches; an answer to an older one is dropped. */
+  private _searchSeq = 0;
+  /** True from a keystroke until the results on screen answer the typed query. */
+  private _resultsStale = false;
   private _custDebounce: ReturnType<typeof setTimeout> | null = null;
 
   connectedCallback() {
@@ -180,6 +184,43 @@ export class POSTerminal extends LitElement {
     }
   }
 
+  /**
+   * Enter adds only a result of the query now in the box. While the typed text is
+   * ahead of the results on screen (the search delay), the search runs at once and
+   * the exact SKU, else the top result of that search, is added.
+   */
+  private _searchKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' && this._resultsStale && this._searchQuery.trim().length >= 2) {
+      e.preventDefault();
+      void this._enterSearch();
+      return;
+    }
+    this._resultKey(e);
+  }
+
+  private async _enterSearch() {
+    const query = this._searchQuery;
+    if (this._searchDebounce) clearTimeout(this._searchDebounce);
+    try {
+      const results = await this._runSearch(query);
+      if (results === null || results.length === 0) return;
+      const exact = results.find((r) => r.sku.toLowerCase() === query.trim().toLowerCase());
+      await this._addItem(exact ?? results[0]);
+    } catch {
+      this._error = 'Search failed';
+    }
+  }
+
+  /** Runs a search; null when a newer query was typed before it answered. */
+  private async _runSearch(query: string): Promise<QuickSearchResult[] | null> {
+    const seq = ++this._searchSeq;
+    const results = await posService.searchProducts(query);
+    if (seq !== this._searchSeq) return null;
+    this._searchResults = results;
+    this._resultsStale = false;
+    return results;
+  }
+
   /* ---- Barcode scanning ---- */
 
   private async _handleScan(barcode: string) {
@@ -203,15 +244,18 @@ export class POSTerminal extends LitElement {
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
 
     if (this._searchQuery.length < 2) {
+      this._searchSeq++;
       this._searchResults = [];
+      this._resultsStale = false;
       return;
     }
 
     this._searchDebounce = setTimeout(async () => {
       try {
-        this._searchResults = await posService.searchProducts(this._searchQuery);
+        await this._runSearch(this._searchQuery);
       } catch {
         this._searchResults = [];
+        this._resultsStale = false;
       }
     }, 200);
   }
@@ -395,12 +439,18 @@ export class POSTerminal extends LitElement {
       this._error = 'Enter a quantity above zero';
       return;
     }
+    if (qty.includes('.') && isCountedUnit(product.uom)) {
+      this._error = `${product.uom} is counted in whole units`;
+      return;
+    }
     try {
       this._error = null;
       const updated = await posService.addItem(this._sale.id, product.product_id, qty, product.uom);
       this._sale = updated;
       this._searchQuery = '';
+      this._searchSeq++;
       this._searchResults = [];
+      this._resultsStale = false;
       this._highlight = 0;
       this._qtyText = '1';
       this._searchInput?.focus();
@@ -765,15 +815,15 @@ export class POSTerminal extends LitElement {
             <input id="pos-search-input" type="text" autocomplete="off"
               placeholder="Search by SKU or description"
               .value=${this._searchQuery}
-              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; this._highlight = 0; }}
-              @keydown=${(e: KeyboardEvent) => this._resultKey(e)}
+              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; this._highlight = 0; this._resultsStale = true; }}
+              @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
               class="flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green"
               aria-label="Search product by SKU or description" />
             <label class="sr-only" for="pos-qty">Quantity</label>
             <input id="pos-qty" type="text" inputmode="decimal" autocomplete="off"
               .value=${this._qtyText}
               @input=${(e: Event) => { this._qtyText = (e.target as HTMLInputElement).value; }}
-              @keydown=${(e: KeyboardEvent) => this._resultKey(e)}
+              @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
               class="w-20 rounded-lg border border-white/10 bg-deep-space px-3 py-3 text-right font-mono text-base text-white outline-none focus:border-gable-green"
               title="Quantity to add" aria-label="Quantity" />
             <button @click=${() => { this._isScanning = true; }}
