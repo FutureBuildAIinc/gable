@@ -13,15 +13,20 @@ import type { LitElement } from 'lit'
 import { mount, flush, update, q, text, jsonResponse } from '../../test/dom'
 
 const PRODUCT = { id: 'p-hanger', sku: 'HANGER-28', description: 'Joist Hanger 2x8', on_hand: '412.0000', allocated: '0.0000' }
-const ROW = (id: string, loc: string, name: string, qty: string) => ({
+const ROW = (id: string, loc: string, name: string, qty: string, allocated = '0.0000') => ({
   id, product_id: PRODUCT.id, location_id: loc, location_name: name,
-  quantity: qty, allocated: '0.0000', available: qty, uom: 'EA', updated_at: '2026-01-01T00:00:00Z',
+  quantity: qty, allocated, available: qty, uom: 'EA', updated_at: '2026-01-01T00:00:00Z',
 })
+const LOC = (id: string, path: string, branch: string) => ({ id, path, code: path, branch_id: branch, type: 'zone', name: null, parent_id: branch })
+
+// The levels list answers newest first: the zone (a later receipt) before the yard's own row.
+let levels = [ROW('i2', 'loc-zone', 'KEL-MAIN/KEL-A', '300.0000'), ROW('i1', 'loc-yard', 'KEL-MAIN', '112.0000')]
 
 let posts: Array<Record<string, unknown>>
 
 beforeEach(() => {
   localStorage.setItem('token', 'test-token')
+  levels = [ROW('i2', 'loc-zone', 'KEL-MAIN/KEL-A', '300.0000'), ROW('i1', 'loc-yard', 'KEL-MAIN', '112.0000')]
   posts = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
@@ -30,7 +35,13 @@ beforeEach(() => {
       return jsonResponse({ status: 'ok' })
     }
     if (url.includes('/api/v1/inventory')) {
-      return jsonResponse({ items: [ROW('i1', 'loc-yard', 'KEL-MAIN', '112.0000'), ROW('i2', 'loc-zone', 'KEL-MAIN/KEL-A', '300.0000')], next_cursor: null })
+      return jsonResponse({ items: levels, next_cursor: null })
+    }
+    if (url.includes('/api/v1/locations')) {
+      return jsonResponse({ items: [
+        LOC('loc-yard', 'KEL-MAIN', 'yard-1'), LOC('loc-zone', 'KEL-MAIN/KEL-A', 'yard-1'),
+        LOC('loc-zone-b', 'KEL-MAIN/KEL-B', 'yard-1'), LOC('loc-other', 'LK-MAIN/LK-A', 'yard-2'),
+      ], next_cursor: null, limit: 200 })
     }
     if (url.includes('/api/v1/products')) return jsonResponse({ items: [PRODUCT], next_cursor: null })
     return jsonResponse({ items: [], next_cursor: null })
@@ -57,19 +68,20 @@ describe('Cycle count by location', () => {
     const el = await openZone()
     const rows = Array.from(el.querySelectorAll('[data-testid="count-location"]'))
     expect(rows.length).toBe(2)
-    expect(text(rows[0])).toContain('KEL-MAIN')
-    expect(text(rows[0])).toContain('112')
-    expect(text(rows[1])).toContain('KEL-A')
-    expect(text(rows[1])).toContain('300')
+    const byName = (n: string) => rows.find((r) => text(r).startsWith(`${n} Expected`)) as Element
+    expect(text(byName('KEL-MAIN/KEL-A'))).toContain('300')
+    expect(text(byName('KEL-MAIN'))).toContain('112')
   })
 
   it('writes each count to its own location and none without one', async () => {
     const el = await openZone()
     const inputs = Array.from(el.querySelectorAll<HTMLInputElement>('[data-testid="count-input"]'))
-    inputs[0].value = '110'
-    inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
-    inputs[1].value = '300'
-    inputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    const yardInput = inputs.find((i) => i.getAttribute('aria-label')?.endsWith('KEL-MAIN')) as HTMLInputElement
+    const zoneInput = inputs.find((i) => i.getAttribute('aria-label')?.endsWith('KEL-A')) as HTMLInputElement
+    yardInput.value = '110'
+    yardInput.dispatchEvent(new Event('input', { bubbles: true }))
+    zoneInput.value = '300'
+    zoneInput.dispatchEvent(new Event('input', { bubbles: true }))
     await update(el, {})
     const submit = Array.from(el.querySelectorAll('button')).find((b) => text(b).startsWith('Submit Count'))
     ;(submit as HTMLButtonElement).click()
@@ -81,5 +93,48 @@ describe('Cycle count by location', () => {
       { product_id: PRODUCT.id, location_id: 'loc-yard', quantity: 110, reason: expect.stringContaining('Cycle count'), is_delta: false },
     ])
     expect(q(el, '[data-testid="count-done"]')).toBeTruthy()
+  })
+
+  it('adds a scan to the location the person chose, never the newest one', async () => {
+    const el = await openZone()
+    const scan = (code: string) => (el as unknown as { _handleScan(c: string): void })._handleScan(code)
+    // With two locations and none chosen, a scan asks which and counts nothing.
+    scan('HANGER-28')
+    await update(el, {})
+    for (const i of el.querySelectorAll<HTMLInputElement>('[data-testid="count-input"]')) expect(i.value).toBe('')
+    // Choose the yard's own row, then scan: the +1 lands there.
+    const chooseYard = Array.from(el.querySelectorAll<HTMLElement>('[data-testid="count-choose"]'))
+      .find((b) => b.getAttribute('aria-label')?.endsWith('KEL-MAIN')) as HTMLElement
+    chooseYard.click()
+    await update(el, {})
+    scan('HANGER-28')
+    await update(el, {})
+    const value = (name: string) => (Array.from(el.querySelectorAll<HTMLInputElement>('[data-testid="count-input"]'))
+      .find((i) => i.getAttribute('aria-label')?.endsWith(name)) as HTMLInputElement).value
+    expect(value('KEL-MAIN')).toBe('1')
+    expect(value('KEL-A')).toBe('')
+  })
+
+  it('offers only the yard\'s own locations for a found pallet', async () => {
+    const el = await openZone()
+    const found = Array.from(el.querySelectorAll('button')).find((b) => text(b).includes('Found elsewhere')) as HTMLButtonElement
+    found.click()
+    await flush()
+    await update(el, {})
+    const offered = Array.from(el.querySelectorAll('button')).map((b) => text(b))
+    expect(offered).toContain('KEL-MAIN/KEL-B')
+    expect(offered).not.toContain('LK-MAIN/LK-A')
+  })
+
+  it('says in words that a count is under the allocated figure, and holds the submit', async () => {
+    levels = [ROW('i1', 'loc-yard', 'KEL-MAIN', '112.0000', '40.0000')]
+    const el = await openZone()
+    const input = q<HTMLInputElement>(el, '[data-testid="count-input"]')
+    input.value = '10'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await update(el, {})
+    expect(text(q(el, '[data-testid="count-allocated-warning"]'))).toContain('40 allocated to orders')
+    const submit = Array.from(el.querySelectorAll('button')).find((b) => text(b).startsWith('Submit Count')) as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
   })
 })
