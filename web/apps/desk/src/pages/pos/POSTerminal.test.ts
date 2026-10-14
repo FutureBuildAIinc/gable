@@ -1926,3 +1926,39 @@ describe('the resets after Clear tenders and Clear sale', () => {
     el.remove();
   });
 });
+
+describe('a changed customer starts the tender over', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  type Inner = {
+    _customer: CounterCustomer | null; _tenderMethod: string | null; _pendingTenders: unknown[];
+    _chooseCustomer(c: CounterCustomer): Promise<void>; _clearCustomer(): Promise<void>;
+  };
+  const inner = (el: POSTerminal) => el as unknown as Inner;
+  const withTender = async () => {
+    const el = await mount(sale({ lines: [], customer_id: 'cu1' }));
+    inner(el)._customer = account;
+    inner(el)._tenderMethod = 'account';
+    inner(el)._pendingTenders = [{ method: 'cash', amount_cents: 1000 }];
+    await el.updateComplete;
+    return el;
+  };
+
+  it('clears the chosen and the added tenders when another customer is named', async () => {
+    const el = await withTender();
+    svc.attachCustomer.mockResolvedValue(sale({ lines: [], customer_id: 'cu2' }));
+    await inner(el)._chooseCustomer({ ...account, id: 'cu2', name: 'Other Builders' } as CounterCustomer);
+    expect(inner(el)._tenderMethod).toBeNull();
+    expect(inner(el)._pendingTenders).toEqual([]);
+    el.remove();
+  });
+
+  it('clears them when the sale goes back to a walk in', async () => {
+    const el = await withTender();
+    svc.attachCustomer.mockResolvedValue(sale({ lines: [], customer_id: null }));
+    await inner(el)._clearCustomer();
+    expect(inner(el)._tenderMethod).toBeNull();
+    expect(inner(el)._pendingTenders).toEqual([]);
+    el.remove();
+  });
+});
