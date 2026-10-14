@@ -175,6 +175,8 @@ type Repository interface {
 	// CounterCustomerByID reads one customer through the same wall; false
 	// when it does not exist or the wall hides it.
 	CounterCustomerByID(ctx context.Context, id uuid.UUID) (*CounterCustomer, bool, error)
+	// ListRegisters reads the registers the caller's branch reach holds.
+	ListRegisters(ctx context.Context) ([]CounterRegister, error)
 	// SetSaleAccount names the customer, currency, purchase order and job of
 	// an open sale and moves its revision.
 	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
@@ -1701,13 +1703,24 @@ type CounterJob struct {
 const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE),
 	CASE WHEN c.credit_limit IS NULL THEN NULL ELSE ROUND(c.credit_limit * 100)::bigint END`
 
+// counterCustomerReach is the customer wall's two parameters at the counter
+// (ruling A): a user reaches every customer whatever the user's yard or
+// grants, so both are nil; a branch bound key keeps its pin.
+func counterCustomerReach(ctx context.Context) (*uuid.UUID, *string) {
+	if pin, ok := branchctx.KeyBranchFromContext(ctx); ok {
+		return &pin, nil
+	}
+	return nil, nil
+}
+
 func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string, limit int) ([]CounterCustomer, error) {
+	branch, grants := counterCustomerReach(ctx)
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE COALESCE(c.is_active, TRUE) AND c.account_number <> 'WALK-IN'
 		  AND (c.name ILIKE '%' || $1 || '%' OR c.account_number ILIKE '%' || $1 || '%')
 		  AND `+customer.Wall("c", 2, 3)+`
 		ORDER BY c.name, c.id LIMIT $4`,
-		q, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), limit)
+		q, branch, grants, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search customers: %w", err)
 	}
@@ -1733,10 +1746,11 @@ func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string,
 }
 
 func (r *PostgresRepository) CounterCustomerByID(ctx context.Context, id uuid.UUID) (*CounterCustomer, bool, error) {
+	branch, grants := counterCustomerReach(ctx)
 	var c CounterCustomer
 	err := r.ex(ctx).QueryRow(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE c.id = $1 AND COALESCE(c.is_active, TRUE) AND `+customer.Wall("c", 2, 3),
-		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
+		id, branch, grants).
 		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
@@ -1775,4 +1789,35 @@ func (r *PostgresRepository) SetSaleAccount(ctx context.Context, saleID uuid.UUI
 		return fmt.Errorf("failed to name the sale's customer: %w", mapWriteError(err))
 	}
 	return nil
+}
+
+// ListRegisters reads the registers the caller may use, by branch then name.
+// The branch is the register's location's branch, else its own, the way a
+// sale resolves it (GetRegisterBranch); the wall is the same branch wall the
+// sale reads carry: a context branch (a header, or a bound key's pin), else
+// the user's grants, else every branch.
+func (r *PostgresRepository) ListRegisters(ctx context.Context) ([]CounterRegister, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT x.id, x.name, x.branch_id, x.branch_code, x.branch_name FROM (
+			SELECT pr.id, pr.name, COALESCE(l.branch_id, pr.branch_id) AS branch_id,
+			       b.code AS branch_code, COALESCE(b.name, b.code) AS branch_name
+			  FROM pos_registers pr
+			  LEFT JOIN locations l ON l.id = pr.location_id
+			  JOIN locations b ON b.id = COALESCE(l.branch_id, pr.branch_id)
+		) x
+		WHERE `+middleware.Wall("x", 1, 2)+`
+		ORDER BY x.branch_name, x.branch_code, x.name, x.id LIMIT 200`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list the registers: %w", err)
+	}
+	defer rows.Close()
+	out := []CounterRegister{}
+	for rows.Next() {
+		var g CounterRegister
+		if err := rows.Scan(&g.ID, &g.Name, &g.BranchID, &g.BranchCode, &g.BranchName); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }

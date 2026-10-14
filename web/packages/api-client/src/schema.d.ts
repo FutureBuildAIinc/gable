@@ -4491,9 +4491,29 @@ export interface paths {
         };
         /**
          * The counter's customer lookup
-         * @description Customers matching the q text (name or account number, at most 10) that the caller's branch context or wall reaches, each with the account's standing the charge tender will read: the credit limit (null for none, 0 for no credit), the open receivable, the available credit and a standing word (good, no_limit, no_credit, over_limit), whether the account asks for a purchase order and its open jobs. A bare array, never null; q under two characters answers [].
+         * @description Customers matching the q text (name or account number, at most 10), every customer to a user whatever the user's yard or grants (ruling A at the counter) and a branch bound key's pin to a key, each with the account's standing the charge tender will read: the credit limit (null for none, 0 for no credit), the open receivable, the available credit and a standing word (good, no_limit, no_credit, over_limit), whether the account asks for a purchase order and its open jobs. A bare array, never null; q under two characters answers [].
          */
         get: operations["posCustomerFind"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/registers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The registers the caller may use
+         * @description The registers within the caller's reach, each with its branch's code and name, ordered by branch then name, in the list envelope: a caller with a branch in context (the header, or a branch bound key's pin) sees that branch's registers; a user with no header sees the branches of the user's grants; an administrator or owner with no header sees all. The counter opens on its yard's register.
+         */
+        get: operations["posRegisterList"];
         put?: never;
         post?: never;
         delete?: never;
@@ -12116,6 +12136,19 @@ export interface components {
             expected_by_method: {
                 [key: string]: number;
             };
+        };
+        PosRegister: {
+            id: string;
+            name: string;
+            /** Format: uuid */
+            branch_id: string;
+            branch_code: string;
+            branch_name: string;
+        };
+        PosRegisterPage: {
+            items: components["schemas"]["PosRegister"][];
+            next_cursor: string | null;
+            limit: number;
         };
         /** @description The immutable end-of-day snapshot written once when the session closes. */
         PosZReport: {
@@ -23920,6 +23953,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PosCounterCustomer"][];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posRegisterList: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The registers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosRegisterPage"];
                 };
             };
             400: components["responses"]["BadRequestEither"];

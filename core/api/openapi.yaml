@@ -10290,7 +10290,7 @@ paths:
       tags: [pos]
       summary: The counter's customer lookup
       description: >-
-        Customers matching the q text (name or account number, at most 10) that the caller's branch context or wall reaches, each with the account's standing the charge tender will read: the credit limit (null for none, 0 for no credit), the open receivable, the available credit and a standing word (good, no_limit, no_credit, over_limit), whether the account asks for a purchase order and its open jobs. A bare array, never null; q under two characters answers [].
+        Customers matching the q text (name or account number, at most 10), every customer to a user whatever the user's yard or grants (ruling A at the counter) and a branch bound key's pin to a key, each with the account's standing the charge tender will read: the credit limit (null for none, 0 for no credit), the open receivable, the available credit and a standing word (good, no_limit, no_credit, over_limit), whether the account asks for a purchase order and its open jobs. A bare array, never null; q under two characters answers [].
       parameters:
         - name: q
           in: query
@@ -10306,6 +10306,30 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/PosCounterCustomer"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/registers:
+    get:
+      operationId: posRegisterList
+      tags: [pos]
+      summary: The registers the caller may use
+      description: >-
+        The registers within the caller's reach, each with its branch's code and name, ordered by branch then name, in the list envelope: a caller with a branch in context (the header, or a branch bound key's pin) sees that branch's registers; a user with no header sees the branches of the user's grants; an administrator or owner with no header sees all. The counter opens on its yard's register.
+      parameters:
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The registers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosRegisterPage"
         "400":
           $ref: "#/components/responses/BadRequestEither"
         "401":
@@ -23875,6 +23899,24 @@ components:
         expected_by_method:
           type: object
           additionalProperties: {type: integer, format: int64}
+    PosRegister:
+      type: object
+      required: [id, name, branch_id, branch_code, branch_name]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        branch_id: {type: string, format: uuid}
+        branch_code: {type: string}
+        branch_name: {type: string}
+    PosRegisterPage:
+      type: object
+      required: [items, next_cursor, limit]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosRegister"}
+        next_cursor: {type: [string, "null"]}
+        limit: {type: integer}
     PosZReport:
       type: object
       description: The immutable end-of-day snapshot written once when the session closes.

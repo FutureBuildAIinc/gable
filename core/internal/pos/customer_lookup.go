@@ -47,7 +47,8 @@ func standOf(c *CounterCustomer, open int64) {
 }
 
 // FindCustomers is the counter's customer lookup: by name or account number,
-// the account's standing beside each. The wall is the repository's.
+// the account's standing beside each. The reach is the repository's: every
+// customer to a user (ruling A at the counter), a bound key's pin to a key.
 func (s *Service) FindCustomers(ctx context.Context, q string) ([]CounterCustomer, error) {
 	q = strings.TrimSpace(q)
 	if len(q) < 2 {
@@ -168,4 +169,10 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 		return nil, err
 	}
 	return out, nil
+}
+
+// ListRegisters is the counter's register list: the registers the caller's
+// branch reach holds. The wall is the repository's.
+func (s *Service) ListRegisters(ctx context.Context) ([]CounterRegister, error) {
+	return s.repo.ListRegisters(ctx)
 }

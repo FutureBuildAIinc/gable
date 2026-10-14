@@ -120,6 +120,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/customers", guard(h.FindCustomers))
 	mux.HandleFunc("PUT /api/v1/pos/transactions/{id}/customer", guard(h.AttachCustomer))
 
+	// The registers the caller may use (the counter opens on its yard's)
+	mux.HandleFunc("GET /api/v1/pos/registers", guard(h.ListRegisters))
+
 	// Offline sync
 	mux.HandleFunc("POST /api/v1/pos/sync", guard(h.SyncOffline))
 	mux.HandleFunc("GET /api/v1/pos/catalog", guard(h.GetCatalog))
@@ -790,4 +793,19 @@ func uppercase(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// ListRegisters is GET /pos/registers: the registers the caller may use,
+// each with its branch, ordered by branch then name, in the list envelope.
+func (h *Handler) ListRegisters(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	found, err := h.service.ListRegisters(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteList(w, found, "", 200)
 }
