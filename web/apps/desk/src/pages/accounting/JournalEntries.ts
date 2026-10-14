@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
@@ -219,14 +220,11 @@ export class JournalEntries extends LitElement {
                                 </div>
                                 ${this.lines.map((line, i) => html`
                                     <div class="grid grid-cols-[2fr_2fr_1fr_1fr_auto] gap-2">
-                                        <select
-                                            class="bg-zinc-800 border border-zinc-700 rounded px-2 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                                        <gable-select
                                             .value=${line.account_id}
+                                            .options=${[{ value: '', label: 'Select account...' }, ...this.accounts.map(a => ({ value: a.id, label: `${a.code} -- ${a.name}` }))]}
                                             @change=${(e: Event) => this._updateLine(i, 'account_id', (e.target as HTMLSelectElement).value)}
-                                        >
-                                            <option value="">Select account...</option>
-                                            ${this.accounts.map(a => html`<option value="${a.id}">${a.code} -- ${a.name}</option>`)}
-                                        </select>
+                                        ></gable-select>
                                         <input
                                             class="bg-zinc-800 border border-zinc-700 rounded px-2 py-2 text-white text-sm focus:border-emerald-500 outline-none"
                                             .value=${line.description}

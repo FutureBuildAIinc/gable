@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -292,15 +293,14 @@ export class GableCreditMemoForm extends LitElement {
                 ${!this.invoice ? html`
                     <div class="bg-slate-steel rounded-lg border border-white/10 p-6">
                         <label class="block text-xs uppercase tracking-wide text-zinc-500 mb-1" for="cm-customer">Customer</label>
-                        <select
-                            id="cm-customer"
-                            .value=${this.customerId}
-                            @change=${(e: Event) => { this.customerId = (e.target as HTMLSelectElement).value; this.errors = {}; }}
-                            class="bg-black/30 border border-white/10 rounded px-3 py-2 text-white text-sm w-full max-w-md"
-                        >
-                            <option value="">Choose a customer</option>
-                            ${this.customers.map(c => html`<option value=${c.id} ?selected=${this.customerId === c.id}>${c.name}</option>`)}
-                        </select>
+                        <div class="max-w-md">
+                            <gable-select
+                                id="cm-customer"
+                                .value=${this.customerId}
+                                .options=${[{ value: '', label: 'Choose a customer' }, ...this.customers.map(c => ({ value: c.id, label: c.name }))]}
+                                @change=${(e: Event) => { this.customerId = (e.target as HTMLSelectElement).value; this.errors = {}; }}
+                            ></gable-select>
+                        </div>
                         ${this.errors.customer ? html`<p class="mt-2 text-sm text-red-400" role="alert">${this.errors.customer}</p>` : nothing}
                     </div>
                 ` : html`
@@ -416,14 +416,12 @@ export class GableCreditMemoForm extends LitElement {
                 <div class="bg-slate-steel rounded-lg border border-white/10 p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label class="block text-xs uppercase tracking-wide text-zinc-500 mb-1" for="cm-reason-code">Reason code</label>
-                        <select
+                        <gable-select
                             id="cm-reason-code"
                             .value=${this.reasonCode}
+                            .options=${CREDIT_REASON_CODES.map(c => ({ value: c, label: formatReasonCode(c) }))}
                             @change=${(e: Event) => { this.reasonCode = (e.target as HTMLSelectElement).value as CreditReasonCode; }}
-                            class="bg-black/30 border border-white/10 rounded px-3 py-2 text-white text-sm w-full"
-                        >
-                            ${CREDIT_REASON_CODES.map(c => html`<option value=${c} ?selected=${this.reasonCode === c}>${formatReasonCode(c)}</option>`)}
-                        </select>
+                        ></gable-select>
                     </div>
                     <div class="md:col-span-2">
                         <label class="block text-xs uppercase tracking-wide text-zinc-500 mb-1" for="cm-reason">Reason</label>

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
@@ -204,10 +205,7 @@ export class GableContactList extends LitElement {
                     ${labeled(
                         id('role'),
                         'Role',
-                        html`<select id=${id('role')} .value=${d.role} @change=${(e: Event) => this.set('role', (e.target as HTMLSelectElement).value as ContactRole | '')} class=${INPUT_CLASS}>
-                            <option value="" ?selected=${d.role === ''}>No role</option>
-                            ${CONTACT_ROLES.map(r => html`<option value=${r} ?selected=${d.role === r}>${r === 'AP' ? 'Accounts Payable' : r}</option>`)}
-                        </select>`,
+                        html`<gable-select id=${id('role')} .value=${d.role} .options=${[{ value: '', label: 'No role' }, ...CONTACT_ROLES.map(r => ({ value: r, label: r === 'AP' ? 'Accounts Payable' : r }))]} @change=${(e: Event) => this.set('role', (e.target as HTMLSelectElement).value as ContactRole | '')}></gable-select>`,
                         err.role,
                     )}
                     ${labeled(id('title'), 'Title', textInput(id('title'), d.title, v => this.set('title', v)), err.title)}

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
@@ -374,14 +375,11 @@ export class BankReconciliation extends LitElement {
                     <div class="grid grid-cols-4 gap-3">
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Bank Account</label>
-                            <select
+                            <gable-select
                                 .value=${this.newSessionAcctId}
+                                .options=${[{ value: '', label: 'Select account...' }, ...this.accounts.map(a => ({ value: a.id, label: a.name }))]}
                                 @change=${(e: Event) => this.newSessionAcctId = (e.target as HTMLSelectElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none"
-                            >
-                                <option value="">Select account...</option>
-                                ${this.accounts.map(a => html`<option value="${a.id}">${a.name}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Period Start</label>

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
@@ -219,23 +220,25 @@ export class TechAdminPage extends LitElement {
                 <h3 class="text-white font-medium">Provider</h3>
                 <p class="text-sm text-slate-400">Choose OpenRouter or the native Anthropic provider (Sonnet 5.5 or better). When no key is set for the chosen provider, AI is off and no feature fakes a result.</p>
                 <div class="grid grid-cols-2 gap-3">
-                    <select
-                        aria-label="AI provider"
+                    <gable-select
+                        label="AI provider"
                         .value=${this.aiProvider}
+                        .options=${[
+                            { value: 'openrouter', label: 'OpenRouter' },
+                            { value: 'anthropic', label: 'Anthropic (native)' },
+                        ]}
                         @change=${(e: Event) => this.aiProvider = (e.target as HTMLSelectElement).value as 'openrouter' | 'anthropic'}
-                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm">
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="anthropic">Anthropic (native)</option>
-                    </select>
-                    <select
-                        aria-label="Anthropic model"
+                    ></gable-select>
+                    <gable-select
+                        label="Anthropic model"
                         .value=${this.aiModel}
                         ?disabled=${this.aiProvider !== 'anthropic'}
+                        .options=${[
+                            { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+                            { value: 'claude-opus-5-5', label: 'Opus 5.5' },
+                        ]}
                         @change=${(e: Event) => this.aiModel = (e.target as HTMLSelectElement).value}
-                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm disabled:opacity-50">
-                        <option value="claude-sonnet-5-5">Sonnet 5.5</option>
-                        <option value="claude-opus-5-5">Opus 5.5</option>
-                    </select>
+                    ></gable-select>
                 </div>
                 ${this.aiProvider === 'anthropic' ? html`
                     <input
