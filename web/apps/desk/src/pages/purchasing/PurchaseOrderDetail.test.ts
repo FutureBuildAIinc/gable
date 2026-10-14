@@ -230,3 +230,104 @@ describe('purchase order detail receive form', () => {
     expect(optionLabels).toEqual(['KEL-A', 'KEL-B', 'KEL-C', 'KEL-D'])
   })
 })
+
+/**
+ * After Confirm Receipt the page itself must say what happened: what came
+ * in, how much of each line, into which bin, and that the purchase order
+ * is now received. A toast that vanishes is not enough.
+ */
+describe('purchase order receipt confirmation', () => {
+  const line1 = { id: 'l-1', po_id: PO_ID, product_id: PRODUCT_ID, description: '2x4x8 SPF Premium', quantity: 50, qty_received: 0, cost: 4.5 }
+  const line2 = { id: 'l-2', po_id: PO_ID, product_id: PRODUCT_ID, description: 'Joist Hanger 2x8', quantity: 30, qty_received: 0, cost: 1.25 }
+  const locations = [
+    loc('loc-a', PO_BRANCH_ID, 'bin', 'KEL-A'),
+    loc('loc-b', PO_BRANCH_ID, 'bin', 'KEL-B'),
+  ]
+  const locationsPage = { items: locations, next_cursor: null, limit: 200 }
+
+  function stubFetch() {
+    let received = false
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/purchase-orders/${PO_ID}/receive`)) {
+        received = true
+        return jsonResponse({ status: 'received' })
+      }
+      if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
+      if (url.endsWith(`/purchase-orders/${PO_ID}`)) {
+        return jsonResponse(received
+          ? po({ status: 'RECEIVED', lines: [{ ...line1, qty_received: 50 }, { ...line2, qty_received: 30 }] })
+          : po({ status: 'SENT', lines: [line1, line2] }))
+      }
+      if (url.includes('/locations')) return jsonResponse(locationsPage)
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
+      return jsonResponse([])
+    }))
+  }
+
+  async function openReceiveForm(el: PurchaseOrderDetail) {
+    const receiveBtn = Array.from(el.querySelectorAll('button')).find((b) => textOf(b as Element).includes('Receive Items')) as HTMLButtonElement
+    expect(receiveBtn, 'expected a Receive Items button').toBeDefined()
+    receiveBtn.click()
+    await flush()
+    await flush()
+    await el.updateComplete
+  }
+
+  it('after Confirm Receipt the page says what came in, how much of each line, into which bin, and that the order is now received', async () => {
+    stubFetch()
+    const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
+    await openReceiveForm(el)
+
+    const qtyInputs = Array.from(el.querySelectorAll('input[type="number"]')) as HTMLInputElement[]
+    const selects = Array.from(el.querySelectorAll('select')) as HTMLSelectElement[]
+    expect(qtyInputs.length).toBe(2)
+    expect(selects.length).toBe(2)
+
+    qtyInputs[0].value = '50'
+    qtyInputs[0].dispatchEvent(new Event('input'))
+    selects[0].value = 'loc-a'
+    selects[0].dispatchEvent(new Event('change'))
+    qtyInputs[1].value = '30'
+    qtyInputs[1].dispatchEvent(new Event('input'))
+    selects[1].value = 'loc-b'
+    selects[1].dispatchEvent(new Event('change'))
+    await flush()
+    await el.updateComplete
+
+    const confirmBtn = Array.from(el.querySelectorAll('button')).find((b) => textOf(b as Element).includes('Confirm Receipt')) as HTMLButtonElement
+    expect(confirmBtn, 'expected a Confirm Receipt button').toBeDefined()
+    confirmBtn.click()
+    await flush()
+    await flush()
+    await el.updateComplete
+
+    const page = textOf(el)
+    expect(page).toContain('This purchase order is now received')
+    expect(page).toContain('2x4x8 SPF Premium')
+    expect(page).toContain('Joist Hanger 2x8')
+    expect(page).toContain('50')
+    expect(page).toContain('30')
+    expect(page).toContain('into KEL-A')
+    expect(page).toContain('into KEL-B')
+  })
+
+  it('a purchase order already received says so in words on the page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
+      if (url.endsWith(`/purchase-orders/${PO_ID}`)) {
+        return jsonResponse(po({ status: 'RECEIVED', lines: [{ ...line1, qty_received: 50 }, { ...line2, qty_received: 30 }] }))
+      }
+      if (url.includes('/locations')) return jsonResponse(locationsPage)
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
+
+    const page = textOf(el)
+    expect(page).toContain('This purchase order is now received')
+    expect(page).toContain('50 of 50 received')
+    expect(page).toContain('30 of 30 received')
+  })
+})
