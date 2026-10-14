@@ -36,7 +36,11 @@ import (
 )
 
 type fixture struct {
-	t            *testing.T
+	t *testing.T
+	// cashierSub, when set, is the subject every request that names a random
+	// one acts as: a test that runs the no header rule (a user with no grants
+	// is refused everywhere) grants it the sale's branch.
+	cashierSub   string
 	db           *database.DB
 	srv          *httptest.Server
 	service      *pos.Service
@@ -305,7 +309,13 @@ func (f *fixture) do(method, path string, body any, headers ...string) resp {
 	}
 	req.Header.Set("X-Request-ID", "req-pos-test")
 	for i := 0; i+1 < len(headers); i += 2 {
-		req.Header.Set(headers[i], headers[i+1])
+		v := headers[i+1]
+		if f.cashierSub != "" && headers[i] == "X-Test-Sub" {
+			if _, err := uuid.Parse(v); err == nil {
+				v = f.cashierSub
+			}
+		}
+		req.Header.Set(headers[i], v)
 	}
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {

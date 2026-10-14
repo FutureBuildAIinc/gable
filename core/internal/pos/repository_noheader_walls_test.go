@@ -46,7 +46,7 @@ func TestSaleReadAndLockWallHoldTheGrants(t *testing.T) {
 	}
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id) VALUES ($1, $2, $3, 'OPEN', $4)`,
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, currency) VALUES ($1, $2, $3, 'OPEN', $4, 'USD')`,
 		sale, reg, uuid.New(), branchB); err != nil {
 		t.Fatalf("seed sale: %v", err)
 	}

@@ -331,6 +331,7 @@ func TestThePaybackStaysInsideTheCallersBranch(t *testing.T) {
 	f := newFixture(t, db, func(f *fixture) {
 		f.service = f.service.WithGateway(gw)
 		mustExecB(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pos-pay-a', $1, TRUE, 'test')`, f.branchID)
+		f.cashierSub = "pos-pay-a"
 	})
 	f.openTill(10000)
 	_, declined, _ := declinedCreditVoid(t, f, gw, "pos-pay-a")

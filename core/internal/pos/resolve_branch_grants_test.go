@@ -53,6 +53,7 @@ func TestTheResolutionHoldsTheSaleToTheCallersGrantsWithoutAHeader(t *testing.T)
 		// the in branch finance user is granted the sale's own branch, so the
 		// same no header path passes for a caller the grants cover
 		mustExecB(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pos-gr-a', $1, TRUE, 'test')`, f.branchID)
+		f.cashierSub = "pos-gr-a"
 	})
 	f.openTill(0)
 	// the B finance user sends no X-Branch-Id header at all: the middleware

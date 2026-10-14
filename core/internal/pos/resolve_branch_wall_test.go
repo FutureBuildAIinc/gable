@@ -54,6 +54,7 @@ func TestTheResolutionStaysInsideTheCallersBranch(t *testing.T) {
 		// the in branch control resolves through a user the sale's branch is
 		// granted: the route holds the sale to the caller's grants (r12 P1-2)
 		mustExecB(`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ('pos-res-a', $1, TRUE, 'test')`, f.branchID)
+		f.cashierSub = "pos-res-a"
 	})
 	saleID, body := f.saleOf("1", withToken(tender("card", 599)))
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
