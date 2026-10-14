@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './OrderList.ts'
 import type { GableOrderList } from './OrderList.ts'
-import { mountAsync, text, jsonResponse } from '../../test/dom'
+import { mountAsync, text, flush, jsonResponse } from '../../test/dom'
 
 describe('the orders list reads the status from the address', () => {
   let requestedUrls: string[] = []
@@ -23,6 +23,7 @@ describe('the orders list reads the status from the address', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     history.replaceState(null, '', '/orders')
   })
@@ -54,5 +55,29 @@ describe('the orders list reads the status from the address', () => {
       b.className.includes('text-gable-green'),
     )
     expect(text(activeTab ?? null)).toBe('All')
+  })
+
+  it('the address follows the chosen tab, replacing rather than pushing', async () => {
+    history.replaceState(null, '', '/orders?status=confirmed')
+    const el = await mountAsync<GableOrderList>('gable-order-list')
+    const pushSpy = vi.spyOn(history, 'pushState')
+    const replaceSpy = vi.spyOn(history, 'replaceState')
+
+    const allTab = Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'All') as HTMLButtonElement
+    allTab.click()
+    await flush()
+    await el.updateComplete
+
+    // Choosing All drops the query, so a reload reopens All.
+    expect(window.location.pathname + window.location.search).toBe('/orders')
+    expect(pushSpy).not.toHaveBeenCalled()
+    expect(replaceSpy).toHaveBeenCalled()
+
+    const confirmedTab = Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Confirmed') as HTMLButtonElement
+    confirmedTab.click()
+    await flush()
+    await el.updateComplete
+
+    expect(window.location.pathname + window.location.search).toBe('/orders?status=confirmed')
   })
 })
