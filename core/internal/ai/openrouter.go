@@ -508,7 +508,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("AI request failed: %s", providerWords(err.Error(), apiKey))
+		return nil, &UnreachableError{Provider: "OpenRouter", Detail: "AI request failed: " + providerWords(err.Error(), apiKey)}
 	}
 	defer resp.Body.Close()
 
@@ -720,7 +720,7 @@ Example output:
 50 pcs - 2x4x8 SPF Stud
 25 pcs - 2x6x12 Doug Fir #2
 30 sheets - OSB 7/16 4x8
-20 bags - Quikrete 80lb`
+20 bags - Concrete mix 80lb`
 
 // ExtractMaterialList sends a file to the vision model for material list
 // extraction. Supports images, PDFs, and pre-processed text/csv. Returns the raw
