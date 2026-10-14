@@ -30,6 +30,20 @@ func (a *Guard) CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error 
 	return err
 }
 
+// GrantsForCreate is the platform's create branch resolution (one grant:
+// that one; several: the choice error; none: the refusal), mapped onto the
+// customer package's own sentinels.
+func (a *Guard) GrantsForCreate(ctx context.Context) (*uuid.UUID, error) {
+	branch, err := a.g.GrantsForCreate(ctx)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return nil, customer.ErrBranchRefused
+	}
+	if errors.Is(err, middleware.ErrCreateBranchChoice) {
+		return nil, customer.ErrCreateBranchChoice
+	}
+	return branch, err
+}
+
 // Shared adapts the key branch wall to the customer service's SharedGuard:
 // the shared customer rule of principal rulings 43, 44 and 45.
 type Shared struct{ w *middleware.KeyBranchWall }

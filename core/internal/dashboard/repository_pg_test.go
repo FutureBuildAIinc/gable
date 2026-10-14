@@ -74,7 +74,7 @@ func TestGetOrderActivity_TiedCreatedAtHasStableOrder(t *testing.T) {
 
 	check := func(label string) {
 		t.Helper()
-		act, err := repo.GetOrderActivity(ctx, &branchID, limit)
+		act, err := repo.GetOrderActivity(ctx, &branchID, nil, limit)
 		if err != nil {
 			t.Fatalf("%s: GetOrderActivity: %v", label, err)
 		}

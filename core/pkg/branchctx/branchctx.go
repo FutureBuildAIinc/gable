@@ -70,6 +70,26 @@ func IDForQuery(ctx context.Context) *uuid.UUID {
 	return bc.BranchID
 }
 
+// GrantsSubForQuery is the list-read companion of IDForQuery and the list
+// form of the record rule the payload guard applies (ADR 0007 section 2.3):
+// with no context branch, a branch-scoped list covers the branches granted
+// to the user, not every branch. It returns the user sub whose
+// user_locations rows scope such a list, and nil when the list covers every
+// branch: a context branch (IDForQuery scopes it), an administrator or owner
+// without a header (the single-branch switch makes every caller one), a
+// caller with no user sub (an unbound key), or no branch context on the
+// path. It lives here, beside IDForQuery, because the customer and CRM
+// repositories cannot import pkg/middleware (an import cycle through
+// partner authentication); pkg/middleware.GrantsSubForQuery delegates to it.
+func GrantsSubForQuery(ctx context.Context) *string {
+	bc := FromContext(ctx)
+	if bc == nil || bc.BranchID != nil || bc.IsAdmin || bc.UserSub == "" {
+		return nil
+	}
+	sub := bc.UserSub
+	return &sub
+}
+
 // With injects a branch Context onto ctx. Used by test helpers and by
 // receivers (e.g. A2A) that bypass the HTTP branch middleware.
 func With(ctx context.Context, bc *Context) context.Context {

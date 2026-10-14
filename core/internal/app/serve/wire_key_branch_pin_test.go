@@ -396,6 +396,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		DB:         db,
 		Logger:     slog.Default(),
 		AuditLog:   audit.NewLogger(db),
+		MW:         wall.mw,
+		Guard:      wall.guard,
 	})
 
 	// The dealer wide modules exactly as serve registers them: the reporting
@@ -410,8 +412,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	wall.eventsFeed(mux, events.NewHandler(db))
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), slog.Default())
 	gl.NewHandler(glSvc).RegisterRoutes(mux, middleware.RequireRole("admin", "owner"))
-	ap.NewHandler(ap.NewService(db, ap.NewRepository(db), glSvc, slog.Default())).
-		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
+	ap.NewHandler(ap.NewService(db, ap.NewRepository(db), glSvc, slog.Default()).WithBranchGuard(wall.guard)).
+		RegisterRoutes(mux, wall.scoped("admin", "owner", "finance"))
 	bankrecon.NewHandler(bankrecon.NewService(db, bankrecon.NewRepository(db), glSvc, slog.Default())).
 		RegisterRoutes(mux, middleware.RequireRole("admin", "owner", "finance"))
 	salesteam.NewHandler(salesteam.NewRepository(db)).
@@ -425,7 +427,7 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 	customerSvc := customer.NewService(customer.NewRepository(db)).WithAudit(customeraudit.New(audit.NewLogger(db)))
 	productSvc := product.NewService(product.NewRepository(db))
 	tax.NewHandler(orderwire.NewTaxService(db, &config.Config{}, slog.Default())).
-		RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
+		RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
 	pricing.NewHandler(pricing.NewService(pricing.NewRepository(db)).WithTxRunner(db), customerSvc, productSvc).
 		RegisterRoutes(mux, pricingRulesCustomerWall(wall.keyWall, db, "admin", "owner"))
 	pricing.NewCategoryHandler(
@@ -499,7 +501,8 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		vendor.NewService(vendor.NewRepository(db))).
 		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
 	poSvc := purchase_order.NewService(purchase_order.NewRepository(db), db, nil, nil, poProductSvc, nil).
-		WithVelocityRepo(purchase_order.NewVelocityRepository(db))
+		WithVelocityRepo(purchase_order.NewVelocityRepository(db)).
+		WithBranchGuard(wall.guard)
 	wall.purchaseOrders(mux, purchase_order.NewHandler(poSvc, poRecSvc))
 
 	// The branch walled document families exactly as serve registers them:

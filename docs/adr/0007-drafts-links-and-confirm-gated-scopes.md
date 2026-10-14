@@ -954,6 +954,117 @@ known limit. Moving its quote creation to `quotes:propose` drafts is a later
 item. Every statement in this record that the gate is enforced "for keys"
 means keys on `/api/v1`.
 
+#### 5.7 A user with no branch in context (SEC-NOHEADER-1)
+
+A user who sends no `X-Branch-Id` while the multi branch switch is on and
+`default_branch_required` is off reaches a module with no branch in the
+branch context. Section 2.3 already held such a user to the user's
+`user_locations` grants for a branch a body names; this section holds the
+user's reads and acts the same way, so no branch in context never means
+every branch:
+
+- a read by id answers 404 when the record's branch is not among the
+  user's grants, and a list returns only rows of the granted branches;
+- an act on a register, till, sale, return or claim of a branch the user
+  does not hold is 403 with nothing written;
+- where no grant decides it, the caller is refused: a user with no grants
+  at all reads no branch scoped row and writes none, a record of no branch
+  reads as missing, and an act on one is the same 403 the record rule
+  names. The sentence is about branch scoped rows. The reference reads
+  (the branch directory, the product, vendor and unit catalogues, the
+  charge codes) carry no branch and stay open to the roles their guards
+  admit, and the delivery route create (`POST /delivery/routes`) writes a
+  route, which carries no branch fact of its own, so it is open to the
+  roles its guard admits with or without a grant;
+- a create whose body names no `branch_id` takes its branch from the
+  user's grants, never the deployment default: exactly one granted branch
+  writes there, several granted branches refuse with a 400 naming
+  `branch_id` (`primary_branch_id` on the customer create), and none
+  refuses fail closed (the payment family held its resolved branch
+  already; the quote, order, draft, customer, purchase order and AP bill
+  creates follow it, and so does the reorder run a purchasing caller
+  starts, while the reorder timer's system caller keeps the default
+  resolution it always had; the special order draft an accepted quote
+  fires takes the branch of the order its line belongs to, not the
+  caller's grants);
+- the tax exemption routes and the tax preview hold the customer they name
+  (path, body, the exemption's own row, the preview's customer and ship to)
+  to the customer family's wall: a customer outside the reach reads as
+  missing (404) on the read and the delete, and is refused 403 naming
+  `customer_id` on the create and the preview, with or without the header,
+  a user with no grants included.
+
+The sentence that keeps the other callers their reach is section 2.3's:
+"With no context branch, an administrator or owner may name any branch, as
+the `X-Branch-Id` header already lets them". A caller that sends the
+header keeps the context branch rule unchanged; so does every caller while
+the single branch kill switch is off, an unbound key, and `AUTH_MODE=dev`.
+
+The reporting surface follows the same rule (the principal's ruling on it):
+a finance user with no context branch sees reports for the granted branches
+only, while an administrator and owner keep the all branch view; a dealer
+that wants a finance person on every branch grants every branch, so nothing
+is lost by the rule. Every reporting or dashboard cache is keyed by the
+caller's reach (the branch and the grants scope together), never shared
+between reaches: a primed administrator entry never serves a finance
+caller. A scheduled report runs under its creator's reach, resolved afresh
+at every run: the schedule records the creating caller's subject and
+whether that caller held the administrator or owner role when the schedule
+was made (the repository has no users table, so the role cannot be re-read
+later), the run of an administrator or owner creator keeps the every branch
+view, any other creator's run carries the granted branches' rows only, and
+a schedule with no creator recorded, or whose creator is not recorded as an
+administrator and holds no branch grant at all, does not run (it is logged
+and audited) until a caller with report access recreates it. While the
+single branch switch is off the run reads that setting afresh and a
+recorded creator keeps the every branch view whatever its grants, as the
+branch middleware treats every caller. A caller with no identity cannot
+create a schedule (409 naming the missing caller identity), and a refused
+run pauses the schedule and audits it once. The
+reconciliation's currency half follows the same reach (the principal's
+ruling under item 64): its two branch owned sums, the customers' balances
+through their customer_branches rows and the unapplied cash through the
+payments' own branches, cover the caller's reach for a scoped caller and
+stay dealer wide for an administrator or owner with no header, while its two GL account
+balances, pure books figures no branch fact can divide, are refused to a
+scoped caller (the columns and their in sync flags are absent from the
+row) and served to the wide callers (an administrator or owner who sends a
+header is a scoped caller and gets that branch's sums with no GL columns).
+
+Two limits of this surface stand stated. A customer that two branches
+share has one subledger (`customer_transactions` carries no branch fact),
+so a statement or an account read of that customer shows the whole ledger
+to every branch that holds the customer, header or not; dividing it needs
+a branch fact on the subledger rows, which the schema does not carry.
+And the dashboard and report caches are keyed by the caller's reach (the
+branch and the grants sub together), not by the grant set itself, so a
+grant revoked or added within the cache's lifetime is served from the
+entry the earlier reach primed: both caches hold an entry for sixty
+seconds, read from `newCacheStore(60 * time.Second)` on the dashboard and
+the `60*time.Second` comparisons in the reporting service.
+
+The routes this closed, each stated in `docs/refactor/CONTRACT-CHANGES.md`
+under `SEC-NOHEADER-1`: the whole pos surface (the till open, close,
+current, report and Z report reads and lists, the sale create, read, list,
+line, complete and void acts, the return create, read and list, and the
+offline sync batch), the order read by id or number, list, count, update,
+transitions, exposure gate and override, fulfilment request queue and
+draft order promotion (the order module's own 403 words naming `id`), the
+purchase order list and the draft by vendor lookup, the quote, order and
+draft creates' branch, the dashboard's five routes, the quote exposure
+routes (which mount the branch middleware and hold the quote's branch), the
+customer family (the customer, contact, ship to and activity reads and
+writes through the customer's branches), and the reporting surface (the
+daily till, the sales summary, the AR aging, the customer statement, the
+reconciliation's customer rows, the report builder and the BI export). The
+quote and purchase order by id routes, the invoice, payment, delivery and
+inventory reads, and the document print and email routes already held the
+record's branch to the grants (their wall, record check or guard carries
+the same arm), which the item's tests prove rather than change. One shared
+predicate (`middleware.Wall`) and one shared hold
+(`BranchGuard.CheckGrantsBranch`) carry the rule, so no route family holds
+a private copy.
+
 ### 6. Agent identity, in all of it
 
 The actor object on the wire, in draft events, in outbox data and in the

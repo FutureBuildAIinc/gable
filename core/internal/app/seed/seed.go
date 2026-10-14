@@ -558,13 +558,7 @@ func Run() {
 	//   - Phone numbers stay in the 555 range; emails use fictional domains or
 	//     IANA-reserved example.com. Never a real consumer ISP or provider.
 	// =========================================================================
-	type cust struct {
-		Name, Acct, Email, Phone, Addr, Tier, Terms, PriceLevel string
-		CreditLimit                                             float64
-		PrimaryBranch                                           uuid.UUID
-		Projects                                                []string
-	}
-	customers := []cust{
+	customers := []demoCustomer{
 		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.ca", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Mission Hill Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
 		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.ca", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
 		{"Lake Country Builders", "LCB-001", "admin@lakecountrybuilders.ca", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
@@ -593,21 +587,13 @@ func Run() {
 	}
 
 	for _, c := range customers {
-		plID := priceLevelIDs[c.PriceLevel]
-		var cid string
-		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms_id, price_level_id, primary_branch_id)
-			VALUES ($1,$2,$3,$4,$5,$6,0,$7,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
-			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7,
-				payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),
-				price_level_id=$9, primary_branch_id=$10
-			RETURNING id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Tier, c.Terms, plID, c.PrimaryBranch).Scan(&cid)
+		custID, branchID, err := seedCustomer(db, c, priceLevelIDs[c.PriceLevel])
 		if err != nil {
 			log.Printf("Customer %s: %v", c.Name, err)
 			continue
 		}
-		custID := uuid.MustParse(cid)
 		customerIDs[c.Name] = custID
-		custToBranch[custID] = c.PrimaryBranch
+		custToBranch[custID] = branchID
 		custToProjects[custID] = []uuid.UUID{}
 
 		// The customer's main ship-to address, the default for its orders and deliveries.
@@ -1387,6 +1373,38 @@ func preSeedDefaultBranch(db *sql.DB) sql.NullString {
 	var v sql.NullString
 	db.QueryRow(`SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&v)
 	return v
+}
+
+// demoCustomer is one seeded customer.
+type demoCustomer struct {
+	Name, Acct, Email, Phone, Addr, Tier, Terms, PriceLevel string
+	CreditLimit                                             float64
+	PrimaryBranch                                           uuid.UUID
+	Projects                                                []string
+}
+
+// seedCustomer upserts one demo customer and returns its id and the primary
+// branch it holds. The seed owns only the rows it creates: a re-seed repairs
+// the demo values but never moves a customer's stored primary branch (the
+// rule item 57 set for REG-01), and it writes the customer_branches row the
+// product's own create writes beside every customer, for the stored branch,
+// so the customer wall shows the customer to the callers its branch holds.
+func seedCustomer(db *sql.DB, c demoCustomer, priceLevel uuid.UUID) (uuid.UUID, uuid.UUID, error) {
+	var cid, branch string
+	err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms_id, price_level_id, primary_branch_id)
+		VALUES ($1,$2,$3,$4,$5,$6,0,$7,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
+		ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7,
+			payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),
+			price_level_id=$9
+		RETURNING id, primary_branch_id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Tier, c.Terms, priceLevel, c.PrimaryBranch).Scan(&cid, &branch)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	if _, err := db.Exec(`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		cid, branch); err != nil {
+		return uuid.Nil, uuid.Nil, fmt.Errorf("mirror the primary branch: %w", err)
+	}
+	return uuid.MustParse(cid), uuid.MustParse(branch), nil
 }
 
 // posRegisterUpsertSQL moves the demo register REG-01 onto the location given

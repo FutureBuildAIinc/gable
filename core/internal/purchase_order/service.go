@@ -6,6 +6,7 @@ package purchase_order
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -19,11 +20,14 @@ import (
 	"github.com/gablelbm/gable/internal/domain"
 	"github.com/gablelbm/gable/internal/edi"
 	"github.com/gablelbm/gable/internal/inventory"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/vendor"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // salesVelocityLister is the narrow read interface RefreshReorderTargets needs.
@@ -43,6 +47,15 @@ type EventRecorder interface {
 // that wait on the received products.
 const EventReceived = "purchase_order.received"
 
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3) to the
+// branch a manual purchase order create names, and settles the branch a
+// create with no body branch writes at (SEC-NOHEADER-1).
+// *middleware.BranchGuard satisfies it.
+type ServiceBranchGuard interface {
+	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
+}
+
 type Service struct {
 	events       EventRecorder
 	repo         *Repository
@@ -53,6 +66,7 @@ type Service struct {
 	vendorSvc    *vendor.Service
 	aiClient     *ai.Client
 	velocityRepo salesVelocityLister
+	branches     ServiceBranchGuard
 }
 
 func NewService(repo *Repository, db *database.DB, ediSvc *edi.Service, inventorySvc *inventory.Service, productSvc *product.Service, vendorSvc *vendor.Service) *Service {
@@ -78,17 +92,88 @@ func (s *Service) WithAIClient(c *ai.Client) {
 	s.aiClient = c
 }
 
+// WithBranchGuard wires the payload branch rule and the grants resolution a
+// manual purchase order create runs through.
+func (s *Service) WithBranchGuard(g ServiceBranchGuard) *Service {
+	s.branches = g
+	return s
+}
+
+// checkBranch holds a branch a body names to the caller's reach (ADR 0007
+// section 2.3): a refusal is 403 forbidden naming branch_id.
+func (s *Service) checkBranch(ctx context.Context, branch uuid.UUID) error {
+	if s.branches == nil {
+		return nil
+	}
+	err := s.branches.CheckPayloadBranch(ctx, branch)
+	if errors.Is(err, middleware.ErrPayloadBranchRefused) {
+		return &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	}
+	return err
+}
+
+// branchFor resolves the branch a manual purchase order writes at: the
+// body's, held to the caller's reach; the caller's context; then, for a
+// user context with no branch, the user's grants (exactly one granted
+// branch: that one; several: the request must name one; none: fail
+// closed), never the deployment default, which no grant of the creator
+// holds (SEC-NOHEADER-1, r4 P1-2). Callers the grants never hold (an
+// administrator, an owner, the A2A receiver that injects its inbound
+// branch, a system caller) answer nil and keep the repository's default
+// resolution.
+func (s *Service) branchFor(ctx context.Context, branch *uuid.UUID) (*uuid.UUID, error) {
+	if branch != nil && *branch != uuid.Nil {
+		if err := s.checkBranch(ctx, *branch); err != nil {
+			return nil, err
+		}
+		return branch, nil
+	}
+	if bid := middleware.BranchIDForQuery(ctx); bid != nil {
+		return bid, nil
+	}
+	if s.branches != nil {
+		granted, err := s.branches.GrantsForCreate(ctx)
+		switch {
+		case err == nil && granted != nil:
+			return granted, nil
+		case err == nil:
+		case errors.Is(err, middleware.ErrCreateBranchChoice):
+			return nil, httpx.BadRequest("branch_id is required: this caller holds more than one branch grant",
+				httpx.FieldError{Field: "branch_id", Message: "is required: name one of the caller's granted branches"})
+		case errors.Is(err, middleware.ErrPayloadBranchRefused):
+			return nil, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+				Message: "branch_id is outside the branches this caller may target",
+				Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+		default:
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
 // CreateReorders checks for low stock alerts and creates Draft POs automatically,
 // grouped by canonical vendor_id. Existing DRAFT POs for the same vendor are
 // reused rather than duplicated. Alerts with no vendor_id are bucketed under a
 // single "Unknown Vendor" row (upserted via vendor.EnsureVendorByName) so the
 // FK on purchase_orders.vendor_id is always satisfied.
+//
+// The run settles its branch the way every create does (SEC-NOHEADER-1): a
+// purchasing caller with no header and exactly one granted branch writes the
+// drafts there (never the deployment default), several grants answer the
+// choice refusal naming branch_id and none fail closed, while the cron
+// engine's system caller keeps the default resolution it always had.
 func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	if s.productSvc == nil {
 		return 0, fmt.Errorf("product service not configured")
 	}
 	if s.vendorSvc == nil {
 		return 0, fmt.Errorf("vendor service not configured")
+	}
+	resolved, err := s.branchFor(ctx, nil)
+	if err != nil {
+		return 0, err
 	}
 
 	alerts, err := s.productSvc.ListBelowReorder(ctx)
@@ -127,6 +212,9 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				VendorID: &vid,
 				Status:   StatusDraft,
 				Source:   SourceReorder,
+			}
+			if resolved != nil {
+				po.BranchID = *resolved
 			}
 			if err := s.repo.CreatePO(ctx, po); err != nil {
 				return createdCount, fmt.Errorf("create PO for vendor %s: %w", vid, err)
@@ -174,6 +262,14 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				Cost:        0, // Cost catalog wiring is a separate backlog item.
 			}
 			if err := s.repo.AddPOLine(ctx, line); err != nil {
+				// A product deleted between the alert listing and this
+				// insert has nothing left to reorder: skip it, as the next
+				// run would not list it, rather than failing the whole run
+				// (and leaving the drafts of the vendors it had passed).
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "purchase_order_lines_product_id_fkey" {
+					continue
+				}
 				return createdCount, fmt.Errorf("add PO line: %w", err)
 			}
 		}
@@ -211,46 +307,11 @@ func (s *Service) CreateManualPO(ctx context.Context, vendorID uuid.UUID, lines 
 	Quantity    float64
 	Cost        float64
 }) (*PurchaseOrder, error) {
-	po := &PurchaseOrder{
-		ID:       uuid.New(),
-		VendorID: &vendorID,
-		Status:   StatusDraft,
-		Source:   SourceManual,
+	in := make([]CreatePOLineInput, len(lines))
+	for i, l := range lines {
+		in[i] = CreatePOLineInput{ProductID: l.ProductID, Description: l.Description, Quantity: l.Quantity, Cost: l.Cost}
 	}
-
-	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
-		if err := s.repo.CreatePO(txCtx, po); err != nil {
-			return fmt.Errorf("failed to create PO: %w", err)
-		}
-
-		for _, l := range lines {
-			var prodID *uuid.UUID
-			if l.ProductID != "" {
-				parsed, err := uuid.Parse(l.ProductID)
-				if err == nil {
-					prodID = &parsed
-				}
-			}
-			line := &PurchaseOrderLine{
-				ID:          uuid.New(),
-				POID:        po.ID,
-				ProductID:   prodID,
-				Description: l.Description,
-				Quantity:    l.Quantity,
-				Cost:        l.Cost,
-			}
-			if err := s.repo.AddPOLine(txCtx, line); err != nil {
-				return fmt.Errorf("failed to add PO line: %w", err)
-			}
-			po.Lines = append(po.Lines, *line)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return po, nil
+	return s.CreateManualPOAt(ctx, vendorID, in, SourceManual, nil)
 }
 
 // CreateManualPOFromHandler is a convenience wrapper using the handler's request types.
@@ -258,8 +319,18 @@ func (s *Service) CreateManualPO(ctx context.Context, vendorID uuid.UUID, lines 
 // SourceManual, the A2A receiver passes SourceA2A. An empty source defaults
 // to MANUAL at the repository layer.
 func (s *Service) CreateManualPOFromHandler(ctx context.Context, vendorID uuid.UUID, lines []CreatePOLineInput, source string) (*PurchaseOrder, error) {
+	return s.CreateManualPOAt(ctx, vendorID, lines, source, nil)
+}
+
+// CreateManualPOAt is the manual create with a body branch: nil runs the
+// branch resolution (the body's absence is the case SEC-NOHEADER-1 closes).
+func (s *Service) CreateManualPOAt(ctx context.Context, vendorID uuid.UUID, lines []CreatePOLineInput, source string, branch *uuid.UUID) (*PurchaseOrder, error) {
 	if source == "" {
 		source = SourceManual
+	}
+	resolved, err := s.branchFor(ctx, branch)
+	if err != nil {
+		return nil, err
 	}
 	po := &PurchaseOrder{
 		ID:       uuid.New(),
@@ -267,8 +338,11 @@ func (s *Service) CreateManualPOFromHandler(ctx context.Context, vendorID uuid.U
 		Status:   StatusDraft,
 		Source:   source,
 	}
+	if resolved != nil {
+		po.BranchID = *resolved
+	}
 
-	err := s.db.RunInTx(ctx, func(txCtx context.Context) error {
+	err = s.db.RunInTx(ctx, func(txCtx context.Context) error {
 		if err := s.repo.CreatePO(txCtx, po); err != nil {
 			return fmt.Errorf("failed to create PO: %w", err)
 		}
@@ -316,13 +390,20 @@ type CreatePOLineInput struct {
 // product, so the receipt puts the stock on hand and the order module's
 // release picks it up (ADR 0005 5.4). The header and the line are one
 // transaction: a line that cannot be linked leaves no empty header behind.
-func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
+// The draft sits at the branch of the order the line belongs to, which the
+// caller names (SEC-NOHEADER-1): the order's own branch, never the caller's
+// grants, so a user who holds several branches and sends no header, and
+// accepts a quote of one of them, gets the draft at that order's branch
+// instead of a choice refusal logged and lost. The draft of the vendor is
+// looked up at that branch alone, so the line never joins another branch's
+// draft.
+func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, branch uuid.UUID, productID *uuid.UUID, vendorId *uuid.UUID, description string, qty float64, cost float64) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context) error {
 		var po *PurchaseOrder
 		var err error
 
 		if vendorId != nil {
-			po, err = s.repo.GetDraftPOByVendor(ctx, vendorId)
+			po, err = s.repo.GetDraftPOByVendorAt(ctx, *vendorId, branch)
 		}
 
 		if po == nil || err != nil {
@@ -332,6 +413,7 @@ func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, prod
 				Status:   StatusDraft,
 				Source:   SourceSpecialOrder,
 			}
+			newPO.BranchID = branch
 			if err := s.repo.CreatePO(ctx, newPO); err != nil {
 				return fmt.Errorf("failed to create PO: %w", err)
 			}

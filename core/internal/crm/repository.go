@@ -64,11 +64,18 @@ const columns = `a.id, a.customer_id, a.contact_id, a.activity_type, a.descripti
 	a.logged_by, a.activity_date, a.revision, a.created_at, a.updated_at`
 
 // wall is the branch wall through the activity's customer: a caller held to
-// a branch sees only activities of customers with that branch.
-func wall(arg int) string {
-	return fmt.Sprintf(`($%d::uuid IS NULL OR EXISTS (SELECT 1 FROM customers c
-		JOIN customer_branches cb ON cb.customer_id = c.id
-		WHERE c.id = a.customer_id AND cb.branch_id = $%d))`, arg, arg)
+// a branch, or to a no header caller's grants (SEC-NOHEADER-1), sees only
+// activities of customers whose branches the reach holds.
+func wall(branch, grants int) string {
+	return fmt.Sprintf(`(
+	    ($%[1]d::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customers c
+		    JOIN customer_branches cb ON cb.customer_id = c.id
+		    WHERE c.id = a.customer_id AND cb.branch_id = $%[1]d))
+	    OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NOT NULL AND EXISTS (SELECT 1 FROM customers c
+		    JOIN customer_branches cb ON cb.customer_id = c.id
+		    WHERE c.id = a.customer_id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $%[2]d)))
+	    OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL)
+	  )`, branch, grants)
 }
 
 func scanOne(row pgx.Row) (*Activity, error) {
@@ -90,8 +97,8 @@ func scanOne(row pgx.Row) (*Activity, error) {
 // predicate is added only to the list, never the count, which is of the
 // whole filtered set.
 func filterConds(ctx context.Context, customerID uuid.UUID, f ListFilter, args *[]any) []string {
-	*args = append(*args, customerID, branchctx.IDForQuery(ctx))
-	conds := []string{`a.customer_id = $1`, wall(2)}
+	*args = append(*args, customerID, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx))
+	conds := []string{`a.customer_id = $1`, wall(2, 3)}
 	if f.Type != nil {
 		*args = append(*args, string(*f.Type))
 		conds = append(conds, fmt.Sprintf(`a.activity_type = $%d`, len(*args)))
@@ -150,8 +157,8 @@ func (r *PostgresRepository) List(ctx context.Context, customerID uuid.UUID, f L
 
 func (r *PostgresRepository) Get(ctx context.Context, id uuid.UUID) (*Activity, error) {
 	a, err := scanOne(r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT `+columns+` FROM crm_activities a WHERE a.id = $1 AND `+wall(2),
-		id, branchctx.IDForQuery(ctx)))
+		`SELECT `+columns+` FROM crm_activities a WHERE a.id = $1 AND `+wall(2, 3),
+		id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -197,8 +204,8 @@ func (r *PostgresRepository) Create(ctx context.Context, a *Activity) error {
 func (r *PostgresRepository) Lock(ctx context.Context, id uuid.UUID) error {
 	var locked uuid.UUID
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT a.id FROM crm_activities a WHERE a.id = $1 AND `+wall(2)+` FOR UPDATE OF a`,
-		id, branchctx.IDForQuery(ctx)).Scan(&locked)
+		`SELECT a.id FROM crm_activities a WHERE a.id = $1 AND `+wall(2, 3)+` FOR UPDATE OF a`,
+		id, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -243,12 +250,20 @@ func (r *PostgresRepository) ContactBelongsTo(ctx context.Context, contactID, cu
 	return ok, nil
 }
 
+// CustomerVisible holds the customer to the file's three arm wall: the
+// context branch when there is one, the no header user's grants when there
+// is none, and every customer when both are nil (an administrator or owner
+// with no header, an unbound key).
 func (r *PostgresRepository) CustomerVisible(ctx context.Context, customerID uuid.UUID) (bool, error) {
 	var ok bool
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM customers c WHERE c.id = $1 AND ($2::uuid IS NULL OR EXISTS (
-			SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $2)))`,
-		customerID, branchctx.IDForQuery(ctx)).Scan(&ok)
+		SELECT EXISTS (SELECT 1 FROM customers c WHERE c.id = $1 AND (
+		    ($2::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id = $2))
+		    OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $3)))
+		    OR ($2::uuid IS NULL AND $3::text IS NULL)))`,
+		customerID, branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("failed to check the customer: %w", err)
 	}

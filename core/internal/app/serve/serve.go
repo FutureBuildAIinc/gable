@@ -433,6 +433,7 @@ func Run() {
 
 	poSvc := purchase_order.NewService(poRepo, db, ediSvc, inventorySvc, productSvc, vendorSvc)
 	poSvc.WithAIClient(aiClient)
+	poSvc.WithBranchGuard(wall.guard)
 	// The receive writes purchase_order.received in its transaction (ADR 0005 5.4).
 	poSvc.WithOutbox(outbox.NewWriter(db, cfg.EventsOrg))
 	velocityRepo := purchase_order.NewVelocityRepository(db)
@@ -621,7 +622,7 @@ func Run() {
 	}
 	taxSvc := orderwire.NewTaxService(db, cfg, logger)
 	taxHandler := tax.NewHandler(taxSvc)
-	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall.keyWall, db, "admin", "owner", "finance"))
+	taxHandler.RegisterRoutes(mux, taxCustomerWall(wall, db, "admin", "owner", "finance"))
 
 	// Payment Module (with Run Payments gateway)
 	paymentRepo := payment.NewRepository(db)
@@ -724,8 +725,12 @@ func Run() {
 	// than transmitting it. The schedule API publishes that distinction itself
 	// (execution.enabled plus execution.delivery), derived from this executor,
 	// so wiring it here is what flips the API from "saved but never run" to
-	// "runs". Stops in step 3.6 of graceful shutdown, before the DB pool closes.
-	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc)
+	// "runs". Each run executes under its creator's recorded reach
+	// (SEC-NOHEADER-1), and a run the fail closed rule refuses (no creator
+	// recorded, a creator holding no grant) writes an audit row beside its
+	// log line. Stops in step 3.6 of graceful shutdown, before the DB pool
+	// closes.
+	reportScheduler := newReportScheduler(db, reportingSvc, emailSvc)
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		logger.Error("report scheduler failed to start", "error", err)
 	}
@@ -780,6 +785,8 @@ func Run() {
 		OrderSvc:      orderSvc,
 		DeliverySvc:   deliverySvc,
 		EventsOrg:     cfg.EventsOrg,
+		MW:            wall.mw,
+		Guard:         wall.guard,
 	})
 
 	// SMS Notification Service
@@ -1290,7 +1297,7 @@ type autoPOAdapter struct {
 	productSvc *product.Service
 }
 
-func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID) error {
+func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, productID *uuid.UUID, vendorID *uuid.UUID, quantity float64, unitCost float64, linkedSOLineID uuid.UUID, branch uuid.UUID) error {
 	// Resolve product description for the PO line; a line with no product
 	// (the quote accept path, which carries none) takes a plain one.
 	desc := "special order"
@@ -1299,7 +1306,7 @@ func (a *autoPOAdapter) CreatePOFromSpecialOrderLine(ctx context.Context, produc
 			desc = fmt.Sprintf("%s - %s", p.SKU, p.Description)
 		}
 	}
-	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, productID, vendorID, desc, quantity, unitCost)
+	return a.poSvc.CreateFromSOLine(ctx, linkedSOLineID, branch, productID, vendorID, desc, quantity, unitCost)
 }
 
 // pricingAuditAdapter bridges the pricing package's mirrored audit entries

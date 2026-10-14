@@ -8,9 +8,27 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/gablelbm/gable/pkg/branchctx"
 )
 
 const maxCacheEntries = 1000
+
+// reachKey is the caller's reach every cached report is keyed by
+// (SEC-NOHEADER-1, the principal's ruling on the reporting surface): the
+// branch a header names and the user sub whose user_locations grants scope a
+// no header caller. Two callers share an entry only when both are nil (the
+// every branch view an administrator or owner keeps), so a primed
+// administrator entry never serves a finance caller.
+func reachKey(ctx context.Context) string {
+	key := "all"
+	if id := branchctx.IDForQuery(ctx); id != nil {
+		key = "branch:" + id.String()
+	} else if sub := branchctx.GrantsSubForQuery(ctx); sub != nil {
+		key = "grants:" + *sub
+	}
+	return key
+}
 
 type cachedReport struct {
 	data      interface{}
@@ -32,7 +50,7 @@ func NewService(repo Repository) *Service {
 
 func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillReport, error) {
 	// Cache Key
-	key := "daily_till:" + dateStr
+	key := "daily_till:" + reachKey(ctx) + ":" + dateStr
 	if dateStr == "" {
 		key += time.Now().Format("2006-01-02")
 	}
@@ -75,7 +93,7 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 
 func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) (*SalesSummaryReport, error) {
 	// Cache Key
-	key := "sales_summary:" + startStr + ":" + endStr
+	key := "sales_summary:" + reachKey(ctx) + ":" + startStr + ":" + endStr
 
 	// Read Cache
 	s.cacheMutex.RLock()
@@ -123,7 +141,7 @@ func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) 
 }
 
 func (s *Service) GetARAgingReport(ctx context.Context) (*ARAgingReport, error) {
-	key := "ar_aging"
+	key := "ar_aging:" + reachKey(ctx)
 
 	s.cacheMutex.RLock()
 	if item, ok := s.cache[key]; ok {
@@ -205,6 +223,25 @@ func (s *Service) UpdateReportScheduleNextRun(ctx context.Context, scheduleID st
 
 func (s *Service) DeleteReportSchedule(ctx context.Context, id string) error {
 	return s.repo.DeleteReportSchedule(ctx, id)
+}
+
+// ScheduleCreatorGrants counts a schedule creator's current user_locations
+// grants: the fail closed check the scheduler makes at every run for a
+// creator the schedule does not record as an administrator.
+func (s *Service) ScheduleCreatorGrants(ctx context.Context, sub string) (int, error) {
+	return s.repo.ScheduleCreatorGrants(ctx, sub)
+}
+
+// PauseReportSchedule marks a schedule PAUSED after a refused run.
+func (s *Service) PauseReportSchedule(ctx context.Context, id string) error {
+	return s.repo.PauseReportSchedule(ctx, id)
+}
+
+// MultiBranchEnabled reads the single branch switch the branch middleware
+// reads, so a scheduled run treats its creator as the middleware treats every
+// caller.
+func (s *Service) MultiBranchEnabled(ctx context.Context) (bool, error) {
+	return s.repo.MultiBranchEnabled(ctx)
 }
 
 func (s *Service) ExecuteReportDefinition(ctx context.Context, def *ReportDefinition, entityType string) ([]map[string]interface{}, error) {

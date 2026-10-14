@@ -242,62 +242,41 @@
   },
   {
     "name": "reporting.bi_export.invoices",
+    "mask_body": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/reporting/export/invoices"
     },
     "response": {
-      "status": 500,
+      "status": 200,
       "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-5>"
-        }
-      }
+      "body": "<body>"
     }
   },
   {
     "name": "reporting.bi_export.orders",
+    "mask_body": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/reporting/export/orders"
     },
     "response": {
-      "status": 500,
+      "status": 200,
       "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-6>"
-        }
-      }
+      "body": "<body>"
     }
   },
   {
     "name": "reporting.bi_export.inventory",
+    "mask_body": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/reporting/export/inventory"
     },
     "response": {
-      "status": 500,
+      "status": 200,
       "content_type": "application/json",
-      "body": {
-        "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
-        },
-        "meta": {
-          "request_id": "<id-7>"
-        }
-      }
+      "body": "<body>"
     }
   },
   {
@@ -315,7 +294,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-5>"
         }
       }
     }

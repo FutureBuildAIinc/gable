@@ -34,9 +34,12 @@ type AuditSink interface {
 	Log(ctx context.Context, e audit.Entry) error
 }
 
-// BranchGuard applies the payload branch rule (ADR 0008 section 11).
+// BranchGuard applies the payload branch rule (ADR 0008 section 11) and
+// settles the branch a create with no body branch writes at
+// (SEC-NOHEADER-1). *middleware.BranchGuard satisfies it.
 type BranchGuard interface {
 	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
 // TxRunner runs fn inside one transaction, joining the caller's when ctx
@@ -265,6 +268,10 @@ func (s *Service) resolve(ctx context.Context, in *Input) (branch uuid.UUID, cur
 		branch = *in.BranchID
 	} else if ctxBranch := middleware.BranchIDForQuery(ctx); ctxBranch != nil {
 		branch = *ctxBranch
+	} else if granted, err := s.grantedBranch(ctx); err != nil {
+		return uuid.Nil, "", err
+	} else if granted != nil {
+		branch = *granted
 	} else {
 		var def uuid.UUID
 		if err := s.db.GetExecutor(ctx).QueryRow(ctx,
@@ -277,6 +284,32 @@ func (s *Service) resolve(ctx context.Context, in *Input) (branch uuid.UUID, cur
 		return uuid.Nil, "", err
 	}
 	return branch, currency, nil
+}
+
+// grantedBranch settles the branch a no header caller's create writes at
+// from the caller's user_locations grants (SEC-NOHEADER-1, r4 P3-5): exactly
+// one granted branch answers it, several answer the 400 that asks the
+// request to name branch_id, none fail closed with the 403, and callers the
+// grants never hold (an administrator, an owner, a key, a system caller)
+// answer nil and keep the default resolution.
+func (s *Service) grantedBranch(ctx context.Context) (*uuid.UUID, error) {
+	if s.branches == nil {
+		return nil, nil
+	}
+	granted, err := s.branches.GrantsForCreate(ctx)
+	switch {
+	case err == nil:
+		return granted, nil
+	case errors.Is(err, middleware.ErrCreateBranchChoice):
+		return nil, httpx.BadRequest("branch_id is required: this caller holds more than one branch grant",
+			httpx.FieldError{Field: "branch_id", Message: "is required: name one of the caller's granted branches"})
+	case errors.Is(err, middleware.ErrPayloadBranchRefused):
+		return nil, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	default:
+		return nil, err
+	}
 }
 
 // Create enters a vendor bill: it starts pending, owing its whole total, with

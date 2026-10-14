@@ -7,11 +7,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -137,6 +139,10 @@ func (h *Handler) HandleCustomerStatement(w http.ResponseWriter, r *http.Request
 	end := r.URL.Query().Get("end")
 	stmt, err := h.service.GetCustomerStatement(r.Context(), customerID, start, end)
 	if err != nil {
+		if errors.Is(err, ErrCustomerNotVisible) {
+			httputil.RespondError(w, r, "no such customer", http.StatusNotFound, err)
+			return
+		}
 		httputil.RespondError(w, r, "failed to get customer statement", http.StatusInternalServerError, err)
 		return
 	}
@@ -413,6 +419,27 @@ func (h *Handler) HandleCreateReportSchedule(w http.ResponseWriter, r *http.Requ
 		schedule.Status = ScheduleStatusActive
 	} else {
 		schedule.Status = ScheduleStatusStored
+	}
+
+	// The schedule records its creator: the run resolves the creator's
+	// reach from it (the subject whose user_locations grants scope a
+	// finance creator, the recorded administrator or owner role that keeps
+	// the every branch view), and a schedule with no creator recorded never
+	// runs. A deployment with no caller identity (authentication disabled)
+	// therefore cannot create a runnable schedule; that is the fail closed
+	// rule, not an accident to paper over, and the create says so with a 409
+	// instead of storing a schedule that could never run. The two resets
+	// keep a body that names created_by or creator_is_admin from being
+	// stored when no claims, or claims with an empty subject, replace them.
+	schedule.CreatedBy = ""
+	schedule.CreatorIsAdmin = false
+	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
+		schedule.CreatedBy = claims.Subject
+		schedule.CreatorIsAdmin = middleware.ClaimsHaveAnyRole(claims, "admin", "owner")
+	}
+	if schedule.CreatedBy == "" {
+		httpx.WriteError(w, r, httpx.Conflict("a schedule needs a caller identity: this caller carries no subject, so the scheduled run could never resolve its reach"))
+		return
 	}
 
 	if err := h.service.CreateReportSchedule(r.Context(), &schedule); err != nil {

@@ -7,8 +7,18 @@ import (
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/reporting"
+	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 )
+
+// newReportScheduler builds the scheduled report runner serve starts. A run
+// the fail closed rule refuses (no creator recorded, a creator holding no
+// grant) records an audit row beside its log line, so a schedule that stops
+// emailing is discoverable; wiring the logger here is what a test drives.
+func newReportScheduler(db *database.DB, svc *reporting.Service, sender reporting.EmailSender) *reporting.Scheduler {
+	return reporting.NewScheduler(svc, sender).WithRefusalAudit(audit.NewLogger(db))
+}
 
 // wireReportSchedules registers the ad-hoc report builder surface, which
 // includes the scheduled-report CRUD routes:
