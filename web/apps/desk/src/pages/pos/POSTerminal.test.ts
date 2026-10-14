@@ -2373,3 +2373,65 @@ describe('a quantity change under tenders already added', () => {
     el.remove();
   });
 });
+
+describe('PR 150 fix round 2: the Z table, the guard in _pay and a typed non cash tender', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('leaves account out of the closed drawer table and names methods in words', async () => {
+    const el = await mount(sale({ lines: [] }));
+    const inner = el as unknown as { _closeResult: unknown; _showTillClose: boolean };
+    inner._closeResult = {
+      session: {
+        over_short_cents: 0,
+        expected_by_method: { CASH: 30000, CHECK: 5000, ACCOUNT: 4000 },
+        counted_by_method: { CASH: 30000, CHECK: 5000 },
+      },
+      sale_count: 3, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    };
+    inner._showTillClose = true;
+    await el.updateComplete;
+    const text = el.textContent ?? '';
+    expect(text).toContain('Z-Report');
+    expect(text.toLowerCase()).not.toContain('account');
+    expect(text).not.toContain('CASH');
+    expect(text).toContain('Cash');
+    expect(text).toContain('Check');
+    el.remove();
+  });
+
+  it('refuses inside _pay while a quantity change is on its way', async () => {
+    svc.changeQuantity.mockReturnValue(new Promise(() => {}));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    (el.querySelector('[aria-label="Increase quantity of Item a"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    await (el as unknown as { _pay(): Promise<void> })._pay();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('keeps Pay off, in words, for a non cash amount typed above what is owed', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    await typeInto(el, '100.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over')).toBeTruthy();
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    // a cash amount above what is owed still gives change
+    q(el, 'tender-cash').click();
+    await el.updateComplete;
+    await typeInto(el, '100.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$13.50');
+    el.remove();
+  });
+});
