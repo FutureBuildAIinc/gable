@@ -64,10 +64,13 @@ func (s *Service) GenerateQuotePDF(ctx context.Context, q *quote.Quote, cust *cu
 	return finish(m)
 }
 
-// PurchaseOrderNumber is the number a purchase order prints under: the
-// purchase order has no number column of its own yet, so its id's first
-// block stands in.
+// PurchaseOrderNumber is the number a purchase order prints under: its own
+// number (PO-000001), the one the desk and the API show. A row without one
+// falls back to its id's first block.
 func PurchaseOrderNumber(po *purchase_order.PurchaseOrder) string {
+	if po.Number != "" {
+		return po.Number
+	}
 	return "PO-" + strings.ToUpper(strings.SplitN(po.ID.String(), "-", 2)[0])
 }
 

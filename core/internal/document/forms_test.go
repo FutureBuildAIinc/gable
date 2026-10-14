@@ -237,7 +237,7 @@ func TestQuoteForm(t *testing.T) {
 func TestPurchaseOrderForm(t *testing.T) {
 	svc := brandedService(t)
 	po := &purchase_order.PurchaseOrder{
-		ID: uuid.MustParse("5a0fbd2c-1111-4222-8333-444455556666"), BranchID: yardSouth, VendorName: "Mill Supply Co", Status: "SENT",
+		ID: uuid.MustParse("5a0fbd2c-1111-4222-8333-444455556666"), Number: "PO-000042", BranchID: yardSouth, VendorName: "Mill Supply Co", Status: "SENT",
 		CreatedAt: time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC),
 		Lines:     []purchase_order.PurchaseOrderLine{{Description: "2x4x8 SPF", Quantity: 100, Cost: 3.5}},
 	}
@@ -245,9 +245,18 @@ func TestPurchaseOrderForm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"PURCHASE ORDER", "PO-5A0FBD2C", "Mill Supply Co", "South Yard", "2 Beta Street", "2x4x8 SPF"} {
+	for _, want := range []string{"PURCHASE ORDER", "PO-000042", "Mill Supply Co", "South Yard", "2 Beta Street", "2x4x8 SPF"} {
 		mustContain(t, doc, want)
 	}
+	mustNotContain(t, doc, "PO-5A0FBD2C")
+
+	// A purchase order with no number yet falls back to the id's first block.
+	po.Number = ""
+	doc, err = svc.GeneratePurchaseOrderPDF(context.Background(), po)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "PO-5A0FBD2C")
 }
 
 // A logo already stored past the dimension cap prints without the image
