@@ -13376,8 +13376,11 @@ export interface components {
             alt_text: string;
             sort_order: number;
             is_primary: boolean;
-            /** @enum {string} */
-            status: "generating" | "ready" | "failed";
+            /**
+             * @description refused is a generation the provider refused for the saved key (a retry cannot work; an administrator enters the key again in Tech Admin, AI Settings).
+             * @enum {string}
+             */
+            status: "generating" | "ready" | "failed" | "refused";
             gen_model: string;
             gen_prompt: string;
             gen_style: string;
@@ -27753,6 +27756,7 @@ export interface operations {
             415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     purchaseOrderFreightApply: {

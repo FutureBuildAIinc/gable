@@ -13877,6 +13877,7 @@ paths:
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500": {$ref: "#/components/responses/InternalError"}
+        "502": {$ref: "#/components/responses/AIRefused"}
   /api/v1/purchase-orders/{id}/freight/{freightId}/apply:
     post:
       operationId: purchaseOrderFreightApply
@@ -25855,6 +25856,9 @@ components:
             - generating
             - ready
             - failed
+            - refused
+          description: >-
+            refused is a generation the provider refused for the saved key (a retry cannot work; an administrator enters the key again in Tech Admin, AI Settings).
         gen_model:
           type: string
         gen_prompt:
