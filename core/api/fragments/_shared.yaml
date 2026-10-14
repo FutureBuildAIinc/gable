@@ -229,7 +229,7 @@ components:
       description: >-
         AI is off (code ai_off): no key for the chosen provider, a stored key
         the vault cannot open, or a feature the chosen provider does not
-        offer (image generation under the Anthropic provider). The message
+        offer. The message
         says that an administrator turns it on in Tech Admin, AI. Or the
         idempotency layer reports the Idempotency-Key in progress (code
         idempotency_in_progress). Both are the ADR 0001 envelope.

@@ -5731,7 +5731,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Generate PIM image */
+        /**
+         * Generate PIM image
+         * @description Starts product image generation and answers 202 with a media row in status generating. With the OpenRouter provider chosen the row becomes a photo; with the Anthropic provider chosen it becomes an SVG illustration drawn by Claude, stored only after a strict sanitiser has re-serialised it (a drawing it refuses settles the row as failed).
+         */
         post: operations["productPimGenerateImage"];
         delete?: never;
         options?: never;
@@ -14455,7 +14458,7 @@ export interface components {
                 "application/json": components["schemas"]["WireError"];
             };
         };
-        /** @description AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer (image generation under the Anthropic provider). The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope. */
+        /** @description AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer. The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope. */
         AIOffEither: {
             headers: {
                 [name: string]: unknown;
