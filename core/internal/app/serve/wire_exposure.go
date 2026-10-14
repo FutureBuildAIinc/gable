@@ -6,6 +6,7 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -273,8 +274,10 @@ func exposureKeyBranchWall(keyWall *middleware.KeyBranchWall, quoteBranchOf func
 // only A neither reads nor writes B's quote, with or without the header. A
 // read outside the reach answers missing (404, the wall a header caller
 // already met); an act is refused (403 naming id) before the handler runs,
-// so nothing is written. A quote that does not exist, or of no branch, names
-// no branch and passes to the handler's own answer.
+// so nothing is written. The wall fails closed: a lookup error answers 500
+// and a quote that does not exist (or of no branch, which names none the
+// caller could hold) answers 404, and neither hands the request on to the
+// handler, whose by id writes have no wall of their own beneath this one.
 func exposureUserBranchWall(guard *middleware.BranchGuard, quoteBranchOf func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -286,21 +289,36 @@ func exposureUserBranchWall(guard *middleware.BranchGuard, quoteBranchOf func(ct
 				return
 			}
 			raw := r.PathValue("id")
-			if raw != "" {
-				if id, err := uuid.Parse(raw); err == nil {
-					if branch, err := quoteBranchOf(r.Context(), id); err == nil && branch != nil {
-						if err := guard.CheckPayloadBranch(r.Context(), *branch); errors.Is(err, middleware.ErrPayloadBranchRefused) {
-							if r.Method == http.MethodGet || r.Method == http.MethodHead {
-								http.NotFound(w, r)
-								return
-							}
-							httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
-								Message: "quote is outside the branches this caller may target",
-								Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}})
-							return
-						}
-					}
+			if raw == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			id, err := uuid.Parse(raw)
+			if err != nil {
+				next.ServeHTTP(w, r) // the handler answers the malformed id
+				return
+			}
+			branch, err := quoteBranchOf(r.Context(), id)
+			if err != nil {
+				httpx.WriteError(w, r, fmt.Errorf("quote branch lookup: %w", err))
+				return
+			}
+			if branch == nil {
+				httpx.WriteError(w, r, httpx.NotFound("quote not found"))
+				return
+			}
+			if err := guard.CheckPayloadBranch(r.Context(), *branch); errors.Is(err, middleware.ErrPayloadBranchRefused) {
+				if r.Method == http.MethodGet || r.Method == http.MethodHead {
+					http.NotFound(w, r)
+					return
 				}
+				httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+					Message: "quote is outside the branches this caller may target",
+					Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}})
+				return
+			} else if err != nil {
+				httpx.WriteError(w, r, fmt.Errorf("quote branch lookup: %w", err))
+				return
 			}
 			next.ServeHTTP(w, r)
 		})

@@ -10,14 +10,17 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/reporting"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -506,5 +509,44 @@ func TestNoHeader_PosVoidOfAHiddenSaleIsMissing(t *testing.T) {
 	}
 	if after := posBState(t, f); after != before {
 		t.Errorf("the void changed B's sale: %s, was %s", after, before)
+	}
+}
+
+// TestExposureUserBranchWall_FailsClosed is the exposure by id wall's lookup
+// (r5 P3-4): a lookup error answers 500 and a quote that does not exist 404,
+// and neither hands the request on to the handler (the by id exposure writes
+// have no wall of their own beneath this one). The control: a quote of the
+// context branch passes.
+func TestExposureUserBranchWall_FailsClosed(t *testing.T) {
+	quote, branch := uuid.New(), uuid.New()
+	for _, c := range []struct {
+		name   string
+		lookup func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+		want   int
+		called bool
+	}{
+		{"lookup error", func(context.Context, uuid.UUID) (*uuid.UUID, error) {
+			return nil, errors.New("injected lookup failure")
+		},
+			http.StatusInternalServerError, false},
+		{"missing quote", func(context.Context, uuid.UUID) (*uuid.UUID, error) { return nil, nil },
+			http.StatusNotFound, false},
+		{"quote of the context branch", func(context.Context, uuid.UUID) (*uuid.UUID, error) { return &branch, nil },
+			http.StatusOK, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			called := false
+			next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+			mux := http.NewServeMux()
+			mux.Handle("POST /api/v1/quotes/{id}/exposure/acknowledge",
+				exposureUserBranchWall(middleware.NewBranchGuard(nil), c.lookup)(next))
+			req := httptest.NewRequest("POST", "/api/v1/quotes/"+quote.String()+"/exposure/acknowledge", nil)
+			req = req.WithContext(middleware.WithBranchContext(req.Context(), &middleware.BranchContext{BranchID: &branch, UserSub: "pin-sales"}))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != c.want || called != c.called {
+				t.Errorf("%s: answered %d with the handler called %t, want %d and %t", c.name, rec.Code, called, c.want, c.called)
+			}
+		})
 	}
 }
