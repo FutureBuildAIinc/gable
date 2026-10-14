@@ -195,7 +195,8 @@ const customerColumns = `
 	ROUND(c.balance_due * 100)::bigint,
 	c.currency,
 	COALESCE(c.currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
-	c.payment_terms_id, pt.code, pt.name, c.po_required, c.revision, c.created_at, COALESCE(c.updated_at, c.created_at)`
+	c.payment_terms_id, pt.code, pt.name, c.po_required, c.revision, c.created_at, COALESCE(c.updated_at, c.created_at),
+	ARRAY(SELECT cb.branch_id FROM customer_branches cb WHERE cb.customer_id = c.id UNION SELECT c.primary_branch_id ORDER BY 1)`
 
 const customerFrom = `
 	FROM customers c
@@ -219,7 +220,7 @@ func scanCustomer(row pgx.Row, c *Customer) error {
 		&c.SalespersonID, &c.SalespersonName,
 		&credit, &balance, &c.Currency, &c.EffectiveCurrency,
 		&c.PaymentTermsID, &c.PaymentTerms.Code, &c.PaymentTerms.Name, &c.POrequired,
-		&c.Revision, &created, &updated); err != nil {
+		&c.Revision, &created, &updated, &c.BranchIDs); err != nil {
 		return err
 	}
 	c.Tier = CustomerTier(tier)
@@ -277,6 +278,7 @@ func (r *PostgresRepository) InsertCustomer(ctx context.Context, c *Customer) er
 		return mapWriteError(err, "failed to insert customer")
 	}
 	c.PrimaryBranchID = branch
+	c.BranchIDs = []uuid.UUID{branch}
 	// Mirror into customer_branches so the branch wall works uniformly.
 	if _, err := exec.Exec(ctx,
 		`INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,

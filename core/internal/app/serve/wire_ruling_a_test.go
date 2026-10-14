@@ -193,3 +193,41 @@ func TestRulingA_TheLinkFollowsTrade(t *testing.T) {
 		}
 	}
 }
+
+// TestRulingA_CustomerAnswerShowsHomeAndTradeYards: the wire answer carries
+// the home yard (primary_branch_id, always among branch_ids) and every yard
+// the customer trades at; a first quote at another yard grows the list.
+func TestRulingA_CustomerAnswerShowsHomeAndTradeYards(t *testing.T) {
+	f := newKeyPinFixture(t)
+	read := func() (home string, yards []string) {
+		status, buf := f.userAs(t, "admin", "GET", "/api/v1/customers/"+f.custB.String(), "", nil)
+		if status != http.StatusOK {
+			t.Fatalf("read of B's customer: %d %s", status, buf)
+		}
+		var c struct {
+			Home  string   `json:"primary_branch_id"`
+			Yards []string `json:"branch_ids"`
+		}
+		if err := json.Unmarshal(buf, &c); err != nil {
+			t.Fatal(err)
+		}
+		return c.Home, c.Yards
+	}
+	home, yards := read()
+	if home != f.branchB.String() || len(yards) != 1 || yards[0] != f.branchB.String() {
+		t.Fatalf("before: home %s yards %v, want B and [B]", home, yards)
+	}
+	body := fmt.Sprintf(`{"customer_id":%q,"lines":[%s]}`, f.custB.String(), f.quoteLine())
+	f.madeAs(t, "admin", "quotes", "POST", "/api/v1/quotes", body, headerA(f), http.StatusCreated)
+	home, yards = read()
+	if home != f.branchB.String() || len(yards) != 2 {
+		t.Fatalf("after a quote at A: home %s yards %v, want home B and two yards", home, yards)
+	}
+	seen := map[string]bool{}
+	for _, y := range yards {
+		seen[y] = true
+	}
+	if !seen[f.branchA.String()] || !seen[f.branchB.String()] {
+		t.Errorf("yards %v miss A or B", yards)
+	}
+}

@@ -22,6 +22,9 @@
         "account_number": "GOLD-A-001",
         "address": "7 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -1045,6 +1048,9 @@
         "account_number": "GOLD-A-001",
         "address": "7 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,
@@ -1091,6 +1097,9 @@
         "account_number": "GOLD-A-001",
         "address": "7 Golden Way, Kelowna BC",
         "balance_cents": 0,
+        "branch_ids": [
+          "<id-1>"
+        ],
         "created_at": "<ts+0d>",
         "credit_limit_cents": 5000000,
         "currency": null,

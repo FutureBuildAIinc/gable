@@ -7716,8 +7716,13 @@ export interface components {
             address: string | null;
             tier: components["schemas"]["CustomerTier"];
             is_active: boolean;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The customer's home yard. It is always among branch_ids.
+             */
             primary_branch_id: string;
+            /** @description The yards the customer trades at, home yard included, in id order. Customers are dealer wide accounts (ruling A): the first document at a yard the customer is not yet linked to adds the yard here. */
+            branch_ids: string[];
             /** Format: uuid */
             price_level_id: string | null;
             price_level: components["schemas"]["PriceLevel"] | null;
