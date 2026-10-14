@@ -20,7 +20,7 @@ var brandWords = []string{
 // tests hold plain product words only.
 func TestSampleListAndItsTestsHoldNoBrandWord(t *testing.T) {
 	sources := map[string]string{"sample list": generateFallbackMaterialList()}
-	for _, name := range []string{"service.go", "service_test.go", "service_degradation_test.go"} {
+	for _, name := range []string{"service.go", "service_test.go", "service_degradation_test.go", "../ai/openrouter.go", "../tax/service_test.go"} {
 		data, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatal(err)
