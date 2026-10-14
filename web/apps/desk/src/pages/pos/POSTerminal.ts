@@ -184,7 +184,26 @@ export class POSTerminal extends LitElement {
     await this._loadTill();
     // a later change of register or yard owns the screen now
     if (reg !== this._registerId) return;
+    // A sale takes its till session when it is created, so none is opened
+    // until a till is: opening the till starts it (and reuses a remembered
+    // empty one), so the till opening never leaves a second sale behind.
+    if (this._till === null) return;
     await this._startNewSale();
+  }
+
+  /**
+   * The signed in person: the key the remembered sale is filed under and the
+   * cashier id the server stamps on a sale they start (the token's subject
+   * when it is a uuid, else the nil uuid).
+   */
+  private _person(): { key: string; cashierId: string } {
+    const NIL = '00000000-0000-0000-0000-000000000000';
+    const s = authCustody.session;
+    if (s === null) return { key: 'anon', cashierId: NIL };
+    if (s.kind === 'dev') return { key: `dev-${s.name}`, cashierId: NIL };
+    const sub = s.claims.sub ?? '';
+    const isId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sub);
+    return { key: sub !== '' ? sub : 'anon', cashierId: isId ? sub.toLowerCase() : NIL };
   }
 
   /** False when the cashier declined to leave the open sale. */
@@ -265,6 +284,8 @@ export class POSTerminal extends LitElement {
       this._tillBusy = true;
       this._closeResult = await posService.closeTill(this._till.id, counted, '');
       this._till = null; // session closed
+      this._sale = null;
+      this._completed = null;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to close till';
     } finally {
@@ -534,6 +555,7 @@ export class POSTerminal extends LitElement {
   /* ---- Sale management ---- */
 
   private async _startNewSale() {
+    if (this._till === null) return;
     // A completion's own timer must not start a second sale over this one.
     if (this._newTxTimer) {
       clearTimeout(this._newTxTimer);
@@ -571,17 +593,21 @@ export class POSTerminal extends LitElement {
 
   /**
    * Each visit to the counter used to open a new empty sale, so abandoned empty
-   * sales piled up on the register. The sale this register last opened is
-   * reused while it is still open, empty, a walk-in and on the till session now
-   * open; otherwise a new one is started and remembered.
+   * sales piled up on the register. The sale this person last opened on this
+   * register is reused while it is still open, empty, a walk-in, theirs (the
+   * server stamps the cashier at the create) and on the till session now open;
+   * otherwise a new one is started and remembered. The counter opens a sale
+   * only while a till is open, so a sale always carries its till session.
    */
   private async _emptyOrNewSale(reg: string): Promise<Sale> {
-    const key = SALE_STORAGE_PREFIX + reg;
+    const who = this._person();
+    const key = `${SALE_STORAGE_PREFIX}${who.key}.${reg}`;
     const remembered = localStorage.getItem(key);
     if (remembered) {
       try {
         const s = await posService.getSale(remembered);
         const empty = s.status === 'open' && s.register_id === reg && s.customer_id === null
+          && s.cashier_id === who.cashierId
           && !s.lines.some((l) => l.parent_line_id === null)
           && (s.till_session_id ?? null) === (this._till?.id ?? null);
         if (empty) return s;
@@ -995,7 +1021,7 @@ export class POSTerminal extends LitElement {
               class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till</button>` : html`
             <button @click=${() => { this._showTillOpen = true; }}
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
-          ${this._register ? html`
+          ${this._register && this._till ? html`
           <button @click=${() => this._startNewSale()}
             class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>` : nothing}
         </div>
@@ -1144,6 +1170,10 @@ export class POSTerminal extends LitElement {
     const open = sale?.status === 'open';
     const plan = payPlan(total, this._pendingTenders, this._entry);
     const canPay = this._till !== null && hasLines && open && !this._loading && plan.ok;
+    // Void and Return act on the completed sale on screen only: an empty new
+    // sale, whatever the one before it was, offers neither.
+    const followOn = this._completed !== null && sale !== null && sale.id === this._completed.id
+      && sale.status === 'completed';
     const label = this._loading ? 'Processing...'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
@@ -1169,9 +1199,9 @@ export class POSTerminal extends LitElement {
           ${label}
         </button>
         <div class="flex gap-2 xl:mt-3">
-          <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!this._completed}
+          <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}
             class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Void</button>
-          <button @click=${() => this._beginReturn()} ?disabled=${!this._completed}
+          <button @click=${() => this._beginReturn()} ?disabled=${!followOn}
             class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Return</button>
         </div>
       </section>`;
@@ -1214,9 +1244,9 @@ export class POSTerminal extends LitElement {
               Ask an administrator to add a register for this yard, or switch to a yard that has one.
             </p>
           </div>` : html`
-        <div class="flex min-h-0 flex-1 flex-col xl:flex-row">
+        <div class="flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-visible" data-testid="pos-body">
           ${this._renderItems(productLines)}
-          <div class="flex max-h-[45%] min-h-0 flex-col overflow-y-auto border-t border-white/10 bg-slate-steel xl:max-h-none xl:w-[420px] xl:border-t-0"
+          <div class="flex shrink-0 flex-col border-t border-white/10 bg-slate-steel xl:min-h-0 xl:w-[420px] xl:overflow-y-auto xl:border-t-0"
             data-testid="pos-panels">
             <div class="p-4">
               <div class="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-1">

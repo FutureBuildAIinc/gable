@@ -15,6 +15,7 @@ const svc = vi.hoisted(() => ({
   addItem: vi.fn(),
   removeItem: vi.fn(),
   getSale: vi.fn(),
+  openTill: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -25,12 +26,20 @@ vi.mock('../../services/POSService', async (orig) => {
 import './POSTerminal';
 import type { POSTerminal } from './POSTerminal';
 import { branchContext } from '../../services/BranchContext';
+import { authCustody } from '@gable/auth';
 import type { CounterRegister } from '../../types/pos';
 
 const reg = (id: string, branch: string, name = 'Front till'): CounterRegister => ({
   id, name, branch_id: `b-${branch}`, branch_code: branch.toUpperCase(), branch_name: `${branch} yard`,
 });
 const REG_01 = reg('REG-01', 'main');
+const OPEN_TILL = { id: 't', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 };
+const NIL_CASHIER = '00000000-0000-0000-0000-000000000000';
+const CASHIER_A = '11111111-1111-4111-8111-111111111111';
+const CASHIER_B = '22222222-2222-4222-8222-222222222222';
+const b64 = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+const tokenFor = (sub: string) => `${b64({ alg: 'none', typ: 'JWT' })}.${b64({ sub, exp: 4102444800 })}.sig`;
+
 
 const line = (id: string, cents: number) => ({
   id, position: 1, line_type: 'product', parent_line_id: null, product_id: `p-${id}`,
@@ -442,12 +451,25 @@ describe('the counter as the Panels layout', () => {
       expect(input.value).toBe('150.50');
     });
 
+    it('lets the whole counter scroll below the desktop width, so no panel is clipped by a capped column', async () => {
+      const el = await mount(sale());
+      const body = q(el, 'pos-body');
+      expect(body.className).toMatch(/(^|\s)overflow-y-auto(\s|$)/);
+      expect(body.className).toContain('xl:overflow-visible');
+      const column = q(el, 'pos-panels');
+      expect(column.className).not.toMatch(/max-h-/);
+      expect(column.className).not.toMatch(/(^|\s)overflow-y-auto(\s|$)/);
+      expect(column.className).toContain('xl:overflow-y-auto');
+      expect(body.contains(q(el, 'panel-customer'))).toBe(true);
+      expect(body.contains(q(el, 'pos-pay'))).toBe(true);
+    });
+
     it('keeps the right column as one scrolling region holding Payment, with Summary and Pay at its foot', async () => {
       const el = await mount(sale());
       const column = q(el, 'pos-panels');
       const scrollers = [...column.querySelectorAll('*')].filter((n) => n.className.toString().includes('overflow-y-auto'));
-      expect(scrollers.length + (column.className.includes('overflow-y-auto') ? 1 : 0)).toBe(1);
-      const region = column.className.includes('overflow-y-auto') ? column : scrollers[0];
+      expect(scrollers.length + (column.className.includes('xl:overflow-y-auto') ? 1 : 0)).toBe(1);
+      const region = column.className.includes('xl:overflow-y-auto') ? column : scrollers[0];
       expect(region.contains(q(el, 'panel-payment'))).toBe(true);
       expect(region.contains(q(el, 'pos-pay'))).toBe(true);
       const foot = q(el, 'pos-panel-foot');
@@ -523,7 +545,7 @@ describe('the counter opens on its own yard\'s register', () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     localStorage.clear();
-    svc.currentTill.mockResolvedValue(null);
+    svc.currentTill.mockResolvedValue(OPEN_TILL);
     svc.startSale.mockResolvedValue(sale());
   });
   // The server's answer: the request carries the yard, so the list is that
@@ -648,7 +670,8 @@ describe('the register and the sale when the cashier moves', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    svc.currentTill.mockResolvedValue(null);
+    authCustody.signOut();
+    svc.currentTill.mockResolvedValue(OPEN_TILL);
     svc.startSale.mockResolvedValue(sale({ lines: [] }));
     svc.getSale.mockRejectedValue(new Error('not found'));
     branchContext.setCurrent('b-lk');
@@ -763,7 +786,7 @@ describe('the register and the sale when the cashier moves', () => {
 
   it('reuses the cashier\'s empty open sale on the register instead of opening another', async () => {
     serve([lk]);
-    const empty = sale({ id: 'empty-1', register_id: 'REG-LK', lines: [], customer_id: null, till_session_id: null });
+    const empty = sale({ id: 'empty-1', register_id: 'REG-LK', lines: [], customer_id: null, cashier_id: NIL_CASHIER });
     svc.startSale.mockResolvedValue(empty);
     const first = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(first);
@@ -782,16 +805,112 @@ describe('the register and the sale when the cashier moves', () => {
 
   it('opens a new sale when the remembered one has lines or is no longer open', async () => {
     serve([lk]);
-    svc.startSale.mockResolvedValue(sale({ id: 'empty-1', register_id: 'REG-LK', lines: [], till_session_id: null }));
+    svc.startSale.mockResolvedValue(sale({ id: 'empty-1', register_id: 'REG-LK', lines: [], cashier_id: NIL_CASHIER }));
     const first = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(first);
     await settle(first);
     first.remove();
-    svc.getSale.mockResolvedValue(sale({ id: 'empty-1', register_id: 'REG-LK', till_session_id: null }));
+    svc.getSale.mockResolvedValue(sale({ id: 'empty-1', register_id: 'REG-LK', cashier_id: NIL_CASHIER }));
     const again = document.createElement('gable-pos-terminal') as POSTerminal;
     document.body.appendChild(again);
     await settle(again);
     expect(svc.startSale).toHaveBeenCalledTimes(2);
     again.remove();
+  });
+  const mountLk = async () => {
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await settle(el);
+    return el;
+  };
+
+  it('does not hand one cashier the empty sale another cashier left on the register', async () => {
+    serve([lk]);
+    authCustody.signInWithToken(tokenFor(CASHIER_A));
+    const aSale = sale({ id: 'a-empty', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_A });
+    svc.startSale.mockResolvedValue(aSale);
+    (await mountLk()).remove();
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    authCustody.signOut();
+    authCustody.signInWithToken(tokenFor(CASHIER_B));
+    const bSale = sale({ id: 'b-new', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_B });
+    svc.startSale.mockResolvedValue(bSale);
+    svc.getSale.mockResolvedValue(aSale);
+    const el = await mountLk();
+    expect(svc.getSale).not.toHaveBeenCalledWith('a-empty');
+    expect(svc.startSale).toHaveBeenCalledTimes(2);
+    // and A's own empty sale is still A's to reuse
+    el.remove();
+    authCustody.signOut();
+    authCustody.signInWithToken(tokenFor(CASHIER_A));
+    svc.getSale.mockResolvedValue(aSale);
+    (await mountLk()).remove();
+    expect(svc.getSale).toHaveBeenCalledWith('a-empty');
+    expect(svc.startSale).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reuse a sale remembered under another cashier even when the server hands it back', async () => {
+    serve([lk]);
+    authCustody.signInWithToken(tokenFor(CASHIER_B));
+    localStorage.setItem(`gable.pos.sale.${CASHIER_B}.REG-LK`, 'a-empty');
+    svc.getSale.mockResolvedValue(sale({ id: 'a-empty', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_A }));
+    svc.startSale.mockResolvedValue(sale({ id: 'b-new', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_B }));
+    (await mountLk()).remove();
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reuse an empty sale that belongs to another till session', async () => {
+    serve([lk]);
+    authCustody.signInWithToken(tokenFor(CASHIER_A));
+    const old = sale({ id: 'old-till', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_A, till_session_id: 'previous-till' });
+    localStorage.setItem(`gable.pos.sale.${CASHIER_A}.REG-LK`, 'old-till');
+    svc.getSale.mockResolvedValue(old);
+    svc.startSale.mockResolvedValue(sale({ id: 'fresh', register_id: 'REG-LK', lines: [], cashier_id: CASHIER_A }));
+    (await mountLk()).remove();
+    expect(svc.getSale).toHaveBeenCalledWith('old-till');
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens no sale until the till is open, and opening the till starts exactly one', async () => {
+    serve([lk]);
+    svc.currentTill.mockResolvedValue(null);
+    svc.openTill.mockResolvedValue({ ...OPEN_TILL, register_id: 'REG-LK' });
+    svc.startSale.mockResolvedValue(sale({ id: 'first', register_id: 'REG-LK', lines: [], cashier_id: NIL_CASHIER }));
+    const el = await mountLk();
+    expect(svc.startSale).not.toHaveBeenCalled();
+    const openBtn = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Open Till') as HTMLElement;
+    openBtn.click();
+    await el.updateComplete;
+    const float = el.querySelector('input[type="number"]') as HTMLInputElement;
+    float.value = '200.00';
+    float.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const confirm = [...el.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Open Till').pop() as HTMLElement;
+    confirm.click();
+    await settle(el);
+    expect(svc.openTill).toHaveBeenCalledTimes(1);
+    expect(svc.startSale).toHaveBeenCalledTimes(1);
+    el.remove();
+  });
+
+  it('shows Void and Return disabled on the empty new sale that follows a completed one', async () => {
+    serve([lk]);
+    const done = sale({ id: 'done', register_id: 'REG-LK', status: 'completed', cashier_id: NIL_CASHIER });
+    svc.startSale.mockResolvedValue(done);
+    const el = await mountLk();
+    // a completed sale this visit did not complete is not offered either
+    expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(true);
+    (el as unknown as { _completed: Sale })._completed = done;
+    await el.updateComplete;
+    expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(false);
+    svc.startSale.mockResolvedValue(sale({ id: 'next', register_id: 'REG-LK', lines: [], cashier_id: NIL_CASHIER }));
+    const newSale = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'New Sale') as HTMLElement;
+    newSale.click();
+    await settle(el);
+    expect(q(el, 'pos-header').textContent).toContain('open');
+    expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(true);
+    const ret = [...q(el, 'pos-panel-foot').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
+    expect(ret.disabled).toBe(true);
+    el.remove();
   });
 });
