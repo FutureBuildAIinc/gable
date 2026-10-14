@@ -59,7 +59,7 @@ test.describe('Order flow on the new contract', () => {
     await page.locator('gable-line-item-editor input[type="number"]').first().fill('10');
     await page.getByRole('button', { name: 'Add', exact: true }).click();
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     const createdRes = await created;
     expect(createdRes.status(), await createdRes.text()).toBe(201);
     const quote = await createdRes.json();
