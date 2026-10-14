@@ -20,9 +20,9 @@ import (
 )
 
 // TestRulingA_CustomerStandingIsDealerWide: a user granted only yard A reads
-// B's customer with its balance and credit limit, and the account, the
-// transactions and the statement of the same customer answer 404 to the same
-// user (ADR 0007 section 5.8).
+// B's customer with its balance and credit limit, and the account summary
+// (the same figures) answers 200; the transactions and the statement of the
+// same customer answer 404 to the same user (ADR 0007 section 5.8).
 func TestRulingA_CustomerStandingIsDealerWide(t *testing.T) {
 	f := newKeyPinFixture(t)
 	noheaderGrant(t, f, "pin-finance", f.branchA)
@@ -59,8 +59,12 @@ func TestRulingA_CustomerStandingIsDealerWide(t *testing.T) {
 	}
 	for _, p := range accountSurface(f.custB) {
 		for _, hdr := range []map[string]string{nil, headerA(f)} {
-			if status, buf := f.userAs(t, "finance", "GET", p, "", hdr); status != http.StatusNotFound {
-				t.Errorf("finance granted A reading %s (header %t): %d %s, want 404", p, hdr != nil, status, buf)
+			want := http.StatusNotFound
+			if summaryRoute(p) {
+				want = http.StatusOK // ruling A: the summary is dealer wide
+			}
+			if status, buf := f.userAs(t, "finance", "GET", p, "", hdr); status != want {
+				t.Errorf("finance granted A reading %s (header %t): %d %s, want %d", p, hdr != nil, status, buf, want)
 			}
 		}
 	}

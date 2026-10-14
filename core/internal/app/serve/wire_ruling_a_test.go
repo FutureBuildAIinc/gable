@@ -94,15 +94,20 @@ func TestRulingA_CustomerReadMatrix(t *testing.T) {
 	}
 }
 
-// TestRulingA_FinanceKeepsGrants: the account, transactions and AR statement
-// of B's customer stay missing for a finance user granted A only.
+// TestRulingA_FinanceKeepsGrants: the transactions and AR statement of B's
+// customer stay missing for a finance user granted A only; the account
+// summary, the customer record's own figures, reads dealer wide.
 func TestRulingA_FinanceKeepsGrants(t *testing.T) {
 	f := newKeyPinFixture(t)
 	noheaderGrant(t, f, "pin-finance", f.branchA)
 	for _, p := range accountSurface(f.custB) {
 		for _, hdr := range []map[string]string{nil, headerA(f)} {
-			if status, buf := f.userAs(t, "finance", "GET", p, "", hdr); status != http.StatusNotFound {
-				t.Errorf("finance granted A reading %s (header %t): %d %s, want 404", p, hdr != nil, status, buf)
+			want := http.StatusNotFound
+			if summaryRoute(p) {
+				want = http.StatusOK // ruling A: the summary is dealer wide
+			}
+			if status, buf := f.userAs(t, "finance", "GET", p, "", hdr); status != want {
+				t.Errorf("finance granted A reading %s (header %t): %d %s, want %d", p, hdr != nil, status, buf, want)
 			}
 		}
 	}
