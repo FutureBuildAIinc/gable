@@ -12,7 +12,7 @@
  * fires a bubbling `change` event with the value on the element itself, so a
  * handler written for a native select keeps its meaning.
  */
-import { LitElement, html, nothing } from 'lit';
+import { LitElement, html, nothing, type TemplateResult } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ChevronDown } from 'lucide';
@@ -222,7 +222,7 @@ export class GableSelect extends LitElement {
     }
 
     private _renderList() {
-        const rows = [];
+        const rows: TemplateResult[] = [];
         let lastGroup: string | undefined;
         this.options.forEach((option, index) => {
             if (option.group !== undefined && option.group !== lastGroup) {
