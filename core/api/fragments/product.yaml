@@ -1116,7 +1116,7 @@ components:
         stackable, geometry_source, lead_time_days, reorder_point,
         reorder_qty, on_hand, allocated, available, revision, created_at,
         updated_at, sale_uom, price_uom, purchase_uom, board_thickness_in,
-        board_width_in, board_length_ft, random_length, units]
+        board_width_in, board_length_ft, random_length, units, image_url]
       properties:
         id:
           type: string
@@ -1204,6 +1204,11 @@ components:
           description: The product's unit set (ADR 0006 sections 3.1 and 3.2).
           items:
             $ref: '#/components/schemas/UnitSetRow'
+        image_url:
+          type: [string, "null"]
+          description: >-
+            The product's picture path while the catalog.product_images
+            setting is on; null while it is off or the product has none.
         created_at:
           type: string
           format: date-time
