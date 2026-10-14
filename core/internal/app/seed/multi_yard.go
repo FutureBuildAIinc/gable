@@ -59,9 +59,24 @@ var mainYardOnlySKUs = []string{
 	"LUM-6612-PT", "LUM-448-WRC", "DR-EXT-3680-STL", "RF-ICE-WTR", "INS-R30-24", "CORNSFT1612V",
 }
 
+// seedExec runs one statement and logs a failure under the section's name, so
+// a half built demo does not end in an unqualified success line.
+func seedExec(db *sql.DB, section, query string, args ...any) {
+	if _, err := db.Exec(query, args...); err != nil {
+		log.Printf("Seed: %s: %v", section, err)
+	}
+}
+
 // upsertPersonas writes the staff rows and the yard grants. The subject is the
 // staff number, the address an invented example domain, and the home yard the
 // grant flagged is_home.
+//
+// The repave is deliberate. The multi yard seed runs only with DEMO_SEED on a
+// demo environment and, like every seed section (AGENTS.md, "Seed resets
+// transactional data each run; reference data upserts"), puts its own rows
+// back on every run: the personas, their grants, the multi_branch_enabled
+// switch and the driver are the demo's own rows, and an edit an operator
+// makes to one of them is overwritten by the next seed.
 func upsertPersonas(db *sql.DB, yards map[string]uuid.UUID) error {
 	for _, p := range demoPersonas {
 		if _, err := db.Exec(`INSERT INTO staff (email, full_name, staff_no, role, active)
@@ -125,12 +140,12 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 			continue
 		}
 		for _, y := range []string{"WK", "LK"} {
-			db.Exec(`DELETE FROM inventory WHERE product_id = $1 AND location_id = $2`, pid, yards[y])
+			seedExec(db, "satellite stock delete "+sku, `DELETE FROM inventory WHERE product_id = $1 AND location_id = $2`, pid, yards[y])
 		}
 	}
 
 	// The main yard's driver, for the one truck the walks dispatch.
-	db.Exec(`INSERT INTO drivers (name, license_number, phone_number, status, cdl_class, cdl_expiry, hire_date, email)
+	seedExec(db, "driver", `INSERT INTO drivers (name, license_number, phone_number, status, cdl_class, cdl_expiry, hire_date, email)
 		VALUES ('Alex Moreno', 'BC-CDL-99001', '250-555-4010', 'ACTIVE', '1', '2027-06-30'::date, '2021-05-03'::date,
 			'demo-driver-kel@gablebuildingsupply.example')
 		ON CONFLICT (license_number) WHERE deleted_at IS NULL
@@ -151,7 +166,7 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 		if err != nil {
 			log.Printf("Seed: Ridgeline Formwork: %v", err)
 		} else {
-			db.Exec(`INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
+			seedExec(db, "Ridgeline ship to", `INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
 				VALUES ($1, 'MAIN', 'Ridgeline Formwork Ltd', '610 Plywood Ct, West Kelowna BC', TRUE)
 				ON CONFLICT (customer_id, code) DO NOTHING`, cid)
 			var invCount int
@@ -159,10 +174,10 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 			if invCount == 0 {
 				orderID, invID := uuid.New(), uuid.New()
 				on := time.Now().AddDate(0, 0, -12)
-				db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
+				seedExec(db, "Ridgeline order", `INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
 					VALUES ($1, $2, $3, 18816.00, 16800.00, 'FULFILLED', $4, 'PICKUP',
 						COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'), 'LEGACY')`, orderID, cid, branch, on)
-				db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
+				seedExec(db, "Ridgeline invoice", `INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
 						due_date, payment_terms_id, invoice_date, created_at)
 					VALUES ($1, $2, $3, $4, 'UNPAID', 18816.00, 16800.00, 0.12, 2016.00, $5::date,
 						(SELECT payment_terms_id FROM customers WHERE id = $3), $6::date, $6)`,
@@ -183,7 +198,7 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 				Cost float64
 			}{{"HANGER-26", 400, 0.80}, {"HANGER-28", 300, 0.95}} {
 				if pid, ok := skuToID[line.SKU]; ok {
-					db.Exec(`INSERT INTO purchase_order_lines (po_id, description, quantity, cost, product_id, qty_received)
+					seedExec(db, "purchase order line "+line.SKU, `INSERT INTO purchase_order_lines (po_id, description, quantity, cost, product_id, qty_received)
 						SELECT $1, p.description, $2, $3, p.id, 0 FROM products p WHERE p.id = $4`, po, line.Qty, line.Cost, pid)
 				}
 			}
@@ -211,15 +226,15 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 		if qid == "" {
 			continue
 		}
-		db.Exec(`INSERT INTO quote_lines (quote_id, product_id, sku, description, quantity, uom, unit_price, line_total)
+		seedExec(db, "cross yard quote line "+c.Customer, `INSERT INTO quote_lines (quote_id, product_id, sku, description, quantity, uom, unit_price, line_total)
 			SELECT $1, p.id, p.sku, p.description, 40, p.uom_primary::text, p.base_price, ROUND(40 * p.base_price, 2)
 			FROM products p WHERE p.id = $2`, qid, pid)
-		db.Exec(`UPDATE quotes SET total_amount = (SELECT COALESCE(SUM(line_total), 0) FROM quote_lines WHERE quote_id = $1) WHERE id = $1`, qid)
+		seedExec(db, "cross yard quote total "+c.Customer, `UPDATE quotes SET total_amount = (SELECT COALESCE(SUM(line_total), 0) FROM quote_lines WHERE quote_id = $1) WHERE id = $1`, qid)
 		var linked bool
 		db.QueryRow(`WITH ins AS (INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)
 				ON CONFLICT DO NOTHING RETURNING 1) SELECT EXISTS (SELECT 1 FROM ins)`, cid, y).Scan(&linked)
 		if linked {
-			db.Exec(`INSERT INTO audit_log (action, entity_type, entity_id, user_id, changes, actor_kind, actor_id)
+			seedExec(db, "cross yard link audit "+c.Customer, `INSERT INTO audit_log (action, entity_type, entity_id, user_id, changes, actor_kind, actor_id)
 				VALUES ('customer.branch_linked', 'customer', $1, 'system',
 					jsonb_build_object('branch_id', $2::text, 'document_type', 'quote', 'document_id', $3::text, 'source', 'demo seed'),
 					'user', 'system')`, cid, y, qid)

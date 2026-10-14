@@ -184,18 +184,19 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id')), $13)
 		RETURNING branch_id
 	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		tx.ID, tx.RegisterID, tx.CashierID, tx.CustomerID,
-		float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
-		tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt, registerBranch, tx.TillSessionID,
-	).Scan(&tx.BranchID)
-	if err != nil {
-		return fmt.Errorf("failed to create POS transaction: %w", err)
-	}
-	if err := customerlink.Ensure(ctx, r.db, "pos_transactions", tx.ID); err != nil {
-		return err
-	}
-	return nil
+	// The sale, the customer's link to its yard and the link's audit row
+	// commit together or not at all (ruling A, ADR 0007 section 5.8).
+	return r.db.RunInTx(ctx, func(ctx context.Context) error {
+		err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
+			tx.ID, tx.RegisterID, tx.CashierID, tx.CustomerID,
+			float64(tx.Subtotal)/100.0, float64(tx.TaxAmount)/100.0, float64(tx.Total)/100.0,
+			tx.Status, tx.CreatedAt, tx.SyncedFrom, tx.ClientCreatedAt, registerBranch, tx.TillSessionID,
+		).Scan(&tx.BranchID)
+		if err != nil {
+			return fmt.Errorf("failed to create POS transaction: %w", err)
+		}
+		return customerlink.Ensure(ctx, r.db, "pos_transactions", tx.ID)
+	})
 }
 
 // TransactionExists checks if a transaction with the given ID already exists (for idempotent sync).
