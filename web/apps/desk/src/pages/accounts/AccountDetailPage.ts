@@ -17,7 +17,7 @@ import type { SalesPerson } from '../../types/salesteam.ts';
 import type { AccountSummary, CustomerTransaction } from '../../types/account.ts';
 import type { Payment } from '../../types/payment.ts';
 import { paymentService } from '../../services/paymentService.ts';
-import { ArrowLeft, CreditCard, Receipt, FileText, Activity, AlertCircle, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
+import { ArrowLeft, CreditCard, Receipt, Activity, Users, MessageSquare, User, Mail, Phone, ChevronDown, MapPin } from 'lucide';
 
 // Side-effect imports: register child custom elements
 import './ContactList.ts';
@@ -47,7 +47,7 @@ export class GableAccountDetail extends LitElement {
     @state() private voidReason = '';
     @state() private paymentBusy = false;
     @state() private loading = true;
-    @state() private activeTab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
+    @state() private activeTab: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm' = 'ledger';
     @state() private salesperson: SalesPerson | null = null;
     @state() private salesTeam: SalesPerson[] = [];
     @state() private showSpDropdown = false;
@@ -134,7 +134,7 @@ export class GableAccountDetail extends LitElement {
 
     /** A tab switch; the payments tab reads the unapplied cash and the open
      * invoices once it is first shown, not on every account load. */
-    private async handleTab(tab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm') {
+    private async handleTab(tab: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm') {
         this.activeTab = tab;
         if (tab === 'payments' && !this.paymentsLoaded && this.customer) {
             this.paymentsLoaded = true;
@@ -235,7 +235,7 @@ export class GableAccountDetail extends LitElement {
         this.showSpDropdown = !this.showSpDropdown;
     }
 
-    private renderTab(tabId: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
+    private renderTab(tabId: 'ledger' | 'payments' | 'shipto' | 'contacts' | 'crm', label: string, iconData: typeof Activity) {
         const active = this.activeTab === tabId;
         return html`
             <button
@@ -420,7 +420,6 @@ export class GableAccountDetail extends LitElement {
                                 <div class="flex gap-2"><dt class="text-zinc-500">Revision</dt><dd class="font-mono text-white" data-fact="revision">${customer.revision}</dd></div>
                             </dl>
                         </div>
-                        <!-- "New Transaction" was never given a target, so it stays disabled rather than looking live. -->
                         <div class="flex gap-2">
                             <button
                                 @click=${() => void this.openEdit()}
@@ -432,11 +431,6 @@ export class GableAccountDetail extends LitElement {
                                 data-testid="account-statement-link"
                                 class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors inline-flex items-center"
                             >Statement</a>
-                            <button
-                                disabled
-                                title="Not implemented: start a quote from Quotes > Quote Builder instead."
-                                class="border border-white/10 text-zinc-500 px-3 py-1.5 rounded text-sm font-medium opacity-50 cursor-not-allowed"
-                            >New Transaction</button>
                         </div>
                     </div>
                 </div>
@@ -567,7 +561,6 @@ export class GableAccountDetail extends LitElement {
                 <div class="space-y-4">
                     <div class="flex items-center gap-1 border-b border-white/10 pb-1">
                         ${this.renderTab('ledger', 'Activity Ledger', Activity)}
-                        ${this.renderTab('invoices', 'Invoices', FileText)}
                         ${this.renderTab('payments', 'Payments', CreditCard)}
                         ${this.renderTab('shipto', 'Ship-to Addresses', MapPin)}
                         ${this.renderTab('contacts', 'Contacts', Users)}
@@ -700,12 +693,6 @@ export class GableAccountDetail extends LitElement {
                             </div>
                         ` : nothing}
 
-                        ${(this.activeTab !== 'ledger' && this.activeTab !== 'payments' && this.activeTab !== 'shipto' && this.activeTab !== 'contacts' && this.activeTab !== 'crm') ? html`
-                            <div class="flex flex-col items-center justify-center h-64 border border-dashed border-white/10 rounded-lg text-zinc-500">
-                                ${icon(AlertCircle, 32, 'mb-2 opacity-50')}
-                                <p>This view is under construction.</p>
-                            </div>
-                        ` : nothing}
                     </div>
                 </div>
             </div>
