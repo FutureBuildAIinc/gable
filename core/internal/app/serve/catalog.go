@@ -68,7 +68,7 @@ var unconvertedAppCatalog = []apps.Manifest{
 
 	// Platform libraries (not routable apps; listed for catalog truthfulness)
 	{Key: "config", Name: "Configuration", Summary: "Environment configuration loader (library).", Category: "Platform", Core: true},
-	{Key: "ai", Name: "AI Client", Summary: "AI client for the chosen provider (OpenRouter or Anthropic), KeyStore, and model routing (library).", Category: "Platform", Core: true},
+	{Key: "ai", Name: "AI Client", Summary: "OpenRouter client, KeyStore, and model routing (library).", Category: "Platform", Core: true},
 	{Key: "domain", Name: "Shared Domain Types", Summary: "Cross-module EDI/GL structs (library).", Category: "Platform", Core: true},
 	{Key: "notification", Name: "Notifications", Summary: "Email/SMS senders (library).", Category: "Platform", Core: true},
 	{Key: "techadmin", Name: "Tech Admin", Summary: "System settings, AI keys, and integration keys.", Category: "Platform", Core: true},
