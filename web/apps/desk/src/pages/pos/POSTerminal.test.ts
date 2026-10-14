@@ -1107,6 +1107,26 @@ describe('the counter before the till opens, and after a sale completes', () => 
       el.remove();
     });
 
+    it('New Sale over an open sale then a quick add puts the line on the new sale, not the old one', async () => {
+      const el = await mount(sale({ id: 'old1', number: 'S-OLD', lines: [line('a', 500)] as unknown as Sale['lines'] }));
+      const anyEl = el as unknown as { _addItem(p: unknown, q: string): Promise<void> };
+      svc.startSale.mockClear();
+      svc.addItem.mockClear();
+      svc.startSale.mockImplementationOnce(() => new Promise((r) => setTimeout(() => r(sale({ id: 'new1', number: 'S-N1', lines: [] })), 40)));
+      svc.addItem.mockImplementation(async (id: string) => sale({ id, number: id === 'new1' ? 'S-N1' : 'S-OLD', lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
+      newSale.click();
+      const p = { product_id: 'p-z', sku: 'SKU-z', description: 'Item z', uom: 'EA', unit_price_cents: 700, in_stock: '5' };
+      await anyEl._addItem(p, '1');
+      await new Promise((r) => setTimeout(r, 60));
+      await el.updateComplete;
+      expect(svc.startSale).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledTimes(1);
+      expect(svc.addItem).toHaveBeenCalledWith('new1', 'p-z', '1', 'EA');
+      expect(q(el, 'pos-header').textContent).toContain('S-N1');
+      el.remove();
+    });
+
     it('locks Change, purchase order and job on a completed account sale', async () => {
       const withJob = { ...account, jobs: [{ id: 'j1', name: 'Back patio' }] } as unknown as CounterCustomer;
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', customer_id: 'cu1' }));
