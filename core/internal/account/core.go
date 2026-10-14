@@ -455,12 +455,16 @@ func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time
 // day of the seed) and links the payment to the invoice it paid, as the order
 // and invoice walks follow it. It writes stamps and that link in the caller's
 // transaction, never an amount, a status or a balance. It is not an act: no
-// route or worker calls it. It refuses a call with no transaction, an invoice
-// that is not paid, a payment with no live application to that invoice, and a
-// payment day before the invoice's or after the present.
+// route or worker calls it. It refuses a call with no transaction, a zero day,
+// an invoice that is not paid, a payment with no live application to that
+// invoice, and a payment day before the invoice's or after the present. It
+// moves only the named payment's live applications, never another payment's.
 func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
 	if err := s.requireTx(ctx); err != nil {
 		return err
+	}
+	if invoicedAt.IsZero() || paidAt.IsZero() {
+		return invalidField("paid_at", "a history day is given for the invoice and the payment")
 	}
 	if paidAt.Before(invoicedAt) {
 		return invalidField("paid_at", "a history payment is not made before its invoice")
@@ -484,7 +488,8 @@ func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.
 	// what the payment settled, so the guard above and the writes agree.
 	_, err := s.ex(ctx).Exec(ctx, `
 		WITH apps AS (
-			UPDATE ar_applications SET created_at = $2 WHERE invoice_id = $1 AND payment_id = $4 RETURNING id
+			UPDATE ar_applications SET created_at = $2
+			WHERE invoice_id = $1 AND payment_id = $4 AND reversed_at IS NULL RETURNING id
 		), ct_inv AS (
 			UPDATE customer_transactions SET created_at = $3 WHERE source_kind = 'invoice' AND reference_id = $1
 		), ct_pay AS (
