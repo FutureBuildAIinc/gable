@@ -77,8 +77,9 @@ type AttachCustomerIn struct {
 }
 
 // namedCustomer is the counter's one rule for which customers a caller may
-// name: the customer wall (the same predicate the lookup filters by), a
-// hidden or inactive customer answered with the module's 404 and nothing
+// name: ruling A (a user names any yard's customer; a branch bound key only its
+// pin's, the same predicate the lookup filters by), a hidden or inactive
+// customer answered with the module's 404 and nothing
 // written. The attach, the create, the offline sync and the completion all
 // name a customer through it, so a change of rule is a change here only.
 func (s *Service) namedCustomer(ctx context.Context, id uuid.UUID) (*CounterCustomer, CustomerFacts, error) {

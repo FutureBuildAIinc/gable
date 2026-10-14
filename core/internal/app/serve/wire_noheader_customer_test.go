@@ -196,13 +196,43 @@ func TestNoHeader_CounterCompletesAnotherYardsCustomerAtTheSellingYard(t *testin
 		`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
 		uuid.NewString()[:8], regNB, client, uuid.NewString(), f.custID.String(),
 		f.posProd.String(), time.Now().UTC().Format(time.RFC3339)), nil)
-	if keyStatus != http.StatusForbidden && strings.Contains(string(keyBuf), `"synced_count":1`) {
-		t.Errorf("key bound to B, sync naming A's customer: %d %s, want refused", keyStatus, keyBuf)
+	if keyStatus != http.StatusForbidden {
+		t.Errorf("key bound to B, sync naming A's customer: %d %s, want 403", keyStatus, keyBuf)
 	}
-	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/transactions/"+uuid.NewString()+"/complete",
-		`{"tenders":[{"method":"account","amount_cents":105}]}`, nil)
-	if keyStatus == http.StatusOK {
-		t.Errorf("key bound to B, completion: %d %s, want refused", keyStatus, keyBuf)
+	// The completion leg is a real sale a cashier opened at B naming A's
+	// customer, completed by the key bound to B: the pin is what refuses it
+	// (404 "customer not found"), the sale stays open and nothing is posted.
+	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions",
+		fmt.Sprintf(`{"register_id":%q,"customer_id":%q}`, regNB, f.custID.String()), nil)
+	if status != http.StatusCreated {
+		t.Fatalf("cashier create for the key's completion leg: %d %s", status, buf)
+	}
+	var keySale struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(buf, &keySale); err != nil {
+		t.Fatal(err)
+	}
+	status, buf = f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+keySale.ID+"/items",
+		`{"line":`+f.productLine()+`}`, nil)
+	if status != http.StatusOK {
+		t.Fatalf("cashier add line for the key's completion leg: %d %s", status, buf)
+	}
+	var keyCur struct {
+		Total    int64 `json:"total_cents"`
+		Revision int64 `json:"revision"`
+	}
+	if err := json.Unmarshal(buf, &keyCur); err != nil {
+		t.Fatal(err)
+	}
+	salesBefore = noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID)
+	keyStatus, keyBuf = f.key(t, boundB, "POST", "/api/v1/pos/transactions/"+keySale.ID+"/complete",
+		fmt.Sprintf(`{"tenders":[{"method":"account","amount_cents":%d}],"revision":%d}`, keyCur.Total, keyCur.Revision), nil)
+	if keyStatus != http.StatusNotFound || !strings.Contains(string(keyBuf), "customer not found") {
+		t.Errorf("key bound to B, completion of B's sale naming A's customer: %d %s, want 404 customer not found", keyStatus, keyBuf)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE id = $1 AND status = 'OPEN'`, keySale.ID); n != 1 {
+		t.Errorf("the sale is no longer open after the key's refused completion")
 	}
 	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_transactions WHERE customer_id = $1`, f.custID); after != salesBefore {
 		t.Errorf("the bound key's legs wrote %d sales naming A's customer", after-salesBefore)

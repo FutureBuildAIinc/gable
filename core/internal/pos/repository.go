@@ -1680,7 +1680,8 @@ func (r *PostgresRepository) LogSyncBatch(ctx context.Context, b LogBatch) error
 // CounterCustomer is a customer as the counter's lookup shows it: who, the
 // standing of the account in figures and in words, and the jobs a charge sale
 // may name. The wall (customer_branches held to the caller's reach) is the
-// lookup's own; a cashier never sees a customer outside it.
+// lookup's own: a user finds every customer (ruling A), a branch bound key
+// only its pin's.
 type CounterCustomer struct {
 	ID                   uuid.UUID    `json:"id"`
 	AccountNumber        string       `json:"account_number"`
@@ -1718,14 +1719,15 @@ func counterCustomerReach(ctx context.Context) (*uuid.UUID, *string) {
 func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string, limit int) ([]CounterCustomer, error) {
 	// the query is text to find, never a pattern: %, _ and the escape itself
 	// match only themselves
+	raw := q
 	q = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
 	branch, grants := counterCustomerReach(ctx)
 	rows, err := r.ex(ctx).Query(ctx, `SELECT `+counterCustomerCols+` FROM customers c
 		WHERE COALESCE(c.is_active, TRUE) AND c.account_number <> 'WALK-IN'
 		  AND (c.name ILIKE '%' || $1 || '%' OR c.account_number ILIKE '%' || $1 || '%')
 		  AND `+customer.Wall("c", 2, 3)+`
-		ORDER BY c.name, c.id LIMIT $4`,
-		q, branch, grants, limit)
+		ORDER BY (lower(c.account_number) = lower($5)) DESC, c.name, c.id LIMIT $4`,
+		q, branch, grants, limit, strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("failed to search customers: %w", err)
 	}
