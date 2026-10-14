@@ -25,13 +25,14 @@ func newAnthropicTestClient(url string) *Client {
 }
 
 func TestValidateAnthropicModel(t *testing.T) {
-	ok := []string{"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-6-0", "claude-sonnet-5-5-20260101", "claude-fable-5-1", ""}
+	ok := []string{"claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-6-0", "claude-sonnet-5-5-20260101", "claude-sonnet-5-5-20261001", "claude-opus-6-20270101", "claude-fable-5-5", "claude-fable-5-1", ""}
 	for _, m := range ok {
 		if err := ValidateAnthropicModel(m); err != nil {
 			t.Errorf("ValidateAnthropicModel(%q) = %v, want nil", m, err)
 		}
 	}
-	bad := []string{"claude-haiku-5-5", "claude-sonnet-4-5", "claude-opus-4-1", "gpt-4o", "claude-sonnet-5-4", "claude-3-5-sonnet"}
+	bad := []string{"claude-haiku-5-5", "claude-sonnet-4-5", "claude-opus-4-1", "gpt-4o", "claude-sonnet-5-4", "claude-3-5-sonnet",
+		"claude-sonnet-5-20260101", "claude-sonnet-5", "claude-opus-5-5-x", "claude-sonnet-5-4-20261001"}
 	for _, m := range bad {
 		err := ValidateAnthropicModel(m)
 		if err == nil {

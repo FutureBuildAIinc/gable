@@ -39,30 +39,37 @@ const (
 )
 
 // anthropicModelRE reads the family and the major and minor version of a
-// Claude model id such as claude-sonnet-5-5 or claude-opus-5-5-20260101.
-var anthropicModelRE = regexp.MustCompile(`^claude-(sonnet|opus|fable)-(\d+)-(\d+)(?:-[0-9a-z]+)*$`)
+// Claude model id such as claude-sonnet-5-5 or claude-opus-5-5-20260101. The
+// minor is one or two digits and the only suffix is an eight digit date, so
+// a dated alias (claude-sonnet-5-20260101) reads as major 5, no minor.
+var anthropicModelRE = regexp.MustCompile(`^claude-(sonnet|opus|fable)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$`)
 
 // ValidateAnthropicModel refuses any model below Sonnet 5.5: Sonnet 5.5 or
-// later, Opus 5.5 or later, and the Fable family are allowed. An empty id is
-// valid (it selects DefaultAnthropicModel). The refusal names the model.
+// later, Opus 5.5 or later, and the Fable family (above Opus) are allowed. An
+// empty id is valid (it selects DefaultAnthropicModel). The refusal names the
+// model.
 func ValidateAnthropicModel(model string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return nil
 	}
+	refuse := fmt.Errorf("model %q is not allowed: use Sonnet 5.5 or better (Opus 5.5 and later)", model)
 	m := anthropicModelRE.FindStringSubmatch(model)
 	if m == nil {
-		return fmt.Errorf("model %q is not allowed: use Sonnet 5.5 or better (Opus 5.5 and later)", model)
+		return refuse
 	}
 	if m[1] == "fable" {
 		return nil
 	}
 	major, _ := strconv.Atoi(m[2])
-	minor, _ := strconv.Atoi(m[3])
+	minor := 0
+	if m[3] != "" {
+		minor, _ = strconv.Atoi(m[3])
+	}
 	if major > 5 || (major == 5 && minor >= 5) {
 		return nil
 	}
-	return fmt.Errorf("model %q is not allowed: use Sonnet 5.5 or better (Opus 5.5 and later)", model)
+	return refuse
 }
 
 // --- Messages API types ---
