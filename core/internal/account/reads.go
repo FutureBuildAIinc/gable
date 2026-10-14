@@ -31,14 +31,17 @@ func wall(alias string, branch, grants int) string {
 // path's customer, aliased c, must hold a branch inside the caller's reach
 // through its customer_branches rows, the same predicate /customers/{id}
 // answers 404 through. Both reach placeholders nil (an administrator or
-// owner with no header) matches every customer.
+// owner with no header, the single branch switch, an unbound key, the dev
+// caller) matches every customer, with or without a row, so the arm sits
+// outside the EXISTS as the customer, CRM and reporting walls have it
+// (r5 P2-1).
 func customerWall(branch, grants int) string {
-	return fmt.Sprintf(`EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND (
+	return fmt.Sprintf(`(($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL)
+	  OR EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND (
 	    ($%[1]d::uuid IS NOT NULL AND cb.branch_id = $%[1]d)
 	    OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NOT NULL AND cb.branch_id IN
 	        (SELECT branch_id FROM user_locations WHERE user_sub = $%[2]d))
-	    OR ($%[1]d::uuid IS NULL AND $%[2]d::text IS NULL)
-	  ))`, branch, grants)
+	  )))`, branch, grants)
 }
 
 // LocalDate is the branch's calendar date at the instant (the business date of

@@ -293,12 +293,7 @@ func (s *Service) Reconcile(ctx context.Context) (*Reconciliation, error) {
 	// wide totals); the GL halves run only for a wide caller, where the
 	// columns are filled below, so a refused column's absence can never be
 	// read as an account balancing at zero.
-	customerReach := ` EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND (
-	    ($1::uuid IS NOT NULL AND cb.branch_id = $1)
-	    OR ($1::uuid IS NULL AND $2::text IS NOT NULL AND cb.branch_id IN
-	        (SELECT branch_id FROM user_locations WHERE user_sub = $2))
-	    OR ($1::uuid IS NULL AND $2::text IS NULL)
-	  ))`
+	customerReach := ` ` + customerWall(1, 2)
 	paymentReach := ` (` + wall("p", 1, 2) + `)`
 	ownedSums := `
 		WITH bal AS (
