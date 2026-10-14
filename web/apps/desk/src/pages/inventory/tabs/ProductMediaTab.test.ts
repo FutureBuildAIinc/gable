@@ -61,4 +61,21 @@ describe('the product media tab generation words', () => {
     expect(text(notice)).toContain('Tech Admin, AI Settings')
     expect(text(el)).not.toContain('Please try again')
   })
+
+  it('shows the refusal notice only while the newest attempt is refused', async () => {
+    stubSettings('anthropic')
+    const row = (id: string, status: string, created: string) =>
+      ({ id, product_id: 'p1', media_type: 'hero', url: status === 'ready' ? 'data:image/svg+xml;base64,AA==' : '', alt_text: '', status, is_primary: false, created_at: created, updated_at: created }) as unknown as PIMMedia
+    // An old refused row, then a newer one that was drawn once the key was fixed.
+    const fixed = await mountAsync<GableProductMediaTab>('gable-product-media-tab', {
+      productId: 'p1', media: [row('new', 'ready', '2026-02-01T00:00:00Z'), row('old', 'refused', '2026-01-01T00:00:00Z')],
+    })
+    expect(fixed.querySelector('[data-testid="pim-ai-notice"]')).toBeNull()
+    document.body.innerHTML = ''
+    // The newest attempt refused: the notice stands.
+    const refused = await mountAsync<GableProductMediaTab>('gable-product-media-tab', {
+      productId: 'p1', media: [row('old', 'ready', '2026-01-01T00:00:00Z'), row('new', 'refused', '2026-02-01T00:00:00Z')],
+    })
+    expect(text(refused.querySelector('[data-testid="pim-ai-notice"]'))).toContain('refused the saved key')
+  })
 })
