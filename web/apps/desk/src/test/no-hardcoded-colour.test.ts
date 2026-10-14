@@ -14,6 +14,16 @@ import { join, relative, resolve } from 'node:path'
 /** file (relative to web/apps) -> reason the arbitrary colour stays. */
 const ALLOWED: Record<string, string> = {}
 
+/**
+ * Files whose inline style= and Lit css colours have been moved onto the
+ * variables: no raw hex or rgb() literal may return there. Each surface adds
+ * its files as it is swept.
+ */
+const INLINE_CLEAN = [
+  'desk/src/pages/pos/POSTerminal.ts',
+  'desk/src/components/layout/app-shell.ts',
+]
+
 const APPS = resolve(process.cwd(), '..')
 const CLASS_HEX = /[A-Za-z0-9_:&![\]>*-]*-\[#[0-9A-Fa-f]{3,8}\]/g
 
@@ -35,6 +45,16 @@ describe('no arbitrary hex colour class in web/apps', () => {
       if (rel in ALLOWED) continue
       const text = readFileSync(file, 'utf8')
       for (const m of text.matchAll(CLASS_HEX)) found.push(`${rel}: ${m[0]}`)
+    }
+    expect(found).toEqual([])
+  })
+
+  it('keeps the swept files free of raw colour literals', () => {
+    const raw = /#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b|rgba?\((?!var\()/g
+    const found: string[] = []
+    for (const rel of INLINE_CLEAN) {
+      const text = readFileSync(join(APPS, rel), 'utf8')
+      for (const m of text.matchAll(raw)) found.push(`${rel}: ${m[0]}`)
     }
     expect(found).toEqual([])
   })

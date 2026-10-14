@@ -318,7 +318,7 @@ export class ReportBuilder extends LitElement {
                                 <button
                                     @click=${this._handlePreview}
                                     ?disabled=${this.loading || this.columns.length === 0}
-                                    class="px-4 py-2 rounded text-white font-medium ${this.loading || this.columns.length === 0 ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}"
+                                    class="px-4 py-2 rounded text-plate font-medium ${this.loading || this.columns.length === 0 ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-sm'}"
                                 >
                                     ${this.loading ? 'Running...' : 'Run Report'}
                                 </button>

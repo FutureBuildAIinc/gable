@@ -250,7 +250,7 @@ export class GableAddProductModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting}
-                class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-plate rounded text-sm font-medium transition-colors disabled:opacity-50"
               >
                 ${this._isSubmitting ? 'Saving...' : 'Create Product'}
               </button>

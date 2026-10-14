@@ -143,7 +143,7 @@ export class BlueprintVerifier extends LitElement {
               @click=${() => this._handleScan()}
               ?disabled=${!this._blueprintText.trim() || this._scanning}
               class="w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all ${this._blueprintText.trim() && !this._scanning
-                ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:shadow-[0_0_30px_rgba(59,130,246,0.3)]'
+                ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-plate hover:shadow-[0_0_30px_rgba(59,130,246,0.3)]'
                 : 'bg-gray-800 text-gray-600 cursor-not-allowed'
               }"
             >

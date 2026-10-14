@@ -521,13 +521,13 @@ export class GableQuoteDetail extends LitElement {
                     <div class="flex gap-2">
                         ${quote.status === 'draft' ? html`
                             <button @click=${() => this.handleStateChange('sent')} ?disabled=${this.processing}
-                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                class="bg-blue-600 text-plate px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Send, 14)} Mark Sent
                             </button>
                         ` : nothing}
                         ${(quote.status === 'draft' || quote.status === 'sent') ? html`
                             <button @click=${() => this.handleStateChange('accepted')} ?disabled=${this.processing}
-                                class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                class="bg-emerald-600 text-plate px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Check, 14)} Accept
                             </button>
                             <button @click=${() => this.handleStateChange('rejected')} ?disabled=${this.processing}

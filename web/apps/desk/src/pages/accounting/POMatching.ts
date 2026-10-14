@@ -140,7 +140,7 @@ export class POMatching extends LitElement {
                         />
                         <button
                             @click=${this._handleRunMatch}
-                            class="px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors"
+                            class="px-5 py-2 rounded-lg bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors"
                         >
                             Run 3-Way Match
                         </button>

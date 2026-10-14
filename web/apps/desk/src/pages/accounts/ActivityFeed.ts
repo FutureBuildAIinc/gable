@@ -95,7 +95,7 @@ export class GableActivityFeed extends LitElement {
                     <h3 class="text-lg font-semibold text-gray-900">Activity History</h3>
                     <button
                         @click=${this._openLogModal}
-                        class="px-4 py-2 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 transition shadow-sm"
+                        class="px-4 py-2 bg-blue-600 text-plate font-medium rounded-md hover:bg-blue-700 transition shadow-sm"
                     >
                         + Log Activity
                     </button>

@@ -341,7 +341,7 @@ export class DeliveryDetail extends LitElement {
                                                         <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                                                             <button
                                                                 @click=${() => this._togglePhotoType(idx)}
-                                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold ${photo.type === 'damage' ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'}"
+                                                                class="px-1.5 py-0.5 rounded text-[10px] font-bold ${photo.type === 'damage' ? 'bg-rose-500 text-plate' : 'bg-blue-500 text-plate'}"
                                                             >
                                                                 ${photo.type}
                                                             </button>

@@ -184,7 +184,7 @@ export class PortalMyAccount extends LitElement {
                             <button
                                 type="submit"
                                 ?disabled=${this.saving}
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                                class="bg-blue-600 hover:bg-blue-700 text-plate px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
                             >
                                 ${this.saving ? 'Saving...' : 'Save Changes'}
                             </button>
