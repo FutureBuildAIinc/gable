@@ -712,7 +712,7 @@ type ReceiveLineInput struct {
 // enter the freight total manually — it never silently succeeds with a zero total.
 func (s *Service) extractFreight(ctx context.Context, fileBytes []byte, contentType string) (*ai.FreightInvoiceResult, string, error) {
 	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
-		return nil, "", fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key; please enter the freight total manually")
+		return nil, "", ai.ErrAIOff
 	}
 	result, raw, err := s.aiClient.ExtractFreightInvoice(ctx, fileBytes, contentType)
 	if err != nil {
@@ -725,6 +725,12 @@ func (s *Service) extractFreight(ctx context.Context, fileBytes []byte, contentT
 }
 
 func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, fileBytes []byte, contentType string, filename string) (*FreightUploadResponse, error) {
+	// AI off is answered first, before the PO is read or the file saved: a
+	// person with no key enters the freight total by hand.
+	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		return nil, ai.ErrAIOff
+	}
+
 	po, err := s.repo.GetPO(ctx, poID)
 	if err != nil {
 		return nil, fmt.Errorf("PO not found: %w", err)

@@ -72,6 +72,12 @@ func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, cont
 	return s.ExtractItems(rawText), false, nil
 }
 
+// AIOff reports whether AI cannot run (no client, or no key for the chosen
+// provider), so a caller can say so plainly.
+func (s *Service) AIOff(ctx context.Context) bool {
+	return s.aiClient == nil || !s.aiClient.IsConfigured(ctx)
+}
+
 // isTextContent reports whether contentType names plain text the rule-based
 // reader can parse without an AI reader.
 func isTextContent(contentType string) bool {

@@ -156,6 +156,24 @@ func (c *Client) IsConfigured(ctx context.Context) bool {
 	return c.getKey(ctx) != ""
 }
 
+// ImageOffMessage is what a person sees when image generation is asked of the
+// Anthropic provider, which does not offer it. Nothing falls back to another
+// provider.
+const ImageOffMessage = "Image generation is off: it needs the OpenRouter provider, which an administrator chooses in Tech Admin, AI."
+
+// CheckImage reports whether image generation can run: AI off is ErrAIOff;
+// the Anthropic provider offers no image model, so it is an OffError naming
+// that reason, and no call goes to any other provider.
+func (c *Client) CheckImage(ctx context.Context) error {
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return NewOff(ImageOffMessage)
+	}
+	if c.getKey(ctx) == "" {
+		return ErrAIOff
+	}
+	return nil
+}
+
 // WithProvider fixes the provider (tests, static configs).
 func (c *Client) WithProvider(p string) *Client { c.provider = p; return c }
 
@@ -438,7 +456,7 @@ func stripJSONFence(s string) string {
 func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResponse, error) {
 	apiKey := c.getKey(ctx)
 	if apiKey == "" {
-		return nil, fmt.Errorf("no OpenRouter API key configured")
+		return nil, ErrAIOff
 	}
 
 	body, err := json.Marshal(req)
@@ -530,6 +548,9 @@ func (c *Client) Generate(ctx context.Context, systemPrompt, userPrompt string, 
 // (base64 data-URI, resolved model, error). The data URI is exactly the
 // "data:image/...;base64,..." shape callers persist directly.
 func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (string, string, error) {
+	if err := c.CheckImage(ctx); err != nil {
+		return "", "", err
+	}
 	fullPrompt := prompt
 	if style != "" {
 		fullPrompt = fmt.Sprintf("%s. Style: %s", prompt, style)
@@ -588,7 +609,7 @@ Rules:
 // 400); the no-key guard here is a backstop that preserves the helpful message.
 func (c *Client) ExtractFreightInvoice(ctx context.Context, fileBytes []byte, contentType string) (*FreightInvoiceResult, string, error) {
 	if !c.IsConfigured(ctx) {
-		return nil, "", fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key; please enter the freight total manually")
+		return nil, "", ErrAIOff
 	}
 
 	if c.activeProvider(ctx) == ProviderAnthropic {
@@ -677,7 +698,7 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 	}
 
 	if !c.IsConfigured(ctx) {
-		return "", fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key")
+		return "", ErrAIOff
 	}
 
 	if c.activeProvider(ctx) == ProviderAnthropic {

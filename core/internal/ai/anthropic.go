@@ -146,7 +146,7 @@ func (c *Client) anthropicBase() string {
 func (c *Client) anthropicMessages(ctx context.Context, req anthropicRequest) (*anthropicResponse, error) {
 	key := c.anthropicKeyValue(ctx)
 	if key == "" {
-		return nil, fmt.Errorf("AI is off: no Anthropic key is set (an admin enters it in Tech Admin, AI settings)")
+		return nil, ErrAIOff
 	}
 	if err := ValidateAnthropicModel(req.Model); err != nil {
 		return nil, err
@@ -262,7 +262,7 @@ func (c *Client) TestConnection(ctx context.Context) error {
 		return err
 	}
 	if c.getKey(ctx) == "" {
-		return fmt.Errorf("AI is off: no OpenRouter key is set (an admin enters it in Tech Admin, AI settings)")
+		return ErrAIOff
 	}
 	_, err := c.chatCompletion(ctx, chatRequest{
 		Model:     c.model(ctx, taskCheap),
