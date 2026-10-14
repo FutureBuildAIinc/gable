@@ -109,6 +109,35 @@ describe('gable-order-detail - the order contract', () => {
     expect(text(el)).toContain('Confirmed')
   })
 
+  it('prints the pick ticket through the token, in a tab opened empty', async () => {
+    localStorage.setItem('token', 'test-token')
+    const tab = { location: { href: '' }, close: vi.fn() }
+    const open = vi.fn(() => tab)
+    vi.stubGlobal('open', open)
+    URL.createObjectURL = vi.fn(() => 'blob:pickticket')
+    URL.revokeObjectURL = vi.fn()
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/documents/print/pickticket/')) return new Response(new Blob(['%PDF']), { status: 200 })
+      return jsonResponse(order())
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+      const button = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('Pick Ticket')) as HTMLButtonElement
+      expect(button).toBeDefined()
+      button.click()
+      for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0))
+      expect(open.mock.calls[0]).toEqual(['', '_blank'])
+      const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/documents/print/pickticket/'))
+      expect(call, 'expected the pick ticket to be fetched').toBeDefined()
+      const init = (call as unknown as [string, RequestInit])[1]
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token')
+      expect(tab.location.href).toBe('blob:pickticket')
+    } finally {
+      localStorage.removeItem('token')
+    }
+  })
+
   it('renders cents money in dollars: the line and the totals', async () => {
     el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
     const body = text(el)
