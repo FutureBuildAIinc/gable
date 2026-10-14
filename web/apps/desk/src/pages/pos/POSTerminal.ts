@@ -340,6 +340,7 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: c.id });
       this._customer = c;
+      this._resetTender();
       this._custQuery = '';
       this._custResults = [];
       this._poText = '';
@@ -382,6 +383,7 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: null });
       this._customer = null;
+      this._resetTender();
       this._poText = '';
       this._jobId = '';
       this._step = 'customer';
@@ -673,6 +675,8 @@ export class POSTerminal extends LitElement {
     }
     this._tenderMethod = null;
     this._tenderAmount = '';
+    // a tender added for the cleared lines is not the next lines' tender
+    this._pendingTenders = [];
   }
 
   /* ---- Hotkeys (the roster and the chord rules are in ./hotkeys) ---- */
@@ -899,7 +903,15 @@ export class POSTerminal extends LitElement {
     return { method: this._tenderMethod, amount_cents: cents };
   }
 
+  /** Nothing chosen and nothing added: the next tender is chosen again. */
+  private _resetTender() {
+    this._tenderMethod = null;
+    this._tenderAmount = '';
+    this._pendingTenders = [];
+  }
+
   private _chooseMethod(method: TenderMethod) {
+    if (this._till === null) return;
     if (method === 'account') {
       const refusal = this._accountRefusal;
       if (refusal) {
@@ -1331,7 +1343,7 @@ export class POSTerminal extends LitElement {
               const chosen = this._tenderMethod === m && this._till !== null;
               return html`
                 <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
-                  ?disabled=${!hasLines || !open || refused !== null}
+                  ?disabled=${this._till === null || !hasLines || !open || refused !== null}
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
                   class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
