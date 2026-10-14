@@ -1046,7 +1046,8 @@ export class POSTerminal extends LitElement {
                 <span>${this._register.branch_name}</span><span aria-hidden="true">&middot;</span>
                 <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
                 ${this._registers.length > 1 ? html`
-                  <gable-select id="pos-register-picker" data-testid="pos-register-picker" label="Register"
+                  <label class="sr-only" for="pos-register-picker">Register</label>
+                  <gable-select id="pos-register-picker" data-testid="pos-register-picker"
                     .value=${this._registerId}
                     .options=${this._registers.map((r) => ({ value: r.id, label: `${r.branch_code} ${r.name}` }))}
                     @change=${(e: Event) => {

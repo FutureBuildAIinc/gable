@@ -42,17 +42,44 @@ export class GableSelect extends LitElement {
     @state() private _open = false;
     @state() private _activeIndex = -1;
     @state() private _openUpward = false;
+    @state() private _fieldLabelId: string | null = null;
 
     private _ids = `gable-select-${++selectSeq}`;
     private _typeahead = '';
     private _typeaheadAt = 0;
+    private _fieldLabel: HTMLLabelElement | null = null;
+    private _onFieldLabelClick = () => {
+        this.querySelector<HTMLElement>('button')?.focus();
+    };
     private _onDocClick = (e: Event) => {
         if (!this.contains(e.target as Node)) this._close();
     };
 
+    firstUpdated() {
+        this._bindFieldLabel();
+    }
+
     disconnectedCallback() {
         super.disconnectedCallback();
         document.removeEventListener('click', this._onDocClick, true);
+        this._fieldLabel?.removeEventListener('click', this._onFieldLabelClick);
+    }
+
+    /**
+     * A custom element is not labelable, so a `label[for]` naming the host id
+     * does nothing on its own: take the name from it (with the chosen value,
+     * so both are read) and let its click focus the control, as a native
+     * select's label does. An explicit `label` property wins.
+     */
+    private _bindFieldLabel() {
+        if (this.label || !this.id) return;
+        const safeId = this.id.replace(/["\\]/g, '\\$&');
+        const label = document.querySelector<HTMLLabelElement>(`label[for="${safeId}"]`);
+        if (!label) return;
+        if (!label.id) label.id = `${this._ids}-field-label`;
+        this._fieldLabel = label;
+        this._fieldLabelId = label.id;
+        label.addEventListener('click', this._onFieldLabelClick);
     }
 
     /** The chosen option, or undefined when the value matches none. */
@@ -268,12 +295,13 @@ export class GableSelect extends LitElement {
                     aria-controls="${this._ids}-list"
                     aria-activedescendant=${activeDesc}
                     aria-label=${this.label || nothing}
+                    aria-labelledby=${this._fieldLabelId ? `${this._fieldLabelId} ${this._ids}-value` : nothing}
                     ?disabled=${this.disabled}
                     @click=${this._toggle}
                     @keydown=${this._onButtonKeydown}
                     class="w-full flex items-center justify-between gap-2 bg-slate-steel/50 border border-white/10 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-gable-green/50 disabled:opacity-50 disabled:cursor-not-allowed ${chosen ? 'text-white' : 'text-zinc-500'}"
                 >
-                    <span class="truncate">${chosen ? chosen.label : this.placeholder}</span>
+                    <span id="${this._ids}-value" class="truncate">${chosen ? chosen.label : this.placeholder}</span>
                     ${icon(ChevronDown, 16, 'shrink-0 text-zinc-500')}
                 </button>
                 ${this._open ? this._renderList() : nothing}

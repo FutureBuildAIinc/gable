@@ -249,7 +249,6 @@ export class GableProductGeometryTab extends LitElement {
                             <label class="block text-xs text-zinc-500 mb-1" for="geometry-stackable">Stackable in a load</label>
                             <gable-select
                                 id="geometry-stackable"
-                                label="Stackable in a load"
                                 .value=${this.stackable === null ? '' : String(this.stackable)}
                                 .options=${[
                                     { value: '', label: 'Unknown — not recorded' },
