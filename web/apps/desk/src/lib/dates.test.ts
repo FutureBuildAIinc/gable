@@ -79,8 +79,31 @@ describe('formatDay is a business day', () => {
     expect(formatDay(null)).toBe('—')
     expect(formatDay(undefined)).toBe('—')
     expect(formatDay('not a date')).toBe('not a date')
-    // A moment is not a business day; it passes through (formatDate reads it).
-    expect(formatDay('2026-10-14T09:00:00Z')).toBe('2026-10-14T09:00:00Z')
+  })
+})
+
+describe('formatDay on a timestamp', () => {
+  it('a business day sent as a midnight UTC timestamp is its day part', () => {
+    expect(formatDay('2026-10-14T00:00:00Z')).toBe('Oct 14, 2026')
+    expect(formatDay('2026-10-14T00:00:00.000Z')).toBe('Oct 14, 2026')
+  })
+  it('the day part never shifts west of UTC', () => {
+    const tz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      // Midnight UTC is still the afternoon before out west; the day the
+      // server means is the day part.
+      expect(new Date('2026-10-14T00:00:00Z').getDate()).toBe(13)
+      expect(formatDay('2026-10-14T00:00:00Z')).toBe('Oct 14, 2026')
+    } finally {
+      process.env.TZ = tz
+    }
+  })
+  it('never shows raw text for a value that parses', () => {
+    // A real moment (a journal entry's timestamp) is formatted as a moment's
+    // day in the person's own zone, not passed through as machine text.
+    expect(formatDay('2026-10-14T15:04:00')).toBe('Oct 14, 2026')
+    expect(formatDay('October 14, 2026')).toBe('Oct 14, 2026')
   })
 })
 
