@@ -34,7 +34,7 @@ import {
   Store, Tags, Truck, Users, Globe, Monitor,
 } from 'lucide';
 import { icon, cn } from '@gable/design-system';
-import { authCustody, authConfig, BRANCH_STORAGE_KEY, InvalidTokenError } from '@gable/auth';
+import { authCustody, authConfig, InvalidTokenError } from '@gable/auth';
 import { loadAppsCatalog, tilesFor, type AppInfo, type DoorTile } from './apps-catalog.ts';
 import { DEMO_PERSONAS, ROLE_WORDS, type DemoPersona } from './demo-personas.ts';
 
@@ -140,16 +140,15 @@ export class GableFrontDoor extends LitElement {
    * into custody, so the door filters tiles with the role and the desk opens
    * on the persona's yard.
    *
-   * Drop the previously stored yard first: an earlier persona's home would
-   * win on the next desk boot, because every dev persona sees every yard in
-   * its grants list and a stored id is restored before the persona is
-   * consulted. A reload within the same persona still keeps the stored
-   * choice: the desk re-inits on its own and writes the same id again.
+   * `signInDev` with a persona drops the previously stored yard: an earlier
+   * persona's home would otherwise win on the next desk boot, because every
+   * dev persona sees every yard in its grants list and a stored id is
+   * restored before the persona is consulted. A reload within the same
+   * persona keeps the stored choice: the desk re-inits on its own.
    */
   private _signInAsPersona(persona: DemoPersona) {
     this._signInError = null;
     try {
-      localStorage.removeItem(BRANCH_STORAGE_KEY);
       authCustody.signInDev(persona.name, { role: persona.role, homeYardCode: persona.homeYardCode });
     } catch (err) {
       this._signInError = err instanceof Error ? err.message : String(err);

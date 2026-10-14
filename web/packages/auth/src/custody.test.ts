@@ -15,6 +15,7 @@ import {
   InvalidTokenError,
 } from './custody'
 import { authConfig } from './config'
+import { BRANCH_STORAGE_KEY } from './branch'
 import { decodeTokenClaims, isExpired } from './jwt'
 
 /** A throw-away in-memory storage double. */
@@ -248,6 +249,16 @@ describe('custody: dev sign-in with a persona', () => {
     const desk = new AuthCustody(store)
     expect(desk.personaRole).toBe('sales')
     expect(desk.personaHomeYardCode).toBe('KEL-MAIN')
+  })
+
+  it('drops the stored yard when a persona signs in, and keeps it for a sign in by name', () => {
+    authConfig.devMode = true
+    const c = new AuthCustody(memoryStorage())
+    localStorage.setItem(BRANCH_STORAGE_KEY, 'b-kel-main')
+    c.signInDev('Local')
+    expect(localStorage.getItem(BRANCH_STORAGE_KEY)).toBe('b-kel-main')
+    c.signInDev('Drew Patel', { role: 'cashier', homeYardCode: 'LK' })
+    expect(localStorage.getItem(BRANCH_STORAGE_KEY)).toBeNull()
   })
 
   it('treats an absent persona as no role and no home yard', () => {

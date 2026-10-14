@@ -25,6 +25,7 @@
  */
 
 import { authConfig } from './config.ts';
+import { BRANCH_STORAGE_KEY } from './branch.ts';
 import { decodeTokenClaims, isExpired, type GableTokenClaims } from './jwt.ts';
 
 /** The storage operations custody needs, so tests can inject doubles. */
@@ -230,8 +231,10 @@ export class AuthCustody {
    *
    * `persona` is optional: a demo persona card passes the persona's role
    * and home yard code so the door can filter tiles with the role and the
-   * desk can open the persona's home yard. A free-form dev sign-in omits it
-   * and the session carries only the display name.
+   * desk can open the persona's home yard. A persona sign in also drops the
+   * yard an earlier session stored, which the desk would otherwise restore
+   * before it consults the persona. A free-form dev sign-in omits it, keeps
+   * the stored yard, and the session carries only the display name.
    */
   signInDev(displayName: string, persona?: DevPersona): AuthSession {
     if (!authConfig.devMode) throw new DevModeDisabledError();
@@ -242,6 +245,13 @@ export class AuthCustody {
     const homeYardCode = persona?.homeYardCode && persona.homeYardCode.length > 0
       ? persona.homeYardCode
       : undefined;
+    if (persona) {
+      try {
+        globalThis.localStorage?.removeItem(BRANCH_STORAGE_KEY);
+      } catch {
+        // A hostile storage context: the desk falls back to its own yard rules.
+      }
+    }
     const session: AuthSession = { kind: 'dev', name, role, homeYardCode };
     this._session = session;
     this._adopted = true;

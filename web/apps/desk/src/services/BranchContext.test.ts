@@ -384,16 +384,12 @@ describe('BranchContext: persona home yard (dev mode)', () => {
   })
 
   /**
-   * A second persona, after a sign out + sign in through the same path the
-   * door uses: the door clears the stored branch key in localStorage before
-   * `signInDev`, so the next desk boot picks the new persona's home yard
-   * rather than restoring the first's. Sign out alone does not clear the key
-   * (signOut only drops custody, which is sessionStorage); the clear is the
-   * door's responsibility. The door's path is reproduced here verbatim:
-   * `localStorage.removeItem(BRANCH_STORAGE_KEY)` then `signInDev(persona)`.
-   * Without the door's clear, the stored KEL-MAIN wins and the LK persona
-   * lands on Kelowna, the walk step "a sale at a second yard for a customer
-   * of the first" fails.
+   * A second persona, after a sign out and a sign in through the door's own
+   * path, `signInDev(name, persona)`: a persona sign in drops the stored yard,
+   * so the next desk boot picks the new persona's home yard rather than
+   * restoring the first's. Sign out alone keeps the key (it drops only the
+   * session handoff). Without the drop, the stored KEL-MAIN wins and the LK
+   * persona lands on Kelowna: the walk's sale at a second yard fails.
    */
   it('opens on the new persona home yard after switching personas', async () => {
     authConfig.devMode = true
@@ -404,14 +400,11 @@ describe('BranchContext: persona home yard (dev mode)', () => {
     expect(branchContext.currentId).toBe('b-kel-main')
     expect(localStorage.getItem(STORAGE_KEY)).toBe('b-kel-main')
 
-    // Sign out: custody drops, but the stored branch key stays (the bug the
-    // door's clear was added to fix).
+    // Sign out: the session goes, the stored yard stays.
     authCustody.signOut()
     expect(localStorage.getItem(STORAGE_KEY)).toBe('b-kel-main')
 
-    // The door's _signInAsPersona: clear the stored branch, then sign in as
-    // the persona. Same effect on the desk.
-    localStorage.removeItem(STORAGE_KEY)
+    // The door's persona card: signInDev with the persona, nothing else.
     authCustody.signInDev('Drew Patel', { role: 'cashier', homeYardCode: 'LK' })
     await reinit()
 
