@@ -192,9 +192,9 @@ export class GableAppDialog extends LitElement {
                     aria-describedby=${describedBy}
                     @click=${this._onDialogClick}
                     @cancel=${this._onDialogCancel}
-                    class="fixed inset-0 m-auto w-full max-w-md h-fit max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-steel border border-white/10 p-6 shadow-xl text-left"
+                    class="fixed inset-0 m-auto w-full max-w-md h-fit max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-steel border border-white/10 p-0 shadow-xl text-left"
                 >
-                    <div>
+                    <div class="p-6">
                         <h2 id="${this._ids}-title" class="text-lg font-bold text-white">${this.heading}</h2>
                         ${this.body
                             ? html`<p id="${this._ids}-body" class="mt-2 text-sm text-zinc-400 whitespace-pre-line">${this.body}</p>`
