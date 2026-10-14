@@ -176,24 +176,24 @@ describe('the counter as the Panels layout', () => {
     expect(svc.completeSale).not.toHaveBeenCalled();
   });
 
-  it('keeps a refused Pay from being sent again, and sends only the corrected entry', async () => {
+  it('sends only the corrected entry after a refused Pay, never the first attempt again', async () => {
     svc.completeSale
-      .mockRejectedValueOnce(new Error('the card was declined'))
+      .mockRejectedValueOnce(new Error('the drawer is closed'))
       .mockResolvedValueOnce(sale({ status: 'completed' }));
     const el = await mount(sale());
-    q(el, 'tender-card').click();
+    q(el, 'tender-cash').click();
     await el.updateComplete;
-    await typeInto(el, '86.50');
+    await typeInto(el, '100.00');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }]);
     await typeInto(el, '86.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledTimes(2);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 8650 }]);
   });
 
   describe('the account refusal guards', () => {
@@ -2432,6 +2432,59 @@ describe('PR 150 fix round 2: the Z table, the guard in _pay and a typed non cas
     await typeInto(el, '100.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
     expect(q(el, 'pos-change').textContent).toContain('$13.50');
+    el.remove();
+  });
+});
+
+describe('PR 150 fix round 3: a normal split pays, and the two refused cases say why', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const press = async (el: POSTerminal, method: string) => { q(el, `tender-${method}`).click(); await el.updateComplete; };
+  const addSplit = async (el: POSTerminal, method: string, amount: string) => {
+    await press(el, method);
+    await typeInto(el, amount);
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+  };
+
+  it('pays a card added and cash typed above what is still owed, with the change due', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await addSplit(el, 'card', '40.00');
+    await press(el, 'cash');
+    await typeInto(el, '60.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$13.50');
+    expect(q(el, 'pos-tenders-over')).toBeNull();
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 6000 },
+    ]);
+    el.remove();
+  });
+
+  it('refuses a typed card or check above what is owed after cash was added, in words', async () => {
+    const el = await mount(sale());
+    await addSplit(el, 'cash', '60.00');
+    await press(el, 'card');
+    await typeInto(el, '40.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card or check cannot be more than what is owed');
+    expect(q(el, 'pos-tenders-over').textContent).not.toContain('added tenders');
+    await typeInto(el, '26.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('keeps the added tenders case and its words for a card added above a reduced total', async () => {
+    const el = await mount(sale());
+    await addSplit(el, 'card', '86.50');
+    (el as unknown as { _sale: Sale })._sale = sale({ total_cents: 5000, subtotal_cents: 5000, tax_cents: 0 });
+    await el.updateComplete;
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('The added tenders are more than the sale now');
     el.remove();
   });
 });
