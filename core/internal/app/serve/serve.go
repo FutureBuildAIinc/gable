@@ -720,7 +720,7 @@ func Run() {
 
 	// Scheduled report delivery. Loads every ACTIVE row from report_schedules,
 	// runs each on the cron engine, and emails the rendered CSV/XLSX to its
-	// recipients via emailSvc — the SMTP sender when SMTP_HOST is set, otherwise
+	// recipients via emailSvc: the SMTP sender when SMTP_HOST is set, otherwise
 	// the log-only LogEmailService, which records the send in the log rather
 	// than transmitting it. The schedule API publishes that distinction itself
 	// (execution.enabled plus execution.delivery), derived from this executor,
