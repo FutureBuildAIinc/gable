@@ -76,6 +76,12 @@ export class GableDateField extends LitElement {
     // replaces the focused cell's node (the month turned) knows to give the
     // focus to the day the move landed on.
     private _gridFocus = false;
+    // Set by the grid's own key handler and the month buttons: a key or a
+    // click there proves the calendar had the interaction, independent of
+    // what focus events the engine fires while the old cell's node goes away
+    // (Chromium sends a focusout on removal, jsdom none). updated() consumes
+    // it to land the focus on the moved-to day.
+    private _refocus = false;
     private _outside = (e: MouseEvent) => {
         if (this._open && !this.contains(e.target as Node)) this._close();
     };
@@ -226,14 +232,14 @@ export class GableDateField extends LitElement {
         const start = weekStart();
         const weekday = (new Date(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))).getDay() - start + 7) % 7;
         switch (e.key) {
-            case 'ArrowLeft': e.preventDefault(); this._move(day, -1, 0); break;
-            case 'ArrowRight': e.preventDefault(); this._move(day, 1, 0); break;
-            case 'ArrowUp': e.preventDefault(); this._move(day, -7, 0); break;
-            case 'ArrowDown': e.preventDefault(); this._move(day, 7, 0); break;
-            case 'PageUp': e.preventDefault(); this._move(day, 0, e.shiftKey ? -12 : -1); break;
-            case 'PageDown': e.preventDefault(); this._move(day, 0, e.shiftKey ? 12 : 1); break;
-            case 'Home': e.preventDefault(); this._move(day, -weekday, 0); break;
-            case 'End': e.preventDefault(); this._move(day, 6 - weekday, 0); break;
+            case 'ArrowLeft': e.preventDefault(); this._refocus = true; this._move(day, -1, 0); break;
+            case 'ArrowRight': e.preventDefault(); this._refocus = true; this._move(day, 1, 0); break;
+            case 'ArrowUp': e.preventDefault(); this._refocus = true; this._move(day, -7, 0); break;
+            case 'ArrowDown': e.preventDefault(); this._refocus = true; this._move(day, 7, 0); break;
+            case 'PageUp': e.preventDefault(); this._refocus = true; this._move(day, 0, e.shiftKey ? -12 : -1); break;
+            case 'PageDown': e.preventDefault(); this._refocus = true; this._move(day, 0, e.shiftKey ? 12 : 1); break;
+            case 'Home': e.preventDefault(); this._refocus = true; this._move(day, -weekday, 0); break;
+            case 'End': e.preventDefault(); this._refocus = true; this._move(day, 6 - weekday, 0); break;
             case 'Enter':
             case ' ':
                 e.preventDefault();
@@ -251,6 +257,7 @@ export class GableDateField extends LitElement {
     }
 
     private _shiftMonth(delta: number) {
+        this._refocus = true;
         const d = new Date(this._viewYear, this._viewMonth - 1 + delta, 1);
         this._viewYear = d.getFullYear();
         this._viewMonth = d.getMonth() + 1;
@@ -351,6 +358,9 @@ export class GableDateField extends LitElement {
                     @keydown=${this._onGridKeydown}
                     @focusin=${() => { this._gridFocus = true; }}
                     @focusout=${(e: FocusEvent) => {
+                        // A focusout whose target is already gone is the
+                        // render removing the old cell, not the person leaving.
+                        if (!(e.target as Node).isConnected) return;
                         const to = e.relatedTarget as Node | null;
                         if (!to || !this.querySelector('[role="grid"]')?.contains(to)) this._gridFocus = false;
                     }}
@@ -411,14 +421,17 @@ export class GableDateField extends LitElement {
                 }
             }
             const btn = this.querySelector(`#${this._id}-grid button[tabindex="0"]`) as HTMLElement | null;
-            // Pull focus to the landed day when the grid had it before the
-            // render (the month turned and the old node went away), or when
+            // Pull focus to the landed day when a grid key or month button
+            // moved (the engine's focus events during removal are beside the
+            // point), when the grid had the focus before the render, or when
             // the calendar just opened from the field.
-            if (btn && document.activeElement !== btn && (this._gridFocus || this.contains(document.activeElement))) {
+            if (btn && document.activeElement !== btn && (this._refocus || this._gridFocus || this.contains(document.activeElement))) {
                 btn.focus();
             }
+            this._refocus = false;
         } else {
             this._gridFocus = false;
+            this._refocus = false;
         }
     }
 }
