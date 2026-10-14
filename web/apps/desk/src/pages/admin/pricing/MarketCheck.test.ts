@@ -142,6 +142,39 @@ describe('Market check screen', () => {
     expect(text(el)).toContain('the first products in the catalogue')
   })
 
+  it('falls back to the fixed length dimensional lumber with the most available, then to the first products', async () => {
+    const board = (n: number, avail: string, over: Record<string, unknown> = {}) => ({
+      ...product(n, `BRD_${n}`), board_thickness_in: '1.5000', board_width_in: '3.5000', board_length_ft: '8.0000',
+      random_length: false, available: avail, ...over,
+    })
+    const items = [
+      { ...product(1, 'TW_WIPE'), available: '900.0000' },
+      board(2, '10.0000'), board(3, '500.0000'), board(4, '40.0000', { random_length: true }),
+      board(5, '300.0000'), board(6, '20.0000', { board_width_in: null }), board(7, '75.5000'),
+      board(8, '60.0000'), board(9, '5.0000'), board(10, '200.0000'), board(11, '9.0000'),
+    ]
+    let listing = items
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      if (url.pathname === '/api/v1/admin/market-check/settings') return jsonResponse(SETTINGS)
+      if (url.pathname === '/api/v1/products') return jsonResponse({ items: listing, next_cursor: null, limit: 200 })
+      return new Response('404 page not found', { status: 404 })
+    }))
+    let el = await open()
+    const chips = text(q(el, '[data-testid="chips"]'))
+    for (const sku of ['BRD_3', 'BRD_5', 'BRD_10', 'BRD_7', 'BRD_8', 'BRD_2']) expect(chips).toContain(sku)
+    for (const sku of ['TW_WIPE', 'BRD_4', 'BRD_6', 'BRD_9', 'BRD_11']) expect(chips).not.toContain(sku)
+    expect(text(el)).toContain('the fixed length dimensional lumber with the most on hand')
+    // the chips are in order of most available
+    expect(chips.indexOf('BRD_3')).toBeLessThan(chips.indexOf('BRD_5'))
+    el.remove()
+    // none of it: the first products
+    listing = [{ ...product(1, 'TW_WIPE'), board_length_ft: null, random_length: false, available: '1.0000' }, product(2, 'TW_RAG')] as never
+    el = await open()
+    expect(text(q(el, '[data-testid="chips"]'))).toContain('TW_WIPE')
+    expect(text(el)).toContain('the first products in the catalogue')
+  })
+
   it('removes a chip, adds from the search, and runs with the picked ids', async () => {
     const el = await open()
     q<HTMLButtonElement>(el, '[aria-label="Remove DL_SPF_1"]').click()

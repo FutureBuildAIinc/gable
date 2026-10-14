@@ -26,6 +26,18 @@ interface Picked {
   description: string;
 }
 
+/**
+ * The catalogue's fixed length dimensional lumber (all three board fields set, not random length), the
+ * most available first: the nearest read of "lumber" the product list carries (it has no category).
+ */
+export function fixedLengthLumber(catalog: Product[]): Picked[] {
+  return catalog
+    .filter((p) => p.board_thickness_in != null && p.board_width_in != null && p.board_length_ft != null && !p.random_length)
+    .sort((a, b) => Number.parseFloat(b.available) - Number.parseFloat(a.available))
+    .slice(0, DEFAULT_PICK)
+    .map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
+}
+
 /** "1 is below", "2 are below": the verb follows the count. */
 function countPhrase(n: number, what: string): string {
   return `${n} ${n === 1 ? 'is' : 'are'} ${what}`;
@@ -101,9 +113,19 @@ export class GableMarketCheck extends LitElement {
         // search both work over the catalogue the page loads once.
         this._catalog = await ProductService.listAllProducts();
         const tiles = await this._topSellers();
-        const chosen = tiles.length > 0 ? tiles : this._catalog.slice(0, DEFAULT_PICK);
-        this._pickSource = tiles.length > 0 ? 'the yard top sellers in Lumber' : 'the first products in the catalogue';
-        this._picked = chosen.map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
+        const boards = fixedLengthLumber(this._catalog);
+        let chosen: Picked[];
+        if (tiles.length > 0) {
+          chosen = tiles;
+          this._pickSource = 'the yard top sellers in Lumber';
+        } else if (boards.length > 0) {
+          chosen = boards;
+          this._pickSource = 'the fixed length dimensional lumber with the most on hand';
+        } else {
+          chosen = this._catalog.slice(0, DEFAULT_PICK).map((p) => ({ id: p.id, sku: p.sku, description: p.description }));
+          this._pickSource = 'the first products in the catalogue';
+        }
+        this._picked = chosen;
       }
     } catch (err) {
       this._loadError = apiErrorMessage(err, 'Could not load the Market check');
