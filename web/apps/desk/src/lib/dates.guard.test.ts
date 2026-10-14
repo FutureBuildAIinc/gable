@@ -78,4 +78,25 @@ describe('date guard', () => {
     }
     expect(findings).toEqual([])
   })
+
+  // The native input rule against the forms this codebase writes: the line's
+  // own end after the value (the usual multi-line form), inline, unquoted and
+  // bound. Planted, so a rule that misses one fails here and not in a page.
+  it('catches a native date input at a line\'s end, inline, unquoted and bound', () => {
+    const rule = RULES.find((r) => r.kind === 'native date/time input')
+    expect(rule).toBeTruthy()
+    const hits = [
+      'type="date"',
+      '<input type="date" .value=${this.asOf} />',
+      'type="datetime-local"',
+      'type="month"',
+      'type="time" />',
+      'type=date>',
+      ".type=${'date'}",
+    ]
+    for (const h of hits) expect(rule!.pattern.test(h), h).toBe(true)
+    for (const miss of ['type="text"', 'type="number"', 'type="daterange"', 'prototype="date"']) {
+      expect(rule!.pattern.test(miss), miss).toBe(false)
+    }
+  })
 })
