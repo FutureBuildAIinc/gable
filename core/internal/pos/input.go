@@ -358,6 +358,12 @@ func (r *closeTillRequest) parse() (map[string]int64, string, error) {
 			v.Check(false, "counted_by_method."+m, "must be cash, check, card or account")
 			continue
 		}
+		if method == TenderAccount {
+			// an account charge is not money in the drawer: counted less
+			// expected over it would post the whole charge as a shortage
+			v.Check(false, "counted_by_method."+m, "an account charge is not in the drawer, so it is not counted")
+			continue
+		}
 		if isAbsentRaw(raw) {
 			continue
 		}

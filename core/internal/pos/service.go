@@ -34,6 +34,7 @@ const (
 
 	auditLinePriceOverridden = "pos_transaction.line_price_overridden"
 	auditLineDiscounted      = "pos_transaction.line_discounted"
+	auditLineQuantityChanged = "pos_transaction.line_quantity_changed"
 )
 
 // PriceEngine prices a product line for a customer and quantity at the
@@ -687,6 +688,9 @@ func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UU
 			return err
 		}
 		line.ID = old.ID
+		// whoever set the price keeps the credit for it: pressing plus does
+		// not make the cashier the author of a manager's override
+		line.PriceAdjustedBy = old.PriceAdjustedBy
 		lines, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
 		if err != nil {
 			return err
@@ -712,10 +716,22 @@ func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UU
 			return err
 		}
 		if s.auditLog != nil {
-			for _, e := range priced.overrides {
-				if err := s.auditLog.Log(ctx, e); err != nil {
-					return fmt.Errorf("failed to write the audit row: %w", err)
+			// an override that was already on the line has its row; only an
+			// override this change brings (the engine's price moved with the
+			// quantity) is new, and it names the line it is on
+			if old.PriceSource != salesdoc.PriceSourceOverride {
+				for _, e := range priced.overrides {
+					e.Changes["line_id"] = old.ID
+					if err := s.auditLog.Log(ctx, e); err != nil {
+						return fmt.Errorf("failed to write the audit row: %w", err)
+					}
 				}
+			}
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: auditLineQuantityChanged, EntityType: "pos_transaction", EntityID: sale.ID, UserID: actor,
+				Changes: map[string]any{"line_id": old.ID, "product_id": old.ProductID,
+					"from_quantity": old.Quantity.WireString(), "to_quantity": qty.WireString()}}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
 			}
 		}
 		if err := s.recalcTotals(ctx, sale); err != nil {
@@ -752,8 +768,10 @@ func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
 	if l.ChargeCode != nil {
 		pl.ChargeCode = *l.ChargeCode
 	}
+	// a charge line and a non stock product line carry their own taxable
+	// flag; a stocked product's comes from the product
 	taxable := l.Taxable
-	if l.LineType == salesdoc.LineCharge {
+	if l.LineType == salesdoc.LineCharge || l.ProductID == nil {
 		pl.Taxable = &taxable
 	}
 	if l.PriceSource == salesdoc.PriceSourceOverride || l.PriceSource == salesdoc.PriceSourceManual || l.LineType == salesdoc.LineCharge {

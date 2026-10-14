@@ -411,7 +411,10 @@ paths:
         quantity gives. A price the cashier overrode and a discount stay on
         the line. The body carries the sale's revision (or the request
         carries If-Match): a stale one is 409 stale_revision and none at all
-        is 428. Only an open sale changes (409 invalid_state_transition). A
+        is 428. Only an open or held sale changes (409 invalid_state_transition), as the
+        line add. A fixed cents discount stays the same cents at the new
+        quantity (a percent discount scales), as it does when the line is
+        removed and added again. A
         quantity of zero or less, or a line that has no quantity (a text
         line) or is a kit's component, is 400. A line that is not on this
         sale is 404. Roles, the branch wall and a bound key's pin are those of
@@ -894,8 +897,10 @@ paths:
         change plus the float less cash refunds) is booked to 5030 inside the
         close's own transaction, the Z report snapshot is written and
         till.closed is the last statement. counted_by_method names the
-        counted cents per lowercase method (cash, check, card, account); a
-        refusal rolls everything back. A session that does not exist, or that
+        counted cents per lowercase method (cash, check, card); account is
+        refused in the 400 envelope naming counted_by_method.account, since an
+        account charge is not money in the drawer and counting it would book
+        the whole charge as a shortage. A refusal rolls everything back. A session that does not exist, or that
         the caller's branch context or wall hides, answers 404, the same for
         both, and nothing is written; a caller with no branch in context who
         holds no grant for the session's branch is refused 403 by name.
