@@ -11,26 +11,42 @@ import { posService } from './POSService';
 describe('the counter receipt routes', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('fetches the receipt through the authenticated client and opens a blob url, never the route', async () => {
-    fetchMock.mockResolvedValue(new Response('%PDF', { status: 200, headers: { 'Content-Type': 'application/pdf' } }));
+  it('opens the tab during the click, before the fetch answers, then points it at a blob url', async () => {
+    let answer: (r: Response) => void = () => {};
+    fetchMock.mockImplementation(() => new Promise<Response>((r) => { answer = r; }));
     const create = vi.fn().mockReturnValue('blob:receipt-1');
-    const revoke = vi.fn();
-    Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    await posService.printReceipt('sale-1');
+    Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() });
+    const tab = { location: { href: '' }, close: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
+    const pending = posService.printReceipt('sale-1');
+    // synchronously, with the fetch still unanswered
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(open).toHaveBeenCalledWith('', '_blank');
+    expect(create).not.toHaveBeenCalled();
+    answer(new Response('%PDF', { status: 200, headers: { 'Content-Type': 'application/pdf' } }));
+    const result = await pending;
     expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/pos/transactions/sale-1/receipt');
-    expect(create).toHaveBeenCalledTimes(1);
-    expect(open).toHaveBeenCalledWith('blob:receipt-1', '_blank');
-    expect(open.mock.calls.some((c) => String(c[0]).includes('/api/v1/'))).toBe(false);
+    expect(tab.location.href).toBe('blob:receipt-1');
+    expect(result).toEqual({ url: 'blob:receipt-1', blocked: false });
     open.mockRestore();
   });
 
-  it('says why when the receipt cannot be fetched and opens nothing', async () => {
+  it('answers a blocked tab with the blob url so the page can offer a download', async () => {
+    fetchMock.mockResolvedValue(new Response('%PDF', { status: 200 }));
+    Object.assign(URL, { createObjectURL: vi.fn().mockReturnValue('blob:receipt-2'), revokeObjectURL: vi.fn() });
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    await expect(posService.printReceipt('sale-1')).resolves.toEqual({ url: 'blob:receipt-2', blocked: true });
+    open.mockRestore();
+  });
+
+  it('closes the tab and throws the words when the receipt cannot be fetched', async () => {
     const body = { error: { code: 'conflict', message: 'this sale has no receipt: only a completed sale with an invoice has one' }, meta: { request_id: 'r' } };
     fetchMock.mockResolvedValue(new Response(JSON.stringify(body), { status: 409, headers: { 'Content-Type': 'application/json' } }));
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const tab = { location: { href: '' }, close: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(tab as unknown as Window);
     await expect(posService.printReceipt('sale-1')).rejects.toThrow('no receipt');
-    expect(open).not.toHaveBeenCalled();
+    expect(tab.close).toHaveBeenCalledTimes(1);
+    expect(tab.location.href).toBe('');
     open.mockRestore();
   });
 

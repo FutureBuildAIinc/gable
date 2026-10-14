@@ -104,18 +104,28 @@ export const posService = {
 
     /**
      * Fetches the completed sale's own receipt through the authenticated client (a
-     * plain new tab would carry no token) and opens it from a blob url in a new tab.
-     * A refusal throws the server's words.
+     * plain new tab would carry no token) and shows it from a blob url in a tab
+     * opened during the click. A blocked tab answers the url for a download link;
+     * a refusal closes the tab and throws the server's words.
      */
-    async printReceipt(saleId: string): Promise<void> {
-        const response = await expectOk(
-            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`),
-            'Failed to read the receipt',
-        );
-        const url = URL.createObjectURL(await response.blob());
-        window.open(url, '_blank');
-        // the tab has the document by then; the url is not kept
-        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    async printReceipt(saleId: string): Promise<{ url: string; blocked: boolean }> {
+        // The tab opens during the click, before any await, so a pop up blocker lets it through.
+        const tab = window.open('', '_blank');
+        try {
+            const response = await expectOk(
+                await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`),
+                'Failed to read the receipt',
+            );
+            const url = URL.createObjectURL(await response.blob());
+            if (tab === null) return { url, blocked: true };
+            tab.location.href = url;
+            // the tab has the document by then
+            setTimeout(() => URL.revokeObjectURL(url), 60_000);
+            return { url, blocked: false };
+        } catch (err) {
+            tab?.close();
+            throw err;
+        }
     },
 
     /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */

@@ -53,6 +53,8 @@ export class POSTerminal extends LitElement {
   @state() private _receiptNote: string | null = null;
   @state() private _receiptRefused = false;
   @state() private _receiptBusy = false;
+  /** A blob url the receipt can be downloaded from when its tab was blocked. */
+  @state() private _receiptDownload: string | null = null;
 
   // The completed sale offered for a return or a void.
   @state() private _completed: Sale | null = null;
@@ -518,6 +520,7 @@ export class POSTerminal extends LitElement {
       this._jobId = '';
       this._receiptNote = null;
       this._receiptRefused = false;
+      this._dropReceiptDownload();
       // A completed sale on screen stays offerable for a void or a return
       // until this new sale replaces it (New Sale, a product or a customer).
       const reg = this._registerId;
@@ -1291,10 +1294,22 @@ export class POSTerminal extends LitElement {
     }
   }
 
+  private _dropReceiptDownload() {
+    if (this._receiptDownload) URL.revokeObjectURL(this._receiptDownload);
+    this._receiptDownload = null;
+  }
+
   /** Opens the sale's receipt document; a refusal is said in words beside Print receipt. */
   private async _printReceipt(saleId: string) {
+    this._dropReceiptDownload();
     try {
-      await posService.printReceipt(saleId);
+      const shown = await posService.printReceipt(saleId);
+      if (shown?.blocked) {
+        this._receiptDownload = shown.url;
+        this._receiptNote = 'Allow pop ups for this page to print the receipt, or download it';
+        this._receiptRefused = true;
+        return;
+      }
       this._receiptNote = null;
       this._receiptRefused = false;
     } catch (err: unknown) {
@@ -1333,6 +1348,8 @@ export class POSTerminal extends LitElement {
             </div>
             ${sale.customer_id !== null ? html`<p class="mt-2 text-xs text-slate-400" data-testid="pos-receipt-contact">Email goes to the contact on the account</p>` : nothing}
             ${this._receiptNote ? html`<p class="mt-2 text-xs ${this._receiptRefused ? 'text-safety-red' : 'text-slate-400'}" data-testid="pos-receipt-note" role="status">${this._receiptNote}</p>` : nothing}
+            ${this._receiptDownload ? html`<a data-testid="pos-receipt-download" href=${this._receiptDownload} download="receipt-${sale.number}.pdf"
+              class="mt-1 inline-block text-xs font-semibold text-gable-green underline">Download the receipt</a>` : nothing}
           </div>` : nothing}
         <div class="mt-4 flex gap-2">
           <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}
