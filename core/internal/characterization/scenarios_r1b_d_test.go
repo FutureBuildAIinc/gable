@@ -223,9 +223,12 @@ func r1bDReportingGroups() []groupDef {
 						"report_id": "{d_saved}", "cron_expression": "0 30 6 * * *",
 						"recipients": []any{"goldens-d@example.com"}, "format": "XLSX",
 					},
-					extract: map[string]string{"d_schedule": "/schedule/id"},
 				},
-				{name: "reporting.schedule.delete", method: "DELETE", path: "/api/v1/reporting/schedules/{d_schedule}"},
+				// The dev caller's create is refused (no caller identity), so
+				// the delete steps run against a legacy schedule row, the
+				// shape every schedule made before migration 112 has.
+				{name: "reporting.schedule.delete", method: "DELETE", path: "/api/v1/reporting/schedules/{d_schedule}",
+					setup: seedLegacySchedule},
 				{name: "reporting.schedule.delete.again", method: "DELETE", path: "/api/v1/reporting/schedules/{d_schedule}"},
 				{name: "reporting.schedule.delete.unknown", method: "DELETE",
 					path: "/api/v1/reporting/schedules/" + zeroUUID},

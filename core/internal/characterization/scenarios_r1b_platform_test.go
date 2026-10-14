@@ -280,3 +280,22 @@ func seedAckRequiredQuote(t *testing.T, h *harness) {
 	              'ACK_REQUIRED', TRUE)`, escalatorID, lineID)
 	h.vars["eventsQuote"] = quoteID
 }
+
+// seedLegacySchedule inserts, through the harness's own SQL, a schedule row
+// with no creator recorded, the state the API can no longer create for a
+// caller with no identity, so the delete steps keep their goldens.
+func seedLegacySchedule(t *testing.T, h *harness) {
+	t.Helper()
+	db, err := sql.Open("pgx", h.dbURL)
+	if err != nil {
+		t.Fatalf("open fixture db: %v", err)
+	}
+	defer db.Close()
+	var id string
+	if err := db.QueryRow(`INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format)
+		VALUES ($1, '0 30 6 * * *', '["goldens-d@example.com"]', 'ACTIVE', 'XLSX') RETURNING id::text`,
+		h.vars["d_saved"]).Scan(&id); err != nil {
+		t.Fatalf("fixture schedule: %v", err)
+	}
+	h.vars["d_schedule"] = id
+}

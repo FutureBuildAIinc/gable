@@ -37,8 +37,13 @@ func newScheduleTestMux(repo *fakeRepo, executor ScheduleExecutor) (*Handler, *h
 	return h, mux
 }
 
+// do sends one request as a caller with an identity (a schedule records its
+// creator, and a caller with none cannot create one).
 func do(mux *http.ServeMux, method, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, &middleware.UserClaims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "schedule-test-creator"},
+	}))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	return w
@@ -571,5 +576,37 @@ func TestRunSavedReport_MissingReportIs404(t *testing.T) {
 
 	if w := do(mux, http.MethodPost, "/api/v1/reporting/saved/gone/run", ""); w.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (body %s)", w.Code, w.Body)
+	}
+}
+
+// CORRECTNESS: a caller with no identity (no claims, or claims with an empty
+// subject) cannot create a schedule, because a schedule with no creator
+// recorded can never run: the create answers 409 naming the missing caller
+// identity and stores nothing, and a body naming created_by or
+// creator_is_admin is never stored in its place.
+func TestCreateReportSchedule_NoCallerIdentityIsRefused(t *testing.T) {
+	forged := `{"report_id":"r1","cron_expression":"0 0 9 * * *","recipients":["controller@example.com"],` +
+		`"created_by":"forged-owner","creator_is_admin":true}`
+	for name, claims := range map[string]*middleware.UserClaims{
+		"no claims":     nil,
+		"empty subject": {RegisteredClaims: jwt.RegisteredClaims{Subject: ""}, Role: "admin", Roles: []string{"admin"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeRepo()
+			repo.saved["r1"] = &SavedReport{ID: "r1", Name: "AR aging", EntityType: "invoices"}
+			_, mux := newScheduleTestMux(repo, &recordingExecutor{})
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/reporting/schedules", strings.NewReader(forged))
+			if claims != nil {
+				req = req.WithContext(context.WithValue(req.Context(), middleware.UserContextKey, claims))
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "caller identity") {
+				t.Errorf("status = %d body %s, want the 409 naming the missing caller identity", w.Code, w.Body)
+			}
+			if len(repo.schedules) != 0 {
+				t.Errorf("the refused create stored %d schedule(s), want none", len(repo.schedules))
+			}
+		})
 	}
 }

@@ -319,10 +319,17 @@ func (s *Scheduler) creatorRunContext(ctx context.Context, schedule ReportSchedu
 
 // refuseRun records why a schedule did not run: a log line always, and an
 // audit row beside it when a logger is wired, so a schedule that stops
-// emailing is discoverable rather than silent.
+// emailing is discoverable rather than silent. A refused schedule cannot run
+// at its next firing either, so the refusal also takes it off the cron engine
+// and pauses the stored row: one audit row, never one per firing, and a
+// restart skips the paused row (a caller with report access recreates it).
 func (s *Scheduler) refuseRun(ctx context.Context, schedule ReportSchedule, reason string) {
 	log.Printf("reporting scheduler: schedule %s (report %s) did not run: %s",
 		schedule.ID, schedule.ReportID, reason)
+	s.RemoveSchedule(schedule.ID)
+	if err := s.service.PauseReportSchedule(ctx, schedule.ID); err != nil {
+		log.Printf("reporting scheduler: schedule %s was refused but could not be paused: %v", schedule.ID, err)
+	}
 	if s.refusalAudit == nil {
 		return
 	}

@@ -35,6 +35,7 @@ func TestServeWiringMountsTheConfinements(t *testing.T) {
 		{string(serveSrc), "wireExposure(exposureDeps{", "the exposure wiring"},
 		{string(exposureSrc), "registerExposureRoutes(deps.Mux", "the exposure by id quote confinement"},
 		{string(serveSrc), "taxCustomerWall(wall", "the tax exemption and preview confinement"},
+		{string(serveSrc), "newReportScheduler(db, reportingSvc, emailSvc)", "the report scheduler with its refusal audit"},
 		{string(serveSrc), "pricingRulesCustomerWall(wall.keyWall", "the pricing rule create and calculate confinement"},
 		{string(serveSrc), "categoryRulesCustomerWall(wall.keyWall", "the category rule confinement"},
 		{string(chainSrc), "middleware.KeyBranchRouteGate(d.Mux", "the route allowlist gate in the chain"},

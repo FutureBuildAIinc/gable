@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -227,10 +228,10 @@ func TestNoHeader_AccountWallSwitchOffKeepsRowlessCustomers(t *testing.T) {
 	}
 }
 
-// saveAndScheduleAs saves a report as the role given and schedules it, and
-// returns the stored schedule the way Scheduler.Start reloads it. The saved
-// report counts the orders of the fixture's two customers.
-func saveAndScheduleAs(t *testing.T, f *keyPinFixture, role string, hdr map[string]string) (reporting.ReportSchedule, *reporting.Service) {
+// saveReportAs saves a report as the role given and removes it, with its
+// schedules and their audit rows, when the test ends. The saved report counts
+// the orders of the fixture's two customers.
+func saveReportAs(t *testing.T, f *keyPinFixture, role string, hdr map[string]string) string {
 	t.Helper()
 	saveBody := `{"name":"pin noheader schedule r4","description":"pin","entity_type":"orders",` +
 		`"definition_json":{"columns":[{"field":"customer_name","label":"Customer"},{"field":"id","label":"Orders","aggregation":"COUNT"}],` +
@@ -252,8 +253,20 @@ func saveAndScheduleAs(t *testing.T, f *keyPinFixture, role string, hdr map[stri
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM report_schedules WHERE report_id = $1`, saved.ID)
 		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM saved_reports WHERE id = $1`, saved.ID)
 	})
-	schedBody := `{"report_id":"` + saved.ID + `","cron_expression":"0 0 9 * * *","recipients":["probe@example.invalid"]}`
-	status, buf = f.userAs(t, role, "POST", "/api/v1/reporting/schedules", schedBody, hdr)
+	return saved.ID
+}
+
+// scheduleBody is the create body for a saved report.
+func scheduleBody(reportID string) string {
+	return `{"report_id":"` + reportID + `","cron_expression":"0 0 9 * * *","recipients":["probe@example.invalid"]}`
+}
+
+// saveAndScheduleAs saves a report and schedules it as the role given, and
+// returns the stored schedule the way Scheduler.Start reloads it.
+func saveAndScheduleAs(t *testing.T, f *keyPinFixture, role string, hdr map[string]string) (reporting.ReportSchedule, *reporting.Service) {
+	t.Helper()
+	reportID := saveReportAs(t, f, role, hdr)
+	status, buf := f.userAs(t, role, "POST", "/api/v1/reporting/schedules", scheduleBody(reportID), hdr)
 	if status != http.StatusCreated {
 		t.Fatalf("%s scheduled report: %d %s", role, status, buf)
 	}
@@ -263,12 +276,33 @@ func saveAndScheduleAs(t *testing.T, f *keyPinFixture, role string, hdr map[stri
 		t.Fatal(err)
 	}
 	for i := range schedules {
-		if schedules[i].ReportID == saved.ID {
+		if schedules[i].ReportID == reportID {
 			return schedules[i], svc
 		}
 	}
 	t.Fatalf("the %s caller's schedule is not stored", role)
 	return reporting.ReportSchedule{}, nil
+}
+
+// refusalRows counts the report_schedule.refused audit rows of a schedule and
+// the reasons they carry.
+func refusalRows(t *testing.T, f *keyPinFixture, schedule string) (n int, reasons []string) {
+	t.Helper()
+	rows, err := f.db.Pool.Query(context.Background(),
+		`SELECT COALESCE(changes->>'reason', '') FROM audit_log
+		  WHERE entity_type = 'report_schedule' AND entity_id = $1 AND action = 'report_schedule.refused'`, schedule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var reason string
+		if err := rows.Scan(&reason); err != nil {
+			t.Fatal(err)
+		}
+		reasons = append(reasons, reason)
+	}
+	return len(reasons), reasons
 }
 
 // TestNoHeader_ReportScheduleUnderTheSingleBranchSwitch is the scheduler
@@ -305,5 +339,92 @@ func TestNoHeader_ReportScheduleUnderTheSingleBranchSwitch(t *testing.T) {
 	}
 	if sender.count() != before {
 		t.Errorf("switch on: the refused run sent %d run(s), want none", sender.count()-before)
+	}
+}
+
+// TestNoHeader_ReportScheduleGuardsHold pins the scheduler's guards the
+// round 3 reviews found untested (r5 P3-1, r6 P3-3), each red when it is
+// reverted alone: a creator that holds no branch grant does not run and is
+// audited, the refusal audit is wired by the function serve builds the
+// scheduler through, a schedule made with no caller identity is refused at
+// the create (it could never run), and a body naming created_by or
+// creator_is_admin is never stored.
+func TestNoHeader_ReportScheduleGuardsHold(t *testing.T) {
+	f := newKeyPinFixture(t)
+	f.seedWalledTwins(t)
+
+	// A finance creator with a subject and no grant at all: the run is
+	// refused, audited with its reason, and sends nothing.
+	stored, svc := saveAndScheduleAs(t, f, "finance", nil)
+	sender := &r3CaptureSender{}
+	sched := newReportScheduler(f.db, svc, sender)
+	if err := sched.ExecuteAndSendReport(context.Background(), stored); err == nil {
+		t.Error("a finance creator holding no grant ran, want the fail closed refusal")
+	}
+	if sender.count() != 0 {
+		t.Errorf("a creator holding no grant sent %d run(s), want none", sender.count())
+	}
+	if n, reasons := refusalRows(t, f, stored.ID); n != 1 || !strings.Contains(reasons[0], "no branch grant") {
+		t.Errorf("the no grant refusal wrote %d audit row(s) %v, want one naming the missing grant", n, reasons)
+	}
+
+	// The refusal audit is wired by the function serve builds the scheduler
+	// through: a schedule with no creator recorded writes its row.
+	nullID := uuid.NewString()
+	if _, err := f.db.Pool.Exec(context.Background(), `
+		INSERT INTO report_schedules (id, report_id, cron_expression, recipients, status, format)
+		VALUES ($1, $2, '0 0 9 * * *', '["probe@example.invalid"]', 'ACTIVE', 'CSV')`, nullID, stored.ReportID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM audit_log WHERE entity_type = 'report_schedule' AND entity_id = $1`, nullID)
+	})
+	if err := sched.ExecuteAndSendReport(context.Background(), reporting.ReportSchedule{
+		ID: nullID, ReportID: stored.ReportID, CronExpression: "0 0 9 * * *",
+		Recipients: []string{"probe@example.invalid"}, Status: reporting.ScheduleStatusActive, Format: "CSV",
+	}); err == nil {
+		t.Error("a schedule with no creator recorded ran")
+	}
+	if n, _ := refusalRows(t, f, nullID); n != 1 {
+		t.Errorf("the scheduler serve builds wrote %d refusal audit row(s) for a schedule with no creator, want one", n)
+	}
+
+	// A caller with no identity (the dev caller, a token with an empty
+	// subject) is refused at the create, 409 naming the missing identity,
+	// and a body naming created_by or creator_is_admin is never stored.
+	reportID := saveReportAs(t, f, "admin", nil)
+	forged := `{"report_id":"` + reportID + `","cron_expression":"0 0 9 * * *","recipients":["probe@example.invalid"],` +
+		`"created_by":"forged-owner","creator_is_admin":true}`
+	for label, send := range map[string]func() (int, []byte){
+		"empty subject": func() (int, []byte) {
+			return f.userSubAs(t, "", "finance", "POST", "/api/v1/reporting/schedules", forged, nil)
+		},
+		"no claims": func() (int, []byte) {
+			req, err := http.NewRequest("POST", f.srv.URL+"/api/v1/reporting/schedules", strings.NewReader(forged))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.Body.Close()
+			buf, _ := io.ReadAll(res.Body)
+			return res.StatusCode, buf
+		},
+	} {
+		status, buf := send()
+		if status != http.StatusConflict || !strings.Contains(string(buf), "caller identity") {
+			t.Errorf("%s: create with no caller identity: %d %s, want the 409 naming the missing caller identity", label, status, buf)
+		}
+		var n int
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT COUNT(*) FROM report_schedules WHERE report_id = $1`, reportID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s: the refused create stored %d schedule(s), want none", label, n)
+		}
 	}
 }

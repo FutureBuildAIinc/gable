@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -426,12 +427,19 @@ func (h *Handler) HandleCreateReportSchedule(w http.ResponseWriter, r *http.Requ
 	// the every branch view), and a schedule with no creator recorded never
 	// runs. A deployment with no caller identity (authentication disabled)
 	// therefore cannot create a runnable schedule; that is the fail closed
-	// rule, not an accident to paper over.
+	// rule, not an accident to paper over, and the create says so with a 409
+	// instead of storing a schedule that could never run. The two resets
+	// keep a body that names created_by or creator_is_admin from being
+	// stored when no claims, or claims with an empty subject, replace them.
 	schedule.CreatedBy = ""
 	schedule.CreatorIsAdmin = false
 	if claims := middleware.ClaimsFromContext(r.Context()); claims != nil && claims.Subject != "" {
 		schedule.CreatedBy = claims.Subject
 		schedule.CreatorIsAdmin = middleware.ClaimsHaveAnyRole(claims, "admin", "owner")
+	}
+	if schedule.CreatedBy == "" {
+		httpx.WriteError(w, r, httpx.Conflict("a schedule needs a caller identity: this caller carries no subject, so the scheduled run could never resolve its reach"))
+		return
 	}
 
 	if err := h.service.CreateReportSchedule(r.Context(), &schedule); err != nil {

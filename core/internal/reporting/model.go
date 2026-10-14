@@ -87,6 +87,13 @@ const ScheduleStatusStored = "STORED"
 // cmd/server/main.go wires. Scheduler.Start registers exactly these rows.
 const ScheduleStatusActive = "ACTIVE"
 
+// ScheduleStatusPaused is the status of a schedule that must not fire:
+// Scheduler.Start skips it. A run the fail closed rule refuses (no creator
+// recorded, a creator holding no branch grant) sets it, once, so the
+// schedule neither fires nor audits again until a caller with report access
+// recreates it.
+const ScheduleStatusPaused = "PAUSED"
+
 type ReportSchedule struct {
 	ID             string   `json:"id"`
 	ReportID       string   `json:"report_id"`

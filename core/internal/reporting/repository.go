@@ -58,6 +58,9 @@ type Repository interface {
 	// failure is returned, never read as off, so a scheduled run cannot
 	// widen its reach on a failed read.
 	MultiBranchEnabled(ctx context.Context) (bool, error)
+	// PauseReportSchedule sets a schedule's status to PAUSED, the state
+	// Scheduler.Start skips, once a run was refused.
+	PauseReportSchedule(ctx context.Context, id string) error
 }
 
 type PostgresRepository struct {
@@ -481,6 +484,16 @@ func (r *PostgresRepository) MultiBranchEnabled(ctx context.Context) (bool, erro
 		return false, fmt.Errorf("failed to read the single branch switch: %w", err)
 	}
 	return middleware.ParseBoolSetting(val, false), nil
+}
+
+// PauseReportSchedule marks the schedule PAUSED. It touches the status and
+// the update time only.
+func (r *PostgresRepository) PauseReportSchedule(ctx context.Context, id string) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE report_schedules SET status = $2, updated_at = NOW() WHERE id = $1`, id, ScheduleStatusPaused); err != nil {
+		return fmt.Errorf("failed to pause report schedule: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) DeleteReportSchedule(ctx context.Context, id string) error {

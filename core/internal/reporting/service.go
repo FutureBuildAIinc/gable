@@ -232,6 +232,11 @@ func (s *Service) ScheduleCreatorGrants(ctx context.Context, sub string) (int, e
 	return s.repo.ScheduleCreatorGrants(ctx, sub)
 }
 
+// PauseReportSchedule marks a schedule PAUSED after a refused run.
+func (s *Service) PauseReportSchedule(ctx context.Context, id string) error {
+	return s.repo.PauseReportSchedule(ctx, id)
+}
+
 // MultiBranchEnabled reads the single branch switch the branch middleware
 // reads, so a scheduled run treats its creator as the middleware treats every
 // caller.

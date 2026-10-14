@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/testutil"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
 )
@@ -362,4 +363,69 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// CORRECTNESS: a run the fail closed rule refuses stops the schedule from
+// firing again (r5 P3-1). A schedule with no creator recorded can never run,
+// so every cron firing used to log and write one more refusal audit row (an
+// every-second expression flooded audit_log). The first refusal now removes
+// the schedule from the cron engine and pauses the stored row, so exactly one
+// audit row is written however long the engine runs, and a restart skips the
+// paused row.
+func TestScheduler_RefusedRunPausesTheScheduleAndAuditsOnce(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	fixture := newScheduledReportFixture(t, db, "0 0 9 * * *")
+
+	var nullID string
+	if err := db.Pool.QueryRow(ctx, `
+		INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format)
+		VALUES ($1, '@every 1s', '["probe@example.invalid"]', 'ACTIVE', 'CSV') RETURNING id::text`,
+		fixture.reportID).Scan(&nullID); err != nil {
+		t.Fatalf("seed schedule with no creator: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(),
+			`DELETE FROM audit_log WHERE entity_type = 'report_schedule' AND entity_id = $1`, nullID)
+	})
+	refusals := func() int {
+		t.Helper()
+		var n int
+		if err := db.Pool.QueryRow(ctx,
+			`SELECT COUNT(*) FROM audit_log WHERE entity_type = 'report_schedule' AND entity_id = $1
+			   AND action = 'report_schedule.refused'`, nullID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	sender := &fakeSender{}
+	sched := NewScheduler(fixture.service, sender).WithRefusalAudit(audit.NewLogger(db))
+	if err := sched.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer sched.Stop()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for refusals() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("no refusal audit row within 20s of the schedule firing")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	// Several more ticks of the every second expression.
+	time.Sleep(3500 * time.Millisecond)
+
+	if n := refusals(); n != 1 {
+		t.Errorf("the refused schedule wrote %d audit row(s) over several firings, want one", n)
+	}
+	if sched.isRegistered(nullID) {
+		t.Error("the refused schedule is still registered with the cron engine")
+	}
+	if got := reloadSchedule(t, fixture.service, nullID).Status; got != ScheduleStatusPaused {
+		t.Errorf("the refused schedule's status = %q, want %q", got, ScheduleStatusPaused)
+	}
+	if sender.count() != 0 {
+		t.Errorf("the refused schedule sent %d email(s), want none", sender.count())
+	}
 }

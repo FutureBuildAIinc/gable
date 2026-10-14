@@ -183,6 +183,18 @@ func (f *fakeRepo) ScheduleCreatorGrants(_ context.Context, sub string) (int, er
 // rule the scheduler applies with several branches.
 func (f *fakeRepo) MultiBranchEnabled(_ context.Context) (bool, error) { return true, nil }
 
+// PauseReportSchedule marks the stored fake schedule PAUSED.
+func (f *fakeRepo) PauseReportSchedule(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.schedules {
+		if f.schedules[i].ID == id {
+			f.schedules[i].Status = ScheduleStatusPaused
+		}
+	}
+	return nil
+}
+
 var _ Repository = (*fakeRepo)(nil)
 
 // --- date-window handling ------------------------------------------------

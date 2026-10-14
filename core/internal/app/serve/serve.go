@@ -715,7 +715,7 @@ func Run() {
 	// recorded, a creator holding no grant) writes an audit row beside its
 	// log line. Stops in step 3.6 of graceful shutdown, before the DB pool
 	// closes.
-	reportScheduler := reporting.NewScheduler(reportingSvc, emailSvc).WithRefusalAudit(audit.NewLogger(db))
+	reportScheduler := newReportScheduler(db, reportingSvc, emailSvc)
 	if err := reportScheduler.Start(context.Background()); err != nil {
 		logger.Error("report scheduler failed to start", "error", err)
 	}
