@@ -66,3 +66,42 @@ func TestExtractItemsWithAI_MidCallFailureFallsBack(t *testing.T) {
 	items, synthetic, err := s.ExtractItemsWithAI(context.Background(), []byte("anything"), "image/png")
 	assertFallback(t, items, synthetic, err)
 }
+
+// A pasted list, a text file or a spreadsheet (the handler hands the service
+// text/plain for a spreadsheet) is read by the rule-based reader when no AI
+// reader is set, so the user's own lines come back, flagged not synthetic.
+func TestExtractItemsWithAI_TextWithoutAIReadsTheCallersList(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		client      *ai.Client
+		contentType string
+	}{
+		{"nil client plain text", nil, "text/plain"},
+		{"unconfigured client csv", ai.NewClient(""), "text/csv"},
+		{"charset suffix", nil, "text/plain; charset=utf-8"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewService(&mockProductRepo{}, tc.client)
+			body := "12 pcs - 4x4x8 Cedar Post\n3 bags - Polymeric Sand\n"
+			items, synthetic, err := s.ExtractItemsWithAI(context.Background(), []byte(body), tc.contentType)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if synthetic {
+				t.Fatalf("the caller's own text must not be reported as synthetic")
+			}
+			if len(items) != 2 || items[0].quantity != 12 || !strings.Contains(items[0].rawText, "Cedar Post") {
+				t.Fatalf("expected the caller's two lines, got %+v", items)
+			}
+		})
+	}
+}
+
+// Images and PDFs need the AI reader, so without one they keep the sample.
+func TestExtractItemsWithAI_NonTextWithoutAIStaysSynthetic(t *testing.T) {
+	for _, ct := range []string{"image/png", "application/pdf"} {
+		s := NewService(&mockProductRepo{}, nil)
+		items, synthetic, err := s.ExtractItemsWithAI(context.Background(), []byte("5 pcs - 2x4x8"), ct)
+		assertFallback(t, items, synthetic, err)
+	}
+}

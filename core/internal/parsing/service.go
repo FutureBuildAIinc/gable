@@ -50,6 +50,13 @@ func NewService(productRepo product.Repository, aiClient *ai.Client) *Service {
 // failure mode this signature exists to prevent.
 func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, contentType string) (items []extractedLine, synthetic bool, err error) {
 	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		// Text needs no AI reader: a pasted list, a text or csv file, or a
+		// spreadsheet the handler already turned into text is read by the
+		// rule-based reader, so the caller's own lines come back and the
+		// result is not synthetic.
+		if isTextContent(contentType) {
+			return s.ExtractItems(string(fileBytes)), false, nil
+		}
 		slog.Warn("AI client not configured; returning the canned demo material list, NOT the uploaded file's contents",
 			"content_type", contentType, "bytes_discarded", len(fileBytes))
 		return s.ExtractItems(generateFallbackMaterialList()), true, nil
@@ -63,6 +70,12 @@ func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, cont
 	}
 
 	return s.ExtractItems(rawText), false, nil
+}
+
+// isTextContent reports whether contentType names plain text the rule-based
+// reader can parse without an AI reader.
+func isTextContent(contentType string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(contentType)), "text/")
 }
 
 // generateFallbackMaterialList returns a fixed demo material list that stands
