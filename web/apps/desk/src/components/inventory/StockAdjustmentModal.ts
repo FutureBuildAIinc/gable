@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { Product } from '../../types/product';
 import type { Location } from '../../types/location';
@@ -80,17 +81,11 @@ export class GableStockAdjustmentModal extends LitElement {
           <form @submit=${this._handleSubmit} class="space-y-4">
             <div>
               <label class="block text-xs uppercase tracking-wider text-gray-500 mb-1">Location</label>
-              <select
-                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+              <gable-select
                 .value=${this._selectedLocationId}
+                .options=${this._locations.map(loc => ({ value: loc.id, label: `${loc.path || loc.code} (${loc.type.toUpperCase()})` }))}
                 @change=${(e: Event) => this._selectedLocationId = (e.target as HTMLSelectElement).value}
-              >
-                ${this._locations.map(loc => html`
-                  <option value=${loc.id}>
-                    ${loc.path || loc.code} (${loc.type.toUpperCase()})
-                  </option>
-                `)}
-              </select>
+              ></gable-select>
             </div>
 
             <div>
@@ -107,17 +102,11 @@ export class GableStockAdjustmentModal extends LitElement {
 
             <div>
               <label class="block text-xs uppercase tracking-wider text-gray-500 mb-1">Reason Code</label>
-              <select
-                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+              <gable-select
                 .value=${this._reason}
+                .options=${['Receipt', 'Cycle Count', 'Damaged', 'Return', 'Found'].map(r => ({ value: r, label: r }))}
                 @change=${(e: Event) => this._reason = (e.target as HTMLSelectElement).value}
-              >
-                <option>Receipt</option>
-                <option>Cycle Count</option>
-                <option>Damaged</option>
-                <option>Return</option>
-                <option>Found</option>
-              </select>
+              ></gable-select>
             </div>
 
             <div class="flex justify-end gap-3 mt-8">

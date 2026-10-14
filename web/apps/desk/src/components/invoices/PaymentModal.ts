@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { CreatePaymentRequest, PaymentMethod } from '../../types/payment';
 
@@ -97,13 +98,11 @@ export class GablePaymentModal extends LitElement {
 
             <div>
               <label class="block text-sm font-medium text-zinc-400 mb-1">Method</label>
-              <select
+              <gable-select
                 .value=${this._method}
+                .options=${PAYMENT_METHODS.map(m => ({ value: m, label: METHOD_LABELS[m] }))}
                 @change=${(e: Event) => this._method = (e.target as HTMLSelectElement).value as PaymentMethod}
-                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
-              >
-                ${PAYMENT_METHODS.map(m => html`<option value=${m}>${METHOD_LABELS[m]}</option>`)}
-              </select>
+              ></gable-select>
             </div>
 
             <div>

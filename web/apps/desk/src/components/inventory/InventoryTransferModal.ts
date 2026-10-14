@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { X } from 'lucide';
@@ -111,36 +112,20 @@ export class GableInventoryTransferModal extends LitElement {
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="block text-sm text-gray-400 mb-2">From Location</label>
-                <select
+                <gable-select
                   .value=${this._fromLoc}
+                  .options=${[{ value: '', label: 'Select Source...' }, ...this._inventory.filter(i => i.location_id).map(i => ({ value: String(i.location_id), label: `${i.location_name} (${formatQuantity(i.quantity)})` }))]}
                   @change=${(e: Event) => this._fromLoc = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white"
-                  required
-                >
-                  <option value="">Select Source...</option>
-                  ${this._inventory.filter(i => i.location_id).map(i => html`
-                    <option value=${i.location_id}>
-                      ${i.location_name} (${formatQuantity(i.quantity)})
-                    </option>
-                  `)}
-                </select>
+                ></gable-select>
               </div>
 
               <div>
                 <label class="block text-sm text-gray-400 mb-2">To Location</label>
-                <select
+                <gable-select
                   .value=${this._toLoc}
+                  .options=${[{ value: '', label: 'Select Dest...' }, ...this._locations.filter(l => l.id !== this._fromLoc).map(l => ({ value: l.id, label: l.path || l.code }))]}
                   @change=${(e: Event) => this._toLoc = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white"
-                  required
-                >
-                  <option value="">Select Dest...</option>
-                  ${this._locations
-                    .filter(l => l.id !== this._fromLoc)
-                    .map(l => html`
-                      <option value=${l.id}>${l.path || l.code}</option>
-                    `)}
-                </select>
+                ></gable-select>
               </div>
             </div>
 

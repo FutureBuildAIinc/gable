@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { X, Truck, User, Calendar, FileText } from 'lucide';
@@ -95,19 +96,11 @@ export class GableCreateRouteModal extends LitElement {
               <label class="block text-sm font-medium text-zinc-400 mb-1.5 flex items-center gap-1.5">
                 ${icon(Truck, 14)} Vehicle
               </label>
-              <select
+              <gable-select
                 .value=${this._vehicleId}
+                .options=${[{ value: '', label: 'Select vehicle...' }, ...this._vehicles.map(v => ({ value: v.id, label: `${v.name} -- ${v.vehicle_type.replace('_', ' ')} (${v.license_plate})${v.capacity_weight_lbs ? ` - ${v.capacity_weight_lbs.toLocaleString()} lbs` : ''}` }))]}
                 @change=${(e: Event) => this._vehicleId = (e.target as HTMLSelectElement).value}
-                required
-                class="w-full bg-[#0A0B10] border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-gable-green/50 focus:outline-none"
-              >
-                <option value="">Select vehicle...</option>
-                ${this._vehicles.map(v => html`
-                  <option value=${v.id}>
-                    ${v.name} -- ${v.vehicle_type.replace('_', ' ')} (${v.license_plate})${v.capacity_weight_lbs ? ` - ${v.capacity_weight_lbs.toLocaleString()} lbs` : ''}
-                  </option>
-                `)}
-              </select>
+              ></gable-select>
               ${selectedVehicle?.capacity_weight_lbs ? html`
                 <p class="text-xs text-zinc-500 mt-1 font-mono">
                   Capacity: ${selectedVehicle.capacity_weight_lbs.toLocaleString()} lbs
@@ -119,19 +112,11 @@ export class GableCreateRouteModal extends LitElement {
               <label class="block text-sm font-medium text-zinc-400 mb-1.5 flex items-center gap-1.5">
                 ${icon(User, 14)} Driver
               </label>
-              <select
+              <gable-select
                 .value=${this._driverId}
+                .options=${[{ value: '', label: 'Select driver...' }, ...this._drivers.map(d => ({ value: d.id, label: `${d.name} ${d.phone_number ? `(${d.phone_number})` : ''}` }))]}
                 @change=${(e: Event) => this._driverId = (e.target as HTMLSelectElement).value}
-                required
-                class="w-full bg-[#0A0B10] border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-gable-green/50 focus:outline-none"
-              >
-                <option value="">Select driver...</option>
-                ${this._drivers.map(d => html`
-                  <option value=${d.id}>
-                    ${d.name} ${d.phone_number ? `(${d.phone_number})` : ''}
-                  </option>
-                `)}
-              </select>
+              ></gable-select>
             </div>
 
             <div>

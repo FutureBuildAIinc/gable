@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import type { CreateActivityRequest, Contact, ActivityType } from '../../types/crm';
 import { crmApi } from '../../services/crmApi';
@@ -89,17 +90,12 @@ export class GableLogActivityModal extends LitElement {
 
             <div class="mb-4">
               <label for="log-activity-contact" class="block text-sm font-medium text-gray-700 mb-1">Contact (Optional)</label>
-              <select
+              <gable-select
                 id="log-activity-contact"
                 .value=${this._contactId}
+                .options=${[{ value: '', label: '-- No Specific Contact --' }, ...this.contacts.map(c => ({ value: c.id, label: `${c.first_name} ${c.last_name} (${c.role})` }))]}
                 @change=${(e: Event) => this._contactId = (e.target as HTMLSelectElement).value}
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-              >
-                <option value="">-- No Specific Contact --</option>
-                ${this.contacts.map(c => html`
-                  <option value=${c.id}>${c.first_name} ${c.last_name} (${c.role})</option>
-                `)}
-              </select>
+              ></gable-select>
             </div>
 
             <div class="mb-6">
