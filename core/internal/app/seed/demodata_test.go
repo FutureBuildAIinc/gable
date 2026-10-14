@@ -83,6 +83,34 @@ func TestDemoImportRequested(t *testing.T) {
 	}
 }
 
+// bannedSeedWords are real brands and a real domain the seeds and the import
+// never carry: a product is named for what it is, and a demo address ends in
+// a reserved ".example" domain.
+var bannedSeedWords = []string{
+	"simpson", "strong-tie", "hardie", "cemtrim", "channellock", "romex",
+	"dryline", "firecode", "brownwood", "turtle", "gable.com",
+	"nordstrom", "kellogg",
+}
+
+// TestSeedDataHoldsNoBrandWord reads the embedded import and fails on any
+// banned word, so the check needs no database.
+func TestSeedDataHoldsNoBrandWord(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"catalog":    catalogData,
+		"customers":  customersData,
+		"staff":      staffData,
+		"vendors":    vendorsData,
+		"vendorkeys": vendorKeysData,
+	} {
+		lower := strings.ToLower(string(data))
+		for _, word := range bannedSeedWords {
+			if strings.Contains(lower, word) {
+				t.Errorf("%s import holds %q", name, word)
+			}
+		}
+	}
+}
+
 func TestDemoImport(t *testing.T) {
 	if testing.Short() {
 		t.Skip("seeds a scratch database of its own; skipped under -short")
@@ -135,7 +163,6 @@ func TestDemoImport(t *testing.T) {
 			  AND sku NOT LIKE 'SCR-%'
 			  AND sku NOT LIKE 'HANGER-%'
 			  AND sku NOT LIKE 'TIE-%'
-			  AND sku NOT LIKE 'SIMP-%'
 			  AND sku NOT LIKE 'RF-%'
 			  AND sku NOT LIKE 'INS-%'
 			  AND sku NOT LIKE 'DR-%'
@@ -183,6 +210,30 @@ func TestDemoImport(t *testing.T) {
 			}
 			if n > 0 {
 				t.Errorf("%s.%s: %d rows carry the legacy dealer domain", c.table, c.column, n)
+			}
+		}
+	})
+
+	t.Run("no row carries a brand word or the real domain", func(t *testing.T) {
+		for _, c := range []struct{ table, column string }{
+			{"products", "sku"},
+			{"products", "description"},
+			{"products", "vendor"},
+			{"products", "category"},
+			{"vendors", "name"},
+			{"vendors", "vendor_key"},
+			{"staff", "email"},
+			{"staff", "full_name"},
+		} {
+			for _, word := range bannedSeedWords {
+				var n int
+				q := fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE %s ILIKE $1`, c.table, c.column)
+				if err := db.QueryRow(q, "%"+word+"%").Scan(&n); err != nil {
+					t.Fatalf("%s.%s: %v", c.table, c.column, err)
+				}
+				if n > 0 {
+					t.Errorf("%s.%s: %d rows hold %q", c.table, c.column, n, word)
+				}
 			}
 		}
 	})
