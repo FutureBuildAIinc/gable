@@ -71,6 +71,14 @@ export class GableProductMediaTab extends LitElement {
         }
     }
 
+    /** The refusal notice stands only while the newest attempt is the refused one. */
+    private _newestRefused(): boolean {
+        const settled = this.media.filter(m => m.status !== 'generating');
+        if (settled.length === 0) return false;
+        const newest = settled.reduce((a, b) => (b.created_at > a.created_at ? b : a));
+        return newest.status === 'refused';
+    }
+
     private async _handleDelete(mediaId: string) {
         try {
             await PIMService.deleteMedia(this.productId, mediaId);
@@ -95,7 +103,7 @@ export class GableProductMediaTab extends LitElement {
         const words = imageWords(this.provider);
         return html`
             <div class="space-y-6">
-                ${renderAiNotice(this.media.some(m => m.status === 'refused') ? words.refused : null)}
+                ${renderAiNotice(this._newestRefused() ? words.refused : null)}
                 <!-- Generation Controls -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <h3 class="text-sm font-medium text-zinc-300 flex items-center gap-2 mb-4">
