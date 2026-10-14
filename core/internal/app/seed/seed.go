@@ -77,8 +77,12 @@ func dropPlaceholderBranch(db *sql.DB) {
 	if err := db.QueryRow(`SELECT id FROM locations WHERE type = 'BRANCH' AND code = 'MAIN' AND name = 'Main Branch'`).Scan(&mainID); err != nil {
 		return
 	}
-	if err := db.QueryRow(`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&defaultID); err != nil || defaultID == mainID {
-		log.Printf("Seed: placeholder branch kept: no other default branch (%v)", err)
+	if err := db.QueryRow(`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&defaultID); err != nil {
+		log.Printf("Seed: placeholder branch kept: reading the default branch: %v", err)
+		return
+	}
+	if defaultID == mainID {
+		log.Printf("Seed: placeholder branch kept: it is still the default branch")
 		return
 	}
 	tx, err := db.Begin()
@@ -97,6 +101,14 @@ func dropPlaceholderBranch(db *sql.DB) {
 			SELECT customer_id, $2 FROM customer_branches WHERE branch_id = $1
 			ON CONFLICT DO NOTHING`, []any{mainID, defaultID}},
 		{`DELETE FROM customer_branches WHERE branch_id = $1`, []any{mainID}},
+		// A grant on the placeholder moves to the default branch (the row
+		// itself moves, so its home flag stays one per person); where the
+		// person already holds the default branch, the duplicate goes. The
+		// branch's delete would otherwise drop the grant by cascade.
+		{`UPDATE user_locations ul SET branch_id = $2 WHERE ul.branch_id = $1
+			AND NOT EXISTS (SELECT 1 FROM user_locations d WHERE d.user_sub = ul.user_sub AND d.branch_id = $2)`,
+			[]any{mainID, defaultID}},
+		{`DELETE FROM user_locations WHERE branch_id = $1`, []any{mainID}},
 		{`DELETE FROM locations WHERE id = $1`, []any{mainID}},
 	} {
 		if _, err := tx.Exec(st.q, st.args...); err != nil {

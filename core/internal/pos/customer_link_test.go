@@ -5,6 +5,7 @@ package pos_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -66,5 +67,62 @@ func TestCounterSaleLinksTheCustomerToTheRegistersYard(t *testing.T) {
 	}
 	if total != 1 {
 		t.Errorf("a second sale at the same yard wrote %d audit rows in all, want 1", total)
+	}
+}
+
+// Three contenders create the first counter sale for one customer at the
+// register's yard, each through CreateTransaction on a pool of four: exactly
+// one link and one audit row, and every sale written.
+func TestConcurrentFirstCounterSalesLinkOnce(t *testing.T) {
+	_, register, own, other := registerBranchFixture(t)
+	db := testutil.RequireDBMaxConns(t, 4)
+	repo := pos.NewRepository(db)
+	ctx := context.Background()
+	customer := uuid.New()
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'concurrent counter link', $2, $3)`,
+		customer, "CC-"+customer.String()[:8], other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM audit_log WHERE entity_id = $1`, customer)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE customer_id = $1`, customer)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id = $1`, customer)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id = $1`, customer)
+	})
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, customer, other); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 3)
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			now := time.Now()
+			errs <- repo.CreateTransaction(pinnedTo(own), &pos.POSTransaction{RegisterID: register, CashierID: uuid.New(),
+				CustomerID: &customer, Status: pos.TransactionStatusOpen, ClientCreatedAt: &now})
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("contender: %v", err)
+		}
+	}
+	var links, audits, sales int
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM customer_branches WHERE customer_id = $1 AND branch_id = $2`, customer, own).Scan(&links); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'customer.branch_linked' AND entity_id = $1`, customer).Scan(&audits); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Pool.QueryRow(ctx, `SELECT count(*) FROM pos_transactions WHERE customer_id = $1`, customer).Scan(&sales); err != nil {
+		t.Fatal(err)
+	}
+	if links != 1 || audits != 1 || sales != 3 {
+		t.Errorf("three first counter sales left %d link(s), %d audit row(s) and %d sale(s), want 1, 1 and 3", links, audits, sales)
 	}
 }
