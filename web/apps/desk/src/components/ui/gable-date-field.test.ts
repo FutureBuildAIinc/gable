@@ -185,6 +185,27 @@ describe('the calendar', () => {
     expect(el.querySelector('[role="dialog"]')).toBeNull()
   })
 
+  it('the focusout Chromium sends on removal does not lose the focus', async () => {
+    // Chromium fires blur and focusout (relatedTarget null) on the focused
+    // cell when the render removes it; jsdom fires nothing. The sequence is
+    // replayed by hand: the key lands, the focusout follows before the
+    // render settles, and the Feb 1 button must still end up focused.
+    const el = await mount<GableDateField>(TAG, { value: '2026-01-31' })
+    await openCalendar(el)
+    const start = gridDays(el).find((b) => b.tabIndex === 0)
+    if (!start) throw new Error('no focused cell')
+    start.focus()
+    q<HTMLElement>(el, '[role="grid"]').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+    )
+    start.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }))
+    await update(el, {})
+    const landed = gridDays(el).find((b) => b.tabIndex === 0)
+    expect(el.textContent).toContain('February 2026')
+    expect(landed?.textContent).toBe('1')
+    expect(document.activeElement).toBe(landed)
+  })
+
   it('the week starts as the locale starts it', async () => {
     // Oct 2026 starts on a Thursday: four blanks under en-US, three under en-GB.
     const el = await mount<GableDateField>(TAG, { value: '2026-10-01' })
