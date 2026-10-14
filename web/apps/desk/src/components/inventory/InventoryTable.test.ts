@@ -7,8 +7,8 @@
  * zeros that read like every product had been configured to default the demo
  * margin. The fix is two parts:
  *
- *  1. When the margin or commission is exactly zero, render "Not set" in the
- *     muted tone instead of a numeric percentage.
+ *  1. When the margin is exactly zero, render "Not set" in the muted tone
+ *     instead of a numeric percentage; an unset commission adds no line.
  *  2. Drop the "ID: xxxxxxxx" line under each description. The SKU is the
  *     product's stable identifier; a second line of UUID fragment is noise on
  *     a list view that already has the SKU cell on the same row.
@@ -89,24 +89,22 @@ describe('inventory pile target margin and commission', () => {
     expect(notSetNode!.className).toContain('text-zinc-500')
   })
 
-  it('shows "Not set" for an unset commission, alongside a set margin', async () => {
+  it('adds no commission line for an unset commission, alongside a set margin', async () => {
     const el = await mount<GableInventoryTable>('gable-inventory-table', {
       products: [product({ target_margin: 33, commission_rate: 0 })],
     })
     expect(textOf(el)).toContain('33.0%')
-    expect(textOf(el)).not.toContain('0.0% Comm')
-    expect(textOf(el)).toContain('Not set')
+    expect(textOf(el)).not.toContain('Comm')
+    expect(textOf(el)).not.toContain('Not set')
   })
 
-  it('shows "Not set" for both an unset margin and an unset commission', async () => {
+  it('shows one "Not set" for an unset margin and an unset commission', async () => {
     const el = await mount<GableInventoryTable>('gable-inventory-table', {
       products: [product({ target_margin: 0, commission_rate: 0 })],
     })
     expect(textOf(el)).not.toContain('0.0%')
-    expect(textOf(el)).not.toContain('% Comm')
-    // The set-margin row above leaves one "Not set" per cell, this row two.
-    const notAll = textOf(el).match(/Not set/g) ?? []
-    expect(notAll.length).toBeGreaterThanOrEqual(2)
+    expect(textOf(el)).not.toContain('Comm')
+    expect(textOf(el).match(/Not set/g) ?? []).toHaveLength(1)
   })
 })
 

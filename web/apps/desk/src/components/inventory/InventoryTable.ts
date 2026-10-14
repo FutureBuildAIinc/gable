@@ -99,10 +99,9 @@ export class GableInventoryTable extends LitElement {
                           ${(p.target_margin && p.target_margin > 0)
                             ? html`<span class="text-zinc-300">${p.target_margin.toFixed(1)}%</span>`
                             : html`<span class="text-zinc-500">Not set</span>`}
-                          <br />
                           ${(p.commission_rate && p.commission_rate > 0)
-                            ? html`<span class="text-xs text-zinc-500">${p.commission_rate.toFixed(1)}% Comm</span>`
-                            : html`<span class="text-xs text-zinc-500">Not set</span>`}
+                            ? html`<br /><span class="text-xs text-zinc-500">${p.commission_rate.toFixed(1)}% Comm</span>`
+                            : nothing}
                         </td>
                         <td class="px-6 py-4 text-right">
                           <span class="font-mono text-white group-hover:text-gable-green transition-colors">
