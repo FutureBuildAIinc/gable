@@ -34,8 +34,12 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		WithPageNumber().
 		Build())
 
+	title := "GABLE LBM - INVOICE"
+	if inv.Status == invoice.InvoiceStatusVoid {
+		title = "GABLE LBM - INVOICE - VOID"
+	}
 	m.AddRow(20,
-		text.NewCol(12, "GABLE LBM - INVOICE", props.Text{
+		text.NewCol(12, title, props.Text{
 			Size:  18,
 			Style: fontstyle.Bold,
 			Align: align.Center,
@@ -44,7 +48,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 
 	m.AddRow(20,
 		text.NewCol(6, fmt.Sprintf("Bill To: %s\nAccount: %s", cust.Name, cust.AccountNumber), props.Text{Size: 10}),
-		text.NewCol(6, fmt.Sprintf("Invoice #: %s\nDate: %s", inv.ID, inv.CreatedAt.Format("2006-01-02")), props.Text{Size: 10, Align: align.Right}),
+		text.NewCol(6, fmt.Sprintf("Invoice #: %s\nDate: %s", inv.Number, inv.InvoiceDate), props.Text{Size: 10, Align: align.Right}),
 	)
 
 	m.AddRow(10,
@@ -54,34 +58,39 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		text.NewCol(3, "Total", props.Text{Style: fontstyle.Bold, Align: align.Right}),
 	)
 
-	for _, line := range inv.Lines {
-		prod, err := s.productRepo.GetProduct(ctx, line.ProductID)
-		desc := "Unknown Product"
-		if err == nil {
-			desc = fmt.Sprintf("%s - %s", prod.SKU, prod.Description)
+	for i := range inv.Lines {
+		line := &inv.Lines[i]
+		desc := line.Description
+		if line.SKU != nil && *line.SKU != "" {
+			desc = fmt.Sprintf("%s - %s", *line.SKU, line.Description)
 		}
-
+		// A text line is a note; a kit's components are shown with their kit
+		// at no charge; every other line prints its quantity, its price per
+		// price unit and its extension, exactly as the invoice stores them.
+		if line.Quantity == nil || line.UnitPrice == nil || line.LineTotal == nil {
+			m.AddRow(10, text.NewCol(12, desc, props.Text{Size: 9}))
+			continue
+		}
+		uom, priceUOM := "", ""
+		if line.UOM != nil {
+			uom = " " + *line.UOM
+		}
+		if line.PriceUOM != nil {
+			priceUOM = "/" + *line.PriceUOM
+		}
 		m.AddRow(10,
 			text.NewCol(4, desc, props.Text{Size: 9}),
-			text.NewCol(2, fmt.Sprintf("%.2f", line.Quantity), props.Text{Size: 9, Align: align.Center}),
-			text.NewCol(3, fmt.Sprintf("$%.2f", float64(line.PriceEach)/100.0), props.Text{Size: 9, Align: align.Right}),
-			text.NewCol(3, fmt.Sprintf("$%.2f", (line.Quantity*float64(line.PriceEach))/100.0), props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(2, line.Quantity.WireString()+uom, props.Text{Size: 9, Align: align.Center}),
+			text.NewCol(3, fmt.Sprintf("$%s%s", line.UnitPrice.DecimalString(), priceUOM), props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, "$"+line.LineTotal.DecimalString(), props.Text{Size: 9, Align: align.Right}),
 		)
 	}
 
-	// Subtotal and tax must be shown separately, or the line extensions
-	// visibly do not add up to TOTAL DUE. Showing the tax as its own line is
-	// also a statutory requirement in the GST/HST jurisdictions this product
-	// targets. An invoice written before those columns were populated carries
-	// zero in both, and total == subtotal + tax means the total IS the
-	// subtotal in that case — so nothing is invented.
-	subtotal, taxAmount := inv.Subtotal, inv.TaxAmount
-	if subtotal == 0 && taxAmount == 0 {
-		subtotal = inv.TotalAmount
-	}
-
+	// Subtotal and tax are shown separately, or the line extensions visibly do
+	// not add up to TOTAL DUE; the tax as its own line is also a statutory
+	// requirement in the GST/HST jurisdictions this product targets.
 	m.AddRow(10,
-		text.NewCol(12, fmt.Sprintf("SUBTOTAL: $%.2f", float64(subtotal)/100.0), props.Text{
+		text.NewCol(12, "SUBTOTAL: $"+inv.SubtotalCents.DecimalString(), props.Text{
 			Top:   5,
 			Align: align.Right,
 			Size:  10,
@@ -89,18 +98,18 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 	)
 
 	taxLabel := "TAX"
-	if inv.TaxRate > 0 {
-		taxLabel = fmt.Sprintf("TAX @ %.2f%%", inv.TaxRate*100)
+	if inv.TaxRatePercent != nil {
+		taxLabel = fmt.Sprintf("TAX @ %s%%", *inv.TaxRatePercent)
 	}
 	m.AddRow(10,
-		text.NewCol(12, fmt.Sprintf("%s: $%.2f", taxLabel, float64(taxAmount)/100.0), props.Text{
+		text.NewCol(12, fmt.Sprintf("%s: $%s", taxLabel, inv.TaxCents.DecimalString()), props.Text{
 			Align: align.Right,
 			Size:  10,
 		}),
 	)
 
 	m.AddRow(15,
-		text.NewCol(12, fmt.Sprintf("TOTAL DUE: $%.2f", float64(inv.TotalAmount)/100.0), props.Text{
+		text.NewCol(12, "TOTAL DUE: $"+inv.TotalCents.DecimalString(), props.Text{
 			Top:   5,
 			Style: fontstyle.Bold,
 			Align: align.Right,

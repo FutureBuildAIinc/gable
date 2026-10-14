@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gablelbm/gable/internal/techadmin"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -24,6 +25,7 @@ import (
 	"github.com/gablelbm/gable/pkg/middleware"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 // --- test doubles -----------------------------------------------------------
@@ -279,12 +281,215 @@ func TestMachineKeyOnKeyManagementRefused(t *testing.T) {
 		}
 	}
 
-	// The rest of the admin module is an ordinary module: a key with the
-	// scope reaches it.
+	// The rest of the admin module is split into finer scopes (ADR 0009): a
+	// key holding the settings area scope reaches the settings routes.
+	_, settingsChain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-s", Scopes: []string{"admin:settings"}}, "/api/integration/")
 	rec := httptest.NewRecorder()
-	chain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/admin/settings/ai", machineKeyShape(t)))
+	settingsChain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/admin/settings/ai", machineKeyShape(t)))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/v1/admin/settings/ai: status = %d, want 200 with admin:read", rec.Code)
+		t.Fatalf("GET /api/v1/admin/settings/ai: status = %d, want 200 with admin:settings", rec.Code)
+	}
+}
+
+// The admin module's areas carry their own scopes (ADR 0009 on ADR 0002's
+// known limits): the coarse admin:read and admin:write no longer reach the
+// settings, staff or modules areas, and each area's scope admits every method
+// on that area's routes.
+func TestMachineKeyFinerAdminScopes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		method string
+		path   string
+		want   int
+	}{
+		{"settings reads with the area scope", []string{"admin:settings"}, "GET", "/api/v1/admin/settings/ai", http.StatusOK},
+		{"settings writes with the area scope", []string{"admin:settings"}, "PUT", "/api/v1/admin/settings/routing", http.StatusOK},
+		{"the coarse read is refused on settings", []string{"admin:read"}, "GET", "/api/v1/admin/settings/ai", http.StatusForbidden},
+		{"the coarse write is refused on settings", []string{"admin:write"}, "PUT", "/api/v1/admin/settings/ai", http.StatusForbidden},
+		{"the settings scope is refused on staff", []string{"admin:settings"}, "GET", "/api/v1/admin/staff", http.StatusForbidden},
+		{"the staff scope reaches staff", []string{"admin:staff"}, "GET", "/api/v1/admin/staff", http.StatusOK},
+		{"the staff scope reaches the module grants", []string{"admin:staff"}, "POST", "/api/v1/admin/staff/00000000-0000-0000-0000-000000000001/modules", http.StatusOK},
+		{"the modules scope reaches the kill switches", []string{"admin:modules"}, "PUT", "/api/v1/admin/modules/ai_lm", http.StatusOK},
+		{"the coarse write is refused on modules", []string{"admin:write"}, "PUT", "/api/v1/admin/modules/ai_lm", http.StatusForbidden},
+	} {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != tc.want {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+
+	// The refusal names the finer scope it lacked, in the envelope and in the
+	// audit row.
+	aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: []string{"admin:read"}}, "/api/integration/")
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "PUT", "/api/v1/admin/settings/ai", machineKeyShape(t)))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	body := decodeError(t, rec)
+	if body.Error.Message != "machine key lacks required scope admin:settings" {
+		t.Fatalf("message = %q, want the finer scope named", body.Error.Message)
+	}
+	if len(aud.calls) != 1 || aud.calls[0].scope != "admin:settings" {
+		t.Fatalf("audit calls = %+v, want one refusing admin:settings", aud.calls)
+	}
+
+	// An empty second segment under /api/v1/admin (the path is /api/v1/admin
+	// with nothing after, or // appears after it) is refused, the most
+	// restrictive answer: the coarse admin:read or admin:write fallback is
+	// too wide for a path the request does not name, so no scope suffices.
+	// The guarantee "coarse scopes reach only routes no area declares" must
+	// not depend on the router cleaning the path.
+	for _, tc := range []struct {
+		name, method, path string
+		scopes             []string
+	}{
+		{"admin:read refused on /api/v1/admin//settings/ai", "GET", "/api/v1/admin//settings/ai", []string{"admin:read"}},
+		{"admin:write refused on /api/v1/admin//settings/ai", "PUT", "/api/v1/admin//settings/ai", []string{"admin:write"}},
+		{"admin:read refused on /api/v1/admin (no segment)", "GET", "/api/v1/admin", []string{"admin:read"}},
+		{"admin:write refused on /api/v1/admin (no segment)", "PUT", "/api/v1/admin", []string{"admin:write"}},
+		{"admin:read refused on /api/v1/admin/ (trailing slash)", "GET", "/api/v1/admin/", []string{"admin:read"}},
+		{"admin:read+admin:settings refused on /api/v1/admin//settings/ai", "GET", "/api/v1/admin//settings/ai", []string{"admin:read", "admin:settings"}},
+		{"admin:read+admin:write refused on /api/v1/admin//settings/ai", "GET", "/api/v1/admin//settings/ai", []string{"admin:read", "admin:write"}},
+	} {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want 403; body: %s", tc.name, tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// An admin path with a "." or ".." segment, or any path not equal to
+// path.Clean(path), is refused before the scope check, regardless of the
+// key's scope. The reviewer's P3-B: today those paths answer 307 (the
+// router's clean redirect) and the redirected request is authorised on the
+// clean form, so the ADR 0009 guarantee leans on the router. The hardening
+// refuses the dirty path outright, the most restrictive answer for a path
+// the request did not name cleanly. The clean path stays untouched.
+func TestMachineKeyAdminPathsDotSegmentRefused(t *testing.T) {
+	// Dirty paths: a "." or ".." segment, or a path that path.Clean would
+	// rewrite. The audit row the refusal writes carries the verbatim path
+	// so the trail tells the operator what the request actually asked for.
+	for _, tc := range []struct {
+		name, method, path string
+		scopes             []string
+	}{
+		{"admin:read refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:staff"}},
+		{"admin:read refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:staff"}},
+		{"admin:read refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:read"}},
+		{"admin:staff refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:staff"}},
+		// Even the area scope that the clean path would satisfy is refused
+		// on the dirty form: the request did not name the clean area, so
+		// "the area scope reaches the area" cannot be the answer.
+		{"admin:settings refused on /api/v1/admin/./settings/ai", "GET", "/api/v1/admin/./settings/ai", []string{"admin:settings"}},
+		{"admin:settings refused on /api/v1/admin/x/../settings/ai", "GET", "/api/v1/admin/x/../settings/ai", []string{"admin:settings"}},
+		{"admin:staff refused on /api/v1/admin/staff/../settings/ai", "GET", "/api/v1/admin/staff/../settings/ai", []string{"admin:staff"}},
+	} {
+		aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+		if len(aud.calls) != 1 || aud.calls[0].action != middleware.AuditActionKeyScopeRefused {
+			t.Errorf("%s: audit calls = %+v, want one key.scope_refused", tc.name, aud.calls)
+		}
+		if rec.Code == http.StatusForbidden {
+			body := decodeError(t, rec)
+			if body.Error.Code != "forbidden" {
+				t.Errorf("%s: code = %q, want forbidden", tc.name, body.Error.Code)
+			}
+		}
+	}
+
+	// The clean path is unchanged: admin:settings still reaches the clean
+	// settings route, and admin:read is still refused on it (the area rule
+	// has not moved).
+	cleanCases := []struct {
+		name   string
+		scopes []string
+		method string
+		path   string
+		want   int
+	}{
+		{"clean settings with admin:settings", []string{"admin:settings"}, "GET", "/api/v1/admin/settings/ai", http.StatusOK},
+		{"clean settings refused for admin:read", []string{"admin:read"}, "GET", "/api/v1/admin/settings/ai", http.StatusForbidden},
+	}
+	for _, tc := range cleanCases {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != tc.want {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, tc.want, rec.Body.String())
+		}
+	}
+}
+
+// The audit action of a refused keyed path keeps two contracts apart. A
+// dirty spelling under a real module (a dot segment, a doubled slash) keeps
+// the scope refusal the module paths wrote before the scope table: the
+// module is named and its policy admits keys, and no scope is named because
+// the request never named a clean route. Every shape under the delegating
+// segments (drafts, links) the policy table does not name, dirty or not,
+// stays the path refusal the C5-2a scopes row promises.
+func TestMachineKeyDirtyPathAuditAction(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		want   string
+	}{
+		{"a dot segment under quotes", "GET", "/api/v1/quotes/../admin/settings/ai", middleware.AuditActionKeyScopeRefused},
+		{"a doubled slash under units", "GET", "/api/v1/units//EA", middleware.AuditActionKeyScopeRefused},
+		{"a trailing slash under products", "GET", "/api/v1/products/", middleware.AuditActionKeyScopeRefused},
+		{"an unnamed draft shape", "DELETE", "/api/v1/drafts/quotes/00000000-0000-0000-0000-000000000001", middleware.AuditActionKeyPathRefused},
+		{"a draft subroute nobody named", "POST", "/api/v1/drafts/quotes/00000000-0000-0000-0000-000000000001/publish", middleware.AuditActionKeyPathRefused},
+		{"a dirty drafts path", "GET", "/api/v1/drafts/../quotes", middleware.AuditActionKeyPathRefused},
+		{"an unnamed link shape", "POST", "/api/v1/links/quotes/00000000-0000-0000-0000-000000000001", middleware.AuditActionKeyPathRefused},
+		{"a link with no id named", "GET", "/api/v1/links/quotes", middleware.AuditActionKeyPathRefused},
+	} {
+		aud, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: []string{"quotes:read", "units:read", "products:read", "quotes:propose"}}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s: %s %s = %d, want 403; body: %s", tc.name, tc.method, tc.path, rec.Code, rec.Body.String())
+			continue
+		}
+		if len(aud.calls) != 1 || aud.calls[0].action != tc.want {
+			t.Errorf("%s: audit calls = %+v, want one %s", tc.name, aud.calls, tc.want)
+		}
+	}
+}
+
+// The users module's write scope is named for what it grants (ADR 0009):
+// users:grants, not users:write.
+func TestMachineKeyUsersGrantsScope(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		scopes []string
+		method string
+		path   string
+		want   int
+	}{
+		{"the grants scope reaches a branch grant", []string{"users:grants"}, "POST", "/api/v1/users/sub/branches", http.StatusOK},
+		{"the grants scope reaches a revoke", []string{"users:grants"}, "DELETE", "/api/v1/users/sub/branches/00000000-0000-0000-0000-000000000001", http.StatusOK},
+		{"the plain write no longer reaches a grant", []string{"users:write"}, "POST", "/api/v1/users/sub/branches", http.StatusForbidden},
+		{"the plain read still reads", []string{"users:read"}, "GET", "/api/v1/users", http.StatusOK},
+		{"the grants scope does not read", []string{"users:grants"}, "GET", "/api/v1/users", http.StatusForbidden},
+	} {
+		_, chain, _ := newStubAuth(t, middleware.KeyPrincipal{ID: "key-1", Scopes: tc.scopes}, "/api/integration/")
+		rec := httptest.NewRecorder()
+		chain.ServeHTTP(rec, bearerRequest(t, tc.method, tc.path, machineKeyShape(t)))
+		if rec.Code != tc.want {
+			t.Errorf("%s: %s %s = %d, want %d; body: %s", tc.name, tc.method, tc.path, rec.Code, tc.want, rec.Body.String())
+		}
 	}
 }
 
@@ -555,7 +760,7 @@ func (v techadminValidator) ValidateKey(ctx context.Context, rawKey string) (mid
 		}
 		return middleware.KeyPrincipal{}, err
 	}
-	return middleware.KeyPrincipal{ID: k.ID, Scopes: k.Scopes}, nil
+	return middleware.KeyPrincipal{ID: k.ID.String(), Scopes: k.Scopes}, nil
 }
 
 func newDBAuth(t *testing.T, db *database.DB) *middleware.MachineKeyAuth {
@@ -567,11 +772,11 @@ func newDBAuth(t *testing.T, db *database.DB) *middleware.MachineKeyAuth {
 func createKey(t *testing.T, db *database.DB, scopes ...string) (raw string, id string) {
 	t.Helper()
 	svc := techadmin.NewService(techadmin.NewRepository(db))
-	raw, key, err := svc.GenerateKey(context.Background(), "r1-13 test", scopes)
+	raw, key, err := svc.GenerateKey(context.Background(), "r1-13 test", scopes, nil)
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	return raw, key.ID
+	return raw, key.ID.String()
 }
 
 func TestRealKeyRoundTrip(t *testing.T) {
@@ -707,13 +912,73 @@ func TestRealKeyRefusalRowBoundedOnLongPath(t *testing.T) {
 	}
 }
 
+// The audit row a refused request writes survives a NUL byte in the path:
+// before the sanitiser the request's path reached the audit writer verbatim,
+// json.Marshal escaped the NUL to the JSON escape sequence "\u0000", and
+// Postgres jsonb rejected the row with SQLSTATE 22P05 ("unsupported Unicode
+// escape sequence"), so the refusal verdict stood but no row was recorded.
+// The sanitiser lives in the audit writer (one place, not per caller) and
+// replaces the NUL with a visible marker before the row is marshalled, so
+// the path is recorded and the audit trail is whole on a refused path that
+// holds whatever the URL contained.
+func TestRealKeyRefusalRowSurvivesNULInPath(t *testing.T) {
+	db := testutil.RequireDB(t)
+
+	// admin:staff is refused on /api/v1/admin/%00: the path's second segment
+	// is the NUL, not one of the declared finer scopes, so RequiredScopeForPath
+	// answers the coarse admin:read and the staff key does not hold it. The
+	// 403 is the verdict the reviewer saw; the audit row is what gets lost
+	// when the sanitiser is absent.
+	raw, id := createKey(t, db, "admin:staff")
+	h := &okHandler{}
+	chain := newDBAuth(t, db).Handler(h)
+
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, bearerRequest(t, "GET", "/api/v1/admin/%00", raw))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 for a refused path with NUL; body: %s", rec.Code, rec.Body.String())
+	}
+	if h.reached {
+		t.Fatal("handler must not be reached on a refused path")
+	}
+
+	// The row is present. Before the fix the INSERT raised SQLSTATE 22P05
+	// inside jsonb and no row was created, so this scan is the assertion
+	// that closes the regression: the trail of a refused request whose path
+	// holds a NUL is not lost.
+	var storedPath string
+	err := db.Pool.QueryRow(context.Background(),
+		`SELECT changes->>'path' FROM audit_log
+		   WHERE actor_kind = 'key' AND actor_id = $1
+		     AND action = 'key.scope_refused'
+		   ORDER BY created_at DESC LIMIT 1`, id,
+	).Scan(&storedPath)
+	if err != nil {
+		t.Fatalf("no key.scope_refused audit row for key %s on a NUL path (the audit write must survive): %v", id, err)
+	}
+	if strings.ContainsRune(storedPath, '\x00') {
+		t.Fatalf("audit row still holds a raw NUL byte in the path: %q", storedPath)
+	}
+	if !strings.Contains(storedPath, "admin") || !strings.Contains(storedPath, `\u0000`) {
+		t.Fatalf("audit row path = %q, want the NUL replaced visibly (e.g. the literal text \\u0000)", storedPath)
+	}
+	if !utf8.ValidString(storedPath) {
+		t.Fatalf("audit row path is not valid UTF-8: %q", storedPath)
+	}
+}
+
 func TestRevokedRealKeyRefused401(t *testing.T) {
 	db := testutil.RequireDB(t)
 
 	raw, id := createKey(t, db, "quotes:write")
+	keyID, err := uuid.Parse(id)
+	if err != nil {
+		t.Fatalf("parse key id %q: %v", id, err)
+	}
 	svc := techadmin.NewService(techadmin.NewRepository(db))
-	if err := svc.RevokeKey(context.Background(), id); err != nil {
-		t.Fatalf("RevokeKey: %v", err)
+	revoked, err := svc.RevokeKey(context.Background(), keyID)
+	if err != nil || !revoked {
+		t.Fatalf("RevokeKey: revoked=%v err=%v", revoked, err)
 	}
 
 	h := &okHandler{}

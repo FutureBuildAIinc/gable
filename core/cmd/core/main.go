@@ -34,8 +34,9 @@ Commands:
 	migrate	apply the SQL migrations from migrations/
 	seed	populate the database with demo data (gated on DEMO_SEED=1)
 
-Configuration comes from the environment (DATABASE_URL, AUTH_MODE, ...);
-no subcommand takes flags today.
+Configuration comes from the environment (DATABASE_URL, AUTH_MODE, ...).
+migrate takes -report units (the read only units pre flight report);
+the other subcommands take no flags.
 `
 
 // runners maps each subcommand to the package Run that implements it. It
@@ -44,9 +45,12 @@ no subcommand takes flags today.
 var runners = map[string]func(args []string){
 	"serve":   func([]string) { serve.Run() },
 	"worker":  func([]string) { worker.Run() },
-	"migrate": func([]string) { migrate.Run() },
+	"migrate": func(args []string) { migrate.RunArgs(args) },
 	"seed":    func([]string) { seed.Run() },
 }
+
+// selfParsing names the subcommands that parse their own flags.
+var selfParsing = map[string]bool{"migrate": true}
 
 func main() {
 	os.Exit(run(os.Args[1:]))
@@ -69,8 +73,13 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "core: unknown command %q\n\n%s", name, usage)
 		return 2
 	}
-	// The subcommand parses its own flags; none defines any today, so an
-	// unknown flag is refused here rather than silently ignored.
+	// migrate parses its own flags (`-report units`, the read only units
+	// pre flight report); the other subcommands take none, so an unknown
+	// flag is refused here rather than silently ignored.
+	if selfParsing[name] {
+		runner(args[1:])
+		return 0
+	}
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

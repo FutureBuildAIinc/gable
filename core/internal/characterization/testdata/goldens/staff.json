@@ -1,53 +1,5 @@
 [
   {
-    "name": "staff.list",
-    "request": {
-      "method": "GET",
-      "path": "/api/v1/admin/staff"
-    },
-    "response": {
-      "status": 200,
-      "content_type": "application/json",
-      "body": [
-        {
-          "active": true,
-          "created_at": "<ts+0d>",
-          "email": "admin@gable.com",
-          "full_name": "Avery Kim",
-          "id": "<id-1>",
-          "modules": [],
-          "role": "admin",
-          "staff_no": "STF-003",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "created_at": "<ts+0d>",
-          "email": "dispatcher@gable.com",
-          "full_name": "Dana Ramirez",
-          "id": "<id-2>",
-          "modules": [
-            "ai_lm"
-          ],
-          "role": "dispatcher",
-          "staff_no": "STF-001",
-          "updated_at": "<ts+0d>"
-        },
-        {
-          "active": true,
-          "created_at": "<ts+0d>",
-          "email": "yard@gable.com",
-          "full_name": "Yuki Tan",
-          "id": "<id-3>",
-          "modules": [],
-          "role": "yard",
-          "staff_no": "STF-002",
-          "updated_at": "<ts+0d>"
-        }
-      ]
-    }
-  },
-  {
     "name": "staff.create",
     "request": {
       "method": "POST",
@@ -66,9 +18,105 @@
         "created_at": "<ts+0d>",
         "email": "goldens@example.com",
         "full_name": "Golden Staff",
-        "id": "<id-4>",
+        "id": "<id-1>",
         "modules": [],
+        "revision": 1,
         "role": "sales",
+        "staff_no": null,
+        "updated_at": "<ts+0d>"
+      }
+    }
+  },
+  {
+    "name": "staff.list",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff?limit=1"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [
+          {
+            "active": true,
+            "created_at": "<ts+0d>",
+            "email": "goldens@example.com",
+            "full_name": "Golden Staff",
+            "id": "<id-1>",
+            "modules": [],
+            "revision": 1,
+            "role": "sales",
+            "staff_no": null,
+            "updated_at": "<ts+0d>"
+          }
+        ],
+        "limit": 1,
+        "next_cursor": "<cursor>"
+      }
+    }
+  },
+  {
+    "name": "staff.list.active_filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff?active=false"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "items": [],
+        "limit": 50,
+        "next_cursor": null
+      }
+    }
+  },
+  {
+    "name": "staff.list.bad_filter",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff?active=maybe"
+    },
+    "response": {
+      "status": 400,
+      "content_type": "application/json",
+      "body": {
+        "error": {
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "active",
+              "message": "must be true or false"
+            }
+          ],
+          "message": "one or more fields failed validation"
+        },
+        "meta": {
+          "request_id": "<id-2>"
+        }
+      }
+    }
+  },
+  {
+    "name": "staff.get",
+    "request": {
+      "method": "GET",
+      "path": "/api/v1/admin/staff/<id-1>"
+    },
+    "response": {
+      "status": 200,
+      "content_type": "application/json",
+      "body": {
+        "active": true,
+        "created_at": "<ts+0d>",
+        "email": "goldens@example.com",
+        "full_name": "Golden Staff",
+        "id": "<id-1>",
+        "modules": [],
+        "revision": 1,
+        "role": "sales",
+        "staff_no": null,
         "updated_at": "<ts+0d>"
       }
     }
@@ -82,13 +130,18 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "enabled": true,
-          "id": "ai_lm",
-          "name": "AI_LM"
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "enabled": true,
+            "id": "ai_lm",
+            "name": "AI_LM",
+            "revision": 1
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   },
   {
@@ -106,11 +159,21 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "email",
+              "message": "is required"
+            },
+            {
+              "field": "full_name",
+              "message": "is required"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-3>"
         }
       }
     }

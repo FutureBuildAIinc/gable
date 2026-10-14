@@ -20,12 +20,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"math"
 	"crypto/rsa"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -218,10 +218,10 @@ func TestA2AOnePurchaseOrderPerKeyUnderConcurrency(t *testing.T) {
 			"vendor_id": f.vendor.String(),
 			"lines":     []map[string]any{{"product_id": f.product.String(), "description": "a2a", "quantity": 2, "cost": 3}},
 		},
-		"trace_id":         "lf-trace",
-		"idempotency_key":  "lf-test-" + uuid.NewString(),
-		"timestamp":        "2026-01-01T00:00:00Z",
-		"iss":              "lf-test",
+		"trace_id":        "lf-trace",
+		"idempotency_key": "lf-test-" + uuid.NewString(),
+		"timestamp":       "2026-01-01T00:00:00Z",
+		"iss":             "lf-test",
 	})
 	if err != nil {
 		t.Fatal(err)

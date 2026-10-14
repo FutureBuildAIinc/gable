@@ -14,7 +14,7 @@ back so every dealer benefits.
 
 ## What's here
 
-- **Modular monolith backend** — a single Go binary with ~40 domain modules,
+- **Modular monolith backend** — a single Go binary with 47 domain modules,
   moving toward an installable-*apps* model so third parties can plug in at a
   stable connector seam.
 - **Web app** — a fast, dark-themed operations UI (ERP desktop, B2B portal,
@@ -26,7 +26,7 @@ back so every dealer benefits.
 
 | Layer | Technology |
 |---|---|
-| Backend | Go 1.25 (stdlib `net/http.ServeMux` + pgx v5) |
+| Backend | Go 1.26 (stdlib `net/http.ServeMux` + pgx v5) |
 | Database | PostgreSQL 16 |
 | Frontend | Lit 3 web components + TypeScript 5.9 + Vite 7 + Tailwind 3.4 |
 | Packaging | Docker |
@@ -43,7 +43,7 @@ back so every dealer benefits.
 
 ## Quickstart
 
-**Prerequisites:** Docker, Go 1.25+, Node 20+, PostgreSQL 16.
+**Prerequisites:** Docker, Go 1.26+, Node 20+, PostgreSQL 16.
 
 ```bash
 # 1. Boot Postgres alone (docker compose → localhost:5434)
@@ -62,7 +62,9 @@ cd core && AUTH_MODE=dev go run ./cmd/server   # API on :8080
 cd web/apps/desk && npm install && npm run dev              # SPA on :5173
 
 # 5. Run the background jobs in a third terminal (the idempotency retention
-#    purge; the server does not start it)
+#    purge, the outbox drain, the outbox retention purge, the draft events
+#    purge, and the order allocation and order fulfilment queues; the server
+#    does not start them)
 cd core && go run ./cmd/core worker
 ```
 

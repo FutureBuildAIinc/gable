@@ -130,12 +130,7 @@ func (h *Handler) HandleGetOrder(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	id, err := pathID(r)
-	if err != nil {
-		httpx.WriteError(w, r, err)
-		return
-	}
-	o, err := h.service.GetOrder(r.Context(), id)
+	o, err := h.service.GetOrderByIDOrNumber(r.Context(), r.PathValue("id"))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

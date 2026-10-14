@@ -20,6 +20,7 @@ export class GableDeliveryList extends LitElement {
   @property({ type: String, attribute: 'route-id' }) routeId: string | null = null;
   @property({ type: String, attribute: 'vehicle-id' }) vehicleId = '';
   @property({ type: String, attribute: 'route-status' }) routeStatus?: RouteStatus;
+  @property({ type: Number, attribute: 'route-revision' }) routeRevision = 0;
 
   @state() private _deliveries: Delivery[] = [];
   @state() private _loading = false;
@@ -67,7 +68,8 @@ export class GableDeliveryList extends LitElement {
 
     this._reordering = true;
     try {
-      await deliveryService.reorderStops(this.routeId, reordered.map(d => d.id));
+      const result = await deliveryService.reorderStops(this.routeId, reordered.map(d => d.id), this.routeRevision);
+      this.routeRevision = result.revision;
       this._deliveries = reordered;
       this._fireDeliveriesChange(reordered);
     } catch {
@@ -82,7 +84,8 @@ export class GableDeliveryList extends LitElement {
     const reversed = [...this._deliveries].reverse();
     this._reordering = true;
     try {
-      await deliveryService.reorderStops(this.routeId, reversed.map(d => d.id));
+      const result = await deliveryService.reorderStops(this.routeId, reversed.map(d => d.id), this.routeRevision);
+      this.routeRevision = result.revision;
       this._deliveries = reversed;
       this._fireDeliveriesChange(reversed);
       ToastService.show('Route order reversed', 'success');
@@ -97,7 +100,8 @@ export class GableDeliveryList extends LitElement {
     if (!this.routeId || this._deliveries.length < 2) return;
     this._optimizing = true;
     try {
-      const result = await deliveryService.optimizeRoute(this.routeId);
+      const result = await deliveryService.optimizeRoute(this.routeId, this.routeRevision);
+      this.routeRevision = result.revision;
       // The backend persists the new stop order + ETAs; reload to reflect it.
       await this._loadDeliveries(this.routeId);
       const miles = result.total_distance_miles?.toFixed(1) ?? '0.0';
@@ -113,7 +117,8 @@ export class GableDeliveryList extends LitElement {
   private async _dispatchRoute() {
     if (!this.routeId) return;
     try {
-      await deliveryService.dispatchRoute(this.routeId);
+      const result = await deliveryService.dispatchRoute(this.routeId, this.routeRevision);
+      this.routeRevision = result.revision;
       ToastService.show('Route dispatched -- driver notified', 'success');
     } catch {
       ToastService.show('Failed to dispatch route', 'error');
@@ -124,7 +129,8 @@ export class GableDeliveryList extends LitElement {
     if (!this.routeId) return;
     this._completing = true;
     try {
-      await deliveryService.completeRoute(this.routeId);
+      const result = await deliveryService.completeRoute(this.routeId, this.routeRevision);
+      this.routeRevision = result.revision;
       ToastService.show('Route marked as completed', 'success');
     } catch {
       ToastService.show('Failed to complete route -- ensure all deliveries have a terminal status', 'error');
@@ -135,7 +141,7 @@ export class GableDeliveryList extends LitElement {
 
   private get _allTerminal(): boolean {
     if (this._deliveries.length === 0) return false;
-    return this._deliveries.every(d => d.status === 'DELIVERED' || d.status === 'FAILED' || d.status === 'PARTIAL');
+    return this._deliveries.every(d => d.status === 'delivered' || d.status === 'failed' || d.status === 'partial');
   }
 
   render() {
@@ -161,9 +167,9 @@ export class GableDeliveryList extends LitElement {
 
     const routeStatusBadge = this.routeStatus ? html`
       <span class="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${
-        this.routeStatus === 'COMPLETED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-        this.routeStatus === 'IN_TRANSIT' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-        this.routeStatus === 'CANCELLED' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+        this.routeStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+        this.routeStatus === 'in_transit' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+        this.routeStatus === 'cancelled' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
         'bg-white/5 text-zinc-400 border-white/10'
       }">
         ${this.routeStatus.replace(/_/g, ' ')}
@@ -178,7 +184,7 @@ export class GableDeliveryList extends LitElement {
             Delivery Manifest
           </h2>
           <div class="flex items-center gap-2">
-            ${this._deliveries.length >= 2 && this.routeStatus !== 'COMPLETED' && this.routeStatus !== 'CANCELLED' ? html`
+            ${this._deliveries.length >= 2 && this.routeStatus !== 'completed' && this.routeStatus !== 'cancelled' ? html`
               <button
                 @click=${this._optimizeRoute}
                 ?disabled=${this._optimizing || this._reordering}
@@ -200,8 +206,8 @@ export class GableDeliveryList extends LitElement {
                 ${icon(RotateCcw, 14)}
               </button>
             ` : nothing}
-            ${this._deliveries.length > 0 && this.routeStatus !== 'COMPLETED' && this.routeStatus !== 'CANCELLED' ? html`
-              ${this.routeStatus === 'IN_TRANSIT' && this._allTerminal ? html`
+            ${this._deliveries.length > 0 && this.routeStatus !== 'completed' && this.routeStatus !== 'cancelled' ? html`
+              ${this.routeStatus === 'in_transit' && this._allTerminal ? html`
                 <button class="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center justify-center rounded-lg font-medium transition-all" @click=${this._completeRoute} ?disabled=${this._completing}>
                   ${icon(CheckCircle2, 12, 'mr-1')} ${this._completing ? 'Completing...' : 'Complete Route'}
                 </button>

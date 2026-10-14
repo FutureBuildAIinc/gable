@@ -44,9 +44,9 @@ type EventRecorder interface {
 // The events C4-1a writes (ADR 0008 section 10.1). purchase_order.received
 // also drains the order module's back order queue (ADR 0005 5.4).
 const (
-	EventCreated = "purchase_order.created"
-	EventSent    = "purchase_order.sent"
-	EventReceived = "purchase_order.received"
+	EventCreated            = "purchase_order.created"
+	EventSent               = "purchase_order.sent"
+	EventReceived           = "purchase_order.received"
 	EventReorderRecommended = "reorder.recommended"
 )
 
@@ -226,18 +226,18 @@ func (s *Service) CreatePO(ctx context.Context, draft *CreateDraft) (*PurchaseOr
 				return err
 			}
 			line := &PurchaseOrderLine{
-				ID:          uuid.New(),
-				POID:        po.ID,
-				ProductID:   l.ProductID,
-				Description: l.Description,
-				Quantity:    l.Quantity,
-				UOM:         l.UOM,
-				PriceUOM:    l.PriceUOM,
-				UOMQty:      l.UOMQty,
-				PriceUOMQty: l.PriceUOMQty,
+				ID:                     uuid.New(),
+				POID:                   po.ID,
+				ProductID:              l.ProductID,
+				Description:            l.Description,
+				Quantity:               l.Quantity,
+				UOM:                    l.UOM,
+				PriceUOM:               l.PriceUOM,
+				UOMQty:                 l.UOMQty,
+				PriceUOMQty:            l.PriceUOMQty,
 				UnitCostTenThousandths: l.UnitCostTenThousandths,
-				Position:    i + 1,
-				LinkedSOLineID: l.LinkedSOLineID,
+				Position:               i + 1,
+				LinkedSOLineID:         l.LinkedSOLineID,
 			}
 			if l.ProductID != nil {
 				stock := stocking[*l.ProductID]

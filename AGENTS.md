@@ -47,12 +47,12 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 ## Tech Stack
 
 ### Backend
-- **Language:** Go 1.25 (`core/go.mod`)
+- **Language:** Go 1.26 (`core/go.mod`)
 - **Router:** Go 1.22+ stdlib `net/http.ServeMux` — **not** Chi. Modules expose `RegisterRoutes(mux, mw)` to attach handlers
 - **Database:** PostgreSQL 16+ via pgx v5 (`pkg/database` wraps a `*pgxpool.Pool`)
 - **Auth:** JWT verified against JWKS (`pkg/middleware.NewAuthMiddleware`). `AUTH_MODE=dev` disables auth for local dev; otherwise `JWKS_URL` is required (fail-closed)
 - **PDF:** maroto v2 | **Excel:** excelize v2 | **Cron:** robfig/cron v3 | **Metrics:** Prometheus
-- **Event bus:** `pkg/eventbus` is an **in-process, in-memory** publish/subscribe seam used by one feature (lumber price exposure → notification emails). There is still **no broker**: no NATS client is imported anywhere in Go code, nothing was added to `go.mod`, and the orphan `nats` container stays out of `docker-compose.yml` (a `NOTE` comment marks where it was). The bus is best-effort and at-most-once — no durability, no cross-process delivery, no redelivery, events lost on restart. Durable state lives in Postgres and the nightly exposure safety-net scan is the recovery path. See the `pkg/eventbus` package doc and `docs/architecture.md` §4.2
+- **Event bus:** `pkg/eventbus` defines the event vocabulary (`Event`, `Handler`, the subject constants, and NATS style subject matching) and ships an in-process, in-memory `Bus` that no production code constructs or publishes on; the package doc keeps it as a tested seam for a possible broker. There is still **no broker**: no NATS client is imported anywhere in Go code, nothing was added to `go.mod`, and the orphan `nats` container stays out of `docker-compose.yml` (a `NOTE` comment marks where it was). The production transport is the transactional outbox (`core/pkg/outbox`, table `events_outbox`): the worker role's `outbox.DrainRunner` delivers at least once, retries on handler error, and parks a row in `event_subscriber_parked` after 10 consecutive failures. Durable state lives in Postgres and the nightly exposure safety-net scan is the recovery path. See the `pkg/eventbus` and `pkg/outbox` package docs and `docs/architecture.md` §4.2
 
 ### Frontend
 - **Framework:** Lit 3 Web Components + TypeScript 5.9 + Vite 7
@@ -63,10 +63,10 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 - **State:** `@state()` internal, `@property()` external; framework-agnostic singleton services under `web/apps/desk/src/services/`
 
 ## Architecture
-- **Pattern:** Modular monolith — single Go binary, ~40 modules under `core/internal/<module>/`
+- **Pattern:** Modular monolith: single Go binary, 54 directories under `core/internal/` (47 domain modules)
 - **Module shape:** Each module typically has `repository.go` (pgx), `service.go` (business logic), and `handler.go` (HTTP handlers + `RegisterRoutes` — there is no separate `routes.go`). Wired together in `core/internal/app/serve/serve.go`
 - **Apps platform (Phase 0):** modules are becoming installable *apps* — manifest + DB registry (`apps` table, migration 074) + per-instance enable/disable via `pkg/apps`, managed at **Tech Admin → Apps** (`/admin/apps`). Converted so far: `millwork`, `governance`. Conversion recipe + phases: `docs/modularization-blueprint.md`
-- **Cross-module:** Synchronous Go interfaces. The one exception is notification side-effects for price exposure, published fire-and-forget over the in-process `pkg/eventbus`; no cross-module *write* goes through an event
+- **Cross-module:** Synchronous Go interfaces. Two side effects are asynchronous, both delivered by the worker through the transactional outbox (`core/pkg/outbox`): price exposure notifications (`quote.exposure.*`), and the order module queueing allocation requests in its own table when a purchase order is received (`purchase_order.received`); no cross-module *write* goes through an event
 - **API surface:** REST JSON at `/api/v1/*` (ERP), `/api/portal/v1/*` (B2B portal, partially public), `/api/integration/*` (service-to-service via `X-Integration-Key`), `/api/v1/a2a/*` (Brain agent-to-agent JWS)
 - **Public paths** (no auth): `/health`, `/healthz/live`, `/healthz/ready`, `/metrics`, portal login/config, integration, a2a — see whitelist in `core/internal/app/serve/serve.go`
 
@@ -107,7 +107,7 @@ A frontend or runtime whose directory has not landed yet may be listed in `manif
 | Safety Red | `#F43F5E` | Errors, stockouts, credit hold |
 | Blueprint Blue | `#38BDF8` | Technical data, links |
 
-- **Body font:** Inter (400, 500, 600) | **Data font:** JetBrains Mono | **Theme:** Industrial Dark
+- **Body font:** Outfit (300, 400, 500, 600, 700) | **Data font:** JetBrains Mono | **Theme:** Industrial Dark
 
 ## Common Commands
 
@@ -205,8 +205,8 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 
 | Surface | Wire format | Notes |
 |---|---|---|
-| ERP `/api/v1/orders`, `/api/v1/invoices` | **int64 cents** | `order/repository.go` does `dollarsToInt64Cents()` on read, `/100.0` on write. DB column is `DECIMAL(10,2)` dollars |
-| Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go:61` has a TODO to migrate. Don't mix with ERP frontend helpers |
+| ERP `/api/v1/orders`, `/api/v1/invoices`, `/api/v1/credit-memos` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths, quantities decimal strings | Converted onto ADR 0001 by C2-2 (orders) and C2-3 (invoices, credit memos): the list envelope, a lowercase status with the transitions route, a document number (`IN-` and `CM-` gapless), a revision with its `ETag`, the shared sales line shape (`docs/adr/0005-sales-and-money-core.md` sections 2 and 6). Credit memo lines, totals and open amounts are NEGATIVE. DB columns stay `NUMERIC`; the modules convert in SQL |
+| Portal `/api/portal/v1/*` | **float64 dollars** | `portal/model.go` (lines 64, 73, 127, 137, 221, 278, 287) has a TODO to migrate. Don't mix with ERP frontend helpers |
 | Quotes `/api/v1/quotes` | **int64 cents** (`*_cents`), unit prices int64 ten thousandths (`unit_price_ten_thousandths`) | Converted by R1-15 onto ADR 0001; the template is `docs/refactor/MODULE-RECIPE.md`. DB columns stay `NUMERIC`; the module converts in SQL, never through float64 |
 | Customers `/api/v1/customers` | **int64 cents** (`credit_limit_cents`, null for no limit; `balance_cents`, read only) | Converted by C2-1 onto ADR 0001 with ship-tos and the payment terms master (`docs/adr/0005-sales-and-money-core.md` section 7). `customers.credit_limit` is NULL for no limit and 0 is no credit. DB columns stay `NUMERIC(12,2)`; the module converts in SQL |
 | DailyTill, reporting | **float64 dollars** | Legacy float convention |
@@ -214,27 +214,42 @@ The convention table at `Key Conventions → Database` ("cents in app code") is 
 
 When rendering money on **ERP pages**, use `formatCents()` from `web/apps/desk/src/lib/utils.ts` (divides by 100 + locale-formats). Calling `.toFixed(2)` directly on an ERP money field will render $73.88 as $7,388.00 — the cents value `7388` formatted as if it were dollars. Portal pages already get dollars from the API and should format directly. Quote pages get cents and `formatCents()` applies.
 
-### AR balance: read live from invoices; `customers.balance_due` is a secondary record
-For **reads / decisions**, compute the customer's AR balance live from open invoices —
-`SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL','OVERDUE')`. The
-canonical status set lives in `invoice.OpenInvoiceStatuses`; the portal AR summary,
-dashboard, reporting, and the order **credit-limit gate** (`order.Service.overCreditLimit`)
-all go through it, so they agree. The credit gate no longer reads the denormalized
-`customers.balance_due` column.
+### AR balance: derive from documents; `customers.balance_due` is a secondary record
+For **reads / decisions**, derive the customer's AR from documents, never from the
+denormalized `customers.balance_due` column. The portal AR summary, dashboard and reporting
+read `SUM(total_amount) FROM invoices WHERE status IN ('UNPAID','PARTIAL')` (each repeats the
+set that `invoice.OpenInvoiceStatuses` names; they do not net partial payments, the gate does).
+The order **credit-limit gate** reads
+`OpenReceivableCents` in the order repository (ADR 0005 section 5.3): the open amounts of the
+customer's open invoices and open credit memos (negative), less its unapplied cash, plus the
+unbilled remainder of its other confirmed, backordered and on hold orders. At confirm the order
+being checked adds its own total (over the limit parks it `ON_HOLD`); at fulfil it adds its own
+unbilled remainder (total less its non-void invoices) and over the limit answers 409
+`credit_limit`; the delivery completion caller (the in process fulfil the delivery queue serves, `order.Service.fulfilChecks`)
+skips the credit check and only audits it. The gate runs at confirm and fulfil, not at create, and only
+for a customer with a credit limit.
 
-The `balance_due` column **is** now written — but only as a secondary subledger figure:
-`order.FulfillOrder` posts each invoice to the GL + the AR subledger via
-`invoice.PostInvoiceToLedger` (single AR writer = `account.PostTransaction`, which updates
-`balance_due` + inserts a `customer_transactions` row), and `payment.ProcessPayment` credits
-it. It can still drift from the live-invoice figure for historical/seed rows, so don't trust
-it for decisions — derive live.
+The `balance_due` column **is** written, but only as a secondary subledger figure. The
+`account` package is its single writer: `PostInvoice`, `PostCreditMemo`, `Apply`, `WriteOff`,
+the voids, the credit memo refund and the reversals go through `account.Service.subledger`,
+which updates `balance_due` and inserts a `customer_transactions` row. `RecordPayment` posts
+the receipt (DR 1010 Cash / CR 2200 Customer Deposits) and reaches the subledger only through
+the applications sent with it; cash left unapplied, and a refund of unapplied cash
+(`RefundPayment`), move neither `balance_due` nor `customer_transactions`. A fulfilment
+(`order.Service.Fulfil`) creates its invoice through `invoice.CreateFulfilmentInvoice`, which
+posts through `account.Service.PostInvoice`; a payment (`payment.Service.Create`) reaches
+`RecordPayment` with its applications. The column can
+still drift from the live document figure for historical and seed rows, so don't trust it for
+decisions: derive live.
 
-> Financial posting is now wired (was aspirational): a fulfilled order produces one
-> tax-inclusive invoice + a balanced `DR Accounts Receivable / CR Sales Revenue` GL entry
-> (`gl.SyncInvoice`, accounts resolved by stable code 1010/1020/4010) + an AR subledger
-> debit, all in one transaction. POS completion posts `DR Cash / CR Sales Revenue`
-> post-commit (best-effort). An over-limit order is parked `ON_HOLD` (a valid `orders.status`
-> as of migration 071).
+> Financial posting is wired: a fulfilled order produces one tax inclusive invoice and one
+> balanced GL entry in the fulfilment's transaction (`account.Service.PostInvoice`, accounts by
+> stable code): DR 1020 Accounts Receivable for the total and DR 5010 Cost of Goods Sold for
+> the cost, against CR the revenue lines, CR 2020 Sales Tax Payable and CR 1030 Inventory for
+> the cost, with the AR subledger debit. POS completion posts the cash collected portion as
+> `DR 1010 Cash / CR 4010 Sales Revenue` through `gl.SyncCashSale` after commit (best effort);
+> an on account portion posts as an invoice through the AR core. An over-limit order is parked
+> `ON_HOLD` at confirm (a valid `orders.status` as of migration 071).
 >
 > **Invoice tax rate:** `invoice.CreateInvoice` resolves the rate from the invoice's branch
 > (`locations.default_tax_rate`, e.g. 0.12 in BC) via `repo.GetBranchTaxRate`; the
@@ -296,12 +311,12 @@ this repository's history. Each is cited by the artifact you can actually inspec
 
 **C. Pick-list workflow.** Insert a `PICKED` status between `CONFIRMED` and `FULFILLED`, generate printable/scannable pick lists from confirmed orders, add warehouse pick endpoints. Yard module exists but skips the pick step. Unblocks the existing yard/warehouse mobile app route tree (`/yard/*`).
 
-**D. Customer credit hold enforcement.** `customer.credit_limit` exists with a known `float64` TODO around money. Order-create path doesn't hard-block when `current_balance + order_total > credit_limit`. Needs: blocking check in `order.Service.Create`, manual override with audit-log entry (`pkg/audit.Logger`), AR aging integration so the balance is real, and a UI surface on the order page. Direct AR-risk reduction for dealers.
+**D. ~~Customer credit hold enforcement.~~ Done; the create-time block is by design skipped.** The credit-limit gate (`OpenReceivableCents` in the order repository) parks the order `ON_HOLD` at confirm (`order.Service.confirm`, writing an `order.hold` audit row with `hold_reason: credit_limit`) and answers 409 `credit_limit` at fulfil (`order.Service.fulfilChecks`); the manual override is the release (the `on_hold` to `confirmed` transition in `order.Service.applyTransition`, admin, owner and finance) writing an `order.hold_released` audit row through `pkg/audit.Logger`; the balance is real because the gate reads documents, not `customers.balance_due` (and `core/internal/account/aging.go` reads the same documents); the UI surface is the hold banner and Release button on the order page (`web/apps/desk/src/pages/orders/OrderDetail.ts`, through `OrderService.releaseHold`). The create-time block is deliberately skipped, per ADR 0005 5.3 (gate at confirm and fulfil, not at create, see the AR balance paragraph above).
 
 ### Cross-cutting / lower-priority backlog
 - Migrate `customer.credit_limit`, order/invoice money fields from `float64` to `int64` cents per the convention in `Key Conventions → Database`. Many call-sites; do as a focused refactor sprint.
 - Frontend admin UI for `system_settings` (currently operators edit via psql). Unblocks self-service for the `reorder.*` keys added in #9.
 - Add an SMTP/SendGrid `notification.EmailService` implementation (currently only `LogEmailService` exists, and it logs every email rather than sending — invoices, delivery notifications and scheduled reports alike). Required before scheduled reports and customer-facing email features are useful in prod. It is one line in `main.go`: every consumer depends on the interface. A real sender should not implement `DeliveryDescription()`; that method is how `LogEmailService` discloses itself to the reporting API, and its absence is what makes `execution.delivery` fall back to a neutral statement.
-- ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`. Superseded by the in-process `pkg/eventbus` (see Tech Stack above): still no broker, and a durable backend remains blueprint Phase 2+.
+- ~~Wire NATS or remove the orphan container~~ **Done July 2026:** orphan NATS container removed from `docker-compose.yml`. Superseded by the transactional outbox (`core/pkg/outbox`, see Tech Stack above): still no broker, and a durable backend remains blueprint Phase 2+.
 - ~~`inventory.MockRepository` missing `DeallocateStock` breaks `go vet`~~ **Already fixed** — the mock implements it (`internal/inventory/service_test.go`); `go vet ./...` is clean.
 - Convert remaining leaf modules to installable apps per `docs/modularization-blueprint.md` §5 — the five dark pages (bankrecon, matching, rebates, purchasing recommendations) are the best next candidates.

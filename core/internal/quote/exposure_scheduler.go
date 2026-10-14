@@ -64,10 +64,10 @@ func (r *dbExposureSettingsReader) Get(ctx context.Context, key string) (string,
 // leave a quote un-flagged until the next manual refresh. The nightly pass
 // closes that gap.
 //
-// It is also the recovery path for the in-process event bus, which is
-// at-most-once and drops events on restart or subscriber saturation
-// (pkg/eventbus). Durable exposure state is recomputed here from Postgres, so
-// a dropped notification costs latency, not correctness. Disabled by default.
+// Exposure notifications travel over the transactional outbox, delivered at
+// least once by the worker's drain; durable exposure state is recomputed
+// here from Postgres, so a notification row parked after its retries costs
+// a notification, not correctness. Disabled by default.
 type ExposureScheduler struct {
 	scanner  safetyNetScanner
 	settings exposureSettingsReader

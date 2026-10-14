@@ -104,6 +104,9 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if err := s.checkSharedChild(ctx, cur.CustomerID, "contact"); err != nil {
+			return err
+		}
 		next := contactFrom(d, id, cur.CustomerID, httpx.TimestampOf(s.now().UTC()))
 		if err := s.repo.UpdateContact(ctx, next); err != nil {
 			return err
@@ -121,7 +124,7 @@ func (s *Service) UpdateContact(ctx context.Context, id uuid.UUID, d *ContactDra
 		return s.record(ctx, cust, EventUpdated, PartContact, map[string]any{"contact_id": id, "action": "updated"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -130,7 +133,7 @@ func (s *Service) DeleteContact(ctx context.Context, id uuid.UUID, pre Precondit
 	if err := needRevision(pre); err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(ctx context.Context) error {
+	return s.sharedOutcome(ctx, s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.repo.LockContact(ctx, id); err != nil {
 			return notFound(err)
 		}
@@ -141,6 +144,9 @@ func (s *Service) DeleteContact(ctx context.Context, id uuid.UUID, pre Precondit
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if err := s.checkSharedChild(ctx, cur.CustomerID, "contact"); err != nil {
+			return err
+		}
 		if err := s.repo.DeleteContact(ctx, id); err != nil {
 			return err
 		}
@@ -149,7 +155,7 @@ func (s *Service) DeleteContact(ctx context.Context, id uuid.UUID, pre Precondit
 			return notFound(err)
 		}
 		return s.record(ctx, cust, EventUpdated, PartContact, map[string]any{"contact_id": id, "action": "deleted"})
-	})
+	}))
 }
 
 // ---- ship-tos ----
@@ -194,7 +200,10 @@ func shipToFrom(d *ShipToDraft, id, customerID uuid.UUID, now httpx.Timestamp) *
 
 // CreateShipTo adds a ship-to. The customer's first active ship-to becomes
 // the default unless the request says otherwise; naming a default moves the
-// default from the one that held it.
+// default from the one that held it. On a shared customer that move changes a
+// shared ship to (every branch's delivery orders default to it), so a bound
+// key's add that names is_default true is refused in the shared rule's words;
+// a customer the pin holds alone still may.
 func (s *Service) CreateShipTo(ctx context.Context, customerID uuid.UUID, d *ShipToDraft) (*ShipTo, error) {
 	var out *ShipTo
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -216,6 +225,11 @@ func (s *Service) CreateShipTo(ctx context.Context, customerID uuid.UUID, d *Shi
 			st.IsDefault = n == 0
 		}
 		if st.IsDefault {
+			if d.DefaultGiven {
+				if err := s.checkSharedChild(ctx, customerID, "is_default"); err != nil {
+					return err
+				}
+			}
 			if err := s.repo.ClearDefaultShipTo(ctx, customerID, st.ID); err != nil {
 				return err
 			}
@@ -229,7 +243,7 @@ func (s *Service) CreateShipTo(ctx context.Context, customerID uuid.UUID, d *Shi
 		return s.record(ctx, cust, EventUpdated, PartShipTo, map[string]any{"ship_to_id": out.ID, "action": "created"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }
@@ -254,6 +268,9 @@ func (s *Service) UpdateShipTo(ctx context.Context, id uuid.UUID, d *ShipToDraft
 		if err := pre.check(cur.Revision); err != nil {
 			return err
 		}
+		if err := s.checkSharedChild(ctx, cur.CustomerID, "ship_to"); err != nil {
+			return err
+		}
 		next := shipToFrom(d, id, cur.CustomerID, httpx.TimestampOf(s.now().UTC()))
 		if next.IsDefault {
 			if err := s.repo.ClearDefaultShipTo(ctx, cur.CustomerID, id); err != nil {
@@ -273,7 +290,7 @@ func (s *Service) UpdateShipTo(ctx context.Context, id uuid.UUID, d *ShipToDraft
 		return s.record(ctx, cust, EventUpdated, PartShipTo, map[string]any{"ship_to_id": id, "action": "updated"})
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.sharedOutcome(ctx, err)
 	}
 	return out, nil
 }

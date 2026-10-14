@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Get account summary
-         * @description Balance due, credit limit and available credit, all in cents. Any service error, including an unknown customer, answers 500.
+         * @description The customer's balance (the subledger), credit limit and the credit left (both null for no limit), and the open credit memos plus unapplied cash as a negative figure. An unknown customer is 404.
          */
         get: operations["accountSummary"];
         put?: never;
@@ -53,11 +53,135 @@ export interface paths {
         };
         /**
          * List account transactions
-         * @description The list is not paginated: limit and offset are not read.
+         * @description The customer's subledger rows (one per movement of account 1020), newest first (created_at, then id), in the cursor list envelope.
          */
         get: operations["accountTransactions"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/aging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receivable aging by customer, job or ship-to
+         * @description One item per group per currency, ordered by customer name, customer id, group id and currency. Every amount is taken as of as_of (default the branch's today), so the aging of a past date ignores later applications, counts an invoice voided after that date, and ties to the balances of 1020 and 2200 on it. current_cents is not yet due; the day buckets count days past the basis date; unapplied_cents is the open credit memos plus unapplied cash, negative, on the row of their own job (a payment carries a job, never a ship-to); total_cents is the buckets plus unapplied_cents. The fields of the coarser groupings are null.
+         */
+        get: operations["arAging"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/aging/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Receivable aging bucket totals per currency
+         * @description The same parameters as the aging (group_by is read and has no effect); the answer is not a list.
+         */
+        get: operations["arAgingSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/customers/{id}/statement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Customer statement
+         * @description Per currency: the opening balance (the subledger rows before from), every row in the range (filtered to the job when job_id is given, through the source document's job), the closing balance, and the open documents (invoices with an open amount, credit memos with open credit). from defaults to a month before to; to to today.
+         */
+        get: operations["arStatement"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Reconcile the subledger, the documents and the ledger
+         * @description Roles admin, owner, finance. Lists every customer whose balance_due, subledger sum and document open amounts disagree, per currency, and for each currency whether the sum of balances equals account 1020 and unapplied cash equals account 2200. Rows written before cycle 2 show here; nothing repairs a difference.
+         */
+        get: operations["arReconciliation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ar/applications/{id}/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reverse one application
+         * @description Roles admin, owner, finance; a reason is required. Reverses one live application of any kind: a payment application (and the discount applications of the same act on the same invoice), a credit memo application, or a write off. A payment application posts the reversal of its own entry, or, when it has none (a migrated one), a new DR 1020 / CR 2200 entry. A discount alone is refused with 409 discount_stands_with_payment. Writes payment.unapplied or credit_memo.reopened (none for a write off), then invoice.reopened, then customer.updated.
+         */
+        post: operations["arApplicationReverse"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/customers/{customerId}/activities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a customer's activities
+         * @description The cursor list envelope, newest first on (created_at, id). activity_type and contact_id filter; total appears only under include=total. A parameter the route does not declare, an activity type outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400. A customer the caller cannot see behind the branch wall serves an empty page.
+         */
+        get: operations["activityList"];
+        put?: never;
+        /**
+         * Log an activity
+         * @description activity_type and description are required; contact_id and logged_by are optional; activity_date defaults to now. The customer is named by the path: a body customer_id is a 400, and a customer the caller cannot see behind the branch wall is a 404. Writes the audit row activity.created and the event activity.created in the same transaction, the event last.
+         */
+        post: operations["activityCreate"];
         delete?: never;
         options?: never;
         head?: never;
@@ -71,15 +195,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one activity */
+        /**
+         * Get one activity
+         * @description The activity with its ETag. An activity behind the caller's branch wall is a 404.
+         */
         get: operations["activityGet"];
         /**
          * Update an activity
-         * @description The write replaces contact_id, activity_type, description, logged_by and activity_date; an omitted field is cleared.
+         * @description Replaces contact_id, activity_type, description, logged_by and activity_date (an omitted activity_date keeps its stored value) on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. A body customer_id is a 400: the customer is fixed at create. The response is the stored row, not the echo of the body. Writes the audit row activity.updated and the event activity.updated in the same transaction, the event last.
          */
         put: operations["activityUpdate"];
         post?: never;
-        /** Delete an activity */
+        /**
+         * Delete an activity
+         * @description Deletes on the client's revision, carried by If-Match alone (a DELETE has no body). Writes the audit row activity.deleted and the event activity.deleted in the same transaction, the event last.
+         */
         delete: operations["activityDelete"];
         options?: never;
         head?: never;
@@ -95,13 +225,13 @@ export interface paths {
         };
         /**
          * List machine API keys
-         * @description Admin or owner only. Newest first, revoked keys included. Not paginated. Answers null, not an empty array, when there are no keys. Only the 12 character prefix identifies a key; the secret is never retrievable.
+         * @description Admin or owner only (a machine key is refused here whatever its scopes). The cursor list envelope, newest first, revoked keys included; scopes is never null. Only the 12 character prefix identifies a key; the secret and its hash are never served. total appears only under include=total.
          */
         get: operations["adminListKeys"];
         put?: never;
         /**
          * Create a machine API key
-         * @description Admin or owner only. The raw key (sk_live_ followed by 43 URL safe base64 characters) is returned here and nowhere else; only its salted Argon2 hash is stored. Success is a 200, not a 201. Neither name nor scopes is validated; omitted scopes are stored as null.
+         * @description Admin or owner only. The raw key (sk_live_ followed by 43 URL safe base64 characters) is returned here and nowhere else; only its salted Argon2 hash is stored. The scopes are stored verbatim (ADR 0002: a grant reads back as written); grammar validation at the mint is C5-2a's (ADR 0007 section 5.3), so this parse checks only that the name is present and each scope is a printable, non-empty string. The mint, its audit row and the key.created event are one transaction.
          */
         post: operations["adminCreateKey"];
         delete?: never;
@@ -122,7 +252,7 @@ export interface paths {
         post?: never;
         /**
          * Revoke a machine API key
-         * @description Admin or owner only. Sets revoked_at; the row is kept. Unknown ids and already revoked keys are a 204 too (an UPDATE that matches nothing is not an error). A malformed id the database refuses is a 500. DELETE is outside the idempotency layer.
+         * @description Admin or owner only. Sets revoked_at; the row is kept. An unknown id is a 404 (a typo no longer looks like success); revoking an already revoked key is an idempotent 204 that writes nothing. A revoke that flips the row writes its audit row and the key.revoked event in one transaction. DELETE is outside the idempotency layer.
          */
         delete: operations["adminRevokeKey"];
         options?: never;
@@ -139,18 +269,18 @@ export interface paths {
         };
         /**
          * Show the OpenRouter key status
-         * @description Admin or owner only. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and is absent when no key is configured. base_url is present only when an admin override is stored, never for the environment or built in default.
+         * @description Admin or owner, or a key holding admin:settings. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and null when no key is configured. base_url is present only when an admin override is stored, null otherwise. revision is the resource's revision anchor and rides the ETag.
          */
         get: operations["adminGetAISettings"];
         /**
          * Save the OpenRouter key and base URL
-         * @description Admin or owner only. The key is stored and never echoed back. base_url absent or null leaves the stored override alone; an empty string clears the override; any other value must be an absolute https URL (plain http only for loopback hosts) or the call is a 400 and nothing, key included, is saved. A key is required. A 500 also answers when the key store is not wired.
+         * @description Admin or owner, or a key holding admin:settings. api_key is required. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
          */
         put: operations["adminSaveAISettings"];
         post?: never;
         /**
-         * Remove the stored OpenRouter key and base URL override
-         * @description Admin or owner only. Deletes the admin stored key and the base URL override together, so both revert to the environment or default. DELETE is outside the idempotency layer.
+         * Remove the OpenRouter admin override
+         * @description Admin or owner, or a key holding admin:settings. Removes the key and the base URL override together, so both revert to their environment defaults. Takes the If-Match precondition; the deletion moves the revision (never backwards) and writes the admin_settings.deleted event.
          */
         delete: operations["adminDeleteAISettings"];
         options?: never;
@@ -167,60 +297,20 @@ export interface paths {
         };
         /**
          * Show the OpenRouteService key status
-         * @description Admin or owner only. Same shape and masking as the AI settings, key only: key_hint is the first 10 and last 4 characters (four asterisks for a key of 12 characters or fewer), and base_url is never present.
+         * @description Admin or owner, or a key holding admin:settings. The AI settings' shape without the base URL; its revision anchor is its own.
          */
         get: operations["adminGetRoutingSettings"];
         /**
          * Save the OpenRouteService key
-         * @description Admin or owner only. The key is stored and never echoed back. A key is required (400). A 500 also answers when the key store is not wired.
+         * @description Admin or owner, or a key holding admin:settings. api_key is required; the write takes the same precondition as the AI settings save and answers the new revision in body and ETag.
          */
         put: operations["adminSaveRoutingSettings"];
         post?: never;
         /**
-         * Remove the stored OpenRouteService key
-         * @description Admin or owner only. Deletes the admin stored key so the environment value, if any, applies again. DELETE is outside the idempotency layer.
+         * Remove the OpenRouteService admin override
+         * @description Admin or owner, or a key holding admin:settings. Takes the If-Match precondition and answers 204.
          */
         delete: operations["adminDeleteRoutingSettings"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/modules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List the integration modules and their global flag
-         * @description Admin or owner only. A fixed catalog (today only ai_lm); enabled is true only when the modules.<id>.enabled setting is exactly true.
-         */
-        get: operations["adminListModules"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/admin/modules/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Switch an integration module on or off globally
-         * @description Admin or owner only. Writes the modules.<id>.enabled setting for any id, known or not, and revokes access for every staff member at once when switched off without deleting grants. The id is not checked against the catalog. The response echoes the id and the new flag with an empty name.
-         */
-        put: operations["adminSetModuleEnabled"];
-        post?: never;
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -235,13 +325,13 @@ export interface paths {
         };
         /**
          * List the staff roster
-         * @description Admin or owner only. Ordered by full name, with each member's raw module grants. Not paginated. Never null.
+         * @description Admin or owner, or a key holding admin:staff. The cursor list envelope, newest first. active filters on the flag (true or false; a value outside is a 400). Each item carries the member's granted module ids, never null and NOT filtered by the global enable flag. total appears only under include=total.
          */
         get: operations["adminListStaff"];
         put?: never;
         /**
-         * Add a staff member
-         * @description Admin or owner only. Email and full_name are required (400 when empty). Role defaults to staff and active to true. A duplicate email the database refuses surfaces as a 500.
+         * Create a staff member
+         * @description Admin or owner, or a key holding admin:staff. email and full_name are required; staff_no is optional (null by default); role defaults to staff and active to true. A duplicate email or staff number is a 409 naming the field. The create, its audit row and the staff.created event are one transaction.
          */
         post: operations["adminCreateStaff"];
         delete?: never;
@@ -258,13 +348,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a staff member
-         * @description Admin or owner only.
+         * Read one staff member
+         * @description Admin or owner, or a key holding admin:staff.
          */
         get: operations["adminGetStaff"];
         /**
          * Update a staff member
-         * @description Admin or owner only. A partial update: absent or null fields are left unchanged (a null staff_no cannot clear the stored value). An empty body returns the current record, or 404 when the id is unknown.
+         * @description Admin or owner, or a key holding admin:staff. Every field is optional: nil leaves it alone, so a PUT that only flips active must not blank out the email it did not send; a staff_no of null clears the number. Takes If-Match or the body revision (428 without, 409 stale) and answers the member with its new revision and ETag.
          */
         put: operations["adminUpdateStaff"];
         post?: never;
@@ -285,9 +375,9 @@ export interface paths {
         put?: never;
         /**
          * Grant a module to a staff member
-         * @description Admin or owner only. Idempotent at the database (a repeat grant is a no-op) and audit logged. The module id is not checked against the catalog. An unknown staff id is refused by the database and is a 500. When the re-read of the member fails after the grant, the answer is still 200 with the bare status object granted.
+         * @description Admin or owner, or a key holding admin:staff. The modules list is part of the staff document: a grant that adds one moves the revision and takes the same precondition; an idempotent re-grant changes nothing and writes nothing. module_id must name a module in the catalog (ai_lm). Answers the member with its new revision and ETag.
          */
-        post: operations["adminGrantStaffModule"];
+        post: operations["adminGrantModule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -306,9 +396,49 @@ export interface paths {
         post?: never;
         /**
          * Revoke a module from a staff member
-         * @description Admin or owner only. Idempotent and audit logged; an unknown staff id or a grant that does not exist still succeeds, with the bare status object revoked (the re-read finds no member). DELETE is outside the idempotency layer.
+         * @description Admin or owner, or a key holding admin:staff. The grant route's mirror: takes the If-Match precondition, moves the revision only when a grant was actually removed, and answers the member. An unknown module id is a 400 naming module_id.
          */
-        delete: operations["adminRevokeStaffModule"];
+        delete: operations["adminRevokeModule"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/modules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the integration modules
+         * @description Admin or owner, or a key holding admin:modules. The catalog of integration modules with each flag's global state and its revision anchor, in the list envelope (a fixed catalog: next_cursor is null on the single page). The flag is the kill switch; the per staff grants live on the staff document.
+         */
+        get: operations["adminListModules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/modules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Toggle a module's global enable flag
+         * @description Admin or owner, or a key holding admin:modules. The kill switch: turning a module off revokes it for every staff member at once WITHOUT deleting any grant, so turning it back on restores the roster. Takes If-Match or the body revision against the flag's own anchor; a toggle that changes nothing writes nothing; a flip writes the module.enabled or module.disabled event. An unknown module id is a 404.
+         */
+        put: operations["adminSetModuleEnabled"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -343,13 +473,13 @@ export interface paths {
         };
         /**
          * List vendor invoices
-         * @description Role guard admin, owner or finance. Optional filters vendor_id (an unparseable value is ignored, not refused) and status (free text, compared as given). No paging parameters exist; limit and offset are silently ignored. Never null. Lines are not included.
+         * @description Role guard admin, owner or finance, behind the branch middleware: a bound caller sees its branch's bills only. The cursor envelope, newest first by (created_at, id). vendor_id and po_id filter on their document and status on the lowercase lifecycle vocabulary (a comma separated list); a parameter the route does not declare, a status outside the vocabulary or an uppercase one, a malformed cursor or an out of range limit is a 400. total appears only under include=total.
          */
         get: operations["apInvoiceList"];
         put?: never;
         /**
          * Enter a vendor invoice
-         * @description Role guard admin, owner or finance. The request carries float dollars; subtotal, tax and line amounts are converted to int64 cents. The invoice starts PENDING with nothing paid. Only an undecodable body is a 400; a malformed invoice_date or due_date or any database refusal (unknown vendor, duplicate number) is a 500. The echo omits vendor_name and lines.
+         * @description Role guard admin, owner or finance. The bill starts pending, owing its whole total, with Gable's own number. Money is _cents, the line unit price is _ten_thousandths and the quantity a decimal string; the server prices each line and never accepts a status. Every line names its gl_account_id (the approve entry debits each line's account). The branch defaults from the body branch, the caller's context branch or the default branch, and is held to the caller's wall (403 naming branch_id). Validation failures are one 400 naming every field with its full path; a duplicate vendor number for the vendor is a 409; an unknown vendor, purchase order or account is a 400 naming the field.
          */
         post: operations["apInvoiceCreate"];
         delete?: never;
@@ -367,7 +497,7 @@ export interface paths {
         };
         /**
          * Get one vendor invoice with lines
-         * @description Role guard admin, owner or finance. Any service failure, not only a missing row, is a 404. lines is omitted when the invoice has none.
+         * @description Role guard admin, owner or finance, held to the caller's branch wall: another branch's bill is a 404. Carries the revision's ETag.
          */
         get: operations["apInvoiceGet"];
         put?: never;
@@ -378,7 +508,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/ap/invoices/{id}/approve": {
+    "/api/v1/ap/invoices/{id}/transitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -388,10 +518,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Approve a pending vendor invoice
-         * @description Role guard admin, owner or finance. No body. The approver is the subject of the caller's JWT claims; with no claims, or a subject that is not a UUID, the handler answers 401 itself (so in AUTH_MODE=dev, which carries no claims, this route is always 401). Only a PENDING invoice can be approved. Every service failure, including an unknown id, a non pending status or a failed GL sync, is a 422. The response carries vendor_name, approved_by and approved_at but not lines.
+         * Approve or void a vendor invoice
+         * @description Role guard admin, owner or finance, held to the caller's branch wall. Replaces the old /approve route. The body names the target status and carries the revision (or If-Match); a write with neither is 428, a mismatch 409 stale_revision. To approved: only from pending; the entry posts through gl.PostEntry inside the transition's transaction (a debit leg per line on the line's account, the tax spread across the line accounts pro rata, the credit to Accounts Payable), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a line with no account is a 409 blocker line_needs_account; a required chart of accounts code that is missing is a 409 blocker account_missing naming it; a pending bill that already carries a paid amount, a legacy or hand edited row no payment of its own could write, is a 409 blocker has_paid_amount naming the cents, and the row is left for the operator to mend by hand; a pending bill that already holds a live journal entry, a legacy row whose posting ran before the status moved with its entry linked by hand or not at all, is a 409 blocker entry_not_linked naming the live entry by its number and id, nothing written). To voided: from pending or approved; a bill's credit is live exactly when the POSTED entries of its VENDOR_INVOICE entry and that entry's whole reversal chain leave a net amount on Accounts Payable (a reversal of a reversal puts the credit back, whatever depth the chain has reached; the net is summed per currency, never across two, as the trial balance sums it, so a chain holding two currencies whose whole sums cancel still reads live in the currency that holds the amount, however the chain arose; the net may stand as a credit or as a debit, and the refusals name a net amount standing on Accounts Payable, never a credit alone), and the void decides on that net, never on one step of the chain: a bill whose entry holds no live credit (one that prices to zero, a legacy bill whose posting was swallowed, or an entry the GL routes have already undone, linked or not) voids with nothing to reverse, a linked live entry with no reversal row is reversed whole in the entry's own currency, and a linked live entry whose one reversal row is already taken (the row is not posted, or the chain was reinstated behind it, so no new reversal can post) is refused with the reversal_not_posted blocker naming the shape; a reason is required, a bill with money applied is refused with the has_payments blocker, a bill that holds a live journal entry it is not linked to (a legacy bill whose posting was swallowed, one holding the removed sync's one leg credit, one whose total was hand edited after its approve, or one posted twice, the duplicate named) with the entry_not_linked blocker, and a bill whose linked entry does not balance with the entry_unbalanced blocker; nothing is written on any refusal, and a reversal insert that loses a race with a concurrent GL reverse on the same entry answers the same reversal_not_posted 409, never a 500, and so does a GL void of the linked entry that commits while the void runs (the entry is no longer POSTED, there is nothing left to reverse, nothing is written and the retry voids with nothing to reverse). No route links an entry to a bill yet: such a bill keeps its status until a later repair item (a stated limit).
          */
-        post: operations["apInvoiceApprove"];
+        post: operations["apInvoiceTransition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -407,13 +537,13 @@ export interface paths {
         };
         /**
          * List vendor payments
-         * @description Role guard admin, owner or finance. Optional vendor_id filter (an unparseable value is ignored). No paging. Never null.
+         * @description Role guard admin, owner or finance, held to the caller's branch wall through the bills a payment applies to (a payment whose every bill is another branch's is not the caller's to read). A bare array until the payment routes' own conversion (ADR 0008 section 11). Optional vendor_id filter (an unparseable value is a 400 naming it); a parameter the route does not declare is refused.
          */
         get: operations["apPaymentList"];
         put?: never;
         /**
          * Pay a vendor
-         * @description Role guard admin, owner or finance. The amount is float dollars, converted to int64 cents. The payment is created COMPLETE and applied in order to the listed invoices up to each one's outstanding balance, then synced to the GL. Only an undecodable body is a 400; a malformed payment_date, an unknown invoice or any GL failure is a 500.
+         * @description Role guard admin, owner or finance. The request's money is int64 amount_cents (a decimal amount is a 400 naming it; the old float dollars amount is gone); the rest of the shape keeps its today form (uppercase methods) until the payment routes' own conversion. The payment locks the named bills in id order and applies only to bills in approved or partial (a pending, paid or voided bill is a 409 blocker invoice_not_approved; a bill of another vendor is a 400 naming invoice_ids[i]); a repeated id in invoice_ids is a 400 naming its index (appears twice); more than the named bills still owe is a 409 blocker exceeds_open. The named bills must share one currency: a payment spanning two is a 409 blocker currency_mismatch naming the bills that differ. The entry posts through gl.PostEntry inside the act's transaction in the bills' currency (DR Accounts Payable, CR Cash), and a posting failure fails the act (a closed period is a 409 blocker period_closed; a missing chart of accounts code is a 409 blocker account_missing naming it).
          */
         post: operations["apPaymentCreate"];
         delete?: never;
@@ -431,7 +561,7 @@ export interface paths {
         };
         /**
          * AP aging by vendor
-         * @description Role guard admin, owner or finance. One row per vendor with open balances in int64 cents buckets. Never null.
+         * @description Role guard admin, owner or finance, held to the caller's branch wall (a bound caller's buckets sum its branch's bills only). One row per vendor with open balances in int64 cents buckets, from amount_open; a paid or voided bill owes nothing anywhere. A bare array until the aging route's own conversion. No query parameters; one is refused.
          */
         get: operations["apAging"];
         put?: never;
@@ -704,7 +834,7 @@ export interface paths {
         };
         /**
          * List every configurator rule
-         * @description Admin, owner or sales. Ordered by dependency type and value, then attribute type and value. Never null.
+         * @description The whole rule matrix, the charge codes master shape: ordered by dependency type and value, then attribute type and value, never null. A query parameter the route does not declare is a 400 unsupported_query_parameter.
          */
         get: operations["configuratorListRules"];
         put?: never;
@@ -724,7 +854,7 @@ export interface paths {
         };
         /**
          * List the allowed values of one attribute
-         * @description Admin, owner or sales. Every query parameter other than attribute_type is read as a current selection (attribute type to chosen value, first value wins), for example attribute_type=Grade&Species=SYP. With no selections, or when no rule matches them, the static defaults for the attribute are answered (an empty array for an unknown attribute). Otherwise the order of the options is unspecified.
+         * @description The values the attribute may take under the current selections, deterministically ordered by value. attribute_type is required; the selections ride as one parameter, a comma separated list of Type=Value pairs (selections=Species=SYP,Treatment=None), so the route declares exactly the two names it reads (the base consumed every unknown query name as a selection and never said so). With no selections, or when no rule matches them, the static defaults for the attribute answer (an empty array for an unknown attribute). A parameter the route does not declare, a missing attribute_type or a malformed selections value is a 400.
          */
         get: operations["configuratorListOptions"];
         put?: never;
@@ -744,7 +874,7 @@ export interface paths {
         };
         /**
          * List the active presets
-         * @description Admin, owner or sales. Active presets only, ordered by name. Never null.
+         * @description Active presets ordered by name, never null. product_type filters (the filter filters); a parameter the route does not declare is a 400 unsupported_query_parameter.
          */
         get: operations["configuratorListPresets"];
         put?: never;
@@ -766,7 +896,7 @@ export interface paths {
         put?: never;
         /**
          * Validate a set of selections against the rules
-         * @description Admin, owner or sales. The body is capped at 64 KiB; an oversized or malformed body is a 400, as is an empty selections map. A rule conflict is a 200 with valid false and the conflicts listed.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. A malformed body, or an empty selections map, is a 400 naming the field. A rule conflict is a 200 with valid false and the conflicts listed (conflicts is always an array, never omitted). The verdict is deterministic: the same selections always answer the same conflicts in the same order.
          */
         post: operations["configuratorValidate"];
         delete?: never;
@@ -786,7 +916,7 @@ export interface paths {
         put?: never;
         /**
          * Build a non stock SKU from selections
-         * @description Admin, owner or sales. The body is capped at 64 KiB. Product type and selections are both required. The selections are validated first; a conflict, and any other service failure including a database fault, answers 400 (never 500). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
+         * @description The body is bounded by the platform request size limit (10 MiB); a larger body is a 413. Product type and selections are both required. The selections are validated first; a conflict is a 400 validation_failed whose details carry one config_conflict blocker per violated rule (the base answered one fixed message and never said which rules). The SKU is NS, the product type code, then the Species, Grade, Treatment and Dimensions selections upper cased with spaces as hyphens; the keys other than those four are ignored.
          */
         post: operations["configuratorBuildSku"];
         delete?: never;
@@ -971,27 +1101,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/customers/{customerId}/activities": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List customer activities
-         * @description Returns activities for a customer, ordered by activity_date descending. The handler guarantees a bare array: an empty array, never null, when the customer has no activities.
-         */
-        get: operations["customerListActivities"];
-        put?: never;
-        /** Create a customer activity */
-        post: operations["customerCreateActivity"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/customers/{customerId}/contacts": {
         parameters: {
             query?: never;
@@ -1168,10 +1277,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List vehicles */
+        /**
+         * List vehicles
+         * @description The cursor list envelope, newest first on (created_at, id). The fleet is dealer-wide, so no branch wall applies. total appears only under include=total.
+         */
         get: operations["deliveryVehicleList"];
         put?: never;
-        /** Create a vehicle */
+        /**
+         * Create a vehicle
+         * @description name, vehicle_type (lowercase) and license_plate are required; an unknown body field, an uppercase vehicle_type or a malformed date is a 400 naming the field. Writes the audit row vehicle.created and the event vehicle.created in one transaction, the event last.
+         */
         post: operations["deliveryVehicleCreate"];
         delete?: never;
         options?: never;
@@ -1188,16 +1303,19 @@ export interface paths {
         };
         /**
          * Get a vehicle
-         * @description Any repository error, not only a missing row, answers 404.
+         * @description A missing vehicle (or one soft deleted) is a 404 in the error envelope.
          */
         get: operations["deliveryVehicleGet"];
         /**
          * Update a vehicle
-         * @description A missing vehicle answers 500, not 404.
+         * @description Replaces every mutable field on the client's revision: If-Match or a body revision (428 without one, 409 stale_revision behind). An omitted optional field clears it. Writes the audit row and the event vehicle.updated.
          */
         put: operations["deliveryVehicleUpdate"];
         post?: never;
-        /** Delete a vehicle */
+        /**
+         * Delete a vehicle
+         * @description A soft delete on the client's revision, carried by If-Match alone (a DELETE has no body). Writes the audit row and the event vehicle.deleted.
+         */
         delete: operations["deliveryVehicleDelete"];
         options?: never;
         head?: never;
@@ -1215,7 +1333,7 @@ export interface paths {
         put?: never;
         /**
          * Upload a vehicle photo
-         * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         * @description A jpg, jpeg, png or webp file of at most 10 MB. The photo attach takes no precondition (a photo is evidence appended to a record, and a revision would fail the second of a run of uploads) but it moves the revision, returns the vehicle with the new ETag, and writes the audit row and event vehicle.updated (data part photo) in one transaction.
          */
         post: operations["deliveryVehiclePhoto"];
         delete?: never;
@@ -1231,10 +1349,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List drivers */
+        /**
+         * List drivers
+         * @description The cursor list envelope, newest first on (created_at, id). The roster is dealer-wide.
+         */
         get: operations["deliveryDriverList"];
         put?: never;
-        /** Create a driver */
+        /**
+         * Create a driver
+         * @description name is required; status defaults to active. Writes the audit row and the event driver.created in one transaction, the event last.
+         */
         post: operations["deliveryDriverCreate"];
         delete?: never;
         options?: never;
@@ -1249,18 +1373,18 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Get a driver
-         * @description Any repository error, not only a missing row, answers 404.
-         */
+        /** Get a driver */
         get: operations["deliveryDriverGet"];
         /**
          * Update a driver
-         * @description A missing driver answers 500, not 404.
+         * @description Replaces every mutable field, status required, on the client's revision (If-Match or body revision; 428 without one, 409 behind). Writes the audit row and the event driver.updated.
          */
         put: operations["deliveryDriverUpdate"];
         post?: never;
-        /** Delete a driver */
+        /**
+         * Delete a driver
+         * @description A soft delete on the client's If-Match; writes the audit row and the event driver.deleted.
+         */
         delete: operations["deliveryDriverDelete"];
         options?: never;
         head?: never;
@@ -1278,7 +1402,7 @@ export interface paths {
         put?: never;
         /**
          * Upload a driver photo
-         * @description A missing form file, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         * @description A jpg, jpeg, png or webp file of at most 10 MB. Like the vehicle photo attach it takes no precondition but moves the revision and writes the audit row and event driver.updated (data part photo).
          */
         post: operations["deliveryDriverPhoto"];
         delete?: never;
@@ -1294,12 +1418,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List routes */
+        /**
+         * List routes
+         * @description The board read. The cursor list envelope, newest scheduled date first on (scheduled_date, id). The date filter is honoured exactly (an unparseable date is a 400 naming date), driver_id and status filter, and include=stops embeds each route's stops in the same payload. A route is visible when none of its stops belongs to a branch the caller cannot see; a route with no stops is visible to every branch.
+         */
         get: operations["deliveryRouteList"];
         put?: never;
         /**
          * Create a route
-         * @description An unparseable scheduled_date answers 500.
+         * @description vehicle_id, driver_id and a scheduled_date as YYYY-MM-DD are required; a missing vehicle or driver is a 400 naming the field. The route starts draft. Writes the audit row and the event route.created.
          */
         post: operations["deliveryRouteCreate"];
         delete?: never;
@@ -1308,7 +1435,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/delivery/routes/{id}/dispatch": {
+    "/api/v1/delivery/routes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a route
+         * @description The route document with its stops embedded, behind the branch wall.
+         */
+        get: operations["deliveryRouteGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/delivery/routes/{id}/transitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -1318,10 +1465,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Dispatch a route
-         * @description Only a DRAFT or SCHEDULED route can be dispatched, otherwise 500. The route becomes IN_TRANSIT.
+         * Move a route through its lifecycle
+         * @description to in_transit (from draft or scheduled) is the dispatch; to completed needs every stop terminal and at least one stop (blockers stop_not_terminal, route_empty). Takes the revision precondition (428 without, 409 stale or invalid_state_transition). Writes the audit row and the event route.in_transit or route.completed. The former /dispatch and /complete action routes are removed.
          */
-        post: operations["deliveryRouteDispatch"];
+        post: operations["deliveryRouteTransition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1337,7 +1484,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reorder the stops of a route */
+        /**
+         * Reorder the stops of a route
+         * @description The list must name every stop of the route exactly once (400 naming ordered_delivery_ids or the offending entry otherwise). Takes the route's revision by If-Match (428 without, 409 behind); each stop's revision moves with its new position and the route's revision moves with the write. Writes the audit row and the event route.updated (data part stops).
+         */
         post: operations["deliveryRouteReorder"];
         delete?: never;
         options?: never;
@@ -1354,28 +1504,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Optimize the stop order of a route */
-        post: operations["deliveryRouteOptimize"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/delivery/routes/{id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
         /**
-         * Complete a route
-         * @description Every failure answers 400: a route with no deliveries, a delivery not yet DELIVERED, FAILED or PARTIAL, or a repository fault.
+         * Optimize the stop order of a route
+         * @description Reorders the stops through the configured routing service and persists the new order and the per-stop ETAs; a route with no geocoded stops is returned unchanged. The routing and geocoding calls run before the transaction opens and the route's revision is re-checked inside it (If-Match, 428 without, 409 if the route moved meanwhile). A route with no deliveries answers the unchanged route. Writes the audit row and the event route.updated (data part stops). The response is the route document now, not the optimizer's intermediate result.
          */
-        post: operations["deliveryRouteComplete"];
+        post: operations["deliveryRouteOptimize"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1389,7 +1522,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the deliveries of a route */
+        /**
+         * List the stops of a route
+         * @description The cursor list envelope in stop order on (stop_sequence, id). The route is read behind the branch wall first, so a caller held to another branch gets the same 404 as reading the route. total appears under include=total.
+         */
         get: operations["deliveryRouteDeliveries"];
         put?: never;
         post?: never;
@@ -1410,7 +1546,7 @@ export interface paths {
         put?: never;
         /**
          * Assign an order to a route
-         * @description A missing route, an order blocked by unresolved index exposure or any other failure answers 500. A pickup (will-call) order is never routed (ADR 0005 5.5): 409 with the blocker pickup_order, in the platform error envelope.
+         * @description Creates the route's stop for the order, pending. A pickup (will-call) order is never routed (ADR 0005 5.5): 409 with the blocker pickup_order. An order with unresolved lumber-index exposure is refused; a route the caller cannot see behind the branch wall is the same 404 as reading it; a missing order is a 400 naming order_id. stop_sequence defaults to the route's next position. The stop's coordinates are geocoded when a routing key is configured, before the transaction opens. A vehicle over its weight capacity answers 201 with a capacity_warning beside the stop (a soft warning). Writes the audit row and the event delivery.created.
          */
         post: operations["deliveryCreate"];
         delete?: never;
@@ -1427,8 +1563,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get a delivery
-         * @description A missing delivery answers 500, not 404.
+         * Get a stop
+         * @description Behind the branch wall through the stop's order; a missing stop is a 404.
          */
         get: operations["deliveryGet"];
         put?: never;
@@ -1439,7 +1575,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/delivery/deliveries/{id}/status": {
+    "/api/v1/delivery/deliveries/{id}/transitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -1447,12 +1583,12 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
+        put?: never;
         /**
-         * Complete a delivery
-         * @description Only DELIVERED, FAILED and PARTIAL are accepted. DELIVERED and PARTIAL need pod_proof_url and pod_signed_by. Any other value or a missing proof answers 500.
+         * Complete a stop
+         * @description to delivered, failed or partial, from pending or out_for_delivery (a terminal stop is 409 invalid_state_transition). delivered and partial need pod_proof_url and pod_signed_by (a 400 naming them). Takes the revision precondition (428 without, 409 behind). A delivered stop queues its order's fulfilment request inside the same transaction (ADR 0005 5.5). Writes the audit row and the event delivery.delivered, delivery.failed or delivery.partial. The former PUT /status route is removed.
          */
-        put: operations["deliveryUpdateStatus"];
-        post?: never;
+        post: operations["deliveryTransition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1468,7 +1604,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Adjust delivered quantities on site */
+        /**
+         * Record a driver's on-site quantity adjustments
+         * @description One adjustment per line: product_id, the quantities as decimal strings (a JSON number is a 400 naming the indexed path), and a lowercase reason code (short_ship, damaged, refused, wrong_product, other). The rows land in delivery_qty_adjustments (the live failure wrote nothing, only a log line), the stop's revision moves, and the audit row and the event delivery.adjusted are written in the same transaction. Like the photo attaches it takes no precondition: it records evidence of a fact already lived.
+         */
         post: operations["deliveryAdjustQty"];
         delete?: never;
         options?: never;
@@ -1487,7 +1626,7 @@ export interface paths {
         put?: never;
         /**
          * Attach a proof of delivery photo
-         * @description A missing photo, an unsupported extension (jpg, jpeg, png, webp) or a body over 10 MB answers 400.
+         * @description A jpg, jpeg, png or webp file of at most 10 MB, with an optional photo_type of signature, site (the default) or damage. The photo attach takes no precondition but moves the stop's revision and writes the audit row and the event delivery.updated (data part pod_photos) in one transaction.
          */
         post: operations["deliveryPodPhoto"];
         delete?: never;
@@ -1503,71 +1642,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the proof of delivery photos */
+        /**
+         * List the proof of delivery photos
+         * @description The cursor list envelope, oldest first on (uploaded_at, id). The stop is read behind the branch wall first; a missing stop is a 404.
+         */
         get: operations["deliveryPodPhotos"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/deposits": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List a customer's deposits
-         * @description A missing customer_id answers 400. The list is not paginated.
-         */
-        get: operations["depositList"];
-        put?: never;
-        /**
-         * Record a customer deposit
-         * @description Every service failure, such as a non positive amount, answers 400.
-         */
-        post: operations["depositCreate"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/deposits/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get one deposit */
-        get: operations["depositGet"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/deposits/{id}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Apply a deposit against AR
-         * @description Every service failure, such as a deposit not OPEN or an amount over the remainder, answers 400.
-         */
-        post: operations["depositApply"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1608,6 +1689,222 @@ export interface paths {
         get: operations["documentsPrintPickticket"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List order drafts
+         * @description The cursor list envelope, newest first on created_at then id. Filters status, subject_id and created_by_kind; total appears only under include=total. Drafts are shared, not owned.
+         */
+        get: operations["ordersDraftList"];
+        put?: never;
+        /**
+         * Create an order draft
+         * @description A create draft (subject_id null) carries the order create request as its payload; an edit draft names the draft order it edits and may assert subject_revision. The payload is the module's own body, never a file and never a revision of its own; the branch is fixed at create.
+         */
+        post: operations["ordersDraftCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The order drafts change feed
+         * @description A text/event-stream of the order draft change rows, never payloads, with the ready, draft, cursor, reset and reauth events of the quotes feed; the cursor resumes through Last-Event-ID (which wins when both are present) or the cursor parameter.
+         */
+        get: operations["ordersDraftFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an order draft
+         * @description The draft with its payload and computed validation; the ETag is the revision.
+         */
+        get: operations["ordersDraftGet"];
+        /**
+         * Replace an order draft's payload
+         * @description The whole-payload compare and swap on the revision precondition; any status but open is 409 with the draft_not_open blocker, and subject_revision moves only forward within the subject's bounds.
+         */
+        put: operations["ordersDraftReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard or reopen an order draft
+         * @description open to discarded and discarded to open, on the revision precondition; promoted is terminal.
+         */
+        post: operations["ordersDraftTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/orders/{id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote an order draft, in one transaction
+         * @description The confirm: the revision the committer read becomes an order born in status draft with its SO- number (order.created, then draft.promoted; the confirm with its credit, PO and contact checks stays an order transition), or an edit draft's payload becomes the draft order's update (order.updated, then draft.promoted). A failure rolls the whole transaction back, the draft stays open at the same revision, and the module's own error is carried out (order_not_draft on a subject that left draft, subject_stale added when the subject moved).
+         */
+        post: operations["ordersDraftPromote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List quote drafts
+         * @description The cursor list envelope, newest first on created_at then id (never updated_at: a keyset on a column that moves would repeat or skip rows). Filters status (open, promoted, discarded), subject_id (the open proposals on one quote) and created_by_kind; total appears only under include=total. Drafts are shared, not owned: any caller the kind admits sees every draft of the branch wall it reads through.
+         */
+        get: operations["quotesDraftList"];
+        put?: never;
+        /**
+         * Create a quote draft
+         * @description A create draft (subject_id null) carries the quote create request as its payload; an edit draft names the quote it edits and may assert subject_revision (a mismatch is 409 stale_revision with the subject_stale blocker). The payload is the module's own body, never a file and never a revision of its own; the branch is fixed at create. validation is computed from the payload alone on every read, so an unfinished draft saves.
+         */
+        post: operations["quotesDraftCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/feed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The quote drafts change feed
+         * @description A text/event-stream of the draft change rows, never payloads: event ready opens with the head cursor, event draft carries each write's summary with its by actor, event cursor advances a filtered stream past rows its filters exclude, event reset tells a resuming client its cursor aged out behind the purge, and event reauth closes the stream at the token's exp, the lifetime bound or a revoked key. The cursor resumes through Last-Event-ID (which wins when both are present) or the cursor parameter; any other parameter is a 400 before the stream opens.
+         */
+        get: operations["quotesDraftFeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a quote draft
+         * @description The draft with its payload and its computed validation; the ETag is the revision. A draft outside the caller's branch wall is a 404.
+         */
+        get: operations["quotesDraftGet"];
+        /**
+         * Replace a quote draft's payload
+         * @description The whole-payload compare and swap: If-Match or the body revision is required (428 without), a moved revision is 409 stale_revision, and any status but open is 409 with the draft_not_open blocker (an edit is not a transition). subject_revision may move forward, never past the subject's current revision.
+         */
+        put: operations["quotesDraftReplace"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard or reopen a quote draft
+         * @description open to discarded and discarded to open, on the revision precondition; promoted is terminal (its retry is told already_promoted) and anything else is an invalid state transition. Discard is reversible by reopen; the audit trail keeps who did what.
+         */
+        post: operations["quotesDraftTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/quotes/{id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote a quote draft, in one transaction
+         * @description The confirm: exactly the revision the committer read becomes a quote (428 without a precondition, 409 stale_revision on a moved one, 409 already_promoted on a keyless retry, 409 draft_discarded), born in status draft with its Q- number and quote.created, beside draft.promoted. The body carries nothing but the revision: what is committed is what was reviewed. A failure rolls the whole transaction back and the draft stays open at the same revision, with the module's own error carried out (payload.-prefixed fields on a 400, subject_stale added when the subject moved).
+         */
+        post: operations["quotesDraftPromote"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1845,7 +2142,7 @@ export interface paths {
         put?: never;
         /**
          * Reverse a posted journal entry
-         * @description Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. Every refusal, including an unknown id, is a 400.
+         * @description Role guard admin or owner. Books a posted, net-zero reversing entry dated today and linked by reverses_entry_id. The optional body reason is appended to the memo; an undecodable or absent body is ignored. Only a POSTED entry that has not already been reversed and has at least 2 lines can be reversed. The reversal posts in the original entry's own currency (the entry priced its legs into that currency, so a reversal in the currency.default setting's code would leave the control account holding both halves of one undo in different currencies). Every refusal, including an unknown id, is a 400.
          */
         post: operations["glJournalEntryReverse"];
         delete?: never;
@@ -2003,15 +2300,15 @@ export interface paths {
         };
         /**
          * List RFCs
-         * @description Admin or owner only. Newest first. Not paginated. Answers null, not an empty array, when there are no RFCs.
+         * @description The cursor list envelope, newest first, one summary per RFC (the body never rides the list). status filters on the lowercase vocabulary (a comma separated list); total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary (uppercase included), a malformed cursor or an out of range limit is a 400.
          */
-        get: operations["governanceListRfcs"];
+        get: operations["governanceListRFCs"];
         put?: never;
         /**
          * Draft an RFC
-         * @description Admin or owner only. The content is expanded from a fixed Markdown template (no model is called). The new RFC is always status draft. The request keys are the Go field names matched case insensitively; the snake_case spelling of ProblemStatement, ProposedSolution and AuthorID is ignored without an error.
+         * @description Creates an RFC in draft. The content is generated from the triple by the provider (a template today), never sent by the client; a request carrying content, status or revision is a 400 naming the field. The number is minted from the sequence (RFC-000001), the create, its audit row and rfc.created are one transaction, and the answer carries the revision and its ETag.
          */
-        post: operations["governanceCreateRfc"];
+        post: operations["governanceCreateRFC"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2026,16 +2323,36 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get an RFC
-         * @description Admin or owner only. Any lookup failure, including a database fault, answers 404.
+         * Read one RFC
+         * @description The full document with its revision and ETag.
          */
-        get: operations["governanceGetRfc"];
+        get: operations["governanceGetRFC"];
         /**
-         * Replace an RFC's editable fields
-         * @description Admin or owner only. A full overwrite: title, status, problem statement, proposed solution and content are all set from the body, so an omitted key blanks the stored value. Status is not validated by the handler and the database has no check on it: any string up to 50 characters is stored (an empty one when the key is omitted), and only a longer one is a 500. An unknown id is a 500, not a 404.
+         * Update an RFC
+         * @description Every editable field is optional: nil leaves it alone. status moves through the transitions route (a request carrying it is a 400 naming it and pointing there); author_id is set once at create. Takes If-Match or the body revision (428 without, 409 stale) and answers the document with its new revision and ETag. An RFC under review may still be edited; an approved or rejected one refuses the edit with a 409 blocker until it is reopened.
          */
-        put: operations["governanceUpdateRfc"];
+        put: operations["governanceUpdateRFC"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/governance/rfcs/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move an RFC along its lifecycle
+         * @description The allowed edges are draft to review, review to approved, review to rejected and rejected back to draft (a reopen); approved is terminal. A forbidden edge is a 409 invalid_state_transition. Takes If-Match or the body revision like every write, and writes the transition's event (rfc.review, rfc.approved, rfc.rejected, rfc.reopened).
+         */
+        post: operations["governanceTransitionRFC"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2383,7 +2700,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List invoices */
+        /**
+         * List invoices
+         * @description The cursor list envelope, newest first (created_at, then id). status filters on the lowercase lifecycle vocabulary (a comma separated list); customer_id, job_id, ship_to_id and order_id filter on their document; overdue=true lists the open invoices past their due date and overdue=false the rest. total appears only under include=total. A parameter the route does not declare, a status outside the vocabulary (overdue is not one), a malformed cursor or an out of range limit is a 400.
+         */
         get: operations["invoiceList"];
         put?: never;
         post?: never;
@@ -2400,7 +2720,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get one invoice with lines */
+        /**
+         * Get one invoice with lines
+         * @description The invoice with every line (id, description, quantity, unit price, line total, cost), its status and open amount, and its ETag.
+         */
         get: operations["invoiceGet"];
         put?: never;
         post?: never;
@@ -2410,7 +2733,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/invoices/{id}/credit-memo": {
+    "/api/v1/invoices/{id}/transitions": {
         parameters: {
             query?: never;
             header?: never;
@@ -2419,8 +2742,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Create and apply a credit memo against an invoice */
-        post: operations["invoiceCreateCreditMemo"];
+        /**
+         * Void an invoice
+         * @description The only client transition is void (roles admin, owner, finance; a reason is required). unpaid, partial, paid and written_off are derived by payments and credit memos, so asking for one is 409 invalid_state_transition. A void is refused with the blocker has_applications while the invoice has a live application (a payment, an applied credit memo, a discount or a write off), and with has_credit_memos while a credit memo that is not void names it. It runs in one transaction: it locks the invoice's order row first, reverses the invoice's whole journal entry (dated the void date), returns its billed stock to on hand, reduces the order lines' fulfilled quantities, re-runs allocation for those quantities and derives the order status; the subledger is credited back. The number is kept; nothing deletes an invoice. Writes invoice.voided (and order.backordered when the order cannot re-allocate) last.
+         */
+        post: operations["invoiceTransition"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2447,15 +2773,266 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/credit-memos/{customerId}": {
+    "/api/v1/credit-memos": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List a customer's credit memos */
-        get: operations["invoiceListCreditMemos"];
+        /**
+         * List credit memos
+         * @description The cursor list envelope, newest first. status filters on the lowercase vocabulary (draft, open, partial, applied, void; a comma separated list); customer_id, invoice_id and job_id filter on their document. total appears only under include=total.
+         */
+        get: operations["creditMemoList"];
+        put?: never;
+        /**
+         * Create a draft credit memo
+         * @description Creates the credit memo in draft: no number (it is minted at post, so a voided draft consumes none), lines built and totalled, tax at the invoice's rate and never more than the invoice charged less what earlier credit memos credited. A line that names an invoice line cannot credit more than it billed less what earlier credit memos returned (409 exceeds_billed). The branch is held to the caller's branch (403 naming branch_id). Writes credit_memo.created.
+         */
+        post: operations["creditMemoCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-memos/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one credit memo with lines
+         * @description The credit memo with every line and its ETag.
+         */
+        get: operations["creditMemoGet"];
+        /**
+         * Replace a draft credit memo
+         * @description Replaces the header fields and the lines, in draft only: in any other status it is 409 with the blocker credit_memo_not_draft. The customer and the invoice are fixed at create. The revision precondition applies (If-Match or the body revision). Writes credit_memo.updated.
+         */
+        put: operations["creditMemoUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-memos/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Post or void a credit memo
+         * @description draft to open posts the credit memo (roles admin, owner, finance): it locks the invoice it names (409 invoice_void when that invoice is void), recomputes its lines against what was posted, restocks the lines that restock, mints the gapless CM- number, posts the balanced entry (revenue and tax back, receivable down, and for a restocked line the cost back to inventory and out of cost of goods sold at the original cost) and the subledger credit, and writes credit_memo.posted last. draft to void ends a draft and consumes no number; open to void (roles admin, owner, finance; a reason is required) reverses the entry and the restock and puts the credit back on the receivable. partial and applied are reached by applications and refunds (POST /credit-memos/{id}/applications and /refunds) and reopened by reversing an application; asking for them here is 409 invalid_state_transition. A credit memo is voided from open only while no application or refund has used it (409 has_applications). Writes credit_memo.posted or credit_memo.voided.
+         */
+        post: operations["creditMemoTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{id}/write-offs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Write off part or all of an invoice's open amount
+         * @description Roles admin, owner, finance; a reason is required. Writes an amount of an unpaid or partial invoice off as bad debt: DR 5040 / CR 1020, a WRITE_OFF application and a WRITE_OFF subledger row. A write off that takes the open amount to zero closes the invoice as written_off, else it stays partial. The precondition is the invoice's revision. Refused with 409 exceeds_open_amount, invalid_state_transition (the invoice is neither unpaid nor partial) or period_closed. Writes invoice.written_off when it closes the invoice, else invoice.partial, and customer.updated. Reversing the application (POST /ar/applications/{id}/reverse) reopens the invoice.
+         */
+        post: operations["invoiceWriteOff"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/invoices/{id}/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List an invoice's applications
+         * @description The applications that settled (or settle) the invoice: payment applications, credit memo applications, early pay discounts and write offs, oldest first, reversed ones included with their reversal. The path keeps its name; the payments of a legacy invoice are its PAYMENT applications.
+         */
+        get: operations["invoiceApplications"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-memos/{id}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a credit memo's open credit to invoices
+         * @description Uses the open credit of an open or partial credit memo on invoices of the same customer and currency. No ledger entry (both sides are in 1020) and no subledger row; each application is a CREDIT_MEMO application. The precondition is the credit memo's revision. Refused with 409 exceeds_open_credit, exceeds_open_amount, invoice_void, customer_mismatch or currency_mismatch. Writes credit_memo.partial or credit_memo.applied, and invoice.partial or invoice.paid per invoice.
+         */
+        post: operations["creditMemoApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a quote to every frontend's record URL
+         * @description The quote's links: the desk record path (absolute when GABLE_PUBLIC_URL is set, origin relative otherwise), the front door's open form (which signs a person in and then opens the record), gable:// for the shell, a null portal until it has record screens, and the agent slot from GABLE_AGENT_URL_TEMPLATE (null when unset). A record the caller cannot see is the same 404 a missing one gets.
+         */
+        get: operations["linksQuoteResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve an order to every frontend's record URL
+         * @description The order's links; the {id} slot is a UUID or an order number such as SO-000123.
+         */
+        get: operations["linksOrderResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/invoices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve an invoice to every frontend's record URL
+         * @description The invoice's links; the {id} slot is a UUID or an invoice number such as IN-000123.
+         */
+        get: operations["linksInvoiceResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/customers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a customer to every frontend's record URL
+         * @description The customer's links (the desk's accounts area); the {id} slot is a UUID (customers carry no document number, so number is null and the segment is the UUID).
+         */
+        get: operations["linksCustomerResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/products/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a product to every frontend's record URL
+         * @description The product's links (the desk's inventory area); the {id} slot is a UUID and number is null.
+         */
+        get: operations["linksProductResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/drafts/quotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a quote draft to every frontend's record URL
+         * @description The draft's links (the desk's quote drafts editor); the {id} slot is the draft's UUID (a draft has no number). The draft link needs the confirm verbs, not the module read scope: proposals are unfinished work an existing read key must not start reading.
+         */
+        get: operations["linksQuoteDraftResolve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/links/drafts/orders/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve an order draft to every frontend's record URL
+         * @description The draft's links (the desk's order drafts editor); the {id} slot is the draft's UUID.
+         */
+        get: operations["linksOrderDraftResolve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2784,15 +3361,35 @@ export interface paths {
         };
         /**
          * List the options of a category
-         * @description Admin, owner or sales. Ordered by name. Not paginated. Answers null, not an empty array, when the category has no options.
+         * @description The cursor list envelope, newest first on (created_at, id); total appears only under include=total. category is required and filters; a parameter the route does not declare, a missing or repeated category, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["millworkListOptions"];
         put?: never;
         /**
          * Create an option
-         * @description Admin, owner or sales. No field is validated by the handler; a value the table refuses (a category over 50 characters, a name over 100) surfaces as a 500.
+         * @description category (at most 50 characters), name (at most 100) and price_adjustment_cents are required; the adjustment may be negative (a discount option); attributes is any JSON the dealer sends, stored as sent and null when absent. Writes the audit row millwork_option.created and the event millwork_option.created in the same transaction, the event last.
          */
         post: operations["millworkCreateOption"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/millwork/options/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one option
+         * @description The option with its ETag, so the create's Location resolves.
+         */
+        get: operations["millworkGetOption"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3071,13 +3668,114 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * List payments
+         * @description The cursor list envelope, newest first (created_at, then id). customer_id, order_id and job_id filter on their document; status and method take comma separated lowercase lists; unapplied=true lists the posted payments that still hold unapplied cash and unapplied=false the rest. total appears only under include=total. A parameter the route does not declare, a value outside its vocabulary, a malformed cursor or an out of range limit is a 400.
+         */
+        get: operations["paymentList"];
+        put?: never;
+        /**
+         * Record a payment
+         * @description Records a posted payment for a customer (cash, check, ach or other; a card is taken through POST /payments/card, and account is not a payment). The whole amount is posted to 2200 (DR 1010 / CR 2200). Without applications the payment is unapplied cash. With applications each invoice takes its cash (and an early pay discount, on or before the invoice's discount date, up to what its terms allow) in the same transaction, each application its own entry (DR 2200 / CR 1020) and subledger row. Refused with 409 and a blocker: exceeds_unapplied, exceeds_open_amount, invoice_void, customer_mismatch, currency_mismatch, discount_not_available, period_closed. Writes payment.recorded, then payment.applied and invoice.partial or invoice.paid per invoice, then customer.updated (part balance).
+         */
+        post: operations["paymentCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one payment with its applications and refunds */
+        get: operations["paymentGet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         get?: never;
         put?: never;
         /**
-         * Record a non card payment
-         * @description Cash, check or account payments against an invoice.
+         * Apply a payment's unapplied cash to invoices
+         * @description Applies unapplied cash later, partly, across many invoices; each application posts its own DR 2200 / CR 1020 entry and a PAYMENT subledger row. The precondition is the payment's revision. Refused with 409 exceeds_unapplied, exceeds_open_amount, invoice_void, payment_voided, customer_mismatch, currency_mismatch, discount_not_available or period_closed. Writes payment.applied, invoice.partial or invoice.paid per invoice, and customer.updated.
          */
-        post: operations["paymentCreate"];
+        post: operations["paymentApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Void a payment
+         * @description The only client transition is voided (roles admin, owner, finance; a reason is required). It reverses every live application (with its discounts), then posts the void entry (DR 2200 / CR 1010) for the amount still unapplied, which is the amount less refunds; a payment with refunds can be voided and the void covers only what was not refunded. A card payment is refused with 409 card_payment (it is refunded through the gateway). Writes payment.unapplied per reversed application, invoice.reopened per invoice, customer.updated and payment.voided.
+         */
+        post: operations["paymentTransition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/{id}/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refund a payment's unapplied cash
+         * @description Pays unapplied cash back out (DR 2200 / CR 1010), limited to the unapplied amount (409 exceeds_unapplied). A card payment is refunded through the gateway before the transaction. The precondition is the payment's revision. Writes payment.refunded.
+         */
+        post: operations["paymentRefund"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/credit-memos/{id}/refunds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pay a credit memo's open credit out
+         * @description Roles admin, owner, finance. Pays the open credit of an open or partial credit memo out (DR 1020 / CR 1010) by check, ach, other or card (a card refund names the card payment it goes back to and goes through the gateway before the transaction), limited to the open credit (409 exceeds_open_credit). The credit leaves the receivable: a REFUND subledger row. The precondition is the credit memo's revision. Writes credit_memo.refunded, then credit_memo.partial or credit_memo.applied, and customer.updated.
+         */
+        post: operations["creditMemoRefund"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3115,46 +3813,9 @@ export interface paths {
         put?: never;
         /**
          * Charge a tokenized card
-         * @description A charge captured at the gateway whose persistence then fails is a generic 402; the token is never echoed back.
+         * @description Charges the gateway (outside the transaction, in the customer's currency), then records and applies the payment as POST /payments does. An invoice that cannot take the payment (void, over open) is refused before the card is charged. When the system refuses the payment after the gateway approved the charge (409), the charge is voided (same day) or refunded before the refusal returns, and the message says which. When the void and the refund both fail the route answers 502 with code charge_not_reversed and a message saying the card was charged and finance must reconcile the named gateway transaction id (the id and nothing else about the card); the attempt is on record as the audit row payment.charge_reversal. A declined card or a gateway fault before anything is recorded is 402 payment_required. The token is never echoed back.
          */
         post: operations["paymentCard"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/payments/refund": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Refund a card payment in part or full */
-        post: operations["paymentRefund"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/invoices/{id}/payments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List an invoice's payments
-         * @description Registered by the payment module on the invoice's path.
-         */
-        get: operations["paymentHistory"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3914,7 +4575,7 @@ export interface paths {
         put?: never;
         /**
          * Replay offline transactions
-         * @description A missing batch_id or an empty items list answers 400.
+         * @description A missing batch_id, an empty items list, or a register_id that is empty or names no register answers 400 for every caller.
          */
         post: operations["posSync"];
         delete?: never;
@@ -3986,7 +4647,7 @@ export interface paths {
         };
         /**
          * Live X report of a session
-         * @description An unknown session answers 500.
+         * @description An unknown session, or a session the caller's branch context hides, answers 404 like the Z report read.
          */
         get: operations["posTillReport"];
         put?: never;
@@ -4831,6 +5492,30 @@ export interface paths {
         patch: operations["productUpdateLeadTime"];
         trace?: never;
     };
+    "/api/v1/products/{id}/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a product's unit set
+         * @description The set, the four defaults, the board measure facts the derivations read and the product's revision.
+         */
+        get: operations["productUnitSetGet"];
+        /**
+         * Replace a product's unit set
+         * @description The whole set and the four default columns in one transaction at the product's revision. The derivations of ADR 0006 section 3.2 complete rows that arrive without a pair; the stocking unit holds of section 3.2 refuse their cases with 409 blockers (stock_unit_in_use, unit_in_use, price_unit_held); until C3-2B the price unit is the stocking unit (a PUT naming another is a 400 naming price_uom). The answer carries the completed set and the warnings.
+         */
+        put: operations["productUnitSetPut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/products/{id}/kit-components": {
         parameters: {
             query?: never;
@@ -4864,13 +5549,13 @@ export interface paths {
         };
         /**
          * The customer's jobs
-         * @description A bare array, newest created first, no page envelope.
+         * @description The cursor list envelope, newest first on (created_at, id). status filters (lowercase); total appears only under include=total. A parameter the route does not declare, a status outside the lowercase vocabulary, a malformed cursor or an out of range limit is a 400.
          */
         get: operations["projectList"];
         put?: never;
         /**
          * Create a job
-         * @description An empty name is a 500 today (the handler's status is fixed). The project starts Active.
+         * @description name is required (1 to 255 characters); the project starts active and no status is accepted on create. Writes the audit row project.created and the event project.created in the same transaction, the event last.
          */
         post: operations["projectCreate"];
         delete?: never;
@@ -4888,12 +5573,12 @@ export interface paths {
         };
         /**
          * One job with its orders, deliveries and invoices
-         * @description The dashboard aggregate. Scoped to the caller; any failure, including another customer's project, is the handler's fixed 404.
+         * @description The dashboard aggregate with the project's ETag. Scoped to the caller: another customer's project is a 404. Item statuses are lowercase summaries of each document's own status; totals are integer cents (null on a delivery, which carries no money).
          */
         get: operations["projectGetDashboard"];
         /**
          * Rename a job or change its status
-         * @description Partial update; absent fields keep their values. An empty name or a status outside Active and Completed is a 500 today (the handler's status is fixed), and so is a project the caller does not own.
+         * @description Partial update on the client's revision: If-Match or a body revision, neither is 428, a stale one 409 stale_revision, an If-Match of * or a list 400, header and body disagreeing 400. Absent fields keep their values; status accepts active or completed. Writes the audit row project.updated and the event project.updated (with the changed field list) in the same transaction, the event last.
          */
         put: operations["projectUpdate"];
         post?: never;
@@ -5359,7 +6044,11 @@ export interface paths {
          * @description Streams the stored original upload of an AI sourced quote. The stored content type is echoed; the filename in Content-Disposition is sanitized. A quote with no stored file, or no such quote, is a 404.
          */
         get: operations["quoteDownloadOriginalFile"];
-        put?: never;
+        /**
+         * Attach the AI parse's original file after promotion
+         * @description The raw file bytes with their content type, the same 5 MiB bound the create applies (413 above it): the quote draft never carries the file (every autosave re-sends the payload and every feed subscriber re-reads it), so the parse flow attaches it here, by the committer, right after a promotion. Accepted only while the quote is in status draft (else 409 with the quote_not_draft blocker), on the revision precondition; it replaces any file already stored, moves the quote's revision by one, returns the quote with its new ETag, and writes the quote.file_attached audit row and no outbox event.
+         */
+        put: operations["quoteAttachFile"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5773,6 +6462,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/units": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List units
+         * @description The keyset envelope of ADR 0001 section 1, ordered units.code, with the dimension and is_active filters.
+         */
+        get: operations["unitList"];
+        put?: never;
+        /**
+         * Create a unit
+         * @description A dealer unit. The code is immutable and must match ^[A-Z]{1,6}$; the dimension and the standard size are immutable once any product unit set or line names the unit. Seeded rows cannot be created again: a duplicate code is a 409.
+         */
+        post: operations["unitCreate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/units/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a unit
+         * @description The unit row with its standard size in canonical form.
+         */
+        get: operations["unitGet"];
+        /**
+         * Update a unit
+         * @description name and is_active always; the dimension and the standard size only while the unit is neither a system row nor named by any product unit set row or line. Deactivation is the only removal: a field the PUT cannot change (code, is_system) is a 400 naming it.
+         */
+        put: operations["unitUpdate"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/uploads/": {
         parameters: {
             query?: never;
@@ -5871,7 +6608,7 @@ export interface components {
         WireError: {
             error: {
                 /** @enum {string} */
-                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
+                code: "bad_request" | "validation_failed" | "unsupported_query_parameter" | "unauthorized" | "forbidden" | "not_found" | "method_not_allowed" | "stale_revision" | "duplicate" | "idempotency_in_progress" | "invalid_state_transition" | "conflict" | "payment_required" | "charge_not_reversed" | "precondition_failed" | "payload_too_large" | "unsupported_media_type" | "idempotency_key_reused" | "precondition_required" | "rate_limited" | "internal_error" | "unavailable";
                 message: string;
                 details?: components["schemas"]["WireErrorDetail"][];
             };
@@ -5961,85 +6698,311 @@ export interface components {
         AccountSummary: {
             /** Format: uuid */
             customer_id: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
             /**
              * Format: int64
-             * @description Cents.
+             * @description null for no limit; 0 is no credit.
              */
-            balance_due: number;
+            credit_limit_cents: number | null;
             /**
              * Format: int64
-             * @description Cents.
+             * @description Limit less balance; null for no limit.
              */
-            credit_limit: number;
+            available_credit_cents: number | null;
             /**
              * Format: int64
-             * @description Cents.
+             * @description Open credit memos plus unapplied cash, negative or zero.
              */
-            available_credit: number;
+            unapplied_cents: number;
         };
-        CustomerTransaction: {
+        /** @enum {string} */
+        AccountTransactionType: "INVOICE" | "PAYMENT" | "ADJUSTMENT" | "REFUND" | "CREDIT_MEMO" | "DISCOUNT" | "WRITE_OFF" | "REVERSAL";
+        AccountTransaction: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             customer_id: string;
-            /** @enum {string} */
-            type: "INVOICE" | "PAYMENT" | "ADJUSTMENT" | "REFUND";
+            type: components["schemas"]["AccountTransactionType"];
             /**
              * Format: int64
-             * @description Cents.
+             * @description Signed, debit positive.
              */
-            amount: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            balance_after: number;
+            amount_cents: number;
+            /** Format: int64 */
+            balance_after_cents: number;
+            currency: string;
+            /** @description invoice, credit_memo, application, refund or pos_return; null on a row written before cycle 2. */
+            source_kind: string | null;
             /** Format: uuid */
             reference_id: string | null;
             description: string;
             /** Format: date-time */
             created_at: string;
         };
+        AccountTransactionPage: {
+            items: components["schemas"]["AccountTransaction"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
         /** @enum {string} */
-        ActivityType: "CALL" | "MEETING" | "EMAIL" | "NOTE";
-        /** @description crm.Activity. contact_id and logged_by are omitted when unset. The customer routes of the customer fragment return the same schema. */
+        ArApplicationKind: "payment" | "credit_memo" | "discount" | "write_off";
+        /** @description The one record of AR being settled; a reversed application is never deleted. */
+        ArApplication: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            customer_id: string;
+            currency: string;
+            kind: components["schemas"]["ArApplicationKind"];
+            /** Format: uuid */
+            payment_id: string | null;
+            /** Format: uuid */
+            credit_memo_id: string | null;
+            /** Format: uuid */
+            invoice_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** @description Required for a write off. */
+            reason: string | null;
+            /** Format: date */
+            applied_on: string;
+            applied_by: string | null;
+            /**
+             * Format: uuid
+             * @description Groups the applications one request made.
+             */
+            act_id: string;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            reversed_at: string | null;
+            reversed_by: string | null;
+            reversal_reason: string | null;
+            /** Format: uuid */
+            reversal_gl_entry_id: string | null;
+            /** Format: date */
+            reversed_on: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ArApplicationReverseRequest: {
+            reason: string;
+        };
+        ArAgingItem: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            job_id: string | null;
+            job_name: string | null;
+            /** Format: uuid */
+            ship_to_id: string | null;
+            ship_to_code: string | null;
+            currency: string;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            unapplied_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+        };
+        ArAgingPage: {
+            items: components["schemas"]["ArAgingItem"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        ArAgingTotal: {
+            currency: string;
+            /** Format: int64 */
+            current_cents: number;
+            /** Format: int64 */
+            days_1_30_cents: number;
+            /** Format: int64 */
+            days_31_60_cents: number;
+            /** Format: int64 */
+            days_61_90_cents: number;
+            /** Format: int64 */
+            over_90_cents: number;
+            /** Format: int64 */
+            unapplied_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+        };
+        ArAgingSummary: {
+            /** Format: date */
+            as_of: string;
+            /** @enum {string} */
+            basis: "due_date" | "invoice_date";
+            totals: components["schemas"]["ArAgingTotal"][];
+        };
+        ArStatementLine: {
+            /** Format: uuid */
+            id: string;
+            /** Format: date */
+            date: string;
+            type: components["schemas"]["AccountTransactionType"];
+            description: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** Format: int64 */
+            balance_after_cents: number;
+            source_kind: string | null;
+            /** Format: uuid */
+            reference_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+        };
+        ArOpenDocument: {
+            /** @enum {string} */
+            kind: "invoice" | "credit_memo";
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: date */
+            date: string;
+            /** Format: date */
+            due_date: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: int64 */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description Negative for a credit memo.
+             */
+            open_cents: number;
+        };
+        ArStatementCurrency: {
+            currency: string;
+            /** Format: int64 */
+            opening_balance_cents: number;
+            lines: components["schemas"]["ArStatementLine"][];
+            /** Format: int64 */
+            closing_balance_cents: number;
+            open_documents: components["schemas"]["ArOpenDocument"][];
+        };
+        ArStatement: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: date */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** Format: uuid */
+            job_id: string | null;
+            currencies: components["schemas"]["ArStatementCurrency"][];
+        };
+        ArDriftRow: {
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            currency: string;
+            /** Format: int64 */
+            balance_cents: number;
+            /** Format: int64 */
+            subledger_cents: number;
+            /** Format: int64 */
+            documents_cents: number;
+        };
+        ArLedgerRow: {
+            currency: string;
+            /** Format: int64 */
+            receivable_ledger_cents: number;
+            /** Format: int64 */
+            balance_sum_cents: number;
+            /** Format: int64 */
+            deposits_ledger_cents: number;
+            /** Format: int64 */
+            unapplied_sum_cents: number;
+            receivable_in_sync: boolean;
+            deposits_in_sync: boolean;
+        };
+        ArReconciliation: {
+            customers: components["schemas"]["ArDriftRow"][];
+            currencies: components["schemas"]["ArLedgerRow"][];
+        };
+        /**
+         * @description Lowercase on the wire (ADR 0001 section 6); the storage vocabulary stays uppercase.
+         * @enum {string}
+         */
+        ActivityType: "call" | "meeting" | "email" | "note";
+        /** @description One logged activity. Optional fields are present as null, never omitted. The response is the stored row: every field reads back its own value. */
         Activity: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             customer_id: string;
             /** Format: uuid */
-            contact_id?: string;
+            contact_id: string | null;
             activity_type: components["schemas"]["ActivityType"];
+            /** @description 1 to 4000 characters. */
             description: string;
             /** Format: uuid */
-            logged_by?: string;
+            logged_by: string | null;
             /** Format: date-time */
             activity_date: string;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The Activity decoded from the body; a missing or unknown activity_type answers 400. */
-        ActivityUpdate: {
+        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
+        ActivityRequest: {
             /** Format: uuid */
-            contact_id?: string;
+            contact_id?: string | null;
             activity_type: components["schemas"]["ActivityType"];
-            description?: string;
+            description: string;
             /** Format: uuid */
-            logged_by?: string;
-            /** Format: date-time */
+            logged_by?: string | null;
+            /**
+             * Format: date-time
+             * @description Optional; defaults to now on create, keeps its stored value on update when absent.
+             */
             activity_date?: string;
+            /**
+             * Format: int64
+             * @description The body revision, on update only. A create carrying one is a 400.
+             */
+            revision?: number;
         };
-        /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never serialized. prefix is the first 12 characters of the raw key (sk_live_ plus four). */
-        TechAdminKey: {
-            /** @description A database UUID rendered as text. */
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ActivityPage: {
+            items: components["schemas"]["Activity"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
+        };
+        /** @description Go type techadmin.APIKey. The hash field is tagged out of the JSON and never leaves the package; only the 12 character prefix identifies a key. */
+        ApiKey: {
+            /** Format: uuid */
             id: string;
             name: string;
             prefix: string;
-            /** @description Null when the key was created without scopes. */
-            scopes: string[] | null;
+            scopes: string[];
+            /**
+             * Format: uuid
+             * @description The branch a branch bound key is pinned to (ADR 0007 section 5.5), set at mint and never edited; null is today's unbound behaviour.
+             */
+            branch_id: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -6047,175 +7010,237 @@ export interface components {
             /** Format: date-time */
             revoked_at: string | null;
         };
-        /** @description Go type techadmin.CreateKeyRequest. Nothing is validated. */
-        TechAdminCreateKeyRequest: {
-            name?: string;
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ApiKeyPage: {
+            items: components["schemas"]["ApiKey"][];
+            next_cursor: string | null;
+            limit: number;
+            total?: number;
+        };
+        /** @description Go type techadmin.CreateKeyRequest. Scopes are minted verbatim; validation of the grammar is C5-2a's. */
+        AdminCreateKeyRequest: {
+            name: string;
             scopes?: string[];
         };
-        /** @description Go type techadmin.CreateKeyResponse. */
-        TechAdminCreateKeyResponse: {
-            /** @description The raw secret key, returned this once and never retrievable again. */
+        /** @description Go type techadmin.CreatedKey. The raw key appears here and nowhere else. */
+        AdminCreateKeyResponse: {
             api_key: string;
-            key: components["schemas"]["TechAdminKey"] | null;
+            key: components["schemas"]["ApiKey"];
         };
-        /** @description Go type techadmin.AISettingsResponse, used by both the AI and routing settings. The key itself is never present. key_hint and base_url are omitted when empty. */
-        TechAdminSettingsStatus: {
+        /** @description Go type techadmin.AISettings. source is admin (a stored override), env (a key from the environment only) or none. key_hint and base_url are null when absent, never omitted. */
+        AISettings: {
             configured: boolean;
-            /**
-             * @description admin when a database override holds the key, env when only the environment does, none when unset.
-             * @enum {string}
-             */
-            source: "admin" | "env" | "none";
-            /** @description First 10 and last 4 characters of the key joined by three dots, or four asterisks for a key of 12 characters or fewer. */
-            key_hint?: string;
-            /** @description The admin override of the OpenRouter base URL; AI settings only. */
-            base_url?: string;
-        };
-        /** @description The anonymous request struct of SaveAISettings. */
-        TechAdminSaveAISettingsRequest: {
-            /** @description The OpenRouter key. Never returned by any route. */
-            api_key: string;
-            /** @description Absent or null leaves the override as is; empty clears it; otherwise an absolute https URL (http only for loopback hosts). */
-            base_url?: string | null;
-        };
-        /** @description The anonymous request struct of SaveRoutingSettings. */
-        TechAdminSaveRoutingSettingsRequest: {
-            /** @description The OpenRouteService key. Never returned by any route. */
-            api_key: string;
-        };
-        /** @description The map literal both save routes answer. */
-        TechAdminSaveResult: {
             /** @enum {string} */
-            status: "saved";
+            source: "admin" | "env" | "none";
+            key_hint: string | null;
+            base_url: string | null;
+            revision: number;
         };
-        /** @description Go type staff.Staff. staff_no is a pointer with omitempty, absent when unset. modules is the raw set of granted module ids, not filtered by the global enable flag. */
+        /** @description Go type techadmin.RoutingSettings, the AI settings' shape without the base URL. */
+        RoutingSettings: {
+            configured: boolean;
+            /** @enum {string} */
+            source: "admin" | "env" | "none";
+            key_hint: string | null;
+            revision: number;
+        };
+        /** @description Go type techadmin.SaveAISettingsRequest. base_url is a pointer: absent leaves the override, empty clears it, a URL sets it. revision is the body form of the If-Match precondition. */
+        AdminSaveAISettingsRequest: {
+            api_key: string;
+            base_url?: string | null;
+            revision?: number;
+        };
+        /** @description Go type techadmin.SaveRoutingSettingsRequest. */
+        AdminSaveRoutingSettingsRequest: {
+            api_key: string;
+            revision?: number;
+        };
+        /** @description Go type staff.Staff. A member of the dealer roster, the identity AI_LM authenticates against; role is a free text label, and modules is the raw grant set, never null and not filtered by the global enable flag. */
         StaffMember: {
             /** Format: uuid */
             id: string;
             email: string;
             full_name: string;
-            staff_no?: string;
-            /** @description A free text label, default staff; it does not govern module access. */
+            staff_no: string | null;
             role: string;
             active: boolean;
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
             modules: string[];
         };
-        /** @description Go type staff.CreateStaffInput. Empty email or full_name is a 400. */
-        StaffCreateRequest: {
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        StaffPage: {
+            items: components["schemas"]["StaffMember"][];
+            next_cursor: string | null;
+            limit: number;
+            total?: number;
+        };
+        /** @description Go type staff.CreateStaffInput. role defaults to staff, active to true, staff_no to null; a revision is refused. */
+        AdminCreateStaffRequest: {
             email: string;
             full_name: string;
             staff_no?: string | null;
-            /** @description Defaults to staff when empty. */
             role?: string;
-            /** @description Defaults to true when absent or null. */
-            active?: boolean | null;
+            active?: boolean;
         };
-        /** @description Go type staff.UpdateStaffInput. Absent or null means leave unchanged. */
-        StaffUpdateRequest: {
+        /** @description Go type staff.UpdateStaffInput. Every field is a pointer: nil leaves it alone; a null staff_no clears it. */
+        AdminUpdateStaffRequest: {
             email?: string | null;
             full_name?: string | null;
             staff_no?: string | null;
             role?: string | null;
             active?: boolean | null;
+            revision?: number;
         };
-        /** @description The unexported grantModuleRequest struct. An empty module_id is a 400. */
-        StaffGrantModuleRequest: {
+        /** @description Go type staff.GrantModuleInput. module_id must name a module in the catalog (ai_lm). */
+        AdminGrantModuleRequest: {
             module_id: string;
+            revision?: number;
         };
-        /** @description The bare map literal answered when the member re-read fails after a grant or revoke. */
-        StaffModuleStatus: {
-            /** @enum {string} */
-            status: "granted" | "revoked";
-        };
-        /** @description Go type staff.Module. */
+        /** @description Go type staff.Module. The global state of an integration module, the kill switch. */
         StaffModule: {
             id: string;
             name: string;
             enabled: boolean;
+            revision: number;
         };
-        /** @description The unexported setModuleEnabledRequest struct. An absent flag means false. */
-        StaffSetModuleEnabledRequest: {
-            enabled?: boolean;
+        /** @description The list envelope over the fixed module catalog. */
+        StaffModulePage: {
+            items: components["schemas"]["StaffModule"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        /** @description Go type staff.SetModuleEnabledInput. */
+        AdminSetModuleEnabledRequest: {
+            enabled: boolean;
+            revision?: number;
         };
         /** @description The map literal HandleAdminScan answers. */
         AdminExposureScanResult: {
             ok: boolean;
         };
-        /** @description A vendor bill (ap.VendorInvoice). Every money field is int64 cents. */
+        ApInvoicePage: {
+            items: components["schemas"]["ApVendorInvoiceSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        /** @description A vendor bill (ap.Invoice): Gable's own number as number, the vendor's as vendor_invoice_number, money in _cents, a lowercase status, the revision, and the entry the approval posted. Optional fields are present as null. */
         ApVendorInvoice: {
             /** Format: uuid */
             id: string;
+            /** @description Gable's own number, AP- and six or more digits. */
+            number: string;
             /** Format: uuid */
             vendor_id: string;
-            /** @description Joined from the vendor on reads and approve; omitted on the create echo. */
-            vendor_name?: string;
-            invoice_number: string;
-            /** Format: date-time */
+            vendor_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** @description The vendor's own number for the bill. */
+            vendor_invoice_number: string;
+            /** @description ISO 4217. */
+            currency: string;
+            /** Format: date */
             invoice_date: string;
-            /** Format: date-time */
+            /** Format: date */
             due_date: string;
             /** Format: uuid */
-            po_id?: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            subtotal: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            tax_amount: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            total: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount_paid: number;
+            po_id: string | null;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            amount_paid_cents: number;
+            /** Format: int64 */
+            amount_open_cents: number;
             /** @enum {string} */
-            status: "PENDING" | "APPROVED" | "PARTIAL" | "PAID" | "VOIDED";
+            status: "pending" | "approved" | "partial" | "paid" | "voided";
             /** Format: uuid */
-            approved_by?: string;
+            approved_by: string | null;
             /** Format: date-time */
-            approved_at?: string;
-            notes?: string;
+            approved_at: string | null;
+            notes: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            gl_entry_id: string | null;
             /** Format: date-time */
             created_at: string;
-            /** @description Present on the single read only. */
-            lines?: components["schemas"]["ApVendorInvoiceLine"][];
+            lines: components["schemas"]["ApVendorInvoiceLine"][];
         };
-        /** @description A vendor invoice line (ap.VendorInvoiceLine). unit_price and line_total are int64 cents. */
+        /** @description A vendor bill header (ap.Summary), the list item and the shape the full document embeds. */
+        ApVendorInvoiceSummary: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: uuid */
+            vendor_id: string;
+            vendor_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            vendor_invoice_number: string;
+            currency: string;
+            /** Format: date */
+            invoice_date: string;
+            /** Format: date */
+            due_date: string;
+            /** Format: uuid */
+            po_id: string | null;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** Format: int64 */
+            total_cents: number;
+            /** Format: int64 */
+            amount_paid_cents: number;
+            /** Format: int64 */
+            amount_open_cents: number;
+            /** @enum {string} */
+            status: "pending" | "approved" | "partial" | "paid" | "voided";
+            /** Format: uuid */
+            approved_by: string | null;
+            /** Format: date-time */
+            approved_at: string | null;
+            notes: string;
+            /** Format: int64 */
+            revision: number;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /** @description A vendor invoice line (ap.InvoiceLine). The quantity is a decimal string, the unit price is _ten_thousandths, and the extension is the server's one rounding. The purchase order line and freight charge links arrive with migration 106 and are written from package C's freight rule on (ADR 0008 7.3): today's lines are not linked. */
         ApVendorInvoiceLine: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            invoice_id: string;
+            position: number;
             description: string;
-            quantity: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            unit_price: number;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            line_total: number;
+            /** @description A plain decimal with at most 4 fraction digits. */
+            quantity: string;
+            /** Format: int64 */
+            unit_price_ten_thousandths: number;
+            /** Format: int64 */
+            line_total_cents: number;
             /** Format: uuid */
-            gl_account_id?: string;
+            gl_account_id: string | null;
+            /** Format: uuid */
+            purchase_order_line_id: string | null;
+            /** Format: uuid */
+            product_id: string | null;
+            /** Format: uuid */
+            po_freight_charge_id: string | null;
             /** Format: date-time */
             created_at: string;
         };
-        /** @description A payment to a vendor (ap.APPayment). amount is int64 cents. */
+        /** @description A payment to a vendor (ap.APPayment), in its today shape. amount is int64 cents. */
         ApPayment: {
             /** Format: uuid */
             id: string;
@@ -6233,7 +7258,7 @@ export interface components {
             method: "CHECK" | "ACH" | "WIRE";
             check_number?: string;
             reference?: string;
-            /** Format: date-time */
+            /** Format: date */
             payment_date: string;
             /** @description PENDING, COMPLETE or VOIDED. */
             status: string;
@@ -6271,43 +7296,75 @@ export interface components {
              */
             total: number;
         };
-        /** @description The create body. Dates are YYYY-MM-DD; tax_amount and line unit_price are float dollars today. */
+        /** @description The create body. Dates are YYYY-MM-DD; money is _cents and the line unit price is _ten_thousandths; the quantity is a decimal string; the server prices each line and never accepts a status. */
         ApCreateVendorInvoiceRequest: {
             /** Format: uuid */
-            vendor_id?: string;
-            invoice_number?: string;
+            vendor_id: string;
+            /**
+             * Format: uuid
+             * @description Defaults from the caller's context branch or the default branch.
+             */
+            branch_id?: string;
+            /** @description 1 to 64 characters, unique per vendor. */
+            vendor_invoice_number: string;
             /** Format: date */
-            invoice_date?: string;
+            invoice_date: string;
             /** Format: date */
-            due_date?: string;
+            due_date: string;
             /** Format: uuid */
             po_id?: string;
-            /** @description Float dollars today. */
-            tax_amount?: number;
+            /** @description An ISO 4217 code of three capital letters; defaults from the setting. */
+            currency?: string;
+            /** Format: int64 */
+            tax_cents?: number;
             notes?: string;
-            lines?: components["schemas"]["ApCreateVendorInvoiceLineRequest"][];
+            lines: components["schemas"]["ApCreateVendorInvoiceLineRequest"][];
         };
         ApCreateVendorInvoiceLineRequest: {
-            description?: string;
-            quantity?: number;
-            /** @description Float dollars today. */
-            unit_price?: number;
+            /** @description 1 to 256 characters. */
+            description: string;
+            /** @description A plain decimal with at most 4 fraction digits, more than zero. */
+            quantity: string;
+            /**
+             * Format: int64
+             * @description Never negative.
+             */
+            unit_price_ten_thousandths: number;
+            /**
+             * Format: uuid
+             * @description The account the approve entry debits for the line.
+             */
+            gl_account_id: string;
             /** Format: uuid */
-            gl_account_id?: string;
+            purchase_order_line_id?: string;
+            /** Format: uuid */
+            product_id?: string;
         };
-        /** @description The pay body. payment_date is YYYY-MM-DD; amount is float dollars today. */
+        /** @description The transition body. The revision, or If-Match, is required (ADR 0001 section 11). */
+        ApInvoiceTransitionRequest: {
+            /** @enum {string} */
+            to: "approved" | "voided";
+            /** Format: int64 */
+            revision?: number;
+            /** @description Required to void; at most 500 characters. */
+            reason?: string;
+        };
+        /** @description The pay body. The money is int64 cents like every other money field; the rest keeps its today shape until the payment routes' own conversion. */
         ApCreatePaymentRequest: {
             /** Format: uuid */
-            vendor_id?: string;
-            /** @description Float dollars today. */
-            amount?: number;
+            vendor_id: string;
+            /**
+             * Format: int64
+             * @description Cents; a decimal amount is a 400 naming the field.
+             */
+            amount_cents: number;
             /** @enum {string} */
-            method?: "CHECK" | "ACH" | "WIRE";
+            method: "CHECK" | "ACH" | "WIRE";
             check_number?: string;
             reference?: string;
             /** Format: date */
-            payment_date?: string;
-            /** @description Invoices this payment is applied to, in order. */
+            payment_date: string;
+            /** @description Bills this payment is applied to, in the order the desk pays them; a repeated id is a 400. */
             invoice_ids?: string[];
         };
         /** @description One catalog entry (Go type apps.Status, which embeds apps.Manifest). orphaned is present, and true, only for registry rows with no compiled in manifest; it is omitted otherwise. */
@@ -6523,7 +7580,7 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description Go type configurator.ConfiguratorRule. error_message is a pointer with omitempty, so it is absent when the database value is null. */
+        /** @description One dependency rule. error_message is present as null when the database value is null, never omitted (ADR 0001 section 12). */
         ConfiguratorRule: {
             /** Format: uuid */
             id: string;
@@ -6532,41 +7589,41 @@ export interface components {
             depends_on_type: string;
             depends_on_value: string;
             is_allowed: boolean;
-            error_message?: string;
+            error_message: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type configurator.ConfiguratorPreset. config is a Go byte slice, so it serializes as a base64 string of the stored JSON text, not as a JSON object. description is a pointer with omitempty, absent when null. */
+        /** @description One preset. config is the JSON the dealer stored, carried as JSON (it serialized as a base64 string before the conversion); description is present as null when the database value is null. */
         ConfiguratorPreset: {
             /** Format: uuid */
             id: string;
             name: string;
-            description?: string;
+            description: string | null;
             product_type: string;
-            config: string | null;
+            /** @description The preset's attribute selections, as stored. */
+            config: unknown;
             is_active: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type configurator.AvailableOption. message is omitted when empty. */
+        /** @description One value with its verdict; message is present as null when no rule explained a refusal. */
         ConfiguratorAvailableOption: {
             value: string;
             allowed: boolean;
             /** @description Why the value is disallowed. */
-            message?: string;
+            message: string | null;
         };
-        /** @description Go type configurator.ValidateConfigRequest. An empty map is a 400. */
+        /** @description An empty map is a 400 naming selections. */
         ConfiguratorValidateRequest: {
             /** @description Attribute type to chosen value, for example Species to SYP. */
             selections: {
                 [key: string]: string;
             };
         };
-        /** @description Go type configurator.ValidationConflict. */
         ConfiguratorValidationConflict: {
             attribute_type: string;
             attribute_value: string;
@@ -6574,12 +7631,12 @@ export interface components {
             depends_on_value: string;
             message: string;
         };
-        /** @description Go type configurator.ValidateConfigResponse. conflicts is omitted when there are none. */
+        /** @description conflicts is always an array, empty when the selections are valid. */
         ConfiguratorValidateResponse: {
             valid: boolean;
-            conflicts?: components["schemas"]["ConfiguratorValidationConflict"][];
+            conflicts: components["schemas"]["ConfiguratorValidationConflict"][];
         };
-        /** @description Go type configurator.BuildSKURequest. An empty product type or an empty selections map is a 400. */
+        /** @description An empty product type or an empty selections map is a 400 naming the field. */
         ConfiguratorBuildSKURequest: {
             /** @description Lumber, Door, Trim or Panel map to LBR, DR, TRM and PNL; any other value is upper cased and cut to three characters. */
             product_type: string;
@@ -6587,7 +7644,6 @@ export interface components {
                 [key: string]: string;
             };
         };
-        /** @description Go type configurator.BuildSKUResponse. */
         ConfiguratorBuildSKUResponse: {
             sku: string;
             description: string;
@@ -6979,17 +8035,6 @@ export interface components {
              */
             revision?: number;
         };
-        /** @description The Activity decoded from the body; customer_id comes from the path and created_at and updated_at are set by the server. A supplied id is kept. A missing or unknown activity_type answers 400. */
-        CustomerActivityCreate: {
-            /** Format: uuid */
-            contact_id?: string;
-            activity_type: components["schemas"]["ActivityType"];
-            description?: string;
-            /** Format: uuid */
-            logged_by?: string;
-            /** Format: date-time */
-            activity_date?: string;
-        };
         /** @description dashboard.DashboardSummary. Money is int64 cents. */
         DashboardSummary: {
             /**
@@ -7069,7 +8114,9 @@ export interface components {
              */
             revenue: number;
         };
-        /** @description Transcribed from delivery.Vehicle. The expiry and service dates are stored as dates and serialized as date-times. */
+        /** @enum {string} */
+        DeliveryVehicleType: "box_truck" | "flatbed" | "pickup" | "van" | "crane";
+        /** @description A fleet vehicle. Business dates are YYYY-MM-DD. */
         DeliveryVehicle: {
             /** Format: uuid */
             id: string;
@@ -7081,25 +8128,31 @@ export interface components {
             year: number | null;
             make: string | null;
             model: string | null;
-            /** Format: date-time */
+            /** Format: date */
             insurance_expiry: string | null;
-            /** Format: date-time */
+            /** Format: date */
             next_service_date: string | null;
             odometer_miles: number | null;
             notes: string | null;
             photo_url: string | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @enum {string} */
-        DeliveryVehicleType: "BOX_TRUCK" | "FLATBED" | "PICKUP" | "VAN" | "CRANE";
-        /** @description CreateVehicleRequest. Nothing is validated; an unparseable date is silently dropped. */
+        DeliveryVehiclePage: {
+            items: components["schemas"]["DeliveryVehicle"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
         DeliveryVehicleCreate: {
-            name?: string;
-            vehicle_type?: components["schemas"]["DeliveryVehicleType"];
-            license_plate?: string;
+            name: string;
+            vehicle_type: components["schemas"]["DeliveryVehicleType"];
+            license_plate: string;
             capacity_weight_lbs?: number | null;
             vin?: string | null;
             year?: number | null;
@@ -7112,11 +8165,10 @@ export interface components {
             odometer_miles?: number | null;
             notes?: string | null;
         };
-        /** @description UpdateVehicleRequest. The handler overwrites every field: an omitted optional date or value clears it. */
         DeliveryVehicleUpdate: {
-            name?: string;
-            vehicle_type?: components["schemas"]["DeliveryVehicleType"];
-            license_plate?: string;
+            name: string;
+            vehicle_type: components["schemas"]["DeliveryVehicleType"];
+            license_plate: string;
             capacity_weight_lbs?: number | null;
             vin?: string | null;
             year?: number | null;
@@ -7128,6 +8180,11 @@ export interface components {
             next_service_date?: string | null;
             odometer_miles?: number | null;
             notes?: string | null;
+            /**
+             * Format: int64
+             * @description The body half of the revision precondition.
+             */
+            revision?: number;
         };
         DeliveryPhotoUpload: {
             /**
@@ -7136,12 +8193,8 @@ export interface components {
              */
             photo: string;
         };
-        DeliveryPhotoUrl: {
-            photo_url: string;
-        };
         /** @enum {string} */
-        DeliveryDriverStatus: "ACTIVE" | "INACTIVE" | "ON_LEAVE";
-        /** @description Transcribed from delivery.Driver. */
+        DeliveryDriverStatus: "active" | "inactive" | "on_leave";
         DeliveryDriver: {
             /** Format: uuid */
             id: string;
@@ -7150,20 +8203,28 @@ export interface components {
             status: components["schemas"]["DeliveryDriverStatus"];
             phone_number: string | null;
             cdl_class: string | null;
-            /** Format: date-time */
+            /** Format: date */
             cdl_expiry: string | null;
-            /** Format: date-time */
+            /** Format: date */
             hire_date: string | null;
             email: string | null;
             photo_url: string | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description CreateDriverRequest. Nothing is validated. */
+        DeliveryDriverPage: {
+            items: components["schemas"]["DeliveryDriver"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
         DeliveryDriverCreate: {
-            name?: string;
+            name: string;
             license_number?: string | null;
             phone_number?: string | null;
             cdl_class?: string | null;
@@ -7173,42 +8234,56 @@ export interface components {
             hire_date?: string | null;
             email?: string | null;
         };
-        /** @description UpdateDriverRequest. */
         DeliveryDriverUpdate: {
-            name?: string;
+            name: string;
             license_number?: string | null;
             phone_number?: string | null;
+            status: components["schemas"]["DeliveryDriverStatus"];
             cdl_class?: string | null;
             /** Format: date */
             cdl_expiry?: string | null;
             /** Format: date */
             hire_date?: string | null;
             email?: string | null;
-            status?: components["schemas"]["DeliveryDriverStatus"];
+            /**
+             * Format: int64
+             * @description The body half of the revision precondition.
+             */
+            revision?: number;
         };
         /** @enum {string} */
-        DeliveryRouteStatus: "DRAFT" | "SCHEDULED" | "IN_TRANSIT" | "COMPLETED" | "CANCELLED";
-        /** @description Transcribed from delivery.Route. The two totals and the joined vehicle and driver names are omitted when empty. */
+        DeliveryRouteStatus: "draft" | "scheduled" | "in_transit" | "completed" | "cancelled";
+        /** @description A run for one date. The joined vehicle and driver names are always present; stops is null unless the list was asked for with include=stops (the board read). vehicle_id and driver_id are nullable: a legacy row with no vehicle or no driver carries null, never the all-zero UUID, so a client cannot reach for the zero identifier. Both stay in `required` (every response carries the key, written as null when the column is NULL) and their type carries the null leg the model needs to write that null. */
         DeliveryRoute: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            vehicle_id: string;
+            vehicle_id: string | null;
             /** Format: uuid */
-            driver_id: string;
-            /** Format: date-time */
+            driver_id: string | null;
+            /** Format: date */
             scheduled_date: string;
             status: components["schemas"]["DeliveryRouteStatus"];
             notes: string | null;
-            total_duration_mins?: number;
-            total_distance_miles?: number;
+            total_duration_mins: number | null;
+            total_distance_miles: number | null;
+            vehicle_name: string;
+            driver_name: string;
+            stop_count: number;
+            stops: components["schemas"]["Delivery"][] | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-            vehicle_name?: string;
-            driver_name?: string;
-            stop_count: number;
+        };
+        DeliveryRoutePage: {
+            items: components["schemas"]["DeliveryRoute"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
         };
         DeliveryRouteCreate: {
             /** Format: uuid */
@@ -7219,24 +8294,21 @@ export interface components {
             scheduled_date: string;
             notes?: string | null;
         };
+        DeliveryRouteTransition: {
+            /** @enum {string} */
+            to: "in_transit" | "completed";
+            /**
+             * Format: int64
+             * @description The body half of the revision precondition.
+             */
+            revision?: number;
+        };
         DeliveryRouteReorder: {
             ordered_delivery_ids: string[];
         };
         /** @enum {string} */
-        DeliveryStatus: "PENDING" | "OUT_FOR_DELIVERY" | "DELIVERED" | "FAILED" | "PARTIAL";
-        /** @description Transcribed from delivery.PODPhoto. */
-        DeliveryPodPhoto: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            delivery_id: string;
-            photo_url: string;
-            /** @description signature, site or damage; site when the form leaves it empty. */
-            photo_type: string;
-            /** Format: date-time */
-            uploaded_at: string;
-        };
-        /** @description Transcribed from delivery.Delivery. route_id is null for a stop not yet on a route. The signature, the ETA, the scheduled window, the joined order fields and pod_photos are omitted when empty. */
+        DeliveryStopStatus: "pending" | "out_for_delivery" | "delivered" | "failed" | "partial";
+        /** @description One stop on a route. route_id is null for a stop that exists and is geocoded but is not on a route yet. order_number is the order's document number. Optional fields are present with null. */
         Delivery: {
             /** Format: uuid */
             id: string;
@@ -7244,81 +8316,121 @@ export interface components {
             route_id: string | null;
             /** Format: uuid */
             order_id: string;
+            order_number: string | null;
             stop_sequence: number;
-            status: components["schemas"]["DeliveryStatus"];
+            status: components["schemas"]["DeliveryStopStatus"];
             pod_proof_url: string | null;
             pod_signed_by: string | null;
             /** Format: date-time */
             pod_timestamp: string | null;
-            signature_data_url?: string;
+            signature_data_url: string | null;
             delivery_instructions: string | null;
             latitude: number | null;
             longitude: number | null;
             /** Format: date-time */
-            estimated_arrival?: string;
+            estimated_arrival: string | null;
             /** Format: date-time */
-            scheduled_start?: string;
+            scheduled_start: string | null;
             /** Format: date-time */
-            scheduled_end?: string;
+            scheduled_end: string | null;
+            customer_name: string | null;
+            address: string | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-            customer_name?: string;
-            order_number?: string;
-            address?: string;
-            pod_photos?: components["schemas"]["DeliveryPodPhoto"][];
         };
-        /** @description AssignOrderRequest. */
+        DeliveryStopPage: {
+            items: components["schemas"]["Delivery"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
         DeliveryCreate: {
             /** Format: uuid */
             route_id: string;
             /** Format: uuid */
             order_id: string;
+            /** @description Defaults to the route's next position. */
             stop_sequence?: number;
             delivery_instructions?: string | null;
         };
-        /** @description Soft warning only; the assignment still happens. */
-        DeliveryCapacityWarning: {
-            vehicle_capacity_lbs: number;
-            current_load_lbs: number;
-            order_weight_lbs: number;
-            total_after_lbs: number;
-        };
         DeliveryAssignResult: {
             delivery: components["schemas"]["Delivery"];
-            capacity_warning?: components["schemas"]["DeliveryCapacityWarning"];
+            /** @description Soft warning only; the assignment still happens. Null when the vehicle holds no capacity or the load fits. */
+            capacity_warning: {
+                vehicle_capacity_lbs: number;
+                current_load_lbs: number;
+                order_weight_lbs: number;
+                total_after_lbs: number;
+            } | null;
         };
-        /** @description UpdateDeliveryStatusRequest. */
-        DeliveryStatusUpdate: {
-            status: components["schemas"]["DeliveryStatus"];
+        DeliveryStopTransition: {
+            /** @enum {string} */
+            to: "delivered" | "failed" | "partial";
+            /**
+             * Format: int64
+             * @description The body half of the revision precondition.
+             */
+            revision?: number;
+            /** @description Required when to is delivered or partial. */
             pod_proof_url?: string | null;
+            /** @description Required when to is delivered or partial. */
             pod_signed_by?: string | null;
             signature_data_url?: string | null;
         };
-        /** @description DeliveryLineAdjustment. */
-        DeliveryAdjustLine: {
-            /** Format: uuid */
-            product_id: string;
-            original_qty: number;
-            adjusted_qty: number;
-            /** @description SHORT_SHIP, DAMAGED, REFUSED, WRONG_PRODUCT or OTHER; not validated by the handler. */
-            reason_code: string;
-            notes?: string;
-        };
-        /** @description QtyAdjustmentRequest; the delivery id comes from the path. */
         DeliveryAdjustQty: {
             /** Format: uuid */
             adjusted_by: string;
             adjustments: components["schemas"]["DeliveryAdjustLine"][];
         };
-        DeliveryAdjustAck: {
+        DeliveryAdjustLine: {
+            /** Format: uuid */
+            product_id: string;
+            /** @description A decimal string, at most 4 fraction digits. */
+            original_qty: string;
+            /** @description A decimal string, at most 4 fraction digits. */
+            adjusted_qty: string;
             /** @enum {string} */
-            status: "adjusted";
+            reason_code: "short_ship" | "damaged" | "refused" | "wrong_product" | "other";
+            notes?: string | null;
         };
-        DeliveryStatusAck: {
+        /** @description One recorded adjustment row (the module's own read of what it wrote). */
+        DeliveryQtyAdjustment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            delivery_id: string;
+            /** Format: uuid */
+            product_id: string;
+            original_qty: string;
+            adjusted_qty: string;
             /** @enum {string} */
-            status: "completed";
+            reason_code: "short_ship" | "damaged" | "refused" | "wrong_product" | "other";
+            notes: string | null;
+            /** Format: uuid */
+            adjusted_by: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DeliveryPodPhoto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            delivery_id: string;
+            photo_url: string;
+            /** @enum {string} */
+            photo_type: "signature" | "site" | "damage";
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        DeliveryPodPhotoPage: {
+            items: components["schemas"]["DeliveryPodPhoto"][];
+            next_cursor: string | null;
+            limit: number;
         };
         DeliveryPodPhotoUpload: {
             /**
@@ -7326,114 +8438,150 @@ export interface components {
              * @description jpg, jpeg, png or webp, at most 10 MB.
              */
             photo: string;
-            /** @description signature, site or damage; defaults to site. */
-            photo_type?: string;
-        };
-        /** @description RouteLeg. */
-        DeliveryRouteLeg: {
-            stop_index: number;
-            duration_mins: number;
-            distance_miles: number;
             /**
-             * Format: date-time
-             * @description ISO 8601 timestamp.
+             * @default site
+             * @enum {string}
              */
-            eta: string;
+            photo_type: "signature" | "site" | "damage";
         };
-        /** @description RouteOptimizationResult. optimized_order holds indices into the geocoded stops, not delivery ids. */
-        DeliveryRouteOptimizationResult: {
-            optimized_order: number[] | null;
-            legs: components["schemas"]["DeliveryRouteLeg"][] | null;
-            total_duration_mins: number;
-            total_distance_miles: number;
+        /**
+         * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
+         * @enum {string}
+         */
+        OrdersDraftStatus: "open" | "promoted" | "discarded";
+        /** @description What pkg/actor resolved for the request (see the quotes kind's actor). */
+        OrdersDraftActor: {
+            /** @enum {string} */
+            kind?: "user" | "key" | "agent" | "anonymous";
+            id?: string | null;
+            acting_as?: string | null;
+            tool?: string | null;
         };
-        /** @description deposit.CustomerDeposit. The branch, reference, note and ledger entry are omitted when empty. */
-        Deposit: {
+        /** @description The order draft resource: one wire type from every draft route. The summary form (the list) is the same object without payload and without validation.problems. */
+        OrdersDraftDocument: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            customer_id: string;
-            /** Format: uuid */
-            branch_id?: string;
-            /**
-             * Format: int64
-             * @description Cents, original.
-             */
-            amount: number;
-            /**
-             * Format: int64
-             * @description Cents, cumulative applied.
-             */
-            applied_amount: number;
-            /**
-             * Format: int64
-             * @description Cents, amount minus applied.
-             */
-            remaining: number;
             /** @enum {string} */
-            status: "OPEN" | "APPLIED" | "REFUNDED";
-            /** @description How the prepayment was taken; free text, CASH when the request leaves it empty. */
-            method: string;
-            reference?: string;
-            note?: string;
+            module: "orders";
+            status: components["schemas"]["OrdersDraftStatus"];
+            /** Format: int64 */
+            revision: number;
             /** Format: uuid */
-            gl_entry_id?: string;
-            /** Format: date-time */
+            branch_id: string;
+            /** Format: uuid */
+            subject_id?: string | null;
+            /** Format: int64 */
+            subject_revision?: number | null;
+            /** @description The order create or update request as JSON. */
+            payload: Record<string, never>;
+            validation: {
+                ready: boolean;
+                problems?: components["schemas"]["WireErrorDetail"][];
+            };
+            created_by: components["schemas"]["OrdersDraftActor"];
+            updated_by: components["schemas"]["OrdersDraftActor"];
+            promoted?: {
+                /** Format: uuid */
+                entity_id?: string;
+                number?: string | null;
+                at?: string;
+                by?: components["schemas"]["OrdersDraftActor"];
+            } | null;
+            discarded?: {
+                at?: string;
+                by?: components["schemas"]["OrdersDraftActor"];
+            } | null;
             created_at: string;
-            /** Format: date-time */
             updated_at: string;
         };
-        /** @description deposit.DepositApplication. The invoice and ledger entry are omitted when empty. */
-        DepositApplication: {
+        OrdersDraftCreateRequest: {
+            /** @description The order create (or, with subject_id, update) request as JSON; at most 256 KiB. */
+            payload: Record<string, never>;
+            /** Format: uuid */
+            subject_id?: string;
+            /** Format: int64 */
+            subject_revision?: number;
+        };
+        /**
+         * @description The draft lifecycle, lowercase on the wire; promoted is terminal.
+         * @enum {string}
+         */
+        QuotesDraftStatus: "open" | "promoted" | "discarded";
+        /** @description What pkg/actor resolved for the request: the user's subject for an agent acting with a person's session, the key's id for a keyed writer; acting_as and tool carry the agent marker and tool name. */
+        QuotesDraftActor: {
+            /** @enum {string} */
+            kind?: "user" | "key" | "agent" | "anonymous";
+            id?: string | null;
+            acting_as?: string | null;
+            tool?: string | null;
+        };
+        /** @description Computed on every read and write from the payload alone: ready is true when the kind's parser would accept the payload as a create (or update) request, and problems is exactly that 400's details with payload.-prefixed fields. It tells an editor what still blocks a promotion without refusing the save. */
+        QuotesDraftValidation: {
+            ready: boolean;
+            problems?: components["schemas"]["WireErrorDetail"][];
+        };
+        /** @description Set once, at promotion, with the entity's id and document number. */
+        QuotesDraftPromoted: {
+            /** Format: uuid */
+            entity_id: string;
+            number?: string | null;
+            at: string;
+            by?: components["schemas"]["QuotesDraftActor"];
+        };
+        /** @description The draft resource: one wire type from every draft route, promotion included. Optional fields are present as null (ADR 0001 section 12). The summary form (the list) is the same object without payload and without validation.problems. */
+        QuotesDraftDocument: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            deposit_id: string;
-            /** Format: uuid */
-            customer_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            /** Format: uuid */
-            invoice_id?: string;
-            /** Format: uuid */
-            gl_entry_id?: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        /** @description The list wrapper; deposits is null when the customer has none. */
-        DepositList: {
-            deposits: components["schemas"]["Deposit"][] | null;
+            /** @enum {string} */
+            module: "quotes";
+            status: components["schemas"]["QuotesDraftStatus"];
             /** Format: int64 */
-            open_balance_cents: number;
+            revision: number;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            subject_id?: string | null;
+            /** Format: int64 */
+            subject_revision?: number | null;
+            /** @description The module's own request body as JSON. */
+            payload: Record<string, never>;
+            validation: components["schemas"]["QuotesDraftValidation"];
+            created_by: components["schemas"]["QuotesDraftActor"];
+            updated_by: components["schemas"]["QuotesDraftActor"];
+            promoted?: components["schemas"]["QuotesDraftPromoted"] | null;
+            discarded?: {
+                at?: string;
+                by?: components["schemas"]["QuotesDraftActor"];
+            } | null;
+            created_at: string;
+            updated_at: string;
         };
-        /** @description RecordDepositRequest. */
-        DepositCreate: {
-            /** Format: uuid */
-            customer_id: string;
-            /** Format: uuid */
-            branch_id?: string;
+        QuotesDraftCreateRequest: {
+            /** @description The quote create request (or, with subject_id, the update request): never a revision, never a file; at most 256 KiB of JSON. */
+            payload: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The quote an edit draft edits; null on a create draft.
+             */
+            subject_id?: string;
             /**
              * Format: int64
-             * @description Must be positive.
+             * @description The entity revision the edit was built on; asserted at create (a mismatch is 409 subject_stale), taken from the subject when omitted, moved forward by a bounded rebase on PUT.
              */
-            amount_cents: number;
-            /** @description Free text; defaults to CASH. */
-            method?: string;
-            reference?: string;
-            note?: string;
+            subject_revision?: number;
         };
-        /** @description ApplyDepositRequest. */
-        DepositApply: {
+        QuotesDraftReplaceRequest: {
+            payload: Record<string, never>;
             /**
              * Format: int64
-             * @description Must be positive and at most the remainder.
+             * @description The body form of the precondition, beside If-Match.
              */
-            amount_cents: number;
-            /** Format: uuid */
-            invoice_id?: string;
+            revision?: number;
+            /**
+             * Format: int64
+             * @description The bounded rebase, never past the subject's current revision.
+             */
+            subject_revision?: number;
         };
         /** @description A trading partner. Used as the create and update request body and as the response body; on a request the id and timestamps are ignored or overwritten by the server. */
         EdiTradingPartner: {
@@ -7565,7 +8713,7 @@ export interface components {
             /** Format: date-time */
             entry_date: string;
             memo: string;
-            /** @description MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN or DEPOSIT. */
+            /** @description MANUAL, INVOICE, PAYMENT, ADJUSTMENT, CLOSING, VENDOR_INVOICE, VENDOR_PAYMENT, REVERSAL, RETURN, DEPOSIT, CREDIT_MEMO or WRITE_OFF. */
             source: string;
             /** Format: uuid */
             source_ref_id?: string;
@@ -7659,8 +8807,10 @@ export interface components {
             created_at: string;
         };
         GlFiscalPeriodList: components["schemas"]["GlFiscalPeriod"][] | null;
-        /** @description One trial balance row (gl.TrialBalanceRow). debit and credit are int64 cents. */
+        /** @description One trial balance row (gl.TrialBalanceRow), per account and currency. debit and credit are int64 cents. */
         GlTrialBalanceRow: {
+            /** @description The ISO 4217 code of the entries summed in this row. */
+            currency: string;
             /** Format: uuid */
             account_id: string;
             account_code: string;
@@ -7689,8 +8839,9 @@ export interface components {
              */
             amount: number;
         };
-        /** @description The income statement (gl.ProfitAndLossReport). Every amount is int64 cents. */
+        /** @description The income statement (gl.ProfitAndLossReport). Every amount is int64 cents, in one currency. */
         GlProfitAndLossReport: {
+            currency: string;
             /** @description YYYY-MM-DD. */
             start_date: string;
             /** @description YYYY-MM-DD. */
@@ -7712,8 +8863,9 @@ export interface components {
             /** Format: int64 */
             net_income: number;
         };
-        /** @description The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents. */
+        /** @description The statement of financial position (gl.BalanceSheetReport). Every amount is int64 cents, in one currency. */
         GlBalanceSheetReport: {
+            currency: string;
             /** @description YYYY-MM-DD. */
             as_of_date: string;
             assets: components["schemas"]["GlAccountLineItem"][];
@@ -7731,40 +8883,72 @@ export interface components {
             /** Format: int64 */
             retained_earnings: number;
         };
-        /** @description Go type governance.RFC. */
-        GovernanceRFC: {
+        /** @description Go type governance.RFCSummary, the list item; the full document embeds it. */
+        RFCSummary: {
             /** Format: uuid */
             id: string;
+            /** @description The human readable document number (RFC-000001), minted from the sequence. */
+            number: string;
             title: string;
-            /** @description Normally one of draft, review, approved or rejected. The database has no check on it, so an RFC updated with another string (or with the key omitted, which stores an empty string) reads back with that value. */
-            status: string;
-            problem_statement: string;
-            proposed_solution: string;
-            /** @description Markdown. */
-            content: string;
+            /** @enum {string} */
+            status: "draft" | "review" | "approved" | "rejected";
             /** Format: uuid */
             author_id: string | null;
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type governance.CreateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. */
-        GovernanceCreateRFCRequest: {
-            Title?: string;
-            ProblemStatement?: string;
-            ProposedSolution?: string;
+        /** @description Go type governance.RFC, the summary fields spelled out with the body behind them. content is generated by the provider at create and null only on rows the legacy seed wrote without one. */
+        RFC: {
             /** Format: uuid */
-            AuthorID?: string | null;
+            id: string;
+            /** @description The human readable document number (RFC-000001), minted from the sequence. */
+            number: string;
+            title: string;
+            /** @enum {string} */
+            status: "draft" | "review" | "approved" | "rejected";
+            /** Format: uuid */
+            author_id: string | null;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            problem_statement: string;
+            proposed_solution: string;
+            content: string | null;
         };
-        /** @description Go type governance.UpdateRFCInput, which has no json tags. Keys match the Go field names case insensitively; any other spelling is ignored. Every field is written, so an omitted key becomes the empty string. */
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        RFCPage: {
+            items: components["schemas"]["RFCSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            total?: number;
+        };
+        /** @description Go type governance.CreateRFCInput. content, status and revision are refused on a create. */
+        GovernanceCreateRFCRequest: {
+            title: string;
+            problem_statement: string;
+            proposed_solution: string;
+            /** Format: uuid */
+            author_id?: string | null;
+        };
+        /** @description Go type governance.UpdateRFCInput. Every editable field is a pointer: nil leaves it alone. */
         GovernanceUpdateRFCRequest: {
-            Title?: string;
-            /** @description Stored as sent; the handler does not check it against the status vocabulary (draft, review, approved, rejected). */
-            Status?: string;
-            ProblemStatement?: string;
-            ProposedSolution?: string;
-            Content?: string;
+            title?: string | null;
+            problem_statement?: string | null;
+            proposed_solution?: string | null;
+            content?: string | null;
+            revision?: number;
+        };
+        /** @description Go type governance.TransitionRequest. */
+        GovernanceTransitionRequest: {
+            /** @enum {string} */
+            to: "draft" | "review" | "approved" | "rejected";
+            revision?: number;
         };
         HealthReadyOK: {
             /** @enum {string} */
@@ -8050,111 +9234,684 @@ export interface components {
             /** @enum {string} */
             status: "ok";
         };
-        /** @enum {string} */
-        InvoiceStatus: "UNPAID" | "PARTIAL" | "PAID" | "VOID" | "OVERDUE";
-        /** @enum {string} */
-        PaymentTerms: "COD" | "DUE_ON_RECEIPT" | "NET30" | "NET60" | "NET90";
-        Invoice: {
+        /**
+         * @description The lifecycle, lowercase on the wire (ADR 0001 section 6; ADR 0005 section 6.2). overdue is not a status: it is the is_overdue flag and the overdue list filter.
+         * @enum {string}
+         */
+        InvoiceStatus: "unpaid" | "partial" | "paid" | "void" | "written_off";
+        /**
+         * @description The credit memo lifecycle, lowercase on the wire (ADR 0005 section 6.3).
+         * @enum {string}
+         */
+        CreditMemoStatus: "draft" | "open" | "partial" | "applied" | "void";
+        /** @description An invoice header, used as a list item and as the head of the full document. */
+        InvoiceSummary: {
             /** Format: uuid */
             id: string;
+            /** @description The gapless IN- number, minted when the invoice is created (ADR 0005 4.1). A void invoice keeps it. */
+            number: string;
             /** Format: uuid */
             branch_id: string;
             /** Format: uuid */
-            order_id: string;
-            /** Format: uuid */
             customer_id: string;
-            customer_name?: string;
+            customer_name: string;
+            /**
+             * Format: uuid
+             * @description The order this invoice bills; null on a counter account charge.
+             */
+            order_id: string | null;
+            /**
+             * Format: uuid
+             * @description The job (project) the invoice carries, from its order (ADR 0005 7.1).
+             */
+            job_id: string | null;
+            /** Format: uuid */
+            ship_to_id: string | null;
             status: components["schemas"]["InvoiceStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description ISO 4217, copied from the order, never sent. */
+            currency: string;
+            /** @enum {string} */
+            origin: "order" | "pos";
+            /** @enum {string} */
+            delivery_type: "pickup" | "delivery";
+            /** @description Who collected a will-call order. */
+            picked_up_by: string | null;
+            /** Format: uuid */
+            delivery_id: string | null;
             /**
-             * Format: int64
-             * @description Cents.
+             * Format: date
+             * @description The business date in the branch's local calendar.
              */
-            subtotal: number;
-            /** @description A fraction such as 0.0825 for 8.25 percent. */
-            tax_rate: number;
+            invoice_date: string;
             /**
-             * Format: int64
-             * @description Cents.
-             */
-            tax_amount: number;
-            /**
-             * Format: int64
-             * @description Cents, subtotal plus tax.
-             */
-            total_amount: number;
-            payment_terms: components["schemas"]["PaymentTerms"];
-            /**
-             * Format: date-time
-             * @description Null while the terms set no date.
+             * Format: date
+             * @description From the customer's payment terms at create.
              */
             due_date: string | null;
+            /** Format: uuid */
+            payment_terms_id: string;
             /**
-             * Format: date-time
-             * @description Null until a payment completes the invoice.
+             * Format: date
+             * @description The last day the early payment discount applies; null when the terms carry none.
              */
+            discount_due_date: string | null;
+            /** @description The early payment discount percent at scale 4 as a decimal string. */
+            discount_percent: string | null;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** @description A percent with at most 4 fraction digits ("8.875"); null when the tax provider answered. */
+            tax_rate_percent: string | null;
+            tax_exempt: boolean;
+            tax_source: components["schemas"]["OrderTaxSource"];
+            /** Format: int64 */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description What is still owed: the total less the live applications (stored by the AR core as amount_open), 0 when paid, written off or void.
+             */
+            open_cents: number;
+            /** @description Computed: open and its due_date is before the branch's today. OVERDUE is not a status. */
+            is_overdue: boolean;
+            /** Format: date-time */
             paid_at: string | null;
+            /**
+             * Format: uuid
+             * @description The invoice entry in the general ledger.
+             */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-            lines?: components["schemas"]["InvoiceLine"][];
         };
+        /** @description The full invoice document with its lines (IN-1.8). */
+        Invoice: {
+            /** Format: uuid */
+            id: string;
+            /** @description The gapless IN- number, minted when the invoice is created (ADR 0005 4.1). A void invoice keeps it. */
+            number: string;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /**
+             * Format: uuid
+             * @description The order this invoice bills; null on a counter account charge.
+             */
+            order_id: string | null;
+            /**
+             * Format: uuid
+             * @description The job (project) the invoice carries, from its order (ADR 0005 7.1).
+             */
+            job_id: string | null;
+            /** Format: uuid */
+            ship_to_id: string | null;
+            status: components["schemas"]["InvoiceStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description ISO 4217, copied from the order, never sent. */
+            currency: string;
+            /** @enum {string} */
+            origin: "order" | "pos";
+            /** @enum {string} */
+            delivery_type: "pickup" | "delivery";
+            /** @description Who collected a will-call order. */
+            picked_up_by: string | null;
+            /** Format: uuid */
+            delivery_id: string | null;
+            /**
+             * Format: date
+             * @description The business date in the branch's local calendar.
+             */
+            invoice_date: string;
+            /**
+             * Format: date
+             * @description From the customer's payment terms at create.
+             */
+            due_date: string | null;
+            /** Format: uuid */
+            payment_terms_id: string;
+            /**
+             * Format: date
+             * @description The last day the early payment discount applies; null when the terms carry none.
+             */
+            discount_due_date: string | null;
+            /** @description The early payment discount percent at scale 4 as a decimal string. */
+            discount_percent: string | null;
+            /** Format: int64 */
+            subtotal_cents: number;
+            /** Format: int64 */
+            tax_cents: number;
+            /** @description A percent with at most 4 fraction digits ("8.875"); null when the tax provider answered. */
+            tax_rate_percent: string | null;
+            tax_exempt: boolean;
+            tax_source: components["schemas"]["OrderTaxSource"];
+            /** Format: int64 */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description What is still owed: the total less the live applications (stored by the AR core as amount_open), 0 when paid, written off or void.
+             */
+            open_cents: number;
+            /** @description Computed: open and its due_date is before the branch's today. OVERDUE is not a status. */
+            is_overdue: boolean;
+            /** Format: date-time */
+            paid_at: string | null;
+            /**
+             * Format: uuid
+             * @description The invoice entry in the general ledger.
+             */
+            gl_entry_id: string | null;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one. */
+            ship_to: {
+                /** Format: uuid */
+                id?: string;
+                code?: string;
+                name?: string;
+                line1?: string;
+                line2?: string | null;
+                city?: string;
+                region?: string;
+                postal_code?: string;
+                country?: string | null;
+                phone?: string | null;
+                delivery_instructions?: string | null;
+            } | null;
+            lines: components["schemas"]["InvoiceLine"][];
+        };
+        /** @description A sales line on an invoice: the shared shape of ADR 0005 section 2.2 for the quantity billed, with the order line it bills and the cost that left. */
         InvoiceLine: {
             /** Format: uuid */
             id: string;
-            /** Format: uuid */
-            invoice_id: string;
-            /** Format: uuid */
-            product_id: string;
-            product_sku?: string;
-            product_name?: string;
-            quantity: number;
+            /** @description The line's place on the document; a kit's components follow it. */
+            position: number;
+            line_type: components["schemas"]["SalesLineType"];
+            /**
+             * Format: uuid
+             * @description Set on a component line only, naming its kit line.
+             */
+            parent_line_id: string | null;
+            /**
+             * Format: uuid
+             * @description Required on kit and component lines, optional on a product line (null is a non stock item), null on charge and text lines.
+             */
+            product_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set on a charge line only.
+             */
+            charge_code_id: string | null;
+            /** @description The charge code's code text, read. */
+            charge_code: string | null;
+            /** @description A snapshot of the product's SKU. */
+            sku: string | null;
+            /** @description A snapshot; required on every line. */
+            description: string;
+            /** @description The quantity as a decimal string with its unit; null only on a text line. */
+            quantity: string | null;
+            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            uom: string | null;
+            /** @description The unit the price is per; equals uom unless the pair says otherwise. */
+            price_uom: string | null;
+            /** @description One side of the conversion pair; 1 and 1 when the units agree (any other pair on equal units is a 400). */
+            uom_qty: string | null;
+            /** @description The other side of the conversion pair. */
+            price_uom_qty: string | null;
             /**
              * Format: int64
-             * @description Cents.
+             * @description The price charged per price unit, after any override, before any discount.
              */
-            price_each: number;
+            unit_price_ten_thousandths: number | null;
+            /**
+             * Format: int64
+             * @description What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
+             */
+            priced_unit_price_ten_thousandths: number | null;
+            price_source: components["schemas"]["SalesPriceSource"];
+            /** @description Required when price_source is override. */
+            override_reason: string | null;
+            /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
+            discount_percent: string | null;
+            /**
+             * Format: int64
+             * @description A discount amount in cents, positive; never with discount_percent.
+             */
+            discount_cents: number | null;
+            /** @description Required with either discount. */
+            discount_reason: string | null;
+            /** @description The actor of the last override or discount; the audit row carries the rest. */
+            price_adjusted_by: string | null;
+            /**
+             * Format: int64
+             * @description The extension, rounded once (ADR 0005 section 2.4); null only on a text line.
+             */
+            line_total_cents: number | null;
+            taxable: boolean;
+            /** @description The charge code's account, snapshotted at create; null on every other line type. */
+            revenue_account_code: string | null;
+            is_special_order: boolean;
+            /** Format: uuid */
+            vendor_id: string | null;
+            /**
+             * Format: int64
+             * @description A unit cost at scale 4.
+             */
+            special_order_unit_cost_ten_thousandths: number | null;
             /** Format: date-time */
             created_at: string;
+            /**
+             * Format: uuid
+             * @description The order line this invoice line bills; null on a note and on a counter charge.
+             */
+            order_line_id: string | null;
+            /**
+             * Format: int64
+             * @description The cost that left (ADR 0005 8.4) at scale 4, shown to the roles that see margin (admin, owner, finance, sales: the roles that reach these routes). Null when the line carries no cost.
+             */
+            unit_cost_ten_thousandths: number | null;
+            /**
+             * Format: int64
+             * @description The cost of goods relieved from inventory for this line, in cents (ADR 0005 8.4); 0 when none.
+             */
+            cost_cents: number;
         };
         InvoicePage: {
-            data: components["schemas"]["Invoice"][];
-            total: number;
+            items: components["schemas"]["InvoiceSummary"][];
+            next_cursor: string | null;
             limit: number;
-            offset: number;
+            /** @description Only under include=total. */
+            total?: number;
         };
-        CreditMemo: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            invoice_id?: string;
-            /** Format: uuid */
-            customer_id: string;
+        /** @description The body of POST /invoices/{id}/transitions: to void, the revision and the reason. */
+        InvoiceTransitionRequest: {
+            to: components["schemas"]["InvoiceStatus"];
             /**
              * Format: int64
-             * @description Cents.
+             * @description The precondition, beside If-Match.
              */
-            amount: number;
-            reason: string;
-            /** @enum {string} */
-            status: "PENDING" | "APPLIED" | "VOID";
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            applied_at?: string;
+            revision?: number;
+            /** @description Required by a void. */
+            reason?: string;
         };
-        CreditMemoCreateRequest: {
-            /**
-             * Format: int64
-             * @description Cents; must be positive.
-             */
-            amount_cents: number;
-            reason: string;
-        };
-        CreditMemoList: components["schemas"]["CreditMemo"][] | null;
         InvoiceEmailResponse: {
             /** @enum {string} */
             status: "queued";
+        };
+        /** @description A credit memo header, used as a list item and as the head of the full document. */
+        CreditMemoSummary: {
+            /** Format: uuid */
+            id: string;
+            /** @description The gapless CM- number, minted when the memo is posted: null while it is a draft, and a voided draft never had one. */
+            number: string | null;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /**
+             * Format: uuid
+             * @description The invoice it credits, optional.
+             */
+            invoice_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set by a counter return (C2-5).
+             */
+            pos_return_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: uuid */
+            ship_to_id: string | null;
+            status: components["schemas"]["CreditMemoStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description The invoice's, else the customer's effective currency; copied, never sent. */
+            currency: string;
+            /** @enum {string} */
+            reason_code: "return" | "price_adjustment" | "damage" | "other";
+            reason: string;
+            /**
+             * Format: int64
+             * @description NEGATIVE: lines, totals and the open amount are negative (ADR 0001 section 7a).
+             */
+            subtotal_cents: number;
+            /**
+             * Format: int64
+             * @description NEGATIVE; never more than the invoice charged less the tax earlier credit memos credited.
+             */
+            tax_cents: number;
+            /** @description The invoice's rate (or the resolved one); null when the invoice's tax came from the provider. */
+            tax_rate_percent: string | null;
+            /**
+             * Format: int64
+             * @description NEGATIVE: subtotal plus tax.
+             */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description The credit not yet used: the total plus its applications and refunds (stored by the AR core as amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.
+             */
+            open_cents: number;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /**
+             * Format: date
+             * @description The business date in the branch's local calendar; set again at post.
+             */
+            memo_date: string;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The full credit memo document with its lines. */
+        CreditMemo: {
+            /** Format: uuid */
+            id: string;
+            /** @description The gapless CM- number, minted when the memo is posted: null while it is a draft, and a voided draft never had one. */
+            number: string | null;
+            /** Format: uuid */
+            branch_id: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /**
+             * Format: uuid
+             * @description The invoice it credits, optional.
+             */
+            invoice_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set by a counter return (C2-5).
+             */
+            pos_return_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: uuid */
+            ship_to_id: string | null;
+            status: components["schemas"]["CreditMemoStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description The invoice's, else the customer's effective currency; copied, never sent. */
+            currency: string;
+            /** @enum {string} */
+            reason_code: "return" | "price_adjustment" | "damage" | "other";
+            reason: string;
+            /**
+             * Format: int64
+             * @description NEGATIVE: lines, totals and the open amount are negative (ADR 0001 section 7a).
+             */
+            subtotal_cents: number;
+            /**
+             * Format: int64
+             * @description NEGATIVE; never more than the invoice charged less the tax earlier credit memos credited.
+             */
+            tax_cents: number;
+            /** @description The invoice's rate (or the resolved one); null when the invoice's tax came from the provider. */
+            tax_rate_percent: string | null;
+            /**
+             * Format: int64
+             * @description NEGATIVE: subtotal plus tax.
+             */
+            total_cents: number;
+            /**
+             * Format: int64
+             * @description The credit not yet used: the total plus its applications and refunds (stored by the AR core as amount_open), 0 for a draft, a fully used or a void memo. NEGATIVE like the total.
+             */
+            open_cents: number;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /**
+             * Format: date
+             * @description The business date in the branch's local calendar; set again at post.
+             */
+            memo_date: string;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            lines: components["schemas"]["CreditMemoLine"][];
+        };
+        /** @description A line on a credit memo: the shared shape with a NEGATIVE quantity and line total (ADR 0001 section 7a; a plain sum is the AR effect), the invoice line it returns and whether it restocks. */
+        CreditMemoLine: {
+            /** Format: uuid */
+            id: string;
+            /** @description The line's place on the document; a kit's components follow it. */
+            position: number;
+            line_type: components["schemas"]["SalesLineType"];
+            /**
+             * Format: uuid
+             * @description Set on a component line only, naming its kit line.
+             */
+            parent_line_id: string | null;
+            /**
+             * Format: uuid
+             * @description Required on kit and component lines, optional on a product line (null is a non stock item), null on charge and text lines.
+             */
+            product_id: string | null;
+            /**
+             * Format: uuid
+             * @description Set on a charge line only.
+             */
+            charge_code_id: string | null;
+            /** @description The charge code's code text, read. */
+            charge_code: string | null;
+            /** @description A snapshot of the product's SKU. */
+            sku: string | null;
+            /** @description A snapshot; required on every line. */
+            description: string;
+            /** @description The quantity as a decimal string with its unit; null only on a text line. */
+            quantity: string | null;
+            /** @description The sale unit. On a stocked line it is the product's stocking unit (ADR 0005 section 1). */
+            uom: string | null;
+            /** @description The unit the price is per; equals uom unless the pair says otherwise. */
+            price_uom: string | null;
+            /** @description One side of the conversion pair; 1 and 1 when the units agree (any other pair on equal units is a 400). */
+            uom_qty: string | null;
+            /** @description The other side of the conversion pair. */
+            price_uom_qty: string | null;
+            /**
+             * Format: int64
+             * @description The price charged per price unit, after any override, before any discount.
+             */
+            unit_price_ten_thousandths: number | null;
+            /**
+             * Format: int64
+             * @description What the pricing engine resolved, read only, so an override is visible as the difference; null on text, charge and non stock lines.
+             */
+            priced_unit_price_ten_thousandths: number | null;
+            price_source: components["schemas"]["SalesPriceSource"];
+            /** @description Required when price_source is override. */
+            override_reason: string | null;
+            /** @description A percent at scale 4 as a decimal string, greater than 0 and at most 100; never with discount_cents. */
+            discount_percent: string | null;
+            /**
+             * Format: int64
+             * @description A discount amount in cents, positive; never with discount_percent.
+             */
+            discount_cents: number | null;
+            /** @description Required with either discount. */
+            discount_reason: string | null;
+            /** @description The actor of the last override or discount; the audit row carries the rest. */
+            price_adjusted_by: string | null;
+            /**
+             * Format: int64
+             * @description The extension, rounded once (ADR 0005 section 2.4); null only on a text line.
+             */
+            line_total_cents: number | null;
+            taxable: boolean;
+            /** @description The charge code's account, snapshotted at create; null on every other line type. */
+            revenue_account_code: string | null;
+            is_special_order: boolean;
+            /** Format: uuid */
+            vendor_id: string | null;
+            /**
+             * Format: int64
+             * @description A unit cost at scale 4.
+             */
+            special_order_unit_cost_ten_thousandths: number | null;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description The invoice line this credit line returns; null on a free line (a price adjustment, a fee given back, a note).
+             */
+            invoice_line_id: string | null;
+            /** @description Whether the goods go back on hand when the credit memo is posted. */
+            restock: boolean;
+            /**
+             * Format: int64
+             * @description The cost that left (ADR 0005 8.4) at scale 4, shown to the roles that see margin (admin, owner, finance, sales: the roles that reach these routes). Null when the line carries no cost.
+             */
+            unit_cost_ten_thousandths: number | null;
+            /**
+             * Format: int64
+             * @description The cost that comes back to inventory, in cents and NEGATIVE like the line (ADR 0005 8.4): COGS reverses at the original cost; 0 on a line that does not restock.
+             */
+            cost_cents: number;
+        };
+        /** @description One credit memo line. A line that names an invoice line (invoice_line_id) sends only the negative quantity credited, restock and optionally a description: its price, pair and discount come from the invoice line, and it cannot credit more than that line billed less what earlier credit memos returned (409 exceeds_billed). A free line names a product, a charge code or only a description and sends its own price; quantities are negative. */
+        CreditMemoLineRequest: {
+            /**
+             * Format: uuid
+             * @description Keeps a line across edits.
+             */
+            id?: string;
+            /** Format: uuid */
+            invoice_line_id?: string;
+            /** @enum {string} */
+            line_type?: "product" | "charge" | "text";
+            /** Format: uuid */
+            product_id?: string;
+            charge_code?: string;
+            description?: string;
+            /** @description A NEGATIVE decimal string: the quantity returned or credited. */
+            quantity?: string;
+            uom?: string;
+            /**
+             * Format: int64
+             * @description Free lines only; never negative.
+             */
+            unit_price_ten_thousandths?: number;
+            taxable?: boolean;
+            /** @description Return the goods to stock at post (a stocked product line). */
+            restock?: boolean;
+        };
+        /** @description The body of POST /credit-memos and PUT /credit-memos/{id}. A create names an invoice (the customer, branch, currency, job and ship-to follow it) or a customer. branch_id, if sent, is held to the caller's branch like every payload branch. currency is never sent. */
+        CreditMemoRequest: {
+            /** Format: uuid */
+            branch_id?: string;
+            /** Format: uuid */
+            customer_id?: string;
+            /** Format: uuid */
+            invoice_id?: string;
+            /** Format: uuid */
+            job_id?: string;
+            /** Format: uuid */
+            ship_to_id?: string;
+            /** @enum {string} */
+            reason_code: "return" | "price_adjustment" | "damage" | "other";
+            reason: string;
+            /**
+             * Format: int64
+             * @description The precondition on a PUT, beside If-Match.
+             */
+            revision?: number;
+            lines: components["schemas"]["CreditMemoLineRequest"][];
+        };
+        CreditMemoPage: {
+            items: components["schemas"]["CreditMemoSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        /** @description The body of POST /credit-memos/{id}/transitions: to open (post) or void, the revision and the reason. */
+        CreditMemoTransitionRequest: {
+            to: components["schemas"]["CreditMemoStatus"];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+            /** @description Required by a void. */
+            reason?: string;
+        };
+        InvoiceWriteOffRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        CreditMemoApplicationRequest: {
+            /** Format: uuid */
+            invoice_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+        };
+        CreditMemoApplyRequest: {
+            applications: components["schemas"]["CreditMemoApplicationRequest"][];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        InvoiceApplicationPage: {
+            items: components["schemas"]["ArApplication"][];
+            next_cursor: string | null;
+            limit: number;
+        };
+        /** @description Who the record is, and every frontend's URL for it. The record segment in the links is the document number when the entity has one, otherwise the UUID; draft links use the draft's UUID. Optional slots are present as null (ADR 0001 section 12). */
+        LinkAnswer: {
+            /** @description The entity name (quote, order, invoice, customer, product, draft). */
+            entity: string;
+            /** @description The module, the path segment under /api/v1. */
+            module: string;
+            /** Format: uuid */
+            id: string;
+            number: string | null;
+            links: {
+                /** @description The desk record route; absolute when GABLE_PUBLIC_URL is configured, otherwise a path relative to the deployment's origin. */
+                desk: string;
+                /** @description The front door's /?open=<record path> form, which signs a person in and then opens the record. */
+                front_door: string;
+                /** @description Null until the portal has a record screen for the entity. */
+                portal: string | null;
+                /** @description The gable:// deep link the Tauri shell parses. */
+                app: string;
+                /** @description The agent UI's record URL from GABLE_AGENT_URL_TEMPLATE ({module}, {entity}, {id}, {number} placeholders); null when the template is unset, every deployment today. */
+                agent: string | null;
+            };
         };
         /** @enum {string} */
         LocationType: "branch" | "zone" | "aisle" | "rack" | "shelf" | "bin" | "yard";
@@ -8241,7 +9998,7 @@ export interface components {
             is_home?: boolean;
             timezone?: string;
         };
-        BranchSummaryList: components["schemas"]["BranchSummary"][] | null;
+        BranchSummaryList: components["schemas"]["BranchSummary"][];
         UserLocation: {
             user_sub: string;
             /** Format: uuid */
@@ -8251,7 +10008,7 @@ export interface components {
             granted_at: string;
             granted_by?: string;
         };
-        UserLocationList: components["schemas"]["UserLocation"][] | null;
+        UserLocationList: components["schemas"]["UserLocation"][];
         UserBranchGrant: {
             /** Format: uuid */
             branch_id: string;
@@ -8261,7 +10018,7 @@ export interface components {
             /** Format: uuid */
             branch_id: string;
         };
-        StringList: string[] | null;
+        StringList: string[];
         /** @enum {string} */
         MatchingStatus: "PENDING" | "MATCHED" | "PARTIAL" | "EXCEPTION";
         MatchingResult: {
@@ -8343,29 +10100,45 @@ export interface components {
             line_count: number;
             exception_count: number;
         };
-        /** @description Go type millwork.MillworkOption. */
+        /** @description One catalog option. The price adjustment is integer cents; attributes is whatever JSON the create carried, null when it carried none. */
         MillworkOption: {
             /** Format: uuid */
             id: string;
             category: string;
             name: string;
-            /** @description Float dollars today. */
-            price_adjustment: number;
-            /** @description Any JSON value stored as sent (an object in practice); null when the create request omitted it. */
-            attributes: unknown;
+            /**
+             * Format: int64
+             * @description A positive option adds to the configured price, a negative one discounts it.
+             */
+            price_adjustment_cents: number;
+            /** @description Any JSON value stored as sent (an object in practice). */
+            attributes: Record<string, never> | unknown[] | string | number | boolean | null;
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description Go type millwork.CreateOptionRequest. */
+        /** @description Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. */
         MillworkCreateOptionRequest: {
-            category?: string;
-            name?: string;
-            /** @description Float dollars today; absent means 0. */
-            price_adjustment?: number;
-            /** @description Any JSON value; stored as sent. Absent is stored as null. */
-            attributes?: unknown;
+            /** @description 1 to 50 characters. */
+            category: string;
+            /** @description 1 to 100 characters. */
+            name: string;
+            /** Format: int64 */
+            price_adjustment_cents: number;
+            /** @description Optional; stored as sent, null when absent. */
+            attributes?: Record<string, never> | unknown[] | string | number | boolean;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        MillworkOptionPage: {
+            items: components["schemas"]["MillworkOption"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         /**
          * @description The lifecycle, lowercase on the wire (ADR 0001 section 6; ADR 0005 section 5.2). The database keeps its uppercase CHECK.
@@ -8650,6 +10423,11 @@ export interface components {
             updated_at: string;
             /** @description The invoices written against the order, oldest first. */
             invoice_ids: string[];
+            /**
+             * Format: int64
+             * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
+             */
+            deposit_unapplied_cents: number;
         };
         /** @description The full order document. */
         Order: {
@@ -8736,6 +10514,11 @@ export interface components {
             updated_at: string;
             /** @description The invoices written against the order, oldest first. */
             invoice_ids: string[];
+            /**
+             * Format: int64
+             * @description The unapplied cash of the posted payments taken against this order (deposits), applied to its invoices as they are billed.
+             */
+            deposit_unapplied_cents: number;
             /** @description The delivery address captured at confirm (ADR 0005 section 5.1); null on an order that never confirmed or a pickup without one. */
             ship_to: {
                 /** Format: uuid */
@@ -8954,99 +10737,257 @@ export interface components {
             /** @description Float dollars. */
             credit_limit: number;
         };
+        /**
+         * @description account stays for history and is refused on a new payment.
+         * @enum {string}
+         */
+        PaymentMethod: "cash" | "card" | "check" | "ach" | "other" | "account";
         /** @enum {string} */
-        PaymentMethod: "CASH" | "CARD" | "CHECK" | "ACCOUNT";
-        Payment: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            method: components["schemas"]["PaymentMethod"];
-            reference: string;
-            notes: string;
-            /** Format: date-time */
-            created_at: string;
-            gateway_tx_id?: string;
-            gateway_status?: string;
-            card_last4?: string;
-            card_brand?: string;
-            auth_code?: string;
-        };
-        PaymentCreateRequest: {
-            /** Format: uuid */
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            method: components["schemas"]["PaymentMethod"];
-            reference?: string;
-            notes?: string;
-        };
-        PaymentIntentRequest: {
-            /** Format: uuid */
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-        };
-        PaymentIntentResponse: {
-            public_key: string;
-            invoice_id: string;
-            /**
-             * Format: int64
-             * @description Cents, echoed from the request's amount field under this name.
-             */
-            amount_cents: number;
-        };
-        CardPaymentRequest: {
-            /** Format: uuid */
-            invoice_id: string;
-            /** @description The Runner.js tokenization result; required. */
-            token_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            notes?: string;
-        };
-        RefundRequest: {
-            /** Format: uuid */
-            payment_id: string;
-            /**
-             * Format: int64
-             * @description Cents, partial or full.
-             */
-            amount: number;
-            reason?: string;
-        };
+        PaymentStatus: "posted" | "voided";
         Refund: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
-            payment_id: string;
-            /**
-             * Format: int64
-             * @description Cents.
-             */
-            amount: number;
-            reason: string;
-            gateway_refund_id?: string;
+            payment_id: string | null;
+            /** Format: uuid */
+            credit_memo_id: string | null;
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string | null;
+            method: components["schemas"]["PaymentMethod"];
+            gateway_refund_id: string | null;
             /** @enum {string} */
             status: "PENDING" | "COMPLETE" | "FAILED";
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            /** Format: date */
+            refunded_on: string;
             /** Format: date-time */
             created_at: string;
         };
-        PaymentList: components["schemas"]["Payment"][] | null;
+        /** @description A payment's head, a list item; the invoice a legacy payment named is not on the wire. */
+        PaymentSummary: {
+            /** Format: uuid */
+            id: string;
+            /** @description PAY-000001, human readable. */
+            number: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            status: components["schemas"]["PaymentStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description ISO 4217, the customer's at record time. */
+            currency: string;
+            method: components["schemas"]["PaymentMethod"];
+            /** Format: int64 */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description amount less live applications and refunds; held in 2200.
+             */
+            unapplied_cents: number;
+            /**
+             * Format: date
+             * @description The business date.
+             */
+            received_on: string;
+            reference: string | null;
+            notes: string | null;
+            /**
+             * Format: uuid
+             * @description Set on a deposit against an order.
+             */
+            order_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            card_last4: string | null;
+            card_brand: string | null;
+            gateway_tx_id: string | null;
+            auth_code: string | null;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The full payment document - the head with its applications and its refunds. */
+        Payment: {
+            /** Format: uuid */
+            id: string;
+            /** @description PAY-000001, human readable. */
+            number: string;
+            /** Format: uuid */
+            customer_id: string;
+            customer_name: string;
+            /** Format: uuid */
+            branch_id: string;
+            status: components["schemas"]["PaymentStatus"];
+            /** Format: int64 */
+            revision: number;
+            /** @description ISO 4217, the customer's at record time. */
+            currency: string;
+            method: components["schemas"]["PaymentMethod"];
+            /** Format: int64 */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description amount less live applications and refunds; held in 2200.
+             */
+            unapplied_cents: number;
+            /**
+             * Format: date
+             * @description The business date.
+             */
+            received_on: string;
+            reference: string | null;
+            notes: string | null;
+            /**
+             * Format: uuid
+             * @description Set on a deposit against an order.
+             */
+            order_id: string | null;
+            /** Format: uuid */
+            job_id: string | null;
+            /** Format: uuid */
+            gl_entry_id: string | null;
+            card_last4: string | null;
+            card_brand: string | null;
+            gateway_tx_id: string | null;
+            auth_code: string | null;
+            /** Format: date-time */
+            voided_at: string | null;
+            voided_by: string | null;
+            void_reason: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            applications: components["schemas"]["ArApplication"][];
+            refunds: components["schemas"]["Refund"][];
+        };
+        PaymentPage: {
+            items: components["schemas"]["PaymentSummary"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Only under include=total. */
+            total?: number;
+        };
+        PaymentApplicationRequest: {
+            /** Format: uuid */
+            invoice_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /**
+             * Format: int64
+             * @description The early pay discount taken beside this cash (a DISCOUNT application, DR 4050 / CR 1020).
+             */
+            discount_cents?: number;
+        };
+        PaymentCreateRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            /**
+             * Format: uuid
+             * @description Defaults to the caller's branch, else the customer's primary branch.
+             */
+            branch_id?: string;
+            /** Format: int64 */
+            amount_cents: number;
+            /** @enum {string} */
+            method: "cash" | "check" | "ach" | "other";
+            reference?: string;
+            notes?: string;
+            /**
+             * Format: date
+             * @description Defaults to the branch's business date.
+             */
+            received_on?: string;
+            /**
+             * Format: uuid
+             * @description A deposit against this order.
+             */
+            order_id?: string;
+            /** Format: uuid */
+            job_id?: string;
+            applications?: components["schemas"]["PaymentApplicationRequest"][];
+        };
+        CardPaymentRequest: {
+            /** Format: uuid */
+            customer_id: string;
+            /** Format: uuid */
+            branch_id?: string;
+            /** @description The gateway tokenizer's result; required. */
+            token_id: string;
+            /** Format: int64 */
+            amount_cents: number;
+            notes?: string;
+            /** Format: uuid */
+            order_id?: string;
+            /** Format: uuid */
+            job_id?: string;
+            applications?: components["schemas"]["PaymentApplicationRequest"][];
+        };
+        PaymentApplyRequest: {
+            applications: components["schemas"]["PaymentApplicationRequest"][];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        PaymentTransitionRequest: {
+            to: components["schemas"]["PaymentStatus"];
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+            reason: string;
+        };
+        PaymentRefundRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        CreditMemoRefundRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+            reason: string;
+            /** @enum {string} */
+            method: "card" | "check" | "ach" | "other";
+            /**
+             * Format: uuid
+             * @description The card payment a card refund goes back to; only for method card.
+             */
+            payment_id?: string;
+            /**
+             * Format: int64
+             * @description The precondition, beside If-Match.
+             */
+            revision?: number;
+        };
+        PaymentIntentRequest: {
+            /** Format: int64 */
+            amount_cents: number;
+        };
+        PaymentIntentResponse: {
+            public_key: string;
+            /** Format: int64 */
+            amount_cents: number;
+        };
         PortalLoginRequest: {
             email: string;
             password: string;
@@ -9132,8 +11073,13 @@ export interface components {
         PortalInvoice: {
             /** Format: uuid */
             id: string;
+            /** @description The invoice's gapless IN- number (C2-3). */
+            number: string;
+            /** @description Computed, open and past its due date; overdue is no longer a status (C2-3). */
+            is_overdue: boolean;
             /** Format: uuid */
             order_id: string;
+            /** @description The stored status, uppercase (UNPAID, PARTIAL, PAID, VOID, WRITTEN_OFF); the portal keeps its legacy vocabulary. */
             status: string;
             /** @description Float dollars. */
             total_amount: number;
@@ -10346,11 +12292,60 @@ export interface components {
              */
             revision: number;
         };
-        /**
-         * @description The database unit of measure vocabulary, verbatim.
-         * @enum {string}
-         */
-        UOM: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
+        /** @description One row of a product's unit set: unit_qty of the row's unit is stock_qty of the product's stocking unit, canonical (ADR 0006 R2). */
+        UnitSetRow: {
+            uom: components["schemas"]["UOM"];
+            unit_qty: components["schemas"]["Quantity"];
+            stock_qty: components["schemas"]["Quantity"];
+            sell: boolean;
+            purchase: boolean;
+            price: boolean;
+        };
+        /** @description GET /products/{id}/units and the PUT's answer: the set, the four defaults, the board measure facts the derivations read, the base price the hold guards, and the PUT's warnings (empty on a read, an array always present). */
+        UnitSetDoc: {
+            /** Format: uuid */
+            product_id: string;
+            stock_uom: components["schemas"]["UOM"];
+            sale_uom: components["schemas"]["UOM"];
+            price_uom: components["schemas"]["UOM"];
+            purchase_uom: components["schemas"]["UOM"];
+            /** Format: int64 */
+            base_price_ten_thousandths: number;
+            board_thickness_in: components["schemas"]["Quantity"] | null;
+            board_width_in: components["schemas"]["Quantity"] | null;
+            board_length_ft: components["schemas"]["Quantity"] | null;
+            random_length: boolean;
+            units: components["schemas"]["UnitSetRow"][];
+            /** @description One entry per sell row whose unit does not convert exactly into the stocking unit, naming the finer stocking unit that would make every sell row exact (the 6x9 paver stocked in PCS and sold by SF). The warning does not refuse. */
+            warnings: {
+                field: string;
+                message: string;
+            }[];
+            /** Format: int64 */
+            revision: number;
+        };
+        /** @description The body of PUT /products/{id}/units: it replaces the whole set and the four default columns at the product's revision. A row may omit its pair (the derivations of ADR 0006 section 3.2 fill it); a sent pair is stored canonically and must agree with every derivation that applies. base_price_ten_thousandths simply sets the base price while the price unit cannot leave the stocking unit. A field the PUT cannot apply (the board measure columns) is a 400 naming it. */
+        UnitSetPut: {
+            /** Format: int64 */
+            revision: number;
+            stock_uom: components["schemas"]["UOM"];
+            sale_uom: components["schemas"]["UOM"];
+            price_uom: components["schemas"]["UOM"];
+            purchase_uom: components["schemas"]["UOM"];
+            /** Format: int64 */
+            base_price_ten_thousandths?: number;
+            units: components["schemas"]["UnitSetRowPut"][];
+        };
+        UnitSetRowPut: {
+            uom: components["schemas"]["UOM"];
+            unit_qty?: components["schemas"]["Quantity"];
+            stock_qty?: components["schemas"]["Quantity"];
+            sell?: boolean;
+            purchase?: boolean;
+            price?: boolean;
+        };
+        /** @description A unit code of the catalogue (the closed enum is gone; ADR 0006 section 2). */
+        UOM: string;
         /** @description The product on the wire (ADR 0006 sections 6 and 7.1): stock_uom, the scaled base price, quantities as decimal strings, and the stock totals in the stocking unit. */
         ProductView: {
             /** Format: uuid */
@@ -10388,6 +12383,19 @@ export interface components {
             available: string;
             /** Format: int64 */
             revision: number;
+            sale_uom: components["schemas"]["UOM"];
+            /** @description The unit the base price is per; the stocking unit until C3-2B. */
+            price_uom: components["schemas"]["UOM"];
+            purchase_uom: components["schemas"]["UOM"];
+            /** @description The nominal cross section of a board measure product (a 2x4 is 2), decimal string on the wire. */
+            board_thickness_in: components["schemas"]["Quantity"] | null;
+            board_width_in: components["schemas"]["Quantity"] | null;
+            /** @description The nominal length of a fixed length piece (a 2x4x8 is 8); null for random length. */
+            board_length_ft: components["schemas"]["Quantity"] | null;
+            /** @description The product is sold by tally (ADR 0006 section 4); requires LF stocking. */
+            random_length: boolean;
+            /** @description The product's unit set (ADR 0006 sections 3.1 and 3.2). */
+            units: components["schemas"]["UnitSetRow"][];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -10411,6 +12419,13 @@ export interface components {
             geometry_source?: string | null;
             reorder_point?: string;
             reorder_qty?: string;
+            /** @description The nominal cross section (a 2x4 is 2 and 4); both halves or neither. */
+            board_thickness_in?: number | null;
+            board_width_in?: number | null;
+            /** @description The nominal length of a fixed length piece; null for random length. */
+            board_length_ft?: number | null;
+            /** @description The product is sold by tally; it stocks in LF and carries no fixed length. */
+            random_length?: boolean;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         ProductPage: {
@@ -10581,12 +12596,26 @@ export interface components {
             /** Format: uuid */
             customer_id: string;
             name: string;
-            /** @enum {string} */
-            status: "Active" | "Completed";
+            /**
+             * @description Lowercase on the wire (ADR 0001 section 6). inactive is a storage value the 091 job merge wrote; writes accept active and completed.
+             * @enum {string}
+             */
+            status: "active" | "completed" | "inactive";
+            /** Format: int64 */
+            revision: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
+        ProjectPage: {
+            items: components["schemas"]["Project"][];
+            /** @description Opaque; pass it back verbatim as cursor. Null on the last page. */
+            next_cursor: string | null;
+            limit: number;
+            /** Format: int64 */
+            total?: number;
         };
         ProjectDashboard: {
             project: components["schemas"]["Project"];
@@ -10600,24 +12629,34 @@ export interface components {
         ProjectItem: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            type: "ORDER" | "DELIVERY" | "INVOICE";
+            /**
+             * @description Lowercase.
+             * @enum {string}
+             */
+            type: "order" | "delivery" | "invoice";
+            /** @description A lowercase summary of the document's own status. */
             status: string;
-            /** @description Float dollars; omitted when zero. */
-            total_amount?: number;
+            /**
+             * Format: int64
+             * @description Integer cents (ADR 0001 section 7); null on a delivery, which carries no money.
+             */
+            total_cents: number | null;
             /** Format: date-time */
             created_at: string;
-            /** @description A human label such as "Order 1a2b3c4d"; omitted when empty. */
-            reference?: string;
+            /** @description A human label such as "Order 1a2b3c4d". */
+            reference: string;
         };
-        ProjectCreateRequest: {
-            name: string;
-        };
-        /** @description Partial: only the fields present are applied. */
-        ProjectUpdateRequest: {
+        /** @description The body of the create and the update. Every field problem is collected into one 400 with a details entry per field; an unknown field is refused. On create only name applies (required); on update absent fields keep their values. */
+        ProjectRequest: {
+            /** @description 1 to 255 characters. */
             name?: string;
             /** @enum {string} */
-            status?: "Active" | "Completed";
+            status?: "active" | "completed";
+            /**
+             * Format: int64
+             * @description The body revision, on update only. A create carrying one is a 400.
+             */
+            revision?: number;
         };
         /** @description A purchase order. Lines appear only on create and get; line_count and total_cost only on the list (omitted when zero). total_cost is float dollars today. */
         PurchaseOrder: {
@@ -10919,6 +12958,12 @@ export interface components {
              * @description Null for a special order line the dealer does not stock.
              */
             product_id: string | null;
+            /** @description The product's stocking unit at the line's create (ADR 0006 section 3.4); null on a line without a product. */
+            stock_uom: string | null;
+            /** @description The quantity converted into the stocking unit, exact at scale 4 (R5); null on a line without a product. */
+            stock_quantity: components["schemas"]["Quantity"] | null;
+            /** @description The pieces by length a random length line carries (ADR 0006 section 4); null on every other line. */
+            tally: components["schemas"]["Tally"] | null;
             sku: string;
             description: string;
             /** @description What a portal user wrote when asking for the line to be priced; an edit that keeps the line id keeps it. */
@@ -10946,11 +12991,26 @@ export interface components {
         };
         /** @description A plain decimal string with at most four fraction digits, never a JSON number. */
         Quantity: string;
-        /**
-         * @description Units of measure keep their standard uppercase codes.
-         * @enum {string}
-         */
-        QuoteUom: "PCS" | "EA" | "LF" | "SF" | "BF" | "MBF" | "SQ" | "BOX" | "CTN" | "RL" | "GAL" | "LBS" | "BAG" | "BUNDLE" | "PAIR" | "SET";
+        /** @description A unit code of the catalogue (ADR 0006 section 2); on a product line, a sale unit of the product's set. */
+        QuoteUom: string;
+        /** @description A random length line's tally (ADR 0006 section 4.3): pieces by length, the cross section snapshotted from the product, the exact linear feet the line's quantity carries, and the board feet display rounding of R4.3 (read by nothing). Pieces are JSON integers; the lengths and derived fields are decimal strings. */
+        Tally: {
+            thickness_in: components["schemas"]["Quantity"] | null;
+            /** @description Null beside a null thickness: a tally without a cross section. */
+            width_in: components["schemas"]["Quantity"] | null;
+            rows: components["schemas"]["TallyRow"][];
+            linear_feet: components["schemas"]["Quantity"];
+            /** @description Linear feet x thickness x width / 12, rounded once to scale 4 for display. */
+            board_feet: components["schemas"]["Quantity"] | null;
+        };
+        TallyRow: {
+            pieces: number;
+            length_ft: components["schemas"]["Quantity"];
+        };
+        /** @description The tally a line carries: rows only. thickness_in, width_in, linear_feet and board_feet are read only, and one in a request is a 400 naming it. Allowed on a random length product line only, its sale unit LF; the linear feet are the line's quantity. */
+        TallyRequest: {
+            rows: components["schemas"]["TallyRow"][];
+        };
         /** @description The body of POST /quotes and PUT /quotes/{id}. A field the schema does not name is a 400. revision is the PUT precondition beside If-Match; a create has no revision and refuses one with a 400. A PUT refuses the create-only fields (branch_id, source, margin_total_cents, original_file, original_filename, original_content_type, parse_map). */
         QuoteRequest: {
             /** Format: uuid */
@@ -10982,7 +13042,7 @@ export interface components {
             revision?: number;
             lines: components["schemas"]["QuoteLineRequest"][];
         };
-        /** @description uom defaults from the product's own unit when the line names a product; a line with neither uom nor product_id is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to uom; when it differs, uom_qty and price_uom_qty (both) are required. */
+        /** @description uom defaults to the product's sale unit when the line names a product; a line with neither uom nor product_id is a 400 naming lines[i].uom. sku and description default from product_id and are required without one. price_uom defaults to the product's price unit on a product line and to uom on the others. The pair is resolved by the server from the product's unit set on a product line (ADR 0006 section 3.3); a sent pair must equal the resolved one as a ratio. A line without a product carries the client's pair, required when the two units differ unless their standard sizes derive it. quantity is required unless the line carries a tally, whose linear feet are the quantity. */
         QuoteLineRequest: {
             /** Format: uuid */
             id?: string;
@@ -10991,7 +13051,7 @@ export interface components {
             sku?: string;
             description?: string;
             customer_note?: string;
-            quantity: components["schemas"]["Quantity"];
+            quantity?: components["schemas"]["Quantity"];
             uom?: components["schemas"]["QuoteUom"];
             /** @description A unit code of one to six capital letters; defaults to uom. */
             price_uom?: string;
@@ -10999,6 +13059,7 @@ export interface components {
             price_uom_qty?: components["schemas"]["Quantity"];
             /** Format: int64 */
             unit_price_ten_thousandths: number;
+            tally?: components["schemas"]["TallyRequest"];
         };
         QuoteTransitionRequest: {
             to: components["schemas"]["QuoteStatus"];
@@ -11522,6 +13583,54 @@ export interface components {
             /** @description True when the flat rate fallback was used. */
             is_estimate: boolean;
         };
+        /** @description One unit of the catalogue. The standard size is the pair std_unit_qty of this unit = std_ref_qty of its dimension's reference unit, stored in the canonical form of ADR 0006 section 1 (GAL is 576 = 77 CF); both fields are null for a unit whose size is per product (a box, a bundle). */
+        Unit: {
+            /** @description Immutable; the value every unit column holds. */
+            code: string;
+            name: string;
+            /** @enum {string} */
+            dimension: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            std_unit_qty: components["schemas"]["Quantity"] | null;
+            std_ref_qty: components["schemas"]["Quantity"] | null;
+            /** @description True on seeded rows: their code, dimension and standard size cannot change. */
+            is_system: boolean;
+            /** @description An inactive unit cannot enter a new unit set row or a new line; existing rows keep it. */
+            is_active: boolean;
+            /** Format: int64 */
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The create body. The dimension is required; the standard size is both halves or neither. is_system and revision are never accepted. */
+        UnitCreate: {
+            code: string;
+            name: string;
+            /** @enum {string} */
+            dimension: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            std_unit_qty?: components["schemas"]["Quantity"];
+            std_ref_qty?: components["schemas"]["Quantity"];
+        };
+        /** @description The update body at the unit's revision: If-Match or revision. A field the PUT cannot change is a 400 naming it. */
+        UnitUpdate: {
+            name?: string;
+            is_active?: boolean;
+            /** @enum {string} */
+            dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+            std_unit_qty?: components["schemas"]["Quantity"];
+            std_ref_qty?: components["schemas"]["Quantity"];
+            /** Format: int64 */
+            revision?: number;
+        };
+        /** @description The list envelope of ADR 0001 section 1 over units. */
+        UnitPage: {
+            items: components["schemas"]["Unit"][];
+            next_cursor: string | null;
+            limit: number;
+            /** @description Present only under include=total. */
+            total?: number;
+        };
         /** @description vendor.Vendor. */
         Vendor: {
             /** Format: uuid */
@@ -11778,6 +13887,15 @@ export interface components {
                 "application/json": components["schemas"]["WireError"];
             };
         };
+        /** @description A dependency the route needs is down, in the ADR 0001 error envelope (code unavailable); retry later. */
+        WireUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
         /** @description The card charge or its persistence failed. */
         PaymentRequired: {
             headers: {
@@ -11884,6 +14002,33 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["IntegrationError"];
+            };
+        };
+        /** @description The card was declined or the gateway could not take the charge; nothing was recorded. */
+        WirePaymentRequired: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The payment gateway is not configured or cannot be reached. */
+        WireServiceUnavailable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The card was charged, the system refused the payment, and neither the gateway void nor the refund went through. The message names the gateway transaction id finance must reconcile; it is the one 5xx whose message reaches the client. */
+        ChargeNotReversed: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
             };
         };
     };
@@ -12022,15 +14167,22 @@ export interface operations {
                     "application/json": components["schemas"]["AccountSummary"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
         };
     };
     accountTransactions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -12042,19 +14194,267 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every transaction of the customer, newest first. The body is null when there are none. */
+            /** @description The page of subledger rows. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CustomerTransaction"][] | null;
+                    "application/json": components["schemas"]["AccountTransactionPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arAging: {
+        parameters: {
+            query?: {
+                group_by?: "customer" | "job" | "ship_to";
+                as_of?: string;
+                basis?: "due_date" | "invoice_date";
+                customer_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of aging rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArAgingPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arAgingSummary: {
+        parameters: {
+            query?: {
+                group_by?: "customer" | "job" | "ship_to";
+                as_of?: string;
+                basis?: "due_date" | "invoice_date";
+                customer_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The bucket totals, one entry per currency. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArAgingSummary"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arStatement: {
+        parameters: {
+            query?: {
+                from?: string;
+                to?: string;
+                job_id?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The statement. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArStatement"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    arReconciliation: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The drift and the ledger comparison. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArReconciliation"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+        };
+    };
+    arApplicationReverse: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArApplicationReverseRequest"];
+            };
+        };
+        responses: {
+            /** @description The application, reversed. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArApplication"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    activityList: {
+        parameters: {
+            query?: {
+                /** @description One lowercase activity type. */
+                activity_type?: "call" | "meeting" | "email" | "note";
+                /** @description Only the activities of this contact. */
+                contact_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                customerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of activities. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    activityCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                customerId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivityRequest"];
+            };
+        };
+        responses: {
+            /** @description The logged activity, with its ETag and a Location header. */
+            201: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Activity"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     activityGet: {
@@ -12074,16 +14474,19 @@ export interface operations {
             /** @description The activity. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Activity"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     activityUpdate: {
@@ -12094,6 +14497,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -12102,13 +14507,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ActivityUpdate"];
+                "application/json": components["schemas"]["ActivityRequest"];
             };
         };
         responses: {
-            /** @description The activity as the request wrote it. customer_id, created_at and any field the body omitted come back as zero values, because the handler echoes the decoded body rather than re-reading the row. */
+            /** @description The activity at its new revision, with its ETag. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12118,11 +14525,12 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     activityDelete: {
@@ -12131,6 +14539,10 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -12146,34 +14558,44 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     adminListKeys: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Every key, or null when none exist. */
+            /** @description The page of keys. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminKey"][] | null;
+                    "application/json": components["schemas"]["ApiKeyPage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminCreateKey: {
@@ -12188,26 +14610,28 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TechAdminCreateKeyRequest"];
+                "application/json": components["schemas"]["AdminCreateKeyRequest"];
             };
         };
         responses: {
-            /** @description The new key record and the raw key, shown once. */
-            200: {
+            /** @description The new key row and the raw key, shown once. */
+            201: {
                 headers: {
+                    /** @description The new key's own URL. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminCreateKeyResponse"];
+                    "application/json": components["schemas"]["AdminCreateKeyResponse"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminRevokeKey: {
@@ -12228,9 +14652,11 @@ export interface operations {
                 };
                 content?: never;
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminGetAISettings: {
@@ -12242,17 +14668,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The key status. */
+            /** @description The settings document. */
             200: {
                 headers: {
+                    /** @description The revision in quotes, the strong form If-Match reads. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSettingsStatus"];
+                    "application/json": components["schemas"]["AISettings"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminSaveAISettings: {
@@ -12261,38 +14690,46 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted ("3"); the weak form W/"3" is accepted. */
+                "If-Match"?: string;
             };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TechAdminSaveAISettingsRequest"];
+                "application/json": components["schemas"]["AdminSaveAISettingsRequest"];
             };
         };
         responses: {
-            /** @description Saved. */
+            /** @description The settings document after the save. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSaveResult"];
+                    "application/json": components["schemas"]["AISettings"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminDeleteAISettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12307,7 +14744,9 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminGetRoutingSettings: {
@@ -12319,17 +14758,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The key status. */
+            /** @description The settings document. */
             200: {
                 headers: {
+                    /** @description The revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSettingsStatus"];
+                    "application/json": components["schemas"]["RoutingSettings"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminSaveRoutingSettings: {
@@ -12338,38 +14780,46 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match"?: string;
             };
             path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["TechAdminSaveRoutingSettingsRequest"];
+                "application/json": components["schemas"]["AdminSaveRoutingSettingsRequest"];
             };
         };
         responses: {
-            /** @description Saved. */
+            /** @description The settings document after the save. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TechAdminSaveResult"];
+                    "application/json": components["schemas"]["RoutingSettings"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminDeleteRoutingSettings: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12384,89 +14834,42 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    adminListModules: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The modules. Never null. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StaffModule"][];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    adminSetModuleEnabled: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["StaffSetModuleEnabledRequest"];
-            };
-        };
-        responses: {
-            /** @description The module with its new flag; name is always the empty string here. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StaffModule"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminListStaff: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Filter on the active flag. */
+                active?: "true" | "false";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The roster. */
+            /** @description The page of staff. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffMember"][];
+                    "application/json": components["schemas"]["StaffPage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminCreateStaff: {
@@ -12481,26 +14884,30 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StaffCreateRequest"];
+                "application/json": components["schemas"]["AdminCreateStaffRequest"];
             };
         };
         responses: {
-            /** @description The created member, with an empty modules array. */
+            /** @description The new staff member. */
             201: {
                 headers: {
+                    /** @description The new member's own URL. */
+                    Location?: string;
+                    /** @description The revision (1) in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminGetStaff: {
@@ -12514,20 +14921,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The member with its raw module grants. */
+            /** @description The staff member. */
             200: {
                 headers: {
+                    /** @description The revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminUpdateStaff: {
@@ -12536,6 +14945,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -12544,35 +14955,40 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StaffUpdateRequest"];
+                "application/json": components["schemas"]["AdminUpdateStaffRequest"];
             };
         };
         responses: {
-            /** @description The updated member. */
+            /** @description The member after the update. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    adminGrantStaffModule: {
+    adminGrantModule: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The staff revision this write preconditions on, quoted. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -12581,32 +14997,39 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StaffGrantModuleRequest"];
+                "application/json": components["schemas"]["AdminGrantModuleRequest"];
             };
         };
         responses: {
-            /** @description The member with its grants, or the bare status object. */
+            /** @description The member after the grant. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
+                    "application/json": components["schemas"]["StaffMember"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    adminRevokeStaffModule: {
+    adminRevokeModule: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description The staff revision this write preconditions on, quoted. */
+                "If-Match": string;
+            };
             path: {
                 id: string;
                 module_id: string;
@@ -12615,19 +15038,97 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The member with its remaining grants, or the bare status object. */
+            /** @description The member after the revoke. */
+            200: {
+                headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffMember"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminListModules: {
+        parameters: {
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The module catalog. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StaffMember"] | components["schemas"]["StaffModuleStatus"];
+                    "application/json": components["schemas"]["StaffModulePage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminSetModuleEnabled: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The flag's revision this write preconditions on, quoted. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminSetModuleEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description The module after the toggle. */
+            200: {
+                headers: {
+                    /** @description The flag's new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffModule"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     adminExposureScan: {
@@ -12663,27 +15164,40 @@ export interface operations {
     apInvoiceList: {
         parameters: {
             query?: {
+                /** @description Filter on the vendor. */
                 vendor_id?: string;
-                /** @description Invoice status filter, for example PENDING, APPROVED, PARTIAL, PAID or VOIDED. */
+                /** @description Filter on the purchase order. */
+                po_id?: string;
+                /** @description Comma separated lowercase statuses (pending, approved, partial, paid, voided). */
                 status?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
-            header?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The vendor invoices, ordered by due_date ascending (earliest due first). */
+            /** @description The page of vendor invoice summaries. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ApVendorInvoice"][];
+                    "application/json": components["schemas"]["ApInvoicePage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12693,6 +15207,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
             };
             path?: never;
             cookie?: never;
@@ -12703,9 +15219,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created invoice. */
+            /** @description The created bill, with its lines. */
             201: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The bill's own route. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12714,8 +15234,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -12724,7 +15244,10 @@ export interface operations {
     apInvoiceGet: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
             path: {
                 id: string;
             };
@@ -12732,9 +15255,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The invoice with vendor_name and lines. */
+            /** @description The bill with its lines. */
             200: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12743,27 +15268,38 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
         };
     };
-    apInvoiceApprove: {
+    apInvoiceTransition: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
             };
             path: {
                 id: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApInvoiceTransitionRequest"];
+            };
+        };
         responses: {
-            /** @description The approved invoice. */
+            /** @description The bill after the transition, with its lines. */
             200: {
                 headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -12771,11 +15307,14 @@ export interface operations {
                 };
             };
             400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["HandlerUnauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntityEither"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
         };
     };
     apPaymentList: {
@@ -12798,8 +15337,9 @@ export interface operations {
                     "application/json": components["schemas"]["ApPayment"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -12830,8 +15370,8 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
@@ -12855,8 +15395,9 @@ export interface operations {
                     "application/json": components["schemas"]["ApAgingSummary"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -13417,10 +15958,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorRule"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorListOptions: {
@@ -13428,6 +15970,8 @@ export interface operations {
             query: {
                 /** @description The attribute to list values for, for example Species, Grade, Treatment, Dimensions, ProductType. */
                 attribute_type: string;
+                /** @description The current selections as Type=Value pairs, comma separated. */
+                selections?: string;
             };
             header?: never;
             path?: never;
@@ -13444,11 +15988,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorAvailableOption"][];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorListPresets: {
@@ -13472,10 +16016,11 @@ export interface operations {
                     "application/json": components["schemas"]["ConfiguratorPreset"][];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorValidate: {
@@ -13507,10 +16052,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     configuratorBuildSku: {
@@ -13542,9 +16086,9 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     customerList: {
@@ -14131,73 +16675,6 @@ export interface operations {
             500: components["responses"]["InternalErrorEither"];
         };
     };
-    customerListActivities: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                customerId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Activities, a bare array that is empty when none exist. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Activity"][];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    customerCreateActivity: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                customerId: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CustomerActivityCreate"];
-            };
-        };
-        responses: {
-            /** @description The created activity. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Activity"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
-        };
-    };
     customerListContacts: {
         parameters: {
             query?: {
@@ -14559,7 +17036,14 @@ export interface operations {
     };
     deliveryVehicleList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -14569,18 +17053,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description All vehicles. The body is null when there are none. */
+            /** @description The page of vehicles. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryVehicle"][] | null;
+                    "application/json": components["schemas"]["DeliveryVehiclePage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryVehicleCreate: {
@@ -14601,9 +17086,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created vehicle. */
+            /** @description The created vehicle, with its ETag and Location. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14616,7 +17104,7 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryVehicleGet: {
@@ -14633,19 +17121,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The vehicle. */
+            /** @description The vehicle, with its revision's ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DeliveryVehicle"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryVehicleUpdate: {
@@ -14656,6 +17147,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -14668,9 +17161,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated vehicle. */
+            /** @description The updated vehicle, with the new revision and its ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14680,10 +17175,12 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryVehicleDelete: {
@@ -14692,6 +17189,8 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -14707,10 +17206,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryVehiclePhoto: {
@@ -14733,27 +17235,37 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The stored photo URL. */
+            /** @description The vehicle with the photo attached. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryPhotoUrl"];
+                    "application/json": components["schemas"]["DeliveryVehicle"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryDriverList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -14763,18 +17275,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description All drivers. The body is null when there are none. */
+            /** @description The page of drivers. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryDriver"][] | null;
+                    "application/json": components["schemas"]["DeliveryDriverPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryDriverCreate: {
@@ -14795,9 +17308,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created driver, status ACTIVE. */
+            /** @description The created driver, with its ETag and Location. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14810,7 +17326,7 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryDriverGet: {
@@ -14827,19 +17343,22 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The driver. */
+            /** @description The driver, with its revision's ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["DeliveryDriver"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryDriverUpdate: {
@@ -14850,6 +17369,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -14862,9 +17383,11 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated driver. */
+            /** @description The updated driver, with the new revision and its ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -14874,10 +17397,12 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryDriverDelete: {
@@ -14886,6 +17411,8 @@ export interface operations {
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -14901,10 +17428,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryDriverPhoto: {
@@ -14927,31 +17457,42 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The stored photo URL. */
+            /** @description The driver with the photo attached. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryPhotoUrl"];
+                    "application/json": components["schemas"]["DeliveryDriver"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryRouteList: {
         parameters: {
             query?: {
-                /** @description Filter to one scheduled date. An unparseable date answers 500. */
+                /** @description Only routes scheduled for this date. */
                 date?: string;
-                /** @description Filter to one driver. */
+                /** @description Only this driver's routes. */
                 driver_id?: string;
+                /** @description One lowercase route status. */
+                status?: components["schemas"]["DeliveryRouteStatus"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
@@ -14962,19 +17503,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Routes. The body is null when there are none. */
+            /** @description The page of routes, with stops under include=stops. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryRoute"][] | null;
+                    "application/json": components["schemas"]["DeliveryRoutePage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryRouteCreate: {
@@ -14995,9 +17536,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created route, status DRAFT. */
+            /** @description The created route, with its ETag and Location. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15010,17 +17554,15 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
-    deliveryRouteDispatch: {
+    deliveryRouteGet: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
             path: {
                 id: string;
@@ -15029,20 +17571,66 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Dispatched; the body is empty. */
+            /** @description The route with its stops, with its revision's ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"];
+                };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    deliveryRouteTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeliveryRouteTransition"];
+            };
+        };
+        responses: {
+            /** @description The route in its new status, with the new revision and its ETag. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryRouteReorder: {
@@ -15053,6 +17641,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -15065,20 +17655,26 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Reordered; the body is empty. */
+            /** @description The route with its stops in the new order. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeliveryRoute"];
+                };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryRouteOptimize: {
@@ -15089,6 +17685,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -15097,60 +17695,38 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The optimization result. A route with no deliveries or no geocoded stops answers an empty result: null order and legs and zero totals. */
+            /** @description The route with its stops in the optimized order. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryRouteOptimizationResult"];
+                    "application/json": components["schemas"]["DeliveryRoute"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    deliveryRouteComplete: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The route is completed. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DeliveryStatusAck"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryRouteDeliveries: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -15162,19 +17738,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Deliveries in stop order. The body is null when there are none. */
+            /** @description The page of stops. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Delivery"][] | null;
+                    "application/json": components["schemas"]["DeliveryStopPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryCreate: {
@@ -15195,9 +17772,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created delivery, with a capacity warning when the vehicle would be over its weight capacity. */
+            /** @description The created stop, with its ETag and Location. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -15207,10 +17787,11 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryGet: {
@@ -15227,22 +17808,25 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The delivery. */
+            /** @description The stop, with its revision's ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Delivery"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
-    deliveryUpdateStatus: {
+    deliveryTransition: {
         parameters: {
             query?: never;
             header?: {
@@ -15250,6 +17834,8 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -15258,24 +17844,30 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DeliveryStatusUpdate"];
+                "application/json": components["schemas"]["DeliveryStopTransition"];
             };
         };
         responses: {
-            /** @description Updated; the body is empty. */
+            /** @description The stop in its terminal status, with the new revision and its ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
+                };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryAdjustQty: {
@@ -15298,22 +17890,25 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Adjusted. */
+            /** @description The stop, with its moved revision and its ETag. */
             200: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryAdjustAck"];
+                    "application/json": components["schemas"]["Delivery"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryPodPhoto: {
@@ -15348,15 +17943,23 @@ export interface operations {
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     deliveryPodPhotos: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
@@ -15368,150 +17971,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Photo records; an empty array when none. */
+            /** @description The page of photo records. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DeliveryPodPhoto"][];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    depositList: {
-        parameters: {
-            query: {
-                /** @description Required. */
-                customer_id: string;
-            };
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The deposits and the customer's open balance. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepositList"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    depositCreate: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DepositCreate"];
-            };
-        };
-        responses: {
-            /** @description The recorded deposit. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Deposit"];
+                    "application/json": components["schemas"]["DeliveryPodPhotoPage"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    depositGet: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The deposit. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Deposit"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    depositApply: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
-                "X-Branch-Id"?: components["parameters"]["XBranchId"];
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DepositApply"];
-            };
-        };
-        responses: {
-            /** @description The recorded application. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepositApplication"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["ForbiddenEither"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     documentsPrintInvoice: {
@@ -15572,6 +18045,578 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    ordersDraftList: {
+        parameters: {
+            query?: {
+                status?: string;
+                subject_id?: string;
+                created_by_kind?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list envelope of order draft summaries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrdersDraftCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The open draft; Location names it and the ETag is its revision. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftFeed: {
+        parameters: {
+            query?: {
+                cursor?: string;
+                draft_id?: string;
+                subject_id?: string;
+            };
+            header?: {
+                "Last-Event-ID"?: string;
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description This principal holds its draft feed stream limit, answered before the stream opens. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    ordersDraftGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftReplace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrdersDraftCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft at its new revision. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "discarded" | "open";
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The draft in its new status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    ordersDraftPromote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description An edit draft's promotion; the body is the promoted draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            /** @description A create draft's promotion; Location is the order's URL. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrdersDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftList: {
+        parameters: {
+            query?: {
+                /** @description A lowercase status (open, promoted, discarded). */
+                status?: string;
+                subject_id?: string;
+                /** @description One of user, key, agent, anonymous. */
+                created_by_kind?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The list envelope of quote draft summaries (no payload, validation.ready only). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotesDraftCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The open draft; Location names it and the ETag is its revision. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftFeed: {
+        parameters: {
+            query?: {
+                /** @description The cursor this feed minted (an SSE id); no cursor means from now. */
+                cursor?: string;
+                draft_id?: string;
+                subject_id?: string;
+            };
+            header?: {
+                /** @description What an SSE client sends on reconnect; it wins over the cursor parameter. */
+                "Last-Event-ID"?: string;
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stream (Cache-Control no-store, X-Accel-Buffering no). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            /** @description This principal holds its draft feed stream limit, answered before the stream opens. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WireError"];
+                };
+            };
+            503: components["responses"]["WireUnavailable"];
+        };
+    };
+    quotesDraftGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft; the ETag is its revision. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftReplace: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuotesDraftReplaceRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft at its new revision; the ETag moved with it. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    to: "discarded" | "open";
+                    /** Format: int64 */
+                    revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description The draft in its new status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    quotesDraftPromote: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: int64 */
+                    revision?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description An edit draft's promotion; the body is the promoted draft. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            /** @description A create draft's promotion; Location is the quote's URL and the body is the promoted draft with promoted filled. An edit draft's promotion answers 200. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuotesDraftDocument"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     ediPartnerList: {
@@ -16098,6 +19143,8 @@ export interface operations {
             query?: {
                 /** @description Cut-off date, YYYY-MM-DD. Defaults to today. */
                 as_of?: string;
+                /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): omitted, every currency's rows are returned, each row naming its currency; given, that currency alone. */
+                currency?: string;
             };
             header?: never;
             path?: never;
@@ -16127,6 +19174,8 @@ export interface operations {
                 start?: string;
                 /** @description Last day, YYYY-MM-DD. Defaults to today. */
                 end?: string;
+                /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the report is in that one currency. */
+                currency?: string;
             };
             header?: never;
             path?: never;
@@ -16154,6 +19203,8 @@ export interface operations {
             query?: {
                 /** @description Statement date, YYYY-MM-DD. Defaults to today. */
                 as_of?: string;
+                /** @description ISO 4217 code, three capital letters. Reports never add two currencies (ADR 0005 4.2): defaults to the dealer's default currency; the sheet is in that one currency. */
+                currency?: string;
             };
             header?: never;
             path?: never;
@@ -16261,31 +19312,40 @@ export interface operations {
             422: components["responses"]["UnprocessableEntity"];
         };
     };
-    governanceListRfcs: {
+    governanceListRFCs: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Comma separated lowercase statuses (draft, review, approved, rejected). */
+                status?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Every RFC, or null when none exist. */
+            /** @description The page of RFC summaries. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"][] | null;
+                    "application/json": components["schemas"]["RFCPage"];
                 };
             };
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    governanceCreateRfc: {
+    governanceCreateRFC: {
         parameters: {
             query?: never;
             header?: {
@@ -16304,23 +19364,27 @@ export interface operations {
             /** @description The drafted RFC. */
             201: {
                 headers: {
+                    /** @description The new RFC's own URL. */
+                    Location?: string;
+                    /** @description The revision (1) in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"];
+                    "application/json": components["schemas"]["RFC"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["WireInternalError"];
+            503: components["responses"]["WireUnavailable"];
         };
     };
-    governanceGetRfc: {
+    governanceGetRFC: {
         parameters: {
             query?: never;
             header?: never;
@@ -16334,33 +19398,29 @@ export interface operations {
             /** @description The RFC. */
             200: {
                 headers: {
+                    /** @description The revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"];
+                    "application/json": components["schemas"]["RFC"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description The RFC does not exist (or the lookup failed), or the governance app is disabled (the app_disabled body). The standard envelope in the first case. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"] | components["schemas"]["AppsDisabledError"];
-                };
-            };
-            500: components["responses"]["InternalError"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
-    governanceUpdateRfc: {
+    governanceUpdateRFC: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted ("3"); the weak form is accepted. */
+                "If-Match"?: string;
             };
             path: {
                 id: string;
@@ -16373,23 +19433,68 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The updated RFC. */
+            /** @description The RFC after the update. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GovernanceRFC"];
+                    "application/json": components["schemas"]["RFC"];
                 };
             };
-            400: components["responses"]["BadRequestEither"];
+            400: components["responses"]["WireBadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    governanceTransitionRFC: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision this write preconditions on, quoted. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GovernanceTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description The RFC after the transition. */
+            200: {
+                headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RFC"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     healthLive: {
@@ -16888,10 +19993,24 @@ export interface operations {
     invoiceList: {
         parameters: {
             query?: {
-                /** @description Page size. Unparseable, non positive or over maximum values are silently ignored and the default applies; the value is never refused today. */
-                limit?: components["parameters"]["Limit"];
-                /** @description Page offset. Unparseable or negative values are silently ignored and the default applies. */
-                offset?: components["parameters"]["Offset"];
+                /** @description Comma separated lowercase statuses (unpaid, partial, paid, void, written_off). */
+                status?: string;
+                /** @description Filter on the customer. */
+                customer_id?: string;
+                /** @description Filter on the job (project). */
+                job_id?: string;
+                /** @description Filter on the ship-to. */
+                ship_to_id?: string;
+                /** @description Filter on the order. */
+                order_id?: string;
+                /** @description true: open and past due; false: everything else. */
+                overdue?: "true" | "false";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
@@ -16911,6 +20030,7 @@ export interface operations {
                     "application/json": components["schemas"]["InvoicePage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             500: components["responses"]["InternalError"];
@@ -16933,6 +20053,8 @@ export interface operations {
             /** @description The invoice. */
             200: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -16942,15 +20064,17 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
         };
     };
-    invoiceCreateCreditMemo: {
+    invoiceTransition: {
         parameters: {
             query?: never;
             header?: {
                 /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -16961,26 +20085,29 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreditMemoCreateRequest"];
+                "application/json": components["schemas"]["InvoiceTransitionRequest"];
             };
         };
         responses: {
-            /** @description The created credit memo. */
-            201: {
+            /** @description The voided invoice. */
+            200: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CreditMemo"];
+                    "application/json": components["schemas"]["Invoice"];
                 };
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
-            404: components["responses"]["NotFound"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -17027,7 +20154,89 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
-    invoiceListCreditMemos: {
+    creditMemoList: {
+        parameters: {
+            query?: {
+                /** @description Comma separated lowercase statuses. */
+                status?: string;
+                /** @description Filter on the customer. */
+                customer_id?: string;
+                /** @description Filter on the invoice credited. */
+                invoice_id?: string;
+                /** @description Filter on the job. */
+                job_id?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of credit memos. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditMemoPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    creditMemoCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft credit memo. */
+            201: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The path of the created document. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditMemo"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    creditMemoGet: {
         parameters: {
             query?: never;
             header?: {
@@ -17035,25 +20244,443 @@ export interface operations {
                 "X-Branch-Id"?: components["parameters"]["XBranchId"];
             };
             path: {
-                customerId: string;
+                id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The credit memos, a bare array that is null when the customer has none. */
+            /** @description The credit memo. */
             200: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CreditMemoList"];
+                    "application/json": components["schemas"]["CreditMemo"];
                 };
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    creditMemoUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoRequest"];
+            };
+        };
+        responses: {
+            /** @description The edited credit memo. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditMemo"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    creditMemoTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description The credit memo after the transition. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditMemo"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    invoiceWriteOff: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvoiceWriteOffRequest"];
+            };
+        };
+        responses: {
+            /** @description The invoice after the write off. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Invoice"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    invoiceApplications: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The applications, in the list envelope (one page, no further cursor). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceApplicationPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    creditMemoApply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description The credit memo after the applications. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreditMemo"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    linksQuoteResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                /** @description A UUID or a quote number such as Q-000123. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksOrderResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksInvoiceResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksCustomerResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksProductResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksQuoteDraftResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    linksOrderDraftResolve: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record and its links. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkAnswer"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["WireInternalError"];
         };
     };
     locationList: {
@@ -17432,7 +21059,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The grants, a bare array that is null when none exist. */
+            /** @description The grants, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -17456,7 +21083,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The branch summaries, a bare array that is null when none exist. */
+            /** @description The branch summaries, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -17479,7 +21106,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The subject strings, a bare array that is null when none exist. */
+            /** @description The subject strings, a bare array, [] when none exist (no paging). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -17755,8 +21382,14 @@ export interface operations {
     millworkListOptions: {
         parameters: {
             query: {
-                /** @description Exact match on the category column. An empty or missing value is a 400. */
+                /** @description Exact match on the category column. */
                 category: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
             };
             header?: never;
             path?: never;
@@ -17764,20 +21397,20 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The options, or null when none match. */
+            /** @description The page of options. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MillworkOption"][] | null;
+                    "application/json": components["schemas"]["MillworkOptionPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     millworkCreateOption: {
@@ -17796,9 +21429,12 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The created option. */
+            /** @description The created option, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -17809,10 +21445,47 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["AppDisabled"];
-            409: components["responses"]["ConflictEither"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
+    millworkGetOption: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The option. */
+            200: {
+                headers: {
+                    /** @description The record's revision in quotes. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MillworkOption"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description The millwork app is disabled on this instance (app_disabled, written by the registry gate), or no option has this id (not_found). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppsDisabledError"] | components["schemas"]["WireError"];
+                };
+            };
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     orderList: {
@@ -18401,10 +22074,54 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    paymentList: {
+        parameters: {
+            query?: {
+                customer_id?: string;
+                /** @description Comma separated lowercase statuses (posted, voided). */
+                status?: string;
+                unapplied?: "true" | "false";
+                order_id?: string;
+                job_id?: string;
+                /** @description Comma separated lowercase methods (cash, card, check, ach, other, account). */
+                method?: string;
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of payments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     paymentCreate: {
         parameters: {
             query?: never;
             header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18418,8 +22135,12 @@ export interface operations {
         };
         responses: {
             /** @description The recorded payment. */
-            200: {
+            201: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The payment's route. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -18428,10 +22149,213 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    paymentGet: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The payment. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Payment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+        };
+    };
+    paymentApply: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description The payment after the applications. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Payment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    paymentTransition: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentTransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description The payment after the void. */
+            200: {
+                headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Payment"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    paymentRefund: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PaymentRefundRequest"];
+            };
+        };
+        responses: {
+            /** @description The refund. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Refund"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    creditMemoRefund: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreditMemoRefundRequest"];
+            };
+        };
+        responses: {
+            /** @description The refund. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Refund"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -18451,7 +22375,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The public key and the echoed invoice and amount. */
+            /** @description The public key and the echoed amount. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18462,17 +22386,18 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            403: components["responses"]["ForbiddenEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            503: components["responses"]["ServiceUnavailable"];
+            503: components["responses"]["WireServiceUnavailable"];
         };
     };
     paymentCard: {
         parameters: {
             query?: never;
             header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
             };
@@ -18485,9 +22410,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The processed payment. */
-            200: {
+            /** @description The recorded card payment. */
+            201: {
                 headers: {
+                    /** @description The document's revision. */
+                    ETag?: string;
+                    /** @description The payment's route. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -18496,71 +22425,13 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["Unauthorized"];
-            402: components["responses"]["PaymentRequired"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
+            402: components["responses"]["WirePaymentRequired"];
+            403: components["responses"]["ForbiddenEither"];
+            409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-        };
-    };
-    paymentRefund: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
-                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RefundRequest"];
-            };
-        };
-        responses: {
-            /** @description The processed refund. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Refund"];
-                };
-            };
-            400: components["responses"]["BadRequestEither"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["IdempotencyConflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
-        };
-    };
-    paymentHistory: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The payments, a bare array that is null when the invoice has none. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaymentList"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            500: components["responses"]["InternalError"];
+            502: components["responses"]["ChargeNotReversed"];
+            503: components["responses"]["WireServiceUnavailable"];
         };
     };
     portalLogin: {
@@ -20012,6 +23883,7 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };
@@ -21673,6 +25545,75 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    productUnitSetGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The unit set. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSetDoc"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    productUnitSetPut: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision precondition, beside the body revision. */
+                "If-Match"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitSetPut"];
+            };
+        };
+        responses: {
+            /** @description The completed set with the new revision and its ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitSetDoc"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     productKitComponentsGet: {
         parameters: {
             query?: never;
@@ -21759,24 +25700,34 @@ export interface operations {
     };
     projectList: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description One lowercase status. */
+                status?: "active" | "completed";
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The projects, a bare array, never null. */
+            /** @description The page of projects. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Project"][];
+                    "application/json": components["schemas"]["ProjectPage"];
                 };
             };
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectCreate: {
@@ -21791,13 +25742,16 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProjectCreateRequest"];
+                "application/json": components["schemas"]["ProjectRequest"];
             };
         };
         responses: {
-            /** @description The created project. */
+            /** @description The created project, with its ETag and a Location header. */
             201: {
                 headers: {
+                    /** @description The record's revision in quotes, for example "3". Send it back as If-Match. */
+                    ETag?: string;
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21806,10 +25760,10 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            409: components["responses"]["IdempotencyConflict"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectGetDashboard: {
@@ -21826,15 +25780,18 @@ export interface operations {
             /** @description The project and its associated documents. */
             200: {
                 headers: {
+                    /** @description The project's revision in quotes. Send it back as If-Match. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ProjectDashboard"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     projectUpdate: {
@@ -21843,6 +25800,8 @@ export interface operations {
             header?: {
                 /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
             };
             path: {
                 id: string;
@@ -21851,13 +25810,15 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ProjectUpdateRequest"];
+                "application/json": components["schemas"]["ProjectRequest"];
             };
         };
         responses: {
-            /** @description The updated project. */
+            /** @description The updated project at its new revision, with its ETag. */
             200: {
                 headers: {
+                    /** @description The new revision in quotes. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -21866,10 +25827,12 @@ export interface operations {
             };
             400: components["responses"]["BadRequestEither"];
             401: components["responses"]["LegacyUnauthorized"];
-            409: components["responses"]["IdempotencyConflict"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["WireConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
-            500: components["responses"]["InternalError"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
         };
     };
     purchaseOrderList: {
@@ -22810,6 +26773,46 @@ export interface operations {
             500: components["responses"]["InternalErrorEither"];
         };
     };
+    quoteAttachFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description The document revision the client read, in quotes ("3"; the weak form W/"3" is accepted too). The body's revision field is the alternative; a write carrying neither is 428, a stale one 409 stale_revision, and * or a list of tags is a 400. */
+                "If-Match"?: components["parameters"]["IfMatch"];
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description The quote with its new revision and ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            413: components["responses"]["PayloadTooLarge"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalErrorEither"];
+        };
+    };
     reportingBuilderPreview: {
         parameters: {
             query?: never;
@@ -23468,6 +27471,146 @@ export interface operations {
             409: components["responses"]["IdempotencyConflict"];
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitList: {
+        parameters: {
+            query?: {
+                /** @description The opaque cursor of the previous page's next_cursor, passed back verbatim. A malformed cursor, or one minted for another ordering, is a 400 naming cursor. */
+                cursor?: components["parameters"]["Cursor"];
+                /** @description Page size of a converted list, 1 to 200, default 50. Anything else is a 400 naming limit (ADR 0001 section 2); it is never clamped. */
+                limit?: components["parameters"]["PageLimit"];
+                /** @description A comma separated list of expansions. total adds the count of rows matching the filters, which costs a second query and is therefore opt in. */
+                include?: components["parameters"]["Include"];
+                /** @description The dimension filter, lowercase (count, length, area, volume, weight, board_measure). */
+                dimension?: "count" | "length" | "area" | "volume" | "weight" | "board_measure";
+                /** @description The active filter, true or false. */
+                is_active?: "true" | "false";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The page of units. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnitPage"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitCreate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitCreate"];
+            };
+        };
+        responses: {
+            /** @description The created unit, revision 1, with its ETag and Location. */
+            201: {
+                headers: {
+                    Location?: string;
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["IdempotencyConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The unit. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    unitUpdate: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+                /** @description The revision precondition, beside the body revision. */
+                "If-Match"?: string;
+            };
+            path: {
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UnitUpdate"];
+            };
+        };
+        responses: {
+            /** @description The updated unit with its new revision and ETag. */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Unit"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["WireConflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            422: components["responses"]["UnprocessableEntity"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };

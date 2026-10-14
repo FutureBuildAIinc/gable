@@ -200,6 +200,7 @@ The code table:
 | 400 | `validation_failed` | one or more fields failed validation; `details` names each field |
 | 400 | `unsupported_query_parameter` | the route does not accept a query parameter the request carries; `details` names it |
 | 401 | `unauthorized` | no or invalid credentials |
+| 402 | `payment_required` | a card charge the gateway declined or could not take, before anything was recorded (`POST /api/v1/payments/card`) |
 | 403 | `forbidden` | credentials lack the scope or role the route requires |
 | 404 | `not_found` | the addressed resource does not exist (or is not visible to this caller) |
 | 405 | `method_not_allowed` | the method is not supported on the route |
@@ -215,6 +216,7 @@ The code table:
 | 428 | `precondition_required` | the write needs `If-Match` or a body revision and carries neither (section 11) |
 | 429 | `rate_limited` | too many requests |
 | 500 | `internal_error` | an unexpected server fault |
+| 502 | `charge_not_reversed` | a card charge the gateway approved, the system refused to record, and nothing gave back (`POST /api/v1/payments/card`); the one 5xx whose message reaches the client, because finance must read the gateway transaction id to reconcile it (the id and nothing else about the card) |
 | 503 | `unavailable` | the service or a dependency it needs is down, retry later |
 
 Errors written by middleware (auth, rate limit, idempotency, the router's

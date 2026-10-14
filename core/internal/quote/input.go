@@ -18,22 +18,11 @@ import (
 // maxOriginalFile bounds the base64 decoded original upload.
 const maxOriginalFile = 5 << 20
 
-// uomCodes are the units of measure the quote_lines.uom enum holds (the
-// standard codes keep their form: ADR 0001 section 6). A code outside it is
-// a 400 at the boundary, not a database cast fault.
-var uomCodes = []product.UOM{
-	product.UOM_PCS, product.UOM_EA, product.UOM_LF, product.UOM_SF, product.UOM_BF, product.UOM_MBF,
-	product.UOM_SQ, product.UOM_BOX, product.UOM_CTN, product.UOM_RL, product.UOM_GAL, product.UOM_LBS,
-	product.UOM_BAG, product.UOM_BUNDLE, product.UOM_PAIR, product.UOM_SET,
-}
-
-func uomNames() []string {
-	out := make([]string, len(uomCodes))
-	for i, u := range uomCodes {
-		out[i] = string(u)
-	}
-	return out
-}
+// unitCodeForm is what a unit of measure looks like on the wire: a code of
+// one to six capital letters (the catalogue's own rule, ADR 0006 section
+// 2.1). Whether the code is a unit of the catalogue, and for a product line
+// a unit of the product's set, is the service's answer, which reads them.
+var unitCodeForm = regexp.MustCompile(`^[A-Z]{1,6}$`)
 
 // Request is the JSON body of POST /quotes and PUT /quotes/{id}. Every field
 // that carries a number, an identifier or a timestamp decodes loosely (a
@@ -71,6 +60,21 @@ type LineRequest struct {
 	UOMQty                  json.RawMessage `json:"uom_qty"`
 	PriceUOMQty             json.RawMessage `json:"price_uom_qty"`
 	UnitPriceTenThousandths json.RawMessage `json:"unit_price_ten_thousandths"`
+	Tally                   *TallyRequest   `json:"tally"`
+}
+
+// TallyRequest is the tally a line carries (ADR 0006 section 4.3): the
+// request carries only rows; thickness_in, width_in, linear_feet and
+// board_feet are read only, and one in a request is a 400 naming the field
+// (the decoder refuses it as a field the write does not apply).
+type TallyRequest struct {
+	Rows []TallyRowRequest `json:"rows"`
+}
+
+// TallyRowRequest is one length of a tally request.
+type TallyRowRequest struct {
+	Pieces   json.RawMessage `json:"pieces"`
+	LengthFT json.RawMessage `json:"length_ft"`
 }
 
 // Draft is a validated, normalized quote ready to price and store: the
@@ -103,11 +107,25 @@ type DraftLine struct {
 	Description  string
 	CustomerNote string
 	Quantity     httpx.Quantity
+	HasQuantity  bool // false when the quantity comes from the line's tally
 	UOM          product.UOM
 	PriceUOM     string
 	UOMQty       httpx.Quantity
 	PriceUOMQty  httpx.Quantity
 	UnitPrice    httpx.Price
+	Tally        *DraftTally
+}
+
+// DraftTally is the tally of a validated line: the rows the client sent,
+// parsed (ADR 0006 section 4.3); the derived fields are the service's.
+type DraftTally struct {
+	Rows []DraftTallyRow
+}
+
+// DraftTallyRow is one parsed row of a tally request.
+type DraftTallyRow struct {
+	Pieces   int
+	LengthFT httpx.Quantity
 }
 
 // priceUOMCode is what a price unit looks like. It is not limited to the sale
@@ -264,32 +282,35 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 		d.CustomerNote = *l.CustomerNote
 	}
 
-	qty, qtyOK := v.Quantity(path+".quantity", l.Quantity, true)
+	// The quantity may be omitted on a tallied line: the tally's linear feet
+	// are the quantity (ADR 0006 section 4.3). Anywhere else it is required.
+	hasTally := l.Tally != nil
+	qty, qtyOK := v.Quantity(path+".quantity", l.Quantity, !hasTally)
 	if qtyOK {
 		v.Check(qty != 0, path+".quantity", "must not be zero")
-		d.Quantity = qty
+		d.Quantity, d.HasQuantity = qty, true
 	}
 
 	// The unit the quantity is in. A line that names a product may leave it
-	// out: the service takes the product's own unit (priceDraft). A line with
-	// neither is the one 400 on lines[i].uom.
+	// out: the service takes the product's sale unit (ADR 0006 section 3.3).
+	// A line with neither is the one 400 on lines[i].uom. The code's form is
+	// checked here; the catalogue and the product's set answer in the
+	// service, which reads them (ADR 0006 section 7.4).
 	if l.UOM == nil || strings.TrimSpace(*l.UOM) == "" {
 		v.Check(d.ProductID != nil, path+".uom", "is required when the line names no product")
 	} else {
 		d.UOM = product.UOM(*l.UOM)
-		known := false
-		for _, u := range uomCodes {
-			if u == d.UOM {
-				known = true
-			}
-		}
-		v.Check(known, path+".uom", "must be one of: "+strings.Join(uomNames(), ", "))
+		v.Check(unitCodeForm.MatchString(*l.UOM), path+".uom",
+			"must be a unit code of one to six capital letters, for example PCS, MBF or M")
 	}
 
-	// The unit the price is quoted per: the uom unless the line says otherwise.
-	// While the uom is still to default from the product, an absent price_uom
-	// stays empty and priceDraft completes both.
-	d.PriceUOM = string(d.UOM)
+	// The unit the price is quoted per. On a line that names no product it is
+	// the uom unless the line says otherwise; on a product line an absent
+	// price_uom stays empty and the service takes the product's own price
+	// unit (ADR 0006 section 3.3, replacing R1-15's default from the uom).
+	if d.ProductID == nil {
+		d.PriceUOM = string(d.UOM)
+	}
 	if l.PriceUOM != nil {
 		if strings.TrimSpace(*l.PriceUOM) == "" {
 			v.Check(false, path+".price_uom", "must not be empty")
@@ -300,6 +321,12 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 		}
 	}
 
+	// The conversion pair. A line that names a product omits it: the server
+	// resolves it from the product's unit set and stores it (ADR 0006 section
+	// 3.3), and a sent pair must equal the resolved one as a ratio, which the
+	// service checks. A line without a product carries the client's pair,
+	// required when the two units differ unless the service can derive it
+	// from two standard sizes.
 	uq, uqOK := v.Quantity(path+".uom_qty", l.UOMQty, false)
 	pq, pqOK := v.Quantity(path+".price_uom_qty", l.PriceUOMQty, false)
 	switch {
@@ -318,13 +345,39 @@ func (l *LineRequest) parse(v *httpx.Validator, path string) (DraftLine, bool) {
 			missing = path + ".price_uom_qty"
 		}
 		v.Check(false, missing, "is required: the conversion is a pair, uom_qty and price_uom_qty together")
-	case d.UOM != "" && d.PriceUOM != string(d.UOM):
-		v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
-	case d.UOM != "":
+	case d.UOM != "" && d.PriceUOM == string(d.UOM):
 		d.UOMQty, d.PriceUOMQty = one, one
 	}
 	// With the uom still to default and no pair sent, UOMQty stays zero:
 	// priceDraft settles it once the unit is known.
+
+	// The tally's rows (ADR 0006 section 4.3): pieces are a count, the
+	// lengths a positive decimal, at most 100 rows, one row per length.
+	if l.Tally != nil {
+		v.Check(len(l.Tally.Rows) > 0, path+".tally", "carries at least one row")
+		v.Check(len(l.Tally.Rows) <= 100, path+".tally", "carries at most 100 rows")
+		d.Tally = &DraftTally{}
+		lengths := map[int64]bool{}
+		for j, row := range l.Tally.Rows {
+			rowPath := fmt.Sprintf("%s.tally.rows[%d]", path, j)
+			rowBefore := errorCount(v)
+			pieces, ok := v.Int(rowPath+".pieces", row.Pieces, true)
+			if ok {
+				v.Check(pieces > 0 && pieces <= 1000000, rowPath+".pieces", "is a count of pieces, 1 to 1000000")
+			}
+			length, ok := v.Quantity(rowPath+".length_ft", row.LengthFT, true)
+			if ok {
+				v.Check(length > 0, rowPath+".length_ft", "must be greater than zero")
+				if lengths[int64(length)] {
+					v.Check(false, rowPath+".length_ft", "repeats a length the tally already carries: one row per length")
+				}
+			}
+			if errorCount(v) == rowBefore {
+				d.Tally.Rows = append(d.Tally.Rows, DraftTallyRow{Pieces: int(pieces), LengthFT: length})
+				lengths[int64(length)] = true
+			}
+		}
+	}
 
 	if price, ok := v.Int(path+".unit_price_ten_thousandths", l.UnitPriceTenThousandths, true); ok {
 		httpx.CheckLineSign(v, path, d.Quantity, httpx.Price(price), false)

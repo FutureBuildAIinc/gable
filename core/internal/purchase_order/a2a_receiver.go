@@ -227,8 +227,6 @@ func (ar *A2AReceiver) verifyJWSSignature(body []byte, jwsSig string) error {
 	return nil
 }
 
-
-
 // --- HTTP response helpers ---
 
 func (ar *A2AReceiver) writeJSON(w http.ResponseWriter, status int, data any) {

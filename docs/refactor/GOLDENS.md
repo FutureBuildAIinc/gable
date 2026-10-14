@@ -39,7 +39,15 @@ run:
    which drawn value still varies per run; see the identity mask below for
    what that rules out.) After the seed finishes, the harness inserts its
    own clock-window fixture rows through SQL on the fresh database (see
-   "Clock-window fixture rows" below).
+   "Clock-window fixture rows" below). Before them it puts every branch on
+   `Etc/UTC` (`pinBranchZonesToUTC`): the server derives a document date
+   (the invoice date, and with it the GL entry date and the due date) in the
+   branch's zone, the seed leaves its branches in `America/Vancouver` and the
+   schema defaults the rest to `America/New_York`, and from UTC midnight to the
+   zone's own midnight the branch's date trails the harness's UTC seed day by
+   one. `TestBranchLocalDate` (internal/order) keeps the arithmetic pinned at
+   the instants the window opens and closes; the goldens simply do not sit in
+   it.
 3. **Real server.** It runs the real server - the `serve` role of the one
    `core` binary, `core serve` - as a subprocess on a free port with
    `AUTH_MODE=dev` (the same shape as CI's backend job). The whole wiring of
@@ -50,8 +58,8 @@ run:
    runs in its own process group, stopped by that group number even when the
    test fails, and carries `Pdeathsig=SIGKILL` on Linux so a killed test
    process takes the server with it.
-4. **Script.** It replays a fixed, ordered script of 991 steps across 100
-   groups (one golden file per group; 202 steps in the first 44 groups, the
+4. **Script.** It replays a fixed, ordered script of 1301 steps across 103
+   groups (one golden file per group; 389 steps in the first 44 groups, the
    rest added by R1-1b). Writes run in a deterministic order, so
    sequence-derived values (order numbers, journal entry numbers) land the
    same way every run. Later steps reference values extracted from earlier
@@ -143,6 +151,8 @@ byte.
 | exposure event `idempotency_key` | `<idem-key>` | a hash over the event's creation instant |
 | quote analytics `avg_days_to_close` | `<days>` | at this base it averages only the quotes the script closes milliseconds after creating them; the seeded book has none |
 | `insurance_expiry`, `next_service_date` (vehicles) | `<ts>` | fixed calendar dates hardcoded in the demo seed's vehicle fixture; unlike every other seed date they move with the calendar, not the seed clock, so a seed-day offset would drift daily |
+| `cdl_expiry`, `hire_date` (seeded drivers) | `<ts>` | the same kind of fixed calendar dates in the demo seed's driver fixture; a seed-day offset moved one day per calendar day and turned `delivery_fleet` red on every day but the one it was recorded |
+| route `eta`, `estimated_arrival` | `<eta>` | the server's now plus minutes; a run in the last minutes before UTC midnight pushes it onto the next day while the end-of-run guard (which compares the clock at the end with the seed day) does not fire. A null stays null |
 
 Placeholders are numbered by walking the transcript (paths, request bodies,
 headers, response bodies) with map keys in sorted order, so the numbering is
@@ -219,10 +229,12 @@ without a recorded step" at the end of this document, each with its reason.
 
 ## R1-1b: depth additions
 
-R1-1b added a recorded step for every route in `core/api/ROUTES.txt` but one
-(56 new groups, 789 new steps). The new groups all run after the clock group,
-so none of their writes can move an earlier golden: the first 44 golden files
-are byte-identical to their R1-1 recording. The harness gained the following,
+R1-1b added 59 new groups and 912 new steps; 34 routes in `core/api/ROUTES.txt`
+remain unrecorded alongside `GET /metrics` (new modules and methods whose
+goldens are still pending, named under "Routes without a recorded step" at the
+end of this document). The new groups all run after the clock group, so none
+of their writes can move an earlier golden: the first 44 golden files are
+byte-identical to their R1-1 recording. The harness gained the following,
 each used only where a route needed it.
 
 - **Order and ownership.** The new groups run in this order after
@@ -384,12 +396,12 @@ last).
 | crm | `crm` | POST /api/v1/customers/{id}/activities; GET /api/v1/customers/{id}/activities; invalid activity_type (400) |
 | gl | `gl` | GET /api/v1/gl/accounts; POST /api/v1/gl/journal-entries; POST /api/v1/gl/journal-entries/{id}/post; unbalanced entry (400) |
 | quote | `quote` | POST /api/v1/quotes (and the refused create without a unit of measure, 400); GET /api/v1/quotes/{id}; GET /api/v1/quotes (the cursor envelope, the status filter with `include=total`, the refused uppercase status, the refused `offset`, the refused cursor); PUT /api/v1/quotes/{id} at its revision (DRAFT edit), without a revision (428) and with a stale one (409); POST /api/v1/quotes/{id}/transitions through every allowed edge (draft to sent/accepted/rejected/expired, sent to accepted/rejected/expired, rejected to draft, expired to draft), the refused accepted to sent (409) and the unknown target (400); POST /api/v1/quotes/{id}/convert; GET /api/v1/events for the `quote.*` events the group wrote; GET /api/v1/quotes/analytics |
-| pricing exposure | `exposure` | GET /api/v1/quotes/{id}/exposure (before and after an event); POST .../request-ack; POST .../acknowledge (409 cleared); POST .../override (409 cleared); POST .../escalate-now (500, see notes); GET /api/v1/quotes/exposure?owner=all (list and summary) |
-| order | `order` | POST /api/v1/orders; GET /api/v1/orders/{id}; GET /api/v1/orders?limit=1 (envelope + newest = this script's order); GET /api/v1/orders/{id}/exposure-gate; POST /api/v1/orders/{id}/cancel (204 then 409); POST /api/v1/orders/{id}/exposure-override; GET unknown id (404) |
-| invoice (via order flow) | `invoice` | POST /api/v1/orders/{id}/confirm and /fulfill (204s; the invoice-creating flow); GET /api/v1/invoices; GET /api/v1/invoices/{id}; POST /api/v1/invoices/{id}/credit-memo; GET /api/v1/credit-memos/{customerId}; GET unknown id (404) |
+| pricing exposure | `exposure` | GET /api/v1/quotes/{id}/exposure (before and after an event); POST .../request-ack; POST .../acknowledge (409 cleared); POST .../override (409 cleared); POST .../escalate-now; GET /api/v1/quotes/exposure?owner=all (list and summary) |
+| order | `order` | POST /api/v1/orders; GET /api/v1/orders/{id}; GET /api/v1/orders?limit=1 (envelope + newest = this script's order); GET /api/v1/orders/{id}/exposure-gate; POST /api/v1/orders/{id}/transitions (cancel-equivalent edge, 409 wrong target, 428 no revision); POST /api/v1/orders/{id}/exposure-override; GET unknown id (404) |
+| invoice (via order flow) | `invoice` | POST /api/v1/orders/{id}/transitions (and /allocate, the invoice-creating flow); POST /api/v1/orders/{id}/fulfillments; GET /api/v1/orders/fulfillment-requests; GET /api/v1/invoices; GET /api/v1/invoices/{id}; POST /api/v1/credit-memos; GET /api/v1/credit-memos/{id}; GET /api/v1/credit-memos?invoice_id=; GET unknown id (404) |
 | payment | `payment` | POST /api/v1/payments; GET /api/v1/invoices/{id}/payments; POST /api/v1/payments/intent (503 with no gateway configured) |
 | account | `account` | GET /api/v1/accounts/{id}; GET /api/v1/accounts/{id}/transactions (pins the nullable array) |
-| deposit | `deposit` | POST /api/v1/deposits; GET /api/v1/deposits/{id}; zero amount (400) |
+| deposit | `deposit` | POST /api/v1/payments (201 and two refused 400); GET /api/v1/payments/{id}; GET /api/v1/payments?order_id=; GET /api/v1/orders/{id}; POST /api/v1/credit-memos/{id}/refunds (409) |
 | tax | `tax` | GET /api/v1/tax/exemptions/{customerID} (empty, pins []); POST /api/v1/tax/exemptions; POST /api/v1/tax/preview |
 | vendor | `vendor` | POST /api/v1/vendors; GET /api/v1/vendors/{id}; GET /api/v1/vendors |
 | purchase_order | `purchase_order` | POST /api/v1/purchase-orders; GET /api/v1/purchase-orders/{id}; bad vendor_id (400) |
@@ -403,7 +415,7 @@ last).
 | pricing rebates | `rebate` | POST /api/v1/pricing/rebates/programs; GET /api/v1/pricing/rebates/programs?vendor_id= |
 | pricing escalators | `escalator` | GET /api/v1/market-indices; PUT /api/v1/market-indices/{id} |
 | delivery | `delivery` | POST /api/v1/delivery/vehicles; GET /api/v1/delivery/vehicles; POST /api/v1/delivery/drivers; GET /api/v1/delivery/drivers/{id} |
-| inventory | `inventory` | GET /api/v1/inventory?product_id= (empty, pins null); POST /api/v1/inventory/adjust; missing product_id (400) |
+| inventory | `inventory` | GET /api/v1/inventory?product_id= (empty, pins null); GET /api/v1/inventory?limit=2&include=total (page envelope); POST /api/v1/inventory/adjust |
 | document | `document` | GET /api/v1/documents/print/pickticket/{orderId} (PDF, text hash); unknown id (404) |
 | reporting | `reporting` | POST /api/v1/reporting/save; GET /api/v1/reporting/saved; POST /api/v1/reporting/schedules; GET /api/v1/reporting/schedules; missing fields (400) |
 | dashboard | `dashboard` | GET /api/v1/dashboard/inventory-alerts (clock-free read); the clock-window reads live in `clockwindow` |
@@ -426,12 +438,11 @@ last).
 | location item | `location_item` | GET /api/v1/branches/{id}/tree; PUT/DELETE /api/v1/locations/{id} |
 | product item | `product_item` | GET /api/v1/products/reorder-alerts; PATCH /api/v1/products/{id}/dimensions, /lead-time, /margins |
 | tax exemption item | `tax_exemption_item` | DELETE /api/v1/tax/exemptions/{id} |
-| deposits | `deposit_apply` | GET /api/v1/deposits; POST /api/v1/deposits/{id}/apply |
-| payment gateway | `payment_gateway` | POST /api/v1/payments/card (402, no gateway); POST /api/v1/payments/refund (500, no gateway) |
+| payment gateway | `payment_gateway` | POST /api/v1/payments/card (402, no gateway); POST /api/v1/payments/refund (405, legacy route gone) |
 | documents | `document_invoice` | GET /api/v1/documents/print/invoice/{id} (PDF text hash); POST /api/v1/invoices/{id}/email (202, async) |
 | quote file | `quote_file` | GET /api/v1/quotes/{id}/file |
 | inventory transfer | `inventory_transfer` | POST /api/v1/inventory/transfer |
-| ap payments | `ap_payments` | POST /api/v1/ap/invoices/{id}/approve (401/400 only: dev mode has no claims, so no approver); GET/POST /api/v1/ap/payments |
+| ap payments | `ap_payments` | POST /api/v1/ap/invoices (201); POST /api/v1/ap/invoices/{id}/transitions (428 no revision, 200 approve via {"to":"approved"}, 409 approve again, 400 bad id, 409 void with payments); GET /api/v1/events (the vendor invoice events); GET /api/v1/ap/invoices/{id} (after a partial and a settling payment); GET /api/v1/ap/payments?vendor_id=; POST /api/v1/ap/payments (201 partial, 201 settle, 409 paid invoice, three refused 400) |
 | gl | `gl_accounts_entries`, `gl_fiscal_periods` | POST /api/v1/gl/accounts; PUT /api/v1/gl/accounts/{id}; GET /api/v1/gl/journal-entries and /{id}; POST .../{id}/reverse and /void; GET /api/v1/gl/fiscal-periods; POST .../{id}/close and /reopen |
 | matching | `matching_runs` | GET /api/v1/matching/exceptions; GET /api/v1/matching/results/{po_id}; POST /api/v1/matching/run/{po_id} |
 | bankrecon | `bankrecon_sessions` | POST /api/v1/bankrecon/import, /match, /unmatch; GET/POST /api/v1/bankrecon/sessions; GET /api/v1/bankrecon/sessions/{id}; POST .../{id}/complete |
@@ -445,7 +456,7 @@ last).
 | pim | `pim_media` | products/{id}/detail; collateral GET/DELETE; media GET/DELETE/primary PATCH; generate/* (500, no AI key) |
 | techadmin | `techadmin_keys`, `techadmin_settings` | DELETE /api/v1/admin/keys/{id}; settings/ai and settings/routing GET/PUT/DELETE (invented placeholder values only) |
 | staff detail | `staff_detail` | GET/PUT /api/v1/admin/staff/{id}; PUT /api/v1/admin/modules/{id}; POST/DELETE /api/v1/admin/staff/{id}/modules |
-| governance | `governance_rfcs` | GET /api/v1/governance/rfcs (500); PUT /api/v1/governance/rfcs/{id} |
+| governance | `governance_rfcs` | GET /api/v1/governance/rfcs (200, plus 400 on a bad uuid); PUT /api/v1/governance/rfcs/{id} (200, plus 400 on a bad uuid and 404 on a missing one); POST .../{id}/transitions (200, 400) |
 | configurator | `configurator_reads` | GET /api/v1/configurator/presets and /rules |
 | server | `server_routes` | `/uploads/` (the file server's plain 404) |
 | partner | `partner_quotes` | GET /api/partner/v1/quotes and /quotes/{id} (the dev-mode 401) |
@@ -461,13 +472,30 @@ modules that wire them.
 
 ## Routes without a recorded step
 
-Every route in `core/api/ROUTES.txt` has a recorded step except one, for a
-stated reason:
+35 routes in `core/api/ROUTES.txt` have no recorded step yet, for stated
+reasons:
 
 - `GET /metrics`: the body is the Prometheus exposition of Go runtime and
   process series (`go_build_info`, memory statistics, goroutines, start time)
-  that differ on every run; the normaliser has no rule for them and R1-1b adds
-  none.
+  that differ on every run; the normaliser has no rule for them and the new
+  recorder adds none.
+- The charge-codes module: `GET /api/v1/charge-codes`, `POST /api/v1/charge-codes`,
+  `GET /api/v1/charge-codes/{id}`, `PUT /api/v1/charge-codes/{id}`. Module
+  registered by R1-3c; the goldens wait until a contract fragment and a driver
+  fixture are in place.
+- The drafts routes (`/api/v1/drafts/orders`, `/api/v1/drafts/quotes`, with
+  `{id}`, `/feed`, `/transitions` and `/promote`): R1-3c drafts feature, no
+  goldens yet.
+- `POST /api/v1/credit-memos/{id}/applications` and
+  `POST /api/v1/invoices/{id}/write-offs`: AR/AP follow-on writes that share
+  their parent's golden at this base.
+- The links module (`/api/v1/links/{customers,drafts/orders,drafts/quotes,invoices,orders,products,quotes}/{id}`):
+  R1-3c preview URL generator, no goldens yet.
+- `/api/v1/products/{id}/kit-components` and `/api/v1/products/{id}/units`
+  (GET, PUT), plus `/api/v1/units` (GET) and `/api/v1/units/{code}` (PUT):
+  units module new in R1-3c; only the units-shaped reads are goldened.
+- `PUT /api/v1/quotes/{id}/file`: no golden (the file upload shape is not
+  covered by the multipart parser yet).
 
 Three portal reads have a step that pins less than the rest:
 `GET /api/portal/v1/dashboard`, `GET /api/portal/v1/invoices` and

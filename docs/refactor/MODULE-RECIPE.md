@@ -127,13 +127,15 @@ after merging `refactor/v1`; another item may take yours) and a down file in
    is for raw SQL writers elsewhere (the portal's insert, the seed); the Go
    create path mints through its transaction.
 
-   If the table already has a number column (orders, invoices and customers
-   do, under their own names and formats), ADR 0001 section 8 applies before
-   anything is added: adopt it as the wire's `number` (map the column in the
-   repository, keep its existing values and format, put the sequence behind
-   its DEFAULT so new rows continue from the maximum) or list the collision in
-   `CONTRACT-CHANGES.md` with what the old format becomes. Never add a second
-   number column beside an existing one.
+   If the table already has a number column, ADR 0001 section 8 applies
+   before anything is added: adopt it as the wire's `number` (map the column
+   in the repository, keep its existing values and format, put the sequence
+   behind its DEFAULT so new rows continue from the maximum) or list the
+   collision in `CONTRACT-CHANGES.md` with what the old format becomes.
+   Never add a second number column beside an existing one. (Customers have
+   one, `account_number`, which the customers wire keeps under its own name;
+   orders and invoices had none, so their conversions added `number` in 092
+   and 097.)
 4. Widen every unit price column the module exposes as
    `_ten_thousandths` that is still scale 2 (step 2b). Quotes needed none.
 5. Add what the wire needs that the table lacks: the conversion pair and
@@ -260,15 +262,15 @@ them. For every column the migration adds or reinterprets, grep every reader
 the new meaning there with a test (an MBF line priced per 187.5 pieces is the
 check) or make it refuse what it cannot carry.
 
-A helper route that feeds an unconverted neighbour (quotes' convert hands the
-order payload to the orders route, which takes whole cents per sale unit and no
-pair) REFUSES what the neighbour cannot carry rather than rounding it: a quote
-with a line whose pair is not 1 to 1, or whose `price_uom` differs from `uom`,
-is a 409 `invalid_state_transition` with a `line_not_convertible` blocker
-naming `lines[i]`. The payload is built inside the transition's transaction,
-before the status changes, so a refusal leaves the document as it was. The
-neighbour's own converting module lifts the refusal (here R2-1). The same
-rule binds the frozen integration seam that does the same job.
+A helper route that feeds a neighbour module (quotes' convert creates the
+order through the orders service, in the transition's own transaction)
+REFUSES what the neighbour cannot carry rather than rounding it: a quote with
+a stocked line sold in a unit other than its product's stocking unit is a 409
+`conflict` with a `unit_not_stock_unit` blocker naming `lines[i]`. The
+neighbour's document is created in the same transaction as the status change,
+so a refusal rolls both back and leaves the document as it was. The
+neighbour's conversions (cycle 3) lift the refusal. The same rule binds the
+frozen integration seam that does the same job.
 
 ## 10. The contract
 
@@ -359,7 +361,7 @@ Then commit per step when green, push, and open the pull request into
 
 | Question | Quotes' answer |
 |---|---|
-| A line without a unit of measure | The server defaults it from the product (`ProductRef.UOMPrimary`) and then `price_uom` from the unit; only a line with neither `uom` nor `product_id` is a 400 naming `lines[i].uom`. The desk still pre-fills the unit so users see it |
+| A line without a unit of measure | The service fills `uom` from the product's sale unit (`productUnits[id].SaleUOM`) and `price_uom` from the product's price unit (`productUnits[id].PriceUOM`); only a line with neither `uom` nor `product_id` is a 400 naming `lines[i].uom`. The desk still pre-fills the unit so users see it |
 | Editing a document the lifecycle has closed | 409 `conflict` with a blocker, not `invalid_state_transition` (an edit is not a transition) |
 | Creating in a status other than the first | Not possible: the request has no status |
 | A transition by an in process caller | Same rules and event, no revision precondition |
@@ -368,8 +370,8 @@ Then commit per step when green, push, and open the pull request into
 | The router's own 404 and 405 | Not converted here; they keep net/http's plain text |
 | `ETag` and the generated client | The client does not surface response headers; the body carries `revision` for clients that need it, and a convert body carries it too |
 | The idempotent replay's `ETag` | A replayed create returns the stored body and status but not the `ETag` header; the body's `revision` is the source (hardening list) |
-| A convert-style helper route | Takes the same revision precondition as any transition, builds its payload inside the transition's transaction, and returns the document's revision (body and `ETag`) |
-| A helper route whose neighbour cannot carry a line | 409 `invalid_state_transition` with a `line_not_convertible` blocker naming `lines[i]`, until the neighbour converts (convert: a pair that is not 1 to 1, or `price_uom` different from `uom`) |
+| A convert-style helper route | Takes the same revision precondition as any transition, creates the neighbour's document in the transition's transaction, and answers with that document (its body and `ETag`) |
+| A helper route whose neighbour cannot carry a line | 409 `conflict` with a `unit_not_stock_unit` blocker naming `lines[i]`, until the neighbour's conversions land (a stocked line sold in a unit other than its product's stocking unit) |
 | A client sending a revision on create | 400 naming `revision`: a create has no revision to precondition on |
 | A PUT carrying a field it does not apply | 400 naming the field (`source`, `margin_total_cents`, `original_file`, `original_filename`, `original_content_type`, `parse_map`, `branch_id`), never a silent drop |
 | `price_uom` vocabulary | `^[A-Z]{1,6}$`: not limited to the sale unit enum (a price per M or per CWT is real), but a code, never free text |

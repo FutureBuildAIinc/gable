@@ -48,11 +48,11 @@ import (
 // API rejects five-field crontab strings up front via
 // reporting.ValidateCronExpression rather than storing schedules the engine
 // would refuse, and advertises the dialect on the read path.
-func wireReportSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor) {
+func wireReportSchedules(mux *http.ServeMux, h *reporting.Handler, executor reporting.ScheduleExecutor, extra ...func(http.Handler) http.Handler) {
 	if executor != nil {
 		h = h.WithScheduleExecutor(executor)
 	}
-	h.RegisterBuilderRoutes(mux, reportScheduleGuard())
+	h.RegisterBuilderRoutes(mux, middleware.Compose(reportScheduleGuard(), middleware.Compose(extra...)))
 }
 
 // reportScheduleGuard is the role guard the builder and schedule routes run

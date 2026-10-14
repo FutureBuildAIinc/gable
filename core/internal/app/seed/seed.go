@@ -8,9 +8,11 @@
 package seed
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"strings"
@@ -88,6 +90,7 @@ func resetTransactionalData(db *sql.DB) {
 		"projects", "crm_activities", "customer_contacts",
 		"rebate_programs", "rebate_tiers", "rebate_claims",
 		"saved_reports", "edi_trading_partners",
+		"drafts", "draft_events",
 	}
 	// Every name above is created by a migration in core/migrations/. The
 	// existence filter is defensive, not a workaround for a missing table: a
@@ -120,6 +123,11 @@ func resetTransactionalData(db *sql.DB) {
 	// again at Q-000001 instead of continuing from the last deploy's.
 	if _, err := db.Exec(`ALTER SEQUENCE IF EXISTS quote_number_seq RESTART`); err != nil {
 		log.Printf("resetTransactionalData: restart quote_number_seq: %v", err)
+	}
+	// The invoices and credit memos are gone too, and their gapless counters
+	// start again at 1 so the demo's series stays unbroken from the first.
+	if _, err := db.Exec(`UPDATE document_counters SET next_value = 1 WHERE series IN ('invoice', 'credit_memo')`); err != nil {
+		log.Printf("resetTransactionalData: reset the invoice counters: %v", err)
 	}
 }
 
@@ -178,6 +186,21 @@ func Run() {
 	if err := db.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
 	}
+
+	// Read the default branch before anything below changes it: dedupeBranches
+	// may clear the setting and section 1 re-points it at Kelowna, while the
+	// register upsert in section 22 compares against the value the migrations
+	// left, the branch migration 066 stamped REG-01 with.
+	regMigrationBranch := preSeedDefaultBranch(db)
+
+	// The AR core: every invoice, payment and credit memo the seed writes moves
+	// AR through it, never through a raw balance_due or subledger write.
+	ar, err := newReceivables(dbURL)
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	defer ar.close()
+	seedCtx := context.Background()
 
 	demoUserID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	log.Println("Seeding started — Gable Lumber & Supply (Kelowna, BC)...")
@@ -572,9 +595,9 @@ func Run() {
 	for _, c := range customers {
 		plID := priceLevelIDs[c.PriceLevel]
 		var cid string
-		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms, payment_terms_id, price_level_id, primary_branch_id)
-			VALUES ($1,$2,$3,$4,$5,$6,0,$7,$8::text,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
-			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7, payment_terms=$8::text,
+		err := db.QueryRow(`INSERT INTO customers (name, account_number, email, phone, address, credit_limit, balance_due, tier, payment_terms_id, price_level_id, primary_branch_id)
+			VALUES ($1,$2,$3,$4,$5,$6,0,$7,COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),$9,$10)
+			ON CONFLICT (account_number) DO UPDATE SET name=$1, phone=$4, address=$5, tier=$7,
 				payment_terms_id=COALESCE((SELECT id FROM payment_terms WHERE code = $8::text), payment_terms_default_id()),
 				price_level_id=$9, primary_branch_id=$10
 			RETURNING id`, c.Name, c.Acct, c.Email, c.Phone, c.Addr, c.CreditLimit, c.Tier, c.Terms, plID, c.PrimaryBranch).Scan(&cid)
@@ -612,12 +635,6 @@ func Run() {
 		}
 	}
 	fmt.Printf("Seed: %d Customers\n", len(customers))
-
-	// Park Glenmore Heritage Reno over its credit limit so the credit-hold UI
-	// has something realistic to render in demos.
-	if ghr, ok := customerIDs["Glenmore Heritage Reno"]; ok {
-		db.Exec(`UPDATE customers SET balance_due = credit_limit + 4500 WHERE id = $1`, ghr)
-	}
 
 	// =========================================================================
 	// 6. CUSTOMER CONTRACTS (Special SKU pricing for top customers)
@@ -714,6 +731,7 @@ func Run() {
 	// =========================================================================
 	totalOrders := 0
 	invoiceIDs := make([]uuid.UUID, 0)
+	var seeded []seedInvoice
 	orderIDs := make([]uuid.UUID, 0)
 	orderCustMap := make(map[uuid.UUID]uuid.UUID)
 
@@ -772,33 +790,57 @@ func Run() {
 				orderIDs = append(orderIDs, orderID)
 				orderCustMap[orderID] = custID
 				invID := uuid.New()
-				invStatus := "UNPAID"
+				// A share of the invoices are paid in full, a share partly paid and a
+				// share left unpaid; overdue is computed from the due date, never stored.
+				// Every invoice is written UNPAID, open at its total, and posted through
+				// the AR core below with the check that paid it.
+				paidShare := 0.0
 				if rand.Float32() < 0.65 {
-					invStatus = "PAID"
+					paidShare = 1
 				} else if rand.Float32() < 0.3 {
-					invStatus = "OVERDUE"
+					paidShare = 0.4
 				}
 				dueDate := orderDate.AddDate(0, 1, 0)
 				taxRate := 0.12 // BC: GST 5% + PST 7% on building materials.
-				subtotal := orderTotal
-				taxAmt := subtotal * taxRate
-				total := subtotal + taxAmt
-
-				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount, due_date, payment_terms, created_at)
-					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'NET30',$11)`,
+				subCents := cents(orderTotal)
+				taxCents := cents(float64(subCents) / 100 * taxRate)
+				subtotal, taxAmt, total := float64(subCents)/100, float64(taxCents)/100, float64(subCents+taxCents)/100
+				invStatus := "UNPAID"
+				// number is left to the column DEFAULT: the seed numbers its invoices
+				// through the same gapless counter as every other writer.
+				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
+						due_date, payment_terms_id, invoice_date, created_at)
+					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,(SELECT payment_terms_id FROM customers WHERE id = $3),$11::date,$11)`,
 					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, orderDate.AddDate(0, 0, 1))
 				if err == nil {
 					invoiceIDs = append(invoiceIDs, invID)
-					if invStatus == "PAID" {
-						db.Exec(`INSERT INTO payments (invoice_id, amount, method, reference, notes)
-							VALUES ($1,$2,'CHECK','CHK-'||floor(random()*10000+1000)::text,'Payment in full')`, invID, total)
-					}
+					// the billed lines: the order's, in the shared line shape
+					db.Exec(`INSERT INTO invoice_lines (invoice_id, order_line_id, product_id, line_type, position, description, sku,
+							quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, price_each, price_source, line_total, taxable)
+						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
+							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
+						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
+					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: orderDate.AddDate(0, 0, 1),
+						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
 				}
 			}
 		}
 		_ = custName
 	}
-	fmt.Printf("Seed: %d Orders, %d Invoices\n", totalOrders, len(invoiceIDs))
+	postedInvoices := ar.post(seedCtx, seeded)
+	// Park Glenmore Heritage Reno over its credit limit so the credit-hold UI has
+	// something realistic to render in demos. The credit check reads documents
+	// (ADR 0005 5.3), so the limit is set 45.00 below what the customer's open
+	// invoices already come to: its receivable stands over the limit through the
+	// AR core's own figures, never through a hand-written balance.
+	if ghr, ok := customerIDs["Glenmore Heritage Reno"]; ok {
+		if _, err := db.Exec(`UPDATE customers c SET credit_limit = GREATEST(0, COALESCE(
+				(SELECT SUM(i.amount_open) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0) - 45)
+			WHERE c.id = $1`, ghr); err != nil {
+			log.Printf("Seed: parking Glenmore over its credit limit: %v", err)
+		}
+	}
+	fmt.Printf("Seed: %d Orders, %d Invoices (%d posted through the AR core)\n", totalOrders, len(invoiceIDs), postedInvoices)
 
 	// =========================================================================
 	// 7b. DISPATCH DAY — the one day AI_LM plans in a demo.
@@ -1033,28 +1075,6 @@ func Run() {
 	fmt.Printf("Seed: %d Purchase Orders\n", poCount)
 
 	// =========================================================================
-	// 12. CUSTOMER TRANSACTIONS (AR Ledger)
-	// =========================================================================
-	txCount := 0
-	for _, custID := range customerIDs {
-		var balance int64 = 0
-		for i := 0; i < 4+rand.Intn(5); i++ {
-			txType := "INVOICE"
-			amt := int64(500+rand.Intn(5000)) * 100
-			if rand.Float32() < 0.5 && balance > 0 {
-				txType = "PAYMENT"
-				amt = -int64(rand.Intn(int(balance/100)+1)) * 100
-			}
-			balance += amt
-			db.Exec(`INSERT INTO customer_transactions (customer_id, type, amount, balance_after, description, created_at)
-				VALUES ($1,$2,$3,$4,$5,$6)`, custID, txType, amt, balance,
-				fmt.Sprintf("Auto-generated %s", txType), recentDate(120))
-			txCount++
-		}
-	}
-	fmt.Printf("Seed: %d Customer Transactions\n", txCount)
-
-	// =========================================================================
 	// 13. PRICING RULES
 	// =========================================================================
 	// PERCENTS, not fractions. pricing_rules.discount_pct and
@@ -1207,22 +1227,40 @@ func Run() {
 	// =========================================================================
 	if len(invoiceIDs) > 3 {
 		memos := []struct {
-			Reason string
-			Amt    float64
-			Status string
+			ReasonCode string
+			Reason     string
+			Amt        float64
+			Status     string
 		}{
-			{"Damaged material on delivery - 2x4x8 split ends", 125.00, "APPLIED"},
-			{"Wrong product shipped - returned OSB", 285.00, "APPLIED"},
-			{"Price adjustment per contract terms", 450.00, "PENDING"},
-			{"Customer loyalty credit Q1", 200.00, "PENDING"},
+			{"DAMAGE", "Damaged material on delivery - 2x4x8 split ends", 125.00, "OPEN"},
+			{"RETURN", "Wrong product shipped - returned OSB", 285.00, "OPEN"},
+			{"PRICE_ADJUSTMENT", "Price adjustment per contract terms", 450.00, "DRAFT"},
+			{"OTHER", "Customer loyalty credit Q1", 200.00, "DRAFT"},
 		}
 		for i, m := range memos {
 			invID := invoiceIDs[i%len(invoiceIDs)]
-			var custIDStr string
-			db.QueryRow("SELECT customer_id FROM invoices WHERE id=$1", invID).Scan(&custIDStr)
-			if custIDStr != "" {
-				db.Exec(`INSERT INTO credit_memos (invoice_id, customer_id, amount, reason, status)
-					VALUES ($1,$2,$3,$4,$5)`, invID, custIDStr, m.Amt, m.Reason, m.Status)
+			// Every memo is inserted as a draft with its one ADJUST charge line; an
+			// OPEN one is then posted through the AR core, which numbers it, writes its
+			// entry and the subledger credit.
+			var memoID, custID, currency string
+			var memoDate time.Time
+			err := db.QueryRow(`INSERT INTO credit_memos (invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status,
+					number, memo_date, subtotal, tax_amount, total_amount, tax_rate)
+				SELECT i.id, i.customer_id, i.branch_id, i.currency, $2::text, $3::text, $4::numeric, 'DRAFT',
+					NULL, i.invoice_date, -$4::numeric, 0, -$4::numeric, 0
+				FROM invoices i WHERE i.id = $1 RETURNING id, customer_id, currency, memo_date`, invID, m.ReasonCode, m.Reason, m.Amt).Scan(&memoID, &custID, &currency, &memoDate)
+			if err != nil {
+				log.Printf("Credit memo %q: %v", m.Reason, err)
+				continue
+			}
+			db.Exec(`INSERT INTO credit_memo_lines (credit_memo_id, position, line_type, charge_code_id, description, quantity, uom, price_uom,
+					uom_qty, price_uom_qty, unit_price, price_source, line_total, taxable, revenue_account_code)
+				SELECT $1, 0, 'CHARGE', cc.id, $2, -1, 'EA', 'EA', 1, 1, $3::numeric, 'MANUAL', -$3::numeric, FALSE, cc.revenue_account_code
+				FROM charge_codes cc WHERE cc.code = 'ADJUST'`, memoID, m.Reason, m.Amt)
+			if m.Status == "OPEN" {
+				if err := ar.postMemo(seedCtx, uuid.MustParse(memoID), uuid.MustParse(custID), currency, cents(m.Amt), memoDate); err != nil {
+					log.Printf("Credit memo %q was not posted: %v", m.Reason, err)
+				}
 			}
 		}
 		fmt.Printf("Seed: %d Credit Memos\n", len(memos))
@@ -1238,7 +1276,7 @@ func Run() {
 		{"Q3 Inventory Audit Procedure", "approved", "Need stricter control on lumber counts"},
 		{"Vendor Onboarding Requirements", "review", "Compliance with new insurance regs"},
 		{"Credit Limit Approval Workflow", "approved", "Automate approvals under $10k"},
-		{"Safety Gear Mandatory List", "published", "Update per WorkSafeBC 2025 guidelines"},
+		{"Safety Gear Mandatory List", "approved", "Update per WorkSafeBC 2025 guidelines"},
 		{"Returns Restocking Fee Policy", "draft", "Customer complaints on 15% fee"},
 		{"Special Order Deposit Increase", "review", "Increase from 25% to 50% for non-stock"},
 	}
@@ -1292,10 +1330,13 @@ func Run() {
 	// =========================================================================
 	// POSTerminal.ts hardcodes the register id "REG-01"; without a row in
 	// pos_registers, /api/v1/pos/transactions fails with "failed to resolve
-	// register branch".
-	db.Exec(`INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
-		VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
-		ON CONFLICT (id) DO NOTHING`, kelMainID.String())
+	// register branch". Migration 027 seeds REG-01 on a location that does not
+	// exist and migration 066 gives it the migration-time default branch, so
+	// the row is moved to Kelowna, the branch the seed makes the default, but
+	// only while it is still exactly in that shape: a row an operator moved,
+	// by its location or by its branch alone, is not the seed's to move back
+	// (the shape condition on posRegisterUpsertSQL below).
+	db.Exec(posRegisterUpsertSQL, kelMainID.String(), regMigrationBranch)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
 		VALUES ('sync-batch-001', 'REG-01', 42, 0, 0, NOW() - interval '2 hours')`)
 	db.Exec(`INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, synced_at)
@@ -1343,6 +1384,47 @@ const pricingRuleUpsertSQL = `
 		starts_at        = EXCLUDED.starts_at,
 		expires_at       = EXCLUDED.expires_at,
 		updated_at       = NOW()`
+
+// preSeedDefaultBranch reads system_settings.default_branch_id as it stands
+// before this seed run changes anything. Migration 059 records the setting and
+// migration 066 stamps every register with it, so that value is half of the
+// shape migrations 027 and 066 leave REG-01 in, and the register upsert below
+// fires only on that exact shape (r19 P2-1). A database holding no setting yet
+// reads NULL, which matches no row: the seed then leaves REG-01 where it is
+// rather than move a row it cannot prove is still the migrations' own.
+func preSeedDefaultBranch(db *sql.DB) sql.NullString {
+	var v sql.NullString
+	db.QueryRow(`SELECT value FROM system_settings WHERE key = 'default_branch_id'`).Scan(&v)
+	return v
+}
+
+// posRegisterUpsertSQL moves the demo register REG-01 onto the location given
+// (Kelowna main, the branch the seed makes the default), as a package level
+// constant for the same reason as pricingRuleUpsertSQL: the behaviour worth
+// testing is what a re-seed leaves behind, and the test has to run the same
+// statement the seeder runs.
+//
+// The conflict is on the id, so the update can only ever touch the seed's own
+// REG-01 row; a register with any other id, created by a person, an import or
+// another seed, is never matched. Of that one row the seed owns the location
+// and the branch alone, and only while the row is exactly as migrations 027
+// and 066 left it: the placeholder location, and the branch 066 gave it, the
+// default branch the seed reads before it changes anything. The placeholder
+// names no locations row, so while the register sits on it the register's
+// branch comes from pos_registers.branch_id alone on every pos read and write,
+// and an operator who re-points REG-01 by its branch alone has moved it as
+// completely as one who moves the location; the seed's to move is neither
+// (item 57 reads migration 027 as another seed; r16 P2, r19 P2-1), and the
+// register's name is an operator's to keep the same way. A database whose
+// default an operator changed then keeps REG-01 where it is, the safe side.
+// The shape condition also makes a second run a no-op: the row no longer
+// carries it.
+const posRegisterUpsertSQL = `
+	INSERT INTO pos_registers (id, location_id, branch_id, name, is_active)
+	VALUES ('REG-01', $1, $1, 'Main Counter - Kelowna', true)
+	ON CONFLICT (id) DO UPDATE SET location_id = $1, branch_id = $1
+		WHERE pos_registers.location_id = '00000000-0000-0000-0000-000000000000'
+		AND pos_registers.branch_id = $2::uuid`
 
 // pricingRule is one row of the demo pricing_rules table.
 //

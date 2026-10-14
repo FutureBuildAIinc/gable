@@ -113,9 +113,9 @@ const poOrdering = "purchase_orders.created_at_id_desc"
 
 // poQuery is the parsed list request.
 type poQuery struct {
-	filters    ListFilter
-	limit      int
-	wantTotal  bool
+	filters   ListFilter
+	limit     int
+	wantTotal bool
 }
 
 // parsePOQuery reads the list request: the strict guard on the route's

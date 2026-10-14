@@ -422,13 +422,13 @@ func TestPurchaseOrderListWire(t *testing.T) {
 	}
 
 	for name, path := range map[string]string{
-		"unknown parameter":  "/api/v1/purchase-orders?foo=1",
-		"uppercase status":   "/api/v1/purchase-orders?status=DRAFT",
-		"unknown status":     "/api/v1/purchase-orders?status=bogus",
-		"bad vendor_id":      "/api/v1/purchase-orders?vendor_id=not-a-uuid",
-		"bad limit":          "/api/v1/purchase-orders?limit=0",
-		"malformed cursor":   "/api/v1/purchase-orders?cursor=garbage",
-		"foreign scope":      "/api/v1/purchase-orders?cursor=eyJ2IjoxLCJvIjoicXVvdGVzLmNyZWF0ZWRfYXRfaWQiLCJrIjpbIjIwMjUtMDEtMDFUMDA6MDA6MDBaIiwiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIl19",
+		"unknown parameter": "/api/v1/purchase-orders?foo=1",
+		"uppercase status":  "/api/v1/purchase-orders?status=DRAFT",
+		"unknown status":    "/api/v1/purchase-orders?status=bogus",
+		"bad vendor_id":     "/api/v1/purchase-orders?vendor_id=not-a-uuid",
+		"bad limit":         "/api/v1/purchase-orders?limit=0",
+		"malformed cursor":  "/api/v1/purchase-orders?cursor=garbage",
+		"foreign scope":     "/api/v1/purchase-orders?cursor=eyJ2IjoxLCJvIjoicXVvdGVzLmNyZWF0ZWRfYXRfaWQiLCJrIjpbIjIwMjUtMDEtMDFUMDA6MDA6MDBaIiwiMDAwMDAwMDAtMDAwMC0wMDAwLTAwMDAtMDAwMDAwMDAwMDAwIl19",
 	} {
 		if status, _, raw := f.do("GET", path, ""); status != http.StatusBadRequest {
 			t.Errorf("%s: %d, want 400 (%s)", name, status, raw)

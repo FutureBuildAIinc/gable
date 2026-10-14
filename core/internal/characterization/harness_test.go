@@ -73,6 +73,13 @@ var (
 	// offset from this day, and the end-of-run guard fails the run if UTC
 	// midnight was crossed between seed and script.
 	seedDay string
+
+	// seedInstant is the instant that capture was taken at, the one moment
+	// every timestamp in a transcript counts its day offset from: a value the
+	// run wrote seconds or minutes later counts as the same day (+0d) even
+	// when those minutes cross UTC midnight, because the offset is a duration
+	// from this instant, not a calendar-day comparison against seedDay.
+	seedInstant time.Time
 )
 
 const dayLayout = "2006-01-02"
@@ -140,7 +147,8 @@ func setupGoldensDatabase() func() {
 	}
 	goldensDBURL = freshURL
 	goldensDBName = dbName
-	seedDay = time.Now().UTC().Format(dayLayout)
+	seedInstant = time.Now().UTC()
+	seedDay = seedInstant.Format(dayLayout)
 
 	var dropped bool
 	return func() {
@@ -252,6 +260,8 @@ func newHarness(t *testing.T, freshURL string) *harness {
 		"GODEBUG":      "randautoseed=0",
 		"TZ":           "Etc/UTC",
 	}), buildDir+"/core", "", "seed")
+
+	pinBranchZonesToUTC(t, freshURL)
 
 	seedClockWindowFixtures(t, freshURL)
 
@@ -473,6 +483,7 @@ func seedVars(t *testing.T, dbURL string) map[string]string {
 	if vars["glAccount2"] == "" {
 		one("glAccount2", `SELECT id FROM gl_accounts ORDER BY code OFFSET 1 LIMIT 1`)
 	}
+	one("expenseAccount", `SELECT id FROM gl_accounts WHERE code = '5020'`)
 	one("vehicle", `SELECT id FROM vehicles WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("driver", `SELECT id FROM drivers WHERE deleted_at IS NULL ORDER BY name LIMIT 1`)
 	one("marketIndex", `SELECT id FROM market_indices WHERE index_code = 'RL_SPF_2X4'`)
@@ -521,6 +532,10 @@ type capturedStep struct {
 	// is unstable: a list whose ORDER BY tiebreaks on random row ids (the
 	// dispatch-day fixture rows all share one created_at).
 	SortPrimaryArray bool `json:"sort_primary_array,omitempty"`
+	// SortEnvelopeItems, when true, also sorts the items array of a cursor
+	// list envelope (the ADR 0001 shape; sort_primary_array covers the
+	// legacy bare array and the data envelope).
+	SortEnvelopeItems bool `json:"sort_envelope_items,omitempty"`
 	// MaskCustomerIdentity, when true, replaces the values of the customer
 	// identity fields (customer_id, customer_name, and a customer's name)
 	// with a class placeholder before comparison. Used on the per-customer
@@ -670,6 +685,7 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 		}
 	}
 	step.SortPrimaryArray = s.sortPrimaryArray
+	step.SortEnvelopeItems = s.sortEnvelopeItems
 	step.MaskCustomerIdentity = s.maskCustomerIdentity
 	if s.maskCustomerIdentity {
 		maskCustomerIdentity(step.Response.Body)
@@ -700,6 +716,9 @@ func (h *harness) doStep(t *testing.T, s stepDef) capturedStep {
 			// Paged envelopes: the primary array sits one level down.
 			if data, ok := body["data"].([]any); ok {
 				sortPrimaryArray(data)
+			}
+			if items, ok := body["items"].([]any); ok && s.sortEnvelopeItems {
+				sortPrimaryArray(items)
 			}
 		}
 	}

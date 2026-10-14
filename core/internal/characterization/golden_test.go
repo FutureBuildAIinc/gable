@@ -48,7 +48,7 @@ import (
 // Everything else - money, statuses, field names, error text, null versus
 // empty array - is real behaviour and is compared byte for byte.
 func normaliseTranscript(steps []capturedStep) []capturedStep {
-	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay, base: seedInstant}
 	for i := range steps {
 		steps[i].Request.Path = n.string(steps[i].Request.Path)
 		steps[i].Request.Body = n.value(steps[i].Request.Body, "")
@@ -63,17 +63,20 @@ func normaliseTranscript(steps []capturedStep) []capturedStep {
 type normaliser struct {
 	ids     map[string]string
 	count   int
-	seedDay string // UTC day of the seed, "2006-01-02"; dates normalise to offsets from it
+	seedDay string    // UTC day of the seed, "2006-01-02"; dates normalise to offsets from it
+	base    time.Time // the instant seedDay was captured; timestamps count day offsets from it
 }
 
 var (
-	reUUID  = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	reJWT   = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
-	reTS    = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})`)
-	rePgTS  = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?(\+\d{2})?`)
-	reDate  = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
-	reKey   = regexp.MustCompile(`sk_live_[A-Za-z0-9_-]{2,}`)
-	rePDFDT = regexp.MustCompile(`D:\d{14}Z?`)
+	reUUID = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	reJWT  = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)
+	reTS   = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})`)
+	rePgTS = regexp.MustCompile(`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?(\+\d{2})?`)
+	reDate = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+	// reWholeDate is a value that is a calendar date and nothing else.
+	reWholeDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	reKey       = regexp.MustCompile(`sk_live_[A-Za-z0-9_-]{2,}`)
+	rePDFDT     = regexp.MustCompile(`D:\d{14}Z?`)
 )
 
 // volatileNumberFields are response fields whose numeric values measure the
@@ -107,11 +110,29 @@ var volatileStringFields = map[string]string{
 // seedFixedDateFields carry fixed calendar dates in the demo seed's vehicle
 // fixture: hardcoded calendar values, unlike every other date in the seed,
 // which is drawn relative to the seed clock. A seed-day offset for them would
-// drift by one every day the calendar advances, so they normalise to the
-// plain timestamp placeholder (the shape check still applies).
+// drift by one every day the calendar advances, so they normalise to a plain
+// placeholder: <date> for a calendar date (the fleet columns are DATE) and
+// <ts> for a timestamp (the shape check still applies).
+//
+// The demo seed's drivers are the same kind of fixture: a hardcoded CDL expiry
+// and hire date each, which moved one day per calendar day against the seed
+// day and turned delivery_fleet red on every day but the one it was recorded.
 var seedFixedDateFields = map[string]bool{
 	"insurance_expiry":  true,
 	"next_service_date": true,
+	"cdl_expiry":        true,
+	"hire_date":         true,
+}
+
+// runTimingTimeFields carry an instant computed from the server's clock plus a
+// few minutes (the mock route optimiser spaces ETAs 15 minutes apart from now).
+// A day offset for them is run timing: a run in the last minutes before UTC
+// midnight pushes the ETA onto the next day while the end-of-run guard, which
+// only compares the clock at the end with the seed day, does not fire. They
+// normalise to a placeholder (the shape check still applies; null stays null).
+var runTimingTimeFields = map[string]string{
+	"eta":               "<eta>",
+	"estimated_arrival": "<eta>",
 }
 
 func (n *normaliser) value(v any, key string) any {
@@ -120,8 +141,14 @@ func (n *normaliser) value(v any, key string) any {
 		if ph, ok := volatileStringFields[key]; ok {
 			return ph
 		}
+		if seedFixedDateFields[key] && reWholeDate.MatchString(x) {
+			return "<date>"
+		}
 		if seedFixedDateFields[key] && (reTS.MatchString(x) || rePgTS.MatchString(x)) {
 			return "<ts>"
+		}
+		if ph, ok := runTimingTimeFields[key]; ok && (reTS.MatchString(x) || rePgTS.MatchString(x)) {
+			return ph
 		}
 		return n.string(x)
 	case json.Number:
@@ -173,21 +200,54 @@ func (n *normaliser) string(s string) string {
 	return s
 }
 
-// tsPlaceholder rewrites one timestamp as <ts+Nd> / <ts-Nd>: N is the value's
-// day offset from the seed day (taken from the leading date; the within-day
-// time is run timing). The regex has already asserted the shape; a parse
-// failure is a harness bug and keeps the raw value (loudly failing every
-// comparison) rather than silently degrading.
+// tsPlaceholder rewrites one timestamp as <ts+Nd> / <ts-Nd>: N is the
+// value's calendar-day offset from the seed day, as ever, except that a
+// value whose instant falls inside the run's own window (the captured seed
+// instant to two hours past it) counts +0d. The run's own writes (created
+// at, updated at) are minutes after the capture; counting their calendar
+// days flipped them from +0d to +1d when those minutes crossed UTC
+// midnight, which the end-of-run guard cannot catch (it compares the day
+// only after every group ran). On a run that never crosses midnight the
+// window changes nothing: every value inside it sits on the seed day and
+// already counted +0d, so the recorded goldens are byte for byte what they
+// were. The regex has already asserted the shape; a parse failure is a
+// harness bug and keeps the raw value (loudly failing every comparison)
+// rather than silently degrading.
 func (n *normaliser) tsPlaceholder(m string) string {
 	d, err := time.Parse(dayLayout, m[:10])
 	if err != nil {
 		return "<ts>"
 	}
 	off := int(d.Sub(parseSeedDay(n.seedDay)).Hours() / 24)
+	if v, ok := parseInstant(m); ok && !v.Before(n.base) && v.Before(n.base.Add(2*time.Hour)) {
+		off = 0
+	}
 	if off >= 0 {
 		return fmt.Sprintf("<ts+%dd>", off)
 	}
 	return fmt.Sprintf("<ts%dd>", off)
+}
+
+// parseInstant parses one matched timestamp in the shapes the two regexes
+// accept: RFC 3339 with Z or a numeric offset, the Postgres text form with
+// an hours-only offset, and the Postgres text form with no offset (read as
+// UTC, the pinned zone of the harness database).
+func parseInstant(m string) (time.Time, bool) {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05.999999999-0700",
+		"2006-01-02T15:04:05-0700",
+		"2006-01-02 15:04:05.999999999-07",
+		"2006-01-02 15:04:05-07",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		if v, err := time.Parse(layout, m); err == nil {
+			return v, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // dayOffset rewrites one calendar date as its day offset from the seed day.
@@ -224,7 +284,7 @@ func parseSeedDay(s string) time.Time {
 // normalisation applied: it pins what the document says, not where each glyph
 // sits.
 func binarySummary(raw []byte) map[string]any {
-	n := &normaliser{ids: map[string]string{}, seedDay: seedDay}
+	n := &normaliser{ids: map[string]string{}, seedDay: seedDay, base: seedInstant}
 	text := pdfText(raw)
 	sum := sha256.Sum256([]byte(n.string(text)))
 	return map[string]any{

@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // Package worker is the worker role of the core binary: the background
-// jobs that do not belong to the HTTP server. Today that is the
-// idempotency retention purge, which R1-4 moved out of serve, the
-// outbox drain (R1-12), which delivers committed events to their
-// subscribers, and the outbox retention purge (R1-12b); the cron schedulers that serve mounts beside its own HTTP
-// surface (auto-reorder and scheduled report delivery) stay in serve.
+// jobs that do not belong to the HTTP server. Today those are six: the
+// idempotency retention purge, which R1-4 moved out of serve; the outbox
+// drain (R1-12), which delivers committed events to their subscribers; the
+// outbox retention purge (R1-12b); the draft events purge; and the order
+// module's allocation and fulfilment queue jobs. The cron schedulers that
+// serve mounts beside its own HTTP surface (auto-reorder and scheduled
+// report delivery) stay in serve.
 package worker
 
 import (
@@ -22,6 +24,7 @@ import (
 	"github.com/gablelbm/gable/internal/app/orderwire"
 	"github.com/gablelbm/gable/internal/config"
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/drafts"
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/inventory"
 	"github.com/gablelbm/gable/internal/invoice"
@@ -122,6 +125,16 @@ func Run() {
 		logger.Error("outbox purge failed to start; the outbox grows until it runs", "error", err)
 	}
 
+	// Draft events retention (ADR 0007 section 3.2): delete draft_events rows
+	// past DRAFT_EVENTS_RETENTION in batches, recording the highest purged
+	// position so a resuming client is told to re-read (event: reset). Unlike
+	// the outbox purge there are no subscriber cursors to respect: this feed
+	// has no in process drain. A zero or negative retention keeps it off.
+	draftPurge := drafts.NewPurgeRunner(db, logger, cfg.DraftEventsRetention)
+	if err := draftPurge.Start(context.Background()); err != nil {
+		logger.Error("draft_events purge failed to start; draft_events grows until it runs", "error", err)
+	}
+
 	// The order queues (ADR 0005 5.4): the back order release, served oldest
 	// first, one order per transaction. It runs only here, beside the drain
 	// whose subscriber fills it, never in serve.
@@ -132,7 +145,7 @@ func Run() {
 	fulfilment := newQueueRunner("order-fulfilment", orderSvc.ServeFulfilmentRequest, logger)
 	fulfilment.Start()
 
-	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,order-allocation,order-fulfilment")
+	logger.Info("Worker started", "jobs", "idempotency-purge,outbox-drain,outbox-purge,draft-events-purge,order-allocation,order-fulfilment")
 
 	sig := <-quit
 	logger.Info("Shutdown signal received", "signal", sig.String())
@@ -146,6 +159,9 @@ func Run() {
 	logger.Info("Shutdown step 1/2: stopping outbox purge...")
 	purge.Stop()
 	logger.Info("Shutdown step 1/2: outbox purge stopped")
+	logger.Info("Shutdown step 1/2: stopping draft_events purge...")
+	draftPurge.Stop()
+	logger.Info("Shutdown step 1/2: draft_events purge stopped")
 	logger.Info("Shutdown step 1/2: stopping outbox drain...")
 	drain.Stop()
 	logger.Info("Shutdown step 1/2: outbox drain stopped")
@@ -185,12 +201,14 @@ func newOutboxDrain(db *database.DB, logger *slog.Logger, orderSvc *order.Servic
 // the rate resolver and the exposure gate, so the delivery completions this
 // role bills are priced exactly as the desk's fulfilments are.
 func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
+	accounts := newAccountService(db)
 	return orderwire.New(orderwire.Deps{
 		DB:         db,
 		Config:     cfg,
 		Logger:     slog.Default(),
 		Inventory:  inventory.NewService(inventory.NewRepository(db)),
-		Invoices:   newInvoiceService(db),
+		Invoices:   newInvoiceServiceWith(db, accounts),
+		Accounts:   accounts,
 		Pricing:    pricing.NewService(pricing.NewRepository(db)),
 		Customers:  customer.NewService(customer.NewRepository(db)),
 		Escalators: pricing.NewEscalatorRepository(db),
@@ -201,9 +219,18 @@ func newOrderService(db *database.DB, cfg *config.Config) *order.Service {
 // newInvoiceService builds the invoice service the fulfilment worker writes
 // through: the real GL and account ledger, the audit log.
 func newInvoiceService(db *database.DB) *invoice.Service {
+	return newInvoiceServiceWith(db, newAccountService(db))
+}
+
+// newAccountService builds the AR core on the real ledger.
+func newAccountService(db *database.DB) *account.Service {
 	logger := slog.Default()
-	glSvc := gl.NewService(gl.NewRepository(db), nil, logger)
-	return invoice.NewService(invoice.NewRepository(db), glSvc, account.NewService(account.NewRepository(db), db, logger), db).
+	return account.NewService(db, gl.NewService(gl.NewRepository(db), nil, logger), logger)
+}
+
+func newInvoiceServiceWith(db *database.DB, accounts *account.Service) *invoice.Service {
+	glSvc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	return invoice.NewService(invoice.NewRepository(db), glSvc, accounts, db).
 		WithAuditLog(audit.NewLogger(db))
 }
 

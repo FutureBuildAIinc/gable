@@ -83,7 +83,7 @@ The surface trees are:
 | "the till", "the front counter", "POS" | `/pos` | `web/apps/desk/src/pages/pos/` |
 
 If the problem is in data rather than display, the backend module is under
-`core/internal/<module>/` — there are 41 of them. `ls core/internal/` and pick the
+`core/internal/<module>/`; there are 47 domain modules. `ls core/internal/` and pick the
 obvious one (`order`, `invoice`, `delivery`, `inventory`, `pricing`, `payment`, `pos`…).
 
 Record the **directory**, not just a guess: the issue template asks for it, and Gable is

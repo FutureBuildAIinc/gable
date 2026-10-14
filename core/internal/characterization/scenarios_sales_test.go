@@ -109,7 +109,7 @@ func customerGroups() []groupDef {
 				extract: map[string]string{"myCustomer": "/id", "myTerms": "/payment_terms_id"},
 			},
 			{name: "customer.get", method: "GET", path: "/api/v1/customers/{myCustomer}"},
-			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3"},
+			{name: "customer.list", method: "GET", path: "/api/v1/customers?limit=3", maskFields: map[string]any{"balance_cents": 999999, "credit_limit_cents": 999999}},
 			// The filters filter; an unsupported parameter, a tier outside the
 			// lowercase vocabulary and a broken cursor are 400s naming the field.
 			{name: "customer.list.search", method: "GET", path: "/api/v1/customers?q=GOLD-001&tier=gold&is_active=true&include=total"},
@@ -166,11 +166,13 @@ func salesGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/customers/{myCustomer}/activities",
 				body: map[string]any{
-					"activity_type": "NOTE", "description": "golden characterisation note",
+					"activity_type": "note", "description": "golden characterisation note",
 				},
 				extract: map[string]string{"myActivity": "/id"},
 			},
 			{name: "crm.activity.list", method: "GET", path: "/api/v1/customers/{myCustomer}/activities"},
+			{name: "crm.activity.list.filter", method: "GET",
+				path: "/api/v1/customers/{myCustomer}/activities?activity_type=note"},
 			{name: "crm.activity.bad_type", method: "POST", path: "/api/v1/customers/{myCustomer}/activities",
 				body: map[string]any{"activity_type": "SMOKE_SIGNAL", "description": "x"}},
 		},
@@ -529,39 +531,149 @@ func invoiceGroups() []groupDef {
 				path: "/api/v1/orders/fulfillment-requests/00000000-0000-0000-0000-0000000000aa/retry"},
 			// Newest invoice is the one fulfilment just created.
 			{name: "invoice.list_newest", method: "GET", path: "/api/v1/invoices?limit=1",
-				extract: map[string]string{"myInvoice": "/data/0/id"}},
+				extract: map[string]string{"myInvoice": "/items/0/id", "myInvoiceRevision": "/items/0/revision"}},
 			{name: "invoice.get", method: "GET", path: "/api/v1/invoices/{myInvoice}"},
-			{
-				name:   "invoice.credit_memo.create",
-				method: "POST",
-				path:   "/api/v1/invoices/{myInvoice}/credit-memo",
-				body:   map[string]any{"amount_cents": 500, "reason": "golden characterisation"},
-			},
-			{name: "invoice.credit_memo.list", method: "GET", path: "/api/v1/credit-memos/{myCustomer}"},
 			{name: "invoice.get.not_found", method: "GET", path: "/api/v1/invoices/00000000-0000-0000-0000-0000000000aa"},
+			// The list's filters filter; an unknown parameter, the legacy
+			// OVERDUE status and a malformed flag are refused.
+			{name: "invoice.list.open_not_overdue", method: "GET", path: "/api/v1/invoices?status=unpaid&overdue=false&limit=1&include=total",
+				maskBody: true},
+			{name: "invoice.list.overdue_status_gone", method: "GET", path: "/api/v1/invoices?status=overdue"},
+			{name: "invoice.list.bad_overdue", method: "GET", path: "/api/v1/invoices?overdue=maybe"},
+			{name: "invoice.list.unsupported_parameter", method: "GET", path: "/api/v1/invoices?offset=1"},
+			// A status other than void is derived by payments and credit memos.
+			{name: "invoice.transition.derived_status", method: "POST", path: "/api/v1/invoices/{myInvoice}/transitions",
+				headers: map[string]string{"If-Match": `"{myInvoiceRevision}"`}, body: map[string]any{"to": "paid"}},
+			{name: "invoice.transition.void_needs_reason", method: "POST", path: "/api/v1/invoices/{myInvoice}/transitions",
+				headers: map[string]string{"If-Match": `"{myInvoiceRevision}"`}, body: map[string]any{"to": "void"}},
+			{name: "invoice.transition.void_stale", method: "POST", path: "/api/v1/invoices/{myInvoice}/transitions",
+				headers: map[string]string{"If-Match": `"99"`}, body: map[string]any{"to": "void", "reason": "stale"}},
+			// The credit memo: a draft with no number, edited, posted (it takes
+			// the next gapless CM- number), blocking the invoice's void while
+			// it stands, then voided.
+			{
+				name:   "credit_memo.create",
+				method: "POST",
+				path:   "/api/v1/credit-memos",
+				body: map[string]any{"invoice_id": "{myInvoice}", "reason_code": "price_adjustment", "reason": "golden characterisation",
+					"lines": []map[string]any{{"line_type": "charge", "charge_code": "ADJUST", "quantity": "-1",
+						"unit_price_ten_thousandths": 5000, "description": "Price adjustment"}}},
+				extract: map[string]string{"myCreditMemo": "/id"},
+			},
+			{name: "credit_memo.get", method: "GET", path: "/api/v1/credit-memos/{myCreditMemo}"},
+			{name: "credit_memo.create.invalid", method: "POST", path: "/api/v1/credit-memos",
+				body: map[string]any{"invoice_id": "{myInvoice}", "reason_code": "refund", "lines": []map[string]any{{"quantity": "1"}}}},
+			{name: "credit_memo.update.stale", method: "PUT", path: "/api/v1/credit-memos/{myCreditMemo}",
+				headers: map[string]string{"If-Match": `"9"`},
+				body: map[string]any{"invoice_id": "{myInvoice}", "reason_code": "price_adjustment", "reason": "edited",
+					"lines": []map[string]any{{"line_type": "charge", "charge_code": "ADJUST", "quantity": "-1", "unit_price_ten_thousandths": 5000}}}},
+			{name: "credit_memo.update", method: "PUT", path: "/api/v1/credit-memos/{myCreditMemo}",
+				headers: map[string]string{"If-Match": `"1"`},
+				body: map[string]any{"invoice_id": "{myInvoice}", "reason_code": "price_adjustment", "reason": "edited",
+					"lines": []map[string]any{{"line_type": "charge", "charge_code": "ADJUST", "quantity": "-1", "unit_price_ten_thousandths": 7500,
+						"description": "Price adjustment"}}}},
+			{name: "credit_memo.post", method: "POST", path: "/api/v1/credit-memos/{myCreditMemo}/transitions",
+				headers: map[string]string{"If-Match": `"2"`}, body: map[string]any{"to": "open"}},
+			{name: "credit_memo.post.again", method: "POST", path: "/api/v1/credit-memos/{myCreditMemo}/transitions",
+				headers: map[string]string{"If-Match": `"3"`}, body: map[string]any{"to": "open"}},
+			{name: "credit_memo.update.not_draft", method: "PUT", path: "/api/v1/credit-memos/{myCreditMemo}",
+				headers: map[string]string{"If-Match": `"3"`},
+				body: map[string]any{"invoice_id": "{myInvoice}", "reason_code": "price_adjustment", "reason": "late",
+					"lines": []map[string]any{{"line_type": "charge", "charge_code": "ADJUST", "quantity": "-1", "unit_price_ten_thousandths": 5000}}}},
+			{name: "invoice.transition.void_refused_credit_memo", method: "POST", path: "/api/v1/invoices/{myInvoice}/transitions",
+				headers: map[string]string{"If-Match": `"{myInvoiceRevision}"`}, body: map[string]any{"to": "void", "reason": "has a credit memo"}},
+			{name: "credit_memo.list", method: "GET", path: "/api/v1/credit-memos?invoice_id={myInvoice}&status=open"},
+			{name: "credit_memo.list.unsupported_parameter", method: "GET", path: "/api/v1/credit-memos?customer=none"},
+			{name: "credit_memo.void", method: "POST", path: "/api/v1/credit-memos/{myCreditMemo}/transitions",
+				headers: map[string]string{"If-Match": `"3"`}, body: map[string]any{"to": "void", "reason": "golden void"}},
+			{name: "credit_memo.get.not_found", method: "GET", path: "/api/v1/credit-memos/00000000-0000-0000-0000-0000000000aa"},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "invoice.events", method: "GET", path: "/api/v1/events?types=invoice.created,invoice.voided&limit=1"},
+			{name: "credit_memo.events", method: "GET", path: "/api/v1/events?types=credit_memo.created,credit_memo.updated,credit_memo.posted,credit_memo.voided&limit=10"},
 		},
 	}}
 }
 
 func paymentGroups() []groupDef {
+	json := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	return []groupDef{{
 		name: "payment",
 		steps: []stepDef{
+			// Unapplied cash: a payment with no application exists without an
+			// invoice (DR 1010 / CR 2200) and shows unapplied_cents (ADR 0005 9.4).
 			{
-				name:   "payment.create",
+				name:   "payment.create.unapplied",
 				method: "POST",
 				path:   "/api/v1/payments",
 				body: map[string]any{
-					"invoice_id": "{myInvoice}", "amount": 1000, "method": "CASH",
-					"reference": "GOLD-PAY-1",
+					"customer_id": "{myCustomer}", "amount_cents": 5000, "method": "check",
+					"reference": "GOLD-PAY-1", "notes": "golden unapplied cash",
 				},
-				extract: map[string]string{"myPayment": "/id"},
+				extract:        map[string]string{"myPayment": "/id"},
+				captureHeaders: []string{"ETag"},
 			},
+			{name: "payment.get", method: "GET", path: "/api/v1/payments/{myPayment}"},
+			{name: "payment.get.not_found", method: "GET", path: "/api/v1/payments/00000000-0000-0000-0000-0000000000aa"},
+			{name: "payment.list.unapplied", method: "GET", path: "/api/v1/payments?unapplied=true&customer_id={myCustomer}&include=total"},
+			{name: "payment.list.method_status", method: "GET", path: "/api/v1/payments?method=check&status=posted&customer_id={myCustomer}"},
+			{name: "payment.list.bad_status", method: "GET", path: "/api/v1/payments?status=POSTED"},
+			{name: "payment.list.bad_unapplied", method: "GET", path: "/api/v1/payments?unapplied=maybe"},
+			{name: "payment.list.unsupported_parameter", method: "GET", path: "/api/v1/payments?offset=1"},
+			{name: "payment.create.invalid", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0, "method": "bitcoin",
+					"applications": []map[string]any{{"invoice_id": "not-a-uuid", "amount_cents": -1}}}},
+			{name: "payment.create.card_method", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 100, "method": "card"}},
+			{name: "payment.create.account_method", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 100, "method": "account"}},
+			{name: "payment.create.unknown_customer", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "00000000-0000-0000-0000-0000000000aa", "amount_cents": 100, "method": "cash"}},
+			{name: "payment.create.bad_body", method: "POST", path: "/api/v1/payments", body: "not-an-object"},
+			// Applying later, partly: the invoice (3142 cents) goes partial.
+			{name: "payment.apply.missing_precondition", method: "POST", path: "/api/v1/payments/{myPayment}/applications",
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 2000}}}},
+			{name: "payment.apply.stale", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("9"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 2000}}}},
+			{name: "payment.apply.partial", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("1"),
+				body:           map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 2000}}},
+				captureHeaders: []string{"ETag"}},
+			{name: "payment.apply.exceeds_unapplied", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 9000}}}},
+			{name: "payment.apply.exceeds_open", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 1143}}}},
+			{name: "payment.apply.discount_not_available", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 100, "discount_cents": 10}}}},
+			{name: "invoice.after_partial_payment", method: "GET", path: "/api/v1/invoices/{myInvoice}", maskBody: true},
 			{name: "payment.history", method: "GET", path: "/api/v1/invoices/{myInvoice}/payments"},
+			{name: "payment.apply.closing", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("2"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 1142}}}},
+			{name: "invoice.after_closing_payment", method: "GET", path: "/api/v1/invoices/{myInvoice}", maskBody: true},
+			{name: "payment.apply.void_invoice_target", method: "POST", path: "/api/v1/payments/{myPayment}/applications", headers: json("3"),
+				body: map[string]any{"applications": []map[string]any{{"invoice_id": "{myInvoice}", "amount_cents": 1}}}},
+			// Refund of unapplied cash (1858 left), then the void.
+			{name: "payment.refund.exceeds_unapplied", method: "POST", path: "/api/v1/payments/{myPayment}/refunds", headers: json("3"),
+				body: map[string]any{"amount_cents": 3000, "reason": "too much"}},
+			{name: "payment.refund.invalid", method: "POST", path: "/api/v1/payments/{myPayment}/refunds", headers: json("3"),
+				body: map[string]any{"amount_cents": 0}},
+			{name: "payment.refund", method: "POST", path: "/api/v1/payments/{myPayment}/refunds", headers: json("3"),
+				body: map[string]any{"amount_cents": 500, "reason": "golden refund"}},
+			{name: "payment.transition.needs_reason", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("4"),
+				body: map[string]any{"to": "voided"}},
+			{name: "payment.transition.posted", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("4"),
+				body: map[string]any{"to": "posted", "reason": "no"}},
+			{name: "payment.void", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("4"),
+				body: map[string]any{"to": "voided", "reason": "golden void"}},
+			{name: "invoice.after_void", method: "GET", path: "/api/v1/invoices/{myInvoice}", maskBody: true},
+			{name: "payment.void.again", method: "POST", path: "/api/v1/payments/{myPayment}/transitions", headers: json("5"),
+				body: map[string]any{"to": "voided", "reason": "twice"}},
+			{name: "payment.get.voided", method: "GET", path: "/api/v1/payments/{myPayment}"},
 			// No Run Payments public key is configured: the gateway intent
 			// answers 503, which is its configured-state behaviour.
 			{name: "payment.intent.no_gateway", method: "POST", path: "/api/v1/payments/intent",
-				body: map[string]any{"invoice_id": "{myInvoice}", "amount": 100}},
+				body: map[string]any{"amount_cents": 100}},
+			// The module's events, read back from the feed (ADR 0003).
+			{name: "payment.events", method: "GET",
+				path: "/api/v1/events?types=payment.recorded,payment.applied,payment.unapplied,payment.refunded,payment.voided,invoice.partial,invoice.paid,invoice.reopened&limit=20"},
 		},
 	}}
 }
@@ -571,29 +683,58 @@ func accountGroups() []groupDef {
 		name: "account",
 		steps: []stepDef{
 			{name: "account.summary", method: "GET", path: "/api/v1/accounts/{myCustomer}"},
-			// The customer was created by this run: pins the nullable list.
+			{name: "account.summary.not_found", method: "GET", path: "/api/v1/accounts/00000000-0000-0000-0000-0000000000aa"},
+			// The subledger, newest first, in the cursor envelope.
 			{name: "account.transactions", method: "GET", path: "/api/v1/accounts/{myCustomer}/transactions"},
+			{name: "account.transactions.unsupported_parameter", method: "GET", path: "/api/v1/accounts/{myCustomer}/transactions?offset=1"},
+			// The aging by customer, job and ship-to, and its summary.
+			{name: "ar.aging", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}"},
+			{name: "ar.aging.by_job", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}&group_by=job"},
+			{name: "ar.aging.by_ship_to", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}&group_by=ship_to&basis=invoice_date"},
+			{name: "ar.aging.past_date", method: "GET", path: "/api/v1/ar/aging?customer_id={myCustomer}&as_of={today-3650}"},
+			{name: "ar.aging.bad_group_by", method: "GET", path: "/api/v1/ar/aging?group_by=region"},
+			{name: "ar.aging.bad_date", method: "GET", path: "/api/v1/ar/aging?as_of=31/12/2000"},
+			{name: "ar.aging.unsupported_parameter", method: "GET", path: "/api/v1/ar/aging?offset=1"},
+			{name: "ar.aging.summary", method: "GET", path: "/api/v1/ar/aging/summary?customer_id={myCustomer}"},
+			{name: "ar.statement", method: "GET", path: "/api/v1/ar/customers/{myCustomer}/statement"},
+			{name: "ar.statement.bad_range", method: "GET", path: "/api/v1/ar/customers/{myCustomer}/statement?from={today+1}&to={today}"},
+			{name: "ar.statement.not_found", method: "GET", path: "/api/v1/ar/customers/00000000-0000-0000-0000-0000000000aa/statement"},
+			// The customer the harness made agrees with its documents and the ledger.
+			{name: "ar.reconciliation", method: "GET", path: "/api/v1/ar/reconciliation", maskBody: true},
+			{name: "ar.application.reverse.not_found", method: "POST",
+				path: "/api/v1/ar/applications/00000000-0000-0000-0000-0000000000aa/reverse", body: map[string]any{"reason": "none"}},
+			{name: "ar.application.reverse.needs_reason", method: "POST",
+				path: "/api/v1/ar/applications/00000000-0000-0000-0000-0000000000aa/reverse", body: map[string]any{}},
 		},
 	}}
 }
 
 func depositGroups() []groupDef {
+	json := func(rev string) map[string]string { return map[string]string{"If-Match": `"` + rev + `"`} }
 	return []groupDef{{
 		name: "deposit",
 		steps: []stepDef{
+			// A deposit is a payment with an order (ADR 0005 9.1): the order
+			// reads its unapplied cash, and a deposit applies to a later invoice.
 			{
 				name:   "deposit.create",
 				method: "POST",
-				path:   "/api/v1/deposits",
+				path:   "/api/v1/payments",
 				body: map[string]any{
-					"customer_id": "{myCustomer}", "branch_id": "{branch}", "amount_cents": 25000,
-					"method": "CHECK", "reference": "GOLD-DEP-1",
+					"customer_id": "{myCustomer}", "order_id": "{myCancelOrder}", "amount_cents": 2500,
+					"method": "check", "reference": "GOLD-DEP-1",
 				},
 				extract: map[string]string{"myDeposit": "/id"},
 			},
-			{name: "deposit.get", method: "GET", path: "/api/v1/deposits/{myDeposit}"},
-			{name: "deposit.create.bad_amount", method: "POST", path: "/api/v1/deposits",
-				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0}},
+			{name: "deposit.get", method: "GET", path: "/api/v1/payments/{myDeposit}"},
+			{name: "deposit.list_by_order", method: "GET", path: "/api/v1/payments?order_id={myCancelOrder}"},
+			{name: "deposit.order_shows_unapplied", method: "GET", path: "/api/v1/orders/{myCancelOrder}", maskBody: true},
+			{name: "deposit.create.bad_amount", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "amount_cents": 0, "method": "cash"}},
+			{name: "deposit.create.order_of_another_customer", method: "POST", path: "/api/v1/payments",
+				body: map[string]any{"customer_id": "{myCustomer}", "order_id": "00000000-0000-0000-0000-0000000000aa", "amount_cents": 100, "method": "cash"}},
+			{name: "deposit.credit_memo.refund_needs_open", method: "POST", path: "/api/v1/credit-memos/{myCreditMemo}/refunds", headers: json("4"),
+				body: map[string]any{"amount_cents": 100, "reason": "none", "method": "check"}},
 		},
 	}}
 }
@@ -686,12 +827,12 @@ func deliveryGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/delivery/vehicles",
 				body: map[string]any{
-					"name": "Golden Truck 01", "vehicle_type": "BOX_TRUCK", "license_plate": "GLD0001",
+					"name": "Golden Truck 01", "vehicle_type": "box_truck", "license_plate": "GLD0001",
 					"capacity_weight_lbs": 5000,
 				},
 				extract: map[string]string{"myVehicle": "/id"},
 			},
-			{name: "delivery.vehicle.list", method: "GET", path: "/api/v1/delivery/vehicles"},
+			{name: "delivery.vehicle.list", method: "GET", path: "/api/v1/delivery/vehicles?limit=200", sortEnvelopeItems: true},
 			{
 				name:   "delivery.driver.create",
 				method: "POST",
@@ -750,16 +891,30 @@ func apGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/ap/invoices",
 				body: map[string]any{
-					"vendor_id": "{vendor}", "invoice_number": "GOLD-AP-001",
-					"invoice_date": "{today}", "due_date": "{today}", "tax_amount": 0,
+					"vendor_id": "{vendor}", "vendor_invoice_number": "GOLD-AP-001",
+					"invoice_date": "{today}", "due_date": "{today}", "tax_cents": 0,
 					"lines": []map[string]any{
-						{"description": "golden ap line", "quantity": 1, "unit_price": 100.0},
+						{"description": "golden ap line", "quantity": "1",
+							"unit_price_ten_thousandths": 1000000, "gl_account_id": "{expenseAccount}"},
 					},
 				},
 				extract: map[string]string{"myAPInvoice": "/id"},
 			},
+			{name: "ap.invoice.create.validation", method: "POST", path: "/api/v1/ap/invoices",
+				body: map[string]any{
+					"vendor_id": "{vendor}", "vendor_invoice_number": "GOLD-AP-002",
+					"invoice_date": "{today}", "due_date": "{today}",
+					"lines": []map[string]any{
+						{"description": "no account", "quantity": "1", "unit_price_ten_thousandths": 100},
+					},
+				}},
 			{name: "ap.invoice.get", method: "GET", path: "/api/v1/ap/invoices/{myAPInvoice}"},
 			{name: "ap.invoice.list", method: "GET", path: "/api/v1/ap/invoices?limit=3"},
+			{name: "ap.invoice.list.status", method: "GET", path: "/api/v1/ap/invoices?limit=3&status=pending"},
+			{name: "ap.invoice.list.bad_status", method: "GET", path: "/api/v1/ap/invoices?status=PENDING"},
+			{name: "ap.invoice.void.pending", method: "POST", path: "/api/v1/ap/invoices/{myAPInvoice}/transitions",
+				body: map[string]any{"to": "voided", "revision": 1, "reason": "golden void"}},
+			{name: "ap.invoice.voided.get", method: "GET", path: "/api/v1/ap/invoices/{myAPInvoice}"},
 		},
 	}, {
 		name: "edi",

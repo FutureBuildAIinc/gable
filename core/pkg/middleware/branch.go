@@ -148,6 +148,19 @@ func (m *BranchMiddleware) Handler(next http.Handler) http.Handler {
 
 		bc := &BranchContext{UserSub: userSub, IsAdmin: isAdmin}
 
+		// A branch bound key is pinned to its branch whatever this request
+		// names or leaves empty (ADR 0007 section 5.5): the machine-key auth
+		// core refused an X-Branch-Id naming another branch before the
+		// router ran, so the pin here simply holds, kill switch or not,
+		// header or not.
+		if pin, ok := branchctx.KeyBranchFromContext(ctx); ok {
+			pinned := pin
+			bc.BranchID = &pinned
+			ctx = context.WithValue(ctx, branchctx.Key, bc)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
 		// Kill switch off: behave single-branch — every request gets nil
 		// BranchID and is treated as admin for downstream filtering.
 		if !m.killSwitch.Load() {

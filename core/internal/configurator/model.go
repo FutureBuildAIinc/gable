@@ -4,41 +4,44 @@
 package configurator
 
 import (
-	"time"
+	"encoding/json"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/google/uuid"
 )
 
-// ConfiguratorRule defines a dependency constraint between product attributes.
-// For example: Species="SYP" allows Treatment="Treatable".
-type ConfiguratorRule struct {
-	ID             uuid.UUID `json:"id"`
-	AttributeType  string    `json:"attribute_type"`   // e.g., "Grade", "Treatment"
-	AttributeValue string    `json:"attribute_value"`  // e.g., "Treatable", "#2"
-	DependsOnType  string    `json:"depends_on_type"`  // e.g., "Species"
-	DependsOnValue string    `json:"depends_on_value"` // e.g., "SYP"
-	IsAllowed      bool      `json:"is_allowed"`
-	ErrorMessage   *string   `json:"error_message,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+// Rule defines a dependency constraint between product attributes. For
+// example: Species="SYP" allows Treatment="Treatable". The attribute names
+// and values are the seeded rule matrix's own vocabulary (Species, Grade,
+// Treatment, Dimensions): data the dealer's catalog owns, not a closed
+// vocabulary the product owns, so they keep their spelling as given.
+type Rule struct {
+	ID             uuid.UUID       `json:"id"`
+	AttributeType  string          `json:"attribute_type"`
+	AttributeValue string          `json:"attribute_value"`
+	DependsOnType  string          `json:"depends_on_type"`
+	DependsOnValue string          `json:"depends_on_value"`
+	IsAllowed      bool            `json:"is_allowed"`
+	ErrorMessage   *string         `json:"error_message"`
+	CreatedAt      httpx.Timestamp `json:"created_at"`
+	UpdatedAt      httpx.Timestamp `json:"updated_at"`
 }
 
-// ConfiguratorPreset is a pre-built product template.
-type ConfiguratorPreset struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Description *string   `json:"description,omitempty"`
-	ProductType string    `json:"product_type"`
-	Config      []byte    `json:"config"` // JSONB
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+// Preset is a pre-built product template.
+type Preset struct {
+	ID          uuid.UUID       `json:"id"`
+	Name        string          `json:"name"`
+	Description *string         `json:"description"`
+	ProductType string          `json:"product_type"`
+	Config      Config          `json:"config"`
+	IsActive    bool            `json:"is_active"`
+	CreatedAt   httpx.Timestamp `json:"created_at"`
+	UpdatedAt   httpx.Timestamp `json:"updated_at"`
 }
 
-// ValidateConfigRequest contains the user's attribute selections to validate.
-type ValidateConfigRequest struct {
-	Selections map[string]string `json:"selections"` // e.g., {"Species": "SYP", "Grade": "#2", "Treatment": "Treatable"}
-}
+// Config is a preset's attribute selections, carried as the JSON the dealer
+// stored.
+type Config = json.RawMessage
 
 // ValidationConflict describes a single rule violation.
 type ValidationConflict struct {
@@ -49,16 +52,12 @@ type ValidationConflict struct {
 	Message        string `json:"message"`
 }
 
-// ValidateConfigResponse contains the validation result.
-type ValidateConfigResponse struct {
+// ValidateResponse contains the validation result. conflicts is always an
+// array, never omitted or null (ADR 0001 section 1's rule for collections,
+// applied to a computed answer).
+type ValidateResponse struct {
 	Valid     bool                 `json:"valid"`
-	Conflicts []ValidationConflict `json:"conflicts,omitempty"`
-}
-
-// BuildSKURequest contains the finalized attribute selections.
-type BuildSKURequest struct {
-	ProductType string            `json:"product_type"` // "Lumber", "Door", "Trim", "Panel"
-	Selections  map[string]string `json:"selections"`
+	Conflicts []ValidationConflict `json:"conflicts"`
 }
 
 // BuildSKUResponse contains the generated non-stock SKU.
@@ -67,15 +66,9 @@ type BuildSKUResponse struct {
 	Description string `json:"description"`
 }
 
-// AvailableOptionsRequest asks for valid options for a given step.
-type AvailableOptionsRequest struct {
-	AttributeType string            `json:"attribute_type"` // The attribute to get options for
-	Selections    map[string]string `json:"selections"`     // Current selections so far
-}
-
-// AvailableOption is a single allowed value with its display label.
+// AvailableOption is a single allowed value with its verdict.
 type AvailableOption struct {
-	Value   string `json:"value"`
-	Allowed bool   `json:"allowed"`
-	Message string `json:"message,omitempty"` // Why it's disallowed
+	Value   string  `json:"value"`
+	Allowed bool    `json:"allowed"`
+	Message *string `json:"message"`
 }

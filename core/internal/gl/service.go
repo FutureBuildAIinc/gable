@@ -63,7 +63,7 @@ func (s *Service) resolveAccountIDs(ctx context.Context, codes ...string) (map[s
 	for _, c := range codes {
 		id, ok := byCode[c]
 		if !ok {
-			return nil, fmt.Errorf("required GL account %q not found in chart of accounts", c)
+			return nil, fmt.Errorf("%w: %q", ErrAccountMissing, c)
 		}
 		out[c] = id
 	}
@@ -188,7 +188,11 @@ func (s *Service) VoidJournalEntry(ctx context.Context, id uuid.UUID) error {
 // same accounts, debits and credits swapped, linked via reverses_entry_id.
 // The original stays POSTED (it happened); the reversal cancels its effect.
 // Enforced once per entry (DB unique index + a pre-check). The reversal is
-// dated today, so it is period-checked at post time like any other entry.
+// dated today, so it is period-checked at post time like any other entry, and
+// it posts in the original's own currency: the entry priced its legs into
+// that currency, so a reversal in the setting's code would leave the control
+// account holding both halves of one undo in different currencies (review r6
+// P2-1).
 func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason string) (uuid.UUID, error) {
 	orig, err := s.repo.GetJournalEntry(ctx, id)
 	if err != nil {
@@ -218,6 +222,7 @@ func (s *Service) ReverseJournalEntry(ctx context.Context, id uuid.UUID, reason 
 		Status:          StatusPosted,
 		PostedBy:        "system",
 		ReversesEntryID: &orig.ID,
+		Currency:        orig.Currency,
 	}
 	for _, l := range orig.Lines {
 		rev.Lines = append(rev.Lines, JournalLine{
@@ -241,11 +246,24 @@ func (s *Service) ReopenFiscalPeriod(ctx context.Context, id uuid.UUID) error {
 
 // --- Trial Balance ---
 
-func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time) ([]TrialBalanceRow, error) {
+// GetTrialBalance sums per account and per currency, never across two currencies
+// (ADR 0005 4.2). currency "" answers every currency's rows, each naming its
+// currency; a code answers that currency alone.
+func (s *Service) GetTrialBalance(ctx context.Context, asOfDate time.Time, currency string) ([]TrialBalanceRow, error) {
 	if asOfDate.IsZero() {
 		asOfDate = time.Now()
 	}
-	return s.repo.GetTrialBalance(ctx, asOfDate)
+	return s.repo.GetTrialBalance(ctx, asOfDate, currency)
+}
+
+// reportCurrency settles the currency of an income statement or a balance
+// sheet: the one named, else the dealer default. A statement is always in one
+// currency.
+func (s *Service) reportCurrency(ctx context.Context, currency string) (string, error) {
+	if currency != "" {
+		return currency, nil
+	}
+	return s.repo.DefaultCurrency(ctx)
 }
 
 // --- Financial Statements ---
@@ -255,7 +273,7 @@ const statementDateLayout = "2006-01-02"
 
 // GetProfitAndLoss assembles an income statement covering [startDate, endDate]
 // inclusive. Both dates are YYYY-MM-DD.
-func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate string) (*ProfitAndLossReport, error) {
+func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate, currency string) (*ProfitAndLossReport, error) {
 	start, err := time.Parse(statementDateLayout, startDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid start date %q: %w", startDate, err)
@@ -268,16 +286,21 @@ func (s *Service) GetProfitAndLoss(ctx context.Context, startDate, endDate strin
 		return nil, fmt.Errorf("end date %s precedes start date %s", endDate, startDate)
 	}
 
-	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense})
+	if currency, err = s.reportCurrency(ctx, currency); err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.GetAccountActivity(ctx, &start, end, []string{AccountTypeRevenue, AccountTypeExpense}, currency)
 	if err != nil {
 		return nil, err
 	}
-	return assembleProfitAndLoss(startDate, endDate, rows), nil
+	report := assembleProfitAndLoss(startDate, endDate, rows)
+	report.Currency = currency
+	return report, nil
 }
 
 // GetBalanceSheet assembles a statement of financial position as of asOfDate
 // (YYYY-MM-DD).
-func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate string) (*BalanceSheetReport, error) {
+func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate, currency string) (*BalanceSheetReport, error) {
 	asOf, err := time.Parse(statementDateLayout, asOfDate)
 	if err != nil {
 		return nil, fmt.Errorf("invalid as_of date %q: %w", asOfDate, err)
@@ -286,17 +309,22 @@ func (s *Service) GetBalanceSheet(ctx context.Context, asOfDate string) (*Balanc
 	// Both halves are inception-to-date. The permanent accounts give the
 	// face of the sheet; the temporary ones give retained earnings, which
 	// has no account of its own to read.
+	if currency, err = s.reportCurrency(ctx, currency); err != nil {
+		return nil, err
+	}
 	position, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity})
+		[]string{AccountTypeAsset, AccountTypeLiability, AccountTypeEquity}, currency)
 	if err != nil {
 		return nil, err
 	}
 	earnings, err := s.repo.GetAccountActivity(ctx, nil, asOf,
-		[]string{AccountTypeRevenue, AccountTypeExpense})
+		[]string{AccountTypeRevenue, AccountTypeExpense}, currency)
 	if err != nil {
 		return nil, err
 	}
-	return assembleBalanceSheet(asOfDate, position, earnings), nil
+	report := assembleBalanceSheet(asOfDate, position, earnings)
+	report.Currency = currency
+	return report, nil
 }
 
 // signedBalance returns an account's balance in the direction that increases
@@ -667,7 +695,6 @@ func (s *Service) ApplyCustomerDeposit(ctx context.Context, depositID uuid.UUID,
 	return entry.ID, nil
 }
 
-// SyncVendorInvoice creates a journal entry: DR Expense/Inventory / CR Accounts Payable.
 // PostTillOverShort books a balanced journal entry for a drawer variance at
 // till close and returns the entry ID. over_short = counted − expected:
 //   - short (negative): DR Cash Over/Short, CR Cash (book cash drops to the
@@ -717,93 +744,6 @@ func (s *Service) PostTillOverShort(ctx context.Context, sessionID uuid.UUID, ov
 		return uuid.Nil, fmt.Errorf("failed to post till over/short to GL: %w", err)
 	}
 	return entry.ID, nil
-}
-
-func (s *Service) SyncVendorInvoice(ctx context.Context, invoiceID uuid.UUID, totalCents int64, lineDetails []VendorInvoiceLineDetail) error {
-	entry := &JournalEntry{
-		EntryDate:   time.Now(),
-		Memo:        fmt.Sprintf("Vendor Invoice %s", invoiceID),
-		Source:      SourceVendorInv,
-		SourceRefID: &invoiceID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
-		Lines: []JournalLine{
-			{AccountID: uuid.Nil, Description: "Accounts Payable", Debit: 0, Credit: totalCents},
-		},
-	}
-
-	for _, line := range lineDetails {
-		acctID := uuid.Nil
-		if line.GLAccountID != nil {
-			acctID = *line.GLAccountID
-		}
-		entry.Lines = append(entry.Lines, JournalLine{
-			AccountID:   acctID,
-			Description: line.Description,
-			Debit:       line.AmountCents,
-			Credit:      0,
-		})
-	}
-
-	// If line GL IDs were missing, try to resolve AP by name
-	if entry.Lines[0].AccountID == uuid.Nil {
-		accounts, err := s.repo.ListAccounts(ctx)
-		if err == nil {
-			for _, a := range accounts {
-				if a.Name == "Accounts Payable" {
-					entry.Lines[0].AccountID = a.ID
-					break
-				}
-			}
-		}
-	}
-
-	if err := s.repo.CreateJournalEntry(ctx, entry); err != nil {
-		s.logger.Warn("Failed to post vendor invoice to internal GL", "error", err, "invoice_id", invoiceID)
-	}
-
-	return nil
-}
-
-// SyncVendorPayment creates a journal entry: DR Accounts Payable / CR Cash.
-func (s *Service) SyncVendorPayment(ctx context.Context, paymentID uuid.UUID, amount int64) error {
-	entry := &JournalEntry{
-		EntryDate:   time.Now(),
-		Memo:        fmt.Sprintf("Vendor Payment %s", paymentID),
-		Source:      SourceVendorPmt,
-		SourceRefID: &paymentID,
-		Status:      StatusPosted,
-		PostedBy:    "system",
-		Lines: []JournalLine{
-			{AccountID: uuid.Nil, Description: "Accounts Payable", Debit: amount, Credit: 0},
-			{AccountID: uuid.Nil, Description: "Cash", Debit: 0, Credit: amount},
-		},
-	}
-
-	accounts, err := s.repo.ListAccounts(ctx)
-	if err == nil {
-		acctMap := make(map[string]uuid.UUID)
-		for _, a := range accounts {
-			acctMap[a.Name] = a.ID
-		}
-		for i := range entry.Lines {
-			if id, ok := acctMap[entry.Lines[i].Description]; ok {
-				entry.Lines[i].AccountID = id
-			}
-		}
-	}
-
-	if err := s.repo.CreateJournalEntry(ctx, entry); err != nil {
-		s.logger.Warn("Failed to post vendor payment to internal GL", "error", err, "payment_id", paymentID)
-	}
-
-	return nil
-}
-
-type VendorInvoiceLineDetail struct {
-	Description string
-	AmountCents int64
-	GLAccountID *uuid.UUID
 }
 
 // --- Helpers ---

@@ -5,16 +5,21 @@ package quote
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/units"
+	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
 	"github.com/google/uuid"
@@ -85,7 +90,22 @@ type Service struct {
 	logger      *slog.Logger
 	branches    BranchGuard  // optional; nil leaves a payload branch unchecked (unit tests)
 	orders      OrderCreator // optional; nil refuses the convert (unit tests)
+	auditor     AuditSink    // optional; nil writes no audit row (unit tests)
 	now         func() time.Time
+}
+
+// AuditSink writes the module's audit rows through the caller's executor.
+// *audit.Logger satisfies it.
+type AuditSink interface {
+	Log(ctx context.Context, entry audit.Entry) error
+}
+
+// WithAudit wires the audit sink.
+func (s *Service) WithAudit(a AuditSink) *Service {
+	if a != nil {
+		s.auditor = a
+	}
+	return s
 }
 
 func NewService(repo Repository) *Service {
@@ -153,12 +173,26 @@ func notFound(err error) error {
 }
 
 // priceDraft turns a Draft into a priced Quote body (no number, no id yet):
-// product defaults filled, each line extended once by the platform rule,
-// totals summed, and freight cleared on a pickup BEFORE it is rolled into the
-// total (a pickup must not be billed for delivery). Every field problem found
-// is collected into one 400.
+// product defaults filled, each line's units resolved against the product's
+// unit set and the catalogue (ADR 0006 sections 3.3, 3.4 and 4), each line
+// extended once by the platform rule, totals summed, and freight cleared on a
+// pickup BEFORE it is rolled into the total (a pickup must not be billed for
+// delivery). Every field problem found is collected into one 400.
 func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	v := &httpx.Validator{}
+
+	// A job the customer does not own is refused for every caller, as the
+	// credit memo create refuses it (round 11 P1-1): a foreign job's pricing
+	// rules would price the document.
+	if d.JobID != nil {
+		owned, err := s.repo.JobOwnedBy(ctx, *d.JobID, d.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			v.Check(false, "job_id", "is not a job of this customer")
+		}
+	}
 
 	var productIDs []uuid.UUID
 	for _, l := range d.Lines {
@@ -167,6 +201,39 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 		}
 	}
 	products, err := s.repo.LookupProducts(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	productUnits, err := s.repo.LookupProductUnits(ctx, productIDs)
+	if err != nil {
+		return nil, err
+	}
+	// Default the units before the catalogue read so it covers the defaulted
+	// codes too: the line's uom takes the product's sale unit and its
+	// price_uom the product's price unit (ADR 0006 section 3.3).
+	var unitCodes []string
+	for i := range d.Lines {
+		dl := &d.Lines[i]
+		if dl.ProductID != nil {
+			set := productUnits[*dl.ProductID]
+			if dl.UOM == "" {
+				dl.UOM = productUOM(set.SaleUOM)
+			}
+			if dl.PriceUOM == "" {
+				dl.PriceUOM = set.PriceUOM
+			}
+		}
+		if dl.PriceUOM == "" {
+			dl.PriceUOM = string(dl.UOM)
+		}
+		if dl.UOM != "" {
+			unitCodes = append(unitCodes, string(dl.UOM))
+		}
+		if dl.PriceUOM != "" {
+			unitCodes = append(unitCodes, dl.PriceUOM)
+		}
+	}
+	catalogue, err := s.repo.LookupCatalogue(ctx, unitCodes)
 	if err != nil {
 		return nil, err
 	}
@@ -215,36 +282,26 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 		if line.ID == uuid.Nil {
 			line.ID = uuid.New()
 		}
+		var set ProductUnitSet
 		if dl.ProductID != nil {
 			p, ok := products[*dl.ProductID]
 			if !ok {
 				v.Check(false, path+".product_id", "no such product")
-			} else {
-				if line.SKU == "" {
-					line.SKU = p.SKU
-				}
-				if line.Description == "" {
-					line.Description = p.Description
-				}
-				// The unit defaults from the product, then the price unit
-				// from the unit, then the pair from the two.
-				if line.UOM == "" {
-					line.UOM = productUOM(p.UOMPrimary)
-				}
+				continue // an unknown product has no set to resolve against
 			}
+			if line.SKU == "" {
+				line.SKU = p.SKU
+			}
+			if line.Description == "" {
+				line.Description = p.Description
+			}
+			set = productUnits[*dl.ProductID]
 		}
-		if line.PriceUOM == "" {
-			line.PriceUOM = string(line.UOM)
-		}
-		if line.UOM == "" {
+		if line.UOM == "" || line.PriceUOM == "" {
 			continue // the product was unknown (reported above): nothing to price
 		}
-		if line.UOMQty == 0 && line.PriceUOMQty == 0 {
-			if line.PriceUOM != string(line.UOM) {
-				v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
-				continue
-			}
-			line.UOMQty, line.PriceUOMQty = one, one
+		if !s.resolveLineUnits(v, path, &line, dl, set, catalogue) {
+			continue
 		}
 		ext, err := httpx.Extend(line.Quantity, line.UOMQty, line.PriceUOMQty, line.UnitPrice)
 		if err != nil || total > math.MaxInt64-int64(ext) {
@@ -262,6 +319,172 @@ func (s *Service) priceDraft(ctx context.Context, d *Draft) (*Quote, error) {
 	return q, nil
 }
 
+// resolveLineUnits settles one line's units (ADR 0006 sections 3.3, 3.4 and
+// 4): the catalogue check, the pair (resolved from the product's set on a
+// product line, the client's or a standard size derivation on the others),
+// the stocking quantity, exact or refused with the nearest quantities, and
+// the tally of a random length line. It answers false when the line is
+// unusable; every problem is already collected in v.
+func (s *Service) resolveLineUnits(v *httpx.Validator, path string, line *QuoteLine, dl DraftLine, set ProductUnitSet, catalogue map[string]units.CatalogueUnit) bool {
+	before := errorCount(v)
+	uom := string(line.UOM)
+
+	// The catalogue: a line's units are active catalogue units (2.1).
+	for _, unit := range []struct {
+		field string
+		code  string
+		sent  bool
+	}{
+		{"uom", uom, true},
+		{"price_uom", line.PriceUOM, dl.ProductID == nil || line.PriceUOM != set.PriceUOM},
+	} {
+		if !unit.sent {
+			continue // defaulted from the product: the set check below covers it
+		}
+		u, known := catalogue[unit.code]
+		if !known {
+			v.Check(false, path+"."+unit.field, unit.code+" is not a unit of the catalogue")
+		} else if !u.IsActive {
+			v.Check(false, path+"."+unit.field, unit.code+" is inactive: an inactive unit cannot enter a new line")
+		}
+	}
+
+	if dl.ProductID != nil {
+		// The units must be rows of the product's set, sell on the sale unit
+		// and price on the price unit (3.3).
+		uRow, hasU := set.Row(uom)
+		if !hasU || !uRow.Sell {
+			v.Check(false, path+".uom", uom+" is not a sale unit of the product")
+		}
+		pRow, hasP := set.Row(line.PriceUOM)
+		if !hasP || !pRow.Price {
+			v.Check(false, path+".price_uom", line.PriceUOM+" is not a price unit of the product")
+		}
+		if v.Err() != nil && errorCount(v) > before {
+			return false
+		}
+		// The pair resolves from the two rows and is stored on the line; a
+		// sent pair must equal it as a ratio (3.3), and the resolved pair
+		// is what the line stores, canonical whatever equivalent pair the
+		// client sent (R2: one conversion, one byte form).
+		resolved, err := units.ResolveLinePair(uRow.rowPair(), pRow.rowPair())
+		if err != nil {
+			v.Check(false, path+".uom_qty", "the conversion between "+uom+" and "+line.PriceUOM+" does not fit the pair's bound")
+			return false
+		}
+		if dl.UOMQty != 0 || dl.PriceUOMQty != 0 {
+			sent := units.Pair{A: dl.UOMQty, B: dl.PriceUOMQty}
+			if !sent.SameRatio(resolved) {
+				v.Check(false, path+".uom_qty",
+					"does not match the product's unit set; omit the pair or send "+
+						resolved.A.WireString()+" and "+resolved.B.WireString())
+			}
+		}
+		line.UOMQty, line.PriceUOMQty = resolved.A, resolved.B
+	} else {
+		// A line without a product keeps R1-15's rule: the pair is the
+		// client's, except that two units with standard sizes in one
+		// dimension derive it the same way (rule 2 of 3.2) and a sent pair
+		// must agree.
+		if line.UOMQty == 0 && line.PriceUOMQty == 0 {
+			if line.PriceUOM == uom {
+				line.UOMQty, line.PriceUOMQty = one, one
+			} else if derived, ok := units.StandardPair(uom, line.PriceUOM, catalogue); ok {
+				line.UOMQty, line.PriceUOMQty = derived.A, derived.B
+			} else {
+				v.Check(false, path+".uom_qty", "is required when price_uom differs from uom: send uom_qty and price_uom_qty")
+			}
+		} else if derived, ok := units.StandardPair(uom, line.PriceUOM, catalogue); ok {
+			if !(units.Pair{A: line.UOMQty, B: line.PriceUOMQty}).SameRatio(derived) {
+				v.Check(false, path+".uom_qty",
+					"does not match the units' standard sizes; the derived pair is "+
+						derived.A.WireString()+" and "+derived.B.WireString())
+			}
+			// The derived pair is canonical (R2): an agreeing sent pair
+			// stores it, not the form the client chose.
+			line.UOMQty, line.PriceUOMQty = derived.A, derived.B
+		}
+	}
+	if errorCount(v) > before {
+		return false
+	}
+
+	// The tally (section 4): allowed on a random length product line only,
+	// its sale unit LF, its linear feet the line's quantity.
+	if dl.Tally != nil {
+		if dl.ProductID == nil || !set.RandomLength {
+			v.Check(false, path+".tally", "a tally is allowed on a random length product line only")
+			return false
+		}
+		if uom != "LF" {
+			v.Check(false, path+".uom", "a tallied line's unit is LF: the tally carries the lengths")
+			return false
+		}
+		rows := make([]units.TallyRow, 0, len(dl.Tally.Rows))
+		for _, r := range dl.Tally.Rows {
+			rows = append(rows, units.TallyRow{Pieces: int64(r.Pieces), LengthFT: r.LengthFT})
+		}
+		linearFeet, err := units.LinearFeet(rows)
+		if err != nil {
+			v.Check(false, path+".tally",
+				"the tally's linear feet are beyond the quantity bound of 99999999.9999 linear feet")
+			return false
+		}
+		if dl.HasQuantity && dl.Quantity != linearFeet {
+			v.Check(false, path+".quantity", "must equal the tally's linear feet, "+linearFeet.WireString())
+			return false
+		}
+		line.Quantity = linearFeet
+		line.Tally = &Tally{Rows: make([]TallyRow, 0, len(rows))}
+		for _, r := range rows {
+			line.Tally.Rows = append(line.Tally.Rows, TallyRow{Pieces: int(r.Pieces), LengthFT: r.LengthFT})
+		}
+		line.Tally.LinearFeet = linearFeet
+		if set.BoardThick != nil && set.BoardWidth != nil {
+			line.Tally.ThicknessIn, line.Tally.WidthIn = set.BoardThick, set.BoardWidth
+			if bf, err := units.BoardFeet(linearFeet, *set.BoardThick, *set.BoardWidth); err == nil {
+				display := units.DisplayBoardFeet(bf)
+				line.Tally.BoardFeet = &display
+			}
+		}
+	}
+
+	// The stocking unit and quantity (3.4): exact at scale 4 or the line is
+	// refused with the nearest quantities that are exact (R5).
+	if dl.ProductID != nil {
+		stockUOM := set.StockUOM
+		var stockQty httpx.Quantity
+		var err error
+		if uom == stockUOM {
+			stockQty = line.Quantity
+		} else if uRow, ok := set.Row(uom); ok {
+			stockQty, err = units.ConvertStock(line.Quantity, uom, stockUOM, uRow.rowPair())
+		} else {
+			return false // the set check above already refused the unit
+		}
+		if err != nil {
+			var inexact *units.InexactError
+			switch {
+			case errors.As(err, &inexact):
+				v.Check(false, path+".quantity", inexact.Error())
+			case errors.Is(err, units.ErrOutOfBound):
+				v.Check(false, path+".quantity",
+					"is past the quantity bound of 99999999.9999 when converted into the stocking unit "+stockUOM)
+			default:
+				v.Check(false, path+".quantity", "does not convert exactly into the stocking unit "+stockUOM)
+			}
+			return false
+		}
+		line.StockUOM, line.StockQuantity = &stockUOM, &stockQty
+	}
+	return true
+}
+
+// rowPair is the set row as a Pair, its left side the row's unit.
+func (r ProductUnitRow) rowPair() units.Pair {
+	return units.Pair{A: r.UnitQty, B: r.StockQty}
+}
+
 // Create validates the references, prices the document, mints its number from
 // the sequence and stores it, writing quote.created as the transaction's last
 // statement. A create that fails anywhere leaves no quote and no event.
@@ -271,24 +494,12 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
 	}
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
-		q, err := s.priceDraft(ctx, d)
+		q, ev, err := s.createCore(ctx, d)
 		if err != nil {
 			return err
 		}
-		q.ID = uuid.New()
-		for i := range q.Lines {
-			q.Lines[i].QuoteID = q.ID
-		}
-		if q.Number, err = s.repo.NextNumber(ctx); err != nil {
-			return err
-		}
-		if err := s.repo.InsertQuote(ctx, q); err != nil {
-			return err
-		}
-		if out, err = s.repo.GetQuote(ctx, q.ID); err != nil {
-			return err
-		}
-		return s.record(ctx, out, EventCreated, "")
+		out = q
+		return s.writeEvent(ctx, ev)
 	})
 	if err != nil {
 		return nil, err
@@ -296,10 +507,155 @@ func (s *Service) Create(ctx context.Context, d *Draft) (*Quote, error) {
 	return out, nil
 }
 
+// createCore prices and stores a new quote INSIDE the caller's transaction
+// and returns the quote.created event instead of writing it, so a caller
+// that owns a larger transaction (a draft's promotion, ADR 0007 section
+// 4.3) writes the event as that transaction's last statement. It assumes
+// the payload branch rule already ran (Create applies it; the promotion
+// runs at the draft's branch context).
+func (s *Service) createCore(ctx context.Context, d *Draft) (*Quote, *outbox.Event, error) {
+	q, err := s.priceDraft(ctx, d)
+	if err != nil {
+		return nil, nil, err
+	}
+	q.ID = uuid.New()
+	for i := range q.Lines {
+		q.Lines[i].QuoteID = q.ID
+	}
+	if q.Number, err = s.repo.NextNumber(ctx); err != nil {
+		return nil, nil, err
+	}
+	if err := s.repo.InsertQuote(ctx, q); err != nil {
+		return nil, nil, err
+	}
+	out, err := s.repo.GetQuote(ctx, q.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	ev := s.buildEvent(out, EventCreated, "")
+	return out, ev, nil
+}
+
 // Update replaces a draft quote's header and lines on the client's revision.
 func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precondition) (*Quote, error) {
 	if pre.missing() {
 		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	var out *Quote
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.updateCore(ctx, id, d, pre)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// updateCore replaces a draft quote's header and lines inside the caller's
+// transaction, on the precondition the caller holds: the quote row is
+// locked first and the revision checked after the lock, so the check and
+// the write are one database act. The update writes no event (the quote's
+// update writes none today, ADR 0007 section 4.4), so the caller's
+// transaction ends with its own statements.
+func (s *Service) updateCore(ctx context.Context, id uuid.UUID, d *Draft, pre Precondition) (*Quote, error) {
+	if err := s.repo.LockQuote(ctx, id); err != nil {
+		return nil, notFound(err)
+	}
+	cur, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, cur); err != nil {
+		return nil, err
+	}
+	if err := pre.check(cur.Revision); err != nil {
+		return nil, err
+	}
+	if cur.Status != QuoteStateDraft {
+		return nil, &httpx.Error{Status: 409, Code: httpx.CodeConflict, Message: "only draft quotes can be edited",
+			Details: []httpx.FieldError{httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status())}}
+	}
+	q, err := s.priceDraft(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	q.ID, q.Number, q.BranchID = cur.ID, cur.Number, cur.BranchID
+	for i := range q.Lines {
+		q.Lines[i].QuoteID = id
+	}
+	if err := s.repo.ReplaceDraft(ctx, q); err != nil {
+		return nil, err
+	}
+	return s.repo.GetQuote(ctx, id)
+}
+
+func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
+	q, err := s.repo.GetQuote(ctx, id)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	if err := s.checkQuoteBranch(ctx, q); err != nil {
+		return nil, err
+	}
+	return q, nil
+}
+
+// NumberPattern is the quote's document number pattern, from the entity's
+// prefix and pad (ADR 0007 section 7): reads accept it in the {id} slot.
+var NumberPattern = regexp.MustCompile(`^Q-[0-9]{6,}$`)
+
+// ResolveRecordID parses a record URL's {id} slot: a UUID first, then the
+// entity's number pattern. A well formed number of another entity, or
+// anything else, is a 400 naming id; a value that names no visible row is
+// the caller's 404.
+func ResolveRecordID(raw string) (uuid.UUID, string, error) {
+	if id, err := uuid.Parse(raw); err == nil {
+		return id, "", nil
+	}
+	if NumberPattern.MatchString(raw) {
+		return uuid.Nil, raw, nil
+	}
+	return uuid.Nil, "", httpx.BadRequest("invalid quote id",
+		httpx.FieldError{Field: "id", Message: "must be a UUID or a quote number such as Q-000123"})
+}
+
+// GetQuoteByIDOrNumber reads a quote by its UUID or its document number
+// (section 7): both spellings answer exactly the same body, no redirect.
+func (s *Service) GetQuoteByIDOrNumber(ctx context.Context, raw string) (*Quote, error) {
+	id, number, err := ResolveRecordID(raw)
+	if err != nil {
+		return nil, err
+	}
+	if number != "" {
+		q, err := s.repo.GetQuoteByNumber(ctx, number)
+		if err != nil {
+			return nil, notFound(err)
+		}
+		if err := s.checkQuoteBranch(ctx, q); err != nil {
+			return nil, err
+		}
+		return q, nil
+	}
+	return s.GetQuote(ctx, id)
+}
+
+// maxAttachFile bounds the quote file route's body: the same 5 MiB bound
+// the create applies to a decoded original upload.
+const maxAttachFile = 5 << 20
+
+// AttachFile replaces the quote's stored upload (ADR 0007 section 10): raw
+// body with its content type, on the revision precondition, only while the
+// quote is in status draft, by the promotion's committer. It moves the
+// revision by one, writes the quote.file_attached audit row and no outbox
+// event (the quote's update writes none today).
+func (s *Service) AttachFile(ctx context.Context, id uuid.UUID, data []byte, filename, contentType string, pre Precondition) (*Quote, error) {
+	if pre.missing() {
+		return nil, httpx.PreconditionRequired("this write needs If-Match or a body revision")
+	}
+	if len(data) > maxAttachFile {
+		return nil, httpx.PayloadTooLarge("the file is past the 5 MiB bound")
 	}
 	var out *Quote
 	err := s.inTx(ctx, func(ctx context.Context) error {
@@ -317,38 +673,33 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, d *Draft, pre Precon
 			return err
 		}
 		if cur.Status != QuoteStateDraft {
-			return &httpx.Error{Status: 409, Code: httpx.CodeConflict, Message: "only draft quotes can be edited",
-				Details: []httpx.FieldError{httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status())}}
+			return httpx.InvalidStateTransition("a file attaches only to a draft quote",
+				httpx.Blocker("quote_not_draft", "the quote is "+cur.Status.Status()))
 		}
-		q, err := s.priceDraft(ctx, d)
-		if err != nil {
+		if err := s.repo.StoreOriginalFile(ctx, id, data, filename, contentType); err != nil {
 			return err
 		}
-		q.ID, q.Number, q.BranchID = cur.ID, cur.Number, cur.BranchID
-		for i := range q.Lines {
-			q.Lines[i].QuoteID = id
-		}
-		if err := s.repo.ReplaceDraft(ctx, q); err != nil {
+		if out, err = s.repo.GetQuote(ctx, id); err != nil {
 			return err
 		}
-		out, err = s.repo.GetQuote(ctx, id)
-		return err
+		if s.auditor != nil {
+			sum := sha256.Sum256(data)
+			return s.auditor.Log(ctx, audit.Entry{
+				Action:     "quote.file_attached",
+				EntityType: "quote",
+				EntityID:   id,
+				Changes: map[string]any{
+					"filename": filename, "content_type": contentType,
+					"bytes": len(data), "sha256": hex.EncodeToString(sum[:]),
+				},
+			})
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
-}
-
-func (s *Service) GetQuote(ctx context.Context, id uuid.UUID) (*Quote, error) {
-	q, err := s.repo.GetQuote(ctx, id)
-	if err != nil {
-		return nil, notFound(err)
-	}
-	if err := s.checkQuoteBranch(ctx, q); err != nil {
-		return nil, err
-	}
-	return q, nil
 }
 
 // ListQuotes returns one page: up to f.Limit rows, and whether more follow
@@ -604,12 +955,11 @@ func quoteSourceFor(q *Quote) *order.QuoteSource {
 	return src
 }
 
-// record writes the quote's event into the outbox through the transaction's
-// executor. fromStatus is set on a transition.
-func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus string) error {
-	if s.events == nil {
-		return nil
-	}
+// buildEvent shapes the quote's event without writing it; fromStatus is set
+// on a transition. A nil service recorder builds the event anyway, so a
+// caller inside a larger transaction (a draft's promotion) can write it
+// through its own recorder.
+func (s *Service) buildEvent(q *Quote, eventType, fromStatus string) *outbox.Event {
 	data := map[string]any{
 		"number":      q.Number,
 		"customer_id": q.CustomerID,
@@ -622,12 +972,27 @@ func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus st
 	}
 	raw, err := json.Marshal(data)
 	if err != nil {
-		return err
+		return nil
 	}
 	branch := q.BranchID
-	return s.events.Write(ctx, outbox.Event{
+	return &outbox.Event{
 		Type: eventType, EntityType: "quote", EntityID: q.ID, BranchID: &branch, Data: raw,
-	})
+	}
+}
+
+// writeEvent writes one shaped event through the transaction's executor,
+// the caller's last statement. A nil recorder or event writes nothing.
+func (s *Service) writeEvent(ctx context.Context, ev *outbox.Event) error {
+	if s.events == nil || ev == nil {
+		return nil
+	}
+	return s.events.Write(ctx, *ev)
+}
+
+// record writes the quote's event into the outbox through the transaction's
+// executor. fromStatus is set on a transition.
+func (s *Service) record(ctx context.Context, q *Quote, eventType, fromStatus string) error {
+	return s.writeEvent(ctx, s.buildEvent(q, eventType, fromStatus))
 }
 
 // triggerAutoPO creates purchase order lines for the SPECIAL ORDER lines of

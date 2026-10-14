@@ -16,7 +16,8 @@
         "sale_count": 1,
         "sales_total": 1872,
         "session": {
-          "cashier_id": "<id-2>",
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
           "id": "<id-1>",
           "notes": "",
           "opened_at": "<ts+0d>",
@@ -46,7 +47,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-3>"
+          "request_id": "<id-4>"
         }
       }
     }
@@ -55,18 +56,18 @@
     "name": "pos.till.report.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/till/<id-4>/report"
+      "path": "/api/v1/pos/till/<id-5>/report"
     },
     "response": {
-      "status": 500,
+      "status": 404,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "INTERNAL_ERROR",
-          "message": "Internal Server Error"
+          "code": "NOT_FOUND",
+          "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-5>"
+          "request_id": "<id-6>"
         }
       }
     }
@@ -86,7 +87,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-6>"
+          "request_id": "<id-7>"
         }
       }
     }
@@ -106,7 +107,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-7>"
+          "request_id": "<id-8>"
         }
       }
     }
@@ -131,7 +132,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-8>"
+          "request_id": "<id-9>"
         }
       }
     }
@@ -152,7 +153,7 @@
           "message": "Bad Request"
         },
         "meta": {
-          "request_id": "<id-9>"
+          "request_id": "<id-10>"
         }
       }
     }
@@ -161,7 +162,7 @@
     "name": "pos.till.close.not_found",
     "request": {
       "method": "POST",
-      "path": "/api/v1/pos/till/<id-4>/close",
+      "path": "/api/v1/pos/till/<id-5>/close",
       "body": {
         "counted_by_method": {
           "CASH": 1
@@ -177,7 +178,7 @@
           "message": "Conflict"
         },
         "meta": {
-          "request_id": "<id-10>"
+          "request_id": "<id-11>"
         }
       }
     }
@@ -205,7 +206,8 @@
         "sale_count": 1,
         "sales_total": 1872,
         "session": {
-          "cashier_id": "<id-2>",
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
           "closed_at": "<ts+0d>",
           "counted_by_method": {
             "CASH": 20000
@@ -213,7 +215,7 @@
           "expected_by_method": {
             "CASH": 11404
           },
-          "gl_entry_id": "<id-11>",
+          "gl_entry_id": "<id-12>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
@@ -249,7 +251,7 @@
           "message": "Conflict"
         },
         "meta": {
-          "request_id": "<id-12>"
+          "request_id": "<id-13>"
         }
       }
     }
@@ -282,8 +284,9 @@
       "status": 201,
       "content_type": "application/json",
       "body": {
-        "cashier_id": "<id-13>",
-        "id": "<id-14>",
+        "branch_id": "<id-2>",
+        "cashier_id": "<id-14>",
+        "id": "<id-15>",
         "notes": "",
         "opened_at": "<ts+0d>",
         "opening_float": 10000,
@@ -309,7 +312,8 @@
         "sale_count": 1,
         "sales_total": 1872,
         "session": {
-          "cashier_id": "<id-2>",
+          "branch_id": "<id-2>",
+          "cashier_id": "<id-3>",
           "closed_at": "<ts+0d>",
           "counted_by_method": {
             "CASH": 20000
@@ -317,7 +321,7 @@
           "expected_by_method": {
             "CASH": 11404
           },
-          "gl_entry_id": "<id-11>",
+          "gl_entry_id": "<id-12>",
           "id": "<id-1>",
           "notes": "r1b c close count",
           "opened_at": "<ts+0d>",
@@ -343,8 +347,9 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
+        "branch_id": "<id-2>",
         "generated_at": "<ts+0d>",
-        "id": "<id-15>",
+        "id": "<id-16>",
         "over_short": 8596,
         "payload": {
           "change_given": 48596,
@@ -354,7 +359,8 @@
           "sale_count": 1,
           "sales_total": 1872,
           "session": {
-            "cashier_id": "<id-2>",
+            "branch_id": "<id-2>",
+            "cashier_id": "<id-3>",
             "closed_at": "<ts+0d>",
             "counted_by_method": {
               "CASH": 20000
@@ -362,7 +368,7 @@
             "expected_by_method": {
               "CASH": 11404
             },
-            "gl_entry_id": "<id-11>",
+            "gl_entry_id": "<id-12>",
             "id": "<id-1>",
             "notes": "r1b c close count",
             "opened_at": "<ts+0d>",
@@ -385,7 +391,7 @@
     "name": "pos.till.zreport.not_found",
     "request": {
       "method": "GET",
-      "path": "/api/v1/pos/till/<id-4>/zreport"
+      "path": "/api/v1/pos/till/<id-5>/zreport"
     },
     "response": {
       "status": 404,
@@ -396,7 +402,7 @@
           "message": "Not Found"
         },
         "meta": {
-          "request_id": "<id-16>"
+          "request_id": "<id-17>"
         }
       }
     }
@@ -413,8 +419,9 @@
       "body": {
         "z_reports": [
           {
+            "branch_id": "<id-2>",
             "generated_at": "<ts+0d>",
-            "id": "<id-15>",
+            "id": "<id-16>",
             "over_short": 8596,
             "payload": {
               "change_given": 48596,
@@ -424,7 +431,8 @@
               "sale_count": 1,
               "sales_total": 1872,
               "session": {
-                "cashier_id": "<id-2>",
+                "branch_id": "<id-2>",
+                "cashier_id": "<id-3>",
                 "closed_at": "<ts+0d>",
                 "counted_by_method": {
                   "CASH": 20000
@@ -432,7 +440,7 @@
                 "expected_by_method": {
                   "CASH": 11404
                 },
-                "gl_entry_id": "<id-11>",
+                "gl_entry_id": "<id-12>",
                 "id": "<id-1>",
                 "notes": "r1b c close count",
                 "opened_at": "<ts+0d>",

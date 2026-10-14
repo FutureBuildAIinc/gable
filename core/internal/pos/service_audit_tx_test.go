@@ -34,10 +34,10 @@ func TestCompleteTransactionAuditRollsBackWithFailedMutation(t *testing.T) {
 	logger := slog.Default()
 
 	glSvc := gl.NewService(gl.NewRepository(db), glint.NewMockGLAdapter(), logger)
-	accountSvc := account.NewService(account.NewRepository(db), db, logger)
+	accountSvc := account.NewService(db, glSvc, logger)
 	invoiceSvc := invoice.NewService(invoice.NewRepository(db), glSvc, accountSvc, db).
 		WithAuditLog(audit.NewLogger(db))
-	paymentSvc := payment.NewService(db, payment.NewRepository(db), invoice.NewRepository(db), accountSvc).
+	paymentSvc := payment.NewService(db, payment.NewRepository(db), accountSvc).
 		WithAuditLog(audit.NewLogger(db))
 	svc := pos.NewService(db, pos.NewRepository(db),
 		product.NewService(product.NewRepository(db)),

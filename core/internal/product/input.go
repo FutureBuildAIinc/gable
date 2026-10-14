@@ -6,9 +6,14 @@ package product
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 )
+
+// unitCode is the catalogue's code rule (ADR 0006 section 2.1): the format
+// is checked here, and the catalogue itself answers in the service.
+var unitCode = regexp.MustCompile(`^[A-Z]{1,6}$`)
 
 // createRequest is the POST /products body as it arrives: strings, pointers
 // and raw numbers, parsed into the domain row by Parse with every problem
@@ -34,6 +39,14 @@ type createRequest struct {
 
 	ReorderPoint *json.RawMessage `json:"reorder_point"`
 	ReorderQty   *json.RawMessage `json:"reorder_qty"`
+
+	// The nominal board measure columns and the random length flag (ADR
+	// 0006 section 3.1): decimal strings, both halves of a cross section
+	// or neither.
+	BoardThicknessIn *json.RawMessage `json:"board_thickness_in"`
+	BoardWidthIn     *json.RawMessage `json:"board_width_in"`
+	BoardLengthFT    *json.RawMessage `json:"board_length_ft"`
+	RandomLength     *bool            `json:"random_length"`
 }
 
 // ParseCreate validates the create body and fills the domain row to hand the
@@ -50,10 +63,28 @@ func ParseCreate(r *http.Request) (*Product, error) {
 	v.Required("description", req.Description)
 	if req.StockUOM == "" {
 		v.Check(false, "stock_uom", "is required")
-	} else if !ValidUOM(UOM(req.StockUOM)) {
-		v.Check(false, "stock_uom", "must be one of the unit codes the catalogue holds")
+	} else if !unitCode.MatchString(req.StockUOM) {
+		v.Check(false, "stock_uom", "must be a unit code of one to six capital letters, for example PCS, LF or MBF")
 	}
 	p.UOMPrimary = UOM(req.StockUOM)
+
+	// The nominal board measure columns: decimal strings, a cross section
+	// both halves or neither, a random length product carries no fixed
+	// length (ADR 0006 section 3.1; the stocking unit rule for a random
+	// length product is the service's, which reads the catalogue).
+	p.BoardThicknessIn = optQuantity(v, "board_thickness_in", req.BoardThicknessIn)
+	p.BoardWidthIn = optQuantity(v, "board_width_in", req.BoardWidthIn)
+	p.BoardLengthFT = optQuantity(v, "board_length_ft", req.BoardLengthFT)
+	if req.RandomLength != nil {
+		p.RandomLength = *req.RandomLength
+	}
+	switch {
+	case (p.BoardThicknessIn == nil) != (p.BoardWidthIn == nil):
+		v.Check(false, "board_thickness_in", "a cross section is both thickness and width, or neither")
+		v.Check(false, "board_width_in", "a cross section is both thickness and width, or neither")
+	case p.RandomLength && p.BoardLengthFT != nil:
+		v.Check(false, "board_length_ft", "a random length product carries no fixed length: its lengths live on its tallies")
+	}
 
 	if req.BasePrice != nil {
 		if n, ok := v.Int("base_price_ten_thousandths", *req.BasePrice, true); ok {
@@ -93,6 +124,20 @@ func ParseCreate(r *http.Request) (*Product, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// optQuantity parses an optional decimal-string quantity column, zero or
+// negative refused (a board measure is positive).
+func optQuantity(v *httpx.Validator, field string, raw *json.RawMessage) *httpx.Quantity {
+	if raw == nil || string(*raw) == "null" {
+		return nil
+	}
+	q, ok := v.Quantity(field, *raw, true)
+	if !ok {
+		return nil
+	}
+	v.Check(q > 0, field, "must be greater than zero")
+	return &q
 }
 
 // marginsRequest is the PATCH /products/{id}/margins body.

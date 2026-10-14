@@ -18,6 +18,7 @@ import (
 	"github.com/gablelbm/gable/internal/gl"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestPostEntry(t *testing.T) {
@@ -108,5 +109,116 @@ func TestPostEntry(t *testing.T) {
 	})
 	if !errors.Is(err, gl.ErrPeriodClosed) {
 		t.Errorf("entry into a closed period = %v, want ErrPeriodClosed", err)
+	}
+}
+
+// RULE (ADR 0005 section 8.2): a reversal is the original's legs swapped,
+// source REVERSAL, linked to the original, dated and currencied as asked, once
+// per entry, inside the act's transaction.
+func TestPostReversal(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	ref := uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1 OR reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1))`, ref)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE reverses_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, ref)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, ref)
+	})
+	var orig uuid.UUID
+	day := time.Date(2031, 3, 4, 0, 0, 0, 0, time.UTC)
+	err := db.RunInTx(ctx, func(ctx context.Context) error {
+		e, err := svc.PostEntry(ctx, gl.PostingInput{EntryDate: time.Now(), Memo: "orig", Source: gl.SourceInvoice, SourceRefID: &ref, Currency: "CAD",
+			Legs: []gl.Leg{{AccountCode: gl.AccountCodeAR, Debit: 1100}, {AccountCode: gl.AccountCodeRevenue, Credit: 1000}, {AccountCode: gl.AccountCodeSalesTax, Credit: 100}}})
+		if err != nil {
+			return err
+		}
+		orig = e.ID
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.PostReversal(ctx, gl.ReversalInput{EntryID: orig, EntryDate: day, Currency: "CAD"}); !errors.Is(err, gl.ErrNoTransaction) {
+		t.Fatalf("PostReversal outside a transaction = %v, want ErrNoTransaction", err)
+	}
+	err = db.RunInTx(ctx, func(ctx context.Context) error {
+		rev, err := svc.PostReversal(ctx, gl.ReversalInput{EntryID: orig, EntryDate: day, Currency: "CAD", Reason: "void", PostedBy: "tester"})
+		if err != nil || rev == nil {
+			t.Fatalf("PostReversal = %v, %v", rev, err)
+		}
+		if _, err := svc.PostReversal(ctx, gl.ReversalInput{EntryID: orig, EntryDate: day, Currency: "CAD"}); !errors.Is(err, gl.ErrAlreadyReversed) {
+			t.Errorf("second reversal = %v, want ErrAlreadyReversed", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var source, cur string
+	var date time.Time
+	var debits, credits int64
+	if err := db.Pool.QueryRow(ctx, `
+		SELECT e.source, e.currency, e.entry_date, COALESCE(SUM(l.debit * 100), 0)::bigint, COALESCE(SUM(l.credit * 100), 0)::bigint
+		FROM gl_journal_entries e JOIN gl_journal_lines l ON l.journal_entry_id = e.id
+		WHERE e.reverses_entry_id = $1 GROUP BY e.id`, orig).Scan(&source, &cur, &date, &debits, &credits); err != nil {
+		t.Fatal(err)
+	}
+	if source != "REVERSAL" || cur != "CAD" || !date.Equal(day) || debits != 1100 || credits != 1100 {
+		t.Errorf("reversal = %s %s %s debit %d credit %d, want REVERSAL CAD %s 1100/1100", source, cur, date, debits, credits, day)
+	}
+	var arCredit int64
+	if err := db.Pool.QueryRow(ctx, `SELECT (l.credit * 100)::bigint FROM gl_journal_lines l JOIN gl_journal_entries e ON e.id = l.journal_entry_id
+		JOIN gl_accounts a ON a.id = l.account_id WHERE e.reverses_entry_id = $1 AND a.code = $2`, orig, gl.AccountCodeAR).Scan(&arCredit); err != nil || arCredit != 1100 {
+		t.Errorf("the reversal credits AR %d, %v, want 1100 (the original's debit)", arCredit, err)
+	}
+}
+
+// RULE (review r5 P3-3): a unique violation on a reversal insert maps to
+// ErrAlreadyReversed only when the violated index is the one reversal index
+// ux_gl_entry_single_reversal. Any other unique violation on the insert (a
+// later unique index on the table) passes through unmapped, so it is never
+// misreported as a lost reversal race. The probe index here stands in for
+// such a later index.
+func TestPostEntryMapsOnlyTheReversalIndexViolation(t *testing.T) {
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	svc := gl.NewService(gl.NewRepository(db), nil, slog.Default())
+	ref := uuid.New()
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_lines WHERE journal_entry_id IN (SELECT id FROM gl_journal_entries WHERE source_ref_id = $1)`, ref)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM gl_journal_entries WHERE source_ref_id = $1`, ref)
+	})
+	sentinel := "r5p3 probe " + uuid.NewString()
+	index := "gv1_probe_ix_" + uuid.NewString()[:8]
+	if _, err := db.Pool.Exec(ctx, `CREATE UNIQUE INDEX `+index+` ON gl_journal_entries (memo) WHERE memo = '`+sentinel+`'`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DROP INDEX IF EXISTS `+index) })
+	entry := func(memo string, reverses *uuid.UUID) gl.PostingInput {
+		return gl.PostingInput{EntryDate: time.Now(), Memo: memo, Source: gl.SourceInvoice, SourceRefID: &ref,
+			Currency: "USD", ReversesEntryID: reverses,
+			Legs: []gl.Leg{{AccountCode: gl.AccountCodeAR, Debit: 1100}, {AccountCode: gl.AccountCodeRevenue, Credit: 1100}}}
+	}
+	err := db.RunInTx(ctx, func(ctx context.Context) error {
+		first, err := svc.PostEntry(ctx, entry(sentinel, nil))
+		if err != nil || first == nil {
+			t.Fatalf("the first entry: %v, %v", first, err)
+		}
+		// The second entry collides on the probe index (its memo repeats);
+		// the entry it reverses holds no reversal row, so the one reversal
+		// index is not the violated one.
+		_, err = svc.PostEntry(ctx, entry(sentinel, &first.ID))
+		return err
+	})
+	if err == nil {
+		t.Fatal("the colliding insert posted, want the probe index to refuse it")
+	}
+	var pg *pgconn.PgError
+	if !errors.As(err, &pg) || pg.Code != "23505" || pg.ConstraintName != index {
+		t.Fatalf("the collision = %v, want a 23505 on the probe index %s", err, index)
+	}
+	if errors.Is(err, gl.ErrAlreadyReversed) {
+		t.Errorf("a violation of %s mapped to ErrAlreadyReversed: only ux_gl_entry_single_reversal may map there, and this loss is not a reversal race", index)
 	}
 }

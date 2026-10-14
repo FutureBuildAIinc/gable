@@ -36,6 +36,7 @@ type Repository interface {
 	DeallocateStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 	FulfillStockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 	RestockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
+	UnstockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error
 }
 
 type PostgresRepository struct {
@@ -398,11 +399,11 @@ func (r *PostgresRepository) ReceiveStockQty(ctx context.Context, productID, loc
 
 // StockLevel is one stock_levels row the job reads and writes.
 type StockLevel struct {
-	ProductID       uuid.UUID
-	BranchID        uuid.UUID
-	ReorderPoint    *float64
-	LowSince        *time.Time
-	Revision        int64
+	ProductID    uuid.UUID
+	BranchID     uuid.UUID
+	ReorderPoint *float64
+	LowSince     *time.Time
+	Revision     int64
 }
 
 // NextDirtyStockLevel claims the oldest dirty row FOR UPDATE SKIP LOCKED,
@@ -475,4 +476,19 @@ func (r *PostgresRepository) ProductStockingUnit(ctx context.Context, productID 
 	err := r.db.GetExecutor(ctx).QueryRow(ctx,
 		`SELECT uom_primary::text FROM products WHERE id = $1`, productID).Scan(&uom)
 	return uom, err
+}
+
+// UnstockQty takes delta (scale 4) off on hand, never below what is allocated:
+// the reverse of RestockQty (a voided restocking credit memo).
+func (r *PostgresRepository) UnstockQty(ctx context.Context, inventoryID uuid.UUID, delta int64) error {
+	ct, err := r.db.GetExecutor(ctx).Exec(ctx, `
+		UPDATE inventory SET quantity = quantity - $1::numeric / 10000, updated_at = NOW()
+		WHERE id = $2 AND (quantity - allocated) >= $1::numeric / 10000`, delta, inventoryID)
+	if err != nil {
+		return fmt.Errorf("failed to take stock back out: %w", err)
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrInsufficientAvailable
+	}
+	return nil
 }

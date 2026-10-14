@@ -240,7 +240,7 @@ func TestMigration100_BackfillsRowsThatExist(t *testing.T) {
 		t.Fatalf("stock_levels backfilled %d rows, want 2 (one per holding branch)", levels)
 	}
 	for _, table := range []string{"stock_level_dirty", "reorder_recommendations"} {
-		if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM ` + table).Scan(&nulls); err != nil {
+		if err := conn.QueryRow(ctx, `SELECT COUNT(*) FROM `+table).Scan(&nulls); err != nil {
 			t.Fatalf("%s: %v", table, err)
 		}
 	}

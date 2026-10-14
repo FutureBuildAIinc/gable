@@ -38,34 +38,34 @@ func DefaultRecommendationConfig() RecommendationConfig {
 // GET /purchase-orders/recommendations, and carried whole as the
 // reorder.recommended event's data.
 type ReorderRecommendation struct {
-	ID         uuid.UUID  `json:"id"`
-	RunID      uuid.UUID  `json:"run_id"`
-	ProductID  uuid.UUID  `json:"product_id"`
-	BranchID   uuid.UUID  `json:"branch_id"`
-	VendorID   *uuid.UUID `json:"vendor_id"`
-	SKU        string     `json:"sku"`
-	Description string    `json:"description"`
+	ID          uuid.UUID  `json:"id"`
+	RunID       uuid.UUID  `json:"run_id"`
+	ProductID   uuid.UUID  `json:"product_id"`
+	BranchID    uuid.UUID  `json:"branch_id"`
+	VendorID    *uuid.UUID `json:"vendor_id"`
+	SKU         string     `json:"sku"`
+	Description string     `json:"description"`
 
-	OnHand     httpx.Quantity `json:"on_hand"`
-	Allocated  httpx.Quantity `json:"allocated"`
-	Available  httpx.Quantity `json:"available"`
-	OnOrder    httpx.Quantity `json:"on_order"`
+	OnHand      httpx.Quantity `json:"on_hand"`
+	Allocated   httpx.Quantity `json:"allocated"`
+	Available   httpx.Quantity `json:"available"`
+	OnOrder     httpx.Quantity `json:"on_order"`
 	Backordered httpx.Quantity `json:"backordered"`
 
-	Velocity    httpx.Quantity `json:"velocity"`
-	LookbackDays int            `json:"lookback_days"`
-	LeadTimeDays httpx.Quantity `json:"lead_time_days"`
-	LeadTimeSource string       `json:"lead_time_source"`
+	Velocity       httpx.Quantity `json:"velocity"`
+	LookbackDays   int            `json:"lookback_days"`
+	LeadTimeDays   httpx.Quantity `json:"lead_time_days"`
+	LeadTimeSource string         `json:"lead_time_source"`
 
-	ReorderPoint     *httpx.Quantity `json:"reorder_point"`
-	ReorderQuantity  *httpx.Quantity `json:"reorder_quantity"`
+	ReorderPoint      *httpx.Quantity `json:"reorder_point"`
+	ReorderQuantity   *httpx.Quantity `json:"reorder_quantity"`
 	SuggestedQuantity float64         `json:"suggested_quantity"`
 
-	VendorItemID *uuid.UUID `json:"vendor_item_id"`
-	Unit         string     `json:"unit"`
-	Status       string     `json:"status"`
-	PurchaseOrderLineID *uuid.UUID `json:"purchase_order_line_id"`
-	CreatedAt    httpx.Timestamp `json:"created_at"`
+	VendorItemID        *uuid.UUID      `json:"vendor_item_id"`
+	Unit                string          `json:"unit"`
+	Status              string          `json:"status"`
+	PurchaseOrderLineID *uuid.UUID      `json:"purchase_order_line_id"`
+	CreatedAt           httpx.Timestamp `json:"created_at"`
 
 	// OldPointF and OldQtyF carry the target pair the run read; they are
 	// internal, not on the wire.
@@ -92,10 +92,10 @@ type reorderScanRow struct {
 	ProductID, BranchID uuid.UUID
 	OnHand, Allocated, Available,
 	OnOrder, Backordered, UnitsSold httpx.Quantity
-	OldPointF, OldQtyF float64
+	OldPointF, OldQtyF                 float64
 	AvailableF, OnOrderF, BackorderedF float64
-	VendorID    *uuid.UUID
-	Unit, SKU, Description string
+	VendorID                           *uuid.UUID
+	Unit, SKU, Description             string
 }
 
 // reorderScanQuery computes, per product and branch, the stock figures, the

@@ -102,6 +102,16 @@ func testEvent(t *testing.T, typ string) Event {
 // cleanOutbox empties all three tables so every test starts from a known
 // feed: the drain reads from position 0 for a fresh subscriber, and a test's
 // assertions about counts and deliveries must not see a prior run's rows.
+//
+// The shared state this suite sits on is the events_outbox table itself:
+// every package's tests write rows into it while this package's tests hold
+// the advisory lock, truncate, and assert exact row sets and delivery
+// windows. A writer that does not hold testutil.LockOutboxTables lands a
+// row between a truncate and a remaining() read (an extra position in the
+// set), inside a drain window (a split batch), or inside a cursor walk (an
+// extra page), and the drain, list and purge tests fail together. The
+// isolation is the lock: every test in the tree that writes outbox rows
+// takes it, so a truncate never interleaves with a foreign commit.
 func cleanOutbox(t *testing.T, db *database.DB) {
 	t.Helper()
 	if _, err := db.Pool.Exec(context.Background(),

@@ -33,7 +33,13 @@ func NewHandler(service *Service) *Handler {
 
 // RegisterRoutes registers every route behind the first guard. A second guard,
 // when given, replaces it on the writes of the payment terms master (creating
-// and editing terms is a finance act, choosing them is a sales one).
+// and editing terms is a finance act, choosing them is a sales one). A third
+// guard, when given, replaces it on the three routes that change a customer's
+// restricted fields (the header write, the salesperson and the escalation
+// policy) and on the two reads those writes need (the record and its
+// escalation policy: a role that may change a restricted field under If-Match
+// must be able to read the revision, item 57), so a role can reach those
+// without reaching the rest.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Handler) http.Handler) {
 	guardWith := func(g func(http.Handler) http.Handler) func(http.HandlerFunc) http.HandlerFunc {
 		return func(handler http.HandlerFunc) http.HandlerFunc {
@@ -45,22 +51,25 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 			}
 		}
 	}
-	var first, second func(http.Handler) http.Handler
+	var first, second, third func(http.Handler) http.Handler
 	if len(roleGuard) > 0 {
-		first, second = roleGuard[0], roleGuard[0]
+		first, second, third = roleGuard[0], roleGuard[0], roleGuard[0]
 	}
 	if len(roleGuard) > 1 && roleGuard[1] != nil {
 		second = roleGuard[1]
 	}
-	guard, termsWrite := guardWith(first), guardWith(second)
+	if len(roleGuard) > 2 && roleGuard[2] != nil {
+		third = roleGuard[2]
+	}
+	guard, termsWrite, restricted := guardWith(first), guardWith(second), guardWith(third)
 
 	mux.HandleFunc("GET /api/v1/customers", guard(h.HandleListCustomers))
 	mux.HandleFunc("POST /api/v1/customers", guard(h.HandleCreateCustomer))
-	mux.HandleFunc("GET /api/v1/customers/{id}", guard(h.HandleGetCustomer))
-	mux.HandleFunc("PUT /api/v1/customers/{id}", guard(h.HandleUpdateCustomer))
-	mux.HandleFunc("PATCH /api/v1/customers/{id}/salesperson", guard(h.HandleUpdateSalesperson))
-	mux.HandleFunc("GET /api/v1/customers/{id}/escalation-policy", guard(h.HandleGetEscalationPolicy))
-	mux.HandleFunc("PUT /api/v1/customers/{id}/escalation-policy", guard(h.HandleSetEscalationPolicy))
+	mux.HandleFunc("GET /api/v1/customers/{id}", restricted(h.HandleGetCustomer))
+	mux.HandleFunc("PUT /api/v1/customers/{id}", restricted(h.HandleUpdateCustomer))
+	mux.HandleFunc("PATCH /api/v1/customers/{id}/salesperson", restricted(h.HandleUpdateSalesperson))
+	mux.HandleFunc("GET /api/v1/customers/{id}/escalation-policy", restricted(h.HandleGetEscalationPolicy))
+	mux.HandleFunc("PUT /api/v1/customers/{id}/escalation-policy", restricted(h.HandleSetEscalationPolicy))
 	mux.HandleFunc("GET /api/v1/price_levels", guard(h.HandleListPriceLevels))
 
 	mux.HandleFunc("GET /api/v1/customers/{id}/ship-tos", guard(h.HandleListShipTos))

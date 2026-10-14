@@ -77,7 +77,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 		outstanding AS (
 			SELECT (COALESCE(SUM(total_amount), 0) * 100)::bigint AS amount, COUNT(*) AS cnt
 			FROM invoices
-			WHERE status IN ('UNPAID', 'PARTIAL', 'OVERDUE')
+			WHERE status IN ('UNPAID', 'PARTIAL')
 			  AND ($4::uuid IS NULL OR branch_id = $4)
 		)
 		SELECT

@@ -103,12 +103,14 @@ func (f *fakeGLRepo) UpdateJournalEntryStatus(_ context.Context, id uuid.UUID, s
 	return nil
 }
 
-func (f *fakeGLRepo) GetTrialBalance(context.Context, time.Time) ([]gl.TrialBalanceRow, error) {
+func (f *fakeGLRepo) GetTrialBalance(context.Context, time.Time, string) ([]gl.TrialBalanceRow, error) {
 	return nil, nil
 }
 
 // Invoice never reads financial statements; this satisfies gl.Repository only.
-func (f *fakeGLRepo) GetAccountActivity(context.Context, *time.Time, time.Time, []string) ([]gl.AccountActivity, error) {
+func (f *fakeGLRepo) DefaultCurrency(context.Context) (string, error) { return "USD", nil }
+
+func (f *fakeGLRepo) GetAccountActivity(context.Context, *time.Time, time.Time, []string, string) ([]gl.AccountActivity, error) {
 	return nil, nil
 }
 

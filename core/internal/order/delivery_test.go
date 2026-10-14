@@ -79,8 +79,11 @@ func (w *deliveryWorld) confirmedDeliveryOrder(t *testing.T, qty string) (orderI
 func (w *deliveryWorld) complete(t *testing.T, deliveryID uuid.UUID) error {
 	t.Helper()
 	proof, by := "https://pod.example/p.jpg", "Site foreman"
-	return w.deliv.CompleteDelivery(context.Background(), deliveryID, delivery.UpdateDeliveryStatusRequest{
-		Status: delivery.DeliveryStatusDelivered, PODProofURL: &proof, PODSignedBy: &by})
+	one := int64(1)
+	_, err := w.deliv.TransitionStop(context.Background(), deliveryID, &delivery.StopTransitionDraft{
+		To: delivery.StopStatusDelivered, PODProofURL: &proof, PODSignedBy: &by},
+		delivery.Precondition{Revision: &one}, "")
+	return err
 }
 
 func (w *deliveryWorld) requests(t *testing.T, orderID string) (n int, attempts int, parked bool, lastErr string) {
@@ -171,9 +174,11 @@ func TestDeliveryCompletionBillsTheRemainderOnce(t *testing.T) {
 	if err := w.f.db.Pool.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'order.fulfillment_checks_skipped' AND entity_id = $1`, orderID).Scan(&skipped); err != nil || skipped != 1 {
 		t.Errorf("%d fulfillment_checks_skipped audit rows (%v), want 1", skipped, err)
 	}
-	// A second completion of the same delivery (a replayed POD) queues nothing new.
-	if err := w.complete(t, deliveryID); err != nil {
-		t.Fatal(err)
+	// A second completion of the same delivery (a replayed POD) is refused
+	// under the revision precondition (the stop's revision moved with its
+	// first completion) and queues nothing new either way.
+	if err := w.complete(t, deliveryID); err == nil {
+		t.Fatal("a replayed completion succeeded; it must be refused")
 	}
 	if err := w.serve(t); err != nil {
 		t.Fatal(err)
@@ -418,7 +423,8 @@ func TestPickupOrderIsNeverRouted(t *testing.T) {
 		_, _ = w.f.db.Pool.Exec(ctx, `DELETE FROM delivery_routes WHERE id = $1`, route)
 		_, _ = w.f.db.Pool.Exec(ctx, `DELETE FROM vehicles WHERE id = $1`, vehicle)
 	})
-	_, _, err := w.deliv.AssignOrderToRoute(ctx, delivery.AssignOrderRequest{RouteID: route, OrderID: uuid.MustParse(orderID), StopSequence: 1})
+	seq := 1
+	_, _, err := w.deliv.AssignOrderToRoute(ctx, &delivery.AssignStopDraft{RouteID: route, OrderID: uuid.MustParse(orderID), StopSequence: &seq}, "")
 	if err == nil || !strings.Contains(err.Error(), "never routed") {
 		t.Fatalf("assigning a pickup order = %v, want the pickup_order refusal", err)
 	}
