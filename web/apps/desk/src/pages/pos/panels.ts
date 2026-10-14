@@ -20,16 +20,17 @@ const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents
  * owed) when the tenders do not cover the total.
  */
 export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn | null): PayPlan {
-    const addedSum = sum(added);
-    // change is given only in cash. Two cases are refused: the added tenders
-    // alone are above the total and one of them is not cash, or a typed
-    // amount that is not cash is more than what is still owed.
-    if (totalCents > 0 && addedSum > totalCents && added.some((t) => t.method !== 'cash')) {
+    // One rule: card, check and account tenders together never exceed the
+    // total, so the change never exceeds the cash tendered (the server's own
+    // change_from_cash). Everything else pays, with change from the cash.
+    const nonCash = (list: TenderIn[]) => sum(list.filter((t) => t.method !== 'cash'));
+    const addedNonCash = nonCash(added);
+    if (totalCents > 0 && addedNonCash > totalCents) {
         return { ok: false, owedCents: 0, over: 'added' };
     }
     let tenders = added;
-    if (addedSum < totalCents && entry !== null && entry.amount_cents > 0) {
-        if (entry.method !== 'cash' && entry.amount_cents > totalCents - addedSum) {
+    if (sum(added) < totalCents && entry !== null && entry.amount_cents > 0) {
+        if (entry.method !== 'cash' && addedNonCash + entry.amount_cents > totalCents) {
             return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method };
         }
         tenders = [...added, entry];

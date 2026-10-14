@@ -2465,16 +2465,26 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     el.remove();
   });
 
-  it('refuses a typed card or check above what is owed after cash was added, in words', async () => {
+  it('refuses a typed card or check that takes the non cash tenders above the total, in words', async () => {
+    const el = await mount(sale());
+    await addSplit(el, 'card', '40.00');
+    await press(el, 'check');
+    await typeInto(el, '50.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card or check cannot be more than what is owed');
+    expect(q(el, 'pos-tenders-over').textContent).not.toContain('added tenders');
+    await typeInto(el, '46.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('pays a card typed beside cash that already covers the change, as the server accepts it', async () => {
     const el = await mount(sale());
     await addSplit(el, 'cash', '60.00');
     await press(el, 'card');
     await typeInto(el, '40.00');
-    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
-    expect(q(el, 'pos-tenders-over').textContent).toContain('A card or check cannot be more than what is owed');
-    expect(q(el, 'pos-tenders-over').textContent).not.toContain('added tenders');
-    await typeInto(el, '26.50');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$13.50');
     el.remove();
   });
 

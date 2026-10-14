@@ -1342,11 +1342,8 @@ export class POSTerminal extends LitElement {
     const entry = this._entry;
     const isCash = this._tenderMethod === 'cash';
     const payPlanNow = payPlan(total, this._pendingTenders, entry);
-    // cash only added above the total (a quantity change lowered it): its change shows as usual
-    const addedChange = this._pendingTenders.length > 0 && this._tenderedSoFar > total
-      && this._pendingTenders.every((t) => t.method === 'cash') ? this._tenderedSoFar - total : 0;
-    const change = addedChange > 0 ? addedChange : isCash && entry !== null && this._tenderedSoFar < total
-      ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
+    // the change due is the plan's: the tendered amount above the total, given from the cash
+    const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
     const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
       ? (payPlanNow.typedMethod === 'account'
@@ -1410,7 +1407,7 @@ export class POSTerminal extends LitElement {
             <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
               ${overWords}
             </div>` : nothing}
-          ${(isCash || addedChange > 0) && change > 0 ? html`
+          ${change > 0 ? html`
             <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
               <span>Change due</span><span class="font-mono">${fmt(change)}</span>
             </div>` : nothing}
