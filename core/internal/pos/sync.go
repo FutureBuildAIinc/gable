@@ -191,7 +191,7 @@ func (s *Service) StartSaleAt(ctx context.Context, item *OfflineSale, register, 
 	}
 	currency := defaultCurrency
 	if in.CustomerID != nil {
-		facts, err := s.repo.CustomerFacts(ctx, *in.CustomerID)
+		_, facts, err := s.namedCustomer(ctx, *in.CustomerID)
 		if err != nil {
 			return nil, err
 		}

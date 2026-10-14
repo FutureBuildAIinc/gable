@@ -270,7 +270,7 @@ func (s *Service) StartSale(ctx context.Context, in *StartSale, actor string) (*
 	}
 	currency := defaultCurrency
 	if in.CustomerID != nil {
-		facts, err := s.repo.CustomerFacts(ctx, *in.CustomerID)
+		_, facts, err := s.namedCustomer(ctx, *in.CustomerID)
 		if err != nil {
 			return nil, err
 		}

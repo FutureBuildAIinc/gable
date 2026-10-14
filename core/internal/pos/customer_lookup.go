@@ -75,6 +75,26 @@ type AttachCustomerIn struct {
 	JobID      *uuid.UUID
 }
 
+// namedCustomer is the counter's one rule for which customers a caller may
+// name: the customer wall (the same predicate the lookup filters by), a
+// hidden or inactive customer answered with the module's 404 and nothing
+// written. The attach, the create, the offline sync and the completion all
+// name a customer through it, so a change of rule is a change here only.
+func (s *Service) namedCustomer(ctx context.Context, id uuid.UUID) (*CounterCustomer, CustomerFacts, error) {
+	c, found, err := s.repo.CounterCustomerByID(ctx, id)
+	if err != nil {
+		return nil, CustomerFacts{}, err
+	}
+	if !found {
+		return nil, CustomerFacts{}, httpx.NotFound("customer not found")
+	}
+	facts, err := s.repo.CustomerFacts(ctx, id)
+	if err != nil {
+		return nil, CustomerFacts{}, err
+	}
+	return c, facts, nil
+}
+
 // AttachCustomer names the sale's customer, purchase order and job. The
 // customer is named before the first line, because the lines price for the
 // customer (price level, tax exemption, currency); the purchase order and
@@ -91,12 +111,9 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 	}
 	currency := ""
 	if in.CustomerID != nil {
-		c, found, err := s.repo.CounterCustomerByID(ctx, *in.CustomerID)
+		c, facts, err := s.namedCustomer(ctx, *in.CustomerID)
 		if err != nil {
 			return nil, err
-		}
-		if !found {
-			return nil, httpx.NotFound("customer not found")
 		}
 		if in.JobID != nil {
 			ok := false
@@ -108,10 +125,6 @@ func (s *Service) AttachCustomer(ctx context.Context, saleID uuid.UUID, in Attac
 			if !ok {
 				return nil, invalid("job_id", "is not an open job of this customer")
 			}
-		}
-		facts, err := s.repo.CustomerFacts(ctx, *in.CustomerID)
-		if err != nil {
-			return nil, err
 		}
 		currency = facts.Currency
 	} else {

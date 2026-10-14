@@ -623,7 +623,7 @@ func (h *Handler) ListZReports(w http.ResponseWriter, r *http.Request) {
 	}
 	date := time.Now()
 	if d := q.Get("date"); d != "" {
-		parsed, err := time.Parse("2006-01-02", d)
+		parsed, err := time.ParseInLocation("2006-01-02", d, time.Local)
 		if err != nil {
 			httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "date", Message: "must be a date as YYYY-MM-DD"}))
 			return
