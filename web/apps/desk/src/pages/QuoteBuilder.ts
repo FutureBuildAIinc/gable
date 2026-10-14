@@ -520,7 +520,7 @@ export class GableQuoteBuilder extends LitElement {
                             <option value="" ?selected=${line.uom === ''}>Unit...</option>
                             ${QUOTE_UOM_CODES.map(code => html`<option value=${code} ?selected=${line.uom === code}>${code}</option>`)}
                         </select>
-                        ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit required</div>` : nothing}
+                        ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
                     ` : html`<span class="font-mono text-xs text-zinc-400">${line.uom}</span>`}
                 </td>
                 <td class="px-2 py-3 text-right">

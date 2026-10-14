@@ -64,7 +64,7 @@ test.describe('Quote flow on the new contract', () => {
     await page.getByRole('button', { name: 'Add', exact: true }).click();
 
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     const res = await created;
     expect(res.status(), await res.text()).toBe(201);
     const quote = await res.json();
@@ -150,13 +150,13 @@ test.describe('Quote flow on the new contract', () => {
       }
       await route.continue();
     });
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     await expect(page.getByText(/uom: must be one of/)).toBeVisible();
     await expect(select).toBeVisible();
     await select.selectOption(saleUnit);
 
     const created = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/quotes' && r.request().method() === 'POST');
-    await page.getByRole('button', { name: 'Create Quote' }).click();
+    await page.getByRole('button', { name: 'Save draft' }).click();
     const res = await created;
     expect(res.status(), await res.text()).toBe(201);
     expect(res.request().postDataJSON().lines[0].uom).toBe(saleUnit);
