@@ -94,6 +94,11 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 			httputil.RespondError(w, r, "location_id is in a branch this caller may not target", http.StatusForbidden, err)
 			return
 		}
+		if errors.Is(err, ErrCountNeedsLocation) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "location_required",
+				Message: "This product is held in more than one location here. Count each location and name the one you counted."})
+			return
+		}
 		slog.Error("AdjustStock failed", "error", err)
 		httputil.RespondError(w, r, "Internal Server Error", http.StatusInternalServerError, err)
 		return

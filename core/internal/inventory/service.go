@@ -26,6 +26,12 @@ var ErrNothingAllocated = errors.New("inventory: no allocated stock")
 // another branch's yard.
 var ErrLocationOutsideBranch = errors.New("inventory: the named location is not on the caller's branch")
 
+// ErrCountNeedsLocation refuses an absolute count that names no location when
+// the product is held in more than one location in the caller's reach: the
+// count would be written to the oldest row and corrupt the yard's total, so
+// the caller names the location it counted.
+var ErrCountNeedsLocation = errors.New("inventory: this product is held in more than one location here; name the location you counted")
+
 type Service struct {
 	repo   Repository
 	levels LevelStore // the levels read's store (C3-1b), when the repo can serve it
@@ -44,6 +50,18 @@ func NewService(repo Repository) *Service {
 
 // AdjustStock handles receipt (Add) or cycle count (Set/Adjust)
 func (s *Service) AdjustStock(ctx context.Context, req StockAdjustmentRequest) error {
+	// A count is an absolute figure for one location. With no location named
+	// it can only be a guess when the product sits in several, so it is
+	// refused in words, never written to the oldest row.
+	if req.LocationID == nil && !req.IsDelta {
+		rows, err := s.repo.ListInventoryByProductAndBranch(ctx, req.ProductID, branchctx.IDForQuery(ctx))
+		if err != nil {
+			return err
+		}
+		if len(rows) > 1 {
+			return ErrCountNeedsLocation
+		}
+	}
 	// 1. Check if inventory record exists
 	inv, err := s.repo.GetInventory(ctx, req.ProductID, req.LocationID)
 	if err != nil {

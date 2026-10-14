@@ -73,7 +73,11 @@ paths:
       tags:
       - inventory
       summary: Adjust inventory (cycle count)
-      description: A result that would leave negative stock answers 500.
+      description: >-
+        A result that would leave negative stock answers 500. An absolute count
+        (is_delta false) that names no location, for a product held in more than
+        one location in the caller's reach, answers 422 with the code
+        location_required: a count is for one location.
       parameters:
       - $ref: '#/components/parameters/XBranchId'
       - $ref: '#/components/parameters/IdempotencyKey'

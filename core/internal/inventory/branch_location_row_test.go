@@ -213,9 +213,12 @@ func TestAnActOnAnotherBranchsYardWithNoRowIsRefused(t *testing.T) {
 	}
 }
 
-// RULE: a request that names no location keeps the stated picks: an unbound
-// caller the legacy unassigned row, a branch scoped caller the branch's first
-// row by creation, never the largest quantity by accident.
+// RULE: a request that names no location keeps the stated picks for a delta
+// (an unbound caller the legacy unassigned row, a branch scoped caller the
+// branch's first row by creation, never the largest quantity by accident); an
+// absolute count that names no location is refused where the product sits in
+// more than one location in reach (item 130, N20: a count is for one
+// location, and the oldest row would have taken the whole yard's figure).
 func TestAnAdjustWithNoLocationTakesTheStatedRow(t *testing.T) {
 	w, read := newLocWorld(t)
 	db := testutil.RequireDB(t)
@@ -242,10 +245,22 @@ func TestAnAdjustWithNoLocationTakesTheStatedRow(t *testing.T) {
 		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE product_id = $1 AND (location_id IS NULL OR location_id = $2)`, w.productID, newYard)
 		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, newYard)
 	})
-	// an unbound caller: the legacy unassigned row
+	// an absolute count with no location is refused for both callers and
+	// writes nothing
+	for name, ctx := range map[string]context.Context{"unbound": context.Background(), "branch scoped": w.ctx} {
+		err := w.svc.AdjustStock(ctx, inventory.StockAdjustmentRequest{ProductID: w.productID, Quantity: 41})
+		if !errors.Is(err, inventory.ErrCountNeedsLocation) {
+			t.Fatalf("%s absolute adjust with no location = %v, want ErrCountNeedsLocation", name, err)
+		}
+	}
+	if got := w.qtyOf(t, read, w.yard1); got != "100.0000" {
+		t.Errorf("yard 1 after the refused counts = %s, want 100.0000", got)
+	}
+	// a delta with no location keeps the stated picks. An unbound caller: the
+	// legacy unassigned row
 	if err := w.svc.AdjustStock(context.Background(), inventory.StockAdjustmentRequest{
-		ProductID: w.productID, Quantity: 41}); err != nil {
-		t.Fatalf("unbound adjust with no location: %v", err)
+		ProductID: w.productID, Quantity: 1, IsDelta: true}); err != nil {
+		t.Fatalf("unbound delta with no location: %v", err)
 	}
 	var legacy string
 	if err := db.Pool.QueryRow(context.Background(),
@@ -256,22 +271,22 @@ func TestAnAdjustWithNoLocationTakesTheStatedRow(t *testing.T) {
 		t.Errorf("the unassigned row = %s, want 41.0000 (the unbound caller's legacy row)", legacy)
 	}
 	if got := w.qtyOf(t, read, w.yard1); got != "100.0000" {
-		t.Errorf("yard 1 after the unbound adjust = %s, want 100.0000", got)
+		t.Errorf("yard 1 after the unbound delta = %s, want 100.0000", got)
 	}
 	// a branch scoped caller: the branch's first row by creation (yard 1,
 	// created before yard 2 and the new yard), though the new yard holds the
 	// most: the pick follows creation order, never quantity
 	if err := w.svc.AdjustStock(w.ctx, inventory.StockAdjustmentRequest{
-		ProductID: w.productID, Quantity: 42}); err != nil {
-		t.Fatalf("branch scoped adjust with no location: %v", err)
+		ProductID: w.productID, Quantity: 2, IsDelta: true}); err != nil {
+		t.Fatalf("branch scoped delta with no location: %v", err)
 	}
-	if got := w.qtyOf(t, read, w.yard1); got != "42.0000" {
-		t.Errorf("yard 1 (the branch's first row) = %s, want 42.0000", got)
+	if got := w.qtyOf(t, read, w.yard1); got != "102.0000" {
+		t.Errorf("yard 1 (the branch's first row) = %s, want 102.0000", got)
 	}
 	if got := w.qtyOf(t, read, w.yard2); got != "5.0000" {
-		t.Errorf("yard 2 after the branch scoped adjust = %s, want 5.0000", got)
+		t.Errorf("yard 2 after the branch scoped delta = %s, want 5.0000", got)
 	}
 	if got := w.qtyOf(t, read, newYard); got != "900.0000" {
-		t.Errorf("the newest yard after the branch scoped adjust = %s, want 900.0000 (a silent largest quantity pick would have taken it)", got)
+		t.Errorf("the newest yard after the branch scoped delta = %s, want 900.0000 (a silent largest quantity pick would have taken it)", got)
 	}
 }
