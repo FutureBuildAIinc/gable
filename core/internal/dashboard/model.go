@@ -24,6 +24,7 @@ type InventoryAlert struct {
 	ReorderQty int    `json:"reorder_qty"`
 	AlertType  string `json:"alert_type"` // "LOW_STOCK" or "OUT_OF_STOCK"
 	LocationID string `json:"location_id,omitempty"`
+	YardName   string `json:"yard_name,omitempty"` // the yard's name, so two rows for one SKU can be told apart
 }
 
 // TopCustomer represents a customer ranked by revenue.

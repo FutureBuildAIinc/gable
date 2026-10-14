@@ -169,7 +169,8 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 // location's branch. A yard's stock is its own row plus every zone and bin
 // whose branch_id is that yard, so the quantity compared with the reorder point
 // (and reported) is that sum, the rule the counter's search already follows.
-// The row's location_id is the yard.
+// The row's location_id is the yard and yard_name its name. A row with no
+// yard (a legacy row with no location) stays its own alert.
 func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) ([]InventoryAlert, error) {
 	query := `
 		SELECT
@@ -180,12 +181,14 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 				WHEN COALESCE(SUM(i.quantity), 0) = 0 THEN 'OUT_OF_STOCK'
 				ELSE 'LOW_STOCK'
 			END as alert_type,
-			COALESCE(l.branch_id::text, '') as location_id
+			COALESCE(l.branch_id::text, '') as location_id,
+			COALESCE(y.name, y.code, '') as yard_name
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
 		LEFT JOIN locations l ON l.id = i.location_id
+		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE ` + middleware.Wall("l", 2, 3) + `
-		GROUP BY p.id, p.sku, p.description, p.reorder_point, l.branch_id
+		GROUP BY p.id, p.sku, p.description, p.reorder_point, l.branch_id, y.name, y.code, COALESCE(l.branch_id, i.location_id)
 		HAVING COALESCE(SUM(i.quantity), 0) <= COALESCE(p.reorder_point, 10)
 		ORDER BY COALESCE(SUM(i.quantity), 0) ASC, p.sku ASC, l.branch_id ASC
 		LIMIT $1
@@ -199,7 +202,7 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 	alerts := make([]InventoryAlert, 0)
 	for rows.Next() {
 		var a InventoryAlert
-		if err := rows.Scan(&a.ProductID, &a.SKU, &a.Name, &a.CurrentQty, &a.ReorderQty, &a.AlertType, &a.LocationID); err != nil {
+		if err := rows.Scan(&a.ProductID, &a.SKU, &a.Name, &a.CurrentQty, &a.ReorderQty, &a.AlertType, &a.LocationID, &a.YardName); err != nil {
 			return nil, fmt.Errorf("failed to scan inventory alert: %w", err)
 		}
 		alerts = append(alerts, a)
