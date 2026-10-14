@@ -125,7 +125,7 @@ export class GableLineItemEditor extends LitElement {
                       class="px-3 py-2 hover:bg-[#00FFA3]/10 cursor-pointer text-sm flex items-center gap-3"
                       @click=${() => this._handleSelectProduct(p)}
                     >
-                      <gable-product-thumb .src=${p.image_url} .size=${24} ?reserve=${pictures}></gable-product-thumb>
+                      ${pictures ? html`<gable-product-thumb .src=${p.image_url} .size=${24} reserve></gable-product-thumb>` : nothing}
                       <div class="min-w-0 flex-1">
                         <div class="flex justify-between">
                           <span class="text-white font-mono">${p.sku}</span>

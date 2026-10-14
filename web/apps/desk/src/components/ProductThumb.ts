@@ -29,7 +29,9 @@ export class GableProductThumb extends LitElement {
 
   render() {
     const px = `${this.size}px`;
-    if (!this.src) {
+    // Only a same origin path is drawn (one leading slash, never a scheme or a protocol relative URL).
+    const drawable = !!this.src && this.src.startsWith('/') && !this.src.startsWith('//');
+    if (!drawable) {
       return this.reserve
         ? html`<span class="inline-block shrink-0 align-middle" style="width:${px};height:${px}" aria-hidden="true"></span>`
         : nothing;
@@ -45,7 +47,7 @@ export class GableProductThumb extends LitElement {
             <rect x="4" y="9" width="16" height="5" rx="1" stroke="currentColor" stroke-width="1.5" />
             <rect x="7" y="4" width="10" height="5" rx="1" stroke="currentColor" stroke-width="1.5" />
           </svg>`
-        : html`<img src=${this.src} alt="" loading="lazy" class="h-full w-full object-cover"
+        : html`<img src=${this.src!} alt="" loading="lazy" class="h-full w-full object-cover"
               @error=${() => { this._broken = true; }} />`}
     </span>`;
   }

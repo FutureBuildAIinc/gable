@@ -13,6 +13,7 @@ import (
 )
 
 func TestImageSQL(t *testing.T) {
+	testutil.LockProductImageSetting(t)
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 	tag := uuid.NewString()[:8]

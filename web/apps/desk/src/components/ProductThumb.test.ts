@@ -27,6 +27,13 @@ describe('gable-product-thumb', () => {
     }
   })
 
+  it('draws only a same origin path', async () => {
+    for (const src of ['javascript:alert(1)', 'https://example.com/a.svg', '//example.com/a.svg', 'data:image/svg+xml,x']) {
+      const el = await mount<GableProductThumb>('gable-product-thumb', { src })
+      expect(el.querySelector('img'), src).toBeNull()
+    }
+  })
+
   it('keeps an empty box of its size when it is told to reserve the room', async () => {
     const el = await mount<GableProductThumb>('gable-product-thumb', { src: null, size: 72, reserve: true })
     expect(el.querySelector('img')).toBeNull()

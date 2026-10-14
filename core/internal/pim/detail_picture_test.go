@@ -21,6 +21,7 @@ import (
 )
 
 func TestProductDetailCarriesTheImagePath(t *testing.T) {
+	testutil.LockProductImageSetting(t)
 	t.Setenv("AUTH_MODE", "dev")
 	db := testutil.RequireDB(t)
 	ctx := context.Background()

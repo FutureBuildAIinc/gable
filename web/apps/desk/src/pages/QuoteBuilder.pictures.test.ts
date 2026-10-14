@@ -57,4 +57,20 @@ describe('quote line pictures', () => {
     expect(first?.querySelector('img')?.getAttribute('src')).toBe('/catalog-illustrations/a.svg')
     expect(second?.querySelector('img')).toBeNull()
   })
+
+  it('draws no thumb element at all while no product has a picture', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/products') return jsonResponse({ items: [productRow(WITHOUT, 'NO-PIC', null)], next_cursor: null })
+      return jsonResponse({ items: [], next_cursor: null })
+    }))
+    const el = await mount<GableQuoteBuilder>('gable-quote-builder')
+    await flush()
+    await update(el, {})
+    q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [parsed(WITHOUT, 'NO-PIC')], bubbles: true }))
+    await flush()
+    await update(el, {})
+    expect(el.querySelectorAll('[data-testid="quote-line"]').length).toBe(1)
+    expect(el.querySelector('gable-product-thumb')).toBeNull()
+  })
 })

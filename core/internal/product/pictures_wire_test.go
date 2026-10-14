@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/platform/pictures"
+	"github.com/gablelbm/gable/internal/testutil"
 )
 
 const testPicture = "/catalog-illustrations/pictures-wire.svg"
@@ -51,6 +52,7 @@ func (f *fixture) productWithPicture(path string) string {
 }
 
 func TestProductImageURL(t *testing.T) {
+	testutil.LockProductImageSetting(t)
 	f := newFixture(t)
 	with, without := f.productWithPicture(testPicture), f.productWithPicture("")
 

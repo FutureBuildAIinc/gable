@@ -37,6 +37,6 @@ describe('product page picture', () => {
   it('draws nothing for a product with no picture', async () => {
     stubDetail(null)
     const el = await mountAsync<GableProductDetail>('gable-product-detail', { routeId: PRODUCT_ID })
-    expect(el.querySelector('gable-product-thumb img')).toBeNull()
+    expect(el.querySelector('gable-product-thumb')).toBeNull()
   })
 })

@@ -28,6 +28,24 @@ const outboxLockKey int64 = 0x6f7574626f78 // "outbox"
 // releases the lock. Without a database it skips or fails like RequireDB.
 func LockOutboxTables(t *testing.T) {
 	t.Helper()
+	lockKey(t, outboxLockKey, "outbox tables")
+}
+
+// productImageLockKey is the advisory lock key every test that writes the
+// catalog.product_images setting row holds for its body.
+const productImageLockKey int64 = 0x70726f64696d67 // "prodimg"
+
+// LockProductImageSetting serialises the calling test against every other test,
+// in any package, that writes the catalog.product_images row of system_settings
+// (one row on a database every package shares). Call it first, as
+// LockOutboxTables is called, so the lock is released last.
+func LockProductImageSetting(t *testing.T) {
+	t.Helper()
+	lockKey(t, productImageLockKey, "product image setting")
+}
+
+func lockKey(t *testing.T, key int64, what string) {
+	t.Helper()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -53,7 +71,7 @@ func LockOutboxTables(t *testing.T) {
 	// pg_advisory_lock waits for the holder; the wait is bounded by the
 	// test binary's own timeout, which is what turns a stuck holder into a
 	// failure rather than a silent hang.
-	if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, outboxLockKey); err != nil {
-		t.Fatalf("take the outbox tables lock: %v", err)
+	if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, key); err != nil {
+		t.Fatalf("take the %s lock: %v", what, err)
 	}
 }

@@ -544,21 +544,20 @@ export class GableQuoteBuilder extends LitElement {
         `;
     }
 
+    private pictureByProduct = new Map<string, string>();
+
     /** The picture path of a line's product, from the catalogue the builder loaded (null when it has none). */
     private pictureOf(line: LineWithEscalator): string | null {
-        if (!line.product_id) return null;
-        return this.products.find(p => p.id === line.product_id)?.image_url ?? null;
+        return line.product_id ? this.pictureByProduct.get(line.product_id) ?? null : null;
     }
 
-    private renderLineRow(line: LineWithEscalator, idx: number) {
+    private renderLineRow(line: LineWithEscalator, idx: number, pictures: boolean) {
         const err = this.lineErrors[idx];
-        // Room for a thumb on every line only while some line carries a picture.
-        const reserve = this.lines.some(l => this.pictureOf(l) !== null);
         return html`
             <tr data-testid="quote-line" class="group hover:bg-white/5 transition-colors align-top">
                 <td class="px-4 py-3">
                     <div class="flex items-start gap-3">
-                        <gable-product-thumb .src=${this.pictureOf(line)} .size=${40} ?reserve=${reserve}></gable-product-thumb>
+                        ${pictures ? html`<gable-product-thumb .src=${this.pictureOf(line)} .size=${40} reserve></gable-product-thumb>` : nothing}
                         <div class="min-w-0 flex-1">
                             <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
                             <div class="text-zinc-400 text-xs">${line.description}</div>
@@ -632,6 +631,9 @@ export class GableQuoteBuilder extends LitElement {
         const blocked = !this.customer || this.lines.length === 0 || this.loading || adding || this.saveBlockedReason !== null;
         const secondary = 'inline-flex items-center justify-center rounded-lg text-sm font-medium border border-white/10 text-zinc-200 hover:bg-white/5 px-3 py-2 disabled:opacity-50';
         const card = 'bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl';
+        // The picture of each line's product, built once per render; room for a thumb only while some line has one.
+        this.pictureByProduct = new Map(this.products.filter(p => p.image_url).map(p => [p.id, p.image_url as string]));
+        const linePictures = this.lines.some(l => this.pictureOf(l) !== null);
 
         return html`
             <div>
@@ -693,7 +695,7 @@ export class GableQuoteBuilder extends LitElement {
                                         ${this.lines.length === 0 ? html`
                                             <tr><td colspan="6" class="px-6 py-10 text-center text-zinc-500 italic">No items yet. Search a product above or read a material list.</td></tr>
                                         ` : nothing}
-                                        ${this.lines.map((line, idx) => this.renderLineRow(line, idx))}
+                                        ${this.lines.map((line, idx) => this.renderLineRow(line, idx, linePictures))}
                                     </tbody>
                                 </table>
                             </div>

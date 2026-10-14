@@ -11,9 +11,11 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/platform/pictures"
+	"github.com/gablelbm/gable/internal/testutil"
 )
 
 func TestInventoryLevelsProductSummaryImageURL(t *testing.T) {
+	testutil.LockProductImageSetting(t)
 	f := newFixture(t)
 	ctx := context.Background()
 	t.Cleanup(func() {
