@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { reportingApi, isValidCronExpression } from '../../services/reportingApi';
+import { confirmDialog } from '../../components/ui/app-dialog.ts';
 import type {
     SavedReport,
     ReportSchedule,
@@ -64,7 +65,12 @@ export class SavedReports extends LitElement {
     }
 
     private async _handleDelete(id: string) {
-        if (!window.confirm('Are you sure you want to delete this report?')) return;
+        if (!await confirmDialog({
+            title: 'Delete this report?',
+            body: 'This cannot be undone.',
+            confirmLabel: 'Delete',
+            tone: 'danger',
+        })) return;
         try {
             await reportingApi.deleteSavedReport(id);
             this._loadReports();
@@ -176,7 +182,12 @@ export class SavedReports extends LitElement {
     }
 
     private async _handleDeleteSchedule(id: string) {
-        if (!window.confirm('Delete this schedule?')) return;
+        if (!await confirmDialog({
+            title: 'Delete this schedule?',
+            body: 'This cannot be undone.',
+            confirmLabel: 'Delete',
+            tone: 'danger',
+        })) return;
         try {
             await reportingApi.deleteReportSchedule(id);
             await this._loadSchedules();

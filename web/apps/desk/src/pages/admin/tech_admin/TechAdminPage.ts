@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
+import { confirmDialog } from '../../../components/ui/app-dialog.ts';
 import { aiHeadline, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
@@ -121,7 +122,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleRevokeKey(id: string) {
-        if (!confirm('Are you sure you want to revoke this key? integrations using it will break immediately.')) return;
+        if (!await confirmDialog({
+            title: 'Revoke this API key?',
+            body: 'Integrations using it will break immediately. This cannot be undone.',
+            confirmLabel: 'Revoke key',
+            tone: 'danger',
+        })) return;
         try {
             this.keyError = null;
             await techAdminService.revokeKey(id);
@@ -254,7 +260,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeleteAIKey() {
-        if (!confirm('Remove the admin-configured API key? If an environment variable is set, it will be used as fallback.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured API key?',
+            body: 'If an environment variable is set, it will be used as fallback.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteAIKey();
             this.aiSuccess = 'Admin API key removed.';
@@ -295,7 +306,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeleteORSKey() {
-        if (!confirm('Remove the admin-configured OpenRouteService key? If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured OpenRouteService key?',
+            body: 'If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteORSKey();
             this.routingSuccess = 'Admin routing key removed.';
@@ -348,7 +364,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeletePartner(id: string) {
-        if (!confirm('Are you sure you want to remove this EDI partner? This will disconnect their catalog sync.')) return;
+        if (!await confirmDialog({
+            title: 'Remove this EDI partner?',
+            body: 'This disconnects their catalog sync and cannot be undone.',
+            confirmLabel: 'Remove partner',
+            tone: 'danger',
+        })) return;
         try {
             this.ediError = null;
             await ediService.deletePartner(id);

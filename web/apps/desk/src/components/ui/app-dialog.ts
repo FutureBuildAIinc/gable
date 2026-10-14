@@ -38,6 +38,7 @@ export interface PromptDialogOptions {
     cancelLabel?: string;
     initialValue?: string;
     placeholder?: string;
+    tone?: DialogTone;
 }
 
 export interface DialogDoneDetail {
@@ -250,5 +251,6 @@ export function promptDialog(options: PromptDialogOptions): Promise<string | nul
         el.cancelLabel = options.cancelLabel ?? 'Cancel';
         el.initialValue = options.initialValue ?? '';
         el.placeholder = options.placeholder ?? '';
+        el.tone = options.tone ?? 'default';
     }).then((detail) => (detail.confirmed ? detail.value : null));
 }

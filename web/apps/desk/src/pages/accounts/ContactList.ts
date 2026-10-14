@@ -10,6 +10,7 @@ import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiErro
 import { CONTACT_ROLES } from '../../types/customer.ts';
 import type { Contact, ContactRequest, ContactRole } from '../../types/customer.ts';
 import { BUTTON_PRIMARY, BUTTON_QUIET, INPUT_CLASS, checkbox, idPrefix, labeled, orNull, textInput } from './formFields.ts';
+import { confirmDialog } from '../../components/ui/app-dialog.ts';
 
 interface ContactDraft {
     first_name: string;
@@ -170,7 +171,12 @@ export class GableContactList extends LitElement {
     }
 
     private async handleDelete(c: Contact) {
-        if (!confirm('Are you sure you want to delete this contact?')) return;
+        if (!await confirmDialog({
+            title: 'Delete this contact?',
+            body: `${c.first_name} ${c.last_name} is removed. This cannot be undone.`,
+            confirmLabel: 'Delete',
+            tone: 'danger',
+        })) return;
         try {
             await CustomerService.deleteContact(c.id, c.revision);
             ToastService.show('Contact deleted', 'success');

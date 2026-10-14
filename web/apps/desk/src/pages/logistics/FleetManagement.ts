@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { Truck, Users, Plus, Pencil, Trash2, AlertTriangle, RefreshCw, X, Upload } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service.ts';
+import { confirmDialog } from '../../components/ui/app-dialog.ts';
 import type { Vehicle, Driver, CreateVehicleRequest, UpdateVehicleRequest, CreateDriverRequest, UpdateDriverRequest, VehicleType, DriverStatus } from '../../types/delivery';
 
 type Tab = 'vehicles' | 'drivers';
@@ -165,7 +166,13 @@ export class FleetManagement extends LitElement {
   }
 
   private async _handleVehicleDelete() {
-    if (!this._vehicleModalVehicle || !confirm('Delete this vehicle? This action cannot be undone.')) return;
+    if (!this._vehicleModalVehicle) return;
+    if (!await confirmDialog({
+      title: 'Delete this vehicle?',
+      body: 'This action cannot be undone.',
+      confirmLabel: 'Delete',
+      tone: 'danger',
+    })) return;
     this._vDeleting = true;
     try {
       await deliveryService.deleteVehicle(this._vehicleModalVehicle.id, this._vehicleModalVehicle.revision);
@@ -235,7 +242,13 @@ export class FleetManagement extends LitElement {
   }
 
   private async _handleDriverDelete() {
-    if (!this._driverModalDriver || !confirm('Remove this driver? This action cannot be undone.')) return;
+    if (!this._driverModalDriver) return;
+    if (!await confirmDialog({
+      title: 'Remove this driver?',
+      body: 'This action cannot be undone.',
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    })) return;
     this._dDeleting = true;
     try {
       await deliveryService.deleteDriver(this._driverModalDriver.id, this._driverModalDriver.revision);

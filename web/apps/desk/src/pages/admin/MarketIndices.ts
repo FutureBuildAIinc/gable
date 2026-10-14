@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { ExposureService } from '../../services/ExposureService';
+import { promptDialog } from '../../components/ui/app-dialog.ts';
 import type { MarketIndex } from '../../types/exposure';
 import { Activity, RefreshCw } from 'lucide';
 
@@ -40,10 +41,14 @@ export class MarketIndicesPage extends LitElement {
   }
 
   private async _refresh(idx: MarketIndex) {
-    const raw = window.prompt(
-      `Apply a new value for ${idx.name} (${idx.index_code || '—'}).\nCurrent: ${this._fmt(idx.current_value)} ${idx.unit || ''}\n\nEnter the new index value:`,
-      idx.current_value != null ? String(idx.current_value) : '',
-    );
+    const raw = await promptDialog({
+      title: `Apply a new value for ${idx.name} (${idx.index_code || '—'})`,
+      body: `Current: ${this._fmt(idx.current_value)} ${idx.unit || ''}`,
+      label: 'New index value',
+      required: true,
+      confirmLabel: 'Apply',
+      initialValue: idx.current_value != null ? String(idx.current_value) : '',
+    });
     if (raw == null) return;
     const newValue = Number(raw);
     if (!Number.isFinite(newValue) || newValue <= 0) {
