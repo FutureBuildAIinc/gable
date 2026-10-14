@@ -111,6 +111,7 @@ export class GableLogActivityModal extends LitElement {
                   <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
                   <gable-date-field
                     label="Activity date"
+                    tone="light"
                     .value=${this._activityDay}
                     @change=${(e: Event) => this._activityDay = (e.target as GableDateField).value}
                   ></gable-date-field>

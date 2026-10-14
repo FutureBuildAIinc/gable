@@ -59,6 +59,8 @@ export class GableDateField extends LitElement {
     /** The accessible name of the text box. */
     @property({ type: String }) label = '';
     @property({ type: Boolean }) disabled = false;
+    /** The host's surface: the dark app by default, "light" on a light card. */
+    @property({ type: String }) tone = 'dark';
 
     @state() private _text = '';
     @state() private _open = false;
@@ -276,7 +278,10 @@ export class GableDateField extends LitElement {
     }
 
     render() {
-        const inputClasses = `w-full bg-white/5 border rounded-lg px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-gable-green/50 ${this._invalid ? 'border-safety-red' : 'border-white/10'}`;
+        const light = this.tone === 'light';
+        const inputClasses = light
+            ? `w-full bg-black/5 border rounded-lg px-3 py-2 pr-9 text-sm text-zinc-900 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-blueprint-blue/50 ${this._invalid ? 'border-safety-red' : 'border-zinc-300'}`
+            : `w-full bg-white/5 border rounded-lg px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-gable-green/50 ${this._invalid ? 'border-safety-red' : 'border-white/10'}`;
         return html`
             <div class="relative">
                 <input
