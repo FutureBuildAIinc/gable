@@ -22,6 +22,8 @@ import (
 // line.
 func (f *fixture) accountReturnOn(t *testing.T, saleID, lineID, qty string) resp {
 	t.Helper()
+	// a return credits the sale's own customer: the sale is the account's
+	mustExec(t, f.db, `UPDATE pos_transactions SET customer_id = $1 WHERE id = $2`, f.customerID, saleID)
 	return f.do("POST", "/api/v1/pos/returns", map[string]any{
 		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
 		"refund_method": "account", "reason": "account credit", "lines": []map[string]any{

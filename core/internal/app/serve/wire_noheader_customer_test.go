@@ -79,6 +79,30 @@ func TestNoHeader_CounterNamesACustomerUnderRulingA(t *testing.T) {
 		t.Errorf("no header sync of A's customer: %d %s, want the sale synced", status, buf)
 	}
 
+	// The return names a customer through the same rule (round 22, ruling A
+	// here): a user's free account return naming B's customer is served and
+	// credits that customer; the bound key stays a 403 with nothing written.
+	noheaderPurgeReturn(t, f, regNA)
+	retBody := func(customer uuid.UUID) string {
+		return fmt.Sprintf(`{"register_id":%q,"customer_id":%q,"refund_method":"account","reason":"wall",`+
+			`"lines":[{"product_id":%q,"quantity":"1","unit_price_ten_thousandths":10000}]}`,
+			regNA, customer.String(), f.posProd.String())
+	}
+	memosBefore := noheaderCount(t, f, `SELECT COUNT(*) FROM credit_memos WHERE customer_id = $1`, f.custB)
+	status, buf = f.cashierNoHeader(t, "POST", "/api/v1/pos/returns", retBody(f.custB))
+	if status != http.StatusCreated {
+		t.Errorf("no header return naming B's customer: %d %s, want 201 (ruling A)", status, buf)
+	}
+	if after := noheaderCount(t, f, `SELECT COUNT(*) FROM credit_memos WHERE customer_id = $1`, f.custB); after != memosBefore+1 {
+		t.Errorf("the return wrote %d credit memos to B's customer, want 1", after-memosBefore)
+	}
+	if keyStatus, keyBuf := f.key(t, f.bound, "POST", "/api/v1/pos/returns", retBody(f.custB), nil); keyStatus != http.StatusForbidden {
+		t.Errorf("bound key return naming B's customer: %d %s, want 403", keyStatus, keyBuf)
+	}
+	if n := noheaderCount(t, f, `SELECT COUNT(*) FROM pos_returns WHERE register_id = $1`, regNA); n != 1 {
+		t.Errorf("the user's return and the refused key's left %d returns, want 1", n)
+	}
+
 	// The bound key keeps its pin: a machine key is no cashier, and the
 	// foreign customer is held at the wall besides; nothing is written.
 	foreignBefore = named(f.custB)

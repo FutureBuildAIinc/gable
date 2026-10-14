@@ -33,7 +33,7 @@ func (f *fixture) returnOn(t *testing.T, saleID, lineID, qty string, extra ...ma
 		}
 	}
 	return f.do("POST", "/api/v1/pos/returns", map[string]any{
-		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"register_id": f.register, "original_sale_id": saleID,
 		"refund_method": "cash", "reason": "bounds", "lines": []map[string]any{line},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
 }
@@ -63,7 +63,7 @@ func TestACashReturnNeedsAnOpenTillSession(t *testing.T) {
 	lineID := body.body["lines"].([]any)[0].(map[string]any)["id"].(string)
 	cashReturn := func() resp {
 		return f.do("POST", "/api/v1/pos/returns", map[string]any{
-			"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+			"register_id": f.register, "original_sale_id": saleID,
 			"refund_method": "cash", "reason": "no drawer", "lines": []map[string]any{
 				{"line_id": lineID, "quantity": "1", "restock": true}},
 		}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
@@ -100,7 +100,7 @@ func TestACashReturnNeedsAnOpenTillSession(t *testing.T) {
 		t.Fatalf("close = %d: %s", r.status, r.raw)
 	}
 	r = f.do("POST", "/api/v1/pos/returns", map[string]any{
-		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID2,
+		"register_id": f.register, "original_sale_id": saleID2,
 		"refund_method": "cash", "reason": "counted drawer", "lines": []map[string]any{
 			{"line_id": lineID2, "quantity": "1", "restock": true}},
 	}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t))
@@ -226,7 +226,7 @@ func TestAProductLineOnANamedSaleIsRefused(t *testing.T) {
 	f.openTill(0)
 	saleID, _ := f.saleOf("1", tender("cash", 599))
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
-		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"register_id": f.register, "original_sale_id": saleID,
 		"refund_method": "cash", "reason": "no line named", "lines": []map[string]any{{
 			"product_id": f.productID.String(), "quantity": "1",
 			"unit_price_ten_thousandths": 55000,

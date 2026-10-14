@@ -133,7 +133,7 @@ func TestAChargeTheTransactionRefusesIsReversed(t *testing.T) {
 func (f *fixture) cardReturnOn(t *testing.T, saleID, lineID, qty string, extra ...map[string]any) resp {
 	t.Helper()
 	body := map[string]any{
-		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"register_id": f.register, "original_sale_id": saleID,
 		"refund_method": "card", "reason": "card back", "lines": []map[string]any{
 			{"line_id": lineID, "quantity": qty, "restock": false}},
 	}

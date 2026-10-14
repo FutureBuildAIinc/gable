@@ -270,3 +270,84 @@ func TestTheLookupTakesItsQueryAsText(t *testing.T) {
 		t.Errorf("a query of two underscores answered %s, want []", r.raw)
 	}
 }
+
+// RULE (ruling A): a user granted only the sale's branch, no header, may
+// return to a customer only another branch trades with. A free return is
+// served and credits the named customer; against a sale it is the sale's own
+// customer that is credited, so a different named one is refused on the field
+// (400) and nothing is written; a sale whose customer trades only at another
+// yard credits that customer once. A bound key's refusal is walled in the
+// serve package's wire test.
+func TestAUserReturnNamesAnotherYardsCustomer(t *testing.T) {
+	w := newNamedWall(t)
+	f := w.f
+	// hand what the returns credited to the hidden customer back to the
+	// fixture's, whose cleanup knows how to remove it
+	t.Cleanup(func() {
+		if _, err := f.db.Pool.Exec(context.Background(), `UPDATE credit_memos SET customer_id = $1 WHERE customer_id = $2`, w.reachable, w.hidden); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+		if _, err := f.db.Pool.Exec(context.Background(), `UPDATE pos_transactions SET customer_id = $1 WHERE customer_id = $2`, w.reachable, w.hidden); err != nil {
+			t.Errorf("cleanup: %v", err)
+		}
+	})
+	if r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": f.register, "opening_float_cents": 0}, w.headers...); r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": f.register}, w.headers...)
+	if r.status != http.StatusCreated {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	saleID := str(t, r.body, "id")
+	if r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/items", map[string]any{"line": f.productLine("1")}, w.headers...); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	cur := f.getSale(t, saleID)
+	r = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/complete",
+		map[string]any{"tenders": []map[string]any{tender("cash", num(t, cur, "total_cents"))}, "revision": cur["revision"]}, w.headers...)
+	if r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := r.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	post := func(method string, withSale bool) resp {
+		req := map[string]any{
+			"register_id": f.register, "customer_id": w.hidden.String(),
+			"refund_method": method, "reason": "wall", "lines": []map[string]any{
+				{"line_id": lineID, "quantity": "1", "restock": false}},
+		}
+		if withSale {
+			req["original_sale_id"] = saleID
+		} else {
+			req["lines"] = []map[string]any{{"product_id": f.productID.String(), "quantity": "1",
+				"unit_price_ten_thousandths": 5990000, "restock": false}}
+		}
+		return f.do("POST", "/api/v1/pos/returns", req, w.headers...)
+	}
+	for _, c := range []struct {
+		method string
+		sale   bool
+		want   int
+	}{{"account", true, http.StatusBadRequest}, {"cash", true, http.StatusBadRequest},
+		{"account", false, http.StatusCreated}, {"cash", false, http.StatusCreated}} {
+		if r := post(c.method, c.sale); r.status != c.want {
+			t.Errorf("%s return (sale %v) naming another yard's customer = %d, want %d: %s", c.method, c.sale, r.status, c.want, r.raw)
+		}
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id = $1`, w.hidden); n != 2 {
+		t.Errorf("the free returns wrote %d credit memos to the named customer, want 2", n)
+	}
+	if got := f.counterReturns(t); got != 2 {
+		t.Errorf("the free returns wrote %d returns, want 2", got)
+	}
+	// a sale whose own customer trades only at another yard: served, one
+	// credit to that customer
+	mustExec(t, f.db, `UPDATE pos_transactions SET customer_id = $1 WHERE id = $2`, w.hidden, saleID)
+	req := map[string]any{"register_id": f.register, "original_sale_id": saleID, "refund_method": "account",
+		"reason": "wall", "lines": []map[string]any{{"line_id": lineID, "quantity": "1", "restock": false}}}
+	if r := f.do("POST", "/api/v1/pos/returns", req, w.headers...); r.status != http.StatusCreated {
+		t.Errorf("return of a sale naming another yard's customer = %d, want 201: %s", r.status, r.raw)
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id = $1`, w.hidden); n != 3 {
+		t.Errorf("the sale's return left %d credit memos on its customer, want 3 in all", n)
+	}
+}

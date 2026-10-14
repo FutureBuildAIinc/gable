@@ -263,7 +263,7 @@ func (s *Service) ResolveRefundIntent(ctx context.Context, intentID uuid.UUID, i
 			if err := json.Unmarshal(rec.Request, &stored); err != nil {
 				return nil, fmt.Errorf("the claim's stored request does not read back: %w", err)
 			}
-			st, err := s.priceReturn(ctx, stored.toReturnIn())
+			st, err := s.priceReturn(ctx, stored.toReturnIn(), false)
 			if err != nil {
 				// the replay prices outside the transaction, and a contender
 				// may settle the claim and book while it does: the race is
