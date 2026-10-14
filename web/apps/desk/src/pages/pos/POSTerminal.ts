@@ -668,10 +668,8 @@ export class POSTerminal extends LitElement {
       await this._removeItem(id);
       if (this._error) return;
     }
-    this._tenderMethod = null;
-    this._tenderAmount = '';
-    // a tender added for the cleared lines is not the next lines' tender
-    this._pendingTenders = [];
+    // a tender chosen or added for the cleared lines is not the next lines' tender
+    this._resetTender();
   }
 
   private async _removeItem(itemId: string) {
@@ -1181,7 +1179,7 @@ export class POSTerminal extends LitElement {
               ?disabled=${!hasLines || !open || this._tenderMethod === null || entry === null || owed <= 0}
               class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
             ${this._pendingTenders.length > 0 ? html`
-              <button @click=${() => { this._pendingTenders = []; this._tenderMethod = null; this._tenderAmount = ''; }}
+              <button @click=${() => { this._resetTender(); }}
                 class="min-h-11 rounded border border-white/10 px-3 py-2 text-xs text-slate-400">Clear tenders</button>` : nothing}
           </div>
           <div class="mt-4 flex items-center justify-between gap-2">
