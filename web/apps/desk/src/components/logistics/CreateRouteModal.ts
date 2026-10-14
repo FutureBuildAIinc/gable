@@ -7,6 +7,9 @@ import { icon } from '../../lib/icons';
 import { X, Truck, User, Calendar, FileText } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service';
+import { todayDay } from '../../lib/dates.ts';
+import '../ui/gable-date-field.ts';
+import type { GableDateField } from '../ui/gable-date-field.ts';
 import type { Vehicle, Driver, CreateRouteRequest } from '../../types/delivery';
 
 @customElement('gable-create-route-modal')
@@ -19,7 +22,7 @@ export class GableCreateRouteModal extends LitElement {
   @state() private _drivers: Driver[] = [];
   @state() private _vehicleId = '';
   @state() private _driverId = '';
-  @state() private _scheduledDate = new Date().toISOString().split('T')[0];
+  @state() private _scheduledDate = todayDay();
   @state() private _notes = '';
   @state() private _saving = false;
 
@@ -138,13 +141,11 @@ export class GableCreateRouteModal extends LitElement {
               <label class="block text-sm font-medium text-zinc-400 mb-1.5 flex items-center gap-1.5">
                 ${icon(Calendar, 14)} Scheduled Date
               </label>
-              <input
-                type="date"
+              <gable-date-field
+                label="Scheduled Date"
                 .value=${this._scheduledDate}
-                @input=${(e: InputEvent) => this._scheduledDate = (e.target as HTMLInputElement).value}
-                required
-                class="w-full bg-[#0A0B10] border border-white/10 rounded-lg px-3 py-2.5 text-white text-sm focus:border-gable-green/50 focus:outline-none"
-              />
+                @change=${(e: Event) => this._scheduledDate = (e.target as GableDateField).value}
+              ></gable-date-field>
             </div>
 
             <div>

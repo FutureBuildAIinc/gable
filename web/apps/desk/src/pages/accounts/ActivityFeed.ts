@@ -6,7 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { crmApi } from '../../services/crmApi.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { format } from 'date-fns';
+import { formatDateTime } from '../../lib/dates.ts';
 import type { Activity, Contact } from '../../types/crm.ts';
 import '../../components/crm/LogActivityModal.ts';
 
@@ -139,7 +139,7 @@ export class GableActivityFeed extends LitElement {
                                                         </div>
                                                         <div class="whitespace-nowrap text-right text-sm text-gray-500">
                                                             <time datetime="${activity.activity_date}">
-                                                                ${format(new Date(activity.activity_date), 'MMM d, yyyy h:mm a')}
+                                                                ${formatDateTime(activity.activity_date)}
                                                             </time>
                                                         </div>
                                                     </div>

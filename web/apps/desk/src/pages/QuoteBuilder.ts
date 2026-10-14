@@ -17,6 +17,9 @@ import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
 import { resolveLinePrice } from '../lib/line-price.ts';
+import { formatTime, todayDay, addDays } from '../lib/dates.ts';
+import '../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../components/ui/gable-date-field.ts';
 import {
     dollarsToCents,
     dollarsToTenThousandths,
@@ -74,8 +77,8 @@ const defaultEscalator = (): QuoteLineEscalator => ({
     enabled: false,
     escalation_type: 'PERCENTAGE',
     escalation_rate: 5,
-    effective_date: new Date().toISOString().split('T')[0],
-    target_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    effective_date: todayDay(),
+    target_date: addDays(todayDay(), 90),
 });
 
 @customElement('gable-quote-builder')
@@ -645,7 +648,7 @@ export class GableQuoteBuilder extends LitElement {
                         <span data-testid="quote-number" class="font-mono text-sm text-zinc-300">${this.quoteNumber ?? 'Number assigned on save'}</span>
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-zinc-300 border border-white/10">${this.quoteStatus}</span>
                         ${this.yardName ? html`<span data-testid="quote-yard" class="text-xs text-zinc-300">${this.yardName}</span>` : nothing}
-                        <span class="font-mono text-xs text-zinc-500">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span class="font-mono text-xs text-zinc-500">${formatTime(new Date())}</span>
                     </div>
                     <div class="flex items-center gap-2">
                         <button type="button" class=${secondary} @click=${() => window.print()}>${icon(Printer, 16, 'mr-2')} Print</button>
@@ -720,9 +723,8 @@ export class GableQuoteBuilder extends LitElement {
                         <div class="${card} p-5">
                             <h2 class="text-lg font-medium text-white mb-4">Terms</h2>
                             <label class="block text-xs text-zinc-500 mb-1.5" for="quote-valid-until">Valid until</label>
-                            <input id="quote-valid-until" type="date" .value=${this.validUntil}
-                                @input=${(e: Event) => { this.validUntil = (e.target as HTMLInputElement).value; }}
-                                class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-gable-green/50" />
+                            <gable-date-field id="quote-valid-until" label="Valid until" .value=${this.validUntil}
+                                @change=${(e: Event) => { this.validUntil = (e.target as GableDateField).value; }}></gable-date-field>
 
                             <div class="flex gap-1 bg-white/5 rounded-lg p-1 border border-white/10 mt-5 mb-4">
                                 <button type="button"

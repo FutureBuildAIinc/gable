@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { GovernanceService } from '../../services/governance.service';
 import type { RFCSummary } from '../../types/governance';
 import { Plus, GitPullRequest, FileText, CheckCircle, Clock, AlertCircle } from 'lucide';
@@ -116,7 +117,7 @@ export class GableRFCDashboard extends LitElement {
                           ${rfc.number}
                         </td>
                         <td class="px-6 py-4 text-right text-zinc-500 font-mono text-xs">
-                          ${new Date(rfc.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                          ${formatDate(rfc.created_at)}
                         </td>
                       </tr>
                     `;

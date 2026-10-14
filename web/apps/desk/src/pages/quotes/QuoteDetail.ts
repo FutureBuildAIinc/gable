@@ -11,6 +11,7 @@ import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/Q
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
+import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import '../../components/quotes/exposure-banner.ts';
 
 /** How much of a text list the Original Upload tab shows. */
@@ -137,7 +138,7 @@ export class GableQuoteDetail extends LitElement {
             <div class="flex items-center gap-3">
                 <div class="w-2 h-2 rounded-full bg-gable-green/60"></div>
                 <span class="text-zinc-400 w-20">${label}</span>
-                <span class="text-white font-mono text-xs">${new Date(date).toLocaleString()}</span>
+                <span class="text-white font-mono text-xs">${formatDateTime(date)}</span>
             </div>
         `;
     }
@@ -515,7 +516,7 @@ export class GableQuoteDetail extends LitElement {
                             ` : nothing}
                         </div>
                         <p class="text-muted-foreground">
-                            ${quote.customer_name || quote.customer_id.slice(0, 8)} &middot; Created ${new Date(quote.created_at).toLocaleDateString()}
+                            ${quote.customer_name || quote.customer_id.slice(0, 8)} &middot; Created ${formatDate(quote.created_at)}
                         </p>
                     </div>
                     <div class="flex gap-2">

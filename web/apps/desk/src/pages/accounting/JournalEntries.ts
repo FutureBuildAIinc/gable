@@ -5,6 +5,9 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchJournalEntries, fetchAccounts, createJournalEntry, postJournalEntry, voidJournalEntry } from '../../services/GLService';
 import type { JournalEntry, GLAccount, CreateJournalEntryRequest } from '../../types/gl';
@@ -191,12 +194,11 @@ export class JournalEntries extends LitElement {
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="text-xs text-zinc-500 block mb-1">Date</label>
-                                    <input
-                                        type="date"
-                                        class="w-full bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                                    <gable-date-field
+                                        label="Date"
                                         .value=${this.entryDate}
-                                        @input=${(e: Event) => this.entryDate = (e.target as HTMLInputElement).value}
-                                    />
+                                        @change=${(e: Event) => this.entryDate = (e.target as GableDateField).value}
+                                    ></gable-date-field>
                                 </div>
                                 <div>
                                     <label class="text-xs text-zinc-500 block mb-1">Memo</label>
@@ -305,7 +307,7 @@ export class JournalEntries extends LitElement {
                                     <tr class="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                                         <td class="px-4 py-2.5 font-mono text-zinc-400">JE-${e.entry_number}</td>
                                         <td class="px-4 py-2.5 text-zinc-300">
-                                            ${new Date(e.entry_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                            ${formatDay(e.entry_date)}
                                         </td>
                                         <td class="px-4 py-2.5 text-white truncate max-w-xs">${e.memo || '--'}</td>
                                         <td class="px-4 py-2.5">

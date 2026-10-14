@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 import type { MatchResult, MatchException, MatchConfig } from '../../types/matching';
 import { runMatch, listExceptions, getMatchConfig, updateMatchConfig, getMatchResult } from '../../services/MatchingService';
 
@@ -230,7 +231,7 @@ export class POMatching extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300">${e.line_count}</td>
                                         <td class="px-3 py-2.5 text-red-400 font-semibold">${e.exception_count}</td>
                                         <td class="px-3 py-2.5 text-slate-400 text-xs">${e.notes}</td>
-                                        <td class="px-3 py-2.5 text-slate-400 text-xs">${new Date(e.created_at).toLocaleDateString()}</td>
+                                        <td class="px-3 py-2.5 text-slate-400 text-xs">${formatDate(e.created_at)}</td>
                                         <td class="px-3 py-2.5">
                                             <button
                                                 @click=${() => this._handleViewResult(e.po_id)}

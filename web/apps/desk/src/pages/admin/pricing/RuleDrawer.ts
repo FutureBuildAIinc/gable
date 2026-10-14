@@ -12,6 +12,7 @@ import { formatPrice4 } from '../../../lib/utils';
 import type { CategoryPricingRule, CategoryRuleType, CategoryPricingAudit, CategoryRuleValues, TargetType } from '../../../types/category-pricing';
 import type { Customer } from '../../../types/customer';
 import { cn } from '../../../lib/utils';
+import { formatDateTime } from '../../../lib/dates.ts';
 import { ToastService } from '../../../lib/toast-service';
 import '../../../components/customers/CustomerSelect.ts';
 
@@ -120,8 +121,7 @@ export class GableRuleDrawer extends LitElement {
   }
 
   private _formatTimestamp(ts: string) {
-    const d = new Date(ts);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return formatDateTime(ts);
   }
 
   private _renderPreview() {

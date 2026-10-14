@@ -5,6 +5,7 @@ import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { ToastService } from '../lib/toast-service.ts';
+import { formatDay } from '../lib/dates.ts';
 import { ReportingService } from '../services/ReportingService.ts';
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting.ts';
 import { DollarSign, CreditCard, BarChart2 } from 'lucide';
@@ -60,7 +61,7 @@ export class GableDailyTill extends LitElement {
                     <div class="bg-zinc-900 border border-zinc-800 rounded-lg p-6">
                         <div class="flex items-center justify-between mb-6">
                             <h2 class="text-xl font-bold text-emerald-400 flex items-center gap-2">
-                                ${icon(DollarSign, 24)} Daily Till (${till.date})
+                                ${icon(DollarSign, 24)} Daily Till (${formatDay(till.date)})
                             </h2>
                             <span class="text-3xl font-mono font-bold text-white">
                                 $${till.total_collected.toFixed(2)}

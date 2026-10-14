@@ -13,6 +13,7 @@ import { ArrowLeft, Users, UserPlus, Trash2, Home, X } from 'lucide';
 import { LocationService } from '../../../services/LocationService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import { router } from '../../../lib/router.ts';
+import { formatDateTime } from '../../../lib/dates.ts';
 import type { Location, UserLocation } from '../../../types/location.ts';
 
 @customElement('gable-admin-branch-users')
@@ -255,9 +256,6 @@ export class GableAdminBranchUsers extends LitElement {
   }
 
   private _fmt(s: string): string {
-    if (!s) return '—';
-    const d = new Date(s);
-    if (isNaN(d.getTime())) return s;
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatDateTime(s);
   }
 }

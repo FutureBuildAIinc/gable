@@ -8,6 +8,7 @@ import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
 import { aiHeadline, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
+import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
@@ -316,7 +317,7 @@ export class TechAdminPage extends LitElement {
             this.readiness = null;
             this.readinessError = err instanceof Error ? err.message : 'Readiness probe unreachable';
         } finally {
-            this.readinessCheckedAt = new Date().toLocaleTimeString();
+            this.readinessCheckedAt = formatTime(new Date());
             this.readinessLoading = false;
         }
     };
@@ -534,9 +535,9 @@ export class TechAdminPage extends LitElement {
                                 <tr class="hover:bg-white/5 transition-colors group">
                                     <td class="px-4 py-3 font-medium text-white">${key.name}</td>
                                     <td class="px-4 py-3 font-mono text-slate-400">${key.prefix}...</td>
-                                    <td class="px-4 py-3 text-slate-400">${new Date(key.created_at).toLocaleDateString()}</td>
+                                    <td class="px-4 py-3 text-slate-400">${formatDate(key.created_at)}</td>
                                     <td class="px-4 py-3 text-slate-400">
-                                        ${key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : 'Never'}
+                                        ${key.last_used_at ? formatDate(key.last_used_at) : 'Never'}
                                     </td>
                                     <td class="px-4 py-3">
                                         ${key.revoked_at

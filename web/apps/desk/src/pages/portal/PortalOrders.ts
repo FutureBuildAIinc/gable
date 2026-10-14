@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { ShoppingCart, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalOrder } from '../../types/portal';
@@ -131,7 +132,7 @@ export class PortalOrders extends LitElement {
                                                     ${order.id.substring(0, 8).toUpperCase()}
                                                 </div>
                                                 <div class="text-xs text-zinc-500 mt-0.5">
-                                                    ${new Date(order.created_at).toLocaleDateString()} · ${order.lines.length} item${order.lines.length !== 1 ? 's' : ''}
+                                                    ${formatDate(order.created_at)} · ${order.lines.length} item${order.lines.length !== 1 ? 's' : ''}
                                                 </div>
                                             </div>
                                         </div>

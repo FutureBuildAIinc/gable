@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { FileText, Download, RefreshCw, AlertTriangle } from 'lucide';
 import { PortalService } from '../../services/PortalService';
+import { formatDay, formatDate } from '../../lib/dates.ts';
 import type { PortalInvoice } from '../../types/portal';
 
 // Portal invoice amounts arrive as float64 DOLLARS (see backend portal/model.go),
@@ -61,10 +62,10 @@ export class PortalInvoices extends LitElement {
     private _handleDownloadPDF(invoice: PortalInvoice) {
         const content = [
             `INVOICE ${invoice.number}`,
-            `Date: ${new Date(invoice.created_at).toLocaleDateString()}`,
+            `Date: ${formatDate(invoice.created_at)}`,
             `Status: ${portalStatusLabel(invoice.status)}${invoice.is_overdue ? ' (overdue)' : ''}`,
             `Payment Terms: ${invoice.payment_terms}`,
-            invoice.due_date ? `Due Date: ${new Date(invoice.due_date).toLocaleDateString()}` : '',
+            invoice.due_date ? `Due Date: ${formatDay(invoice.due_date.slice(0, 10))}` : '',
             '',
             `Subtotal: ${formatCurrency(invoice.subtotal)}`,
             `Tax: ${formatCurrency(invoice.tax_amount)}`,
@@ -137,7 +138,7 @@ export class PortalInvoices extends LitElement {
                                                     ${inv.number}
                                                 </div>
                                                 <div class="text-xs text-zinc-500 mt-0.5">
-                                                    ${new Date(inv.created_at).toLocaleDateString()}${inv.due_date ? html` · Due ${new Date(inv.due_date).toLocaleDateString()}` : ''}
+                                                    ${formatDate(inv.created_at)}${inv.due_date ? html` · Due ${formatDay(inv.due_date.slice(0, 10))}` : ''}
                                                 </div>
                                             </div>
                                         </div>

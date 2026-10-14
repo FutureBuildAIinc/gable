@@ -6,6 +6,9 @@ import { customElement, property, state } from 'lit/decorators.js';
 import type { CreateActivityRequest, Contact, ActivityType } from '../../types/crm';
 import { crmApi } from '../../services/crmApi';
 import { ToastService } from '../../lib/toast-service';
+import { todayDay } from '../../lib/dates.ts';
+import '../ui/gable-date-field.ts';
+import type { GableDateField } from '../ui/gable-date-field.ts';
 
 const ACTIVITY_TYPES: ActivityType[] = ['call', 'meeting', 'email', 'note'];
 
@@ -19,17 +22,22 @@ export class GableLogActivityModal extends LitElement {
   @state() private _loading = false;
   @state() private _activityType: ActivityType = 'call';
   @state() private _description = '';
-  @state() private _activityDate = new Date().toISOString().slice(0, 16);
+  @state() private _activityDay = todayDay();
   @state() private _contactId = '';
 
   private async _handleSubmit(e: Event) {
     e.preventDefault();
     try {
+      if (!this._activityDay) {
+        ToastService.show('Choose a date', 'error');
+        return;
+      }
       this._loading = true;
       const payload: CreateActivityRequest = {
         activity_type: this._activityType,
         description: this._description,
-        activity_date: new Date(this._activityDate).toISOString(),
+        // The day the person picked, at noon so the day survives every time zone's round trip.
+        activity_date: new Date(`${this._activityDay}T12:00:00`).toISOString(),
         contact_id: this._contactId === '' ? undefined : this._contactId,
       };
       await crmApi.createActivity(this.customerId, payload);
@@ -76,15 +84,12 @@ export class GableLogActivityModal extends LitElement {
             </div>
 
             <div class="mb-4">
-              <label for="log-activity-date" class="block text-sm font-medium text-gray-700 mb-1">Date & Time</label>
-              <input
-                id="log-activity-date"
-                type="datetime-local"
-                required
-                .value=${this._activityDate}
-                @input=${(e: InputEvent) => this._activityDate = (e.target as HTMLInputElement).value}
-                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500"
-              />
+              <label class="block text-sm font-medium text-gray-700 mb-1">Date</label>
+              <gable-date-field
+                label="Activity date"
+                .value=${this._activityDay}
+                @change=${(e: Event) => this._activityDay = (e.target as GableDateField).value}
+              ></gable-date-field>
             </div>
 
             <div class="mb-4">

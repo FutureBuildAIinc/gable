@@ -4,6 +4,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { RecentOrder } from '../../types/dashboard.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 function getStatusColor(status: string): string {
     switch (status.toLowerCase()) {
@@ -68,7 +69,7 @@ export class GableRecentOrdersFeed extends LitElement {
                                         </span>
                                     </div>
                                     <div class="flex justify-between items-center text-xs text-zinc-500">
-                                        <div class="font-mono">${new Date(order.created_at).toLocaleDateString()}</div>
+                                        <div class="font-mono">${formatDate(order.created_at)}</div>
                                         <div class="font-mono text-zinc-400">
                                             $${(order.total_amount / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                         </div>

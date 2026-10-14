@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents, formatDay } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { keyed } from 'lit/directives/keyed.js';
@@ -651,7 +652,7 @@ export class GableAccountDetail extends LitElement {
                                         ` : this.transactions.map(txn => html`
                                             <tr class="group hover:bg-white/5 transition-colors">
                                                 <td class="px-4 py-3 font-mono text-zinc-400">
-                                                    ${new Date(txn.created_at).toLocaleDateString()}
+                                                    ${formatDate(txn.created_at)}
                                                 </td>
                                                 <td class="px-4 py-3">
                                                     ${this.renderTxnTypeBadge(txn.type)}

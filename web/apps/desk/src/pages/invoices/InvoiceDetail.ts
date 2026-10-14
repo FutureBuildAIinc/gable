@@ -23,6 +23,7 @@ import type { PaymentApplication, CreatePaymentRequest } from '../../types/payme
 import { Download, CreditCard, Mail, RotateCcw, Ban } from 'lucide';
 import { formatCents, formatDay } from '../../lib/utils.ts';
 import { creditTextClass } from '../../lib/credit-display.ts';
+import { formatDate, formatDateTime } from '../../lib/dates.ts';
 import { chipClass, overdueBadge } from '../../components/invoices/chips.ts';
 import { renderSalesLines } from '../../components/invoices/lines-table.ts';
 
@@ -235,7 +236,7 @@ export class GableInvoiceDetail extends LitElement {
                     <div class="rounded-lg border border-red-500/50 bg-red-500/10 p-4 text-red-300" data-testid="void-banner">
                         <div class="text-lg font-bold tracking-wide text-red-400">VOID</div>
                         <div class="text-sm mt-1">
-                            This invoice was voided${inv.voided_at ? html` on ${new Date(inv.voided_at).toLocaleString()}` : nothing}${inv.voided_by ? html` by ${inv.voided_by}` : nothing}.
+                            This invoice was voided${inv.voided_at ? html` on ${formatDateTime(inv.voided_at)}` : nothing}${inv.voided_by ? html` by ${inv.voided_by}` : nothing}.
                             ${inv.void_reason ? html`<span class="block mt-1">Reason: <span class="text-white">${inv.void_reason}</span></span>` : nothing}
                         </div>
                     </div>
@@ -313,9 +314,9 @@ export class GableInvoiceDetail extends LitElement {
                                         <tbody class="divide-y divide-white/5">
                                             ${this.applications.map(a => html`
                                                 <tr>
-                                                    <td class="p-3 text-zinc-300">${new Date(a.created_at).toLocaleString()}</td>
+                                                    <td class="p-3 text-zinc-300">${formatDateTime(a.created_at)}</td>
                                                     <td class="p-3 text-zinc-300 font-bold">${a.kind}</td>
-                                                    <td class="p-3 ${a.reversed_at ? 'text-zinc-500' : 'text-zinc-300'}">${a.reversed_at ? `reversed ${new Date(a.reversed_at).toLocaleDateString()}` : 'live'}</td>
+                                                    <td class="p-3 ${a.reversed_at ? 'text-zinc-500' : 'text-zinc-300'}">${a.reversed_at ? `reversed ${formatDate(a.reversed_at)}` : 'live'}</td>
                                                     <td class="p-3 text-right text-white font-mono font-bold">${formatCents(a.amount_cents)}</td>
                                                 </tr>
                                             `)}
@@ -355,7 +356,7 @@ export class GableInvoiceDetail extends LitElement {
                                 <div class="flex justify-between gap-4"><dt class="text-zinc-400">Origin</dt><dd class="text-zinc-200">${inv.origin === 'pos' ? 'Counter' : 'Order'}</dd></div>
                                 <div class="flex justify-between gap-4"><dt class="text-zinc-400">Delivery</dt><dd class="text-zinc-200">${inv.delivery_type === 'pickup' ? 'Pickup' : 'Delivery'}</dd></div>
                                 ${inv.picked_up_by ? html`<div class="flex justify-between gap-4"><dt class="text-zinc-400">Picked up by</dt><dd class="text-zinc-200">${inv.picked_up_by}</dd></div>` : nothing}
-                                ${inv.paid_at ? html`<div class="flex justify-between gap-4"><dt class="text-zinc-400">Paid</dt><dd class="text-zinc-200">${new Date(inv.paid_at).toLocaleDateString()}</dd></div>` : nothing}
+                                ${inv.paid_at ? html`<div class="flex justify-between gap-4"><dt class="text-zinc-400">Paid</dt><dd class="text-zinc-200">${formatDate(inv.paid_at)}</dd></div>` : nothing}
                             </dl>
                         </div>
                     </div>

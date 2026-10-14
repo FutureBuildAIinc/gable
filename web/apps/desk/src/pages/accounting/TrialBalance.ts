@@ -5,6 +5,8 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchTrialBalance } from '../../services/GLService';
 import type { TrialBalanceRow } from '../../types/gl';
@@ -83,12 +85,11 @@ export class TrialBalance extends LitElement {
                     </div>
                     <div class="flex items-center gap-3">
                         <label class="text-sm text-zinc-400">As of:</label>
-                        <input
-                            type="date"
-                            class="bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                        <gable-date-field
+                            label="As of"
                             .value=${this.asOfDate}
-                            @change=${(e: Event) => { this.asOfDate = (e.target as HTMLInputElement).value; this._load(); }}
-                        />
+                            @change=${(e: Event) => { this.asOfDate = (e.target as GableDateField).value; this._load(); }}
+                        ></gable-date-field>
                     </div>
                 </div>
 
