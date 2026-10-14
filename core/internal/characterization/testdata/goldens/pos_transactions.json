@@ -32,6 +32,7 @@
       "path": "/api/v1/inventory/adjust",
       "body": {
         "is_delta": true,
+        "location_id": "<id-1>",
         "product_id": "<id-4>",
         "quantity": 50,
         "reason": "r1b c pos setup"
@@ -52,6 +53,7 @@
       "path": "/api/v1/inventory/adjust",
       "body": {
         "is_delta": true,
+        "location_id": "<id-1>",
         "product_id": "<id-5>",
         "quantity": 10,
         "reason": "r1b c pos setup"

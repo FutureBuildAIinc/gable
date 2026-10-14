@@ -22,7 +22,8 @@
       "path": "/api/v1/inventory/adjust",
       "body": {
         "is_delta": true,
-        "product_id": "<id-2>",
+        "location_id": "<id-2>",
+        "product_id": "<id-3>",
         "quantity": 25,
         "reason": "golden characterisation"
       }
@@ -48,17 +49,6 @@
         "items": [
           {
             "allocated": "0",
-            "available": "25",
-            "id": "<id-3>",
-            "location_id": null,
-            "location_name": "",
-            "product_id": "<id-2>",
-            "quantity": "25",
-            "uom": "PCS",
-            "updated_at": "<ts+0d>"
-          },
-          {
-            "allocated": "0",
             "available": "67",
             "id": "<id-4>",
             "location_id": "<id-5>",
@@ -67,11 +57,22 @@
             "quantity": "67",
             "uom": "LF",
             "updated_at": "<ts+0d>"
+          },
+          {
+            "allocated": "0",
+            "available": "51",
+            "id": "<id-7>",
+            "location_id": "<id-8>",
+            "location_name": "WK",
+            "product_id": "<id-6>",
+            "quantity": "51",
+            "uom": "LF",
+            "updated_at": "<ts+0d>"
           }
         ],
         "limit": 2,
         "next_cursor": "<cursor>",
-        "total": 193
+        "total": 192
       }
     }
   }
