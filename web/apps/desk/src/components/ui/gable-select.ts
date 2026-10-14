@@ -42,6 +42,7 @@ export class GableSelect extends LitElement {
     @state() private _open = false;
     @state() private _activeIndex = -1;
     @state() private _openUpward = false;
+    @state() private _listStyle = '';
     @state() private _fieldLabelId: string | null = null;
 
     private _ids = `gable-select-${++selectSeq}`;
@@ -93,20 +94,45 @@ export class GableSelect extends LitElement {
 
     private _openList() {
         if (this.disabled || this._open) return;
-        const rect = this.getBoundingClientRect();
+        // The list is a manual popover (the browser's top layer, so no modal's
+        // overflow or transform can clip it) positioned from the button's box,
+        // flipped up when the room is above. jsdom has no popover; the fixed
+        // position alone carries the tests there.
+        const rect = this.querySelector('button')?.getBoundingClientRect() ?? this.getBoundingClientRect();
         const below = window.innerHeight - rect.bottom;
         const above = rect.top;
         this._openUpward = below < 240 && above > below;
+        this._listStyle =
+            `position:fixed;margin:0;left:${rect.left}px;width:${rect.width}px;` +
+            (this._openUpward ? `bottom:${window.innerHeight - rect.top}px;` : `top:${rect.bottom}px;`);
         const selected = this.options.findIndex((o) => o.value === this.value && !o.disabled);
         this._activeIndex = selected >= 0 ? selected : (this._enabledIndexes()[0] ?? -1);
         this._open = true;
         document.addEventListener('click', this._onDocClick, true);
-        this.updateComplete.then(() => this._scrollActiveIntoView());
+        this.updateComplete.then(() => {
+            const list = this.querySelector<HTMLElement>('[role="listbox"]');
+            if (list && typeof list.showPopover === 'function') {
+                try {
+                    list.showPopover();
+                } catch {
+                    // already shown; nothing to do
+                }
+            }
+            this._scrollActiveIntoView();
+        });
     }
 
     private _close(restoreFocus = false) {
         if (!this._open) return;
         this._open = false;
+        const list = this.querySelector<HTMLElement>('[role="listbox"]');
+        if (list && typeof list.hidePopover === 'function') {
+            try {
+                list.hidePopover();
+            } catch {
+                // not shown; nothing to do
+            }
+        }
         document.removeEventListener('click', this._onDocClick, true);
         if (restoreFocus) {
             // Synchronously: a change handler that opens a dialog must not
@@ -273,7 +299,9 @@ export class GableSelect extends LitElement {
                 role="listbox"
                 aria-label=${this.label || nothing}
                 @click=${(e: Event) => e.preventDefault()}
-                class="absolute z-50 left-0 right-0 max-h-60 overflow-y-auto rounded-md bg-surface-2 border border-white/10 shadow-xl py-1 ${this._openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}"
+                popover="manual"
+                style=${this._listStyle}
+                class="z-50 max-h-60 overflow-y-auto rounded-md bg-surface-2 border border-white/10 shadow-xl py-1 ${this._openUpward ? 'mb-1' : 'mt-1'}"
             >
                 ${rows.length > 0
                     ? rows
