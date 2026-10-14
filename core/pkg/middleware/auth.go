@@ -138,6 +138,17 @@ func (m *AuthMiddleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
+		// A role bearing user token with no subject is refused: the branch
+		// rule reads an empty subject as "no user" and gives the caller the
+		// every branch reach, and no grant can be keyed to it (SEC-NOHEADER-1).
+		// Every identity provider token carries sub; this repository mints no
+		// user token of its own (the portal's tokens use their own middleware).
+		if claims.Subject == "" && (claims.Role != "" || len(claims.Roles) > 0) {
+			m.logger.Warn("Token carries a role and no subject", "path", r.URL.Path)
+			respondAuthError(w, r, http.StatusUnauthorized, "unauthorized", "invalid token")
+			return
+		}
+
 		// 4. Inject into Context
 		ctx := context.WithValue(r.Context(), UserContextKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
