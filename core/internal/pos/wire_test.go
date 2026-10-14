@@ -440,7 +440,7 @@ func TestReturnRestocksAndReversesCOGS(t *testing.T) {
 	saleLines := body.body["lines"].([]any)
 	firstLine := saleLines[0].(map[string]any)["id"].(string)
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
-		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"register_id": f.register, "original_sale_id": saleID,
 		"refund_method": "cash",
 		"reason":        "wrong length", "lines": []map[string]any{{
 			"product_id": f.productID.String(), "line_id": firstLine, "quantity": "4", "restock": true,
@@ -834,6 +834,9 @@ type fakeGateway struct {
 	// mutex: the tests park a refund in flight or probe the database while
 	// the terminal is on the wire.
 	onRefund func()
+	// onCharge runs at the start of every Charge call, outside the fake's
+	// mutex: a test changes the database while the card is on the wire.
+	onCharge func()
 	// mu guards every slice above: with the gateway called outside every
 	// transaction, contenders reach it concurrently.
 	mu sync.Mutex
@@ -850,6 +853,9 @@ func declinedCharge() *payment.GatewayResult {
 }
 
 func (g *fakeGateway) Charge(ctx context.Context, req payment.ChargeRequest) (*payment.GatewayResult, error) {
+	if g.onCharge != nil {
+		g.onCharge()
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.chargeCalls++

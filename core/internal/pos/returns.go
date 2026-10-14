@@ -104,7 +104,13 @@ type refundClaim struct {
 // reads the sale's tax facts: everything the money transaction restates under
 // the sale row lock, gathered once. The guards that need no lock run here so
 // a refusal never moves money at the terminal.
-func (s *Service) priceReturn(ctx context.Context, in *ReturnIn) (*returnState, error) {
+//
+// holdCustomer puts a named customer, the request's or the original sale's,
+// through the counter's one customer rule (Service.namedCustomer) before
+// anything is written: a hidden customer answers the module's 404. The
+// operator resolution's replay of a stranded claim passes false: its money
+// moved long before, and the replay restates what the claim recorded.
+func (s *Service) priceReturn(ctx context.Context, in *ReturnIn, holdCustomer bool) (*returnState, error) {
 	branchID, err := s.repo.GetRegisterBranch(ctx, in.RegisterID)
 	if err != nil {
 		return nil, err
@@ -154,8 +160,24 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn) (*returnState, 
 					"a return that names the original sale names the line of it: every line carries line_id")
 			}
 		}
-		if customerID == nil {
-			customerID = original.CustomerID
+		// A return against a sale credits that sale's customer: a named
+		// customer other than the sale's is refused, and a walk-in sale's
+		// goods go back by the original tenders' methods, never onto an
+		// account.
+		if in.CustomerID != nil && (original.CustomerID == nil || *original.CustomerID != *in.CustomerID) {
+			walkInID, _, err := s.repo.WalkInCustomer(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if original.CustomerID != nil || walkInID != *in.CustomerID {
+				return nil, invalid("customer_id",
+					"a return against a sale credits the sale's own customer: leave the customer off, or name the sale's")
+			}
+		}
+		customerID = original.CustomerID
+		if customerID == nil && in.RefundMethod == RefundAccount {
+			return nil, invalid("refund_method",
+				"the sale named no customer: its goods are refunded to the drawer or the card, not to an account")
 		}
 	}
 	isWalkIn := false
@@ -181,8 +203,12 @@ func (s *Service) priceReturn(ctx context.Context, in *ReturnIn) (*returnState, 
 		return nil, conflict("walk_in_account",
 			"account credit needs a named customer: the walk-in customer is refunded from the drawer or to the card")
 	}
-	facts, err := s.repo.CustomerFacts(ctx, *customerID)
-	if err != nil {
+	var facts CustomerFacts
+	if holdCustomer && !isWalkIn {
+		if _, facts, err = s.namedCustomer(ctx, *customerID); err != nil {
+			return nil, err
+		}
+	} else if facts, err = s.repo.CustomerFacts(ctx, *customerID); err != nil {
 		return nil, err
 	}
 	// Price the lines: a line naming a sale line refunds at that line's own
@@ -505,7 +531,7 @@ func (s *Service) ReturnSale(ctx context.Context, cashierID uuid.UUID, in *Retur
 	if s.ar == nil || s.inventory == nil {
 		return nil, errNotConfigured
 	}
-	st, err := s.priceReturn(ctx, in)
+	st, err := s.priceReturn(ctx, in, true)
 	if err != nil {
 		return nil, err
 	}

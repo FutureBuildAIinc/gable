@@ -153,7 +153,7 @@ func TestARequestNamingOneSaleLineTwiceIsRefused(t *testing.T) {
 	}
 	lineID := f.getSale(t, saleID)["lines"].([]any)[0].(map[string]any)["id"].(string)
 	r := f.do("POST", "/api/v1/pos/returns", map[string]any{
-		"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+		"register_id": f.register, "original_sale_id": saleID,
 		"refund_method": "cash", "reason": "split across lines", "lines": []map[string]any{
 			{"line_id": lineID, "quantity": "1", "restock": true},
 			{"line_id": lineID, "quantity": "1", "restock": false},

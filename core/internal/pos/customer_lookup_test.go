@@ -16,6 +16,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gablelbm/gable/internal/payment"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -232,5 +233,69 @@ func TestThreeNamingsOfOneSaleAreSerialized(t *testing.T) {
 	po := str(t, end, "customer_po")
 	if po != "PO-A" && po != "PO-B" && po != "PO-C" {
 		t.Errorf("customer_po = %q, want one of the three", po)
+	}
+}
+
+// RULE: the card side checks stand alone. A split of card and account that
+// the account side would refuse (a purchase order the account asks for and
+// the sale does not carry, or a zero limit) charges no card at all.
+func TestASplitWhoseAccountLegIsRefusedChargesNoCard(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) { f.service = f.service.WithGateway(gw) })
+	f.openTill(0)
+	mustExec(t, f.db, `UPDATE customers SET po_required = TRUE WHERE id = $1`, f.customerID)
+	t.Cleanup(func() {
+		mustExec(t, f.db, `UPDATE customers SET po_required = FALSE, credit_limit = NULL WHERE id = $1`, f.customerID)
+	})
+	saleID := f.startSale(&f.customerID)
+	if r := f.addLine(saleID, f.productLine("2")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	total := num(t, f.getSale(t, saleID), "total_cents")
+	r := f.completeSale(saleID, withToken(tender("card", total/2)), tender("account", total-total/2))
+	if r.status != http.StatusConflict || !strings.Contains(string(r.raw), "po_required") {
+		t.Fatalf("the split with no PO = %d: %s, want 409 po_required", r.status, r.raw)
+	}
+	mustExec(t, f.db, `UPDATE customers SET po_required = FALSE, credit_limit = 0 WHERE id = $1`, f.customerID)
+	r = f.completeSale(saleID, withToken(tender("card", total/2)), tender("account", total-total/2))
+	if r.status != http.StatusConflict || !strings.Contains(string(r.raw), "credit_hold") {
+		t.Fatalf("the split on a zero limit = %d: %s, want 409 credit_hold", r.status, r.raw)
+	}
+	if gw.chargeCalls != 0 {
+		t.Errorf("the refused splits reached the terminal %d times, want 0", gw.chargeCalls)
+	}
+}
+
+// RULE: the purchase order is checked again under the credit lock. The PO
+// leaves the sale while the card is on the wire; the transaction refuses the
+// charge 409 po_required, the card is reversed and no invoice is posted.
+func TestThePORecheckUnderTheLockRefusesAPOGoneWhileTheCardWasCharged(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	gw := &fakeGateway{charges: []*payment.GatewayResult{approvedCharge()}}
+	f := newFixture(t, testutil.RequireDB(t), func(f *fixture) { f.service = f.service.WithGateway(gw) })
+	f.openTill(0)
+	mustExec(t, f.db, `UPDATE customers SET po_required = TRUE WHERE id = $1`, f.customerID)
+	t.Cleanup(func() { mustExec(t, f.db, `UPDATE customers SET po_required = FALSE WHERE id = $1`, f.customerID) })
+	saleID := f.startSale(nil)
+	if r := f.attach(saleID, map[string]any{"customer_id": f.customerID.String(), "customer_po": "PO-1"}); r.status != http.StatusOK {
+		t.Fatalf("attach = %d: %s", r.status, r.raw)
+	}
+	if r := f.addLine(saleID, f.productLine("2")); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	total := num(t, f.getSale(t, saleID), "total_cents")
+	gw.onCharge = func() {
+		mustExec(t, f.db, `UPDATE pos_transactions SET customer_po = NULL WHERE id = $1`, saleID)
+	}
+	r := f.completeSale(saleID, withToken(tender("card", total/2)), tender("account", total-total/2))
+	if r.status != http.StatusConflict || !strings.Contains(string(r.raw), "po_required") {
+		t.Fatalf("the charge with the PO gone = %d: %s, want 409 po_required", r.status, r.raw)
+	}
+	if gw.chargeCalls != 1 || len(gw.voids)+len(gw.refunds) != 1 {
+		t.Errorf("charges %d, reversals %d, want the one card charged and reversed", gw.chargeCalls, len(gw.voids)+len(gw.refunds))
+	}
+	if got := f.scalar(`SELECT count(*) FROM invoices WHERE customer_id = $1`, f.customerID).(int64); got != 0 {
+		t.Errorf("%d invoices after the refused charge, want none", got)
 	}
 }

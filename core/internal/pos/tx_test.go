@@ -250,7 +250,7 @@ func TestVoidRacingTwoReturns(t *testing.T) {
 		go func(i int, qty string) {
 			defer wg.Done()
 			returnStatuses[i] = f.do("POST", "/api/v1/pos/returns", map[string]any{
-				"register_id": f.register, "customer_id": f.customerID.String(), "original_sale_id": saleID,
+				"register_id": f.register, "original_sale_id": saleID,
 				"refund_method": "cash", "reason": "racing",
 				"lines": []map[string]any{{"line_id": lineID, "quantity": qty, "restock": true}},
 			}, "X-Test-Role", "cashier", "X-Test-Sub", mustUUID(t)).status

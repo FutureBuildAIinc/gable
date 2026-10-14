@@ -196,3 +196,79 @@ func TestTheLookupTakesItsQueryAsText(t *testing.T) {
 		t.Errorf("a query of two underscores answered %s, want []", r.raw)
 	}
 }
+
+// RULE: a return names a customer through the same wall: a user granted only
+// the sale's branch, no header, who returns to a customer only another branch
+// trades with, by any refund method, is answered 404 and nothing is written
+// (no return, no credit memo, no refund). The same holds when the customer
+// comes from the original sale.
+func TestTheReturnHoldsTheNamedCustomerToTheCustomerWall(t *testing.T) {
+	w := newNamedWall(t)
+	f := w.f
+	if r := f.do("POST", "/api/v1/pos/till/open", map[string]any{"register_id": f.register, "opening_float_cents": 0}, w.headers...); r.status != http.StatusCreated {
+		t.Fatalf("open till = %d: %s", r.status, r.raw)
+	}
+	r := f.do("POST", "/api/v1/pos/transactions", map[string]any{"register_id": f.register}, w.headers...)
+	if r.status != http.StatusCreated {
+		t.Fatalf("create = %d: %s", r.status, r.raw)
+	}
+	saleID := str(t, r.body, "id")
+	if r := f.do("POST", "/api/v1/pos/transactions/"+saleID+"/items", map[string]any{"line": f.productLine("1")}, w.headers...); r.status != http.StatusOK {
+		t.Fatalf("add line = %d: %s", r.status, r.raw)
+	}
+	cur := f.getSale(t, saleID)
+	r = f.do("POST", "/api/v1/pos/transactions/"+saleID+"/complete",
+		map[string]any{"tenders": []map[string]any{tender("cash", num(t, cur, "total_cents"))}, "revision": cur["revision"]}, w.headers...)
+	if r.status != http.StatusOK {
+		t.Fatalf("complete = %d: %s", r.status, r.raw)
+	}
+	lineID := r.body["lines"].([]any)[0].(map[string]any)["id"].(string)
+	post := func(method string, withSale bool) resp {
+		req := map[string]any{
+			"register_id": f.register, "customer_id": w.hidden.String(),
+			"refund_method": method, "reason": "wall", "lines": []map[string]any{
+				{"line_id": lineID, "quantity": "1", "restock": false}},
+		}
+		if withSale {
+			req["original_sale_id"] = saleID
+		} else {
+			req["lines"] = []map[string]any{{"product_id": f.productID.String(), "quantity": "1",
+				"unit_price_ten_thousandths": 5990000, "restock": false}}
+		}
+		return f.do("POST", "/api/v1/pos/returns", req, w.headers...)
+	}
+	for _, c := range []struct {
+		method string
+		sale   bool
+	}{{"account", true}, {"account", false}, {"cash", true}, {"cash", false}} {
+		// a free return meets the wall (404); against a sale it is the
+		// sale's own customer that is credited, so the named one is refused
+		// on the field (400): either way nothing is written
+		want := http.StatusNotFound
+		if c.sale {
+			want = http.StatusBadRequest
+		}
+		if r := post(c.method, c.sale); r.status != want {
+			t.Errorf("%s return (sale %v) naming a hidden customer = %d, want %d: %s", c.method, c.sale, r.status, want, r.raw)
+		}
+	}
+	if n := countOf(t, f.db, `SELECT count(*) FROM credit_memos WHERE customer_id = $1`, w.hidden); n != 0 {
+		t.Errorf("the refused returns wrote %d credit memos to the hidden customer", n)
+	}
+	if got := f.counterReturns(t); got != 0 {
+		t.Errorf("the refused returns wrote %d returns", got)
+	}
+	// a sale whose own customer left the grants holds the return the same way
+	mustExec(t, f.db, `UPDATE pos_transactions SET customer_id = $1 WHERE id = $2`, w.hidden, saleID)
+	req := map[string]any{"register_id": f.register, "original_sale_id": saleID, "refund_method": "account",
+		"reason": "wall", "lines": []map[string]any{{"line_id": lineID, "quantity": "1", "restock": false}}}
+	if r := f.do("POST", "/api/v1/pos/returns", req, w.headers...); r.status != http.StatusNotFound {
+		t.Errorf("return of a sale naming a hidden customer = %d, want 404: %s", r.status, r.raw)
+	}
+	// the reachable customer still returns
+	mustExec(t, f.db, `UPDATE pos_transactions SET customer_id = $1 WHERE id = $2`, w.reachable, saleID)
+	req["customer_id"] = w.reachable.String()
+	if r := f.do("POST", "/api/v1/pos/returns", req, w.headers...); r.status != http.StatusCreated {
+		t.Errorf("return naming a reachable customer = %d, want 201: %s", r.status, r.raw)
+	}
+}
