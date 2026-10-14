@@ -10,7 +10,7 @@ import type { TenderIn } from '../../services/POSService';
 
 export type PayPlan =
     | { ok: true; tenders: TenderIn[]; changeCents: number }
-    | { ok: false; owedCents: number; over?: boolean };
+    | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method'] };
 
 const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents, 0);
 
@@ -20,16 +20,21 @@ const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents
  * owed) when the tenders do not cover the total.
  */
 export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn | null): PayPlan {
+    const addedSum = sum(added);
+    // change is given only in cash. Two cases are refused: the added tenders
+    // alone are above the total and one of them is not cash, or a typed
+    // amount that is not cash is more than what is still owed.
+    if (totalCents > 0 && addedSum > totalCents && added.some((t) => t.method !== 'cash')) {
+        return { ok: false, owedCents: 0, over: 'added' };
+    }
     let tenders = added;
-    if (sum(tenders) < totalCents && entry !== null && entry.amount_cents > 0) {
+    if (addedSum < totalCents && entry !== null && entry.amount_cents > 0) {
+        if (entry.method !== 'cash' && entry.amount_cents > totalCents - addedSum) {
+            return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method };
+        }
         tenders = [...added, entry];
     }
     const tendered = sum(tenders);
-    // change is given only in cash: tenders above the total with any of them
-    // not cash (added, or the amount typed) are cleared and chosen again
-    if (totalCents > 0 && tendered > totalCents && tenders.some((t) => t.method !== 'cash')) {
-        return { ok: false, owedCents: 0, over: true };
-    }
     if (totalCents <= 0 || tenders.length === 0 || tendered < totalCents) {
         return { ok: false, owedCents: Math.max(totalCents - tendered, 0) };
     }

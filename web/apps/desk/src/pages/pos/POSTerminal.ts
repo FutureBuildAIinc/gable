@@ -1347,7 +1347,12 @@ export class POSTerminal extends LitElement {
       && this._pendingTenders.every((t) => t.method === 'cash') ? this._tenderedSoFar - total : 0;
     const change = addedChange > 0 ? addedChange : isCash && entry !== null && this._tenderedSoFar < total
       ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
-    const tendersOver = !payPlanNow.ok && payPlanNow.over === true;
+    const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
+    const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
+      ? (payPlanNow.typedMethod === 'account'
+        ? 'A charge to account cannot be more than what is owed'
+        : 'A card or check cannot be more than what is owed')
+      : 'The added tenders are more than the sale now: clear them and choose again';
     const ready = this._till !== null && hasLines && open;
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
     const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
@@ -1403,7 +1408,7 @@ export class POSTerminal extends LitElement {
             aria-label="Tender amount" />
           ${tendersOver ? html`
             <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
-              The added tenders are more than the sale now: clear them and choose again
+              ${overWords}
             </div>` : nothing}
           ${(isCash || addedChange > 0) && change > 0 ? html`
             <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
@@ -1477,7 +1482,8 @@ export class POSTerminal extends LitElement {
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
-      : !plan.ok && plan.over === true ? 'Clear the added tenders'
+      : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
+      : !plan.ok && plan.over === 'typed' ? 'Type no more than is owed'
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
