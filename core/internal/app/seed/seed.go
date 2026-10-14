@@ -65,6 +65,52 @@ func dedupeBranches(db *sql.DB) {
 	log.Printf("Seed: dedupeBranches reset; downstream steps will rebuild location-dependent tables")
 }
 
+// dropPlaceholderBranch removes the migrations' placeholder branch (MAIN, Main
+// Branch) at the end of the run. dedupeBranches cannot drop it on a fresh
+// database: register REG-01 (migration 066) still points at it then, as may a
+// customer homed at the default branch a migration knew. By now the sections
+// above have moved REG-01 to the default branch; this re-homes whatever else
+// still points at the placeholder onto the default branch and drops it, so the
+// yard switcher lists the dealer's yards only.
+func dropPlaceholderBranch(db *sql.DB) {
+	var mainID, defaultID uuid.UUID
+	if err := db.QueryRow(`SELECT id FROM locations WHERE type = 'BRANCH' AND code = 'MAIN' AND name = 'Main Branch'`).Scan(&mainID); err != nil {
+		return
+	}
+	if err := db.QueryRow(`SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'`).Scan(&defaultID); err != nil || defaultID == mainID {
+		log.Printf("Seed: placeholder branch kept: no other default branch (%v)", err)
+		return
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		log.Printf("Seed: placeholder branch: %v", err)
+		return
+	}
+	defer tx.Rollback()
+	for _, st := range []struct {
+		q    string
+		args []any
+	}{
+		{`UPDATE pos_registers SET branch_id = $2 WHERE branch_id = $1`, []any{mainID, defaultID}},
+		{`UPDATE customers SET primary_branch_id = $2 WHERE primary_branch_id = $1`, []any{mainID, defaultID}},
+		{`INSERT INTO customer_branches (customer_id, branch_id)
+			SELECT customer_id, $2 FROM customer_branches WHERE branch_id = $1
+			ON CONFLICT DO NOTHING`, []any{mainID, defaultID}},
+		{`DELETE FROM customer_branches WHERE branch_id = $1`, []any{mainID}},
+		{`DELETE FROM locations WHERE id = $1`, []any{mainID}},
+	} {
+		if _, err := tx.Exec(st.q, st.args...); err != nil {
+			log.Printf("Seed: placeholder branch kept: %v", err)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		log.Printf("Seed: placeholder branch kept: %v", err)
+		return
+	}
+	fmt.Println("Seed: the migrations' placeholder branch removed")
+}
+
 // resetTransactionalData clears the demo's generated transactional tables at the
 // start of every seed run so they do NOT accumulate across redeploys. Orders,
 // invoices, quotes, deliveries, etc. are inserted with fresh random UUIDs and no
@@ -1331,6 +1377,8 @@ func Run() {
 	db.Exec(`INSERT INTO edi_trading_partners (name, isa_sender_id, isa_receiver_id, gs_sender_id, gs_receiver_id, transport_type)
 		VALUES ('Do It Best', 'DIB-111111', 'GABLE-987654', 'DIB', 'GAB', 'AS2')`)
 	fmt.Println("Seed: EDI Trading Partners")
+
+	dropPlaceholderBranch(db)
 
 	fmt.Println("==================================================")
 	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE BUILDING SUPPLY (KELOWNA, BC)  ")
