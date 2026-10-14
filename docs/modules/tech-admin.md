@@ -63,7 +63,8 @@ mode the caller is treated as owner.
 | POST | `/api/v1/admin/keys` | Mint a machine key, returns the raw key once. |
 | DELETE | `/api/v1/admin/keys/{id}` | Revoke a key (idempotent 204 on an already revoked id). |
 | GET | `/api/v1/admin/settings/ai` | Read the AI settings document with its revision. |
-| PUT | `/api/v1/admin/settings/ai` | Save the OpenRouter key and optional base URL override. |
+| PUT | `/api/v1/admin/settings/ai` | Save the AI provider, the Anthropic model, the OpenRouter key, the Anthropic key and the optional base URL override. |
+| POST | `/api/v1/admin/settings/ai/test` | Test the active provider with its cheapest call; answers `ok` or the provider's error in words. |
 | DELETE | `/api/v1/admin/settings/ai` | Clear the AI admin override, revert to env defaults. |
 | GET | `/api/v1/admin/settings/routing` | Read the routing settings document with its revision. |
 | PUT | `/api/v1/admin/settings/routing` | Save the OpenRouteService key. |
@@ -347,3 +348,27 @@ platform and HTTP behaviour; the apps registry tests in
 `core/pkg/apps/registry_test.go` pin the toggle rules;
 the staff wire tests in `core/internal/staff/wire_test.go` pin the
 roster and grant behaviour.
+
+## AI provider and the Anthropic key
+
+The AI provider is OpenRouter (the default) or the native Anthropic provider
+on the Messages API. An admin chooses it, the model (Sonnet 5.5 or better;
+Opus 5.5 and later; anything lower is a 400 naming the model) and enters the
+Anthropic key in Tech Admin, AI settings. There is no environment variable
+for the Anthropic key.
+
+- **Sealed at rest.** The key is sealed with the same AES-256-GCM vault the
+  payment credentials use (`PAYMENT_VAULT_KEY`). With no vault key the save
+  is refused with a 400 naming `anthropic_api_key`; a key is never stored in
+  plain text. The OpenRouter key is sealed too when a vault key exists, and a
+  key stored before the vault is sealed at startup without loss.
+- **Never returned.** No route returns a key: the settings document carries
+  `anthropic_configured` and a masked hint (four asterisks and the last four
+  characters). The key is never logged. The audit row and the event record
+  the provider, the model and that the key changed, never the key.
+- **Test connection.** `POST /api/v1/admin/settings/ai/test` makes a one
+  token call and answers `{ok, message}`; a provider failure is `ok: false`
+  with its words, never the key.
+- **AI off.** With no key for the chosen provider every AI feature says AI is
+  off and how an admin turns it on; nothing fakes a result (the material list
+  intake keeps its labelled sample for images and PDFs).

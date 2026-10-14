@@ -43,6 +43,10 @@ func openValue(v Sealer, s string) (string, error) {
 	return v.Open(s)
 }
 
+// OpenValue opens a stored value: sealed values are opened with the vault,
+// legacy plaintext passes through.
+func OpenValue(v Sealer, s string) (string, error) { return openValue(v, s) }
+
 // SealValue seals a plaintext secret for storage, refusing when no vault key
 // is configured.
 func SealValue(v Sealer, plaintext string) (string, error) {

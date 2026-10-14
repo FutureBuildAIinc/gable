@@ -126,7 +126,7 @@ func (s *Service) UpdateContent(ctx context.Context, productID uuid.UUID, req Up
 // GenerateDescriptions uses Claude to generate product descriptions and extract attributes
 func (s *Service) GenerateDescriptions(ctx context.Context, productID uuid.UUID, tone, audience string) (*PIMContent, error) {
 	if s.ai == nil {
-		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
+		return nil, fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -219,7 +219,7 @@ Only include attribute keys where the value can be reasonably inferred from the 
 // GenerateSEO uses Claude to generate SEO metadata
 func (s *Service) GenerateSEO(ctx context.Context, productID uuid.UUID, targetKeywords []string) (*PIMContent, error) {
 	if s.ai == nil {
-		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
+		return nil, fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)
@@ -421,7 +421,7 @@ Your SVGs must be self-contained with no external dependencies.`
 // GenerateCollateral uses Claude to generate marketing collateral
 func (s *Service) GenerateCollateral(ctx context.Context, productID uuid.UUID, collateralType, tone, audience string) (*PIMCollateral, error) {
 	if s.ai == nil {
-		return nil, fmt.Errorf("AI client not configured — set the OpenRouter key in Admin > AI Settings")
+		return nil, fmt.Errorf("AI is off: an admin turns it on in Tech Admin, AI settings, by choosing a provider and entering its key")
 	}
 
 	p, err := s.productSvc.GetProduct(ctx, productID)

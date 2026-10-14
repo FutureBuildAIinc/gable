@@ -268,13 +268,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Show the OpenRouter key status
-         * @description Admin or owner, or a key holding admin:settings. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and null when no key is configured. base_url is present only when an admin override is stored, null otherwise. revision is the resource's revision anchor and rides the ETag.
+         * Show the AI provider settings
+         * @description Admin or owner, or a key holding admin:settings. Never returns a key: key_hint and anthropic_key_hint are four asterisks and the last 4 characters (four asterisks alone for a key of 12 characters or fewer), and null when no key is configured. provider is openrouter or anthropic; model is the effective Anthropic model; vault_present says whether a key can be saved sealed. base_url is present only when an admin override is stored, null otherwise. revision is the resource's revision anchor and rides the ETag.
          */
         get: operations["adminGetAISettings"];
         /**
-         * Save the OpenRouter key and base URL
-         * @description Admin or owner, or a key holding admin:settings. api_key is required. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
+         * Save the AI provider, model and keys
+         * @description Admin or owner, or a key holding admin:settings. api_key (the OpenRouter key) is required unless provider is anthropic or anthropic_api_key is given. The Anthropic key is sealed at rest and refused with a 400 naming anthropic_api_key when the server has no vault key; a model below Sonnet 5.5 is a 400 naming model. The audit row and event record the provider and model, never a key. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
          */
         put: operations["adminSaveAISettings"];
         post?: never;
@@ -283,6 +283,26 @@ export interface paths {
          * @description Admin or owner, or a key holding admin:settings. Removes the key and the base URL override together, so both revert to their environment defaults. Takes the If-Match precondition; the deletion moves the revision (never backwards) and writes the admin_settings.deleted event.
          */
         delete: operations["adminDeleteAISettings"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/settings/ai/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test the AI provider connection
+         * @description Admin or owner, or a key holding admin:settings. Makes the cheapest call the active provider allows (one output token) and answers ok, or ok false with the provider's error in words. Never returns the key.
+         */
+        post: operations["adminTestAIConnection"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -7059,6 +7079,17 @@ export interface components {
             key_hint: string | null;
             base_url: string | null;
             revision: number;
+            /** @enum {string} */
+            provider: "openrouter" | "anthropic";
+            model: string;
+            anthropic_configured: boolean;
+            anthropic_key_hint: string | null;
+            vault_present: boolean;
+        };
+        /** @description Go type techadmin.TestResult. A provider failure is ok false with its words, never the key. */
+        AdminTestAIResult: {
+            ok: boolean;
+            message: string;
         };
         /** @description Go type techadmin.RoutingSettings, the AI settings' shape without the base URL. */
         RoutingSettings: {
@@ -7070,8 +7101,12 @@ export interface components {
         };
         /** @description Go type techadmin.SaveAISettingsRequest. base_url is a pointer: absent leaves the override, empty clears it, a URL sets it. revision is the body form of the If-Match precondition. */
         AdminSaveAISettingsRequest: {
-            api_key: string;
+            api_key?: string;
             base_url?: string | null;
+            /** @enum {string} */
+            provider?: "openrouter" | "anthropic";
+            model?: string;
+            anthropic_api_key?: string;
             revision?: number;
         };
         /** @description Go type techadmin.SaveRoutingSettingsRequest. */
@@ -14779,6 +14814,29 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["WireConflict"];
             428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    adminTestAIConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The test result. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminTestAIResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["WireInternalError"];
         };
     };

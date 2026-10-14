@@ -39,6 +39,11 @@ export class TechAdminPage extends LitElement {
     @state() private aiShowInput = false;
     @state() private aiError: string | null = null;
     @state() private aiSuccess: string | null = null;
+    @state() private aiProvider: 'openrouter' | 'anthropic' = 'openrouter';
+    @state() private aiModel = 'claude-sonnet-5-5';
+    @state() private aiAnthropicKey = '';
+    @state() private aiTesting = false;
+    @state() private aiTestResult: { ok: boolean; message: string } | null = null;
 
     // Routing (OpenRouteService) Settings state
     @state() private routingSettings: RoutingSettings | null = null;
@@ -133,6 +138,8 @@ export class TechAdminPage extends LitElement {
         try {
             const data = await techAdminService.getAISettings();
             this.aiSettings = data;
+            this.aiProvider = data.provider;
+            this.aiModel = data.model;
         } catch (err) {
             console.error(err);
         } finally {
@@ -163,6 +170,82 @@ export class TechAdminPage extends LitElement {
         } finally {
             this.aiSaving = false;
         }
+    }
+
+    private async _handleSaveProvider() {
+        this.aiSaving = true;
+        this.aiError = null;
+        this.aiSuccess = null;
+        try {
+            await techAdminService.saveAIProvider(this.aiProvider, this.aiModel, this.aiAnthropicKey.trim() || undefined);
+            this.aiAnthropicKey = '';
+            this.aiSuccess = 'AI provider saved.';
+            await this._loadAISettings();
+        } catch (err) {
+            this.aiError = err instanceof Error ? err.message : 'Failed to save';
+        } finally {
+            this.aiSaving = false;
+        }
+    }
+
+    private async _handleTestAI() {
+        this.aiTesting = true;
+        this.aiTestResult = null;
+        try {
+            this.aiTestResult = await techAdminService.testAIConnection();
+        } catch (err) {
+            this.aiTestResult = { ok: false, message: err instanceof Error ? err.message : 'Test failed' };
+        } finally {
+            this.aiTesting = false;
+        }
+    }
+
+    private _renderProviderCard() {
+        const s = this.aiSettings;
+        const vaultMissing = s !== null && !s.vault_present;
+        return html`
+            <div class="border border-white/10 rounded-lg p-6 space-y-3" data-testid="ai-provider-card">
+                <h3 class="text-white font-medium">Provider</h3>
+                <p class="text-sm text-slate-400">Choose OpenRouter or the native Anthropic provider (Sonnet 5.5 or better). When no key is set for the chosen provider, AI is off and no feature fakes a result.</p>
+                <div class="grid grid-cols-2 gap-3">
+                    <select
+                        aria-label="AI provider"
+                        .value=${this.aiProvider}
+                        @change=${(e: Event) => this.aiProvider = (e.target as HTMLSelectElement).value as 'openrouter' | 'anthropic'}
+                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm">
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="anthropic">Anthropic (native)</option>
+                    </select>
+                    <select
+                        aria-label="Anthropic model"
+                        .value=${this.aiModel}
+                        ?disabled=${this.aiProvider !== 'anthropic'}
+                        @change=${(e: Event) => this.aiModel = (e.target as HTMLSelectElement).value}
+                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm disabled:opacity-50">
+                        <option value="claude-sonnet-5-5">Sonnet 5.5</option>
+                        <option value="claude-opus-5-5">Opus 5.5</option>
+                    </select>
+                </div>
+                ${this.aiProvider === 'anthropic' ? html`
+                    <input
+                        type="password"
+                        autocomplete="off"
+                        aria-label="Anthropic API key"
+                        .value=${this.aiAnthropicKey}
+                        @input=${(e: Event) => this.aiAnthropicKey = (e.target as HTMLInputElement).value}
+                        ?disabled=${vaultMissing}
+                        class="w-full bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white font-mono text-sm placeholder-slate-500"
+                        placeholder=${s?.anthropic_configured ? `Stored (${s.anthropic_key_hint ?? '****'}); type to replace` : 'Anthropic API key'}
+                    />
+                    ${vaultMissing ? html`<p class="text-xs text-amber-400">This server has no vault key, so an Anthropic key cannot be stored. Set PAYMENT_VAULT_KEY and restart.</p>` : nothing}
+                ` : nothing}
+                <div class="flex gap-2 justify-end items-center">
+                    ${this.aiTestResult ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
+                    <button @click=${this._handleTestAI} ?disabled=${this.aiTesting} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 disabled:opacity-50">Test connection</button>
+                    <button @click=${this._handleSaveProvider} ?disabled=${this.aiSaving} class="bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Save provider</button>
+                </div>
+            </div>
+        `;
     }
 
     private async _handleDeleteAIKey() {
@@ -499,8 +582,10 @@ export class TechAdminPage extends LitElement {
                         ${icon(Sparkles, 20, 'w-5 h-5 text-violet-400')}
                         AI Provider
                     </h2>
-                    <p class="text-slate-400 text-sm mt-1">Configure your OpenRouter API key — one key powers all AI features across the ERP. Optionally point at a self-hosted, OpenAI-compatible endpoint.</p>
+                    <p class="text-slate-400 text-sm mt-1">Choose the provider and enter its key; one key powers all AI features across the ERP. OpenRouter can point at a self-hosted, OpenAI-compatible endpoint.</p>
                 </div>
+
+                ${this._renderProviderCard()}
 
                 <div class="${cn('border rounded-lg p-6', this.aiSettings?.configured ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
                     <div class="flex items-start justify-between">
