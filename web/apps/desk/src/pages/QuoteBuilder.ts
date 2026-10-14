@@ -16,6 +16,7 @@ import type { Product } from '../types/product.ts';
 import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
+import { resolveLinePrice } from '../lib/line-price.ts';
 import {
     dollarsToCents,
     dollarsToTenThousandths,
@@ -252,23 +253,44 @@ export class GableQuoteBuilder extends LitElement {
         this.lineErrors = errs;
     }
 
-    private handleAcceptParsed(parsedItems: ParsedItem[]) {
+    /** True while an accepted list is being priced; a second Accept in that time is ignored. */
+    private accepting = false;
+
+    private async handleAcceptParsed(parsedItems: ParsedItem[]) {
         // A sample list is not the user's file: it never joins a quote, by any path.
         if (this.lastParseResult?.synthetic) return;
-        // The parsing API still answers in float dollars and a float quantity;
-        // both are converted here, once, through the integer helpers.
-        const newLines: LineWithEscalator[] = parsedItems.map(item => ({
-            product_id: item.matched_product?.product_id || null,
-            sku: item.matched_product?.sku || 'SPECIAL-ORDER',
-            description: item.matched_product?.description || item.raw_text,
-            quantity: numberToQuantity(item.quantity) ?? '1',
-            uom: (item.matched_product?.uom || item.uom || '').toUpperCase(),
-            unit_price_ten_thousandths: floatDollarsToTenThousandths(item.matched_product?.base_price || 0),
-            escalator: defaultEscalator(),
-        }));
-        this.lines = [...this.lines, ...newLines];
-        this.aiSource = true;
-        ToastService.show(`${parsedItems.length} items added from material list`, 'success');
+        if (this.accepting) return;
+        this.accepting = true;
+        try {
+            // The parsing API still answers in float dollars and a float quantity;
+            // both are converted here, once, through the integer helpers. The price is
+            // the one a hand added line takes (the customer's, else the base price).
+            const customerId = this.customer?.id;
+            const priced = await Promise.all(parsedItems.map(item => {
+                const uom = (item.matched_product?.uom || item.uom || '').toUpperCase();
+                const base = floatDollarsToTenThousandths(item.matched_product?.base_price || 0);
+                return item.matched_product
+                    ? resolveLinePrice(customerId, item.matched_product.product_id, uom, base)
+                    : Promise.resolve({ unitPriceTenThousandths: base, details: null, failed: false });
+            }));
+            const newLines: LineWithEscalator[] = parsedItems.map((item, i) => ({
+                product_id: item.matched_product?.product_id || null,
+                sku: item.matched_product?.sku || 'SPECIAL-ORDER',
+                description: item.matched_product?.description || item.raw_text,
+                quantity: numberToQuantity(item.quantity) ?? '1',
+                uom: (item.matched_product?.uom || item.uom || '').toUpperCase(),
+                unit_price_ten_thousandths: priced[i].unitPriceTenThousandths,
+                escalator: defaultEscalator(),
+            }));
+            this.lines = [...this.lines, ...newLines];
+            this.aiSource = true;
+            if (priced.some(p => p.failed)) {
+                ToastService.show('Customer prices could not be read; the list prices are on these lines', 'error');
+            }
+            ToastService.show(`${parsedItems.length} items added from material list`, 'success');
+        } finally {
+            this.accepting = false;
+        }
     }
 
     /** Index of every line that has no unit of measure; the server rejects such a line. */
