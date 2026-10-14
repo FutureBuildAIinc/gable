@@ -153,3 +153,61 @@ describe('QuoteDetail material list words', () => {
     expect(badge!.querySelector('svg')!.innerHTML).not.toBe(createElement(Sparkles).innerHTML)
   })
 })
+
+describe('QuoteDetail original file with the token', () => {
+  const API = /\/api\/v1\/quotes\/q\d\/file/
+  function authOf(call: unknown): string | null {
+    return new Headers((call as [string, RequestInit])[1]?.headers).get('Authorization')
+  }
+
+  it('shows an image original from a blob fetched with the token, never an API address', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:original-image')
+    URL.revokeObjectURL = vi.fn()
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes/q1/file') return new Response('PNGBYTES', { status: 200, headers: { 'Content-Type': 'image/png' } })
+      if (path === '/api/v1/quotes/q1') return jsonResponse({ ...QUOTE, original_filename: 'list.png', original_content_type: 'image/png' })
+      return jsonResponse({ message: 'none' }, 404)
+    })
+    const el = await detail()
+    tab(el, 'Original Upload').click()
+    await flush(); await flush()
+    await update(el, {})
+    const img = q<HTMLImageElement>(el, 'img[alt="Original material list"]')
+    expect(img.getAttribute('src')).toBe('blob:original-image')
+    const call = fetchMock.mock.calls.find(([u]) => API.test(String(u)))
+    expect(call, 'expected the original to be fetched').toBeDefined()
+    expect(authOf(call)).toBe('Bearer test-token')
+  })
+
+  it('shows a pdf original from a blob, and Download Original fetches with the token', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:original-pdf')
+    URL.revokeObjectURL = vi.fn()
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes/q1/file') return new Response('%PDF', { status: 200, headers: { 'Content-Type': 'application/pdf' } })
+      if (path === '/api/v1/quotes/q1') return jsonResponse({ ...QUOTE, original_filename: 'list.pdf', original_content_type: 'application/pdf' })
+      return jsonResponse({ message: 'none' }, 404)
+    })
+    const saved: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(`${this.getAttribute('href')}|${this.download}`)
+    })
+    try {
+      const el = await detail()
+      tab(el, 'Original Upload').click()
+      await flush(); await flush()
+      await update(el, {})
+      expect(q<HTMLIFrameElement>(el, 'iframe[title="Original PDF"]').getAttribute('src')).toBe('blob:original-pdf')
+      for (const a of Array.from(el.querySelectorAll('a'))) expect(a.getAttribute('href') ?? '').not.toMatch(/\/api\/v1\//)
+      const link = Array.from(el.querySelectorAll('a')).find((a) => text(a).includes('Download Original')) as HTMLAnchorElement
+      link.click()
+      await flush(); await flush()
+      expect(saved).toContain('blob:original-pdf|list.pdf')
+      for (const c of fetchMock.mock.calls.filter(([u]) => API.test(String(u)))) expect(authOf(c)).toBe('Bearer test-token')
+    } finally {
+      click.mockRestore()
+    }
+  })
+})
+
