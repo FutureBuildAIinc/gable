@@ -153,39 +153,12 @@ func (r *receivables) postParallel(ctx context.Context, invoices []seedInvoice) 
 	return total
 }
 
-// stampDay puts the history's day on the rows the act wrote with the present:
-// the AR core stamps the subledger rows, the application and the payment with
-// the moment of the call, and the revenue trend, the statements and the ledger's
-// created dates would all collapse onto the day of the seed. The ledger entries
-// and the receipt's date already carry the day through the act's dates; this
-// sets the stamps in the same transaction as the act, never a row of its own.
-// The payment is also linked to its invoice, as the order and invoice walks
-// (the dashboard's trend and recent activity) follow it.
+// stampDay puts the history's day on the rows the acts wrote with the present,
+// through the AR core (the only writer of its tables, ADR 0005 section 9.3): the
+// invoice's rows take the history's moment and the payment's a second later, in
+// the same transaction as the acts.
 func (r *receivables) stampDay(ctx context.Context, in seedInvoice, payID uuid.UUID) error {
-	// One statement: each update is a CTE over the rows the act just wrote, so
-	// the act costs one more round trip, not seven.
-	_, err := r.db.GetExecutor(ctx).Exec(ctx, `
-		WITH apps AS (
-			UPDATE ar_applications SET created_at = $2 WHERE invoice_id = $1 RETURNING id
-		), ct_inv AS (
-			UPDATE customer_transactions SET created_at = $3 WHERE source_kind = 'invoice' AND reference_id = $1
-		), ct_pay AS (
-			UPDATE customer_transactions SET created_at = $2 WHERE source_kind = 'application'
-				AND reference_id IN (SELECT id FROM apps)
-		), pay AS (
-			UPDATE payments SET invoice_id = $1, created_at = $2, updated_at = $2 WHERE id = $4
-		), inv AS (
-			UPDATE invoices SET paid_at = $2, updated_at = $2 WHERE id = $1
-		), gl_inv AS (
-			UPDATE gl_journal_entries SET created_at = $3, updated_at = $3 WHERE source_ref_id = $1
-		)
-		UPDATE gl_journal_entries SET created_at = $2, updated_at = $2
-		WHERE source_ref_id = $4 OR source_ref_id IN (SELECT id FROM apps)`,
-		in.ID, in.Stamp.Add(time.Second), in.Stamp, payID)
-	if err != nil {
-		return fmt.Errorf("the history's day was not stamped: %w", err)
-	}
-	return nil
+	return r.acct.RestampHistory(ctx, in.ID, payID, in.Stamp, in.Stamp.Add(time.Second))
 }
 
 // postMemo posts a draft credit memo the seed inserted (one ADJUST line, no

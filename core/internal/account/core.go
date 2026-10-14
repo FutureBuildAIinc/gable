@@ -445,3 +445,39 @@ func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time
 	}
 	return nil
 }
+
+// RestampHistory puts a trading day on the rows an invoice's posting and its
+// payment's act stamped with the present. Only the demo seed calls it: its
+// history posts each invoice and the payment that settles it through the acts
+// above, so the ledger, the subledger and the application are this core's own,
+// then moves their stamps to the history's day (the revenue trend, the
+// statements and the ledger's created dates would otherwise collapse onto the
+// day of the seed) and links the payment to the invoice it paid, as the order
+// and invoice walks follow it. It writes stamps and that link in the caller's
+// transaction, never an amount, a status or a balance.
+func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	// One statement: each update is a CTE over the rows the acts just wrote, so
+	// a history invoice costs one more round trip, not seven.
+	_, err := s.ex(ctx).Exec(ctx, `
+		WITH apps AS (
+			UPDATE ar_applications SET created_at = $2 WHERE invoice_id = $1 RETURNING id
+		), ct_inv AS (
+			UPDATE customer_transactions SET created_at = $3 WHERE source_kind = 'invoice' AND reference_id = $1
+		), ct_pay AS (
+			UPDATE customer_transactions SET created_at = $2 WHERE source_kind = 'application'
+				AND reference_id IN (SELECT id FROM apps)
+		), pay AS (
+			UPDATE payments SET invoice_id = $1, created_at = $2, updated_at = $2 WHERE id = $4
+		), inv AS (
+			UPDATE invoices SET paid_at = $2, updated_at = $2 WHERE id = $1
+		), gl_inv AS (
+			UPDATE gl_journal_entries SET created_at = $3, updated_at = $3 WHERE source_ref_id = $1
+		)
+		UPDATE gl_journal_entries SET created_at = $2, updated_at = $2
+		WHERE source_ref_id = $4 OR source_ref_id IN (SELECT id FROM apps)`,
+		invoiceID, paidAt, invoicedAt, paymentID)
+	if err != nil {
+		return fmt.Errorf("the history's day was not stamped: %w", err)
+	}
+	return nil
+}
