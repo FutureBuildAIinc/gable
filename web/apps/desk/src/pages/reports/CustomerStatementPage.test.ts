@@ -204,13 +204,23 @@ describe('customer statement preselect via ?customer=<id>', () => {
 })
 
 describe('customer statement print', () => {
-  it('opens the statement document for the period shown and never prints the page', async () => {
-    stubRoutes({
-      [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
-      [`/ar/customers/${CUSTOMER_ID}/statement`]: statement(CUSTOMER_ID),
-    })
-    const open = vi.fn()
+  it('fetches the statement document with the token for the period shown and never prints the page', async () => {
+    localStorage.setItem('token', 'test-token')
+    const tab = { location: { href: '' }, close: vi.fn() }
+    const open = vi.fn(() => tab)
     const print = vi.fn()
+    URL.createObjectURL = vi.fn(() => 'blob:statement')
+    URL.revokeObjectURL = vi.fn()
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/documents/print/statement/')) return new Response(new Blob(['%PDF']), { status: 200 })
+      const routes: Record<string, unknown> = {
+        [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+        [`/ar/customers/${CUSTOMER_ID}/statement`]: statement(CUSTOMER_ID),
+      }
+      for (const [fragment, body] of Object.entries(routes)) if (String(url).includes(fragment)) return jsonResponse(body)
+      return jsonResponse([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
     vi.stubGlobal('open', open)
     vi.stubGlobal('print', print)
     history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
@@ -223,15 +233,24 @@ describe('customer statement print', () => {
       const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).trim() === 'Print') as HTMLButtonElement
       expect(button, 'expected a Print button once the statement is shown').toBeDefined()
       button.click()
+      for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0))
 
       expect(print).not.toHaveBeenCalled()
+      // the tab is opened empty during the click: never a bare tab on the API's address
       expect(open).toHaveBeenCalledTimes(1)
-      const url = String(open.mock.calls[0][0])
+      expect(open.mock.calls[0]).toEqual(['', '_blank'])
+      const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/documents/print/statement/'))
+      expect(call, 'expected the statement document to be fetched').toBeDefined()
+      const url = String(call![0])
       expect(url).toContain(`/api/v1/documents/print/statement/${CUSTOMER_ID}`)
       expect(url).toContain('from=2031-01-01')
       expect(url).toContain('to=2031-12-31')
+      const init = (call as unknown as [string, RequestInit])[1]
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token')
+      expect(tab.location.href).toBe('blob:statement')
     } finally {
       history.replaceState(null, '', '/')
+      localStorage.removeItem('token')
     }
   })
 })
