@@ -26,7 +26,7 @@
     <rect class="bagMain" x="46" y="80" width="164" height="112"/>
     <rect class="bagRim" x="46" y="190" width="164" height="2" opacity="0.6"/>
   </g>
-  <text class="textBrand" x="128" y="116" font-size="14" fill="#3a2410" text-anchor="middle">ProFrame</text>
+  
   <rect x="58" y="124" width="140" height="1" fill="#3a2410" opacity="0.6"/>
   <text class="textSub" x="128" y="142" font-size="9" fill="#3a2410" text-anchor="middle">CARRIAGE BOLTS</text>
   <text class="textSub" x="128" y="156" font-size="6.5" fill="#3a2410" text-anchor="middle" opacity="0.7">3/8 IN  6 IN  QTY 25</text>

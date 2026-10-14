@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>ProFrame 18V cordless drill, side view</title>
+  <title>18V cordless drill, side view</title>
   <defs>
     <style>
       .bodyMain{fill:#6a6f7a}
@@ -49,7 +49,7 @@
     <rect class="bodyShade" x="46" y="120" width="124" height="14" rx="4" opacity="0.6"/>
     <rect class="accent" x="46" y="96" width="124" height="14"/>
     <rect class="accentShade" x="46" y="106" width="124" height="4" opacity="0.6"/>
-    <text class="textBrand" x="108" y="108" font-size="11" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    
     <text class="textSmall" x="108" y="80" font-size="5" fill="#faf3e0" text-anchor="middle" opacity="0.85">18V Li-Ion</text>
     <g opacity="0.55">
       <rect class="vent" x="58" y="124" width="22" height="2" rx="0.5"/>

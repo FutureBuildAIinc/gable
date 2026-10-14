@@ -28,7 +28,7 @@
     <rect class="label" x="62" y="100" width="132" height="106"/>
     <rect class="label" x="62" y="100" width="132" height="106" fill="none" stroke="#7a6a4a" stroke-width="0.6"/>
     <rect class="labelBand" x="62" y="100" width="132" height="22"/>
-    <text class="textBrand" x="128" y="116" font-size="13" fill="#faf3e0" text-anchor="middle">Ridgeline</text>
+    
     <rect class="labelBand" x="62" y="196" width="132" height="10"/>
     <text class="textSub" x="128" y="144" font-size="10" fill="#3a2a1a" text-anchor="middle">CONCRETE MIX</text>
     <text class="textSub" x="128" y="160" font-size="7" fill="#3a2a1a" text-anchor="middle" opacity="0.7">HIGH STRENGTH  FAST SET</text>

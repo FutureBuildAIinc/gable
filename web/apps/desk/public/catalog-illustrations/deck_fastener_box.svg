@@ -22,7 +22,7 @@
     <rect class="boxFront" x="38" y="84" width="160" height="120"/>
     <rect class="boxRim" x="38" y="200" width="158" height="4" opacity="0.6"/>
   </g>
-  <text class="textBrand" x="118" y="116" font-size="13" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+  
   <rect x="54" y="124" width="128" height="1" fill="#faf3e0" opacity="0.6"/>
   <text class="textSub" x="118" y="144" font-size="8" fill="#faf3e0" text-anchor="middle">HIDDEN DECK</text>
   <text class="textSub" x="118" y="156" font-size="8" fill="#faf3e0" text-anchor="middle">FASTENERS</text>

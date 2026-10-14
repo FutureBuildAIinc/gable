@@ -7,7 +7,7 @@
   <rect x="64" y="100" width="128" height="56" fill="#faf6e8"/>
   <rect x="64" y="100" width="128" height="56" fill="none" stroke="#6a4a20" stroke-width="1"/>
   <rect x="70" y="106" width="116" height="6" fill="#c84a2e"/>
-  <text x="128" y="124" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#2a2c30" text-anchor="middle">ProFrame</text>
+  
   <text x="128" y="138" font-family="Arial, sans-serif" font-size="8" fill="#2a2c30" text-anchor="middle">WOOD SCREWS</text>
   <text x="128" y="150" font-family="Arial, sans-serif" font-size="7" fill="#2a2c30" text-anchor="middle">3 IN #8 1 LB</text>
   <g transform="translate(72,170)">

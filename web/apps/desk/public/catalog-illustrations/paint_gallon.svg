@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>One gallon paint can, Ridgeline exterior satin</title>
+  <title>One gallon paint can, exterior satin</title>
   <defs><style>
     .canBody{fill:#f0e4cc}
     .canShade{fill:#d8c8a4}
@@ -34,7 +34,7 @@
     <rect class="label" x="58" y="108" width="100" height="86"/>
     <rect class="labelBand" x="58" y="108" width="100" height="22"/>
     <rect class="labelBand" x="58" y="178" width="100" height="16"/>
-    <text class="textBrand" x="108" y="124" font-size="14" fill="#faf3e0" text-anchor="middle">RIDGELINE</text>
+    
     <rect class="labelAccent" x="64" y="138" width="6" height="30"/>
     <text class="textSub" x="74" y="150" font-size="7" fill="#3a3e44">EXTERIOR</text>
     <text class="textSub" x="74" y="160" font-size="7" fill="#3a3e44">LATEX</text>

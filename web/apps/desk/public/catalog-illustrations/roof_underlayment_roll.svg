@@ -41,7 +41,7 @@
   <g>
     <rect class="label" x="92" y="130" width="72" height="22" rx="1"/>
     <rect x="92" y="130" width="72" height="3" fill="#c84a2e"/>
-    <text class="labelText" x="128" y="144" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="700" letter-spacing="1" text-anchor="middle">RIDGELINE</text>
+    
     <text class="labelText" x="128" y="150" font-family="Verdana,Arial,sans-serif" font-size="4" font-weight="600" letter-spacing="0.5" text-anchor="middle">SYNTHETIC 10 SQ</text>
   </g>
 </svg>

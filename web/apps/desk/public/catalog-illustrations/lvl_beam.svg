@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>ProFrame LVL engineered beam</title>
+  <title>LVL engineered beam</title>
   <defs><style>
     .face{fill:#c89868}
     .faceHi{fill:#d8ad7c}
@@ -45,7 +45,7 @@
   <g>
     <rect class="stamp" x="74" y="132" width="108" height="34" rx="2"/>
     <rect class="stampHi" x="74" y="132" width="108" height="3" rx="1"/>
-    <text x="128" y="148" font-family="Verdana,Arial,sans-serif" font-size="11" font-weight="700" letter-spacing="2" fill="#f0e0c0" text-anchor="middle">ProFrame</text>
+    
     <text x="128" y="160" font-family="Verdana,Arial,sans-serif" font-size="5" font-weight="600" letter-spacing="1.5" fill="#e0d0a0" text-anchor="middle">LVL 1.75 x 11.875 x 22</text>
   </g>
 </svg>

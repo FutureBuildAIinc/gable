@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>Stone brand claw hammer with hickory handle</title>
+  <title>claw hammer with hickory handle</title>
   <defs>
     <style>
       .headMain{fill:#5a5d66}
@@ -44,6 +44,6 @@
       <ellipse class="headHi" cx="74" cy="76" rx="6" ry="6" opacity="0.6"/>
       <ellipse class="headShade" cx="78" cy="84" rx="6" ry="6" opacity="0.6"/>
     </g>
-    <text class="textBrand" x="128" y="172" font-size="9" fill="#faf3e0" text-anchor="middle">STONE</text>
+    
   </g>
 </svg>

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>Stone brand 20 inch hand saw with hardpoint teeth</title>
+  <title>20 inch hand saw with hardpoint teeth</title>
   <defs>
     <style>
       .bladeMain{fill:#cdcdcd}
@@ -20,7 +20,7 @@
     <rect class="bladeMain" x="22" y="76" width="160" height="20" rx="1"/>
     <rect class="bladeHi" x="22" y="76" width="160" height="3" opacity="0.6"/>
     <rect class="bladeShade" x="22" y="92" width="160" height="4" opacity="0.6"/>
-    <text class="textBrand" x="74" y="90" font-size="8" fill="#3a3d44" text-anchor="middle">STONE</text>
+    
   </g>
   <g>
     <polygon class="tooth" points="22,96 26,96 24,100"/>

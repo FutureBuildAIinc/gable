@@ -34,7 +34,7 @@
     <rect class="label" x="48" y="118" width="68" height="50" rx="1"/>
     <rect class="labelAccent" x="48" y="118" width="68" height="6"/>
     <rect class="labelAccent" x="48" y="162" width="68" height="6"/>
-    <text class="textBrand" x="82" y="138" font-size="11" fill="#1a3a6e" text-anchor="middle">STONE</text>
+    
     <text class="textSub" x="82" y="150" font-size="6" fill="#1a3a6e" text-anchor="middle">SHOP TOWELS</text>
     <text class="textCt" x="82" y="160" font-size="6" fill="#1a3a6e" text-anchor="middle">200 CT</text>
   </g>

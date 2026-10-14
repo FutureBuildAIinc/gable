@@ -23,7 +23,7 @@
     <rect class="boxFront" x="42" y="82" width="158" height="104"/>
     <rect class="boxRim" x="42" y="184" width="158" height="2" opacity="0.6"/>
   </g>
-  <text class="textBrand" x="120" y="116" font-size="14" fill="#3a2410" text-anchor="middle">ProFrame</text>
+  
   <rect x="58" y="124" width="126" height="1" fill="#3a2410" opacity="0.6"/>
   <text class="textSub" x="120" y="146" font-size="9" fill="#3a2410" text-anchor="middle">GALV NAILS</text>
   <text class="textSub" x="120" y="160" font-size="6.5" fill="#3a2410" text-anchor="middle" opacity="0.7">HOT DIPPED  3-1/2 IN  QTY 320</text>

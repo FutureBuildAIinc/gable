@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>ProFrame random orbit sander</title>
+  <title>random orbit sander</title>
   <defs><style>
     .body{fill:#c84a2e}
     .bodyHi{fill:#e0685a}
@@ -34,7 +34,7 @@
     <path class="topHi" d="M 60 100 L 196 100 L 196 106 L 60 106 Z"/>
     <path class="topShade" d="M 60 156 L 196 156 L 196 162 L 60 162 Z"/>
     <rect class="accent" x="60" y="116" width="136" height="14"/>
-    <text class="textBrand" x="128" y="127" font-size="11" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    
     <rect x="68" y="138" width="14" height="3" fill="#3a3530"/>
     <rect x="86" y="138" width="14" height="3" fill="#3a3530"/>
     <rect x="104" y="138" width="14" height="3" fill="#3a3530"/>

@@ -22,7 +22,7 @@
     <rect class="label" x="40" y="106" width="148" height="40"/>
     <rect class="labelBand" x="40" y="106" width="148" height="6"/>
     <rect class="labelBand" x="40" y="140" width="148" height="6"/>
-    <text class="textBrand" x="114" y="120" font-size="11" fill="#faf3e0" text-anchor="middle">RIDGELINE</text>
+    
     <text class="textSub" x="114" y="132" font-size="6" fill="#2d4a3a" text-anchor="middle">SILICONE CAULK</text>
     <rect class="labelAccent" x="44" y="106" width="2" height="40"/>
     <rect class="labelAccent" x="184" y="106" width="2" height="40"/>

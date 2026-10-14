@@ -37,7 +37,7 @@
   <g>
     <rect class="tag" x="84" y="118" width="92" height="68" rx="1"/>
     <rect class="stamp" x="84" y="118" width="92" height="6"/>
-    <text class="textBrand" x="130" y="134" font-size="12" fill="#faf3e0" text-anchor="middle">RIDGELINE</text>
+    
     <rect x="92" y="138" width="76" height="2" fill="#3a2410" opacity="0.6"/>
     <text class="textSub" x="130" y="152" font-size="7" fill="#3a2410" text-anchor="middle">CEDAR MULCH</text>
     <text class="textSub" x="130" y="164" font-size="5" fill="#7a4a20" text-anchor="middle">PREMIUM BARK</text>

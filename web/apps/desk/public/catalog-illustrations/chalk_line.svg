@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>Stone brand 100 ft chalk line reel</title>
+  <title>100 ft chalk line reel</title>
   <defs>
     <style>
       .bodyMain{fill:#c84a3d}
@@ -23,7 +23,7 @@
     <circle class="bodyAccent" cx="92" cy="120" r="6"/>
     <circle class="bodyMain" cx="100" cy="120" r="3"/>
     <rect class="bodyAccent" x="60" y="170" width="64" height="10" rx="2"/>
-    <text class="textBrand" x="92" y="124" font-size="9" fill="#faf3e0" text-anchor="middle">STONE</text>
+    
   </g>
   <g>
     <rect class="handle" x="156" y="106" width="64" height="28" rx="6"/>

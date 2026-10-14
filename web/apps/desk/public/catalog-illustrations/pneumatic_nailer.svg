@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <title>ProFrame pneumatic framing nailer</title>
+  <title>pneumatic framing nailer</title>
   <defs><style>
     .body{fill:#c84a2e}
     .bodyHi{fill:#e0685a}
@@ -24,7 +24,7 @@
     <rect class="bodyHi" x="40" y="64" width="170" height="6" rx="3"/>
     <rect class="bodyShade" x="40" y="130" width="170" height="10" rx="4"/>
     <rect class="accent" x="40" y="92" width="170" height="14"/>
-    <text class="textBrand" x="124" y="103" font-size="11" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    
   </g>
   <g>
     <rect class="magazine" x="200" y="74" width="22" height="62" rx="2"/>
