@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -138,6 +139,9 @@ func (h *Handler) HandleGenerateDescriptions(w http.ResponseWriter, r *http.Requ
 
 	content, err := h.service.GenerateDescriptions(r.Context(), id, req.Tone, req.Audience)
 	if err != nil {
+		if respondAIOff(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to generate descriptions", http.StatusInternalServerError, err)
 		return
 	}
@@ -161,6 +165,9 @@ func (h *Handler) HandleGenerateSEO(w http.ResponseWriter, r *http.Request) {
 
 	content, err := h.service.GenerateSEO(r.Context(), id, req.TargetKeywords)
 	if err != nil {
+		if respondAIOff(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to generate SEO", http.StatusInternalServerError, err)
 		return
 	}
@@ -184,6 +191,9 @@ func (h *Handler) HandleGenerateImage(w http.ResponseWriter, r *http.Request) {
 
 	media, err := h.service.GenerateImage(r.Context(), id, req.Style, req.Prompt)
 	if err != nil {
+		if respondAIOff(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to generate image", http.StatusInternalServerError, err)
 		return
 	}
@@ -211,6 +221,9 @@ func (h *Handler) HandleGenerateCollateral(w http.ResponseWriter, r *http.Reques
 
 	collateral, err := h.service.GenerateCollateral(r.Context(), id, req.Type, req.Tone, req.Audience)
 	if err != nil {
+		if respondAIOff(w, r, err) {
+			return
+		}
 		httputil.RespondError(w, r, "failed to generate collateral", http.StatusInternalServerError, err)
 		return
 	}
@@ -310,4 +323,16 @@ func (h *Handler) HandleDeleteCollateral(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// respondAIOff answers an AI off error as the module's error envelope: a 409
+// with the stable code ai_off and the plain sentence a person reads. It
+// reports whether it answered.
+func respondAIOff(w http.ResponseWriter, r *http.Request, err error) bool {
+	msg, ok := ai.OffMessage(err)
+	if !ok {
+		return false
+	}
+	httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: ai.CodeAIOff, Message: msg})
+	return true
 }

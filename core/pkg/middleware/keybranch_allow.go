@@ -216,6 +216,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/vendors":                                         {KeyBranchClassRefused, "the vendor master is dealer wide; the read stays a stated limit"},
 	"PUT /api/v1/admin/modules/{id}":                               {KeyBranchClassRefused, "a module kill switch is a dealer wide write; the read stays a stated limit"},
 	"PUT /api/v1/admin/settings/ai":                                {KeyBranchClassRefused, "a dealer wide configuration write (the provider key and base URL); the read stays a stated limit"},
+	"POST /api/v1/admin/settings/ai/test":                          {KeyBranchClassRefused, "a dealer wide configuration action that spends the provider key; no branch binds it"},
 	"PUT /api/v1/admin/settings/routing":                           {KeyBranchClassRefused, "a dealer wide configuration write (the provider key and base URL); the read stays a stated limit"},
 	"PUT /api/v1/admin/staff/{id}":                                 {KeyBranchClassRefused, "the staff roster and its module grants span every branch"},
 	"PUT /api/v1/charge-codes/{id}":                                {KeyBranchClassRefused, "charge codes carry a revenue account and no branch column; the reads stay stated limits"},

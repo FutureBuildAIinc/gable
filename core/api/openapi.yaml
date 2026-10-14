@@ -695,9 +695,9 @@ paths:
     get:
       operationId: adminGetAISettings
       tags: [admin]
-      summary: Show the OpenRouter key status
+      summary: Show the AI provider settings
       description: >-
-        Admin or owner, or a key holding admin:settings. Never returns the key: key_hint is the first 10 and last 4 characters joined by three dots (four asterisks for a key of 12 characters or fewer), and null when no key is configured. base_url is present only when an admin override is stored, null otherwise. revision is the resource's revision anchor and rides the ETag.
+        Admin or owner, or a key holding admin:settings. Never returns a key: key_hint and anthropic_key_hint are four asterisks and the last 4 characters (four asterisks alone for a key of 12 characters or fewer), and null when no key is configured. provider is openrouter or anthropic; model is the effective Anthropic model; vault_present says whether a key can be saved sealed. base_url is present only when an admin override is stored, null otherwise. revision is the resource's revision anchor and rides the ETag.
       responses:
         "200":
           description: The settings document.
@@ -716,9 +716,9 @@ paths:
     put:
       operationId: adminSaveAISettings
       tags: [admin]
-      summary: Save the OpenRouter key and base URL
+      summary: Save the AI provider, model and keys
       description: >-
-        Admin or owner, or a key holding admin:settings. api_key is required. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
+        Admin or owner, or a key holding admin:settings. A save must change something: api_key (the OpenRouter key) is required only when the body names no provider, model, base_url or anthropic_api_key, so a provider alone switches back to OpenRouter and keeps both keys. The settings take effect at once, no cached value outlives the save. The Anthropic key is sealed at rest and refused with a 400 naming anthropic_api_key when the server has no vault key; a model below Sonnet 5.5 is a 400 naming model. The audit row and event record the provider and model, never a key. base_url is absent (leave the override as it is), a URL (set the override; http and non host URLs are refused) or empty (clear the override, reverting to the environment default). The save, its audit row and the admin_settings.saved event are one transaction on the resource's revision: a write without a precondition is 428, a stale one 409, and the answer carries the new revision in body and ETag.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - name: If-Match
@@ -773,6 +773,23 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/WireConflict"}
         "428": {$ref: "#/components/responses/WirePreconditionRequired"}
+        "500": {$ref: "#/components/responses/WireInternalError"}
+  /api/v1/admin/settings/ai/test:
+    post:
+      operationId: adminTestAIConnection
+      tags: [admin]
+      summary: Test the AI provider connection
+      description: >-
+        Admin or owner, or a key holding admin:settings. Makes the cheapest call the active provider allows (one output token) and answers ok, or ok false with the provider's error in words. Never returns the key.
+      responses:
+        "200":
+          description: The test result.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminTestAIResult"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/WireInternalError"}
   /api/v1/admin/settings/routing:
     get:
@@ -8959,7 +8976,7 @@ paths:
       tags: [parsing]
       summary: Parse a material list upload into catalog matched items
       description: >-
-        Accepts multipart/form-data with one file field named file: an image, a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose sniffed type is octet-stream or zip is treated as a spreadsheet and converted to tab separated text before extraction; an unreadable spreadsheet is a 400). The whole request body is capped at 10 MiB by the server's request size middleware and the file read at 10 MiB; a body over the cap, an unparseable form or a missing file field is a 400. Requires the role admin, owner or sales. Extracted lines are matched against the whole product catalog. When the AI extractor is unavailable (OPENROUTER_API_KEY unset, the default, or the call failed) the response is still 200 but items is a fixed demo list, not the file's contents, and synthetic is true with synthetic_reason filled. source_image is always a base64 data URI of the real upload. A catalog or extraction failure is a 500.
+        Accepts multipart/form-data with one file field named file: an image, a PDF, a CSV or an xlsx spreadsheet (a name ending .xlsx or .xls whose sniffed type is octet-stream or zip is treated as a spreadsheet and converted to tab separated text before extraction; an unreadable spreadsheet is a 400). The whole request body is capped at 10 MiB by the server's request size middleware and the file read at 10 MiB; a body over the cap, an unparseable form or a missing file field is a 400. Requires the role admin, owner or sales. Extracted lines are matched against the whole product catalog. When the AI extractor is unavailable (AI is off, the default until an administrator enters a key in Tech Admin, AI, or the call failed) the response is still 200 but items is a fixed demo list, not the file's contents, and synthetic is true with synthetic_reason filled. source_image is always a base64 data URI of the real upload. A catalog or extraction failure is a 500.
       security:
         - BearerJWT: []
       parameters:
@@ -12541,7 +12558,7 @@ paths:
       tags:
         - product
       summary: Generate PIM collateral
-      description: Answers 500 when no AI client is configured.
+      description: Answers 409 with code ai_off when AI is off.
       parameters:
         - name: id
           in: path
@@ -12571,7 +12588,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -12584,7 +12601,7 @@ paths:
       tags:
         - product
       summary: Generate PIM descriptions
-      description: Answers 500 when no AI client is configured.
+      description: Answers 409 with code ai_off when AI is off.
       parameters:
         - name: id
           in: path
@@ -12614,7 +12631,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -12656,7 +12673,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -12669,7 +12686,7 @@ paths:
       tags:
         - product
       summary: Generate PIM SEO content
-      description: Answers 500 when no AI client is configured.
+      description: Answers 409 with code ai_off when AI is off.
       parameters:
         - name: id
           in: path
@@ -12699,7 +12716,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenEither'
         '409':
-          $ref: '#/components/responses/IdempotencyConflict'
+          $ref: '#/components/responses/AIOffEither'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -13454,7 +13471,7 @@ paths:
       tags: [purchaseOrder]
       summary: Upload a freight invoice
       description: >-
-        Roles admin, owner, purchasing. Multipart form with a file field, 10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction must be configured. Every service failure (wrong status, no AI, bad extraction, nothing received) is a 400, not a 500. Returns 200, not 201.
+        Roles admin, owner, purchasing. Multipart form with a file field, 10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction must be configured. A wrong status, a bad extraction or nothing received is a 400, not a 500; AI off (no key for the chosen provider) is a 409 with code ai_off and a message saying an administrator turns it on in Tech Admin, AI. Returns 200, not 201.
       parameters:
         - name: id
           in: path
@@ -15411,6 +15428,13 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/WireError"
+    AIOffEither:
+      description: >-
+        AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer (image generation under the Anthropic provider). The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     ConflictEither:
       description: >-
         Either the handler reports a conflict with the resource's current state (the standard error envelope, code CONFLICT), or the idempotency layer reports the Idempotency-Key in progress (the ADR 0001 envelope, code idempotency_in_progress).
@@ -15644,6 +15668,7 @@ components:
                 - conflict
                 - payment_required
                 - charge_not_reversed
+                - ai_off
                 - precondition_failed
                 - payload_too_large
                 - unsupported_media_type
@@ -16183,7 +16208,7 @@ components:
           $ref: "#/components/schemas/ApiKey"
     AISettings:
       type: object
-      required: [configured, source, key_hint, base_url, revision]
+      required: [configured, source, key_hint, base_url, revision, provider, model, anthropic_configured, anthropic_key_hint, vault_present]
       description: >-
         Go type techadmin.AISettings. source is admin (a stored override), env (a key from the environment only) or none. key_hint and base_url are null when absent, never omitted.
       properties:
@@ -16198,6 +16223,26 @@ components:
           type: [string, "null"]
         revision:
           type: integer
+        provider:
+          type: string
+          enum: [openrouter, anthropic]
+        model:
+          type: string
+        anthropic_configured:
+          type: boolean
+        anthropic_key_hint:
+          type: [string, "null"]
+        vault_present:
+          type: boolean
+    AdminTestAIResult:
+      type: object
+      required: [ok, message]
+      description: Go type techadmin.TestResult. A provider failure is ok false with its words, never the key.
+      properties:
+        ok:
+          type: boolean
+        message:
+          type: string
     RoutingSettings:
       type: object
       required: [configured, source, key_hint, revision]
@@ -16216,12 +16261,18 @@ components:
       type: object
       description: >-
         Go type techadmin.SaveAISettingsRequest. base_url is a pointer: absent leaves the override, empty clears it, a URL sets it. revision is the body form of the If-Match precondition.
-      required: [api_key]
       properties:
         api_key:
           type: string
         base_url:
           type: [string, "null"]
+        provider:
+          type: string
+          enum: [openrouter, anthropic]
+        model:
+          type: string
+        anthropic_api_key:
+          type: string
         revision:
           type: integer
     AdminSaveRoutingSettingsRequest:

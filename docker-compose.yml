@@ -66,6 +66,10 @@ services:
       SMTP_PORT: ${GABLE_SMTP_PORT:-}
       SMTP_TLS: ${GABLE_SMTP_TLS:-}
       SMTP_FROM: ${GABLE_SMTP_FROM:-}
+      # Seals the AI keys an admin enters in Tech Admin. Empty by default (no
+      # key can then be stored); set it in the shell to 64 hex characters,
+      # the same value each run, never in a file. See docs/modules/tech-admin.md.
+      PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -80,6 +84,10 @@ services:
     command: ["./core", "worker"]
     environment:
       AUTH_MODE: dev
+      # Seals the AI keys an admin enters in Tech Admin. Empty by default (no
+      # key can then be stored); set it in the shell to 64 hex characters,
+      # the same value each run, never in a file. See docs/modules/tech-admin.md.
+      PAYMENT_VAULT_KEY: ${PAYMENT_VAULT_KEY:-}
       DATABASE_URL: postgres://${POSTGRES_USER:-gable_user}:${POSTGRES_PASSWORD:-gable_password}@postgres:5432/${POSTGRES_DB:-gable_db}?sslmode=disable
     healthcheck:
       test: ["CMD-SHELL", "pidof core >/dev/null"]

@@ -5,8 +5,10 @@ package techadmin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -44,6 +46,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/admin/settings/ai", guard(h.GetAISettings))
 	mux.HandleFunc("PUT /api/v1/admin/settings/ai", guard(h.SaveAISettings))
 	mux.HandleFunc("DELETE /api/v1/admin/settings/ai", guard(h.DeleteAISettings))
+	mux.HandleFunc("POST /api/v1/admin/settings/ai/test", guard(h.TestAIConnection))
 	mux.HandleFunc("GET /api/v1/admin/settings/routing", guard(h.GetRoutingSettings))
 	mux.HandleFunc("PUT /api/v1/admin/settings/routing", guard(h.SaveRoutingSettings))
 	mux.HandleFunc("DELETE /api/v1/admin/settings/routing", guard(h.DeleteRoutingSettings))
@@ -241,19 +244,34 @@ func (h *Handler) SaveAISettings(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	apiKey, baseURL, revision, err := req.Parse()
+	save, revision, err := req.Parse()
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
-	out, err := h.service.SaveAISettings(r.Context(), apiKey, baseURL,
+	out, err := h.service.SaveAISettingsFull(r.Context(), save,
 		Precondition{IfMatch: r.Header.Get("If-Match"), Revision: revision})
+	if errors.Is(err, ai.ErrNoVault) {
+		v := &httpx.Validator{}
+		v.Check(false, "anthropic_api_key", "cannot be stored: no vault key is configured on this server, so the key would sit in plain text; set PAYMENT_VAULT_KEY and restart")
+		err = v.Err()
+	}
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return
 	}
 	httpx.WriteRevisionETag(w, out.Revision)
 	writeJSON(w, http.StatusOK, out)
+}
+
+// TestAIConnection makes the cheapest call the active provider allows and
+// answers ok or the provider's error in words; never the key.
+func (h *Handler) TestAIConnection(w http.ResponseWriter, r *http.Request) {
+	if err := noQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, h.service.TestAIConnection(r.Context()))
 }
 
 func (h *Handler) DeleteAISettings(w http.ResponseWriter, r *http.Request) {

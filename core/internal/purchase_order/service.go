@@ -712,7 +712,7 @@ type ReceiveLineInput struct {
 // enter the freight total manually — it never silently succeeds with a zero total.
 func (s *Service) extractFreight(ctx context.Context, fileBytes []byte, contentType string) (*ai.FreightInvoiceResult, string, error) {
 	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
-		return nil, "", fmt.Errorf("AI service not configured — please enter the freight total manually")
+		return nil, "", ai.ErrAIOff
 	}
 	result, raw, err := s.aiClient.ExtractFreightInvoice(ctx, fileBytes, contentType)
 	if err != nil {
@@ -732,6 +732,12 @@ func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, file
 
 	if po.Status != StatusReceived && po.Status != StatusPartialReceive {
 		return nil, fmt.Errorf("PO must be in RECEIVED or PARTIAL status to upload freight (current: %s)", po.Status)
+	}
+
+	// AI off is answered before the file is saved: a person with no key
+	// enters the freight total by hand.
+	if s.aiClient == nil || !s.aiClient.IsConfigured(ctx) {
+		return nil, ai.ErrAIOff
 	}
 
 	// Save the file to disk

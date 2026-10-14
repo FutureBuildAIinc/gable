@@ -485,6 +485,7 @@ func TestKeyBranchPin_StatedLimitWritesRefused(t *testing.T) {
 	for _, c := range []struct{ method, path, body string }{
 		{"PUT", "/api/v1/admin/settings/ai", `{"provider":"avalara"}`},
 		{"DELETE", "/api/v1/admin/settings/ai", ""},
+		{"POST", "/api/v1/admin/settings/ai/test", ""},
 		{"PUT", "/api/v1/admin/settings/routing", `{"provider":"avalara"}`},
 		{"DELETE", "/api/v1/admin/settings/routing", ""},
 		{"PUT", "/api/v1/admin/modules/" + uuid.NewString(), `{"is_enabled":false}`},

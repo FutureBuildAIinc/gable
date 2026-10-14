@@ -70,23 +70,46 @@ func (r *CreateKeyRequest) Parse() (name string, scopes []string, branch *uuid.U
 // (clear the override, reverting to the environment default) stay distinct.
 // Revision is the body's precondition; If-Match serves the same role.
 type SaveAISettingsRequest struct {
-	APIKey   *string         `json:"api_key"`
-	BaseURL  *string         `json:"base_url"`
-	Revision json.RawMessage `json:"revision"`
+	APIKey          *string         `json:"api_key"`
+	BaseURL         *string         `json:"base_url"`
+	Provider        *string         `json:"provider"`
+	Model           *string         `json:"model"`
+	AnthropicAPIKey *string         `json:"anthropic_api_key"`
+	Revision        json.RawMessage `json:"revision"`
 }
 
 // Parse validates the save, collecting every problem into one 400. A bad
-// base URL is reported here, before anything is written, so a refused save
-// never leaves half the settings behind.
-func (r *SaveAISettingsRequest) Parse() (apiKey string, baseURL *string, revision *int64, err error) {
+// base URL or model is reported here, before anything is written, so a
+// refused save never leaves half the settings behind. An OpenRouter key
+// is required only when the save names nothing else.
+func (r *SaveAISettingsRequest) Parse() (save AISave, revision *int64, err error) {
 	v := &httpx.Validator{}
-	apiKey = ""
+	var apiKey, provider, model, akey string
 	if r.APIKey != nil {
 		apiKey = *r.APIKey
 	}
-	if strings.TrimSpace(apiKey) == "" {
+	if r.Provider != nil {
+		provider = strings.TrimSpace(*r.Provider)
+	}
+	if r.Model != nil {
+		model = strings.TrimSpace(*r.Model)
+	}
+	if r.AnthropicAPIKey != nil {
+		akey = strings.TrimSpace(*r.AnthropicAPIKey)
+	}
+	if provider != "" && provider != ai.ProviderOpenRouter && provider != ai.ProviderAnthropic {
+		v.Check(false, "provider", "must be openrouter or anthropic")
+	}
+	if verr := ai.ValidateAnthropicModel(model); verr != nil {
+		v.Check(false, "model", verr.Error())
+	}
+	// A save must change something: an OpenRouter key is required only when
+	// the body names nothing else, so a provider or model alone (switching
+	// back to OpenRouter) is a valid save.
+	if strings.TrimSpace(apiKey) == "" && akey == "" && provider == "" && model == "" && r.BaseURL == nil {
 		v.Check(false, "api_key", "is required")
 	}
+	var baseURL *string
 	if r.BaseURL != nil {
 		u := strings.TrimSpace(*r.BaseURL)
 		if u != "" {
@@ -101,9 +124,15 @@ func (r *SaveAISettingsRequest) Parse() (apiKey string, baseURL *string, revisio
 		revision = &n
 	}
 	if err := v.Err(); err != nil {
-		return "", nil, nil, err
+		return AISave{}, nil, err
 	}
-	return apiKey, baseURL, revision, nil
+	return AISave{
+		APIKey:          strings.TrimSpace(apiKey),
+		BaseURL:         baseURL,
+		Provider:        provider,
+		Model:           model,
+		AnthropicAPIKey: akey,
+	}, revision, nil
 }
 
 // SaveRoutingSettingsRequest is the body of PUT /api/v1/admin/settings/routing.

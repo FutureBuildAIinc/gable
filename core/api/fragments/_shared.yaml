@@ -225,6 +225,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/WireError"
+    AIOffEither:
+      description: >-
+        AI is off (code ai_off): no key for the chosen provider, a stored key
+        the vault cannot open, or a feature the chosen provider does not
+        offer (image generation under the Anthropic provider). The message
+        says that an administrator turns it on in Tech Admin, AI. Or the
+        idempotency layer reports the Idempotency-Key in progress (code
+        idempotency_in_progress). Both are the ADR 0001 envelope.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
     ConflictEither:
       description: >-
         Either the handler reports a conflict with the resource's current state
@@ -422,6 +434,7 @@ components:
                 - conflict
                 - payment_required
                 - charge_not_reversed
+                - ai_off
                 - precondition_failed
                 - payload_too_large
                 - unsupported_media_type

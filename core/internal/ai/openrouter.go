@@ -39,6 +39,17 @@ type Client struct {
 	models       *ModelRouter
 	httpClient   *http.Client
 	maestro      *MaestroClient // optional: routes text AI through Brain (dead code today)
+
+	// The native Anthropic provider (see anthropic.go). The provider is chosen
+	// in settings; the key lives sealed in system_settings and has no
+	// environment fallback.
+	provider            string
+	providerStore       *KeyStore
+	anthropicKey        string
+	anthropicKeyStore   *KeyStore
+	anthropicModel      string
+	anthropicModelStore *KeyStore
+	anthropicBaseURL    string // tests only
 }
 
 const (
@@ -136,9 +147,86 @@ func (c *Client) getBaseURL(ctx context.Context) string {
 	return strings.TrimRight(candidate, "/")
 }
 
-// IsConfigured returns true if an API key is available (from DB or env/static).
+// IsConfigured returns true if the active provider has its key (from DB or
+// env/static for OpenRouter; the sealed admin key for Anthropic).
 func (c *Client) IsConfigured(ctx context.Context) bool {
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicKeyValue(ctx) != ""
+	}
 	return c.getKey(ctx) != ""
+}
+
+// ImageOffMessage is what a person sees when image generation is asked of the
+// Anthropic provider, which does not offer it. Nothing falls back to another
+// provider.
+const ImageOffMessage = "Image generation is off: it needs the OpenRouter provider, which an administrator chooses in Tech Admin, AI."
+
+// CheckImage reports whether image generation can run: AI off is ErrAIOff;
+// the Anthropic provider offers no image model, so it is an OffError naming
+// that reason, and no call goes to any other provider.
+func (c *Client) CheckImage(ctx context.Context) error {
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return NewOff(ImageOffMessage)
+	}
+	if c.getKey(ctx) == "" {
+		return ErrAIOff
+	}
+	return nil
+}
+
+// WithProvider fixes the provider (tests, static configs).
+func (c *Client) WithProvider(p string) *Client { c.provider = p; return c }
+
+// WithProviderStore attaches the admin-editable provider choice.
+func (c *Client) WithProviderStore(ks *KeyStore) *Client { c.providerStore = ks; return c }
+
+// WithAnthropicKey fixes the Anthropic key (tests only; serve uses the store).
+func (c *Client) WithAnthropicKey(k string) *Client { c.anthropicKey = k; return c }
+
+// WithAnthropicKeyStore attaches the store the sealed Anthropic key is read from.
+func (c *Client) WithAnthropicKeyStore(ks *KeyStore) *Client { c.anthropicKeyStore = ks; return c }
+
+// WithAnthropicModel fixes the Anthropic model (tests).
+func (c *Client) WithAnthropicModel(m string) *Client { c.anthropicModel = m; return c }
+
+// WithAnthropicModelStore attaches the admin-editable Anthropic model.
+func (c *Client) WithAnthropicModelStore(ks *KeyStore) *Client { c.anthropicModelStore = ks; return c }
+
+// WithAnthropicBaseURL points the Anthropic provider at a test server.
+func (c *Client) WithAnthropicBaseURL(u string) *Client { c.anthropicBaseURL = u; return c }
+
+func (c *Client) activeProvider(ctx context.Context) string {
+	if c.providerStore != nil {
+		if p := c.providerStore.Get(ctx); p == ProviderAnthropic || p == ProviderOpenRouter {
+			return p
+		}
+	}
+	if c.provider == ProviderAnthropic {
+		return ProviderAnthropic
+	}
+	return ProviderOpenRouter
+}
+
+// Invalidate drops every cached setting the client reads (keys, base URL,
+// provider, models), so the next call uses what an admin just saved.
+func (c *Client) Invalidate() {
+	for _, ks := range []*KeyStore{c.keyStore, c.baseURLStore, c.providerStore, c.anthropicKeyStore, c.anthropicModelStore} {
+		if ks != nil {
+			ks.Invalidate()
+		}
+	}
+	if c.models != nil {
+		for _, ks := range []*KeyStore{c.models.text, c.models.vision, c.models.cheap, c.models.image} {
+			ks.Invalidate()
+		}
+	}
+}
+
+func (c *Client) anthropicKeyValue(ctx context.Context) string {
+	if c.anthropicKeyStore != nil {
+		return c.anthropicKeyStore.Get(ctx)
+	}
+	return c.anthropicKey
 }
 
 // --- JWT context propagation for Maestro (dead code path, preserved) ---
@@ -383,7 +471,7 @@ func stripJSONFence(s string) string {
 func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResponse, error) {
 	apiKey := c.getKey(ctx)
 	if apiKey == "" {
-		return nil, fmt.Errorf("no OpenRouter API key configured")
+		return nil, ErrAIOff
 	}
 
 	body, err := json.Marshal(req)
@@ -403,7 +491,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("AI request failed: %w", err)
+		return nil, fmt.Errorf("AI request failed: %s", providerWords(err.Error(), apiKey))
 	}
 	defer resp.Body.Close()
 
@@ -413,11 +501,12 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		msg := string(respBody)
 		var errResp chatResponse
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
-			return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, errResp.Error.Message)
+			msg = errResp.Error.Message
 		}
-		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, providerWords(msg, apiKey))
 	}
 
 	var cr chatResponse
@@ -425,7 +514,7 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 	if cr.Error != nil {
-		return nil, fmt.Errorf("OpenRouter error: %s", cr.Error.Message)
+		return nil, fmt.Errorf("OpenRouter error: %s", providerWords(cr.Error.Message, apiKey))
 	}
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("empty response from AI (no choices)")
@@ -442,6 +531,9 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 func (c *Client) Generate(ctx context.Context, systemPrompt, userPrompt string, maxTokens int) (string, string, error) {
 	if maxTokens == 0 {
 		maxTokens = 2048
+	}
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicGenerate(ctx, systemPrompt, userPrompt, maxTokens)
 	}
 
 	msgs := make([]chatMessage, 0, 2)
@@ -472,6 +564,9 @@ func (c *Client) Generate(ctx context.Context, systemPrompt, userPrompt string, 
 // (base64 data-URI, resolved model, error). The data URI is exactly the
 // "data:image/...;base64,..." shape callers persist directly.
 func (c *Client) GenerateImage(ctx context.Context, prompt, style string) (string, string, error) {
+	if err := c.CheckImage(ctx); err != nil {
+		return "", "", err
+	}
 	fullPrompt := prompt
 	if style != "" {
 		fullPrompt = fmt.Sprintf("%s. Style: %s", prompt, style)
@@ -530,7 +625,21 @@ Rules:
 // 400); the no-key guard here is a backstop that preserves the helpful message.
 func (c *Client) ExtractFreightInvoice(ctx context.Context, fileBytes []byte, contentType string) (*FreightInvoiceResult, string, error) {
 	if !c.IsConfigured(ctx) {
-		return nil, "", fmt.Errorf("no AI key configured — please enter the freight total manually")
+		return nil, "", ErrAIOff
+	}
+
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		raw, err := c.anthropicFileCall(ctx, freightSystemPrompt,
+			"Extract the freight charge details from this invoice. Return JSON with total_amount, carrier_name, and invoice_number.",
+			fileBytes, contentType, 1024)
+		if err != nil {
+			return nil, "", err
+		}
+		var result FreightInvoiceResult
+		if err := json.Unmarshal([]byte(stripJSONFence(raw)), &result); err != nil {
+			return nil, raw, fmt.Errorf("failed to parse AI response as JSON: %w", err)
+		}
+		return &result, raw, nil
 	}
 
 	content, plugins, err := buildFileContent(fileBytes, contentType,
@@ -605,7 +714,13 @@ func (c *Client) ExtractMaterialList(ctx context.Context, fileBytes []byte, cont
 	}
 
 	if !c.IsConfigured(ctx) {
-		return "", fmt.Errorf("no AI key configured")
+		return "", ErrAIOff
+	}
+
+	if c.activeProvider(ctx) == ProviderAnthropic {
+		return c.anthropicFileCall(ctx, systemPrompt,
+			"Extract all material list items from this document. Output each item as: QUANTITY UOM - DESCRIPTION",
+			fileBytes, contentType, 4096)
 	}
 
 	content, plugins, err := buildFileContent(fileBytes, contentType,
