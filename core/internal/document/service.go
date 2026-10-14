@@ -527,12 +527,7 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 			m.AddRow(10, text.NewCol(12, "Net balance: "+money(c.NetBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
 		}
 		if len(c.OpenDocuments) > 0 {
-			heading := "Open documents"
-			if branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx); branch != nil || grants != nil {
-				// the list follows the printing yard's reach; the balance and the aging cover the account
-				heading = "Open documents at this yard"
-			}
-			m.AddRow(10, text.NewCol(12, heading, props.Text{Style: fontstyle.Bold, Top: 3}))
+			m.AddRow(10, text.NewCol(12, "Open documents", props.Text{Style: fontstyle.Bold, Top: 3}))
 			for _, d := range c.OpenDocuments {
 				due := ""
 				if d.DueDate != nil {
@@ -545,6 +540,17 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 					text.NewCol(3, money(d.OpenCents), props.Text{Size: 9, Align: align.Right}),
 				)
 			}
+		}
+	}
+	// The documents listed follow the printing yard's reach; the balance and the
+	// aging cover the whole account (FROM-PRINCIPAL 117): one line says so.
+	if branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx); branch != nil || grants != nil {
+		listed := false
+		for _, c := range st.Currencies {
+			listed = listed || len(c.OpenDocuments) > 0 || len(c.UnappliedPayments) > 0
+		}
+		if listed {
+			m.AddRow(10, text.NewCol(12, "Documents listed are those this yard can see; the balance covers the whole account.", props.Text{Size: 8, Top: 3}))
 		}
 	}
 	b.remitRow(m)

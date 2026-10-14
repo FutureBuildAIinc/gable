@@ -326,8 +326,7 @@ export class CustomerStatementPage extends LitElement {
 
                     ${cur.open_documents.length > 0 ? html`
                         <div class="mt-6">
-                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-1">Open documents</h3>
-                            <p class="text-xs text-zinc-500 mb-3" data-testid="open-documents-scope">Open documents follow the yard you are working at; the closing balance and the aging cover the whole account.</p>
+                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">Open documents</h3>
                             <table class="w-full text-sm text-left">
                                 <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
                                     <tr>
