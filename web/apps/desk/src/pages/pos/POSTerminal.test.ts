@@ -1899,6 +1899,32 @@ describe('the resets after Clear tenders and Clear sale', () => {
     el.remove();
   });
 
+  it('puts a tender that was pressed but not added back to none on Clear sale', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    svc.removeItem
+      .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
+      .mockResolvedValueOnce(sale({ lines: [], subtotal_cents: 0, tax_cents: 0, total_cents: 0 }));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-cash').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual(['cash']);
+    q(el, 'pos-clear-sale').click();
+    await settle();
+    await el.updateComplete;
+    (el as unknown as { _sale: Sale })._sale = sale({
+      lines: [line('n', 5000)] as unknown as Sale['lines'], subtotal_cents: 5000, tax_cents: 0, total_cents: 5000,
+    });
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    confirm.mockRestore();
+    el.remove();
+  });
+
   it('drops the added tenders on Clear sale, so the next lines are not paid on them', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     svc.removeItem
