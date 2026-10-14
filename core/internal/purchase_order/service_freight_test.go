@@ -95,3 +95,35 @@ func TestExtractFreight_AnthropicChosen(t *testing.T) {
 		t.Errorf("result %+v, block %q", res, blockType)
 	}
 }
+
+// The detector types a text upload "text/plain; charset=utf-8"; freight
+// extraction under Anthropic must read it as text, not refuse the type.
+func TestExtractFreight_AnthropicChosenReadsDetectedText(t *testing.T) {
+	var blockType, sent string
+	an := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		blockType, sent = body.Messages[0].Content[0].Type, body.Messages[0].Content[0].Text
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []any{map[string]any{"type": "text", "text": `{"total_amount":12.5,"carrier_name":"Yard Freight","invoice_number":"FR-8"}`}},
+		})
+	}))
+	defer an.Close()
+	client := ai.NewClient("").WithProvider(ai.ProviderAnthropic).
+		WithAnthropicKey("test-" + "key-not-real").WithAnthropicBaseURL(an.URL)
+	s := &Service{aiClient: client}
+	res, _, err := s.extractFreight(context.Background(), []byte("Freight total 12.50"), "text/plain; charset=utf-8")
+	if err != nil {
+		t.Fatalf("extractFreight: %v", err)
+	}
+	if res.InvoiceNumber != "FR-8" || blockType != "text" || !strings.Contains(sent, "Freight total 12.50") {
+		t.Errorf("result %+v, block %q, text %q", res, blockType, sent)
+	}
+}

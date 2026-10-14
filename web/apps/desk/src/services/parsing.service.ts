@@ -26,7 +26,15 @@ export const ParsingService = {
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(errorText || 'Failed to parse material list');
+            // The wire error envelope carries the words a person reads.
+            let words = '';
+            try {
+                const body = JSON.parse(errorText) as { error?: { message?: string } };
+                words = body.error?.message ?? '';
+            } catch {
+                words = errorText;
+            }
+            throw new Error(words || 'Failed to parse material list');
         }
 
         return response.json();

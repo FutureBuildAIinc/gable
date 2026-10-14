@@ -14458,6 +14458,15 @@ export interface components {
                 "application/json": components["schemas"]["WireError"];
             };
         };
+        /** @description The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope. */
+        UnsupportedType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
         /** @description AI is off (code ai_off): no key for the chosen provider, a stored key the vault cannot open, or a feature the chosen provider does not offer. The message says that an administrator turns it on in Tech Admin, AI. Or the idempotency layer reports the Idempotency-Key in progress (code idempotency_in_progress). Both are the ADR 0001 envelope. */
         AIOffEither: {
             headers: {
@@ -22986,6 +22995,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
@@ -27324,6 +27334,7 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             409: components["responses"]["ConflictEither"];
             413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };

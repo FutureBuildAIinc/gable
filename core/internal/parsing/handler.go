@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/audit"
 	"github.com/gablelbm/gable/pkg/httputil"
 	"github.com/google/uuid"
@@ -140,6 +141,10 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 	// of the upload — it must reach the client labelled as such.
 	extracted, synthetic, extractErr := h.service.ExtractItemsWithAI(r.Context(), aiBytes, aiContentType)
 	if extractErr != nil {
+		if msg, ok := ai.UnsupportedTypeMessage(extractErr); ok {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnsupportedMediaType, Code: "unsupported_type", Message: msg})
+			return
+		}
 		slog.Error("Failed to extract items", "error", extractErr)
 		httputil.RespondError(w, r, "Failed to extract items from file", http.StatusInternalServerError, extractErr)
 		return

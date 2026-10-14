@@ -9005,6 +9005,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedType"}
         "422": {$ref: "#/components/responses/UnprocessableEntity"}
         "500": {$ref: "#/components/responses/InternalError"}
   /api/partner/v1/dashboard:
@@ -13686,6 +13687,7 @@ paths:
         "403": {$ref: "#/components/responses/ForbiddenEither"}
         "409": {$ref: "#/components/responses/ConflictEither"}
         "413": {$ref: "#/components/responses/PayloadTooLarge"}
+        "415": {$ref: "#/components/responses/UnsupportedType"}
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         "500": {$ref: "#/components/responses/InternalError"}
@@ -15606,6 +15608,13 @@ components:
     IdempotencyConflict:
       description: >-
         The Idempotency-Key is already in progress under a concurrent request (code idempotency_in_progress). Written by the idempotency layer, so the ADR 0001 envelope. The operation raises no 409 of its own.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WireError"
+    UnsupportedType:
+      description: >-
+        The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope.
       content:
         application/json:
           schema:

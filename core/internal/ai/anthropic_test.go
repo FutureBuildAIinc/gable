@@ -6,6 +6,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -292,3 +293,20 @@ func TestAnthropicImageKindAndCheck(t *testing.T) {
 }
 
 func errorsIsOff(err error) bool { _, ok := OffMessage(err); return ok }
+
+// A type the chosen provider cannot read is the sentinel, with the words a
+// person reads, from both file builders.
+func TestUnsupportedTypeIsASentinelWithWords(t *testing.T) {
+	_, err := anthropicFileBlocks([]byte("x"), "image/bmp", "extract")
+	if !errors.Is(err, ErrUnsupportedType) {
+		t.Fatalf("anthropic bmp: %v", err)
+	}
+	msg, ok := UnsupportedTypeMessage(err)
+	if !ok || !strings.Contains(msg, "Claude reads JPEG, PNG, GIF or WebP pictures and PDF files") {
+		t.Errorf("words = %q (%v)", msg, ok)
+	}
+	_, _, err = buildFileContent([]byte("x"), "application/zip", "extract")
+	if !errors.Is(err, ErrUnsupportedType) {
+		t.Errorf("openrouter zip: %v", err)
+	}
+}

@@ -5,6 +5,7 @@ package parsing
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"math"
 	"regexp"
@@ -64,6 +65,11 @@ func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, cont
 
 	rawText, aiErr := s.aiClient.ExtractMaterialList(ctx, fileBytes, contentType)
 	if aiErr != nil {
+		if errors.Is(aiErr, ai.ErrUnsupportedType) {
+			// Refused in words: a canned list is never the answer for a type
+			// the provider cannot read.
+			return nil, false, aiErr
+		}
 		slog.Error("AI extraction failed; returning the canned demo material list, NOT the uploaded file's contents",
 			"error", aiErr, "content_type", contentType, "bytes_discarded", len(fileBytes))
 		return s.ExtractItems(generateFallbackMaterialList()), true, nil

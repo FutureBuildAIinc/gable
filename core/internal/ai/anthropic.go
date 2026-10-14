@@ -250,7 +250,7 @@ func anthropicFileBlocks(fileBytes []byte, contentType, instruction string) ([]a
 	case strings.HasPrefix(mt, "image/"):
 		media, ok := anthropicImageTypes[mt]
 		if !ok {
-			return nil, fmt.Errorf("unsupported image type: %s (use JPEG, PNG, GIF or WebP)", mt)
+			return nil, &UnsupportedTypeError{Message: fmt.Sprintf("This picture type (%s) cannot be read. %s", mt, anthropicReadsWords)}
 		}
 		return []anthropicBlock{
 			{Type: "image", Source: &anthropicSource{Type: "base64", MediaType: media, Data: base64.StdEncoding.EncodeToString(fileBytes)}},
@@ -264,9 +264,12 @@ func anthropicFileBlocks(fileBytes []byte, contentType, instruction string) ([]a
 	case isTextMediaType(mt):
 		return []anthropicBlock{{Type: "text", Text: instruction + "\n\n" + string(fileBytes)}}, nil
 	default:
-		return nil, fmt.Errorf("unsupported content type: %s", contentType)
+		return nil, &UnsupportedTypeError{Message: fmt.Sprintf("This file type (%s) cannot be read. %s", mt, anthropicReadsWords)}
 	}
 }
+
+// anthropicReadsWords names what the Anthropic provider reads.
+const anthropicReadsWords = "Claude reads JPEG, PNG, GIF or WebP pictures and PDF files, and plain text or CSV."
 
 // isTextMediaType reports the plain text types read as inline text.
 func isTextMediaType(mt string) bool {
