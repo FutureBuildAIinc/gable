@@ -1255,6 +1255,7 @@ func Run() {
 		VALUES ('Gable Building Supply', '#00FFA3', 'support@gablebuildingsupply.example', '250-555-1000')
 		ON CONFLICT DO NOTHING`)
 	fmt.Println("Seed: Portal Config")
+	seedDealerProfile(db)
 
 	// =========================================================================
 	// 19. CREDIT MEMOS

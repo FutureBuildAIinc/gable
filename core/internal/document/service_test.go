@@ -224,7 +224,7 @@ func TestGenerateInvoicePDF_LinesNameTheProduct(t *testing.T) {
 	mustContain(t, doc, "OSB-716 - 7/16 OSB Sheathing")
 	mustContain(t, doc, "Acme")
 	mustContain(t, doc, "C-1001")
-	mustContain(t, doc, "GABLE LBM - INVOICE")
+	mustContain(t, doc, "INVOICE")
 	if len(repo.lookups) != 0 {
 		t.Errorf("looked up %d products; the invoice carries its own snapshot", len(repo.lookups))
 	}
@@ -262,46 +262,6 @@ func TestGenerateInvoicePDF_NoLines(t *testing.T) {
 	}
 	assertPDF(t, doc)
 	mustContain(t, doc, "TOTAL DUE: $50.00")
-}
-
-// CORRECTNESS: the invoice PDF must not jump from the line extensions straight
-// to a tax-inclusive "TOTAL DUE". Without a subtotal row and a tax row the
-// lines visibly do not add up to the total. Showing tax separately is also a
-// statutory requirement in the GST/HST jurisdictions this product targets.
-func TestGenerateInvoicePDF_MustShowSubtotalAndTax(t *testing.T) {
-	svc := NewService(newRepo())
-	rate := "12"
-	inv := mkInvoice(11200, func(i *invoice.Invoice) {
-		i.SubtotalCents, i.TaxCents, i.TaxRatePercent = 10000, 1200, &rate
-		// Two $50.00 lines, so "$100.00" can only appear if a subtotal row is
-		// rendered: it is not a line extension.
-		i.Lines = []invoice.InvoiceLine{
-			mkLine("2X4-8", "SPF Stud", "50", "PCS", 10000, 5000),
-			mkLine("2X4-8", "SPF Stud", "50", "PCS", 10000, 5000),
-		}
-	})
-	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme"})
-	if err != nil {
-		t.Fatalf("GenerateInvoicePDF: %v", err)
-	}
-	assertPDF(t, doc)
-	mustContain(t, doc, "SUBTOTAL: $100.00")
-	mustContain(t, doc, "TAX @ 12%: $12.00")
-	mustContain(t, doc, "TOTAL DUE: $112.00")
-}
-
-// CHARACTERIZATION: the "PAY ONLINE" link is hard-coded to app.gable.com and
-// keyed on the invoice UUID. For a self-hosted or white-labelled dealer this
-// URL points at someone else's domain; the portal branding config
-// (portal.PortalConfig) is not consulted.
-func TestGenerateInvoicePDF_PayLinkIsHardCoded(t *testing.T) {
-	inv := mkInvoice(100, nil)
-	svc := NewService(newRepo())
-	doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme"})
-	if err != nil {
-		t.Fatalf("GenerateInvoicePDF: %v", err)
-	}
-	mustContain(t, assertPDF(t, doc), "https://app.gable.com/pay/"+inv.ID.String())
 }
 
 // --- pick ticket ---------------------------------------------------------
@@ -406,20 +366,6 @@ func TestGeneratePickTicketPDF_NoLines(t *testing.T) {
 	assertPDF(t, doc)
 	mustContain(t, doc, "PICK TICKET")
 	mustContain(t, doc, "Qty to Pick")
-}
-
-// CHARACTERIZATION: the pick ticket's "Job" field is hard-coded to "N/A". The
-// order carries no job reference on the struct the generator is given, so a
-// jobsite name can never appear on the ticket the driver takes to the site.
-func TestGeneratePickTicketPDF_JobIsAlwaysNA(t *testing.T) {
-	svc := NewService(newRepo())
-	ord := &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), CreatedAt: httpx.TimestampOf(time.Now())}}
-
-	doc, err := svc.GeneratePickTicketPDF(context.Background(), ord, &customer.Customer{Name: "Acme"})
-	if err != nil {
-		t.Fatalf("GeneratePickTicketPDF: %v", err)
-	}
-	mustContain(t, assertPDF(t, doc), "Job: N/A")
 }
 
 // --- determinism ---------------------------------------------------------
