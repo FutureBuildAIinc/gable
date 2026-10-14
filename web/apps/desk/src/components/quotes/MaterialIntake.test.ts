@@ -83,6 +83,28 @@ describe('MaterialIntake', () => {
     expect(el.querySelectorAll('[data-testid="intake-line"]').length).toBe(2)
   })
 
+  it('holds every Accept while the quote is saving: no line leaves the list and nothing is sent', async () => {
+    const el = await mount<GableMaterialIntake>('gable-material-intake')
+    await paste(el, 'x')
+    let sent = 0
+    el.addEventListener('accept-lines', () => { sent += 1 })
+    await update(el, { disabled: true })
+    const lineAccept = q<HTMLButtonElement>(el.querySelectorAll('[data-testid="intake-line"]')[0] as HTMLElement, '[data-testid="intake-accept"]')
+    const confident = q<HTMLButtonElement>(el, '[data-testid="intake-accept-confident"]')
+    expect(lineAccept.disabled).toBe(true)
+    expect(confident.disabled).toBe(true)
+    lineAccept.click()
+    confident.click()
+    // An accept that reaches the handlers while saving (a click landing as the
+    // save starts) is refused there too.
+    const handlers = el as unknown as { _accept(index: number): void, _acceptConfident(): void }
+    handlers._accept(0)
+    handlers._acceptConfident()
+    await update(el, {})
+    expect(sent).toBe(0)
+    expect(el.querySelectorAll('[data-testid="intake-line"]').length).toBe(3)
+  })
+
   it('accepts all confident lines only', async () => {
     const el = await mount<GableMaterialIntake>('gable-material-intake')
     await paste(el, 'x')
