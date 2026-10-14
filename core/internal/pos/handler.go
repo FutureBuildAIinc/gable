@@ -114,6 +114,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	// History and search
 	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))
 
+	// The counter's customer: the lookup with the account's standing, and
+	// naming the customer (and the account's purchase order and job) on an
+	// open sale.
+	mux.HandleFunc("GET /api/v1/pos/customers", guard(h.FindCustomers))
+	mux.HandleFunc("PUT /api/v1/pos/transactions/{id}/customer", guard(h.AttachCustomer))
+
 	// Offline sync
 	mux.HandleFunc("POST /api/v1/pos/sync", guard(h.SyncOffline))
 	mux.HandleFunc("GET /api/v1/pos/catalog", guard(h.GetCatalog))
@@ -420,6 +426,49 @@ func (h *Handler) SearchProducts(w http.ResponseWriter, r *http.Request) {
 		results = []QuickSearchResult{}
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+// FindCustomers is GET /pos/customers: the counter's lookup by name or
+// account number, each account's standing beside it. A bare array, never
+// null; q under two characters answers [].
+func (h *Handler) FindCustomers(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r, "q"); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	found, err := h.service.FindCustomers(r.Context(), r.URL.Query().Get("q"))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, found)
+}
+
+// AttachCustomer is PUT /pos/transactions/{id}/customer: the sale's customer,
+// purchase order and job. A null customer_id makes the sale a walk-in again.
+func (h *Handler) AttachCustomer(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	var req attachCustomerRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	in, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	sale, err := h.service.AttachCustomer(r.Context(), id, *in, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, sale.Revision)
+	writeJSON(w, http.StatusOK, sale)
 }
 
 // SyncOffline is POST /pos/sync.

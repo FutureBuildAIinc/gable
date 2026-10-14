@@ -259,6 +259,7 @@ func (f *fixture) cleanup() {
 	exec(`DELETE FROM pos_registers WHERE id = $1`, f.register)
 	exec(`DELETE FROM locations WHERE id = $1`, f.yardID)
 	exec(`DELETE FROM product_kit_components WHERE kit_product_id = $1`, f.kitID)
+	exec(`DELETE FROM projects WHERE customer_id = $1`, f.customerID)
 	exec(`UPDATE customers SET balance_due = 0 WHERE id IN ($1, `+walkIn+`)`, f.customerID)
 	exec(`DELETE FROM products WHERE id = $1 OR id = $2`, f.productID, f.kitID)
 	exec(`DELETE FROM customers WHERE id = $1`, f.customerID)

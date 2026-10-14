@@ -627,15 +627,17 @@ func (r *PostgresRepository) InsertCounterInvoice(ctx context.Context, in *Fulfi
 		INSERT INTO invoices (id, number, order_id, customer_id, status, subtotal, tax_rate, tax_amount, total_amount,
 			payment_terms_id, due_date, discount_due_date, discount_percent,
 			branch_id, currency, delivery_type, picked_up_by, delivery_id,
-			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at)
+			ship_to_id, ship_to_snapshot, project_id, tax_exempt, tax_source, invoice_date, origin, paid_at, created_at, updated_at,
+			customer_po)
 		VALUES ($1, $2, NULL, $3, CASE WHEN $7::bigint = 0 THEN 'PAID' ELSE 'UNPAID' END,
 			$4::numeric / 100, $5::numeric, $6::numeric / 100, $7::numeric / 100,
 			$8, $9::date, $10::date, $11::numeric / 10000,
 			$12, $13, 'PICKUP', $14, NULL,
-			NULL, NULL, NULL, $15, $16, $17::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW())`,
+			NULL, NULL, $18::uuid, $15, $16, $17::date, 'POS', CASE WHEN $7::bigint = 0 THEN NOW() END, NOW(), NOW(),
+			$19)`,
 		in.ID, in.Number, in.CustomerID, in.SubtotalCents, in.TaxRate, in.TaxCents, in.TotalCents,
 		in.PaymentTermsID, in.DueDate.Format("2006-01-02"), discountDue, in.DiscountPercent,
-		in.BranchID, in.Currency, in.PickedUpBy, in.TaxExempt, in.TaxSource, in.InvoiceDate)
+		in.BranchID, in.Currency, in.PickedUpBy, in.TaxExempt, in.TaxSource, in.InvoiceDate, in.ProjectID, in.CustomerPO)
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
 	}

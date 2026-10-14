@@ -10284,6 +10284,79 @@ paths:
           $ref: "#/components/responses/WireNotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/customers:
+    get:
+      operationId: posCustomerFind
+      tags: [pos]
+      summary: The counter's customer lookup
+      description: >-
+        Customers matching the q text (name or account number, at most 10) that the caller's branch context or wall reaches, each with the account's standing the charge tender will read: the credit limit (null for none, 0 for no credit), the open receivable, the available credit and a standing word (good, no_limit, no_credit, over_limit), whether the account asks for a purchase order and its open jobs. A bare array, never null; q under two characters answers [].
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: {type: string}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The matching customers.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PosCounterCustomer"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/v1/pos/transactions/{id}/customer:
+    put:
+      operationId: posTransactionCustomer
+      tags: [pos]
+      summary: Name the sale's customer, purchase order and job
+      description: >-
+        Names who the sale is for. The customer is named before the first line (the lines price for the customer: 409 invalid_state_transition once a line exists and the customer would change); the purchase order and the job may change while the sale is open. A null customer_id makes the sale a walk-in sale again. The job must be an open job of the customer. The sale's revision moves; the response is the whole sale. A sale or customer that does not exist, or that the caller's branch context or wall hides, answers 404, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosSaleCustomerRequest"
+      responses:
+        "200":
+          description: The sale with its customer named.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/items:
     post:
       operationId: posTransactionAddItem
@@ -23600,7 +23673,7 @@ components:
     PosTransaction:
       type: object
       description: "The full sale: the head with its lines and tenders."
-      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, lines, tenders]
+      required: [id, number, revision, branch_id, register_id, cashier_id, customer_id, currency, subtotal_cents, tax_cents, total_cents, change_cents, till_session_id, status, invoice_id, completed_at, created_at, customer_po, job_id, lines, tenders]
       properties:
         id: {type: string, format: uuid}
         number: {type: string, description: "POS-000001, human readable."}
@@ -23619,6 +23692,8 @@ components:
         invoice_id: {type: [string, "null"], format: uuid, description: "The invoice the completion posted."}
         completed_at: {type: [string, "null"], format: date-time}
         created_at: {type: string, format: date-time}
+        customer_po: {type: [string, "null"], description: "The purchase order a charge sale names."}
+        job_id: {type: [string, "null"], format: uuid, description: "The customer's job the sale belongs to."}
         lines:
           type: array
           items:
@@ -23627,6 +23702,35 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PosTender"
+    PosCounterJob:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+    PosCounterCustomer:
+      type: object
+      required: [id, account_number, name, po_required, credit_limit_cents, open_receivable_cents, available_credit_cents, standing, jobs]
+      properties:
+        id: {type: string, format: uuid}
+        account_number: {type: string}
+        name: {type: string}
+        po_required: {type: boolean, description: "The account asks for a purchase order on a charge sale (409 po_required at completion without one)."}
+        credit_limit_cents: {type: [integer, "null"], format: int64, description: "Null: no limit. 0: no credit."}
+        open_receivable_cents: {type: integer, format: int64, description: "What the credit check reads: open invoices less open credit memos and unapplied cash."}
+        available_credit_cents: {type: [integer, "null"], format: int64, description: "The limit less the open receivable; negative when over; null with no limit."}
+        standing: {type: string, enum: [good, no_limit, no_credit, over_limit]}
+        jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PosCounterJob"
+    PosSaleCustomerRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        customer_id: {type: [string, "null"], format: uuid}
+        customer_po: {type: [string, "null"], maxLength: 100}
+        job_id: {type: [string, "null"], format: uuid}
     PosTransactionPage:
       type: object
       required: [items, next_cursor, limit]

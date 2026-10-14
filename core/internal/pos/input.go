@@ -6,6 +6,7 @@ package pos
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
@@ -66,6 +67,31 @@ func (r *addLineRequest) parse() ([]salesdoc.ParsedLine, error) {
 		return nil, err
 	}
 	return lines, nil
+}
+
+// attachCustomerRequest is PUT /pos/transactions/{id}/customer.
+type attachCustomerRequest struct {
+	CustomerID *string `json:"customer_id"`
+	CustomerPO *string `json:"customer_po"`
+	JobID      *string `json:"job_id"`
+}
+
+func (r *attachCustomerRequest) parse() (*AttachCustomerIn, error) {
+	v := &httpx.Validator{}
+	out := &AttachCustomerIn{}
+	if id, ok := v.UUID("customer_id", r.CustomerID, false); ok {
+		out.CustomerID = &id
+	}
+	if id, ok := v.UUID("job_id", r.JobID, false); ok {
+		out.JobID = &id
+	}
+	if r.CustomerPO != nil {
+		out.CustomerPO = strings.TrimSpace(*r.CustomerPO)
+	}
+	if err := v.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // completeSaleRequest is POST /pos/transactions/{id}/complete: the tenders in

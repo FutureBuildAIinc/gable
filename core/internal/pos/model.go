@@ -100,6 +100,11 @@ type Sale struct {
 	CompletedAt   *httpx.Timestamp `json:"completed_at"`
 	CreatedAt     httpx.Timestamp  `json:"created_at"`
 
+	// CustomerPO and JobID are the purchase order and job a charge sale
+	// names when the account asks for them.
+	CustomerPO *string    `json:"customer_po"`
+	JobID      *uuid.UUID `json:"job_id"`
+
 	Lines   []salesdoc.Line `json:"lines"`
 	Tenders []Tender        `json:"tenders"`
 

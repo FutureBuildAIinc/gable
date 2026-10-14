@@ -192,6 +192,16 @@ func (s *Service) CompleteSale(ctx context.Context, saleID uuid.UUID, ifMatch st
 	// charged (a refusal must never move money at the terminal); the
 	// transaction repeats it under the customer's credit lock.
 	if accountPortion > 0 {
+		facts, err := s.repo.CustomerFacts(ctx, realCustomerID)
+		if err != nil {
+			return nil, err
+		}
+		// An account that asks for a purchase order is not sold to on
+		// account without one; the check runs before any card is charged.
+		if facts.PORequired && (pre.CustomerPO == nil || strings.TrimSpace(*pre.CustomerPO) == "") {
+			return nil, conflict("po_required",
+				"the customer requires a purchase order number: name it on the sale before charging it to the account")
+		}
 		if err := s.checkAccountCredit(ctx, realCustomerID, accountPortion); err != nil {
 			return nil, err
 		}
@@ -459,6 +469,7 @@ func (s *Service) completeSaleTx(ctx context.Context, saleID uuid.UUID, ifMatch 
 			PickedUpBy: pickedBy, InvoiceDate: date, Actor: actor,
 			SubtotalCents: int64(totals.SubtotalCents), TaxCents: taxCents, TotalCents: total,
 			TaxRate: taxRate, TaxExempt: taxExempt, TaxSource: taxSource,
+			CustomerPO: sale.CustomerPO, JobID: sale.JobID,
 		}
 		refs, err := s.costRefs(ctx, lines)
 		if err != nil {

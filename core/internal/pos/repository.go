@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
@@ -168,6 +169,15 @@ type Repository interface {
 	GetProductCatalog(ctx context.Context) ([]CatalogProduct, error)
 	WalkInCustomer(ctx context.Context) (uuid.UUID, string, error)
 	CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error)
+	// FindCounterCustomers searches the customers the caller's wall reaches
+	// by name or account number, standing figures left to the service.
+	FindCounterCustomers(ctx context.Context, q string, limit int) ([]CounterCustomer, error)
+	// CounterCustomerByID reads one customer through the same wall; false
+	// when it does not exist or the wall hides it.
+	CounterCustomerByID(ctx context.Context, id uuid.UUID) (*CounterCustomer, bool, error)
+	// SetSaleAccount names the customer, currency, purchase order and job of
+	// an open sale and moves its revision.
+	SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error
 	CustomerExempt(ctx context.Context, customerID uuid.UUID) (bool, error)
 	OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error)
 	BranchLocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
@@ -184,6 +194,7 @@ type CustomerFacts struct {
 	CreditLimitCents *int64
 	Name             string
 	Currency         string
+	PORequired       bool
 }
 
 // TillAggregate is a session's raw sums, taken from the payments its sales
@@ -331,16 +342,20 @@ func (r *PostgresRepository) BumpSaleRevision(ctx context.Context, id uuid.UUID)
 	return nil
 }
 
-const saleCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.cashier_id, t.customer_id, t.currency,
+const saleHeadCols = `t.id, t.number, t.revision, t.branch_id, t.register_id, t.cashier_id, t.customer_id, t.currency,
 	ROUND(t.subtotal * 100)::bigint, ROUND(t.tax_amount * 100)::bigint, ROUND(t.total * 100)::bigint,
 	ROUND(t.change_due * 100)::bigint, t.till_session_id, t.status, t.invoice_id, t.completed_at, t.created_at`
+
+// saleCols is the full sale's columns: the list item's head and the purchase
+// order and job a charge sale names.
+const saleCols = saleHeadCols + `, t.customer_po, t.job_id`
 
 func scanSale(row pgx.Row, s *Sale) error {
 	var completed *time.Time
 	var created time.Time
 	if err := row.Scan(&s.ID, &s.Number, &s.Revision, &s.BranchID, &s.RegisterID, &s.CashierID, &s.CustomerID, &s.Currency,
 		&s.SubtotalCents, &s.TaxCents, &s.TotalCents, &s.ChangeCents, &s.TillSessionID, &s.Status, &s.InvoiceID,
-		&completed, &created); err != nil {
+		&completed, &created, &s.CustomerPO, &s.JobID); err != nil {
 		return err
 	}
 	s.CompletedAt = httpx.PtrTimestamp(completed)
@@ -434,7 +449,7 @@ func (r *PostgresRepository) ListSales(ctx context.Context, f SaleFilter, limit 
 	if f.Status != "" {
 		args[1] = f.Status
 	}
-	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleCols+`,
+	rows, err := r.ex(ctx).Query(ctx, `SELECT `+saleHeadCols+`,
 		(SELECT count(*) FROM pos_line_items l WHERE l.transaction_id = t.id AND l.line_type <> 'TEXT')
 		FROM pos_transactions t `+predicate+` ORDER BY t.created_at DESC, t.id DESC LIMIT $7`, append(args, limit)...)
 	if err != nil {
@@ -1581,8 +1596,9 @@ func (r *PostgresRepository) CustomerFacts(ctx context.Context, customerID uuid.
 	var limit *int64
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT name, ROUND(credit_limit * 100)::bigint,
-			COALESCE(currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD')
-		FROM customers WHERE id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency)
+			COALESCE(currency, (SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'),
+			COALESCE(po_required, FALSE)
+		FROM customers WHERE id = $1`, customerID).Scan(&f.Name, &limit, &f.Currency, &f.PORequired)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, httpx.NotFound("no such customer")
 	}
@@ -1655,4 +1671,108 @@ func (r *PostgresRepository) LogSyncBatch(ctx context.Context, b LogBatch) error
 		INSERT INTO pos_sync_log (batch_id, register_id, synced_count, duplicate_count, error_count, errors)
 		VALUES ($1, $2, $3, $4, $5, $6::jsonb)`, b.BatchID, b.RegisterID, b.Synced, b.Duplicates, b.ErrorCount, string(raw))
 	return err
+}
+
+// CounterCustomer is a customer as the counter's lookup shows it: who, the
+// standing of the account in figures and in words, and the jobs a charge sale
+// may name. The wall (customer_branches held to the caller's reach) is the
+// lookup's own; a cashier never sees a customer outside it.
+type CounterCustomer struct {
+	ID                   uuid.UUID    `json:"id"`
+	AccountNumber        string       `json:"account_number"`
+	Name                 string       `json:"name"`
+	POrequired           bool         `json:"po_required"`
+	CreditLimitCents     *httpx.Cents `json:"credit_limit_cents"`
+	OpenReceivableCents  httpx.Cents  `json:"open_receivable_cents"`
+	AvailableCreditCents *httpx.Cents `json:"available_credit_cents"`
+	// Standing is the account's state in a word the screen puts in its own
+	// words: good, no_limit, no_credit (a limit of zero: the account is on
+	// hold, no credit given) or over_limit.
+	Standing string       `json:"standing"`
+	Jobs     []CounterJob `json:"jobs"`
+}
+
+// CounterJob is one of the customer's open jobs.
+type CounterJob struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+const counterCustomerCols = `c.id, c.account_number, c.name, COALESCE(c.po_required, FALSE),
+	CASE WHEN c.credit_limit IS NULL THEN NULL ELSE ROUND(c.credit_limit * 100)::bigint END`
+
+func (r *PostgresRepository) FindCounterCustomers(ctx context.Context, q string, limit int) ([]CounterCustomer, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT `+counterCustomerCols+` FROM customers c
+		WHERE COALESCE(c.is_active, TRUE) AND c.account_number <> 'WALK-IN'
+		  AND (c.name ILIKE '%' || $1 || '%' OR c.account_number ILIKE '%' || $1 || '%')
+		  AND `+customer.Wall("c", 2, 3)+`
+		ORDER BY c.name, c.id LIMIT $4`,
+		q, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx), limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search customers: %w", err)
+	}
+	defer rows.Close()
+	out := []CounterCustomer{}
+	for rows.Next() {
+		var c CounterCustomer
+		if err := rows.Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for i := range out {
+		if out[i].Jobs, err = r.customerJobs(ctx, out[i].ID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (r *PostgresRepository) CounterCustomerByID(ctx context.Context, id uuid.UUID) (*CounterCustomer, bool, error) {
+	var c CounterCustomer
+	err := r.ex(ctx).QueryRow(ctx, `SELECT `+counterCustomerCols+` FROM customers c
+		WHERE c.id = $1 AND COALESCE(c.is_active, TRUE) AND `+customer.Wall("c", 2, 3),
+		id, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)).
+		Scan(&c.ID, &c.AccountNumber, &c.Name, &c.POrequired, &c.CreditLimitCents)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to read the customer: %w", err)
+	}
+	if c.Jobs, err = r.customerJobs(ctx, c.ID); err != nil {
+		return nil, false, err
+	}
+	return &c, true, nil
+}
+
+func (r *PostgresRepository) customerJobs(ctx context.Context, customerID uuid.UUID) ([]CounterJob, error) {
+	rows, err := r.ex(ctx).Query(ctx, `SELECT id, name FROM projects
+		WHERE customer_id = $1 AND lower(status) = 'active' ORDER BY name, id LIMIT 50`, customerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the customer's jobs: %w", err)
+	}
+	defer rows.Close()
+	out := []CounterJob{}
+	for rows.Next() {
+		var j CounterJob
+		if err := rows.Scan(&j.ID, &j.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+func (r *PostgresRepository) SetSaleAccount(ctx context.Context, saleID uuid.UUID, customerID *uuid.UUID, currency string, po *string, jobID *uuid.UUID) error {
+	_, err := r.ex(ctx).Exec(ctx, `UPDATE pos_transactions SET customer_id = $2, currency = $3, customer_po = $4, job_id = $5,
+		updated_at = NOW(), revision = revision + 1 WHERE id = $1`, saleID, customerID, currency, po, jobID)
+	if err != nil {
+		return fmt.Errorf("failed to name the sale's customer: %w", mapWriteError(err))
+	}
+	return nil
 }

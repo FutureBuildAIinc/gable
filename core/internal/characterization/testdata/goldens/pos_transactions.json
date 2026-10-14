@@ -137,8 +137,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [],
         "number": "POS-000002",
         "register_id": "REG-01",
@@ -172,8 +174,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": null,
+        "customer_po": null,
         "id": "<id-10>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [],
         "number": "POS-000003",
         "register_id": "REG-01",
@@ -207,8 +211,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": null,
+        "customer_po": null,
         "id": "<id-11>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [],
         "number": "POS-000004",
         "register_id": "REG-01",
@@ -455,8 +461,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -525,8 +533,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -705,8 +715,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -841,8 +853,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -1324,8 +1338,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": "<id-52>",
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -1465,8 +1481,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": null,
+        "customer_po": null,
         "id": "<id-10>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -1613,8 +1631,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": null,
+        "customer_po": null,
         "id": "<id-11>",
         "invoice_id": null,
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -1693,8 +1713,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": null,
+        "customer_po": null,
         "id": "<id-11>",
         "invoice_id": "<id-62>",
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -1790,8 +1812,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": null,
+        "customer_po": null,
         "id": "<id-11>",
         "invoice_id": "<id-62>",
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,
@@ -1881,8 +1905,10 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-8>",
+        "customer_po": null,
         "id": "<id-9>",
         "invoice_id": "<id-52>",
+        "job_id": null,
         "lines": [
           {
             "charge_code": null,

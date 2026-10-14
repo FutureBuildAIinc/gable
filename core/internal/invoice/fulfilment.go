@@ -73,6 +73,7 @@ type FulfilmentInvoice struct {
 	ShipToID       *uuid.UUID
 	ShipToSnapshot []byte // JSON, or nil
 	ProjectID      *uuid.UUID
+	CustomerPO     *string   // a counter sale's purchase order
 	InvoiceDate    time.Time // the branch's local date
 
 	PaymentTermsID  uuid.UUID
@@ -111,6 +112,11 @@ type CounterInvoice struct {
 
 	PickedUpBy  *string
 	InvoiceDate time.Time // the branch's local date
+
+	// CustomerPO and JobID are the purchase order and job the counter sale
+	// named: the invoice's customer_po and project.
+	CustomerPO *string
+	JobID      *uuid.UUID
 
 	SubtotalCents int64
 	TaxCents      int64
@@ -164,6 +170,7 @@ func (s *Service) CreateCounterInvoice(ctx context.Context, in *CounterInvoice) 
 	inv := &FulfilmentInvoice{
 		ID: in.ID, Number: in.Number, BranchID: in.BranchID, CustomerID: in.CustomerID, Currency: in.Currency,
 		DeliveryType: "PICKUP", PickedUpBy: in.PickedUpBy, InvoiceDate: in.InvoiceDate,
+		ProjectID: in.JobID, CustomerPO: in.CustomerPO,
 		SubtotalCents: in.SubtotalCents, TaxCents: in.TaxCents, TotalCents: in.TotalCents,
 		TaxRate: in.TaxRate, TaxExempt: in.TaxExempt, TaxSource: in.TaxSource,
 		Lines: in.Lines, Revenue: in.Revenue, CostCents: in.CostCents, Actor: in.Actor,

@@ -4482,6 +4482,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/customers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counter's customer lookup
+         * @description Customers matching the q text (name or account number, at most 10) that the caller's branch context or wall reaches, each with the account's standing the charge tender will read: the credit limit (null for none, 0 for no credit), the open receivable, the available credit and a standing word (good, no_limit, no_credit, over_limit), whether the account asks for a purchase order and its open jobs. A bare array, never null; q under two characters answers [].
+         */
+        get: operations["posCustomerFind"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/customer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Name the sale's customer, purchase order and job
+         * @description Names who the sale is for. The customer is named before the first line (the lines price for the customer: 409 invalid_state_transition once a line exists and the customer would change); the purchase order and the job may change while the sale is open. A null customer_id makes the sale a walk-in sale again. The job must be an open job of the customer. The sale's revision moves; the response is the whole sale. A sale or customer that does not exist, or that the caller's branch context or wall hides, answers 404, and nothing is written; a caller with no branch in context who holds no grant for the sale's branch is refused 403 by name.
+         */
+        put: operations["posTransactionCustomer"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/transactions/{id}/items": {
         parameters: {
             query?: never;
@@ -11828,8 +11868,53 @@ export interface components {
             completed_at: string | null;
             /** Format: date-time */
             created_at: string;
+            /** @description The purchase order a charge sale names. */
+            customer_po: string | null;
+            /**
+             * Format: uuid
+             * @description The customer's job the sale belongs to.
+             */
+            job_id: string | null;
             lines: components["schemas"]["PosLineItem"][];
             tenders: components["schemas"]["PosTender"][];
+        };
+        PosCounterJob: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        PosCounterCustomer: {
+            /** Format: uuid */
+            id: string;
+            account_number: string;
+            name: string;
+            /** @description The account asks for a purchase order on a charge sale (409 po_required at completion without one). */
+            po_required: boolean;
+            /**
+             * Format: int64
+             * @description Null: no limit. 0: no credit.
+             */
+            credit_limit_cents: number | null;
+            /**
+             * Format: int64
+             * @description What the credit check reads: open invoices less open credit memos and unapplied cash.
+             */
+            open_receivable_cents: number;
+            /**
+             * Format: int64
+             * @description The limit less the open receivable; negative when over; null with no limit.
+             */
+            available_credit_cents: number | null;
+            /** @enum {string} */
+            standing: "good" | "no_limit" | "no_credit" | "over_limit";
+            jobs: components["schemas"]["PosCounterJob"][];
+        };
+        PosSaleCustomerRequest: {
+            /** Format: uuid */
+            customer_id?: string | null;
+            customer_po?: string | null;
+            /** Format: uuid */
+            job_id?: string | null;
         };
         PosTransactionPage: {
             items: components["schemas"]["PosTransactionSummary"][];
@@ -23806,6 +23891,74 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posCustomerFind: {
+        parameters: {
+            query?: {
+                q?: string;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The matching customers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosCounterCustomer"][];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionCustomer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosSaleCustomerRequest"];
+            };
+        };
+        responses: {
+            /** @description The sale with its customer named. */
+            200: {
+                headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
             500: components["responses"]["InternalError"];
         };
     };
