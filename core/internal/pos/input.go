@@ -69,6 +69,31 @@ func (r *addLineRequest) parse() ([]salesdoc.ParsedLine, error) {
 	return lines, nil
 }
 
+// changeQuantityRequest is PATCH /pos/transactions/{id}/items/{itemId}.
+type changeQuantityRequest struct {
+	Quantity json.RawMessage `json:"quantity"`
+	Revision json.RawMessage `json:"revision"`
+}
+
+func (r *changeQuantityRequest) parse() (httpx.Quantity, *int64, error) {
+	v := &httpx.Validator{}
+	qty, ok := v.Quantity("quantity", r.Quantity, true)
+	if ok {
+		v.Check(qty > 0, "quantity", "must be greater than zero")
+	}
+	var revision *int64
+	if !isAbsentRaw(r.Revision) {
+		if n, ok := v.Int("revision", r.Revision, true); ok {
+			v.Check(n >= 1, "revision", "must be a revision number, 1 or more")
+			revision = &n
+		}
+	}
+	if err := v.Err(); err != nil {
+		return 0, nil, err
+	}
+	return qty, revision, nil
+}
+
 // attachCustomerRequest is PUT /pos/transactions/{id}/customer.
 type attachCustomerRequest struct {
 	CustomerID *string `json:"customer_id"`

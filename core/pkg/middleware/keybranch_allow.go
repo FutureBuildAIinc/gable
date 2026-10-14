@@ -161,6 +161,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/sales-team":                                       {KeyBranchClassRefused, "the sales team roster spans every branch"},
 	"GET /api/v1/sales-team/{id}":                                  {KeyBranchClassRefused, "the sales team roster spans every branch"},
 	"GET /api/v1/users":                                            {KeyBranchClassRefused, "the known users list spans every branch"},
+	"PATCH /api/v1/pos/transactions/{id}/items/{itemId}":           {KeyBranchClassWalled, "pos_transactions.branch_id (the sale is read and locked before the write); TestKeyBranchPin_PosAndAccountRows"},
 	"PATCH /api/v1/products/{id}/dimensions":                       {KeyBranchClassRefused, "the product catalogue is dealer wide, no branch column; the reads stay stated limits"},
 	"PATCH /api/v1/products/{id}/lead-time":                        {KeyBranchClassRefused, "the product catalogue is dealer wide, no branch column; the reads stay stated limits"},
 	"PATCH /api/v1/products/{id}/margins":                          {KeyBranchClassRefused, "the product catalogue is dealer wide, no branch column; the reads stay stated limits"},

@@ -4851,7 +4851,11 @@ export interface paths {
         delete: operations["posTransactionRemoveItem"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change a line's quantity
+         * @description Sets the quantity of one line of an open sale. The line is priced again by the same step the add uses, at the new quantity (a quantity break, a kit's components and the sale's tax follow), keeps its id and its place, and the sale's subtotal, tax and total are summed again, so the result is what removing the line and adding it at the new quantity gives. A price the cashier overrode and a discount stay on the line. The body carries the sale's revision (or the request carries If-Match): a stale one is 409 stale_revision and none at all is 428. Only an open sale changes (409 invalid_state_transition). A quantity of zero or less, or a line that has no quantity (a text line) or is a kit's component, is 400. A line that is not on this sale is 404. Roles, the branch wall and a bound key's pin are those of the line add.
+         */
+        patch: operations["posTransactionChangeItemQuantity"];
         trace?: never;
     };
     "/api/v1/pos/transactions/{id}/complete": {
@@ -12064,6 +12068,12 @@ export interface components {
         };
         PosAddLineRequest: {
             line: components["schemas"]["PosLineRequest"];
+        };
+        PosChangeQuantityRequest: {
+            /** @description The line's new quantity, a decimal string greater than zero. */
+            quantity: string;
+            /** @description The sale's revision the change is made on. */
+            revision: number;
         };
         PosCompleteRequest: {
             tenders: components["schemas"]["PosTenderRequest"][];
@@ -25099,6 +25109,45 @@ export interface operations {
             403: components["responses"]["ForbiddenEither"];
             404: components["responses"]["WireNotFound"];
             409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionChangeItemQuantity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosChangeQuantityRequest"];
+            };
+        };
+        responses: {
+            /** @description The whole sale with the line repriced. */
+            200: {
+                headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
             500: components["responses"]["InternalError"];
         };
     };

@@ -10,6 +10,7 @@ package pos_test
 
 import (
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/testutil"
@@ -204,5 +205,52 @@ func TestQuantityChangeCarriesTheBranchWall(t *testing.T) {
 	cur := f.do("GET", "/api/v1/pos/transactions/"+s, nil, own...)
 	if q := cur.body["lines"].([]any)[0].(map[string]any)["quantity"]; q == "3" || q == "3.0000" {
 		t.Errorf("the wall let the quantity change")
+	}
+}
+
+// RULE: three changes racing on one revision at pool size 4 leave one
+// winner; the others are told the sale moved, and the sale's totals are
+// those of the winner's quantity alone.
+func TestQuantityChangeRaceHasOneWinner(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDBMaxConns(t, 4))
+	s := f.startSale(nil)
+	added := f.addLine(s, f.productLine("1"))
+	line := lineIDs(t, added)[0]
+	revision := rev(t, added)
+
+	quantities := []string{"4", "5", "6"}
+	results := make([]resp, len(quantities))
+	var wg sync.WaitGroup
+	for i := range quantities {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i] = f.patchQty(s, line, quantities[i], revision)
+		}()
+	}
+	wg.Wait()
+
+	winner := -1
+	for i, r := range results {
+		switch r.status {
+		case http.StatusOK:
+			if winner != -1 {
+				t.Errorf("two changes won on one revision")
+			}
+			winner = i
+		case http.StatusConflict:
+		default:
+			t.Errorf("contender %d = %d: %s", i, r.status, r.raw)
+		}
+	}
+	if winner == -1 {
+		t.Fatalf("no change won")
+	}
+	ref := f.startSale(nil)
+	want := f.addLine(ref, f.productLine(quantities[winner]))
+	got := f.do("GET", "/api/v1/pos/transactions/"+s, nil)
+	if totalsOf(t, got) != totalsOf(t, want) {
+		t.Errorf("totals %v, want the winner's quantity alone %v", totalsOf(t, got), totalsOf(t, want))
 	}
 }
