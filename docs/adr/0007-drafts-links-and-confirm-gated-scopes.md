@@ -1018,10 +1018,11 @@ reconciliation's currency half follows the same reach (the principal's
 ruling under item 64): its two branch owned sums, the customers' balances
 through their customer_branches rows and the unapplied cash through the
 payments' own branches, cover the caller's reach for a scoped caller and
-stay dealer wide for an administrator or owner, while its two GL account
+stay dealer wide for an administrator or owner with no header, while its two GL account
 balances, pure books figures no branch fact can divide, are refused to a
 scoped caller (the columns and their in sync flags are absent from the
-row) and served to the wide callers.
+row) and served to the wide callers (an administrator or owner who sends a
+header is a scoped caller and gets that branch's sums with no GL columns).
 
 Two limits of this surface stand stated. A customer that two branches
 share has one subledger (`customer_transactions` carries no branch fact),

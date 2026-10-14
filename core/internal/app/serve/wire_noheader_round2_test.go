@@ -840,7 +840,7 @@ func TestNoHeader_CustomerFamily(t *testing.T) {
 func TestNoHeader_Reports(t *testing.T) {
 	f := newKeyPinFixture(t)
 	ctx := context.Background()
-	f.seedWalledTwins(t)
+	w := f.seedWalledTwins(t)
 	noheaderGrant(t, f, "pin-finance", f.branchA)
 	// A drift row per customer, so the reconciliation has one row per branch
 	// to hold.
@@ -981,6 +981,48 @@ func TestNoHeader_Reports(t *testing.T) {
 		t.Errorf("raising B's customer by 777 moved the finance balance_sum from %s to %s, want it unmoved",
 			financeBalance, after)
 	}
+
+	// The unapplied cash half (r6 P2-3, r5 P2-3): raising B's payment's
+	// unapplied amount must not move finance's figure, with or without the
+	// header, while the administrator's dealer wide figure moves with it.
+	unappliedOf := func(role string, hdr map[string]string) int64 {
+		t.Helper()
+		status, buf := f.userAs(t, role, "GET", "/api/v1/ar/reconciliation", "", hdr)
+		if status != http.StatusOK {
+			t.Fatalf("%s reconciliation: %d %s", role, status, buf)
+		}
+		var recon struct {
+			Currencies []struct {
+				Currency  string `json:"currency"`
+				Unapplied int64  `json:"unapplied_sum_cents"`
+			} `json:"currencies"`
+		}
+		if err := json.Unmarshal(buf, &recon); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range recon.Currencies {
+			if c.Currency == "USD" {
+				return c.Unapplied
+			}
+		}
+		t.Fatalf("%s reconciliation carries no USD row: %s", role, buf)
+		return 0
+	}
+	financeUn, financeUnA, adminUn := unappliedOf("finance", nil), unappliedOf("finance", headerA(f)), unappliedOf("admin", nil)
+	if _, err := f.db.Pool.Exec(ctx,
+		`UPDATE payments SET amount = amount + 12.34, amount_unapplied = amount_unapplied + 12.34 WHERE id = $1`, w.payB); err != nil {
+		t.Fatal(err)
+	}
+	if got := unappliedOf("finance", nil); got != financeUn {
+		t.Errorf("raising B's payment by 1234 moved the finance unapplied_sum_cents (no header) from %d to %d, want it unmoved", financeUn, got)
+	}
+	if got := unappliedOf("finance", headerA(f)); got != financeUnA {
+		t.Errorf("raising B's payment by 1234 moved the finance unapplied_sum_cents (header A) from %d to %d, want it unmoved", financeUnA, got)
+	}
+	if got := unappliedOf("admin", nil); got-adminUn != 1234 {
+		t.Errorf("raising B's payment by 1234 moved the administrator's unapplied_sum_cents by %d, want 1234", got-adminUn)
+	}
+
 	_, adminRows := reconRead("admin")
 	if len(adminRows) != 1 {
 		t.Fatalf("admin reconciliation carries %d USD rows, want one", len(adminRows))
