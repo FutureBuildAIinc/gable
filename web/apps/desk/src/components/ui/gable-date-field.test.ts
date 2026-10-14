@@ -278,3 +278,39 @@ describe('the field follows its host surface', () => {
     expect(input(el).className).toContain('border-zinc-300')
   })
 })
+
+describe('the calendar opens in the browser top layer', () => {
+  it('inside a transform and overflow hidden ancestor, nothing can offset or clip it', async () => {
+    // jsdom has no popover API; stub it to watch the calls a real engine gets.
+    const proto = HTMLElement.prototype as unknown as {
+      showPopover?: (this: HTMLElement) => void
+      hidePopover?: (this: HTMLElement) => void
+    }
+    const shown: HTMLElement[] = []
+    proto.showPopover = function (this: HTMLElement) { shown.push(this) }
+    proto.hidePopover = function (this: HTMLElement) { /* no-op */ }
+    try {
+      const host = document.createElement('div')
+      host.style.transform = 'translateX(40px)'
+      host.style.overflow = 'hidden'
+      document.body.appendChild(host)
+      const el = document.createElement('gable-date-field') as GableDateField
+      el.value = '2026-10-14'
+      host.appendChild(el)
+      await update(el, {})
+      await openCalendar(el)
+      const pop = q<HTMLElement>(el, '[role="dialog"]')
+      expect(pop.getAttribute('popover')).toBe('manual')
+      expect(shown).toContain(pop)
+      // Coordinates still come from the field's own box on the screen.
+      expect(pop.style.position).toBe('fixed')
+      expect(pop.style.top).toBe('4px')
+      await key(el, 'Escape')
+      expect(el.querySelector('[role="dialog"]')).toBeNull()
+      host.remove()
+    } finally {
+      delete proto.showPopover
+      delete proto.hidePopover
+    }
+  })
+})
