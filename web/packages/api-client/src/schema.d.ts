@@ -5918,7 +5918,7 @@ export interface paths {
         put?: never;
         /**
          * Accept the quote and create its order in one act
-         * @description A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. Events: quote.accepted, then order.created.
+         * @description A transition to accepted on the client's revision and the creation of the order in ONE transaction (ADR 0005 section 5.8), answering 201 with the order: no payload crosses the client, so a retry cannot create a second order. The lines carry the conversion pair and the scale 4 price without loss; the quote's freight becomes one FREIGHT charge line; a stocked line sold in another unit than its product's stocking unit is refused with 409 unit_not_stock_unit until cycle 3; a quote that already has an order not cancelled is 409 already_converted. A quote already accepted (on the desk or by the customer) converts as it is, with no second transition and no second quote.accepted. Events: quote.accepted (unless the quote was already accepted), then order.created.
          */
         post: operations["quoteConvertToOrder"];
         delete?: never;
