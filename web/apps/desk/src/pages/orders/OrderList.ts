@@ -26,6 +26,13 @@ export class GableOrderList extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        // A link may name a tab in the address (the dashboard's Active
+        // Orders card opens /orders?status=confirmed). An unknown value
+        // opens All.
+        const requested = new URLSearchParams(window.location.search).get('status')?.toLowerCase();
+        if (requested && requested !== 'all' && (STATUS_FILTERS as string[]).includes(requested)) {
+            this.status = requested as OrderStatus;
+        }
         this.loadOrders();
         this._unsubBranch = onBranchChanged(() => {
             this.loading = true;

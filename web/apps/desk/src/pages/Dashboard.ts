@@ -181,7 +181,7 @@ export class GableDashboard extends LitElement {
                         .value=${this.summary?.active_orders ?? 0}
                         .iconHtml=${icon(ShoppingCart, 20, 'w-5 h-5')}
                         ?loading=${this.loading}
-                        href="/orders"
+                        href="/orders?status=confirmed"
                         link-label="Open the active orders"
                     ></gable-kpi-card>
                     <gable-kpi-card
