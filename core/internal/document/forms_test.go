@@ -63,7 +63,19 @@ func (f fakeJobs) JobName(_ context.Context, id uuid.UUID) (string, error) {
 	return n, nil
 }
 
-type fakeStatements struct{ st *account.Statement }
+type fakeStatements struct {
+	st    *account.Statement
+	aging *account.AgingSummary
+}
+
+// AgingSummary answers the canned aging, and records nothing: the form asks
+// for the customer's aging as of the statement's last day.
+func (f fakeStatements) AgingSummary(_ context.Context, q account.AgingQuery) (*account.AgingSummary, error) {
+	if f.aging == nil {
+		return &account.AgingSummary{AsOf: q.AsOf.Format("2006-01-02"), Basis: q.Basis, Totals: []account.AgingTotal{}}, nil
+	}
+	return f.aging, nil
+}
 
 func (fakeStatements) LocalDate(_ context.Context, _ uuid.UUID, at time.Time) (time.Time, error) {
 	return at, nil
@@ -205,7 +217,7 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 			OpenDocuments: []account.OpenDocument{{Kind: "invoice", Number: "IN-000007", Date: "2026-02-10", TotalCents: 5500, OpenCents: 5500}},
 		}},
 	}
-	svc := brandedService(t).WithStatements(fakeStatements{st})
+	svc := brandedService(t).WithStatements(fakeStatements{st: st})
 	doc, err := svc.GenerateStatementPDF(context.Background(), st, cust)
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +227,27 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 	}
 	mustNotContain(t, doc, "$-")
 	mustNotContain(t, doc, "North Yard")
+}
+
+// The statement carries the account's aging as of the period's last day: the
+// buckets the AR Aging page reads, in the statement's own currency.
+func TestStatementCarriesTheAgingAsOfThePeriodsEnd(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
+	st := &account.Statement{
+		CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
+		Currencies: []account.StatementCurrency{{Currency: "CAD", OpeningBalanceCents: 0, ClosingBalanceCents: 123456,
+			Lines: []account.StatementLine{{Date: "2026-02-10", Type: "INVOICE", Description: "Invoice IN-000007", AmountCents: 123456, BalanceAfterCents: 123456}}}},
+	}
+	aging := &account.AgingSummary{AsOf: "2026-02-28", Basis: "due_date", Totals: []account.AgingTotal{{
+		Currency: "CAD", CurrentCents: 100001, Days1To30: 20002, Days31To60: 3003, Days61To90: 400, Over90: 50, TotalCents: 123456}}}
+	svc := brandedService(t).WithStatements(fakeStatements{st: st, aging: aging})
+	doc, err := svc.GenerateStatementPDF(context.Background(), st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Aging as of 2026-02-28", "Current", "1-30", "31-60", "61-90", "Over 90", "$1,000.01", "$200.02", "$30.03", "$4.00", "$0.50"} {
+		mustContain(t, doc, want)
+	}
 }
 
 func TestQuoteForm(t *testing.T) {
