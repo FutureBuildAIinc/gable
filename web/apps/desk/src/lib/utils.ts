@@ -71,3 +71,10 @@ export function formatDollars(amount: number | null | undefined): string {
     const negative = n < 0 && text !== '0.00';
     return `${negative ? '-' : ''}$${text}`;
 }
+
+// A purchase order's label on every desk surface: its document number
+// (PO-000042), or the first eight characters of its id when a response from
+// an older core carries none.
+export function poLabel(po: { id: string; number?: string | null }): string {
+    return po.number || po.id.slice(0, 8);
+}

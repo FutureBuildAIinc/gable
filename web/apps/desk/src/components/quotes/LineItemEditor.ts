@@ -9,7 +9,7 @@ import type { Product } from '../../types/product';
 import { PricingService } from '../../services/pricing.service';
 import type { CalculatedPrice } from '../../types/pricing';
 import { ToastService } from '../../lib/toast-service';
-import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput } from '../../lib/money';
+import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput, floatDollarsToTenThousandths } from '../../lib/money';
 
 @customElement('gable-line-item-editor')
 export class GableLineItemEditor extends LitElement {
@@ -44,21 +44,21 @@ export class GableLineItemEditor extends LitElement {
         if (this._selectedProduct?.id !== p.id) return; // another product was picked while this answered
         if (pricing.price_uom === p.stock_uom) {
           // The exact scale 4 price per stocking unit, kept as the integer the quote line carries.
-          this._price = tenThousandthsToInput(pricing.unit_price_ten_thousandths);
+          this._price = tenThousandthsToInput(Math.round(pricing.unit_price_ten_thousandths));
           this._priceDetails = pricing;
         } else {
           // A price in another unit would need the line's conversion pair; use the base price until then.
-          this._price = tenThousandthsToInput(p.base_price_ten_thousandths);
+          this._price = tenThousandthsToInput(Math.round(p.base_price_ten_thousandths));
           this._priceDetails = null;
         }
       } catch (err) {
         console.error('Failed to fetch price', err);
         ToastService.show('Resolved price failed, using fallback base price', 'error');
-        this._price = tenThousandthsToInput(p.base_price_ten_thousandths);
+        this._price = tenThousandthsToInput(Math.round(p.base_price_ten_thousandths));
         this._priceDetails = null;
       }
     } else {
-      this._price = tenThousandthsToInput(p.base_price_ten_thousandths);
+      this._price = tenThousandthsToInput(Math.round(p.base_price_ten_thousandths));
       this._priceDetails = null;
     }
   }
@@ -73,6 +73,20 @@ export class GableLineItemEditor extends LitElement {
 
   private get _canAdd(): boolean {
     return !!this._selectedProduct && this._parsedQuantity !== null && this._parsedPrice !== null;
+  }
+
+  /** On commit, a price with a float tail (4.675000190734863) is held at ten thousandths (4.675). */
+  private _normalisePrice(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const text = input.value.trim();
+    this._price = text;
+    if (dollarsToTenThousandths(text) !== null) return;
+    const n = Number(text);
+    if (text !== '' && Number.isFinite(n) && n >= 0) {
+      this._price = tenThousandthsToInput(floatDollarsToTenThousandths(n));
+      // The binding may already hold this string, so write the box itself.
+      input.value = this._price;
+    }
   }
 
   private _handleAdd() {
@@ -156,11 +170,13 @@ export class GableLineItemEditor extends LitElement {
           <div class="col-span-2">
             <label class="block text-xs font-medium text-gray-500 mb-1">Price</label>
             <input
-              type="number"
+              type="text"
+              inputmode="decimal"
+              aria-label="Unit price"
               class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
               .value=${this._price}
               @input=${(e: InputEvent) => this._price = (e.target as HTMLInputElement).value}
-              step="0.01"
+              @change=${this._normalisePrice}
             />
             ${this._priceDetails && this._priceDetails.price_basis !== 'retail' ? html`
               <div class="text-[10px] text-[#00FFA3] whitespace-nowrap mt-1">${this._priceDetails.details}</div>
