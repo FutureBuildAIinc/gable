@@ -42,7 +42,7 @@ async function signInOnDoor(page: Page, name: string): Promise<CatalogApp[]> {
 test.describe('Front door', () => {
   test('signed out: the sign in card, then tiles that come from GET /api/v1/apps', async ({ page }) => {
     await page.goto('/');
-    await expect(page).toHaveTitle(/Front Door/);
+    await expect(page).toHaveTitle('Gable');
     await expect(page.getByRole('heading', { name: 'Sign in to Gable' })).toBeVisible();
     await expect(page.getByLabel('Display name')).toBeVisible();
     await shot(page, 'door-signed-out.png');
