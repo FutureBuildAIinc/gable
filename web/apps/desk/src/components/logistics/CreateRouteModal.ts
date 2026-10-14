@@ -23,10 +23,12 @@ export class GableCreateRouteModal extends LitElement {
   @state() private _scheduledDate = new Date().toISOString().split('T')[0];
   @state() private _notes = '';
   @state() private _saving = false;
+  @state() private _formError = '';
 
   updated(changed: Map<string, unknown>) {
     if (changed.has('isOpen') && this.isOpen) {
       this._loadFleet();
+      this._formError = '';
     }
   }
 
@@ -45,7 +47,11 @@ export class GableCreateRouteModal extends LitElement {
 
   private async _handleSubmit(e: Event) {
     e.preventDefault();
-    if (!this._vehicleId || !this._driverId || !this._scheduledDate) return;
+    if (!this._vehicleId || !this._driverId || !this._scheduledDate) {
+      this._formError = 'Choose a vehicle and a driver, and pick a date.';
+      return;
+    }
+    this._formError = '';
 
     this._saving = true;
     try {
@@ -97,9 +103,11 @@ export class GableCreateRouteModal extends LitElement {
                 ${icon(Truck, 14)} Vehicle
               </label>
               <gable-select
+                required
+                ?invalid=${this._formError !== '' && !this._vehicleId}
                 .value=${this._vehicleId}
                 .options=${[{ value: '', label: 'Select vehicle...' }, ...this._vehicles.map(v => ({ value: v.id, label: `${v.name} -- ${v.vehicle_type.replace('_', ' ')} (${v.license_plate})${v.capacity_weight_lbs ? ` - ${v.capacity_weight_lbs.toLocaleString()} lbs` : ''}` }))]}
-                @change=${(e: Event) => this._vehicleId = (e.target as HTMLSelectElement).value}
+                @change=${(e: Event) => { this._vehicleId = (e.target as HTMLSelectElement).value; this._formError = ''; }}
               ></gable-select>
               ${selectedVehicle?.capacity_weight_lbs ? html`
                 <p class="text-xs text-zinc-500 mt-1 font-mono">
@@ -113,9 +121,11 @@ export class GableCreateRouteModal extends LitElement {
                 ${icon(User, 14)} Driver
               </label>
               <gable-select
+                required
+                ?invalid=${this._formError !== '' && !this._driverId}
                 .value=${this._driverId}
                 .options=${[{ value: '', label: 'Select driver...' }, ...this._drivers.map(d => ({ value: d.id, label: `${d.name} ${d.phone_number ? `(${d.phone_number})` : ''}` }))]}
-                @change=${(e: Event) => this._driverId = (e.target as HTMLSelectElement).value}
+                @change=${(e: Event) => { this._driverId = (e.target as HTMLSelectElement).value; this._formError = ''; }}
               ></gable-select>
             </div>
 
@@ -145,6 +155,9 @@ export class GableCreateRouteModal extends LitElement {
               ></textarea>
             </div>
 
+            ${this._formError ? html`
+              <p class="text-sm text-safety-red" role="alert" data-testid="route-form-error">${this._formError}</p>
+            ` : nothing}
             <div class="flex justify-end gap-3 pt-2">
               <button type="button" @click=${this._close} class="border border-white/10 bg-transparent hover:bg-white/5 text-white hover:border-gable-green/50 inline-flex items-center justify-center rounded-lg text-sm font-medium transition-all duration-300 h-10 py-2 px-4">Cancel</button>
               <button type="submit" ?disabled=${this._saving || !this._vehicleId || !this._driverId} class="bg-gable-green text-deep-space hover:shadow-glow font-bold inline-flex items-center justify-center rounded-lg text-sm transition-all duration-300 h-10 py-2 px-4 disabled:opacity-50 disabled:pointer-events-none">

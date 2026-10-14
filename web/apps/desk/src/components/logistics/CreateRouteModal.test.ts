@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './CreateRouteModal'
 import type { GableCreateRouteModal } from './CreateRouteModal'
-import { mountAsync, q, text } from '../../test/dom.ts'
+import { mountAsync, update, q, text } from '../../test/dom.ts'
 import { jsonResponse } from '../../test/dom.ts'
 
 let posts: string[]
@@ -52,6 +52,7 @@ describe('gable-create-route-modal required picks', () => {
   it('a submit with nothing chosen says what is missing and sends nothing', async () => {
     const el = await open()
     q<HTMLFormElement>(el, 'form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await update(el, {})
     const message = q<HTMLElement>(el, '[data-testid="route-form-error"]')
     expect(message.getAttribute('role')).toBe('alert')
     expect(text(message)).toContain('vehicle')

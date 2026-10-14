@@ -38,6 +38,8 @@ export class GableSelect extends LitElement {
     @property({ type: String }) placeholder = '';
     @property({ type: String }) label = '';
     @property({ type: Boolean }) disabled = false;
+    @property({ type: Boolean }) required = false;
+    @property({ type: Boolean }) invalid = false;
 
     @state() private _open = false;
     @state() private _activeIndex = -1;
@@ -324,10 +326,12 @@ export class GableSelect extends LitElement {
                     aria-activedescendant=${activeDesc}
                     aria-label=${this.label || nothing}
                     aria-labelledby=${this._fieldLabelId ? `${this._fieldLabelId} ${this._ids}-value` : nothing}
+                    aria-required=${this.required ? 'true' : nothing}
+                    aria-invalid=${this.invalid ? 'true' : nothing}
                     ?disabled=${this.disabled}
                     @click=${this._toggle}
                     @keydown=${this._onButtonKeydown}
-                    class="w-full flex items-center justify-between gap-2 bg-slate-steel/50 border border-white/10 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-gable-green/50 disabled:opacity-50 disabled:cursor-not-allowed ${chosen ? 'text-white' : 'text-zinc-500'}"
+                    class="w-full flex items-center justify-between gap-2 bg-slate-steel/50 border ${this.invalid ? 'border-safety-red' : 'border-white/10'} rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-1 focus:ring-gable-green/50 disabled:opacity-50 disabled:cursor-not-allowed ${chosen ? 'text-white' : 'text-zinc-500'}"
                 >
                     <span id="${this._ids}-value" class="truncate">${chosen ? chosen.label : this.placeholder}</span>
                     ${icon(ChevronDown, 16, 'shrink-0 text-zinc-500')}
