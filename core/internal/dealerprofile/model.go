@@ -7,8 +7,13 @@
 package dealerprofile
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -65,4 +70,57 @@ type Logo struct {
 type Reader interface {
 	Get(ctx context.Context) (*Profile, error)
 	GetLogo(ctx context.Context) (*Logo, error)
+}
+
+// The decoded size a logo may have. The byte cap alone is no bound on what
+// printing allocates: a small file can declare a very large image.
+const (
+	MaxLogoSide   = 2000
+	MaxLogoPixels = 4_000_000
+)
+
+// LogoSizeError is a logo whose declared dimensions are past the cap.
+type LogoSizeError struct{ Width, Height int }
+
+func (e *LogoSizeError) Error() string {
+	return fmt.Sprintf("the logo is %d by %d pixels; the cap is %d pixels a side and %d pixels in all",
+		e.Width, e.Height, MaxLogoSide, MaxLogoPixels)
+}
+
+// CheckLogoImage accepts raw only when it is one whole image of the named
+// format ("png" or "jpeg") within the dimension cap: the header is read and
+// the size checked before any pixel is decoded, then the whole image is
+// decoded, and bytes after the image's end are refused.
+func CheckLogoImage(raw []byte, format string) error {
+	cfg, got, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	if got != format {
+		return fmt.Errorf("the image is %s, not %s", got, format)
+	}
+	if cfg.Width < 1 || cfg.Height < 1 || cfg.Width > MaxLogoSide || cfg.Height > MaxLogoSide || cfg.Width*cfg.Height > MaxLogoPixels {
+		return &LogoSizeError{Width: cfg.Width, Height: cfg.Height}
+	}
+	rd := bytes.NewReader(raw)
+	switch format {
+	case "png":
+		// png.Decode on the bare reader, not image.Decode, which buffers
+		// ahead and would hide what follows the image.
+		if _, err := png.Decode(rd); err != nil {
+			return err
+		}
+		if rd.Len() != 0 {
+			return errors.New("bytes follow the end of the image")
+		}
+	case "jpeg":
+		if _, err := jpeg.Decode(rd); err != nil {
+			return err
+		}
+		// The JPEG decoder reads ahead, so the end marker is the check.
+		if !bytes.HasSuffix(raw, []byte{0xff, 0xd9}) {
+			return errors.New("bytes follow the end of the image")
+		}
+	}
+	return nil
 }

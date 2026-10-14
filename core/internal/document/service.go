@@ -148,8 +148,14 @@ func validLogo(l *dealerprofile.Logo) bool {
 	if l == nil || len(l.Bytes) == 0 {
 		return false
 	}
-	_, _, err := image.DecodeConfig(bytes.NewReader(l.Bytes))
-	return err == nil
+	// Only the header is read: the dimension cap is what keeps a stored
+	// oversized logo from being decoded on every form.
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(l.Bytes))
+	if err != nil {
+		return false
+	}
+	return cfg.Width >= 1 && cfg.Height >= 1 && cfg.Width <= dealerprofile.MaxLogoSide &&
+		cfg.Height <= dealerprofile.MaxLogoSide && cfg.Width*cfg.Height <= dealerprofile.MaxLogoPixels
 }
 
 // joinLines drops the empty lines; a block is a slice of lines because the PDF

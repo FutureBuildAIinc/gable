@@ -233,6 +233,47 @@ func TestDealerProfileLogo(t *testing.T) {
 	}
 }
 
+// TestDealerProfileLogoRefusals: an image whose decoded size is past the cap
+// (8000 by 8000 is a small file and a gigabyte of pixels), a truncated or
+// corrupt image, and a file with bytes after the image's end are each a 400.
+func TestDealerProfileLogoRefusals(t *testing.T) {
+	f := newFixture(t, 0)
+	ifm := func() string { return `"` + strconv.FormatInt(f.revision(), 10) + `"` }
+	put := func(b []byte) resp {
+		return f.do("PUT", "/api/v1/dealer-profile/logo", bytes.NewReader(b), "Content-Type", "image/png", "If-Match", ifm())
+	}
+
+	var huge bytes.Buffer
+	if err := png.Encode(&huge, image.NewGray(image.Rect(0, 0, 8000, 8000))); err != nil {
+		t.Fatal(err)
+	}
+	if huge.Len() >= dealerprofile.MaxLogoBytes {
+		t.Fatalf("the probe image is %d bytes; it must sit under the byte cap to prove the dimension cap", huge.Len())
+	}
+	if r := put(huge.Bytes()); r.status != http.StatusBadRequest || !strings.Contains(string(r.raw), "pixels") {
+		t.Errorf("8000x8000: %d %s", r.status, r.raw)
+	}
+
+	good := pngBytes(t, 16, 16)
+	if r := put(good[:len(good)-20]); r.status != http.StatusBadRequest {
+		t.Errorf("truncated: %d %s", r.status, r.raw)
+	}
+	corrupt := append([]byte{}, good...)
+	for i := len(corrupt) / 2; i < len(corrupt)/2+8; i++ {
+		corrupt[i] ^= 0xff
+	}
+	if r := put(corrupt); r.status != http.StatusBadRequest {
+		t.Errorf("corrupt: %d %s", r.status, r.raw)
+	}
+	poly := append(append([]byte{}, good...), []byte("PK\x03\x04 not part of the image")...)
+	if r := put(poly); r.status != http.StatusBadRequest {
+		t.Errorf("trailing bytes: %d %s", r.status, r.raw)
+	}
+	if r := put(good); r.status != http.StatusOK {
+		t.Errorf("a clean image: %d %s", r.status, r.raw)
+	}
+}
+
 // TestDealerProfileThreeWritersOneWinner: three racers on one revision at
 // pool size 4, exactly one wins and the others are stale.
 func TestDealerProfileThreeWritersOneWinner(t *testing.T) {

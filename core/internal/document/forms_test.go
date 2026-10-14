@@ -249,3 +249,23 @@ func TestPurchaseOrderForm(t *testing.T) {
 		mustContain(t, doc, want)
 	}
 }
+
+// A logo already stored past the dimension cap prints without the image
+// rather than allocating its pixels on every form.
+func TestOversizedStoredLogoPrintsWithoutTheImage(t *testing.T) {
+	svc := brandedService(t)
+	var huge bytes.Buffer
+	if err := png.Encode(&huge, image.NewGray(image.Rect(0, 0, 8000, 8000))); err != nil {
+		t.Fatal(err)
+	}
+	p := svc.profiles.(fakeProfiles)
+	p.logo = &dealerprofile.Logo{Bytes: huge.Bytes(), ContentType: "image/png"}
+	svc.profiles = p
+
+	doc, err := svc.GenerateInvoicePDF(context.Background(), invoiceAt(yardNorth), &customer.Customer{Name: "Acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "Test Yard")
+	mustNotContain(t, doc, "/Subtype /Image")
+}

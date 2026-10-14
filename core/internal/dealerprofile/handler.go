@@ -4,10 +4,8 @@
 package dealerprofile
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"image"
 	_ "image/jpeg" // registers the decoder the logo check uses
 	_ "image/png"  // registers the decoder the logo check uses
 	"io"
@@ -166,9 +164,14 @@ func (h *Handler) PutLogo(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, httpx.BadRequest("the logo body could not be read"))
 		return
 	}
-	_, format, derr := image.DecodeConfig(bytes.NewReader(raw))
 	want := map[string]string{"image/png": "png", "image/jpeg": "jpeg"}[ctype]
-	if derr != nil || format != want {
+	if err := CheckLogoImage(raw, want); err != nil {
+		var tooBig *LogoSizeError
+		if errors.As(err, &tooBig) {
+			httpx.WriteError(w, r, httpx.BadRequest(err.Error(),
+				httpx.FieldError{Field: "body", Message: "must be at most 2000 pixels a side and 4 megapixels"}))
+			return
+		}
 		httpx.WriteError(w, r, httpx.BadRequest("the body is not a valid "+want+" image",
 			httpx.FieldError{Field: "body", Message: "must decode as " + ctype}))
 		return
