@@ -16,6 +16,8 @@ const svc = vi.hoisted(() => ({
   removeItem: vi.fn(),
   getSale: vi.fn(),
   openTill: vi.fn(),
+  tillReport: vi.fn(),
+  closeTill: vi.fn(),
 }));
 
 vi.mock('../../services/POSService', async (orig) => {
@@ -839,14 +841,15 @@ describe('the register and the sale when the cashier moves', () => {
     const el = await mountLk();
     expect(svc.getSale).not.toHaveBeenCalledWith('a-empty');
     expect(svc.startSale).toHaveBeenCalledTimes(2);
-    // and A's own empty sale is still A's to reuse
+    // signing out forgot A's remembered sale, so A starts afresh
     el.remove();
     authCustody.signOut();
+    expect(localStorage.getItem(`gable.pos.sale.${CASHIER_A}.REG-LK`)).toBeNull();
     authCustody.signInWithToken(tokenFor(CASHIER_A));
-    svc.getSale.mockResolvedValue(aSale);
+    svc.getSale.mockClear();
     (await mountLk()).remove();
-    expect(svc.getSale).toHaveBeenCalledWith('a-empty');
-    expect(svc.startSale).toHaveBeenCalledTimes(2);
+    expect(svc.getSale).not.toHaveBeenCalled();
+    expect(svc.startSale).toHaveBeenCalledTimes(3);
   });
 
   it('does not reuse a sale remembered under another cashier even when the server hands it back', async () => {
@@ -911,6 +914,185 @@ describe('the register and the sale when the cashier moves', () => {
     expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(true);
     const ret = [...q(el, 'pos-panel-foot').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
     expect(ret.disabled).toBe(true);
+    el.remove();
+  });
+});
+
+describe('the counter before the till opens, and after a sale completes', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  async function mountNoTill(): Promise<POSTerminal> {
+    svc.listRegisters.mockResolvedValue([REG_01]);
+    svc.currentTill.mockResolvedValue(null);
+    svc.searchProducts.mockResolvedValue([
+      { product_id: 'p1', sku: 'SKU-1', description: 'Item 1', uom: 'EA', unit_price_cents: 500, in_stock: '9' },
+    ]);
+    svc.findCustomers.mockResolvedValue([account]);
+    const el = document.createElement('gable-pos-terminal') as POSTerminal;
+    document.body.appendChild(el);
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    return el;
+  }
+  const alertText = (el: Element) => el.querySelector('[role="alert"]')?.textContent ?? '';
+  const answered = (el: POSTerminal) => {
+    expect(alertText(el)).toContain('Open the till to start a sale');
+    expect(document.activeElement?.id).toBe('pos-open-till');
+    expect(svc.startSale).not.toHaveBeenCalled();
+    expect(svc.addItem).not.toHaveBeenCalled();
+    expect(svc.attachCustomer).not.toHaveBeenCalled();
+  };
+
+  it('says the till must be open in the empty state', async () => {
+    const el = await mountNoTill();
+    expect(q(el, 'pos-empty').textContent?.trim()).toBe('Open the till to start a sale');
+    el.remove();
+  });
+
+  it('locks and dims the search, quantity, Scan, customer find and Payment card with no till', async () => {
+    const el = await mountNoTill();
+    for (const sel of ['#pos-search-input', '#pos-qty', '#pos-customer-search']) {
+      expect((el.querySelector(sel) as HTMLInputElement).disabled).toBe(true);
+    }
+    const scan = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Scan') as HTMLButtonElement;
+    expect(scan.disabled).toBe(true);
+    expect(q(el, 'panel-payment').className).toContain('opacity-50');
+    expect(q(el, 'panel-customer').textContent).toContain('Open the till to start a sale');
+    expect((q(el, 'pos-void') as HTMLButtonElement).className).toContain('text-slate-400');
+    el.remove();
+  });
+
+  it('answers a product added with no till', async () => {
+    const el = await mountNoTill();
+    await (el as unknown as { _addItem(p: unknown, q: string): Promise<void> })._addItem(
+      { product_id: 'p1', sku: 'SKU-1', description: 'Item 1', uom: 'EA', unit_price_cents: 500, in_stock: '9' }, '1');
+    await el.updateComplete;
+    answered(el);
+    el.remove();
+  });
+
+  it('answers Enter on the search with no till', async () => {
+    const el = await mountNoTill();
+    const input = el.querySelector('#pos-search-input') as HTMLInputElement;
+    input.value = 'SKU-1';
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    answered(el);
+    el.remove();
+  });
+
+  it('answers a scan with no till', async () => {
+    const el = await mountNoTill();
+    await (el as unknown as { _handleScan(b: string): Promise<void> })._handleScan('SKU-1');
+    await el.updateComplete;
+    await new Promise((r) => setTimeout(r, 0));
+    answered(el);
+    el.remove();
+  });
+
+  it('answers picking a customer with no till', async () => {
+    const el = await mountNoTill();
+    await (el as unknown as { _chooseCustomer(c: CounterCustomer): Promise<void> })._chooseCustomer(account);
+    await el.updateComplete;
+    answered(el);
+    el.remove();
+  });
+
+  describe('a completed sale', () => {
+    async function completeOne(): Promise<POSTerminal> {
+      svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
+      const el = await mount(sale());
+      await typeInto(el, '100.00');
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      return el;
+    }
+
+    it('stays on screen past the old timer, with its band, Void and Return', async () => {
+      const el = await completeOne();
+      vi.useFakeTimers({ toFake: ['setTimeout'] });
+      try {
+        await vi.advanceTimersByTimeAsync(5000);
+        await el.updateComplete;
+        expect(svc.startSale).toHaveBeenCalledTimes(1);
+        expect(el.querySelector('[role="status"]')?.textContent).toContain('Sale POS-000001 complete');
+        expect(el.querySelector('[role="status"]')?.textContent).toContain('CHANGE DUE $13.50');
+        expect(q(el, 'pos-header').textContent).toContain('completed');
+        expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(false);
+        const ret = [...q(el, 'pos-panel-foot').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
+        expect(ret.disabled).toBe(false);
+        ret.click();
+        await el.updateComplete;
+        expect(el.textContent).toContain('Return');
+        expect((el as unknown as { _showReturn: boolean })._showReturn).toBe(true);
+        el.remove();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('gives way to a new sale carrying the product added next', async () => {
+      const el = await completeOne();
+      svc.startSale.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [] }));
+      svc.addItem.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      await (el as unknown as { _addItem(p: unknown, q: string): Promise<void> })._addItem(
+        { product_id: 'p-z', sku: 'SKU-z', description: 'Item z', uom: 'EA', unit_price_cents: 700, in_stock: '5' }, '1');
+      await el.updateComplete;
+      expect(svc.startSale).toHaveBeenCalledTimes(2);
+      expect(svc.addItem).toHaveBeenCalledWith('s2', 'p-z', '1', 'EA');
+      expect(q(el, 'pos-header').textContent).toContain('S-2');
+      expect(q(el, 'pos-lines').textContent).toContain('Item z');
+      expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(true);
+      el.remove();
+    });
+
+    it('gives way to a new sale for the customer named next', async () => {
+      const el = await completeOne();
+      svc.startSale.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [] }));
+      svc.attachCustomer.mockResolvedValue(sale({ id: 's2', number: 'S-2', lines: [], customer_id: 'cu1' }));
+      (el as unknown as { _custResults: unknown[] })._custResults = [account];
+      await el.updateComplete;
+      expect((el.querySelector('#pos-customer-search') as HTMLInputElement).disabled).toBe(false);
+      (q(el, 'pos-customer-results').querySelector('button') as HTMLElement).click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+      expect(svc.startSale).toHaveBeenCalledTimes(2);
+      expect(svc.attachCustomer).toHaveBeenCalledWith('s2', { customer_id: 'cu1' });
+      expect(q(el, 'pos-customer-name').textContent).toBe('Test Builders');
+      el.remove();
+    });
+  });
+});
+
+describe('closing the till', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('asks first over a sale with lines, and declining keeps the till and the sale', async () => {
+    const el = await mount(sale());
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await el.updateComplete;
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(svc.tillReport).not.toHaveBeenCalled();
+    expect(q(el, 'pos-till-state').textContent).toContain('Till open');
+    expect((el as unknown as { _sale: Sale })._sale.id).toBe('s1');
+    confirm.mockRestore();
+    el.remove();
+  });
+
+  it('clears the sale and hides New Sale once the till is closed', async () => {
+    const el = await mount(sale({ lines: [] }));
+    const inner = el as unknown as { _confirmCloseTill(): Promise<void>; _till: unknown; _counts: Record<string, string> };
+    svc.closeTill.mockResolvedValue({ variance_cents: 0 });
+    await inner._confirmCloseTill();
+    await el.updateComplete;
+    expect([...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'New Sale')).toBe(false);
+    expect(q(el, 'pos-till-state').textContent).toContain('No till');
+    expect((el as unknown as { _sale: Sale | null })._sale).toBeNull();
     el.remove();
   });
 });

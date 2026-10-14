@@ -83,7 +83,6 @@ export class POSTerminal extends LitElement {
 
   @query('#pos-search-input') private _searchInput!: HTMLInputElement;
 
-  private _newTxTimer: ReturnType<typeof setTimeout> | null = null;
   private _errorTimer: ReturnType<typeof setTimeout> | null = null;
   private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
   /** Counts searches; an answer to an older one is dropped. */
@@ -256,6 +255,8 @@ export class POSTerminal extends LitElement {
 
   private async _beginCloseTill() {
     if (!this._till) return;
+    // The same question a register change asks: declining keeps till and sale.
+    if (this._saleHasLines && !window.confirm(this._leaveSaleQuestion())) return;
     try {
       this._tillBusy = true;
       this._tillReport = await posService.tillReport(this._till.id);
@@ -297,7 +298,6 @@ export class POSTerminal extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener('gable:branch-changed', this._onYardChanged);
     this._registerSeq++;
-    if (this._newTxTimer) clearTimeout(this._newTxTimer);
     if (this._errorTimer) clearTimeout(this._errorTimer);
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
     if (this._custDebounce) clearTimeout(this._custDebounce);
@@ -334,6 +334,11 @@ export class POSTerminal extends LitElement {
    * the exact SKU, else the top result of that search, is added.
    */
   private _searchKey(e: KeyboardEvent) {
+    if (e.key === 'Enter' && this._till === null) {
+      e.preventDefault();
+      this._needTill();
+      return;
+    }
     if (e.key === 'Enter' && this._resultsStale && this._searchQuery.trim().length >= 2) {
       e.preventDefault();
       void this._enterSearch();
@@ -343,6 +348,10 @@ export class POSTerminal extends LitElement {
   }
 
   private async _enterSearch() {
+    if (this._till === null) {
+      this._needTill();
+      return;
+    }
     const query = this._searchQuery;
     if (this._searchDebounce) clearTimeout(this._searchDebounce);
     try {
@@ -368,6 +377,10 @@ export class POSTerminal extends LitElement {
   /* ---- Barcode scanning ---- */
 
   private async _handleScan(barcode: string) {
+    if (this._till === null) {
+      this._needTill();
+      return;
+    }
     try {
       const results = await posService.searchProducts(barcode);
       if (results && results.length > 0) {
@@ -423,6 +436,7 @@ export class POSTerminal extends LitElement {
 
   /** Names the customer on the open sale; the lines then price for them. */
   private async _chooseCustomer(c: CounterCustomer) {
+    if (!(await this._readySale())) return;
     if (!this._sale) return;
     try {
       this._error = null;
@@ -475,7 +489,8 @@ export class POSTerminal extends LitElement {
 
   private _renderCustomerPanel() {
     const sale = this._sale;
-    const hasLines = (sale?.lines.length ?? 0) > 0;
+    // A completed sale's lines are no bar: naming a customer starts the next sale.
+    const hasLines = sale?.status === 'open' && (sale?.lines.length ?? 0) > 0;
     const c = this._customer;
     const toneClass = (tone: string) =>
       tone === 'stop' ? 'text-safety-red' : tone === 'warn' ? 'text-amber-400' : 'text-gable-green';
@@ -532,10 +547,10 @@ export class POSTerminal extends LitElement {
           placeholder="Find by name or account number"
           aria-label="Find a customer by name or account number"
           .value=${this._custQuery}
-          ?disabled=${hasLines}
+          ?disabled=${hasLines || this._till === null}
           @input=${(e: Event) => { this._custQuery = (e.target as HTMLInputElement).value; }}
-          class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:opacity-40" />
-        <div class="mt-1 text-xs text-slate-400">Name the customer before the first line</div>
+          class="mt-2 w-full rounded border border-white/10 bg-slate-steel px-2 py-2 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40" />
+        <div class="mt-1 text-xs text-slate-400">${this._till === null ? 'Open the till to start a sale' : 'Name the customer before the first line'}</div>
         ${this._custResults.length > 0 ? html`
           <div class="mt-2 rounded border border-white/10" data-testid="pos-customer-results">
             ${this._custResults.map((r) => {
@@ -556,11 +571,6 @@ export class POSTerminal extends LitElement {
 
   private async _startNewSale() {
     if (this._till === null) return;
-    // A completion's own timer must not start a second sale over this one.
-    if (this._newTxTimer) {
-      clearTimeout(this._newTxTimer);
-      this._newTxTimer = null;
-    }
     try {
       this._loading = true;
       this._error = null;
@@ -571,8 +581,8 @@ export class POSTerminal extends LitElement {
       this._custResults = [];
       this._poText = '';
       this._jobId = '';
-      // The last completed sale stays offerable for a void or a return
-      // until the next completion replaces it.
+      // A completed sale on screen stays offerable for a void or a return
+      // until this new sale replaces it (New Sale, a product or a customer).
       const reg = this._registerId;
       const sale = await this._emptyOrNewSale(reg);
       // a late answer for a register no longer selected is dropped
@@ -620,7 +630,31 @@ export class POSTerminal extends LitElement {
     return sale;
   }
 
+  /**
+   * Before a product is added or a customer named: with no till open nothing is
+   * created, the cashier is told and the focus goes to Open Till; a completed
+   * sale on screen gives way to a fresh one in this till session. True when an
+   * open sale is there to act on.
+   */
+  private async _readySale(): Promise<boolean> {
+    if (this._till === null) {
+      this._needTill();
+      return false;
+    }
+    if (this._sale?.status === 'completed') await this._startNewSale();
+    return this._sale !== null && this._sale.status === 'open';
+  }
+
+  /** The counter's own message, and the focus on Open Till. */
+  private _needTill() {
+    this._error = 'Open the till to start a sale';
+    void this.updateComplete.then(() => {
+      (this.querySelector('#pos-open-till') as HTMLElement | null)?.focus();
+    });
+  }
+
   private async _addItem(product: QuickSearchResult, quantity = this._qtyText) {
+    if (!(await this._readySale())) return;
     if (!this._sale) return;
     const qty = normalizeQuantity(quantity);
     if (qty === null) {
@@ -742,6 +776,8 @@ export class POSTerminal extends LitElement {
     try {
       this._loading = true;
       this._error = null;
+      // A timer set earlier must not clear this completion's band.
+      if (this._errorTimer) clearTimeout(this._errorTimer);
       const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
       this._sale = completed;
       this._completed = completed;
@@ -753,10 +789,8 @@ export class POSTerminal extends LitElement {
       this._tenderAmount = '';
       if (tenders.some((t) => t.method === 'account')) void this._refreshStanding();
 
-      // Auto-start the next sale after 2 seconds
-      this._newTxTimer = setTimeout(() => {
-        this._startNewSale();
-      }, 2000);
+      // The completed sale, its band and the change due stay until the cashier
+      // moves on: New Sale, a product added or a customer named.
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to complete sale';
     } finally {
@@ -1019,7 +1053,7 @@ export class POSTerminal extends LitElement {
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
               title="Count the drawer and close the till with its Z report"
               class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till</button>` : html`
-            <button @click=${() => { this._showTillOpen = true; }}
+            <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
           ${this._register && this._till ? html`
           <button @click=${() => this._startNewSale()}
@@ -1029,27 +1063,30 @@ export class POSTerminal extends LitElement {
   }
 
   private _renderItems(productLines: SaleLine[]) {
+    const noTill = this._till === null;
     const th = 'border-b border-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400';
     return html`
-      <section class="flex min-h-[22rem] flex-1 flex-col border-white/10 xl:min-h-0 xl:border-r" data-testid="pos-items">
+      <section class="flex ${productLines.length > 0 ? 'min-h-[22rem]' : 'min-h-[12rem]'} flex-1 flex-col border-white/10 xl:min-h-0 xl:border-r" data-testid="pos-items">
         <div class="relative border-b border-white/10 p-4">
           <div class="flex gap-2">
             <input id="pos-search-input" type="text" autocomplete="off"
               placeholder="Search by SKU or description"
               .value=${this._searchQuery}
+              ?disabled=${noTill}
               @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; this._highlight = 0; this._resultsStale = true; }}
               @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
-              class="flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green"
+              class="flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Search product by SKU or description" />
             <label class="sr-only" for="pos-qty">Quantity</label>
             <input id="pos-qty" type="text" inputmode="decimal" autocomplete="off"
               .value=${this._qtyText}
+              ?disabled=${noTill}
               @input=${(e: Event) => { this._qtyText = (e.target as HTMLInputElement).value; }}
               @keydown=${(e: KeyboardEvent) => this._searchKey(e)}
-              class="w-20 rounded-lg border border-white/10 bg-deep-space px-3 py-3 text-right font-mono text-base text-white outline-none focus:border-gable-green"
+              class="w-20 rounded-lg border border-white/10 bg-deep-space px-3 py-3 text-right font-mono text-base text-white outline-none focus:border-gable-green disabled:cursor-not-allowed disabled:opacity-40"
               title="Quantity to add" aria-label="Quantity" />
-            <button @click=${() => { this._isScanning = true; }}
-              class="rounded-lg border border-white/20 px-4 text-sm font-semibold text-slate-200">Scan</button>
+            <button @click=${() => { this._isScanning = true; }} ?disabled=${noTill}
+              class="rounded-lg border border-white/20 px-4 text-sm font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-40">Scan</button>
           </div>
           ${this._isScanning ? html`
             <gable-barcode-scanner
@@ -1072,7 +1109,7 @@ export class POSTerminal extends LitElement {
         <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
           ${productLines.length === 0 ? html`
             <div class="flex h-full min-h-[120px] items-center justify-center text-sm text-slate-400" data-testid="pos-empty">
-              Search and add products to start a sale
+              ${this._till === null ? 'Open the till to start a sale' : 'Search and add products to start a sale'}
             </div>` : html`
             <table class="w-full border-collapse" aria-label="Ticket lines" data-testid="pos-lines">
               <thead><tr>
@@ -1113,7 +1150,8 @@ export class POSTerminal extends LitElement {
     const change = isCash && entry !== null && this._tenderedSoFar < total
       ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
     return html`
-      <section class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="panel-payment">
+      <section class="rounded-lg border border-white/10 bg-deep-space p-3 ${this._till === null ? 'opacity-50' : ''}" data-testid="panel-payment"
+        aria-disabled=${this._till === null ? 'true' : 'false'}>
         <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Payment</div>
         ${this._pendingTenders.length > 0 ? html`
           <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
@@ -1134,7 +1172,7 @@ export class POSTerminal extends LitElement {
                 ?disabled=${!hasLines || !open || refused !== null}
                 title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
                 aria-pressed=${chosen ? 'true' : 'false'}
-                class="rounded-lg border px-3 py-3 text-sm font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed disabled:opacity-40 ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white'}">
+                class="rounded-lg border px-3 py-3 text-sm font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
                 ${m === 'account' ? 'Charge to account' : m}
               </button>`;
           })}
@@ -1143,7 +1181,7 @@ export class POSTerminal extends LitElement {
           ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
         </label>
         <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
-          placeholder=${(owed / 100).toFixed(2)} .value=${this._tenderAmount}
+          placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
           ?disabled=${!hasLines || !open}
           @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
           @blur=${() => this._formatTenderAmount()}
@@ -1174,6 +1212,9 @@ export class POSTerminal extends LitElement {
     // sale, whatever the one before it was, offers neither.
     const followOn = this._completed !== null && sale !== null && sale.id === this._completed.id
       && sale.status === 'completed';
+    const follow = followOn
+      ? 'border-white/30 text-slate-200 hover:bg-white/5'
+      : 'cursor-not-allowed border-white/10 bg-white/5 text-slate-400';
     const label = this._loading ? 'Processing...'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
@@ -1188,7 +1229,7 @@ export class POSTerminal extends LitElement {
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
           <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Tax</dt>
             <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
-          <div class="mt-1 flex items-baseline justify-between border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
+          <div class="mt-1 flex items-baseline justify-between gap-4 border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
             <dd class="font-mono text-2xl text-gable-green" data-testid="summary-total">${fmt(total)}</dd></div>
           ${this._pendingTenders.length > 0 ? html`
             <div class="flex justify-between py-1 text-slate-400"><dt>Still owed</dt>
@@ -1200,9 +1241,9 @@ export class POSTerminal extends LitElement {
         </button>
         <div class="flex gap-2 xl:mt-3">
           <button data-testid="pos-void" @click=${() => this._voidSale()} ?disabled=${!followOn}
-            class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Void</button>
+            class="min-h-11 flex-1 rounded border px-3 py-2 text-xs font-semibold ${follow}">Void</button>
           <button @click=${() => this._beginReturn()} ?disabled=${!followOn}
-            class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Return</button>
+            class="min-h-11 flex-1 rounded border px-3 py-2 text-xs font-semibold ${follow}">Return</button>
         </div>
       </section>`;
   }
