@@ -25,6 +25,7 @@
  */
 
 import { authConfig } from './config.ts';
+import { BRANCH_STORAGE_KEY } from './branch.ts';
 import { decodeTokenClaims, isExpired, type GableTokenClaims } from './jwt.ts';
 
 /** The storage operations custody needs, so tests can inject doubles. */
@@ -57,7 +58,7 @@ export const SESSION_HANDOFF_KEY = 'gable.auth.session.v1';
 /** A signed-in session, in the shape the frontends render. */
 export type AuthSession =
   | { kind: 'token'; token: string; claims: GableTokenClaims }
-  | { kind: 'dev'; name: string };
+  | { kind: 'dev'; name: string; role?: string; homeYardCode?: string };
 
 /** The handoff record's on-the-wire shape. The v tags the payload shape. */
 interface HandoffRecord {
@@ -65,6 +66,18 @@ interface HandoffRecord {
   kind: 'token' | 'dev';
   token?: string;
   name?: string;
+  role?: string;
+  homeYardCode?: string;
+}
+
+/**
+ * The persona a dev card sets: the role the door uses to filter tiles and
+ * the home yard code the desk opens on. Both are optional, so the existing
+ * dev sign-in (a free display name only) keeps working unchanged.
+ */
+export interface DevPersona {
+  role?: string;
+  homeYardCode?: string;
 }
 
 export class InvalidTokenError extends Error {
@@ -126,7 +139,11 @@ export class AuthCustody {
     if (rec.kind === 'dev') {
       if (!authConfig.devMode) return null;
       if (typeof rec.name !== 'string' || rec.name.length === 0) return null;
-      return { kind: 'dev', name: rec.name };
+      const role = typeof rec.role === 'string' && rec.role.length > 0 ? rec.role : undefined;
+      const homeYardCode = typeof rec.homeYardCode === 'string' && rec.homeYardCode.length > 0
+        ? rec.homeYardCode
+        : undefined;
+      return { kind: 'dev', name: rec.name, role, homeYardCode };
     }
     return null;
   }
@@ -166,6 +183,28 @@ export class AuthCustody {
   }
 
   /**
+   * The persona's role when the session is a dev session with one (a
+   * persona card set it), otherwise null. The door uses this to filter its
+   * tiles in dev mode; a token session never sets it.
+   */
+  get personaRole(): string | null {
+    const s = this.session;
+    if (s === null || s.kind !== 'dev') return null;
+    return s.role ?? null;
+  }
+
+  /**
+   * The persona's home yard code when the session is a dev session with
+   * one, otherwise null. The desk's BranchContext uses this to open the
+   * right yard for a persona; a token session never sets it.
+   */
+  get personaHomeYardCode(): string | null {
+    const s = this.session;
+    if (s === null || s.kind !== 'dev') return null;
+    return s.homeYardCode ?? null;
+  }
+
+  /**
    * Sign in with a bearer token issued by the configured identity provider.
    * The token is decoded (never verified client-side) and refused as data
    * when it is not a JWT or its own exp claim is in the past. On success it
@@ -189,16 +228,34 @@ export class AuthCustody {
    * credential exists or is needed; the record carries a display name so
    * the door can render a user. Refused unless the build set
    * VITE_AUTH_DEV_MODE.
+   *
+   * `persona` is optional: a demo persona card passes the persona's role
+   * and home yard code so the door can filter tiles with the role and the
+   * desk can open the persona's home yard. A persona sign in also drops the
+   * yard an earlier session stored, which the desk would otherwise restore
+   * before it consults the persona. A free-form dev sign-in omits it, keeps
+   * the stored yard, and the session carries only the display name.
    */
-  signInDev(displayName: string): AuthSession {
+  signInDev(displayName: string, persona?: DevPersona): AuthSession {
     if (!authConfig.devMode) throw new DevModeDisabledError();
     const name = displayName.trim();
     if (name.length === 0) throw new InvalidTokenError('Empty display name');
 
-    const session: AuthSession = { kind: 'dev', name };
+    const role = persona?.role && persona.role.length > 0 ? persona.role : undefined;
+    const homeYardCode = persona?.homeYardCode && persona.homeYardCode.length > 0
+      ? persona.homeYardCode
+      : undefined;
+    if (persona) {
+      try {
+        globalThis.localStorage?.removeItem(BRANCH_STORAGE_KEY);
+      } catch {
+        // A hostile storage context: the desk falls back to its own yard rules.
+      }
+    }
+    const session: AuthSession = { kind: 'dev', name, role, homeYardCode };
     this._session = session;
     this._adopted = true;
-    this._writeHandoff({ v: 1, kind: 'dev', name });
+    this._writeHandoff({ v: 1, kind: 'dev', name, role, homeYardCode });
     return session;
   }
 

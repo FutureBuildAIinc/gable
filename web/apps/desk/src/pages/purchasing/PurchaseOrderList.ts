@@ -7,9 +7,12 @@ import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
+import { VendorService } from '../../services/VendorService';
+import { branchContext } from '../../services/BranchContext.ts';
 import type { PurchaseOrder, POSourceSummary } from '../../types/purchaseOrder';
 import type { ReorderAlert } from '../../types/product';
 import { formatQuantity } from '../../lib/money';
+import { formatDollars } from '../../lib/utils.ts';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 
@@ -43,6 +46,8 @@ export class PurchaseOrderList extends LitElement {
     @state() private alerts: ReorderAlert[] = [];
     @state() private loading = true;
     @state() private sourceSummary: POSourceSummary = {};
+    /** Vendor names by id: the list route carries only `vendor_id`. */
+    @state() private vendorNames: Record<string, string> = {};
     private _unsubBranch: (() => void) | null = null;
 
     connectedCallback() {
@@ -64,11 +69,13 @@ export class PurchaseOrderList extends LitElement {
 
     private async _loadData() {
         try {
-            const [poData, alertData, summary] = await Promise.all([
+            const [poData, alertData, summary, vendors] = await Promise.all([
                 PurchaseOrderService.listPOs(),
                 PurchaseOrderService.getReorderAlerts(),
                 PurchaseOrderService.getSourceSummary().catch(() => ({} as POSourceSummary)),
+                VendorService.listVendors().catch(() => []),
             ]);
+            this.vendorNames = Object.fromEntries((vendors || []).map((v) => [v.id, v.name]));
             this.pos = poData || [];
             this.alerts = alertData || [];
             this.sourceSummary = summary || {};
@@ -200,6 +207,8 @@ export class PurchaseOrderList extends LitElement {
                             <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
                                 <tr>
                                     <th class="px-6 py-4">PO #</th>
+                                    <th class="px-6 py-4">Vendor</th>
+                                    <th class="px-6 py-4">Yard</th>
                                     <th class="px-6 py-4">Status</th>
                                     <th class="px-6 py-4">Source</th>
                                     <th class="px-6 py-4 text-right">Lines</th>
@@ -208,13 +217,26 @@ export class PurchaseOrderList extends LitElement {
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-white/5">
-                                ${this.pos.map((po) => html`
+                                ${this.pos.map((po) => {
+                                    // The yard is the branch the wire stamped on the PO; resolve
+                                    // its display name from the BranchContext. A branch outside
+                                    // the caller's list reads "Not set", never a raw id.
+                                    const yardName = po.branch_id
+                                        ? branchContext.branches.find((b) => b.id === po.branch_id)?.name ?? ''
+                                        : '';
+                                    return html`
                                     <tr
                                         @click=${() => router.navigate(`/purchasing/${po.id}`)}
                                         class="hover:bg-white/5 cursor-pointer transition-colors"
                                     >
                                         <td class="px-6 py-4 font-mono text-white">
                                             ${po.id.slice(0, 8)}...
+                                        </td>
+                                        <td class="px-6 py-4 text-zinc-200">
+                                            ${po.vendor_name ?? (po.vendor_id ? this.vendorNames[po.vendor_id] : undefined) ?? html`<span class="text-zinc-500">Not set</span>`}
+                                        </td>
+                                        <td class="px-6 py-4 text-zinc-200">
+                                            ${yardName || html`<span class="text-zinc-500">Not set</span>`}
                                         </td>
                                         <td class="px-6 py-4">
                                             <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border ${statusColors[po.status] || statusColors.DRAFT}">
@@ -230,13 +252,13 @@ export class PurchaseOrderList extends LitElement {
                                             ${po.line_count || 0}
                                         </td>
                                         <td class="px-6 py-4 text-right font-mono text-emerald-400">
-                                            $${(po.total_cost || 0).toFixed(2)}
+                                            ${formatDollars(po.total_cost)}
                                         </td>
                                         <td class="px-6 py-4 text-zinc-400">
                                             ${new Date(po.created_at).toLocaleDateString()}
                                         </td>
                                     </tr>
-                                `)}
+                                `;})}
                             </tbody>
                         </table>
                     `}

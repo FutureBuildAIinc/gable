@@ -332,7 +332,6 @@ export class GableInvoiceDetail extends LitElement {
                             <h3 class="font-semibold text-white mb-4">Bill To</h3>
                             <div class="space-y-2 text-sm">
                                 <p class="text-white font-medium text-base"><a href="/accounts/${inv.customer_id}" class="hover:underline">${inv.customer_name || 'Customer'}</a></p>
-                                <p class="text-muted-foreground">Account: <span class="text-white font-mono">${inv.customer_id.slice(0, 8)}</span></p>
                                 ${inv.ship_to ? html`
                                     <p class="text-muted-foreground pt-2" data-testid="ship-to">
                                         <span class="text-zinc-300">${inv.ship_to.name}</span><br>
