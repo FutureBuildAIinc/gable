@@ -106,8 +106,9 @@ paths:
         the customer. from and to are YYYY-MM-DD business dates in the primary
         branch's time zone (to defaults to today, from to a month before to).
         Role gated admin, owner, sales and finance; a branch bound machine key
-        reaches it only while the customer holds its pin. A customer in a
-        branch the caller may not target is a 403.
+        reaches it only while the customer holds its pin. A customer the
+        caller may not see (the customer read is the wall) is a 404; a role
+        refusal is a 403.
       security:
         - BearerJWT: []
       parameters:
