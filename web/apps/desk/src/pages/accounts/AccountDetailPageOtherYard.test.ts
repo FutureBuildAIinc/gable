@@ -73,4 +73,67 @@ describe('an account kept at another yard', () => {
     expect(toast).not.toHaveBeenCalled()
     window.history.pushState({}, '', '/')
   })
+
+  const summary = () => ({ customer_id: CUSTOMER_ID, currency: 'USD', balance_cents: 12000, credit_limit_cents: 50000,
+    available_credit_cents: 38000, unapplied_cents: -7500 })
+
+  async function openTab(el: Element, tab: string) {
+    const btn = Array.from(el.querySelectorAll('button')).find(b => b.textContent?.trim() === tab) as HTMLButtonElement
+    btn.click()
+    await new Promise(r => setTimeout(r, 0))
+    await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
+  }
+
+  it('answers the payments tab with the same calm note, never an error toast', async () => {
+    ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
+    const toast = vi.spyOn(ToastService, 'show')
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => missing(),
+      '/api/v1/payments': () => missing(),
+      '/api/v1/invoices': () => missing(),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    await openTab(el, 'Payments')
+    const note = el.querySelector('[data-testid="payments-yard-note"]')
+    expect(note?.textContent).toContain('West Kelowna Satellite')
+    expect(text(el)).not.toContain('No unapplied cash on this account')
+    expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('answers the CRM tab with a calm note when the activities answer 404, never a toast', async () => {
+    ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
+    const toast = vi.spyOn(ToastService, 'show')
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => missing(),
+      [`/api/v1/customers/${CUSTOMER_ID}/activities`]: () => missing(),
+      [`/api/v1/customers/${CUSTOMER_ID}/contacts`]: () => ({ items: [], next_cursor: null }),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    await openTab(el, 'CRM Activity')
+    await new Promise(r => setTimeout(r, 0))
+    expect(el.querySelector('[data-testid="activity-yard-note"]')).not.toBeNull()
+    expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('keeps an unknown customer id on the statement page an honest error, not a yard note', async () => {
+    const toast = vi.spyOn(ToastService, 'show')
+    window.history.pushState({}, '', '/reports/customer-statement')
+    const state = routedFetch({
+      '/api/v1/ar/customers/': () => missing(),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-customer-statement')
+    ;(el as unknown as { customerId: string }).customerId = '00000000-0000-0000-0000-00000000dead'
+    await (el as unknown as { _loadStatement: () => Promise<void> })._loadStatement()
+    await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    expect(el.querySelector('[data-testid="statement-yard-note"]')).toBeNull()
+    expect(toast).toHaveBeenCalledWith('Statement not found for that customer', 'error')
+    window.history.pushState({}, '', '/')
+  })
 })

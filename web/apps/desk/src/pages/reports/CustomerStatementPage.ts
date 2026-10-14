@@ -8,6 +8,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
@@ -31,8 +32,21 @@ export class CustomerStatementPage extends LitElement {
     @state() private yardNote = '';
     private _searchDebounce: ReturnType<typeof setTimeout> | null = null;
 
+    private _unsubBranch: (() => void) | null = null;
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubBranch?.();
+        this._unsubBranch = null;
+    }
+
     connectedCallback() {
         super.connectedCallback();
+        // A yard change re-reads the statement for the selected customer: the
+        // wall moved, so it may now answer the calm "kept at" note.
+        this._unsubBranch = onBranchChanged(() => {
+            if (this.selectedCustomer && this.customerId) void this._loadStatement();
+        });
         // The Account page's "Statement" action lands here with `?customer=<id>`.
         // Preselect that customer and run the statement so the user sees something
         // useful before they have to type or click anything.
@@ -104,13 +118,16 @@ export class CustomerStatementPage extends LitElement {
         try {
             this.statement = await ArService.statement(this.customerId.trim(), this.startDate || undefined, this.endDate || undefined);
         } catch (err) {
-            if (err instanceof LedgerOutsideYardError) {
+            // The yard note is for a customer the person can read; an id that is no
+            // customer stays an honest not found.
+            if (err instanceof LedgerOutsideYardError && this.selectedCustomer) {
                 this.statement = null;
-                this.yardNote = ledgerYardNote(this.selectedCustomer?.branch_ids ?? []);
+                this.yardNote = ledgerYardNote(this.selectedCustomer.branch_ids);
                 return;
             }
             console.error(err);
-            ToastService.show('Failed to load statement', 'error');
+            this.statement = null;
+            ToastService.show(err instanceof LedgerOutsideYardError ? 'Statement not found for that customer' : 'Failed to load statement', 'error');
         } finally {
             this.loading = false;
         }

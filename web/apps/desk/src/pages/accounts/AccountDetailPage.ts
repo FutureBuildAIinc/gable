@@ -143,6 +143,11 @@ export class GableAccountDetail extends LitElement {
             this.unappliedPayments = unapplied;
             this.openInvoices = open;
         } catch (error) {
+            if (error instanceof LedgerOutsideYardError) {
+                // The walled lists answer 404 for a customer kept at another yard.
+                this.ledgerNote = ledgerYardNote(this.customer?.branch_ids ?? []);
+                return;
+            }
             console.error('Failed to load payments:', error);
             ToastService.show(error instanceof WalkTruncatedError ? error.message : 'Failed to load payments', 'error');
         } finally {
@@ -154,7 +159,7 @@ export class GableAccountDetail extends LitElement {
      * invoices once it is first shown, not on every account load. */
     private async handleTab(tab: 'ledger' | 'invoices' | 'payments' | 'shipto' | 'contacts' | 'crm') {
         this.activeTab = tab;
-        if (tab === 'payments' && !this.paymentsLoaded && this.customer) {
+        if (tab === 'payments' && !this.paymentsLoaded && this.customer && !this.ledgerNote) {
             this.paymentsLoaded = true;
             await this.loadPayments(this.customer.id);
         }
@@ -642,7 +647,11 @@ export class GableAccountDetail extends LitElement {
                                 </div>` : nothing}
                         ` : nothing}
 
-                        ${this.activeTab === 'payments' ? html`
+                        ${this.activeTab === 'payments' && this.ledgerNote ? html`
+                            <div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="payments-yard-note">${this.ledgerNote}</div>
+                        ` : nothing}
+
+                        ${this.activeTab === 'payments' && !this.ledgerNote ? html`
                             <div class="space-y-4" data-testid="payments-tab">
                                 <div class="flex items-center justify-between">
                                     <div>
