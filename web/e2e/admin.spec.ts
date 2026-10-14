@@ -76,8 +76,11 @@ test.describe('Tech admin flow on the new contract', () => {
 
     // The saved state shows the admin override with its masked hint and the
     // base URL it stored; the save carried the revision it read, so it
-    // cannot have clobbered a second editor's write.
-    await expect(page.getByText('AI Features Active')).toBeVisible();
+    // cannot have clobbered a second editor's write. The save tested the
+    // key with the provider (item 130, N7): a placeholder key never passes,
+    // whether the provider refuses it or cannot be reached, so the card
+    // reads off rather than active.
+    await expect(page.getByText('AI Features Off')).toBeVisible();
     await expect(page.getByText('Admin configured')).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-ai-saved.png') });
 
