@@ -89,7 +89,8 @@ func TestDemoImportRequested(t *testing.T) {
 var bannedSeedWords = []string{
 	"simpson", "strong-tie", "hardie", "cemtrim", "channellock", "romex",
 	"dryline", "firecode", "brownwood", "turtle", "gable.com",
-	"nordstrom", "kellogg",
+	"nordstrom", "kellogg", "zellweger",
+	"simp-", "ice & water shield", "speed square",
 }
 
 // TestSeedDataHoldsNoBrandWord reads the embedded import and fails on any
