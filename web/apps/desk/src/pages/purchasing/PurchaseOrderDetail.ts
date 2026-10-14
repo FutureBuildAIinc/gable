@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state, property, query } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -329,17 +330,14 @@ export class PurchaseOrderDetail extends LitElement {
                                         ` : nothing}
                                         ${this.receiving ? html`
                                             <td class="px-6 py-4">
-                                                <select
-                                                    .value=${this.receiveData[line.id]?.locationId || ''}
-                                                    @change=${(e: Event) => this._updateReceiveLocation(line.id, (e.target as HTMLSelectElement).value)}
-                                                    class="w-40 bg-black/20 border border-white/10 rounded px-2 py-1 text-white focus:border-[#00FFA3] outline-none"
-                                                    ?disabled=${remaining <= 0}
-                                                >
-                                                    <option value="">Select...</option>
-                                                    ${this._receiveLocations.map(loc => html`
-                                                        <option value="${loc.id}">${loc.path || loc.code}</option>
-                                                    `)}
-                                                </select>
+                                                <div class="w-40">
+                                                    <gable-select
+                                                        .value=${this.receiveData[line.id]?.locationId || ''}
+                                                        .options=${[{ value: '', label: 'Select...' }, ...this._receiveLocations.map(loc => ({ value: loc.id, label: loc.path || loc.code }))]}
+                                                        ?disabled=${remaining <= 0}
+                                                        @change=${(e: Event) => this._updateReceiveLocation(line.id, (e.target as HTMLSelectElement).value)}
+                                                    ></gable-select>
+                                                </div>
                                             </td>
                                         ` : nothing}
                                     </tr>

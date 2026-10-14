@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { Truck, Users, Plus, Pencil, Trash2, AlertTriangle, RefreshCw, X, Upload } from 'lucide';
@@ -512,13 +513,11 @@ export class FleetManagement extends LitElement {
               ${this._renderField('Name', this._vForm.name, (v: string) => { this._vForm = { ...this._vForm, name: v }; }, true)}
               <div>
                 <label class="block text-xs text-zinc-500 mb-1">Type</label>
-                <select
+                <gable-select
                   .value=${this._vForm.vehicle_type}
+                  .options=${VEHICLE_TYPES.map(t => ({ value: t, label: t.replace(/_/g, ' ') }))}
                   @change=${(e: Event) => { this._vForm = { ...this._vForm, vehicle_type: (e.target as HTMLSelectElement).value as VehicleType }; }}
-                  class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                >
-                  ${VEHICLE_TYPES.map(t => html`<option value="${t}" ?selected=${this._vForm.vehicle_type === t}>${t.replace(/_/g, ' ')}</option>`)}
-                </select>
+                ></gable-select>
               </div>
             </div>
             <div class="grid grid-cols-2 gap-4">
@@ -594,13 +593,11 @@ export class FleetManagement extends LitElement {
             <div class="grid grid-cols-3 gap-4">
               <div>
                 <label class="block text-xs text-zinc-500 mb-1">CDL Class</label>
-                <select
+                <gable-select
                   .value=${this._dForm.cdl_class || ''}
+                  .options=${CDL_CLASSES.map(c => ({ value: c, label: c || 'None' }))}
                   @change=${(e: Event) => { this._dForm = { ...this._dForm, cdl_class: (e.target as HTMLSelectElement).value || undefined }; }}
-                  class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                >
-                  ${CDL_CLASSES.map(c => html`<option value="${c}" ?selected=${(this._dForm.cdl_class || '') === c}>${c || 'None'}</option>`)}
-                </select>
+                ></gable-select>
               </div>
               ${this._renderDateField('CDL Expiry', this._dForm.cdl_expiry || '', (v: string) => { this._dForm = { ...this._dForm, cdl_expiry: v || undefined }; })}
               ${this._renderDateField('Hire Date', this._dForm.hire_date || '', (v: string) => { this._dForm = { ...this._dForm, hire_date: v || undefined }; })}
@@ -608,13 +605,11 @@ export class FleetManagement extends LitElement {
             ${isEdit ? html`
               <div>
                 <label class="block text-xs text-zinc-500 mb-1">Status</label>
-                <select
+                <gable-select
                   .value=${this._dForm.status}
+                  .options=${DRIVER_STATUSES.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))}
                   @change=${(e: Event) => { this._dForm = { ...this._dForm, status: (e.target as HTMLSelectElement).value as DriverStatus }; }}
-                  class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-                >
-                  ${DRIVER_STATUSES.map(s => html`<option value="${s}" ?selected=${this._dForm.status === s}>${s.replace(/_/g, ' ')}</option>`)}
-                </select>
+                ></gable-select>
               </div>
             ` : nothing}
           </div>

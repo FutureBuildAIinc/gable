@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select';
 import { customElement, state } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer, CounterRegister } from '../../types/pos';
@@ -465,12 +466,10 @@ export class POSTerminal extends LitElement {
               <div>
                 <label class="block text-xs text-slate-400" for="pos-job">Job</label>
                 <div class="relative mt-1">
-                  <select id="pos-job" .value=${this._jobId} ?disabled=${finished}
+                  <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished}
+                    .options=${[{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
                     @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
-                    class="w-full appearance-none rounded border border-white/10 bg-slate-steel py-2 pl-2 pr-7 text-sm text-white outline-none disabled:cursor-not-allowed disabled:opacity-40">
-                    <option value="">No job</option>
-                    ${c.jobs.map((j) => html`<option value=${j.id} ?selected=${j.id === this._jobId}>${j.name}</option>`)}
-                  </select>
+                  ></gable-select>
                   <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-slate-400" aria-hidden="true">&#9662;</span>
                 </div>
               </div>` : nothing}
@@ -982,13 +981,16 @@ export class POSTerminal extends LitElement {
       `)}
       <div style="display:flex;align-items:center;gap:10px;margin:14px 0">
         <label style="font-size:13px;color:#8b949e">Refund</label>
-        <select .value=${this._returnMethod}
-          @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
-          style="flex:1;padding:10px;background:#0d1117;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;outline:none">
-          <option value="cash">Cash (out of the drawer)</option>
-          <option value="card">Card (back on the card)</option>
-          <option value="account">Account credit</option>
-        </select>
+        <div style="flex:1">
+          <gable-select .value=${this._returnMethod}
+            .options=${[
+              { value: 'cash', label: 'Cash (out of the drawer)' },
+              { value: 'card', label: 'Card (back on the card)' },
+              { value: 'account', label: 'Account credit' },
+            ]}
+            @change=${(e: Event) => { this._returnMethod = (e.target as HTMLSelectElement).value as RefundMethod; }}
+          ></gable-select>
+        </div>
       </div>
       <input type="text" .value=${this._returnReason}
         @input=${(e: Event) => { this._returnReason = (e.target as HTMLInputElement).value; }}
@@ -1028,17 +1030,16 @@ export class POSTerminal extends LitElement {
                 <span>${this._register.branch_name}</span><span aria-hidden="true">&middot;</span>
                 <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
                 ${this._registers.length > 1 ? html`
-                  <label class="sr-only" for="pos-register-picker">Register</label>
-                  <select id="pos-register-picker" data-testid="pos-register-picker"
+                  <gable-select id="pos-register-picker" data-testid="pos-register-picker" label="Register"
+                    .value=${this._registerId}
+                    .options=${this._registers.map((r) => ({ value: r.id, label: `${r.branch_code} ${r.name}` }))}
                     @change=${(e: Event) => {
                       const picker = e.target as HTMLSelectElement;
                       void this._chooseRegister(picker.value).then((chosen) => {
                         if (!chosen) picker.value = this._registerId;
                       });
                     }}
-                    class="rounded border border-white/20 bg-deep-space px-2 py-0.5 text-xs text-slate-200">
-                    ${this._registers.map((r) => html`<option value=${r.id} ?selected=${r.id === this._registerId}>${r.branch_code} ${r.name}</option>`)}
-                  </select>` : nothing}
+                  ></gable-select>` : nothing}
               </p>` : nothing}
           </div>
           <nav class="flex flex-wrap items-center gap-2" aria-label="Sale progress">

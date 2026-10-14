@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -129,15 +130,11 @@ export class PortalTeam extends LitElement {
                                         </div>
                                         <div class="flex items-center gap-3">
                                             <div class="relative">
-                                                <select
+                                                <gable-select
                                                     .value=${user.role}
+                                                    .options=${['View-Only', 'Buyer', 'Admin'].map(r => ({ value: r, label: r }))}
                                                     @change=${(e: Event) => this._handleRoleChange(user.id, (e.target as HTMLSelectElement).value)}
-                                                    class="appearance-none bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 pr-8 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green cursor-pointer"
-                                                >
-                                                    <option value="View-Only" class="bg-zinc-900">View-Only</option>
-                                                    <option value="Buyer" class="bg-zinc-900">Buyer</option>
-                                                    <option value="Admin" class="bg-zinc-900">Admin</option>
-                                                </select>
+                                                ></gable-select>
                                                 ${icon(Shield, 14, 'absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none')}
                                             </div>
 

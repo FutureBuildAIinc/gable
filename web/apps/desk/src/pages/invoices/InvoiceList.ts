@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -148,27 +149,23 @@ export class GableInvoiceList extends LitElement {
                 <div class="flex flex-wrap items-center gap-4 pb-3 border-b border-white/10">
                     <label class="flex items-center gap-2 text-sm text-zinc-400">
                         Status
-                        <select
-                            aria-label="Status"
+                        <gable-select
+                            label="Status"
                             .value=${this.status}
+                            .options=${[{ value: 'all', label: 'All' }, ...INVOICE_STATUSES.map(s => ({ value: s, label: formatInvoiceStatus(s) }))]}
                             @change=${(e: Event) => { this.status = (e.target as HTMLSelectElement).value as InvoiceStatus | 'all'; this.refilter(); }}
-                            class="bg-black/30 border border-white/10 rounded px-3 py-1.5 text-white text-sm"
-                        >
-                            <option value="all">All</option>
-                            ${INVOICE_STATUSES.map(s => html`<option value=${s} ?selected=${this.status === s}>${formatInvoiceStatus(s)}</option>`)}
-                        </select>
+                        ></gable-select>
                     </label>
                     <label class="flex items-center gap-2 text-sm text-zinc-400">
                         Customer
-                        <select
-                            aria-label="Customer"
-                            .value=${this.customerId}
-                            @change=${(e: Event) => { this.customerId = (e.target as HTMLSelectElement).value; this.refilter(); }}
-                            class="bg-black/30 border border-white/10 rounded px-3 py-1.5 text-white text-sm max-w-[16rem]"
-                        >
-                            <option value="">All customers</option>
-                            ${this.customers.map(c => html`<option value=${c.id} ?selected=${this.customerId === c.id}>${c.name}</option>`)}
-                        </select>
+                        <div class="max-w-[16rem]">
+                            <gable-select
+                                label="Customer"
+                                .value=${this.customerId}
+                                .options=${[{ value: '', label: 'All customers' }, ...this.customers.map(c => ({ value: c.id, label: c.name }))]}
+                                @change=${(e: Event) => { this.customerId = (e.target as HTMLSelectElement).value; this.refilter(); }}
+                            ></gable-select>
+                        </div>
                     </label>
                     <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
                         <input

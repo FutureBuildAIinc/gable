@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { Save, Loader2, Box, Eraser } from 'lucide';
@@ -246,20 +247,20 @@ export class GableProductGeometryTab extends LitElement {
 
                         <div class="mt-5">
                             <label class="block text-xs text-zinc-500 mb-1" for="geometry-stackable">Stackable in a load</label>
-                            <select
+                            <gable-select
                                 id="geometry-stackable"
-                                aria-label="Stackable in a load"
+                                label="Stackable in a load"
                                 .value=${this.stackable === null ? '' : String(this.stackable)}
+                                .options=${[
+                                    { value: '', label: 'Unknown — not recorded' },
+                                    { value: 'true', label: 'Yes, other cargo may stack on it' },
+                                    { value: 'false', label: 'No, keep the top clear' },
+                                ]}
                                 @change=${(e: Event) => {
                                     const v = (e.target as HTMLSelectElement).value;
                                     this.stackable = v === '' ? null : v === 'true';
                                 }}
-                                class="w-full bg-zinc-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-gable-green/50"
-                            >
-                                <option value="">Unknown — not recorded</option>
-                                <option value="true">Yes, other cargo may stack on it</option>
-                                <option value="false">No, keep the top clear</option>
-                            </select>
+                            ></gable-select>
                         </div>
 
                         <p class="text-[11px] text-zinc-600 mt-4">

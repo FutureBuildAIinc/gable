@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { reportingApi } from '../../services/reportingApi';
@@ -196,25 +197,21 @@ export class ReportBuilder extends LitElement {
                         <div class="bg-white p-4 rounded shadow-sm">
                             <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider mb-3">Settings</h3>
                             <label class="block text-sm font-medium text-gray-700 mb-1">Base Data Source</label>
-                            <select
-                                class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            <gable-select
                                 .value=${this.entityType}
+                                .options=${Object.entries(SCHEMA_METADATA).map(([key, meta]) => ({ value: key, label: meta.label }))}
                                 @change=${(e: Event) => this._handleEntityTypeChange((e.target as HTMLSelectElement).value)}
-                            >
-                                ${Object.entries(SCHEMA_METADATA).map(([key, meta]) => html`
-                                    <option value="${key}">${meta.label}</option>
-                                `)}
-                            </select>
+                            ></gable-select>
                         </div>
 
                         <!-- Columns -->
                         <div class="bg-white p-4 rounded shadow-sm">
                             <div class="flex justify-between items-center mb-3">
                                 <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Columns</h3>
-                                <select @change=${this._handleAddColumn} class="text-sm border-gray-300 rounded">
-                                    <option value="" disabled selected>+ Add Column</option>
-                                    ${this._availableFields.map(f => html`<option value="${f.name}">${f.name}</option>`)}
-                                </select>
+                                <gable-select
+                                    .options=${[{ value: '', label: '+ Add Column', disabled: true }, ...this._availableFields.map(f => ({ value: f.name, label: f.name }))]}
+                                    @change=${this._handleAddColumn}
+                                ></gable-select>
                             </div>
                             ${this.columns.length === 0 ? html`<p class="text-xs text-gray-500 italic">No columns selected.</p>` : nothing}
                             <ul class="space-y-2">
@@ -222,16 +219,16 @@ export class ReportBuilder extends LitElement {
                                     <li class="flex items-center justify-between text-sm bg-gray-50 p-2 rounded border border-gray-100">
                                         <span class="font-medium text-gray-800">${col.label}</span>
                                         <div class="flex items-center space-x-2">
-                                            <select
-                                                class="text-xs py-1 border-gray-300 rounded"
+                                            <gable-select
                                                 .value=${col.aggregation || ''}
+                                                .options=${[
+                                                    { value: '', label: 'No Aggregation' },
+                                                    { value: 'SUM', label: 'Sum' },
+                                                    { value: 'COUNT', label: 'Count' },
+                                                    { value: 'AVG', label: 'Average' },
+                                                ]}
                                                 @change=${(e: Event) => this._handleUpdateColumnAgg(col.field, (e.target as HTMLSelectElement).value)}
-                                            >
-                                                <option value="">No Aggregation</option>
-                                                <option value="SUM">Sum</option>
-                                                <option value="COUNT">Count</option>
-                                                <option value="AVG">Average</option>
-                                            </select>
+                                            ></gable-select>
                                             <button @click=${() => this._handleRemoveColumn(col.field)} class="text-red-500 hover:text-red-700">x</button>
                                         </div>
                                     </li>
@@ -250,25 +247,25 @@ export class ReportBuilder extends LitElement {
                                 ${this.filters.map((filter, idx) => html`
                                     <div class="flex flex-col space-y-2 bg-gray-50 p-2 rounded border border-gray-100 relative">
                                         <button @click=${() => this._handleRemoveFilter(idx)} class="absolute top-1 right-2 text-red-500 hover:text-red-700 text-lg">x</button>
-                                        <select
+                                        <gable-select
                                             .value=${filter.field}
+                                            .options=${this._availableFields.map(f => ({ value: f.name, label: f.name }))}
                                             @change=${(e: Event) => this._handleUpdateFilter(idx, 'field', (e.target as HTMLSelectElement).value)}
-                                            class="text-sm border-gray-300 rounded w-full pr-6"
-                                        >
-                                            ${this._availableFields.map(f => html`<option value="${f.name}">${f.name}</option>`)}
-                                        </select>
+                                        ></gable-select>
                                         <div class="flex space-x-2">
-                                            <select
-                                                .value=${filter.operator}
-                                                @change=${(e: Event) => this._handleUpdateFilter(idx, 'operator', (e.target as HTMLSelectElement).value)}
-                                                class="text-sm border-gray-300 rounded w-1/3"
-                                            >
-                                                <option value="=">=</option>
-                                                <option value="!=">!=</option>
-                                                <option value=">">&gt;</option>
-                                                <option value="<">&lt;</option>
-                                                <option value="LIKE">Contains</option>
-                                            </select>
+                                            <div class="w-1/3">
+                                                <gable-select
+                                                    .value=${filter.operator}
+                                                    .options=${[
+                                                        { value: '=', label: '=' },
+                                                        { value: '!=', label: '!=' },
+                                                        { value: '>', label: '>' },
+                                                        { value: '<', label: '<' },
+                                                        { value: 'LIKE', label: 'Contains' },
+                                                    ]}
+                                                    @change=${(e: Event) => this._handleUpdateFilter(idx, 'operator', (e.target as HTMLSelectElement).value)}
+                                                ></gable-select>
+                                            </div>
                                             <input
                                                 type="text"
                                                 .value=${filter.value != null ? String(filter.value) : ''}
@@ -286,10 +283,10 @@ export class ReportBuilder extends LitElement {
                         <div class="bg-white p-4 rounded shadow-sm border-l-4 border-indigo-400">
                             <div class="flex justify-between items-center mb-3">
                                 <h3 class="text-sm font-semibold text-gray-700 uppercase tracking-wider">Group By</h3>
-                                <select @change=${this._handleAddGrouping} class="text-sm border-gray-300 rounded">
-                                    <option value="" disabled selected>+ Add Grouping</option>
-                                    ${this._availableFields.map(f => html`<option value="${f.name}">${f.name}</option>`)}
-                                </select>
+                                <gable-select
+                                    .options=${[{ value: '', label: '+ Add Grouping', disabled: true }, ...this._availableFields.map(f => ({ value: f.name, label: f.name }))]}
+                                    @change=${this._handleAddGrouping}
+                                ></gable-select>
                             </div>
                             ${this.groupings.length === 0 ? html`<p class="text-xs text-gray-500 italic">No groupings applied.</p>` : nothing}
                             <div class="flex flex-wrap gap-2">

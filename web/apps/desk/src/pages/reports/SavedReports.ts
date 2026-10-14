@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { reportingApi, isValidCronExpression } from '../../services/reportingApi';
@@ -322,32 +323,32 @@ export class SavedReports extends LitElement {
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm text-gray-700 mb-1" for="schedule-format">Output format</label>
-                                    <select
+                                    <gable-select
                                         id="schedule-format"
-                                        aria-label="Output format"
+                                        label="Output format"
                                         .value=${this.newFormat}
+                                        .options=${[
+                                            { value: 'CSV', label: 'CSV' },
+                                            { value: 'XLSX', label: 'Excel (XLSX)' },
+                                            { value: 'PDF', label: 'PDF' },
+                                        ]}
                                         @change=${(e: Event) => this.newFormat = (e.target as HTMLSelectElement).value as ReportScheduleFormat}
-                                        class="w-full border rounded p-2"
-                                    >
-                                        <option value="CSV">CSV</option>
-                                        <option value="XLSX">Excel (XLSX)</option>
-                                        <option value="PDF">PDF</option>
-                                    </select>
+                                    ></gable-select>
                                 </div>
                                 <div>
                                     <label class="block text-sm text-gray-700 mb-1" for="schedule-frequency">Frequency</label>
-                                    <select
+                                    <gable-select
                                         id="schedule-frequency"
-                                        aria-label="Frequency"
+                                        label="Frequency"
                                         .value=${this.newFrequency}
+                                        .options=${[
+                                            { value: 'daily', label: 'Daily at 9:00 AM' },
+                                            { value: 'weekly', label: 'Weekly on Sunday at 9:00 AM' },
+                                            { value: 'monthly', label: 'Monthly on the 1st at 9:00 AM' },
+                                            { value: 'custom', label: 'Custom cron expression' },
+                                        ]}
                                         @change=${this._handleFrequencyChange}
-                                        class="w-full border rounded p-2"
-                                    >
-                                        <option value="daily">Daily at 9:00 AM</option>
-                                        <option value="weekly">Weekly on Sunday at 9:00 AM</option>
-                                        <option value="monthly">Monthly on the 1st at 9:00 AM</option>
-                                        <option value="custom">Custom cron expression</option>
-                                    </select>
+                                    ></gable-select>
                                 </div>
                             </div>
 
