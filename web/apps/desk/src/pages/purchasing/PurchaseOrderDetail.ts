@@ -117,13 +117,14 @@ export class PurchaseOrderDetail extends LitElement {
     /** Receive bins only: locations under the PO's own yard, no top-level
      *  branch rows. `branch_id` on a Location is the link, and `type === 'branch'`
      *  rows are skipped because a stray top-level location would let a user
-     *  receive into another yard by accident. */
+     *  receive into another yard by accident. Listed by their path, first bin
+     *  first, whatever order the wire serves. */
     private get _receiveLocations(): Location[] {
         const po = this.po;
         if (!po?.branch_id) return [];
-        return this.locations.filter(
-            (loc) => loc.branch_id === po.branch_id && loc.type !== 'branch',
-        );
+        return this.locations
+            .filter((loc) => loc.branch_id === po.branch_id && loc.type !== 'branch')
+            .sort((a, b) => (a.path || a.code).localeCompare(b.path || b.code, undefined, { numeric: true }));
     }
 
     private async _handleSubmitPO() {
