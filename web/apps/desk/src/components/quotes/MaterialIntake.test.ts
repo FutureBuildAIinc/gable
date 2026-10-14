@@ -150,7 +150,13 @@ describe('MaterialIntake', () => {
       { status: 502, headers: { 'Content-Type': 'application/json' } },
     ))
     const el = await mount<GableMaterialIntake>('gable-material-intake')
-    await paste(el, 'x')
+    // A photo goes through the file input: a pasted text list is read by the
+    // server's rules under a refusal and never answers 502.
+    const input = q<HTMLInputElement>(el, 'input[type="file"]')
+    Object.defineProperty(input, 'files', { value: [new File(['x'], 'list.png', { type: 'image/png' })], configurable: true })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    await update(el, {})
     const refused = q(el, '[data-testid="intake-ai-refused"]')
     expect(text(refused)).toContain(words)
     expect(el.querySelector('[data-testid="intake-sample-banner"]')).toBeNull()

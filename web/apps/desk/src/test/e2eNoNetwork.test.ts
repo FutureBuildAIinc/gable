@@ -8,15 +8,17 @@
  */
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 
-const E2E = new URL('../../../../e2e/', import.meta.url)
+// The desk workspace is the working directory of its tests: the specs are two folders up.
+const E2E = resolve(process.cwd(), '../../e2e')
 const ALLOWED = /^(127\.0\.0\.1|localhost|host\.docker\.internal|www\.w3\.org|([a-z0-9-]+\.)*example(\.com|\.org|\.net)?|[a-z0-9.-]*\.example|[a-z0-9.-]*\.invalid)$/i
 
 describe('end to end specs', () => {
   it('name no third party host', () => {
     const offenders: string[] = []
     for (const name of readdirSync(E2E).filter((f) => f.endsWith('.ts'))) {
-      const body = readFileSync(new URL(name, E2E), 'utf8')
+      const body = readFileSync(join(E2E, name), 'utf8')
       for (const m of body.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)) {
         if (!ALLOWED.test(m[1])) offenders.push(`${name}: ${m[1]}`)
       }

@@ -686,9 +686,9 @@ export class TechAdminPage extends LitElement {
                     <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Features Powered by AI</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         ${features.map((f) => html`
-                            <div class="${cn('border rounded-lg p-4 transition-colors', this.aiSettings?.configured ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
+                            <div class="${cn('border rounded-lg p-4 transition-colors', aiIsOn(this.aiSettings) ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
                                 <div class="flex items-center gap-2 mb-2">
-                                    ${icon(f.iconData, 16, cn('w-4 h-4', this.aiSettings?.configured ? 'text-violet-400' : 'text-slate-600'))}
+                                    ${icon(f.iconData, 16, cn('w-4 h-4', aiIsOn(this.aiSettings) ? 'text-violet-400' : 'text-slate-600'))}
                                     <span class="text-white text-sm font-medium">${f.name}</span>
                                 </div>
                                 <p class="text-xs text-slate-500">${f.description}</p>
