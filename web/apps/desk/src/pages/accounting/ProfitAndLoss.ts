@@ -5,6 +5,7 @@ import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import '../../components/ui/gable-date-field.ts';
+import { todayDay } from '../../lib/dates.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { formatStatementCents, statementAmountClasses } from './statement-format';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -22,7 +23,7 @@ export class ProfitAndLoss extends LitElement {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     })();
-    @state() private endDate = new Date().toISOString().split('T')[0];
+    @state() private endDate = todayDay();
 
     connectedCallback() {
         super.connectedCallback();

@@ -7,7 +7,7 @@ import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
 import '../../components/ui/gable-date-field.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
-import { formatDay } from '../../lib/dates.ts';
+import { formatDay, todayDay } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchJournalEntries, fetchAccounts, createJournalEntry, postJournalEntry, voidJournalEntry } from '../../services/GLService';
 import type { JournalEntry, GLAccount, CreateJournalEntryRequest } from '../../types/gl';
@@ -43,7 +43,7 @@ export class JournalEntries extends LitElement {
     @state() private loading = true;
     @state() private showCreate = false;
     @state() private memo = '';
-    @state() private entryDate = new Date().toISOString().split('T')[0];
+    @state() private entryDate = todayDay();
     @state() private lines: LineForm[] = [
         { account_id: '', description: '', debit: '', credit: '' },
         { account_id: '', description: '', debit: '', credit: '' },

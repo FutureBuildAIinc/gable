@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import '../../components/ui/gable-date-field.ts';
+import { todayDay } from '../../lib/dates.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { formatStatementCents, statementAmountClasses } from './statement-format';
 import { ToastService } from '../../lib/toast-service.ts';
@@ -18,7 +19,7 @@ export class BalanceSheet extends LitElement {
 
     @state() private report: BalanceSheetReport | null = null;
     @state() private loading = true;
-    @state() private asOfDate = new Date().toISOString().split('T')[0];
+    @state() private asOfDate = todayDay();
 
     connectedCallback() {
         super.connectedCallback();

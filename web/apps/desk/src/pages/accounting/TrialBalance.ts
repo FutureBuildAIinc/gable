@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents } from '../../lib/utils.ts';
 import '../../components/ui/gable-date-field.ts';
+import { todayDay } from '../../lib/dates.ts';
 import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchTrialBalance } from '../../services/GLService';
@@ -34,7 +35,7 @@ export class TrialBalance extends LitElement {
 
     @state() private rows: TrialBalanceRow[] = [];
     @state() private loading = true;
-    @state() private asOfDate = new Date().toISOString().split('T')[0];
+    @state() private asOfDate = todayDay();
 
     connectedCallback() {
         super.connectedCallback();
