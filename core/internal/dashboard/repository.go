@@ -164,25 +164,30 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	return summary, nil
 }
 
-// GetInventoryAlerts returns products with low or zero stock, walled to the
-// caller's reach through the stocking location's branch.
+// GetInventoryAlerts returns products with low or zero stock, one row per
+// product and yard, walled to the caller's reach through the stocking
+// location's branch. A yard's stock is its own row plus every zone and bin
+// whose branch_id is that yard, so the quantity compared with the reorder point
+// (and reported) is that sum, the rule the counter's search already follows.
+// The row's location_id is the yard.
 func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *uuid.UUID, grantsSub *string, limit int) ([]InventoryAlert, error) {
 	query := `
 		SELECT
 			p.id, p.sku, p.description,
-			COALESCE(i.quantity, 0) as current_qty,
+			COALESCE(SUM(i.quantity), 0) as current_qty,
 			COALESCE(p.reorder_point, 10) as reorder_qty,
 			CASE
-				WHEN COALESCE(i.quantity, 0) = 0 THEN 'OUT_OF_STOCK'
+				WHEN COALESCE(SUM(i.quantity), 0) = 0 THEN 'OUT_OF_STOCK'
 				ELSE 'LOW_STOCK'
 			END as alert_type,
-			COALESCE(i.location_id::text, '') as location_id
+			COALESCE(l.branch_id::text, '') as location_id
 		FROM products p
 		LEFT JOIN inventory i ON p.id = i.product_id
 		LEFT JOIN locations l ON l.id = i.location_id
-		WHERE COALESCE(i.quantity, 0) <= COALESCE(p.reorder_point, 10)
-		  AND ` + middleware.Wall("l", 2, 3) + `
-		ORDER BY COALESCE(i.quantity, 0) ASC, p.sku ASC, i.location_id ASC
+		WHERE ` + middleware.Wall("l", 2, 3) + `
+		GROUP BY p.id, p.sku, p.description, p.reorder_point, l.branch_id
+		HAVING COALESCE(SUM(i.quantity), 0) <= COALESCE(p.reorder_point, 10)
+		ORDER BY COALESCE(SUM(i.quantity), 0) ASC, p.sku ASC, l.branch_id ASC
 		LIMIT $1
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, limit, branchID, grantsSub)

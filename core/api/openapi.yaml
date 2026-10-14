@@ -3117,7 +3117,7 @@ paths:
       tags: [dashboard]
       summary: Products at or below their reorder point
       description: >-
-        Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+        Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       responses:
@@ -18233,7 +18233,7 @@ components:
         location_id:
           type: string
           format: uuid
-          description: Absent when the product has no inventory row.
+          description: The yard (the branch) the stock sum is for. Absent when the product has no inventory row.
     DashboardTopCustomer:
       type: object
       description: dashboard.TopCustomer. Money is int64 cents.

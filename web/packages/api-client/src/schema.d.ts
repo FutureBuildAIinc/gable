@@ -1219,7 +1219,7 @@ export interface paths {
         };
         /**
          * Products at or below their reorder point
-         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
          */
         get: operations["dashboardInventoryAlerts"];
         put?: never;
@@ -8532,7 +8532,7 @@ export interface components {
             alert_type: "LOW_STOCK" | "OUT_OF_STOCK";
             /**
              * Format: uuid
-             * @description Absent when the product has no inventory row.
+             * @description The yard (the branch) the stock sum is for. Absent when the product has no inventory row.
              */
             location_id?: string;
         };
