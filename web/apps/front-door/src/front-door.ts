@@ -187,7 +187,7 @@ export class GableFrontDoor extends LitElement {
           ${this._renderBody()}
         </main>
         <footer class="px-6 md:px-8 py-4 text-center text-xs text-muted-foreground border-t border-white/5">
-          GableLBM · the front door
+          Powered by Gable
         </footer>
       </div>
     `;
