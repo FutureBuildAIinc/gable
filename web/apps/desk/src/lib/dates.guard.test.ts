@@ -10,9 +10,13 @@
  *
  *   - a native `date`, `datetime-local`, `month` or `time` input (the
  *     browser's white system calendar and its "mm/dd/yyyy" placeholder),
+ *     quoted, unquoted or bound,
  *   - a `toLocaleDateString(`, `toLocaleTimeString(` or
  *     `Intl.DateTimeFormat(` call outside `lib/dates.ts`, so no page formats
- *     a date on its own in the browser's locale instead of the dealer's.
+ *     a date on its own in the browser's locale instead of the dealer's,
+ *   - a `toLocaleString(` on a date (built from a Date, or called with date
+ *     options), a `toDateString(` or `toUTCString(`, or a `date-fns` import,
+ *     the other places a date hides in the browser's own format.
  *
  * Every finding names its file and line.
  */
@@ -40,11 +44,21 @@ function* sources(dir: string): Generator<string> {
 const RULES: Array<{ kind: string; pattern: RegExp }> = [
   {
     kind: 'native date/time input',
-    pattern: /type\s*=\s*['"](?:date|datetime-local|month|time)['"]/,
+    pattern: /(?:^|\s|\.)type\s*=\s*(?:\$\{\s*)?['"]?(?:date|datetime-local|month|time)['"]?[\s}>/]/,
   },
   { kind: 'toLocaleDateString(', pattern: /\.toLocaleDateString\s*\(/ },
   { kind: 'toLocaleTimeString(', pattern: /\.toLocaleTimeString\s*\(/ },
   { kind: 'Intl.DateTimeFormat(', pattern: /Intl\.DateTimeFormat\s*\(/ },
+  // toLocaleString on a date: built from a Date, or called with date options
+  // (numbers never take those). A plain toLocaleString() on a number stays.
+  { kind: 'toLocaleString( on a date', pattern: /new Date\([^)]*\)\.toLocaleString\s*\(/ },
+  {
+    kind: 'toLocaleString( with date options',
+    pattern: /\.toLocaleString\s*\([^)]*\b(?:dateStyle|timeStyle|month|weekday|day|year|hour)\b/,
+  },
+  { kind: 'toDateString(', pattern: /\.toDateString\s*\(/ },
+  { kind: 'toUTCString(', pattern: /\.toUTCString\s*\(/ },
+  { kind: 'date-fns import', pattern: /from\s+['"]date-fns['"]/ },
 ]
 
 describe('date guard', () => {
