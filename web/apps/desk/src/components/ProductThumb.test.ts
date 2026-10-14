@@ -34,10 +34,11 @@ describe('gable-product-thumb', () => {
     }
   })
 
-  it('keeps an empty box of its size when it is told to reserve the room', async () => {
-    const el = await mount<GableProductThumb>('gable-product-thumb', { src: null, size: 72, reserve: true })
+  it('draws the no picture mark on a plate of its size when it is told to reserve the room', async () => {
+    const el = await mount<GableProductThumb>('gable-product-thumb', { src: null, size: 40, reserve: true })
     expect(el.querySelector('img')).toBeNull()
-    expect(el.querySelector<HTMLElement>('span')!.style.width).toBe('72px')
+    expect(el.querySelector('[data-testid="product-thumb-none"]')).not.toBeNull()
+    expect(el.querySelector<HTMLElement>('[data-testid="product-thumb"]')!.style.width).toBe('40px')
   })
 
   it('draws the no picture mark when the image fails to load, and the img again for a new path', async () => {

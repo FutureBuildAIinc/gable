@@ -56,6 +56,9 @@ describe('quote line pictures', () => {
     const [first, second] = rows.map((r) => r.querySelector('gable-product-thumb') as HTMLElement | null)
     expect(first?.querySelector('img')?.getAttribute('src')).toBe('/catalog-illustrations/a.svg')
     expect(second?.querySelector('img')).toBeNull()
+    // the line without a picture keeps the slot and draws the neutral mark on the same plate
+    expect(second?.querySelector('[data-testid="product-thumb-none"]')).not.toBeNull()
+    expect(second?.querySelector<HTMLElement>('[data-testid="product-thumb"]')?.style.width).toBe('40px')
   })
 
   it('draws no thumb element at all while no product has a picture', async () => {
