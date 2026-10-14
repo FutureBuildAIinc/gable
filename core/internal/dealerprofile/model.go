@@ -15,6 +15,7 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"regexp"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -75,10 +76,17 @@ type Logo struct {
 // MaxLocaleTagLength caps a locale tag (BCP 47's own suggestion is 35).
 const MaxLocaleTagLength = 35
 
-// CheckLocale accepts a BCP 47 tag the date formatter can use ("en-US",
-// "en-CA", "fr-CA") and refuses anything else in words. The canonical form
-// the parser would rewrite to (it title cases the region, for example) is
-// not required; the tag is stored as given.
+// localeShape is exactly the column's check (migration 119), so a tag the
+// write accepts never fails the database: letters and hyphens, no singleton
+// subtags, no underscore.
+var localeShape = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
+
+// CheckLocale accepts a BCP 47 tag the date formatter and the column both
+// take ("en-US", "en-CA", "fr-CA") and refuses anything else in words. The
+// tag must hold the column's shape, parse, and be its own canonical form up
+// to case (an "en_US" or an "i-klingon" is another tag misspelled); the root
+// tag and the local use block (qaa through qtz) are refused: no person means
+// them.
 func CheckLocale(tag string) error {
 	if tag == "" {
 		return errors.New("the locale must be a language tag such as en-US")
@@ -86,8 +94,18 @@ func CheckLocale(tag string) error {
 	if len(tag) > MaxLocaleTagLength {
 		return fmt.Errorf("the locale must be at most %d characters", MaxLocaleTagLength)
 	}
-	if _, err := language.Parse(tag); err != nil {
+	if !localeShape.MatchString(tag) {
+		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (letters and hyphens, such as en-US)", tag)
+	}
+	t, err := language.Parse(tag)
+	if err != nil {
 		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (a BCP 47 tag such as en-US)", tag)
+	}
+	if !strings.EqualFold(t.String(), tag) || t.String() == "und" {
+		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (a BCP 47 tag such as en-US)", tag)
+	}
+	if base, _ := t.Base(); base.String() >= "qaa" && base.String() <= "qtz" {
+		return fmt.Errorf("the locale %q is reserved for local use, not a language tag the date formatter accepts", tag)
 	}
 	return nil
 }
