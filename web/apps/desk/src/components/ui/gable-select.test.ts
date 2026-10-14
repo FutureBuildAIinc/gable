@@ -142,6 +142,33 @@ describe('gable-select', () => {
     fieldLabel.remove()
   })
 
+  it('shows the list in the top layer, positioned from the button box', async () => {
+    const el = await mountSelect()
+    const button = buttonOf(el)
+    const rect = { left: 100, right: 260, top: 180, bottom: 200, width: 160, height: 20, x: 100, y: 180, toJSON: () => ({}) } as DOMRect
+    button.getBoundingClientRect = () => rect
+    await open(el)
+    const list = q<HTMLElement>(el, '[role="listbox"]')
+    // The popover attribute puts the list in the browser's top layer, so no
+    // modal's overflow or stacking context can clip it.
+    expect(list.hasAttribute('popover')).toBe(true)
+    expect(list.style.position).toBe('fixed')
+    expect(list.style.left).toBe('100px')
+    expect(list.style.top).toBe('200px')
+    expect(list.style.width).toBe('160px')
+  })
+
+  it('flips up when the room is above the button', async () => {
+    const el = await mountSelect()
+    const button = buttonOf(el)
+    const rect = { left: 10, right: 170, top: 680, bottom: 700, width: 160, height: 20, x: 10, y: 680, toJSON: () => ({}) } as DOMRect
+    button.getBoundingClientRect = () => rect
+    await open(el)
+    const list = q<HTMLElement>(el, '[role="listbox"]')
+    expect(list.style.top).toBe('')
+    expect(list.style.bottom).toBe(`${window.innerHeight - 680}px`)
+  })
+
   it('Escape closes without choosing and returns focus to the button', async () => {
     const el = await mountSelect()
     const onChange = vi.fn()
