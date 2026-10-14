@@ -772,27 +772,29 @@ func TestNoHeader_CustomerFamily(t *testing.T) {
 	replace := fmt.Sprintf(`{"name":"renamed by noheader","account_number":%q,"payment_terms_id":%q,"po_required":%v,"revision":%d}`,
 		cur.AccountNumber, cur.Terms, po, cur.Revision)
 
-	reads := []struct {
+	// Ruling A: the customer, its contact and its ship to are dealer wide
+	// reads; only the activity (a CRM record) still follows the grants.
+	for _, r := range []struct {
 		path string
 		want string
+		code int
 	}{
-		{"/api/v1/customers/" + f.custB.String(), "customer"},
-		{"/api/v1/contacts/" + w.conB.String(), "contact"},
-		{"/api/v1/ship-tos/" + w.shipB.String(), "ship to"},
-		{"/api/v1/activities/" + w.actB.String(), "activity"},
-	}
-	for _, r := range reads {
+		{"/api/v1/customers/" + f.custB.String(), "customer", http.StatusOK},
+		{"/api/v1/contacts/" + w.conB.String(), "contact", http.StatusOK},
+		{"/api/v1/ship-tos/" + w.shipB.String(), "ship to", http.StatusOK},
+		{"/api/v1/activities/" + w.actB.String(), "activity", http.StatusNotFound},
+	} {
 		status, buf := f.userAs(t, "sales", "GET", r.path, "", nil)
-		if status != http.StatusNotFound {
-			t.Errorf("no header read of B's %s: %d %s, want 404", r.want, status, buf)
+		if status != r.code {
+			t.Errorf("no header read of B's %s: %d %s, want %d", r.want, status, buf, r.code)
 		}
 	}
 	status, buf := f.userAs(t, "sales", "GET", "/api/v1/customers", "", nil)
 	if status != http.StatusOK || !strings.Contains(string(buf), f.custID.String()) {
 		t.Errorf("no header customer list misses A's customer: %d %s", status, buf)
 	}
-	if strings.Contains(string(buf), f.custB.String()) {
-		t.Errorf("no header customer list carries B's customer: %s", buf)
+	if !strings.Contains(string(buf), f.custB.String()) {
+		t.Errorf("no header customer list misses B's customer (ruling A): %s", buf)
 	}
 
 	// The writes: the rename and the child creates refuse, nothing written.

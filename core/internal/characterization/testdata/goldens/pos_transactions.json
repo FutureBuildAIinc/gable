@@ -373,7 +373,7 @@
         },
         {
           "description": "4x4x8 Western Red Cedar",
-          "in_stock": "900",
+          "in_stock": "674",
           "product_id": "<id-26>",
           "sku": "LUM-448-WRC",
           "unit_price_cents": 3400,
@@ -381,7 +381,7 @@
         },
         {
           "description": "6x6x12 Pressure Treated",
-          "in_stock": "499",
+          "in_stock": "406",
           "product_id": "<id-27>",
           "sku": "LUM-6612-PT",
           "unit_price_cents": 5500,

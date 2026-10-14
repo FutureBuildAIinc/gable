@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/customer"
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/database"
@@ -443,6 +444,9 @@ func (r *PostgresRepository) CreateInvoice(ctx context.Context, inv *LegacyInvoi
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
 	}
+	if err := customerlink.Ensure(ctx, r.db, "invoices", inv.ID); err != nil {
+		return err
+	}
 	queryLine := `
 		INSERT INTO invoice_lines (id, invoice_id, product_id, quantity, price_each, created_at,
 			sku, description, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total)
@@ -586,6 +590,9 @@ func (r *PostgresRepository) InsertFulfilmentInvoice(ctx context.Context, in *Fu
 		in.ShipToID, in.ShipToSnapshot, in.ProjectID, in.TaxExempt, in.TaxSource, in.InvoiceDate)
 	if err != nil {
 		return fmt.Errorf("failed to insert invoice: %w", err)
+	}
+	if err := customerlink.Ensure(ctx, r.db, "invoices", in.ID); err != nil {
+		return err
 	}
 	// Parents first: a component's parent_line_id references its kit line.
 	for i := range in.Lines {

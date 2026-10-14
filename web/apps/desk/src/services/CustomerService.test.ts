@@ -54,6 +54,7 @@ const CUSTOMER: Customer = {
   tier: 'gold',
   is_active: true,
   primary_branch_id: 'b-1',
+  branch_ids: ['b-1'],
   price_level_id: null,
   price_level: null,
   salesperson_id: 's-1',
