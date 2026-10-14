@@ -10,7 +10,7 @@ import type { TenderIn } from '../../services/POSService';
 
 export type PayPlan =
     | { ok: true; tenders: TenderIn[]; changeCents: number }
-    | { ok: false; owedCents: number };
+    | { ok: false; owedCents: number; over?: boolean };
 
 const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents, 0);
 
@@ -20,6 +20,11 @@ const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents
  * owed) when the tenders do not cover the total.
  */
 export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn | null): PayPlan {
+    // change is given only in cash: tenders already added above the total
+    // with any of them not cash cannot be paid, and are cleared and chosen again
+    if (totalCents > 0 && sum(added) > totalCents && added.some((t) => t.method !== 'cash')) {
+        return { ok: false, owedCents: 0, over: true };
+    }
     let tenders = added;
     if (sum(tenders) < totalCents && entry !== null && entry.amount_cents > 0) {
         tenders = [...added, entry];

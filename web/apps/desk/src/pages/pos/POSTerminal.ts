@@ -1339,8 +1339,13 @@ export class POSTerminal extends LitElement {
     const owed = this._owedCents;
     const entry = this._entry;
     const isCash = this._tenderMethod === 'cash';
-    const change = isCash && entry !== null && this._tenderedSoFar < total
+    const payPlanNow = payPlan(total, this._pendingTenders, entry);
+    // cash only added above the total (a quantity change lowered it): its change shows as usual
+    const addedChange = this._pendingTenders.length > 0 && this._tenderedSoFar > total
+      && this._pendingTenders.every((t) => t.method === 'cash') ? this._tenderedSoFar - total : 0;
+    const change = addedChange > 0 ? addedChange : isCash && entry !== null && this._tenderedSoFar < total
       ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
+    const tendersOver = !payPlanNow.ok && payPlanNow.over === true;
     const ready = this._till !== null && hasLines && open;
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
     const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
@@ -1394,7 +1399,11 @@ export class POSTerminal extends LitElement {
             @blur=${() => this._formatTenderAmount()}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
             aria-label="Tender amount" />
-          ${isCash && change > 0 ? html`
+          ${tendersOver ? html`
+            <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
+              The added tenders are more than the sale now: clear them and choose again
+            </div>` : nothing}
+          ${(isCash || addedChange > 0) && change > 0 ? html`
             <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
               <span>Change due</span><span class="font-mono">${fmt(change)}</span>
             </div>` : nothing}
@@ -1466,6 +1475,7 @@ export class POSTerminal extends LitElement {
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
+      : !plan.ok && plan.over === true ? 'Clear the added tenders'
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
