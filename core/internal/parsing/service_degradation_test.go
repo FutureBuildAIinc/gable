@@ -5,9 +5,11 @@ package parsing
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/gablelbm/gable/internal/ai"
@@ -132,5 +134,58 @@ func TestExtractItems_SkipsAHeaderRow(t *testing.T) {
 	// A first line that is a product, not a header, stays.
 	if got := s.ExtractItems("Polymeric Sand, bag\n3 pcs - Cedar Post\n"); len(got) != 2 {
 		t.Fatalf("a product line must not be taken for a header, got %+v", got)
+	}
+}
+
+// With Anthropic chosen and ONLY its key saved, the quote intake reads the
+// upload through Anthropic as image and document blocks and a text upload
+// (the detector's "text/plain; charset=utf-8") as text: the result is the
+// caller's own list, never the canned one, and OpenRouter is never asked.
+func TestExtractItemsWithAI_AnthropicChosenReadsUploads(t *testing.T) {
+	var hits int32
+	var lastBlockType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		var body struct {
+			Messages []struct {
+				Content []struct {
+					Type string `json:"type"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		lastBlockType = body.Messages[0].Content[0].Type
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"content": []any{map[string]any{"type": "text", "text": "12 pcs - 2x6x10 Doug Fir #2"}},
+		})
+	}))
+	defer srv.Close()
+	or := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("OpenRouter must not be called with Anthropic chosen")
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer or.Close()
+
+	client := ai.NewClient("").WithBaseURL(or.URL).WithProvider(ai.ProviderAnthropic).
+		WithAnthropicKey("test-" + "key-not-real").WithAnthropicBaseURL(srv.URL)
+	s := NewService(&mockProductRepo{}, client)
+	if s.AIOff(context.Background()) {
+		t.Fatal("AI reads as off with an Anthropic key saved")
+	}
+	for _, tc := range []struct{ ct, block string }{
+		{"image/jpeg", "image"},
+		{"application/pdf", "document"},
+		{"text/plain; charset=utf-8", "text"},
+	} {
+		items, synthetic, err := s.ExtractItemsWithAI(context.Background(), []byte("bytes"), tc.ct)
+		if err != nil || synthetic || len(items) != 1 {
+			t.Fatalf("%s: items %v synthetic %v err %v", tc.ct, items, synthetic, err)
+		}
+		if lastBlockType != tc.block {
+			t.Errorf("%s: first block = %q, want %q", tc.ct, lastBlockType, tc.block)
+		}
+	}
+	if n := atomic.LoadInt32(&hits); n != 3 {
+		t.Errorf("Anthropic received %d requests, want 3", n)
 	}
 }

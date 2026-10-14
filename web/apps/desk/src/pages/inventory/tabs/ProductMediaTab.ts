@@ -8,6 +8,8 @@ import { Sparkles, Trash2, Star, Loader2, Image as ImageIcon, AlertTriangle } fr
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import type { PIMMedia } from '../../../types/pim.ts';
+import { techAdminService } from '../../../services/TechAdminService';
+import { imageWords, type AIProvider } from '../../../lib/aiWords.ts';
 
 const STYLES = ['', 'photographic', 'digital-art', 'cinematic', '3d-model', 'isometric'];
 
@@ -22,6 +24,16 @@ export class GableProductMediaTab extends LitElement {
     @state() private prompt = '';
     @state() private generating = false;
     @state() private error: string | null = null;
+    // The chosen AI provider decides what the button makes: a photo with
+    // OpenRouter, an illustration drawn by Claude with Anthropic.
+    @state() private provider: AIProvider | null = null;
+
+    connectedCallback() {
+        super.connectedCallback();
+        techAdminService.getAISettings()
+            .then(s => { this.provider = s.provider; })
+            .catch(() => { this.provider = null; });
+    }
 
     private async _handleGenerate() {
         this.generating = true;
@@ -32,7 +44,7 @@ export class GableProductMediaTab extends LitElement {
             // The image is produced in the background — poll until the row settles.
             await this._pollUntilSettled();
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Image generation failed';
+            const msg = err instanceof Error ? err.message : imageWords(this.provider).failed;
             this.error = msg;
         } finally {
             this.generating = false;
@@ -50,7 +62,7 @@ export class GableProductMediaTab extends LitElement {
             this.media = media;
             if (!media.some(m => m.status === 'generating')) {
                 if (media.some(m => m.status === 'failed')) {
-                    this.error = 'Image generation failed — please try again.';
+                    this.error = imageWords(this.provider).failed;
                 }
                 return;
             }
@@ -79,13 +91,14 @@ export class GableProductMediaTab extends LitElement {
     }
 
     render() {
+        const words = imageWords(this.provider);
         return html`
             <div class="space-y-6">
                 <!-- Generation Controls -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <h3 class="text-sm font-medium text-zinc-300 flex items-center gap-2 mb-4">
                         ${icon(Sparkles, 16, 'w-4 h-4 text-amber-400')}
-                        AI Image Generation
+                        ${words.heading}
                     </h3>
                     <div class="space-y-3">
                         <div class="flex flex-wrap items-end gap-4">
@@ -107,7 +120,7 @@ export class GableProductMediaTab extends LitElement {
                                 class="flex items-center gap-2 px-4 py-2 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-lg hover:bg-amber-500/30 transition-colors disabled:opacity-50"
                             >
                                 ${this.generating ? icon(Loader2, 16, 'w-4 h-4 animate-spin') : icon(Sparkles, 16, 'w-4 h-4')}
-                                ${this.generating ? 'Generating...' : 'Generate Image'}
+                                ${this.generating ? words.busy : words.button}
                             </button>
                         </div>
                         <div>
@@ -134,7 +147,7 @@ export class GableProductMediaTab extends LitElement {
                     ? html`
                         <div class="bg-zinc-900 border border-white/10 rounded-xl p-12 text-center">
                             ${icon(ImageIcon, 48, 'w-12 h-12 text-zinc-600 mx-auto mb-3')}
-                            <p class="text-zinc-500 text-sm">No images yet. Generate one using AI above.</p>
+                            <p class="text-zinc-500 text-sm">${words.empty}</p>
                         </div>
                     `
                     : html`

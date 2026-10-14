@@ -485,6 +485,13 @@ paths:
       tags:
       - product
       summary: Generate PIM image
+      description: >-
+        Starts product image generation and answers 202 with a media row in
+        status generating. With the OpenRouter provider chosen the row
+        becomes a photo; with the Anthropic provider chosen it becomes an
+        SVG illustration drawn by Claude, stored only after a strict
+        sanitiser has re-serialised it (a drawing it refuses settles the
+        row as failed).
       parameters:
       - name: id
         in: path
