@@ -973,6 +973,8 @@ export class POSTerminal extends LitElement {
   /** Pay: the added tenders plus the entry when they do not cover the total. */
   private async _pay() {
     if (!this._sale) return;
+    // a quantity change on its way would leave the sale paid at the old quantity
+    if (this._changing.size > 0) return;
     const plan = payPlan(this._sale.total_cents, this._pendingTenders, this._entry);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
@@ -1148,12 +1150,12 @@ export class POSTerminal extends LitElement {
             <th style="text-align:left;padding:4px 0">Method</th><th>Expected</th><th>Counted</th><th>\u0394</th>
           </tr></thead>
           <tbody>
-            ${Object.keys(r.session.expected_by_method || {}).map((m) => {
+            ${Object.keys(r.session.expected_by_method || {}).filter((m) => m.toLowerCase() !== 'account').map((m) => {
               const exp = r.session.expected_by_method?.[m] ?? 0;
               const cnt = r.session.counted_by_method?.[m] ?? 0;
               const d = cnt - exp;
               return html`<tr style="text-align:right;border-top:1px solid #21262d">
-                <td style="text-align:left;padding:6px 0">${m}</td>
+                <td style="text-align:left;padding:6px 0">${methodLabel(m.toLowerCase() as TenderMethod)}</td>
                 <td>${fmt(exp)}</td><td>${fmt(cnt)}</td>
                 <td style="color:${d === 0 ? '#8b949e' : d < 0 ? '#f85149' : '#d29922'}">${fmt(d)}</td>
               </tr>`;

@@ -20,16 +20,16 @@ const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents
  * owed) when the tenders do not cover the total.
  */
 export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn | null): PayPlan {
-    // change is given only in cash: tenders already added above the total
-    // with any of them not cash cannot be paid, and are cleared and chosen again
-    if (totalCents > 0 && sum(added) > totalCents && added.some((t) => t.method !== 'cash')) {
-        return { ok: false, owedCents: 0, over: true };
-    }
     let tenders = added;
     if (sum(tenders) < totalCents && entry !== null && entry.amount_cents > 0) {
         tenders = [...added, entry];
     }
     const tendered = sum(tenders);
+    // change is given only in cash: tenders above the total with any of them
+    // not cash (added, or the amount typed) are cleared and chosen again
+    if (totalCents > 0 && tendered > totalCents && tenders.some((t) => t.method !== 'cash')) {
+        return { ok: false, owedCents: 0, over: true };
+    }
     if (totalCents <= 0 || tenders.length === 0 || tendered < totalCents) {
         return { ok: false, owedCents: Math.max(totalCents - tendered, 0) };
     }

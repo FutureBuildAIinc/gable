@@ -176,19 +176,19 @@ describe('the counter as the Panels layout', () => {
     expect(svc.completeSale).not.toHaveBeenCalled();
   });
 
-  it('sends only the corrected entry after a refused Pay, never the first attempt again', async () => {
+  it('keeps a refused Pay from being sent again, and sends only the corrected entry', async () => {
     svc.completeSale
-      .mockRejectedValueOnce(new Error('only a cash tender can give change'))
+      .mockRejectedValueOnce(new Error('the card was declined'))
       .mockResolvedValueOnce(sale({ status: 'completed' }));
     const el = await mount(sale());
     q(el, 'tender-card').click();
     await el.updateComplete;
-    await typeInto(el, '100.00');
+    await typeInto(el, '86.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 10000 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
     await typeInto(el, '86.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -2392,12 +2392,12 @@ describe('PR 150 fix round 2: the Z table, the guard in _pay and a typed non cas
     };
     inner._showTillClose = true;
     await el.updateComplete;
-    const text = el.textContent ?? '';
-    expect(text).toContain('Z-Report');
-    expect(text.toLowerCase()).not.toContain('account');
-    expect(text).not.toContain('CASH');
-    expect(text).toContain('Cash');
-    expect(text).toContain('Check');
+    expect(el.textContent).toContain('Z-Report');
+    const table = el.querySelector('table')?.textContent ?? '';
+    expect(table.toLowerCase()).not.toContain('account');
+    expect(table).not.toContain('CASH');
+    expect(table).toContain('Cash');
+    expect(table).toContain('Check');
     el.remove();
   });
 
