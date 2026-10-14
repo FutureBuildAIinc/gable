@@ -1624,10 +1624,12 @@ func (r *PostgresRepository) CustomerExempt(ctx context.Context, customerID uuid
 
 func (r *PostgresRepository) OpenReceivableCents(ctx context.Context, customerID uuid.UUID) (int64, error) {
 	var open int64
+	// A credit memo's open amount is stored negative, so it is ADDED: an open
+	// memo lowers the figure, as the order module's credit gate does.
 	err := r.ex(ctx).QueryRow(ctx, `
 		SELECT COALESCE((SELECT SUM(ROUND(i.amount_open * 100)::bigint) FROM invoices i
 			WHERE i.customer_id = $1 AND i.status IN ('UNPAID', 'PARTIAL', 'OVERDUE')), 0)
-			- COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
+			+ COALESCE((SELECT SUM(ROUND(m.amount_open * 100)::bigint) FROM credit_memos m
 			WHERE m.customer_id = $1 AND m.status IN ('OPEN', 'PARTIAL')), 0)
 			- COALESCE((SELECT SUM(ROUND(p.amount_unapplied * 100)::bigint) FROM payments p
 			WHERE p.customer_id = $1 AND p.status = 'POSTED'), 0)`, customerID).Scan(&open)
