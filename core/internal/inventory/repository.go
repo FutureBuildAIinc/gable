@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -51,13 +52,75 @@ func (r *PostgresRepository) ExecuteInTx(ctx context.Context, fn func(context.Co
 }
 
 func (r *PostgresRepository) GetInventory(ctx context.Context, productID uuid.UUID, locationID *uuid.UUID) (*Inventory, error) {
-	query := `
-		SELECT id, product_id, location_id, location, quantity, allocated, updated_at
-		FROM inventory
-		WHERE product_id = $1 AND (($2::uuid IS NULL AND location_id IS NULL) OR location_id = $2)
-	`
+	// The write path's read follows the branch wall (C2-5's carried fix from
+	// PR 44's review, restated by the fourteenth review): a request that names a
+	// location reads exactly that location's row, held to the caller's branch
+	// when the context carries one (a row on another branch is refused by
+	// ErrLocationOutsideBranch, never substituted), and a named location that
+	// holds no row yet is held the same way (the fifteenth review's P3-1): its
+	// branch is read from the location itself, so the row's absence cannot let
+	// a service caller seed a first row on another branch's yard (the HTTP
+	// routes reach the same refusal through the handler's location guard);
+	// only a request that names no location lets the branch rule pick a row,
+	// and it takes the branch's first row by creation, a stated rule the
+	// stock routes document, never the largest quantity by accident; an
+	// unbound request that names no location keeps the legacy behaviour, the
+	// row with no location.
+	branch := branchctx.IDForQuery(ctx)
 	var inv Inventory
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID, locationID).Scan(
+	var rowBranch *uuid.UUID
+	if locationID != nil {
+		err := r.db.GetExecutor(ctx).QueryRow(ctx, `
+			SELECT i.id, i.product_id, i.location_id, i.location, i.quantity, i.allocated, i.updated_at, l.branch_id
+			FROM inventory i
+			LEFT JOIN locations l ON l.id = i.location_id
+			WHERE i.product_id = $1 AND i.location_id = $2
+			ORDER BY i.created_at, i.id
+			LIMIT 1`, productID, locationID).Scan(
+			&inv.ID,
+			&inv.ProductID,
+			&inv.LocationID,
+			&inv.Location,
+			&inv.Quantity,
+			&inv.Allocated,
+			&inv.UpdatedAt,
+			&rowBranch,
+		)
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				// no row to read the branch from: the named location's own
+				// branch answers the wall instead
+				if branch != nil {
+					locBranch, lbErr := r.LocationBranchID(ctx, *locationID)
+					if lbErr != nil {
+						return nil, fmt.Errorf("failed to get inventory: %w", lbErr)
+					}
+					if locBranch == nil || *locBranch != *branch {
+						return nil, ErrLocationOutsideBranch
+					}
+				}
+				return nil, nil
+			}
+			return nil, fmt.Errorf("failed to get inventory: %w", err)
+		}
+		if branch != nil && (rowBranch == nil || *rowBranch != *branch) {
+			return nil, ErrLocationOutsideBranch
+		}
+		return &inv, nil
+	}
+	query := `
+		SELECT i.id, i.product_id, i.location_id, i.location, i.quantity, i.allocated, i.updated_at
+		FROM inventory i
+		LEFT JOIN locations l ON l.id = i.location_id
+		WHERE i.product_id = $1
+		  AND (
+			($2::uuid IS NOT NULL AND l.branch_id = $2)
+			OR ($2::uuid IS NULL AND i.location_id IS NULL)
+		  )
+		ORDER BY i.created_at, i.id
+		LIMIT 1
+	`
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, productID, branch).Scan(
 		&inv.ID,
 		&inv.ProductID,
 		&inv.LocationID,

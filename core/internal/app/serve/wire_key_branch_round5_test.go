@@ -410,10 +410,10 @@ func TestKeyBranchPin_PosSyncCustomerWall(t *testing.T) {
 	client := uuid.New()
 	freshClient := func() string { client = uuid.New(); return client.String() }
 	sync := func(register, customer string) string {
-		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"register_id":%q,"cashier_id":%q,`+
-			`"customer_id":%q,"items":[{"product_id":%q,"quantity":1,"uom":"EA"}],`+
-			`"tenders":[{"method":"ACCOUNT","amount":1.08}],"client_created_at":%q}]}`,
-			uuid.NewString()[:8], register, freshClient(), register, uuid.NewString(), customer,
+		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
+			`"tenders":[{"method":"account","amount_cents":105}],"client_created_at":%q}]}`,
+			uuid.NewString()[:8], register, freshClient(), uuid.NewString(), customer,
 			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
 	}
 	invoicesOn := func(customer uuid.UUID) (n int) {

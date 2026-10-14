@@ -289,8 +289,17 @@ func (w *branchWall) draftGuard(db *database.DB, kind string, roles ...string) f
 // sale names (round 10 P1-1). The cashier creates refuse a machine key
 // outright in the handler (a cashier must be a user).
 func (w *branchWall) pos(mux *http.ServeMux, h *pos.Handler, roles ...string) {
-	h.RegisterRoutes(mux, w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()),
-		"POST /api/v1/pos/sync"))
+	// The counter's operator routes (the resolve and the payback, the finance
+	// money movers) run behind the finance wall: the claim's sale is read
+	// through the caller's branch context, so a finance user held to one
+	// branch finds another branch's claim a missing row (ninth review P1-3,
+	// ADR 0007 section 2.3). The handler also holds the claim's sale to the
+	// wall, which is what scopes a caller with no context branch
+	// (default_branch_required=false, no header) to its grants (r12 P1-2),
+	// the same record hold the document and purchase order routes carry.
+	h.WithBranchGuard(w.guard).RegisterRoutes(mux,
+		w.patternWall(w.scoped(roles...), w.keyWall.CustomerBranch(posSyncCustomersOf()), "POST /api/v1/pos/sync"),
+		w.scoped("finance", "owner"))
 }
 
 func (w *branchWall) purchaseOrders(mux *http.ServeMux, h *purchase_order.Handler) {

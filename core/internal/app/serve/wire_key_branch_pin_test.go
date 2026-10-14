@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -307,21 +308,21 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		t.Fatalf("seed till sessions: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id)
-		VALUES ($1, $2, $4, 'OPEN', $5, $6), ($3, $7, $4, 'OPEN', $8, $9)`,
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id, currency)
+		VALUES ($1, $2, $4, 'OPEN', $5, $6, 'USD'), ($3, $7, $4, 'OPEN', $8, $9, 'USD')`,
 		f.txnA, f.regA, f.txnB, cashier, f.branchA, f.tillA, f.regB, f.branchB, f.tillB); err != nil {
 		t.Fatalf("seed pos transactions: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO pos_line_items (id, transaction_id, product_id, description, quantity, uom, unit_price, line_total)
-		VALUES ($1, $2, $4, 'pin', 1, 'EA', 1, 1), ($3, $5, $4, 'pin', 1, 'EA', 1, 1)`,
+		`INSERT INTO pos_line_items (id, transaction_id, product_id, description, quantity, uom, price_uom, uom_qty, price_uom_qty, unit_price, line_total, line_type, price_source)
+		VALUES ($1, $2, $4, 'pin', 1, 'EA', 'EA', 1, 1, 1, 1, 'PRODUCT', 'PRICE_LIST'), ($3, $5, $4, 'pin', 1, 'EA', 'EA', 1, 1, 1, 1, 'PRODUCT', 'PRICE_LIST')`,
 		f.lineA, f.txnA, f.lineB, f.posProd, f.txnB); err != nil {
 		t.Fatalf("seed pos lines: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, refund_method, status)
-		VALUES ($1, $2, $3, $5, 'CASH', 'COMPLETED'), ($6, $4, $7, $5, 'CASH', 'COMPLETED')`,
-		f.retA, f.regA, f.branchA, f.regB, cashier, f.retB, f.branchB); err != nil {
+		`INSERT INTO pos_returns (id, register_id, branch_id, cashier_id, refund_method, status, currency, number)
+		VALUES ($1, $2, $3, $5, 'CASH', 'COMPLETED', 'USD', $8), ($6, $4, $7, $5, 'CASH', 'COMPLETED', 'USD', $9)`,
+		f.retA, f.regA, f.branchA, f.regB, cashier, f.retB, f.branchB, "RTPIN-"+f.retA.String()[:8], "RTPIN-"+f.retB.String()[:8]); err != nil {
 		t.Fatalf("seed pos returns: %v", err)
 	}
 	if _, err := db.Pool.Exec(ctx,
@@ -446,9 +447,11 @@ func newKeyPinFixtureSwitched(t *testing.T, switchState string) *keyPinFixture {
 		WithAuditLog(audit.NewLogger(db))
 	paymentSvc := payment.NewService(db, payment.NewRepository(db), accountSvc).
 		WithAuditLog(audit.NewLogger(db))
-	posSvc := pos.NewService(db, pos.NewRepository(db), productSvc,
-		inventory.NewService(inventory.NewRepository(db)), invoiceSvc, paymentSvc, slog.Default()).
-		WithAuditLog(audit.NewLogger(db))
+	posSvc := pos.NewService(db, pos.NewRepository(db), slog.Default()).
+		WithInvoices(invoiceSvc).WithAR(accountSvc).
+		WithInventory(inventory.NewService(inventory.NewRepository(db))).
+		WithLedger(glSvc).WithAuditLog(audit.NewLogger(db)).
+		WithOutbox(outbox.NewWriter(db, "")).WithTxRunner(db)
 	wall.pos(mux, pos.NewHandler(posSvc), "admin", "owner", "cashier")
 
 	// The AI spending routes exactly as serve registers them, each call
@@ -1620,7 +1623,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 
 	// The foreign till cannot be closed: no session write, no Z report.
 	f.key(t, f.bound, "POST", "/api/v1/pos/till/"+f.tillB.String()+"/close",
-		`{"counted_by_method":{"CASH":50}}`, nil)
+		`{"counted_by_method":{"cash":5000}}`, nil)
 	f.twinLeg("POST", "/api/v1/pos/till/"+f.tillB.String()+"/close")
 	if !tillOpen(f.tillB) {
 		t.Errorf("bound key closed the foreign till session")
@@ -1671,7 +1674,7 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	f.twinLeg("GET", "/api/v1/pos/transactions/"+f.txnB.String())
 	before := linesOn(f.txnB)
 	f.key(t, f.bound, "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items",
-		fmt.Sprintf(`{"product_id":%q,"quantity":1,"uom":"EA"}`, f.posProd.String()), nil)
+		fmt.Sprintf(`{"line":{"product_id":%q,"quantity":"1"}}`, f.posProd.String()), nil)
 	f.twinLeg("POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/items")
 	if after := linesOn(f.txnB); after != before {
 		t.Errorf("bound key line insert on the foreign transaction wrote: %d rows then %d", before, after)
@@ -1683,10 +1686,44 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	}
 	before = linesOn(f.txnA)
 	f.allow(t, "bound", "POST", "/api/v1/pos/transactions/"+f.txnA.String()+"/items",
-		fmt.Sprintf(`{"product_id":%q,"quantity":1,"uom":"EA"}`, f.posProd.String()), nil, http.StatusOK)
+		fmt.Sprintf(`{"line":{"product_id":%q,"quantity":"1"}}`, f.posProd.String()), nil, http.StatusOK)
 	if after := linesOn(f.txnA); after != before+1 {
 		t.Errorf("bound key line insert on the own transaction: %d rows then %d, want one new line", before, after)
 	}
+
+	// The counter's customer: the lookup finds the pin's own customer and
+	// never the foreign one, and naming a customer on the foreign sale reads
+	// as a missing sale (nothing written) while the pin's own sale takes it.
+	var acctA, acctB string
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT account_number FROM customers WHERE id = $1`, f.custID).Scan(&acctA); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT account_number FROM customers WHERE id = $1`, f.custB).Scan(&acctB); err != nil {
+		t.Fatal(err)
+	}
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/customers?q="+url.QueryEscape(acctB), "", nil)
+	f.twinLeg("GET", "/api/v1/pos/customers")
+	if strings.Contains(string(buf), f.custB.String()) {
+		t.Errorf("bound key counter lookup carries the foreign customer: %s", buf)
+	}
+	buf = f.allow(t, "bound", "GET", "/api/v1/pos/customers?q="+url.QueryEscape(acctA), "", nil, http.StatusOK)
+	if !strings.Contains(string(buf), f.custID.String()) {
+		t.Errorf("bound key counter lookup does not carry the pin's own customer: %s", buf)
+	}
+	if sB, _ := f.key(t, f.bound, "PUT", "/api/v1/pos/transactions/"+f.txnB.String()+"/customer",
+		fmt.Sprintf(`{"customer_id":%q}`, f.custID.String()), nil); sB != http.StatusNotFound {
+		t.Errorf("bound key naming a customer on the foreign sale: %d, want 404", sB)
+	}
+	f.twinLeg("PUT", "/api/v1/pos/transactions/"+f.txnB.String()+"/customer")
+	var named *uuid.UUID
+	if err := f.db.Pool.QueryRow(context.Background(), `SELECT customer_id FROM pos_transactions WHERE id = $1`, f.txnB).Scan(&named); err != nil {
+		t.Fatal(err)
+	}
+	if named != nil && *named == f.custID {
+		t.Errorf("bound key named the pin's customer on the foreign sale")
+	}
+	f.allow(t, "bound", "PUT", "/api/v1/pos/transactions/"+f.txnA.String()+"/customer",
+		`{"customer_id":null}`, nil, http.StatusOK)
 
 	// The account routes name a customer in the path: the foreign customer is
 	// refused with the audit row, the pin's own answers, and the

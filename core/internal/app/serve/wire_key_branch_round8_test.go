@@ -46,6 +46,11 @@ func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 	ctx := context.Background()
 	client := uuid.New()
 	batch := "pin-r8-" + uuid.NewString()[:8]
+	// the control's sale completes, so the pin's product needs stock
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO inventory (product_id, location_id, location, quantity) VALUES ($1, NULL, '', 50)`, f.posProd); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_line_items WHERE transaction_id = $1`, client)
 		_, _ = f.db.Pool.Exec(ctx, `DELETE FROM pos_transactions WHERE id = $1`, client)
@@ -53,9 +58,10 @@ func TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister(t *testing.T) {
 	})
 	syncBody := func(batchRegister string) string {
 		return `{"batch_id":"` + batch + `","register_id":"` + batchRegister +
-			`","items":[{"client_id":"` + client.String() + `","register_id":"` + f.regA +
+			`","items":[{"client_id":"` + client.String() +
 			`","cashier_id":"` + uuid.NewString() + `","customer_id":"` + f.custID.String() +
-			`","items":[],"tenders":[],"client_created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}]}`
+			`","items":[{"product_id":"` + f.posProd.String() + `","quantity":"1"}],` +
+			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}]}`
 	}
 	logRows := func() (n int) {
 		if err := f.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM pos_sync_log WHERE batch_id = $1`, batch).Scan(&n); err != nil {

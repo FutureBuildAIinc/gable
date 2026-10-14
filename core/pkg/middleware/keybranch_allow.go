@@ -257,6 +257,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/payment-terms":                                    {KeyBranchClassStatedLimit, "the dealer wide payment terms vocabulary"},
 	"GET /api/v1/payment-terms/{id}":                               {KeyBranchClassStatedLimit, "the dealer wide payment terms vocabulary"},
 	"GET /api/v1/pos/catalog":                                      {KeyBranchClassStatedLimit, "the dealer wide product catalogue"},
+	"GET /api/v1/pos/customers":                                    {KeyBranchClassWalled, "customer_branches (the customer wall the customer list carries, held to the caller's branch context or grants); the counter's lookup reads only what that wall reaches"},
 	"GET /api/v1/pos/products/search":                              {KeyBranchClassStatedLimit, "the dealer wide product catalogue"},
 	"GET /api/v1/price_levels":                                     {KeyBranchClassStatedLimit, "the dealer wide price level vocabulary"},
 	"GET /api/v1/pricing/categories":                               {KeyBranchClassStatedLimit, "product category reference data, no branch fact"},
@@ -398,11 +399,13 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"POST /api/v1/payments/{id}/applications":                      {KeyBranchClassWalled, "payments.branch_id beside InvoiceVisible"},
 	"POST /api/v1/payments/{id}/refunds":                           {KeyBranchClassWalled, "payments.branch_id (MemoFactsFor and the refund wall)"},
 	"POST /api/v1/payments/{id}/transitions":                       {KeyBranchClassWalled, "payments.branch_id (the payment repository wall)"},
-	"POST /api/v1/pos/returns":                                     {KeyBranchClassWalled, "the return is stamped with the register's branch (its location's branch, else pos_registers.branch_id) and the caller's branch context is held against it (403 on a mismatch, round 7); no machine key cashier"},
+	"POST /api/v1/pos/refund-intents/{id}/payback":                 {KeyBranchClassRefused, "a held credit is paid back by a person through the counter terminal rail: finance and owner only, and the route itself refuses a machine key, bound or not, whatever scopes it holds (C2-5, FROM-PRINCIPAL 60b)"},
+	"POST /api/v1/pos/refund-intents/{id}/resolve":                 {KeyBranchClassRefused, "a refund claim is resolved by a person: finance and owner only, and the route itself refuses a machine key, bound or not, whatever scopes it holds (C2-5, FROM-PRINCIPAL 41)"},
+	"POST /api/v1/pos/returns":                                     {KeyBranchClassWalled, "the return is stamped with the register's branch (its location's branch, else pos_registers.branch_id) and the caller's branch context is held against it (403 on a mismatch, round 7); a customer the return names, or its original sale's (a return of a sale credits that sale's customer only, 400 otherwise), passes the counter's one customer rule (404 when hidden, nothing written, round 22); no machine key cashier"},
 	"POST /api/v1/pos/sync":                                        {KeyBranchClassWalled, "the register's branch (its location's branch, else pos_registers.branch_id) on every replayed create and on the batch register itself (a batch of another branch's register is refused 403 before any item runs and before the pos_sync_log row is written, round 7, and a batch register that is empty or names no register is refused 400 the same way, rounds 8 and 9), and items[].customer_id through the customer branch wall (round 10 P1-1); TestKeyBranchPin_PosSyncCustomerWall, TestKeyBranchPin_SyncRefusesAnotherBranchsBatchRegister, TestKeyBranchPin_SyncRefusesAnUnknownBatchRegister"},
 	"POST /api/v1/pos/till/open":                                   {KeyBranchClassWalled, "the till session is stamped with the register's branch (its location's branch, else pos_registers.branch_id) and the caller's branch context is held against it (403 on a mismatch, round 7); no machine key cashier"},
 	"POST /api/v1/pos/till/{id}/close":                             {KeyBranchClassWalled, "till_sessions.branch_id (the close reads the session first); TestKeyBranchPin_PosAndAccountRows"},
-	"POST /api/v1/pos/transactions":                                {KeyBranchClassWalled, "the register's branch (its location's branch, else pos_registers.branch_id) on create, pos_transactions.branch_id after, and a register of another branch is refused 403 (round 7); no machine key cashier"},
+	"POST /api/v1/pos/transactions":                                {KeyBranchClassWalled, "the register's branch (its location's branch, else pos_registers.branch_id) on create, pos_transactions.branch_id after, and a register of another branch is refused 403 (round 7); the customer it names goes through the customer branch wall (a hidden customer reads as missing, nothing written); no machine key cashier"},
 	"POST /api/v1/pos/transactions/{id}/complete":                  {KeyBranchClassWalled, "pos_transactions.branch_id (the transaction is read before any write)"},
 	"POST /api/v1/pos/transactions/{id}/items":                     {KeyBranchClassWalled, "pos_transactions.branch_id (the transaction is read before the insert); TestKeyBranchPin_PosAndAccountRows"},
 	"POST /api/v1/pos/transactions/{id}/void":                      {KeyBranchClassWalled, "pos_transactions.branch_id (the transaction is read before any write)"},
@@ -426,6 +429,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"PUT /api/v1/quotes/{id}":                                      {KeyBranchClassWalled, "quotes.branch_id"},
 	"PUT /api/v1/quotes/{id}/file":                                 {KeyBranchClassWalled, "quotes.branch_id"},
 	"PUT /api/v1/ship-tos/{id}":                                    {KeyBranchClassWalled, "customer_ship_tos.customer_id to customer_branches"},
+	"PUT /api/v1/pos/transactions/{id}/customer":                   {KeyBranchClassWalled, "pos_transactions.branch_id (the sale is held to the caller's branch before any write: 404 for a hidden sale, 403 by name with no branch in context and no grant) and the named customer through the customer branch wall (a hidden customer reads as missing); no machine key cashier"},
 }
 
 // KeyBranchRouteClassFor returns the class the table gives a method and

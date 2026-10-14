@@ -1332,6 +1332,98 @@ The card gateway is called before the transaction and its result written
 inside it, as today; a database failure after a successful charge is
 logged as critical for reconciliation, as today.
 
+Every card refund (a void's, a card return's) is claimed first in a committed
+refund intent, and the intent table is the one authority on what a card
+tender has refunded or may be refunding: a claim is refused when a void intent
+of the tender is done, when the tender's done and pending amounts plus the
+claim pass the tender, or when the sale is no longer completed, and a return
+refunded by any method but the card's own and the till close are refused
+while an intent of the sale or session is pending (and such a return is
+refused while the sale's void has a booked tender refund, its goods already
+paid back at the terminal). A gateway error with no verdict leaves the
+intent pending (the terminal may have moved the money) with an audit row,
+and only the terminal's explicit decline releases it: an answer of PENDING
+or ERROR proves nothing either way and leaves the claim standing the same
+way. The gateway's refund id is written onto the intent the
+moment the terminal answers, in its own committed write, so a pending intent
+that carries one is a refund that moved and one without it may not have. A
+claim also records its own terminal call: the call is bounded, every path it
+can take (the refund id's committed write, the decline release, the no
+verdict record, and an abandon stamp for a tender whose call was never
+reached) stamps the answer, and the claim carries an in flight lease from
+the moment it opens, restamped in its own committed write immediately
+before each of its act's terminal calls, so a later tender's call in a
+sequence (a void's calls run one tender after another) never runs under a
+lease the earlier calls already spent. While the terminal has not answered
+and the lease runs, the claim is live, not stranded: the resolve route and
+the till close refuse it (409 `refund_in_flight`), so a tender whose money
+has not answered cannot be released and then refunded twice; once the lease
+expires with no answer at all (a crashed or hung act) the claim is marked
+UNKNOWN and settles as the operator records. The terminal's refund id is
+written onto the claim whatever state it is in, and a recorded refund that
+never booked holds the tender against every later act (the payback and
+every act on the credit, an application or the online refund route alike,
+refuse 409 `tender_refunded` until the claim is reconciled), so a late
+answer behind an early release can never be paid twice. A
+pending intent is resolved by one guarded admin route, for the finance and
+owner roles and never a machine key, inside the caller's branch (the claim's
+sale is read through the branch context, so a caller outside the branch
+finds a missing row; and a caller whose context carries no branch, the
+default branch setting off and no header sent, has the sale's own branch
+held to the caller's grants, the same missing row outside them): the
+operator records the terminal's actual
+outcome, either its refund id (the act's own money transaction then books it
+with every cap and lock) or an explicit "no refund" with a reconciliation
+reference (the intent is released and nothing moves), and one audit row names
+the person, the intent, the outcome and the reason. The record cannot
+contradict the claim's own: a no refund over a claim carrying the terminal's
+refund id, and a refund recorded under a different id, are refused. The
+claim row is locked inside the resolution's transaction, read right after
+the sale row it settles under, and every state
+change refuses when it settles no row, so of any number of concurrent
+resolutions exactly one books and the losers are told the race, never a
+state refusal the winner's own completion caused. A void's resolution
+accounts for each card tender separately: it books only the resolved
+tender's refund, and the sale's void completes when no claim of the sale is
+pending anymore, from whichever leg empties them (a booked refund or a no
+refund of the last claim alike), so the order the claims are resolved in
+never decides the end state; a void whose every claim settles without a
+booked refund keeps the sale completable by a fresh void. Between one
+tender's booked refund and the last claim's resolution the sale stands
+completed in an interim state: the booked refund reversed its application,
+so the invoice is open again for the booked cents and the customer's balance
+carries them as owed, until the last claim resolves and the void completes,
+and the till close is refused while any claim of the session is pending, so
+the interim never slips into a counted drawer. Nothing may be applied to the
+interim invoice while the void's claims stand: every application path (a
+receipt's applications, the apply route, a credit memo, a write off) refuses
+with 409 `void_claim_pending` naming the claims, so the void is always
+completable and a credit that might have been absorbed stays on its own
+payment. The tenders whose refunds were declined, or were recorded as a no
+refund, keep their charge as unapplied credit owed to the customer, and
+that credit is held to its own tender: it applies to no invoice, whatever
+the customer. The account core asks the counter through a guard (the
+origin is readable through `pos_tenders.payment_id`, which the account
+core alone cannot read), and the refusal names the origin, the void and
+the claim it released; a counter card tender is exactly its cents, so the
+unapplied cash on its payment can only be the void's reversal, and on the
+shared walk-in customer one card holder's credit must never pay another
+walk-in's invoice. The credit is paid back only to that card, through the
+counter terminal rail the charge came from, by the payback route beside
+the resolve route (`POST /api/v1/pos/refund-intents/{id}/payback`, finance
+and owner only, the branch wall, exactly one payback per tender, made
+structural by a partial unique index on the tender's payback claims
+(PENDING or DONE; a FAILED claim stays outside it so the counter may ask
+again after a decline), with the payback's claim opened in a transaction
+that locks the tender's payment row and rechecks the credit under that
+lock, so of any number of concurrent paybacks exactly one reaches the
+terminal and the card is never paid twice, its
+terminal call under the same claim discipline every terminal refund runs
+under); the payment refund route through the online gateway is never the
+way back for a counter tender and refuses the credit (409
+`tender_credit_held`). Until the card is paid back the credit stays held:
+nothing else can spend it.
+
 ### 12. Events
 
 Every event is written through the outbox in the act's transaction, last,
@@ -1763,7 +1855,11 @@ Inputs proved: IN-1.1, IN-1.2, IN-1.3, IN-1.4, IN-3.2, IN-3.7. Tests: a split
 tender sale posts one invoice entry, one receipt per tender and one
 application entry per tender; the till's expected cash equals the sum of the
 session's cash payments (already net of change; change is never subtracted
-a second time) plus the opening float less cash refunds; a void of a sale with
+a second time) plus the opening float less cash refunds, and the expected
+CARD figure names the session's net card collection, its completed sales'
+card tenders less the booked card refunds (a void's resolutions book against
+the tender's payment) and its card returns' refunds through their credit
+memos, dropping with the tender when a void completes; a void of a sale with
 a card tender refunds through the gateway and leaves the ledger at zero for
 the sale; a return restocks and reverses COGS; the offline sync completes
 each sale through the same path; a sale whose event write fails leaves no

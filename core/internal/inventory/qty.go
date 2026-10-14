@@ -212,6 +212,59 @@ func scaled(f float64) int64 {
 	return int64(f*10000 + 0.5)
 }
 
+// ErrInsufficientOnHand is the counter's name for a short free stock: a
+// sale at the till that asks for more than the branch has free.
+var ErrInsufficientOnHand = ErrInsufficientAvailable
+
+// IssueQty takes qty of the product from on hand at the branch for a
+// counter sale: a counter sale never allocates (there is no confirm moment
+// between the goods leaving the shelf and the money), so it takes from the
+// free stock, rows with the most free first, and refuses below what is
+// allocated with ErrInsufficientOnHand.
+func (s *Service) IssueQty(ctx context.Context, productID, branchID uuid.UUID, qty httpx.Quantity) error {
+	if qty <= 0 {
+		return nil
+	}
+	items, err := s.repo.LockBranchInventory(ctx, productID, branchID)
+	if err != nil {
+		return err
+	}
+	type slot struct {
+		id   uuid.UUID
+		free int64
+	}
+	var slots []slot
+	var total int64
+	for i := range items {
+		if f := scaled(items[i].Quantity) - scaled(items[i].Allocated); f > 0 {
+			slots = append(slots, slot{items[i].ID, f})
+			total += f
+		}
+	}
+	if total < int64(qty) {
+		return fmt.Errorf("%w: product %s has %d free, the sale takes %d", ErrInsufficientOnHand, productID, total, qty)
+	}
+	remaining := int64(qty)
+	for remaining > 0 {
+		best := 0
+		for i := range slots {
+			if slots[i].free > slots[best].free {
+				best = i
+			}
+		}
+		take := remaining
+		if slots[best].free < take {
+			take = slots[best].free
+		}
+		if err := s.repo.UnstockQty(ctx, slots[best].id, take); err != nil {
+			return err
+		}
+		slots[best].free -= take
+		remaining -= take
+	}
+	return nil
+}
+
 // UnrestockQty takes qty back off on hand at the branch, the reverse of
 // RestockQty (a voided restocking credit memo). It takes from the rows
 // holding the most unallocated stock first and never below what is
