@@ -195,4 +195,38 @@ describe('purchase order detail receive form', () => {
     expect(textOf(el)).toContain('$10.00')
     expect(textOf(el)).not.toContain('$9.00')
   })
+
+  it('lists the receive bins in path order, first bin first, however the wire serves them', async () => {
+    // The walk saw the bins in reverse (KEL-D first). The picker must list
+    // them by their path, in order, whatever order the locations call returns.
+    const locations = [
+      loc('loc-d', PO_BRANCH_ID, 'bin', 'KEL-D'),
+      loc('loc-c', PO_BRANCH_ID, 'bin', 'KEL-C'),
+      loc('loc-b', PO_BRANCH_ID, 'bin', 'KEL-B'),
+      loc('loc-a', PO_BRANCH_ID, 'bin', 'KEL-A'),
+    ]
+    const locationsPage = { items: locations, next_cursor: null, limit: 200 }
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes(`/purchase-orders/${PO_ID}/freight`)) return jsonResponse([])
+      if (url.endsWith(`/purchase-orders/${PO_ID}`)) return jsonResponse(po({ status: 'SENT' }))
+      if (url.includes('/locations')) return jsonResponse(locationsPage)
+      if (url.endsWith('/vendors/v-1')) return jsonResponse({ id: 'v-1', name: 'Acme Lumber' })
+      if (url.endsWith(`/products/${PRODUCT_ID}`)) return jsonResponse({ id: PRODUCT_ID, sku: 'LUM-2X4-08' })
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderDetail>('gable-purchase-order-detail', { routeId: PO_ID })
+
+    const receiveBtn = Array.from(el.querySelectorAll('button')).find((b) => textOf(b as Element).includes('Receive Items')) as HTMLButtonElement
+    expect(receiveBtn, 'expected a Receive Items button').toBeDefined()
+    receiveBtn.click()
+    await flush()
+    await flush()
+    await el.updateComplete
+
+    const select = q<HTMLSelectElement>(el, 'select')
+    const optionLabels = Array.from(select.querySelectorAll('option'))
+      .map((o) => textOf(o as Element))
+      .filter((label) => label !== 'Select...')
+    expect(optionLabels).toEqual(['KEL-A', 'KEL-B', 'KEL-C', 'KEL-D'])
+  })
 })
