@@ -1065,6 +1065,44 @@ predicate (`middleware.Wall`) and one shared hold
 (`BranchGuard.CheckGrantsBranch`) carry the rule, so no route family holds
 a private copy.
 
+#### 5.8 Customers are dealer wide accounts (ruling A)
+
+A customer is an account of the dealer, not of a yard. Any yard's people may
+look a customer up and sell to it; `customer_branches` records the yards the
+customer trades at, and `customers.primary_branch_id` is its home yard, always
+linked.
+
+The read matrix, for the customer, contact, ship to and escalation policy
+reads, the list, the count and the lookup by email (the customer module's
+repository, through `branchctx.CustomerReadBranchForQuery`):
+
+| Caller | Before | After |
+|---|---|---|
+| user with `X-Branch-Id` | the customers linked to that yard | every customer |
+| user without the header | the customers linked to the user's grants | every customer |
+| administrator or owner | every customer | every customer |
+| finance user | as the user rows above | every customer on these reads; the account, subledger, statement, aging, reconciliation, dashboard and report routes keep the grants (5.7) |
+| key bound to a branch | the customers that hold the pin | unchanged: the customers that hold the pin |
+| key bound to no branch | every customer | every customer |
+
+The writes and locks of the family, the CRM activities and the tax exemption
+routes keep the walls 5.5 and 5.7 settled; restricted customer fields keep
+the shared customer rule (a bound key changes only the branch local fields).
+
+The link follows trade. A document created at yard X for a customer not yet
+linked to X (a quote, an order and the order a quote converts into, an invoice
+from fulfilment, a credit memo, a payment, a counter sale, and the portal's
+quote and reorder) adds the `customer_branches` row in the same transaction
+and writes one `customer.branch_linked` audit row naming the actor, the
+document and the yard; a customer already linked adds nothing. The insert is
+the arbiter, so concurrent first documents at one yard write one link and one
+audit row (`internal/customer/customerlink`). Migration 116 adds the missing
+link for open documents only, from each document's own branch, idempotent,
+with a system audit row per link; its down removes nothing.
+
+The wire answer carries `primary_branch_id` (the home yard) and `branch_ids`
+(the yards the customer trades at, home included).
+
 ### 6. Agent identity, in all of it
 
 The actor object on the wire, in draft events, in outbox data and in the

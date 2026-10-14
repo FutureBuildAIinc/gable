@@ -81,7 +81,7 @@ export class GableLocalTestHub extends LitElement {
           </h1>
           <p class="text-zinc-400 max-w-2xl mb-2">
             Choose a UI surface to exercise against ${backendLabel}. Demo tenant:
-            <span class="text-white font-medium">Gable Lumber &amp; Supply, Kelowna BC</span>
+            <span class="text-white font-medium">Gable Building Supply, Kelowna BC</span>
             (Kelowna Main, West Kelowna, Lake Country).
           </p>
           <p class="text-xs text-zinc-500 mb-10 font-mono">

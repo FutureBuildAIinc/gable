@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Commons-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-// Package seed populates the database with the Kelowna / Gable Lumber &
+// Package seed populates the database with the Kelowna / Gable Building
 // Supply demo data, gated on DEMO_SEED. It is the body of the old
 // cmd/seed entry point, moved here so it can be imported; cmd/seed and
 // the one core binary's `seed` subcommand both call Run.
@@ -203,7 +203,7 @@ func Run() {
 	seedCtx := context.Background()
 
 	demoUserID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	log.Println("Seeding started — Gable Lumber & Supply (Kelowna, BC)...")
+	log.Println("Seeding started — Gable Building Supply (Kelowna, BC)...")
 
 	// =========================================================================
 	// 1. LOCATIONS — Multi-Branch Hierarchy
@@ -328,7 +328,7 @@ func Run() {
 		LeadDays, FillRate, SpendYTD                      float64
 	}
 	vendors := []vendor{
-		{"Gable Lumber & Supply", "orders@gablelumber.ca", "250-555-1100", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "Net 30", 3, 97.5, 485000},
+		{"Gable Building Supply", "orders@gablebuildingsupply.example", "250-555-1100", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "Net 30", 3, 97.5, 485000},
 		{"Okanagan Hardware Distribution", "sales@okhardware.ca", "250-555-1200", "1500 Fastener Way", "Kelowna", "BC", "V1Y 4R9", "Net 30", 5, 94.2, 128000},
 		{"BC Roofing Wholesale", "contact@bcroofing.ca", "250-555-1300", "200 Shingle Ln", "Vernon", "BC", "V1T 2L8", "Net 45", 7, 91.0, 95000},
 		{"Interior Millwork Co", "info@interiormillwork.ca", "250-555-1400", "75 Cabinet Ct", "Kelowna", "BC", "V1Z 1G2", "Net 30", 14, 88.5, 72000},
@@ -362,28 +362,28 @@ func Run() {
 		ReorderPt, ReorderQty            int
 	}
 	products := []product{
-		{"2x4x8 SPF Premium", "LUM-248-PREM", "PCS", "Gable Lumber & Supply", "Lumber", 3.50, 5.50, 9.0, 200, 500},
-		{"2x4x10 SPF Premium", "LUM-2410-PREM", "PCS", "Gable Lumber & Supply", "Lumber", 4.50, 7.25, 11.3, 150, 400},
-		{"2x4x12 SPF Premium", "LUM-2412-PREM", "PCS", "Gable Lumber & Supply", "Lumber", 5.40, 8.75, 13.5, 100, 300},
-		{"2x4x92-5/8 SPF Stud", "LUM-2492-STUD", "PCS", "Gable Lumber & Supply", "Lumber", 3.20, 5.10, 8.5, 300, 600},
-		{"2x6x10 SPF Premium", "LUM-2610-PREM", "PCS", "Gable Lumber & Supply", "Lumber", 6.00, 9.80, 16.9, 120, 300},
-		{"2x6x12 SPF Premium", "LUM-2612-PREM", "PCS", "Gable Lumber & Supply", "Lumber", 7.20, 11.75, 20.3, 100, 250},
-		{"2x6x16 SPF Premium", "LUM-2616-PREM", "PCS", "Gable Lumber & Supply", "Lumber", 9.60, 15.60, 27.0, 80, 200},
-		{"2x8x10 Hem-Fir No.2", "LUM-2810-NO2", "PCS", "Gable Lumber & Supply", "Lumber", 8.50, 13.90, 22.5, 80, 200},
-		{"2x8x16 Hem-Fir No.2", "LUM-2816-NO2", "PCS", "Gable Lumber & Supply", "Lumber", 13.60, 22.25, 36.0, 50, 150},
-		{"2x10x12 Hem-Fir No.2", "LUM-21012-NO2", "PCS", "Gable Lumber & Supply", "Lumber", 15.00, 24.50, 33.8, 60, 150},
-		{"2x12x16 Hem-Fir No.2", "LUM-21216-NO2", "PCS", "Gable Lumber & Supply", "Lumber", 28.00, 45.00, 54.0, 30, 80},
-		{"4x4x8 Pressure Treated", "LUM-448-PT", "PCS", "Gable Lumber & Supply", "Lumber", 8.00, 12.50, 22.0, 100, 200},
-		{"4x4x10 Pressure Treated", "LUM-4410-PT", "PCS", "Gable Lumber & Supply", "Lumber", 10.00, 15.75, 27.5, 80, 150},
-		{"6x6x12 Pressure Treated", "LUM-6612-PT", "PCS", "Gable Lumber & Supply", "Lumber", 35.00, 55.00, 72.0, 30, 60},
-		{"4x4x8 Western Red Cedar", "LUM-448-WRC", "PCS", "Gable Lumber & Supply", "Lumber", 22.00, 34.00, 22.0, 40, 100},
-		{"1x6x6 Cedar Fence Board", "LUM-166-WRC", "PCS", "Gable Lumber & Supply", "Lumber", 3.20, 5.10, 4.0, 200, 600},
-		{"3/4 Plywood G1S 4x8 (Fir)", "PLY-34-CDX", "PCS", "Gable Lumber & Supply", "Sheet Goods", 24.00, 38.00, 70.0, 80, 200},
-		{"1/2 Plywood G1S 4x8 (Fir)", "PLY-12-CDX", "PCS", "Gable Lumber & Supply", "Sheet Goods", 18.00, 28.50, 48.0, 80, 200},
-		{"3/4 OSB T&G 4x8", "OSB-34-TG", "PCS", "Gable Lumber & Supply", "Sheet Goods", 22.00, 34.00, 65.0, 100, 250},
-		{"7/16 OSB 4x8", "OSB-12", "PCS", "Gable Lumber & Supply", "Sheet Goods", 12.00, 19.50, 44.0, 120, 300},
-		{"1/2 Drywall Regular 4x8", "DW-12-REG", "PCS", "Gable Lumber & Supply", "Sheet Goods", 11.00, 16.00, 57.0, 100, 250},
-		{"5/8 Drywall Firecode 4x8", "DW-58-FC", "PCS", "Gable Lumber & Supply", "Sheet Goods", 14.00, 21.00, 70.0, 60, 150},
+		{"2x4x8 SPF Premium", "LUM-248-PREM", "PCS", "Gable Building Supply", "Lumber", 3.50, 5.50, 9.0, 200, 500},
+		{"2x4x10 SPF Premium", "LUM-2410-PREM", "PCS", "Gable Building Supply", "Lumber", 4.50, 7.25, 11.3, 150, 400},
+		{"2x4x12 SPF Premium", "LUM-2412-PREM", "PCS", "Gable Building Supply", "Lumber", 5.40, 8.75, 13.5, 100, 300},
+		{"2x4x92-5/8 SPF Stud", "LUM-2492-STUD", "PCS", "Gable Building Supply", "Lumber", 3.20, 5.10, 8.5, 300, 600},
+		{"2x6x10 SPF Premium", "LUM-2610-PREM", "PCS", "Gable Building Supply", "Lumber", 6.00, 9.80, 16.9, 120, 300},
+		{"2x6x12 SPF Premium", "LUM-2612-PREM", "PCS", "Gable Building Supply", "Lumber", 7.20, 11.75, 20.3, 100, 250},
+		{"2x6x16 SPF Premium", "LUM-2616-PREM", "PCS", "Gable Building Supply", "Lumber", 9.60, 15.60, 27.0, 80, 200},
+		{"2x8x10 Hem-Fir No.2", "LUM-2810-NO2", "PCS", "Gable Building Supply", "Lumber", 8.50, 13.90, 22.5, 80, 200},
+		{"2x8x16 Hem-Fir No.2", "LUM-2816-NO2", "PCS", "Gable Building Supply", "Lumber", 13.60, 22.25, 36.0, 50, 150},
+		{"2x10x12 Hem-Fir No.2", "LUM-21012-NO2", "PCS", "Gable Building Supply", "Lumber", 15.00, 24.50, 33.8, 60, 150},
+		{"2x12x16 Hem-Fir No.2", "LUM-21216-NO2", "PCS", "Gable Building Supply", "Lumber", 28.00, 45.00, 54.0, 30, 80},
+		{"4x4x8 Pressure Treated", "LUM-448-PT", "PCS", "Gable Building Supply", "Lumber", 8.00, 12.50, 22.0, 100, 200},
+		{"4x4x10 Pressure Treated", "LUM-4410-PT", "PCS", "Gable Building Supply", "Lumber", 10.00, 15.75, 27.5, 80, 150},
+		{"6x6x12 Pressure Treated", "LUM-6612-PT", "PCS", "Gable Building Supply", "Lumber", 35.00, 55.00, 72.0, 30, 60},
+		{"4x4x8 Western Red Cedar", "LUM-448-WRC", "PCS", "Gable Building Supply", "Lumber", 22.00, 34.00, 22.0, 40, 100},
+		{"1x6x6 Cedar Fence Board", "LUM-166-WRC", "PCS", "Gable Building Supply", "Lumber", 3.20, 5.10, 4.0, 200, 600},
+		{"3/4 Plywood G1S 4x8 (Fir)", "PLY-34-CDX", "PCS", "Gable Building Supply", "Sheet Goods", 24.00, 38.00, 70.0, 80, 200},
+		{"1/2 Plywood G1S 4x8 (Fir)", "PLY-12-CDX", "PCS", "Gable Building Supply", "Sheet Goods", 18.00, 28.50, 48.0, 80, 200},
+		{"3/4 OSB T&G 4x8", "OSB-34-TG", "PCS", "Gable Building Supply", "Sheet Goods", 22.00, 34.00, 65.0, 100, 250},
+		{"7/16 OSB 4x8", "OSB-12", "PCS", "Gable Building Supply", "Sheet Goods", 12.00, 19.50, 44.0, 120, 300},
+		{"1/2 Drywall Regular 4x8", "DW-12-REG", "PCS", "Gable Building Supply", "Sheet Goods", 11.00, 16.00, 57.0, 100, 250},
+		{"5/8 Drywall Firecode 4x8", "DW-58-FC", "PCS", "Gable Building Supply", "Sheet Goods", 14.00, 21.00, 70.0, 60, 150},
 		{"3-1/4\" Common Nails (25kg)", "NAIL-16D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Common Nails (25kg)", "NAIL-10D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Deck Screws (2.5kg)", "SCR-DECK-3-5", "BOX", "Mountain Fastener Supply", "Hardware", 18.00, 29.99, 5.0, 40, 100},
@@ -416,24 +416,24 @@ func Run() {
 		{"Casing 2-1/4 MDF 14'", "MLD-CASE-MDF", "PCS", "Interior Millwork Co", "Millwork", 8.00, 13.50, 5.0, 50, 100},
 
 		// Cornice / Exterior Trim Materials
-		{"Flashing J 6 X 6 X 10", "CORN2006", "EA", "Gable Lumber & Supply", "Cornice", 15.50, 23.25, 3.0, 20, 50},
-		{"Flashing Z Bar 3/4 X 10'", "CORN2009", "EA", "Gable Lumber & Supply", "Cornice", 3.50, 5.25, 1.5, 30, 60},
+		{"Flashing J 6 X 6 X 10", "CORN2006", "EA", "Gable Building Supply", "Cornice", 15.50, 23.25, 3.0, 20, 50},
+		{"Flashing Z Bar 3/4 X 10'", "CORN2009", "EA", "Gable Building Supply", "Cornice", 3.50, 5.25, 1.5, 30, 60},
 		{"Silicone Clear Caulk", "CORNCLEAR", "EA", "Okanagan Hardware Distribution", "Cornice", 5.75, 8.65, 0.8, 40, 80},
-		{"Cemtrim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Gable Lumber & Supply", "Cornice", 7.54, 11.31, 12.0, 50, 120},
-		{"Cemtrim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Gable Lumber & Supply", "Cornice", 11.94, 17.91, 18.0, 30, 80},
-		{"Vinyl H Mold 1/4 X 12'", "CORNHMOLD14", "EA", "Gable Lumber & Supply", "Cornice", 4.00, 6.00, 1.0, 30, 60},
+		{"Cemtrim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Gable Building Supply", "Cornice", 7.54, 11.31, 12.0, 50, 120},
+		{"Cemtrim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Gable Building Supply", "Cornice", 11.94, 17.91, 18.0, 30, 80},
+		{"Vinyl H Mold 1/4 X 12'", "CORNHMOLD14", "EA", "Gable Building Supply", "Cornice", 4.00, 6.00, 1.0, 30, 60},
 		{"Poly Black 18 X 300", "CORNPOLY18", "RL", "Okanagan Hardware Distribution", "Cornice", 23.12, 34.68, 25.0, 10, 25},
-		{"Solid Soffit Hardie Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Gable Lumber & Supply", "Cornice", 15.25, 22.88, 20.0, 30, 60},
-		{"Solid Soffit Hardie Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Gable Lumber & Supply", "Cornice", 20.45, 30.68, 28.0, 20, 50},
-		{"Vented Soffit Hardie Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Gable Lumber & Supply", "Cornice", 26.15, 39.23, 30.0, 25, 60},
-		{"Vented Soffit Hardie Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Gable Lumber & Supply", "Cornice", 17.50, 26.25, 22.0, 20, 50},
-		{"Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX", "CORNSHTGR49", "EA", "Gable Lumber & Supply", "Cornice", 9.36, 14.04, 24.0, 40, 100},
+		{"Solid Soffit Hardie Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Gable Building Supply", "Cornice", 15.25, 22.88, 20.0, 30, 60},
+		{"Solid Soffit Hardie Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Gable Building Supply", "Cornice", 20.45, 30.68, 28.0, 20, 50},
+		{"Vented Soffit Hardie Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Gable Building Supply", "Cornice", 26.15, 39.23, 30.0, 25, 60},
+		{"Vented Soffit Hardie Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Gable Building Supply", "Cornice", 17.50, 26.25, 22.0, 20, 50},
+		{"Sheathing 1/8 X 4 X 9 (Green) NSP DRYLine TSX", "CORNSHTGR49", "EA", "Gable Building Supply", "Cornice", 9.36, 14.04, 24.0, 40, 100},
 		{"Window Tape 6\" (100')", "CORNTAPE", "RL", "Okanagan Hardware Distribution", "Cornice", 22.00, 33.00, 3.0, 15, 30},
 
 		// Random-length / economy grade
-		{"1 X 4 RL #3 SPF", "LUMB14RLN3+", "LF", "Gable Lumber & Supply", "Lumber", 0.34, 0.52, 0.3, 500, 2000},
-		{"2 X 4 RL #3 SPF", "LUMB24RLN3", "LF", "Gable Lumber & Supply", "Lumber", 0.30, 0.46, 0.5, 1000, 5000},
-		{"2 X 4 RL Utility", "LUMBUT24RL", "LF", "Gable Lumber & Supply", "Lumber", 0.29, 0.44, 0.5, 500, 2000},
+		{"1 X 4 RL #3 SPF", "LUMB14RLN3+", "LF", "Gable Building Supply", "Lumber", 0.34, 0.52, 0.3, 500, 2000},
+		{"2 X 4 RL #3 SPF", "LUMB24RLN3", "LF", "Gable Building Supply", "Lumber", 0.30, 0.46, 0.5, 1000, 5000},
+		{"2 X 4 RL Utility", "LUMBUT24RL", "LF", "Gable Building Supply", "Lumber", 0.29, 0.44, 0.5, 500, 2000},
 	}
 
 	skuToID := make(map[string]uuid.UUID)
@@ -668,12 +668,12 @@ func Run() {
 		Role  string
 	}
 	salesReps := []salesRep{
-		{"a1b2c3d4-0001-4000-8000-000000000001", "Heather Macdonald", "heather.m@gablelumber.ca", "250-555-5001", "Sales Manager"},
-		{"a1b2c3d4-0002-4000-8000-000000000002", "Ethan Gagnon", "ethan.g@gablelumber.ca", "250-555-5002", "Sales Rep"},
-		{"a1b2c3d4-0003-4000-8000-000000000003", "Priya Brar", "priya.b@gablelumber.ca", "250-555-5003", "Account Executive"},
-		{"a1b2c3d4-0004-4000-8000-000000000004", "Cameron Fraser", "cameron.f@gablelumber.ca", "250-555-5004", "Sales Rep"},
-		{"a1b2c3d4-0005-4000-8000-000000000005", "Lucas Pelletier", "lucas.p@gablelumber.ca", "250-555-5005", "Sales Rep"},
-		{"a1b2c3d4-0006-4000-8000-000000000006", "Amanda Wong", "amanda.w@gablelumber.ca", "250-555-5006", "Account Executive"},
+		{"a1b2c3d4-0001-4000-8000-000000000001", "Heather Macdonald", "heather.m@gablebuildingsupply.example", "250-555-5001", "Sales Manager"},
+		{"a1b2c3d4-0002-4000-8000-000000000002", "Ethan Gagnon", "ethan.g@gablebuildingsupply.example", "250-555-5002", "Sales Rep"},
+		{"a1b2c3d4-0003-4000-8000-000000000003", "Priya Brar", "priya.b@gablebuildingsupply.example", "250-555-5003", "Account Executive"},
+		{"a1b2c3d4-0004-4000-8000-000000000004", "Cameron Fraser", "cameron.f@gablebuildingsupply.example", "250-555-5004", "Sales Rep"},
+		{"a1b2c3d4-0005-4000-8000-000000000005", "Lucas Pelletier", "lucas.p@gablebuildingsupply.example", "250-555-5005", "Sales Rep"},
+		{"a1b2c3d4-0006-4000-8000-000000000006", "Amanda Wong", "amanda.w@gablebuildingsupply.example", "250-555-5006", "Account Executive"},
 	}
 	for _, sr := range salesReps {
 		db.Exec(`INSERT INTO sales_team (id, name, email, phone, role)
@@ -937,12 +937,12 @@ func Run() {
 		Name, License, Phone, Email, CDLClass, CDLExpiry, HireDate string
 	}
 	drvs := []driver{
-		{"Ryan MacKenzie", "BC-CDL-88421", "250-555-4001", "ryan.m@gablelumber.ca", "1", "2026-11-15", "2019-03-01"},
-		{"Daniel Sandhu", "BC-CDL-77332", "250-555-4002", "daniel.s@gablelumber.ca", "3", "2027-02-28", "2020-06-15"},
-		{"Connor Tremblay", "BC-CDL-66243", "250-555-4003", "connor.t@gablelumber.ca", "1", "2026-08-30", "2018-01-10"},
-		{"Marc Cardinal", "BC-CDL-55154", "250-555-4004", "marc.c@gablelumber.ca", "3", "2027-05-15", "2021-09-20"},
-		{"Brendan Lee", "BC-CDL-44065", "250-555-4005", "brendan.l@gablelumber.ca", "1", "2027-01-20", "2022-04-15"},
-		{"Tyler Beaudry", "BC-CDL-33976", "250-555-4006", "tyler.b@gablelumber.ca", "5", "2026-12-01", "2023-01-08"},
+		{"Ryan MacKenzie", "BC-CDL-88421", "250-555-4001", "ryan.m@gablebuildingsupply.example", "1", "2026-11-15", "2019-03-01"},
+		{"Daniel Sandhu", "BC-CDL-77332", "250-555-4002", "daniel.s@gablebuildingsupply.example", "3", "2027-02-28", "2020-06-15"},
+		{"Connor Tremblay", "BC-CDL-66243", "250-555-4003", "connor.t@gablebuildingsupply.example", "1", "2026-08-30", "2018-01-10"},
+		{"Marc Cardinal", "BC-CDL-55154", "250-555-4004", "marc.c@gablebuildingsupply.example", "3", "2027-05-15", "2021-09-20"},
+		{"Brendan Lee", "BC-CDL-44065", "250-555-4005", "brendan.l@gablebuildingsupply.example", "1", "2027-01-20", "2022-04-15"},
+		{"Tyler Beaudry", "BC-CDL-33976", "250-555-4006", "tyler.b@gablebuildingsupply.example", "5", "2026-12-01", "2023-01-08"},
 	}
 	driverIDs := make([]uuid.UUID, 0)
 	for _, d := range drvs {
@@ -1143,7 +1143,7 @@ func Run() {
 		Name   string
 		Type   string
 	}{
-		{"Gable Lumber & Supply", "2026 Volume Rebate", "VOLUME"},
+		{"Gable Building Supply", "2026 Volume Rebate", "VOLUME"},
 		{"Okanagan Hardware Distribution", "Growth Incentive Q1", "GROWTH"},
 		{"BC Roofing Wholesale", "Product Mix Bonus", "PRODUCT_MIX"},
 	}
@@ -1194,7 +1194,7 @@ func Run() {
 	// 18. PORTAL CONFIG
 	// =========================================================================
 	db.Exec(`INSERT INTO portal_config (dealer_name, primary_color, support_email, support_phone)
-		VALUES ('Gable Lumber & Supply', '#00FFA3', 'support@gablelumber.ca', '250-555-1000')
+		VALUES ('Gable Building Supply', '#00FFA3', 'support@gablebuildingsupply.example', '250-555-1000')
 		ON CONFLICT DO NOTHING`)
 	fmt.Println("Seed: Portal Config")
 
@@ -1284,8 +1284,8 @@ func Run() {
 		// returned 403 to every demo login, and the role-update endpoint would
 		// have refused to set the role back to anything it recognised.
 		{"Kelbrook Construction", "demo@kelbrook.ca", "Sam Kelbrook", "Admin"},
-		{"Okanagan Homes Ltd", "okhomes@gable.com", "Olivia Homes", "Admin"},
-		{"Mission Hill Custom", "missionhill@gable.com", "Marc Mission", "Buyer"},
+		{"Okanagan Homes Ltd", "okhomes@gablebuildingsupply.example", "Olivia Homes", "Admin"},
+		{"Mission Hill Custom", "missionhill@gablebuildingsupply.example", "Marc Mission", "Buyer"},
 	}
 	for _, pu := range portalUsers {
 		cid, ok := customerIDs[pu.Customer]
@@ -1299,7 +1299,7 @@ func Run() {
 			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (email) DO UPDATE SET password_hash=$3, role=$5`, cid, pu.Email, string(pwHash), pu.Name, pu.Role)
 	}
-	fmt.Println("Seed: Portal Users (demo@kelbrook.ca / okhomes@gable.com / missionhill@gable.com, password: 'password')")
+	fmt.Println("Seed: Portal Users (demo@kelbrook.ca / okhomes@gablebuildingsupply.example / missionhill@gablebuildingsupply.example, password: 'password')")
 
 	// =========================================================================
 	// 22. POS REGISTERS + OFFLINE POS SYNC LOGS
@@ -1319,6 +1319,10 @@ func Run() {
 		VALUES ('sync-batch-002', 'REG-01', 15, 2, 0, NOW() - interval '30 minutes')`)
 	fmt.Println("Seed: POS Registers + Offline POS Sync Logs")
 
+	// The multi yard world (multi_yard.go): personas, a register and stock per
+	// yard, a purchase order to receive, cross yard quotes.
+	seedMultiYard(db, branchIDs, skuToID, customerIDs, vendorIDs, custToBranch)
+
 	// =========================================================================
 	// 23. EDI TRADING PARTNERS
 	// =========================================================================
@@ -1329,7 +1333,7 @@ func Run() {
 	fmt.Println("Seed: EDI Trading Partners")
 
 	fmt.Println("==================================================")
-	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE LUMBER & SUPPLY (KELOWNA, BC)  ")
+	fmt.Println("  DATABASE SEEDING COMPLETE — GABLE BUILDING SUPPLY (KELOWNA, BC)  ")
 	fmt.Println("==================================================")
 }
 
