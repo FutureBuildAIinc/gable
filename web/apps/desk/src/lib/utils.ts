@@ -56,3 +56,22 @@ export function formatDay(day: string | null | undefined): string {
     if (!m) return day;
     return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
 }
+
+// Money rendering for endpoints that already answer in float dollars (the
+// purchase order wire). Sits beside `formatCents` rather than replacing it:
+// the cents helper reads int64 cents; the dollars helper reads float dollars,
+// and the two never share a call site. Same rules: a leading "$", exactly two
+// decimal places, thousands separators grouped, the minus sign outside the
+// symbol. 123456.78 -> "$123,456.78", -73.88 -> "-$73.88", null -> "$0.00".
+export function formatDollars(amount: number | null | undefined): string {
+    const n = typeof amount === 'number' && isFinite(amount) ? amount : 0;
+    const negative = n < 0;
+    const abs = Math.abs(n);
+    // toFixed avoids the float-arithmetic surprise ("0.1 + 0.2 = 0.30000000000000004"),
+    // and Intl handles the grouping. Truncate floats to cents: these are display-only.
+    const whole = Math.floor(abs);
+    const cents = Math.round((abs - whole) * 100);
+    const safeCents = cents === 100 ? 0 : cents; // 12.005 rounds to 100, not 0
+    const text = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(whole + safeCents / 100);
+    return `${negative ? '-' : ''}$${text}`;
+}
