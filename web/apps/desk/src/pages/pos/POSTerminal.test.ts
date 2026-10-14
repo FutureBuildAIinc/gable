@@ -2302,3 +2302,74 @@ describe('PR 150 fix round 1: quantity edits, controls and the blind count', () 
     el.remove();
   });
 });
+
+describe('a quantity change under tenders already added', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const reduced = () => sale({
+    revision: 4, subtotal_cents: 5000, tax_cents: 0, total_cents: 5000,
+    lines: [{ ...line('a', 5000), quantity: '1' }] as unknown as Sale['lines'],
+  });
+  const addTender = async (el: POSTerminal, method: 'cash' | 'card', amount: string) => {
+    q(el, `tender-${method}`).click();
+    await el.updateComplete;
+    await typeInto(el, amount);
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+  };
+  const start = async () => mount(sale({
+    lines: [{ ...line('a', 8650), quantity: '2' }] as unknown as Sale['lines'], subtotal_cents: 8000, tax_cents: 650, total_cents: 8650,
+  }));
+  const minus = async (el: POSTerminal) => {
+    (el.querySelector('[aria-label="Decrease quantity of Item a"]') as HTMLButtonElement).click();
+    await settle();
+    await el.updateComplete;
+  };
+
+  it('shows the amount owed at once when the total rises over added tenders', async () => {
+    const el = await start();
+    await addTender(el, 'cash', '50.00');
+    expect(q(el, 'pos-amount-due').textContent?.trim()).toBe('$36.50');
+    svc.changeQuantity.mockResolvedValue(sale({ revision: 4, total_cents: 12000, subtotal_cents: 12000, tax_cents: 0,
+      lines: [{ ...line('a', 12000), quantity: '3' }] as unknown as Sale['lines'] }));
+    (el.querySelector('[aria-label="Increase quantity of Item a"]') as HTMLButtonElement).click();
+    await settle();
+    await el.updateComplete;
+    expect(q(el, 'pos-amount-due').textContent?.trim()).toBe('$70.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+
+  it('turns Pay on with the change due when cash only is added above a reduced total', async () => {
+    svc.changeQuantity.mockResolvedValue(reduced());
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await start();
+    await addTender(el, 'cash', '40.00');
+    await addTender(el, 'cash', '46.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    await minus(el);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$36.50');
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 4, [
+      { method: 'cash', amount_cents: 4000 }, { method: 'cash', amount_cents: 4650 },
+    ]);
+    el.remove();
+  });
+
+  it('keeps Pay off, in words, when a non cash tender is added above a reduced total', async () => {
+    svc.changeQuantity.mockResolvedValue(reduced());
+    const el = await start();
+    await addTender(el, 'card', '86.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    await minus(el);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('The added tenders are more than the sale now: clear them and choose again');
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+});
