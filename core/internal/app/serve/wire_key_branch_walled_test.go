@@ -288,8 +288,8 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 	// the fixture's.
 	txnA2 := uuid.New()
 	if _, err := f.db.Pool.Exec(context.Background(),
-		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id)
-		 SELECT $1, register_id, cashier_id, 'OPEN', branch_id, till_session_id FROM pos_transactions WHERE id = $2`, txnA2, f.txnA); err != nil {
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, till_session_id, currency)
+		 SELECT $1, register_id, cashier_id, 'OPEN', branch_id, till_session_id, currency FROM pos_transactions WHERE id = $2`, txnA2, f.txnA); err != nil {
 		t.Fatalf("seed the second open transaction: %v", err)
 	}
 	if _, err := f.db.Pool.Exec(context.Background(),
@@ -332,17 +332,21 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		}
 		return f.regA
 	}
-	posTender := fixed(`{"tenders":[{"method":"CASH","amount":5}]}`)
+	posTender := fixed(`{"tenders":[{"method":"cash","amount_cents":500}]}`)
 	posReturn := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"register_id":%q,"refund_method":"CASH","reason":"pin","lines":[{"product_id":%q,"quantity":1,"unit_price":1}]}`, regOf(row), f.posProd.String())
+		return fmt.Sprintf(`{"register_id":%q,"refund_method":"cash","reason":"pin","customer_id":%q,`+
+			`"lines":[{"product_id":%q,"quantity":"1","unit_price_ten_thousandths":10000,"restock":false}]}`,
+			regOf(row), f.custID.String(), f.posProd.String())
 	}
 	posSync := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"register_id":%q,"cashier_id":%q,`+
-			`"items":[{"product_id":%q,"quantity":1,"uom":"EA"}],"tenders":[{"method":"CASH","amount":5}],"client_created_at":%q}]}`,
-			uuid.NewString()[:8], regOf(row), uuid.NewString(), regOf(row), uuid.NewString(), f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
+		return fmt.Sprintf(`{"batch_id":"pin-%s","register_id":%q,"items":[{"client_id":%q,"cashier_id":%q,`+
+			`"customer_id":%q,"items":[{"product_id":%q,"quantity":"1"}],`+
+			`"tenders":[{"method":"cash","amount_cents":105}],"client_created_at":%q}]}`,
+			uuid.NewString()[:8], regOf(row), uuid.NewString(), uuid.NewString(), f.custID.String(),
+			f.posProd.String(), time.Now().UTC().Format(time.RFC3339))
 	}
 	posOpen := func(row uuid.UUID) string {
-		return fmt.Sprintf(`{"register_id":%q,"opening_float":10}`, regOf(row))
+		return fmt.Sprintf(`{"register_id":%q,"opening_float_cents":1000}`, regOf(row))
 	}
 	posStart := func(row uuid.UUID) string {
 		return fmt.Sprintf(`{"register_id":%q,"cashier_id":%q}`, regOf(row), uuid.NewString())
@@ -483,7 +487,7 @@ func TestKeyBranchPin_WalledRowsHoldThePin(t *testing.T) {
 		// the wall (it answers a missing one 500).
 		{method: "POST", path: "/api/v1/pos/transactions/%s/complete", body: posTender, twin: f.txnB, own: f.txnA, first: true, sameAsMissing: true,
 			noControl: "the completion deducts stock from a location this fixture does not stock, so the control answers 422 past the body and the transaction read"},
-		{method: "POST", path: "/api/v1/pos/transactions/%s/void", twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
+		{method: "POST", path: "/api/v1/pos/transactions/%s/void", body: fixed(`{"reason":"pin"}`), twin: f.txnB, own: txnA2, first: true, sameAsMissing: true},
 		// The sync is held by the module itself now: a batch whose register
 		// names another branch is refused before any item runs (round 7), so
 		// the foreign leg is a held leg and the control on the pin's own

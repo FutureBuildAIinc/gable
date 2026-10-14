@@ -44,6 +44,50 @@ func (s *Service) WithAuditLog(l *audit.Logger) *Service { s.auditLog = l; retur
 // WithOutbox sets the event writer of the HTTP level acts.
 func (s *Service) WithOutbox(e EventRecorder) *Service { s.events = e; return s }
 
+// InvoiceApplyGuard refuses an application to an invoice another module
+// holds mid act: the counter wires it so that while a sale's void has
+// standing refund claims, the sale's invoice takes no application (its open
+// cents are the void's interim, and a live application would strand the
+// void's completion; C2-5, the fourteenth review's P2-1). The guard answers the
+// standing claims of the invoice's sale, named in the refusal. Optional:
+// without it applications apply as before.
+type InvoiceApplyGuard interface {
+	PendingVoidClaimsOfInvoice(ctx context.Context, invoiceID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// WithInvoiceApplyGuard sets the application guard. The counter's service
+// satisfies it; serve wires the two.
+func (s *Service) WithInvoiceApplyGuard(g InvoiceApplyGuard) *Service { s.applyGuard = g; return s }
+
+// HeldTenderCredit names a payment's unapplied cash another module holds to
+// one tender: the credit a completed void left on a card tender whose refund
+// the terminal declined (C2-5, FROM-PRINCIPAL 60). Cents is what is still
+// held; SaleNumber and IntentID name the origin, the void and the claim it
+// released.
+type HeldTenderCredit struct {
+	Cents      int64
+	SaleID     uuid.UUID
+	SaleNumber string
+	TenderID   uuid.UUID
+	IntentID   uuid.UUID
+}
+
+// TenderCreditGuard answers whether a payment's unapplied cash is a credit
+// held to its own tender: the counter wires the guard (C2-5) so the account
+// core refuses any application of that cash to an invoice; the credit is
+// payable back only to its card. Optional: without it applications apply as
+// before.
+type TenderCreditGuard interface {
+	HeldTenderCredit(ctx context.Context, paymentID uuid.UUID) (HeldTenderCredit, bool, error)
+}
+
+// WithTenderCreditGuard sets the held credit guard. The counter's service
+// satisfies it; serve wires the two.
+func (s *Service) WithTenderCreditGuard(g TenderCreditGuard) *Service {
+	s.tenderCreditGuard = g
+	return s
+}
+
 // RecordEvents writes the events of an act through the outbox, in order.
 // Owners of an act call it last inside the act's transaction.
 func (s *Service) RecordEvents(ctx context.Context, evs []outbox.Event) error {

@@ -260,16 +260,36 @@ func Run() {
 	// Unified AI client — one OpenRouter key (DB-first via system_settings, env
 	// fallback) powers all AI features: material-list/freight OCR, PIM content, and
 	// product image generation. Base URL and per-task model slugs are admin-overridable.
-	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey)
+	//
+	// The provider (OpenRouter or the native Anthropic one) is chosen in Tech
+	// Admin. AI keys are sealed at rest with the same vault key the payment
+	// credentials use; the Anthropic key has no environment fallback.
+	aiVault, aiVaultErr := payment.NewVault(cfg.PaymentVaultKey)
+	if aiVaultErr != nil {
+		// The error text is not logged: a parse error can echo a character of
+		// the value.
+		logger.Error("PAYMENT_VAULT_KEY is not a valid vault key (64 hex characters); AI keys cannot be sealed or opened")
+		aiVault = &payment.Vault{}
+	}
+	aiKeyStore := ai.NewKeyStore(db.Pool, "openrouter_api_key", cfg.OpenRouterAPIKey).WithSealer(aiVault)
 	aiBaseURLStore := ai.NewKeyStore(db.Pool, "openrouter_base_url", cfg.OpenRouterBaseURL)
 	aiClient := ai.NewClientWithKeyStore(aiKeyStore).
 		WithBaseURLStore(aiBaseURLStore).
+		WithProviderStore(ai.NewKeyStore(db.Pool, ai.SettingProvider, ai.ProviderOpenRouter)).
+		WithAnthropicKeyStore(ai.NewKeyStore(db.Pool, ai.SettingAnthropicKey, "").WithSealer(aiVault)).
+		WithAnthropicModelStore(ai.NewKeyStore(db.Pool, ai.SettingAnthropicModel, ai.DefaultAnthropicModel)).
 		WithModels(ai.NewModelRouter(db.Pool, ai.ModelDefaults{
 			Text:   cfg.AIModelText,
 			Vision: cfg.AIModelVision,
 			Cheap:  cfg.AIModelCheap,
 			Image:  cfg.AIModelImage,
 		}))
+	techAdminSvc.WithVault(aiVault).WithAITester(aiClient)
+	if n, err := techAdminSvc.SealLegacySettings(context.Background()); err != nil {
+		logger.Error("sealing stored AI keys failed", "error", err)
+	} else if n > 0 {
+		logger.Info("sealed stored AI keys at rest", "count", n)
+	}
 	if cfg.OpenRouterAPIKey != "" {
 		logger.Info("AI initialized via OpenRouter (env key present, admin can override via Tech Admin > AI Settings)")
 	} else {
@@ -656,19 +676,38 @@ func Run() {
 
 	wall.payments(mux, paymentSvc)
 
-	// POS Module (Retail Counter Sales)
+	// POS Module (Retail Counter Sales), on the wire contract (ADR 0005
+	// section 14.2 C2-5): the completed sale one transaction (stock out, the
+	// POS invoice posted with tax and COGS, each tender a payment applied),
+	// the void through the counter's own path, returns as credit memos, and
+	// the till's expected cash from the payments the session's sales became.
 	posRepo := pos.NewRepository(db)
-	posSvc := pos.NewService(db, posRepo, productSvc, inventorySvc, invoiceSvc, paymentSvc, logger)
-	posSvc.WithPricing(&posCalcAdapter{pricingSvc: pricingSvc, customerSvc: customerSvc})
-	posSvc.WithAuditLog(auditLog)
-	posSvc.WithTax(taxSvc, invoiceRepo)
-	posSvc.WithTillLedger(glSvc) // post drawer over/short to the GL at close
-	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal /
-	// Run Terminal API), NOT the Run online/keyed-web charge API (rpGateway) —
-	// that rail is the Contractor Portal / invoice online-payment path. Until
-	// the Clover terminal integration lands, counter CARD tenders are recorded
-	// as externally-captured (the device settles); posSvc.WithGateway is where
+	posSvc := pos.NewService(db, posRepo, logger).
+		WithPriceEngine(&orderwire.PriceEngineAdapter{Pricing: pricingSvc, Customers: customerSvc}).
+		WithTaxProvider(taxSvc).
+		WithInvoices(invoiceSvc).
+		WithAR(accountSvc).
+		WithInventory(inventorySvc).
+		WithLedger(glSvc). // post drawer over/short to the GL inside the close's transaction
+		WithAuditLog(auditLog).
+		WithOutbox(outbox.NewWriter(db, cfg.EventsOrg)).
+		WithTxRunner(db)
+	// POS card tenders ride the CARD-PRESENT rail (Clover merchant terminal),
+	// NOT the Run online/keyed-web charge API: until the Clover terminal
+	// integration lands, counter CARD tenders are recorded as
+	// externally-captured (the device settles); posSvc.WithGateway is where
 	// the Clover terminal gateway wires in.
+	// The counter also guards the AR core's applications: while a sale's void
+	// has standing refund claims, the sale's invoice takes no application
+	// (its open cents are the void's interim, C2-5), and a payment whose
+	// unapplied cash is a declined void tender's credit applies to no invoice
+	// either (the credit is payable back only to its card, C2-5,
+	// FROM-PRINCIPAL 60).
+	accountSvc.WithInvoiceApplyGuard(posSvc)
+	accountSvc.WithTenderCreditGuard(posSvc)
+	// and the payment refund route holds the same credit to the counter's
+	// terminal rail: the online gateway is never the way back for it
+	paymentSvc.WithTenderCreditGuard(posSvc)
 	posHandler := pos.NewHandler(posSvc)
 	wall.pos(mux, posHandler, "admin", "owner", "cashier")
 
@@ -1308,28 +1347,6 @@ func (a pricingAuditAdapter) Log(ctx context.Context, e pricing.AuditEntry) erro
 	return a.l.Log(ctx, audit.Entry{
 		Action: e.Action, EntityType: e.EntityType, EntityID: id, UserID: e.UserID, Changes: e.Changes,
 	})
-}
-
-// posCalcAdapter bridges pricing.Service + customer.Service to pos.PriceCalculator.
-type posCalcAdapter struct {
-	pricingSvc  *pricing.Service
-	customerSvc *customer.Service
-}
-
-func (a *posCalcAdapter) CalculateItemPrice(ctx context.Context, customerID uuid.UUID, productID uuid.UUID, basePrice float64, quantity float64) (float64, error) {
-	cust, err := a.customerSvc.GetCustomer(ctx, customerID)
-	if err != nil {
-		return basePrice, nil // Fallback to base price if customer lookup fails
-	}
-	// The counter (fenced) turns this float into cents with a +0.5 truncation,
-	// which misrounds a half cent price whose float is just below it (20.025
-	// is 2002.4999 cents). So hand it a price already rounded half away from
-	// zero to whole cents, in integers.
-	sp, err := a.pricingSvc.CalculateScaled(ctx, cust, productID, basePrice, quantity, nil)
-	if err != nil {
-		return basePrice, nil
-	}
-	return float64(pricing.CentsOf(sp.Price)) / 100, nil
 }
 
 // rowOrNone unwraps RowFor's lookup; the table and the registrations sit

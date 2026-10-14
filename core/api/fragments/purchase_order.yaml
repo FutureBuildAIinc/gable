@@ -261,9 +261,10 @@ paths:
       description: >-
         Roles admin, owner, purchasing. Multipart form with a file field,
         10 MiB limit. The order must be RECEIVED or PARTIAL and AI extraction
-        must be configured. Every service failure (wrong status, no AI, bad
-        extraction, nothing received) is a 400, not a 500. Returns 200, not
-        201.
+        must be configured. A wrong status, a bad extraction or nothing
+        received is a 400, not a 500; AI off (no key for the chosen provider)
+        is a 409 with code ai_off and a message saying an administrator turns
+        it on in Tech Admin, AI. Returns 200, not 201.
       parameters:
         - name: id
           in: path

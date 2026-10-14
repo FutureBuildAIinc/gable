@@ -20,6 +20,12 @@ import (
 // mismatch it should survive; the second is not.
 var ErrNothingAllocated = errors.New("inventory: no allocated stock")
 
+// ErrLocationOutsideBranch is the write path's branch wall: the request named
+// a location whose row sits in a branch the caller's context does not carry.
+// A sentinel so a caller can answer 403 instead of creating a first row on
+// another branch's yard.
+var ErrLocationOutsideBranch = errors.New("inventory: the named location is not on the caller's branch")
+
 type Service struct {
 	repo   Repository
 	levels LevelStore // the levels read's store (C3-1b), when the repo can serve it

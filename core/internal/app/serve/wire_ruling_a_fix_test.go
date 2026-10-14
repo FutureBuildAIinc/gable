@@ -91,7 +91,7 @@ func failLinkAudit(t *testing.T, f *keyPinFixture, customer uuid.UUID) {
 }
 
 // TestRulingA_ARolledBackFirstDocumentLeavesNoLink: for each family that
-// links on its first document at a yard (quote, order, counter sale; the
+// links on its first document at a yard (quote, order, counter sale, and a customer named on a counter sale; the
 // fulfilment invoice is TestFulfilmentInvoiceRollsBackWithItsLink in the order package), a create whose link audit fails rolls back to no document, no
 // customer_branches row and no audit row. Each family first runs once with
 // no failure as the control, so a 4xx that never reached the link cannot
@@ -127,7 +127,24 @@ func TestRulingA_ARolledBackFirstDocumentLeavesNoLink(t *testing.T) {
 		{"counter sale", "pos_transactions", func() func() int {
 			return func() int {
 				s, _ := f.userAs(t, "admin", "POST", "/api/v1/pos/transactions",
-					fmt.Sprintf(`{"register_id":%q,"customer_id":%q,"cashier_id":%q}`, reg, B, uuid.NewString()), hdr)
+					fmt.Sprintf(`{"register_id":%q,"customer_id":%q,"cashier_id":%q}`, reg, B, uuid.NewString()), nil)
+				return s
+			}
+		}},
+		// The sale is opened with no customer before the failure is forced;
+		// the create under test is the customer named on it afterwards.
+		{"counter sale customer named later", "pos_transactions", func() func() int {
+			s, buf := f.userAs(t, "admin", "POST", "/api/v1/pos/transactions",
+				fmt.Sprintf(`{"register_id":%q,"cashier_id":%q}`, reg, uuid.NewString()), nil)
+			var sale struct {
+				ID string `json:"id"`
+			}
+			if s != http.StatusCreated || json.Unmarshal(buf, &sale) != nil || sale.ID == "" {
+				t.Fatalf("open the sale: %d %s", s, buf)
+			}
+			return func() int {
+				s, _ := f.userAs(t, "admin", "PUT", "/api/v1/pos/transactions/"+sale.ID+"/customer",
+					fmt.Sprintf(`{"customer_id":%q}`, B), nil)
 				return s
 			}
 		}},

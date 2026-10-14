@@ -171,6 +171,15 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	if len(lines) == 0 {
 		return invalidField(prefix, "name at least one invoice")
 	}
+	// the counter's hold first (C2-5, FROM-PRINCIPAL 60): a payment whose
+	// unapplied cash is a declined void tender's credit applies to no
+	// invoice, whatever invoice the request names; the refusal names the
+	// origin and nothing of the application is written. Every path that
+	// applies a payment's unapplied cash (the apply route, a receipt's own
+	// applications, the deposit path) runs through here.
+	if err := s.refuseHeldTenderCredit(ctx, pay.ID); err != nil {
+		return err
+	}
 	ids := make([]uuid.UUID, len(lines))
 	seen := map[uuid.UUID]bool{}
 	var cash int64
@@ -216,6 +225,11 @@ func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow,
 	plans := make([]plan, 0, len(lines))
 	for _, l := range lines {
 		inv := byID[l.InvoiceID]
+		// the counter's hold first (C2-5): a held interim invoice refuses
+		// before its amounts are even read
+		if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+			return err
+		}
 		switch {
 		case inv.Status == invVoid:
 			return conflict("invoice_void", "the invoice is void: it takes no application")
@@ -361,6 +375,11 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	}
 	for _, l := range in.Lines {
 		inv := byID[l.InvoiceID]
+		// the counter's hold first (C2-5): a held interim invoice refuses
+		// before its amounts are even read
+		if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+			return nil, err
+		}
 		switch {
 		case inv.Status == invVoid:
 			return nil, conflict("invoice_void", "the invoice is void: it takes no application")
@@ -418,6 +437,11 @@ func (s *Service) WriteOff(ctx context.Context, in WriteOffIn) (*Effects, error)
 	inv := byID[in.InvoiceID]
 	if inv.Status != invUnpaid && inv.Status != invPartial {
 		return nil, httpx.InvalidStateTransition("only an unpaid or partly paid invoice can be written off: it is " + lower(inv.Status))
+	}
+	// the counter's hold first (C2-5): a held interim invoice refuses before
+	// its amounts are even read
+	if err := s.refuseHeldInvoice(ctx, inv.ID); err != nil {
+		return nil, err
 	}
 	if in.AmountCents > inv.Open {
 		return nil, conflict("exceeds_open_amount", fmt.Sprintf("invoice %s has %d cents open: %d cents were asked", inv.Number, inv.Open, in.AmountCents))

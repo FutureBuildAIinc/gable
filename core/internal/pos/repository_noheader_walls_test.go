@@ -5,21 +5,23 @@ package pos_test
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"testing"
-	"time"
 
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pos"
 	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 )
 
-// The write side walls the service holds cannot answer for (SEC-NOHEADER-1):
-// the service's holdSaleBranch refuses an act on another branch's sale
-// before the write, so a wire probe cannot tell whether the update wall
-// still matches underneath. This drives the repository itself: a caller
-// granted only A completes B's sale, and the wall leaves the row alone.
-func TestUpdateTransactionWallHoldsTheGrants(t *testing.T) {
+// The repository's own walls (SEC-NOHEADER-1): the service's act hold refuses
+// an act on another branch's sale by name before any read, so a wire probe
+// cannot tell whether the sale read and lock still carry the wall
+// underneath. This drives the repository itself: a caller granted only A
+// neither reads nor locks B's sale, and an administrator does.
+func TestSaleReadAndLockWallHoldTheGrants(t *testing.T) {
 	db := testutil.RequireDB(t)
 	ctx := context.Background()
 
@@ -44,7 +46,7 @@ func TestUpdateTransactionWallHoldsTheGrants(t *testing.T) {
 	}
 	sale := uuid.New()
 	if _, err := db.Pool.Exec(ctx,
-		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id) VALUES ($1, $2, $3, 'OPEN', $4)`,
+		`INSERT INTO pos_transactions (id, register_id, cashier_id, status, branch_id, currency) VALUES ($1, $2, $3, 'OPEN', $4, 'USD')`,
 		sale, reg, uuid.New(), branchB); err != nil {
 		t.Fatalf("seed sale: %v", err)
 	}
@@ -56,28 +58,24 @@ func TestUpdateTransactionWallHoldsTheGrants(t *testing.T) {
 	})
 
 	repo := pos.NewRepository(db)
-	now := time.Now()
-	completed := sale
-	done := pos.POSTransaction{ID: completed, Status: pos.TransactionStatusCompleted, CompletedAt: &now}
-	if err := repo.UpdateTransaction(branchctx.With(ctx, &branchctx.Context{UserSub: sub}), &done); err != nil {
-		t.Fatalf("walled update: %v", err)
+	held := branchctx.With(ctx, &branchctx.Context{UserSub: sub})
+	notFound := func(err error) bool {
+		var he *httpx.Error
+		return errors.As(err, &he) && he.Status == http.StatusNotFound
 	}
-	var status string
-	if err := db.Pool.QueryRow(ctx, `SELECT status FROM pos_transactions WHERE id = $1`, sale).Scan(&status); err != nil {
-		t.Fatal(err)
+	if _, err := repo.GetSale(held, sale); !notFound(err) {
+		t.Errorf("a caller granted only A read B's sale: %v, want the missing sale's 404", err)
 	}
-	if status != "OPEN" {
-		t.Errorf("the walled update completed B's sale (status %s), want it left OPEN", status)
+	if err := repo.LockSale(held, sale); !notFound(err) {
+		t.Errorf("a caller granted only A locked B's sale: %v, want the missing sale's 404", err)
 	}
 
-	// The control: a caller the wall does not hold completes it.
-	if err := repo.UpdateTransaction(branchctx.With(ctx, &branchctx.Context{UserSub: "admin", IsAdmin: true}), &done); err != nil {
-		t.Fatalf("admin update: %v", err)
+	// The control: a caller the wall does not hold reads and locks it.
+	admin := branchctx.With(ctx, &branchctx.Context{UserSub: "admin", IsAdmin: true})
+	if got, err := repo.GetSale(admin, sale); err != nil || got.ID != sale {
+		t.Errorf("the admin read of B's sale: %v %v, want the sale", got, err)
 	}
-	if err := db.Pool.QueryRow(ctx, `SELECT status FROM pos_transactions WHERE id = $1`, sale).Scan(&status); err != nil {
-		t.Fatal(err)
-	}
-	if status != "COMPLETED" {
-		t.Errorf("the admin update left the sale %s, want COMPLETED", status)
+	if err := repo.LockSale(admin, sale); err != nil {
+		t.Errorf("the admin lock of B's sale: %v", err)
 	}
 }

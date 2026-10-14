@@ -14,14 +14,13 @@
             "items": [
               {
                 "product_id": "<id-3>",
-                "quantity": 1
+                "quantity": "1"
               }
             ],
-            "register_id": "REG-01",
             "tenders": [
               {
-                "amount": 200,
-                "method": "CASH"
+                "amount_cents": 20000,
+                "method": "cash"
               }
             ]
           }
@@ -36,6 +35,9 @@
         "batch_id": "r1c-batch-1",
         "duplicate_count": 0,
         "error_count": 0,
+        "errors": [],
+        "pending": [],
+        "pending_count": 0,
         "synced_count": 1
       }
     }
@@ -55,14 +57,13 @@
             "items": [
               {
                 "product_id": "<id-3>",
-                "quantity": 1
+                "quantity": "1"
               }
             ],
-            "register_id": "REG-01",
             "tenders": [
               {
-                "amount": 200,
-                "method": "CASH"
+                "amount_cents": 20000,
+                "method": "cash"
               }
             ]
           }
@@ -77,6 +78,9 @@
         "batch_id": "r1c-batch-1",
         "duplicate_count": 1,
         "error_count": 0,
+        "errors": [],
+        "pending": [],
+        "pending_count": 0,
         "synced_count": 0
       }
     }
@@ -96,13 +100,13 @@
             "items": [
               {
                 "product_id": "<id-3>",
-                "quantity": 1
+                "quantity": "1"
               }
             ],
             "tenders": [
               {
-                "amount": 0.01,
-                "method": "CASH"
+                "amount_cents": 1,
+                "method": "cash"
               }
             ]
           }
@@ -120,9 +124,11 @@
         "errors": [
           {
             "client_id": "<id-4>",
-            "reason": "complete: insufficient tender: need 616 cents, got 1 cents"
+            "reason": "complete: the sale needs 616 cents and the tenders carry 1"
           }
         ],
+        "pending": [],
+        "pending_count": 0,
         "synced_count": 0
       }
     }
@@ -146,8 +152,18 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "batch_id",
+              "message": "is required"
+            },
+            {
+              "field": "items[0].tenders",
+              "message": "name at least one tender"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-6>"
@@ -170,8 +186,14 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "validation_failed",
+          "details": [
+            {
+              "field": "items",
+              "message": "cannot be empty"
+            }
+          ],
+          "message": "one or more fields failed validation"
         },
         "meta": {
           "request_id": "<id-7>"
@@ -191,8 +213,8 @@
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "bad_request",
+          "message": "request body must be a JSON object"
         },
         "meta": {
           "request_id": "<id-8>"
@@ -203,6 +225,7 @@
   {
     "name": "pos.transaction.list.after_sync",
     "sort_primary_array": true,
+    "sort_envelope_items": true,
     "request": {
       "method": "GET",
       "path": "/api/v1/pos/transactions?register_id=REG-01"
@@ -210,59 +233,108 @@
     "response": {
       "status": 200,
       "content_type": "application/json",
-      "body": [
-        {
-          "completed_at": "<ts+0d>",
-          "created_at": "<ts+0d>",
-          "id": "<id-2>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "COMPLETED",
-          "total": 616
-        },
-        {
-          "completed_at": "<ts+0d>",
-          "created_at": "<ts+0d>",
-          "id": "<id-9>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "VOIDED",
-          "total": 616
-        },
-        {
-          "completed_at": "<ts+0d>",
-          "created_at": "<ts+0d>",
-          "id": "<id-10>",
-          "item_count": 2,
-          "register_id": "REG-01",
-          "status": "COMPLETED",
-          "total": 1872
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-11>",
-          "item_count": 0,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 0
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-4>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "OPEN",
-          "total": 616
-        },
-        {
-          "created_at": "<ts+0d>",
-          "id": "<id-12>",
-          "item_count": 1,
-          "register_id": "REG-01",
-          "status": "VOIDED",
-          "total": 4256
-        }
-      ]
+      "body": {
+        "items": [
+          {
+            "branch_id": "<id-9>",
+            "cashier_id": "<id-10>",
+            "completed_at": "<ts+0d>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-11>",
+            "id": "<id-12>",
+            "invoice_id": "<id-13>",
+            "item_count": 1,
+            "number": "POS-000002",
+            "register_id": "REG-01",
+            "revision": 5,
+            "status": "completed",
+            "total_cents": 1403
+          },
+          {
+            "branch_id": "<id-9>",
+            "cashier_id": "<id-10>",
+            "completed_at": "<ts+0d>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-14>",
+            "invoice_id": "<id-15>",
+            "item_count": 1,
+            "number": "POS-000004",
+            "register_id": "REG-01",
+            "revision": 4,
+            "status": "voided",
+            "total_cents": 616
+          },
+          {
+            "branch_id": "<id-9>",
+            "cashier_id": "<id-1>",
+            "completed_at": "<ts+0d>",
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-2>",
+            "invoice_id": "<id-16>",
+            "item_count": 1,
+            "number": "POS-000005",
+            "register_id": "REG-01",
+            "revision": 3,
+            "status": "completed",
+            "total_cents": 616
+          },
+          {
+            "branch_id": "<id-9>",
+            "cashier_id": "<id-10>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": "<id-11>",
+            "id": "<id-17>",
+            "invoice_id": null,
+            "item_count": 0,
+            "number": "POS-000001",
+            "register_id": "REG-01",
+            "revision": 1,
+            "status": "open",
+            "total_cents": 0
+          },
+          {
+            "branch_id": "<id-9>",
+            "cashier_id": "<id-10>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-18>",
+            "invoice_id": null,
+            "item_count": 1,
+            "number": "POS-000003",
+            "register_id": "REG-01",
+            "revision": 2,
+            "status": "open",
+            "total_cents": 4256
+          },
+          {
+            "branch_id": "<id-9>",
+            "cashier_id": "<id-1>",
+            "completed_at": null,
+            "created_at": "<ts+0d>",
+            "currency": "USD",
+            "customer_id": null,
+            "id": "<id-4>",
+            "invoice_id": null,
+            "item_count": 1,
+            "number": "POS-000006",
+            "register_id": "REG-01",
+            "revision": 2,
+            "status": "open",
+            "total_cents": 616
+          }
+        ],
+        "limit": 50,
+        "next_cursor": null
+      }
     }
   }
 ]

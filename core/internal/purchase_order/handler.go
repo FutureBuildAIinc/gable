@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gablelbm/gable/internal/ai"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/httputil"
@@ -440,6 +441,11 @@ func (h *Handler) HandleUploadFreight(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.service.UploadFreightInvoice(r.Context(), poID, fileBytes, contentType, header.Filename)
 	if err != nil {
+		if msg, off := ai.OffMessage(err); off {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusConflict, Code: ai.CodeAIOff,
+				Message: msg + " Until then, enter the freight total by hand."})
+			return
+		}
 		httputil.RespondError(w, r, "failed to upload freight invoice", http.StatusBadRequest, err)
 		return
 	}

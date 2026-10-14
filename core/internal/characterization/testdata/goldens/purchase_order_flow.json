@@ -2508,12 +2508,12 @@
       }
     },
     "response": {
-      "status": 400,
+      "status": 409,
       "content_type": "application/json",
       "body": {
         "error": {
-          "code": "BAD_REQUEST",
-          "message": "Bad Request"
+          "code": "ai_off",
+          "message": "AI is off. An administrator turns it on in Tech Admin, AI, by choosing a provider and entering its key. Until then, enter the freight total by hand."
         },
         "meta": {
           "request_id": "<id-92>"

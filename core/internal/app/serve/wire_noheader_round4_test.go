@@ -480,11 +480,11 @@ func TestNoHeader_ReportScheduleGuardsHold(t *testing.T) {
 func posHiddenLegs(f *keyPinFixture) []struct{ label, method, path, body string } {
 	tx, till, line := f.txnB.String(), f.tillB.String(), f.lineB.String()
 	return []struct{ label, method, path, body string }{
-		{"close the till session", "POST", "/api/v1/pos/till/" + till + "/close", `{"counted_by_method":{"CASH":50}}`},
-		{"add a line", "POST", "/api/v1/pos/transactions/" + tx + "/items", `{"product_id":"` + f.posProd.String() + `","quantity":1,"uom":"EA"}`},
+		{"close the till session", "POST", "/api/v1/pos/till/" + till + "/close", `{"counted_by_method":{"cash":5000}}`},
+		{"add a line", "POST", "/api/v1/pos/transactions/" + tx + "/items", `{"line":{"product_id":"` + f.posProd.String() + `","quantity":"1","uom":"EA"}}`},
 		{"remove a line", "DELETE", "/api/v1/pos/transactions/" + tx + "/items/" + line, ""},
-		{"complete the sale", "POST", "/api/v1/pos/transactions/" + tx + "/complete", `{"tenders":[{"method":"CASH","amount":50}]}`},
-		{"void the sale", "POST", "/api/v1/pos/transactions/" + tx + "/void", ""},
+		{"complete the sale", "POST", "/api/v1/pos/transactions/" + tx + "/complete", `{"tenders":[{"method":"cash","amount_cents":5000}]}`},
+		{"void the sale", "POST", "/api/v1/pos/transactions/" + tx + "/void", `{"reason":"pin"}`},
 	}
 }
 
@@ -543,11 +543,11 @@ func TestNoHeader_PosVoidOfAHiddenSaleIsMissing(t *testing.T) {
 	f := newKeyPinFixture(t)
 	noheaderGrant(t, f, "pin-cashier", f.branchA)
 	before := posBState(t, f)
-	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", "", headerA(f))
+	status, buf := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+f.txnB.String()+"/void", `{"reason":"pin"}`, headerA(f))
 	if status != http.StatusNotFound {
 		t.Errorf("header A cashier void of B's live sale: %d %s, want the missing sale's 404", status, buf)
 	}
-	if mStatus, _ := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+uuid.NewString()+"/void", "", headerA(f)); mStatus != status {
+	if mStatus, _ := f.userAs(t, "cashier", "POST", "/api/v1/pos/transactions/"+uuid.NewString()+"/void", `{"reason":"pin"}`, headerA(f)); mStatus != status {
 		t.Errorf("a missing sale answers %d, B's hidden sale %d, want the same", mStatus, status)
 	}
 	if after := posBState(t, f); after != before {

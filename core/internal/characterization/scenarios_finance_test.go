@@ -59,7 +59,7 @@ func posGroups() []groupDef {
 				name:    "pos.till.open",
 				method:  "POST",
 				path:    "/api/v1/pos/till/open",
-				body:    map[string]any{"register_id": "REG-01", "opening_float": 100.0},
+				body:    map[string]any{"register_id": "REG-01", "opening_float_cents": 10000},
 				extract: map[string]string{"myTill": "/id"},
 			},
 			{name: "pos.till.current", method: "GET", path: "/api/v1/pos/till/current?register_id=REG-01"},
