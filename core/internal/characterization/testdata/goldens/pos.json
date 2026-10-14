@@ -584,7 +584,7 @@
           "uom": "PCS"
         },
         {
-          "description": "Ice & Water Shield 65'",
+          "description": "Ice and Water Barrier 65'",
           "in_stock": "489",
           "product_id": "<id-66>",
           "sku": "RF-ICE-65",
@@ -592,7 +592,7 @@
           "uom": "RL"
         },
         {
-          "description": "Ice & Water Shield",
+          "description": "Ice and Water Barrier",
           "in_stock": "359",
           "product_id": "<id-67>",
           "sku": "RF-ICE-WTR",

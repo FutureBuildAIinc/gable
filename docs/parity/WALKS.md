@@ -167,7 +167,7 @@ Steps:
    must show `REG-01` on `KEL-MAIN`, `REG-WK` on `WK` and `REG-LK` on `LK`.
 3. Stock differs by yard. Pick the product `2x4x8 SPF Premium` (`LUM-248-PREM`): in the desk's inventory page, or
    `curl -s "http://127.0.0.1:8080/api/v1/inventory?product_id=<product id>"`, it must show three rows with three
-   different quantities, one per yard. Then pick `Ice & Water Shield` (`RF-ICE-WTR`): it must show a row at
+   different quantities, one per yard. Then pick `Ice and Water Barrier` (`RF-ICE-WTR`): it must show a row at
    `KEL-MAIN` only, and none at `WK` or `LK`.
 4. People: `select s.staff_no, s.full_name, s.role, l.code, ul.is_home from staff s join user_locations ul on
    ul.user_sub = s.staff_no join locations l on l.id = ul.branch_id where s.staff_no like 'demo-%' order by 1, 4;`

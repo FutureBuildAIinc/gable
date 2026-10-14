@@ -112,9 +112,9 @@ export class GableLocalTestHub extends LitElement {
 
           <footer class="mt-12 pt-6 border-t border-white/5 flex flex-wrap items-center gap-4 text-xs text-zinc-500">
             <span class="font-mono">Portal logins:</span>
-            <code class="text-zinc-300">demo@gable.com</code>
-            <code class="text-zinc-300">summit@gable.com</code>
-            <code class="text-zinc-300">elite@gable.com</code>
+            <code class="text-zinc-300">demo@kelbrook.ca</code>
+            <code class="text-zinc-300">okhomes@gablebuildingsupply.example</code>
+            <code class="text-zinc-300">missionhill@gablebuildingsupply.example</code>
             <span class="text-zinc-500">/ password <code class="text-zinc-300">password</code></span>
           </footer>
         </div>

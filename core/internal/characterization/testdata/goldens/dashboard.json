@@ -93,7 +93,7 @@
           "alert_type": "LOW_STOCK",
           "current_qty": 17,
           "location_id": "<id-2>",
-          "name": "Ice & Water Shield 65'",
+          "name": "Ice and Water Barrier 65'",
           "product_id": "<id-11>",
           "reorder_qty": 20,
           "sku": "RF-ICE-65"
