@@ -22,10 +22,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/gablelbm/gable/internal/inventory"
-	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/product"
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/testutil"
@@ -115,14 +113,28 @@ func (f *wireFixture) do(method, path, body string, headers ...[2]string) (int, 
 }
 
 func (f *wireFixture) createBody(quantity, cost string) string {
-	return fmt.Sprintf(`{"branch_id":%q,"vendor_id":%q,"lines":[{"product_id":%q,"description":"po wire","quantity":%q,"unit_cost_ten_thousandths":205500}]}`,
-		f.branch, f.vendor, f.product, quantity)
+	return f.createBodyCost(quantity, 205500)
+}
+
+func (f *wireFixture) createBodyCost(quantity string, tenThousandths int64) string {
+	return fmt.Sprintf(`{"branch_id":%q,"vendor_id":%q,"lines":[{"product_id":%q,"description":"po wire","quantity":%q,"unit_cost_ten_thousandths":%d}]}`,
+		f.branch, f.vendor, f.product, quantity, tenThousandths)
 }
 
 // createPO posts a one line purchase order and returns its decoded body.
 func (f *wireFixture) createPO(t *testing.T) map[string]any {
 	t.Helper()
-	status, _, raw := f.do("POST", "/api/v1/purchase-orders", f.createBody("2.5", "20.55"))
+	return f.createPOQty(t, "2.5")
+}
+
+func (f *wireFixture) createPOQty(t *testing.T, quantity string) map[string]any {
+	t.Helper()
+	return f.createPOBody(t, f.createBody(quantity, "20.55"))
+}
+
+func (f *wireFixture) createPOBody(t *testing.T, body string) map[string]any {
+	t.Helper()
+	status, _, raw := f.do("POST", "/api/v1/purchase-orders", body)
 	if status != http.StatusCreated {
 		t.Fatalf("create: %d %s", status, raw)
 	}
@@ -186,13 +198,10 @@ func TestPurchaseOrderCreateWire(t *testing.T) {
 	if line["linked_so_line_id"] != nil {
 		t.Errorf("linked_so_line_id = %v, want null", line["linked_so_line_id"])
 	}
-	for _, legacy := range []string{"cost", "total_cost", "po_id", "line_count"} {
+	for _, legacy := range []string{"cost", "total_cost", "po_id"} {
 		if _, has := po[legacy]; has {
 			t.Errorf("legacy field %q still on the wire", legacy)
 		}
-	}
-	if po["line_count"] != nil { // line_count is a summary field, absent on the full document's map? it is present; assert it
-		_ = po
 	}
 	if got := po["line_count"]; got != float64(1) {
 		t.Errorf("line_count = %v, want 1", got)
@@ -304,7 +313,7 @@ func TestPurchaseOrderRevisionPrecondition(t *testing.T) {
 		t.Fatalf("submit without a precondition: %d %s, want 428", status, raw)
 	}
 	stale := `{"revision":99}`
-	if status, _, raw := f.do("POST", "/api/v1/purchase-orders/"+id+"/submit", stale); status != http.StatusConflict {
+	if status, _, raw = f.do("POST", "/api/v1/purchase-orders/"+id+"/submit", stale); status != http.StatusConflict {
 		t.Fatalf("stale submit: %d %s, want 409", status, raw)
 	}
 	var errBody struct {
@@ -372,6 +381,9 @@ func TestPurchaseOrderListWire(t *testing.T) {
 		t.Fatalf("page = %d items, limit %d, cursor %v", len(page.Items), page.Limit, page.NextCursor)
 	}
 	seen := map[string]bool{}
+	for _, it := range page.Items {
+		seen[it["id"].(string)] = true
+	}
 	cursor := *page.NextCursor
 	pages := 1
 	for {
@@ -453,7 +465,6 @@ func TestPurchaseOrderListWire(t *testing.T) {
 // the first response with Idempotency-Replayed and makes one row and one
 // event.
 func TestPurchaseOrderIdempotency(t *testing.T) {
-	testutil.LockOutboxTables(t)
 	f := newWireFixture(t)
 	key := [2]string{"Idempotency-Key", "pw-create-" + uuid.NewString()}
 	status1, _, raw1 := f.do("POST", "/api/v1/purchase-orders", f.createBody("1", "10"), key)
@@ -541,7 +552,11 @@ type sentPO struct {
 
 func (f *wireFixture) sentPO(t *testing.T, quantity string) sentPO {
 	t.Helper()
-	po := f.createPO(t)
+	return f.sendPO(t, f.createPOQty(t, quantity))
+}
+
+func (f *wireFixture) sendPO(t *testing.T, po map[string]any) sentPO {
+	t.Helper()
 	id := po["id"].(string)
 	line := po["lines"].([]any)[0].(map[string]any)["id"].(string)
 	status, _, raw := f.do("POST", "/api/v1/purchase-orders/"+id+"/submit", `{"revision":1}`)
@@ -571,7 +586,8 @@ func TestReceiveMovesAverageExactly(t *testing.T) {
 	if _, err := f.db.Pool.Exec(ctx, `UPDATE products SET average_unit_cost = 5.0000 WHERE id = $1`, f.product); err != nil {
 		t.Fatal(err)
 	}
-	po := f.sentPO(t, "10")
+	created := f.createPOBody(t, f.createBodyCost("10", 70000))
+	po := f.sendPO(t, created)
 	body := fmt.Sprintf(`{"revision":2,"lines":[{"line_id":%q,"qty_received":"10","location_id":%q}]}`, po.line, f.yard)
 	status, _, raw := f.do("POST", "/api/v1/purchase-orders/"+po.id+"/receive", body)
 	if status != http.StatusOK {
@@ -601,6 +617,4 @@ func TestReceiveMovesAverageExactly(t *testing.T) {
 	if doc.Revision != 3 || doc.Status != "received" {
 		t.Errorf("after receive: revision %d status %s, want 3 and received", doc.Revision, doc.Status)
 	}
-	_ = time.Second
-	_ = httpx.Quantity(0)
 }

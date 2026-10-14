@@ -251,6 +251,9 @@ func (s *Service) CreatePO(ctx context.Context, draft *CreateDraft) (*PurchaseOr
 			po.Lines = append(po.Lines, *line)
 		}
 		po.LineCount = len(po.Lines)
+		for _, l := range po.Lines {
+			po.TotalCents += l.LineTotalCents
+		}
 		// The event is the last write (ADR 0003 section 2).
 		return s.recordEvent(txCtx, EventCreated, po.ID, po.BranchID, poEventData(po, ""))
 	})

@@ -443,35 +443,34 @@ func (r *Repository) MoveAverageUnderLock(ctx context.Context, productID uuid.UU
 	if err != nil {
 		return 0, err
 	}
-	avg4 := new(big.Rat)
+	scale := big.NewRat(10000, 1)
+	avg := new(big.Rat)
 	hasAvg := false
 	if avgText != nil {
 		if v, err := httpx.ParsePrice(*avgText); err == nil && v > 0 {
-			avg4.SetInt64(int64(v))
+			avg.SetFrac64(int64(v), 10000)
 			hasAvg = true
 		}
 	}
-	q4 := new(big.Rat)
+	// Q, q and the value in real units (dollars for the value): the integer
+	// scales of the parsers are divided out before the formula.
+	onHand := new(big.Rat)
 	if v, err := httpx.ParseQuantity(qText); err == nil {
-		q4.SetInt64(int64(v))
+		onHand.SetFrac64(int64(v), 10000)
 	}
-	received4 := new(big.Rat).SetInt64(int64(received))
-	// The received value in dollars at scale 4: cents x 100.
-	v4 := new(big.Rat).SetInt64(int64(value) * 100)
+	got := new(big.Rat).SetFrac64(int64(received), 10000)
+	val := new(big.Rat).SetFrac64(int64(value), 100)
 
-	zero := new(big.Rat)
-	num := new(big.Rat).Mul(q4, avg4)
-	num.Add(num, v4)
-	den := new(big.Rat).Add(q4, received4)
 	var next *big.Rat
-	if !hasAvg || q4.Cmp(zero) <= 0 {
-		next = new(big.Rat).Quo(v4, received4)
+	if !hasAvg || onHand.Sign() <= 0 {
+		next = new(big.Rat).Quo(val, got)
 	} else {
-		next = new(big.Rat).Quo(num, den)
+		num := new(big.Rat).Mul(onHand, avg)
+		num.Add(num, val)
+		next = new(big.Rat).Quo(num, new(big.Rat).Add(onHand, got))
 	}
 	// Round once, half away from zero, to scale 4.
-	scaled := new(big.Rat).Mul(next, new(big.Rat).SetInt64(10000))
-	units := roundRatHalfAway(scaled)
+	units := roundRatHalfAway(new(big.Rat).Mul(next, scale))
 	f := new(big.Rat).SetFrac(units, big.NewInt(10000))
 	out, _ := f.Float64()
 	return out, nil

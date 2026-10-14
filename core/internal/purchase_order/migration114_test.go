@@ -4,10 +4,10 @@
 package purchase_order_test
 
 // Migration 114 on rows that exist (the recipe's migration step): the schema
-// up to 098 is built in a scratch database of its own, legacy rows are
+// before 114 is built in a scratch database of its own, legacy rows are
 // written in the shape the base commit left them (purchase orders with no
 // created_at, lines with a two-decimal cost, vendors with no created_at,
-// stock on two branches), then 100 is applied and each backfill is read
+// stock on two branches), then 114 is applied and each backfill is read
 // back. The down refuses where new-shape data has no old place and drops
 // what the up wrote; the up applies again.
 
@@ -73,9 +73,9 @@ func migration114Files(t *testing.T) (before []string, target, down string) {
 	for _, f := range all {
 		base := filepath.Base(f)
 		switch {
-		case strings.HasPrefix(base, "100_"):
+		case strings.HasPrefix(base, "114_"):
 			target = f
-		case base < "100_":
+		case base < "114_":
 			before = append(before, f)
 		}
 	}
@@ -100,7 +100,7 @@ func applyMigrationFile(t *testing.T, conn *pgx.Conn, file string) {
 	}
 }
 
-func TestMigration100_BackfillsRowsThatExist(t *testing.T) {
+func TestMigration114_BackfillsRowsThatExist(t *testing.T) {
 	conn := scratchDB(t)
 	before, target, downFile := migration114Files(t)
 	for _, f := range before {
@@ -301,10 +301,10 @@ func TestMigration100_BackfillsRowsThatExist(t *testing.T) {
 	}
 }
 
-// TestMigration100_DownRefusesNewShapeData: a per branch stock level target
+// TestMigration114_DownRefusesNewShapeData: a per branch stock level target
 // that diverges from the product's own has no old place, and the down says
 // so instead of discarding it.
-func TestMigration100_DownRefusesNewShapeData(t *testing.T) {
+func TestMigration114_DownRefusesNewShapeData(t *testing.T) {
 	conn := scratchDB(t)
 	before, target, downFile := migration114Files(t)
 	for _, f := range before {

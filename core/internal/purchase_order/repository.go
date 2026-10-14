@@ -370,7 +370,7 @@ func (r *Repository) ListPOsPage(ctx context.Context, f ListFilter) ([]PurchaseO
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
 		SELECT `+summaryColumns+`
 		FROM purchase_orders po
-		LEFT JOIN purchase_order_lines pol ON pol.po_id = po.id`+fmt.Sprintf(poListFilters, 8, 8, 8)+`
+		LEFT JOIN purchase_order_lines pol ON pol.po_id = po.id`+fmt.Sprintf(poListFilters, 7, 7, 7)+`
 		  AND ($4::timestamptz IS NULL OR (po.created_at, po.id) < ($4, $5::uuid))
 		GROUP BY po.id
 		ORDER BY po.created_at DESC, po.id DESC
