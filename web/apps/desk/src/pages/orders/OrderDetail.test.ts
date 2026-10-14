@@ -126,6 +126,14 @@ describe('gable-order-detail - the order contract', () => {
     expect(body).toContain('PCS')
   })
 
+  it('links the customer by name to its account page and shows no id fragment', async () => {
+    el = await mountAsync<GableOrderDetail>('gable-order-detail', { routeId: order().id })
+    const link = el.querySelector<HTMLAnchorElement>(`a[href="/accounts/${order().customer_id}"]`)
+    expect(link).not.toBeNull()
+    expect(link?.textContent).toContain('Ridgeview Framing')
+    expect(text(el)).not.toContain('Account: 00000000')
+  })
+
   it('renders the hold banner a confirm can land on, never an error page', async () => {
     const held = order({ status: 'on_hold', hold_reason: 'credit_limit' })
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(held)))

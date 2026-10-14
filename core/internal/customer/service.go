@@ -43,12 +43,23 @@ type AuditLogger interface {
 // outside what the caller may target.
 var ErrBranchRefused = errors.New("payload branch is outside the caller's branches")
 
-// BranchGuard applies the payload branch rule (ADR 0007 section 2.3). The
-// customer package cannot import pkg/middleware (which imports this package for
-// partner auth), so customerguard adapts *middleware.BranchGuard to it, mapping
-// middleware.ErrPayloadBranchRefused to ErrBranchRefused.
+// ErrCreateBranchChoice is the verdict a BranchGuard returns when a caller
+// whose context carries no branch holds more than one granted branch: no
+// grant alone decides the branch a create would write at, so the request
+// must name one (the service maps this to its 400 naming
+// primary_branch_id).
+var ErrCreateBranchChoice = errors.New("the caller holds more than one branch grant; the request must name primary_branch_id")
+
+// BranchGuard applies the payload branch rule (ADR 0007 section 2.3) and
+// settles the branch a create with no body branch writes at
+// (SEC-NOHEADER-1). The customer package cannot import pkg/middleware
+// (which imports this package for partner auth), so customerguard adapts
+// *middleware.BranchGuard to it, mapping middleware.ErrPayloadBranchRefused
+// to ErrBranchRefused and middleware.ErrCreateBranchChoice to
+// ErrCreateBranchChoice.
 type BranchGuard interface {
 	CheckPayloadBranch(ctx context.Context, branch uuid.UUID) error
+	GrantsForCreate(ctx context.Context) (*uuid.UUID, error)
 }
 
 // Event types the module writes to the outbox. Every state change of a
@@ -223,10 +234,47 @@ func (s *Service) checkBranch(ctx context.Context, branch *uuid.UUID) error {
 	return err
 }
 
+// resolveCreateBranch settles the primary branch a create names no
+// primary_branch_id for (SEC-NOHEADER-1, r4 P2-3): a user context with no
+// branch takes it from the user's grants, never the deployment default the
+// insert used to fall back to (a branch no grant of the creator holds, whose
+// walled read back then answered a false 404 and rolled the create back).
+// Exactly one granted branch answers it; several answer the 400 that asks
+// the request to name primary_branch_id; none fail closed with the 403.
+// Callers the grants never hold (a context branch, an administrator, an
+// owner, a key, a system caller) answer nil and keep the default
+// resolution.
+func (s *Service) resolveCreateBranch(ctx context.Context) (*uuid.UUID, error) {
+	if s.branches == nil {
+		return nil, nil
+	}
+	granted, err := s.branches.GrantsForCreate(ctx)
+	switch {
+	case err == nil:
+		return granted, nil
+	case errors.Is(err, ErrCreateBranchChoice):
+		return nil, httpx.BadRequest("primary_branch_id is required: this caller holds more than one branch grant",
+			httpx.FieldError{Field: "primary_branch_id", Message: "is required: name one of the caller's granted branches"})
+	case errors.Is(err, ErrBranchRefused):
+		return nil, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+			Message: "primary_branch_id is outside the branches this caller may target",
+			Details: []httpx.FieldError{{Field: "primary_branch_id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}}
+	default:
+		return nil, err
+	}
+}
+
 // Create validates the references, stores the customer and writes
 // customer.created as the transaction's last statement. A create that fails
 // anywhere leaves no customer and no event.
 func (s *Service) Create(ctx context.Context, d *Draft) (*Customer, error) {
+	if d.PrimaryBranchID == nil {
+		resolved, err := s.resolveCreateBranch(ctx)
+		if err != nil {
+			return nil, err
+		}
+		d.PrimaryBranchID = resolved
+	}
 	var out *Customer
 	err := s.inTx(ctx, func(ctx context.Context) error {
 		if err := s.checkBranch(ctx, d.PrimaryBranchID); err != nil {

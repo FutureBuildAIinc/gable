@@ -57,6 +57,21 @@ export function formatDay(day: string | null | undefined): string {
     return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
 }
 
+// Money rendering for endpoints that already answer in float dollars (the
+// purchase order wire). Sits beside `formatCents` rather than replacing it:
+// the cents helper reads int64 cents; the dollars helper reads float dollars,
+// and the two never share a call site. Same rules: a leading "$", exactly two
+// decimal places, thousands separators grouped, the minus sign outside the
+// symbol. 123456.78 -> "$123,456.78", -73.88 -> "-$73.88", null -> "$0.00".
+export function formatDollars(amount: number | null | undefined): string {
+    const n = typeof amount === 'number' && isFinite(amount) ? amount : 0;
+    // Intl rounds the whole value to cents and carries into the dollars
+    // (9.996 -> "10.00"); a value that rounds to zero is never negative.
+    const text = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Math.abs(n));
+    const negative = n < 0 && text !== '0.00';
+    return `${negative ? '-' : ''}$${text}`;
+}
+
 // A purchase order's label on every desk surface: its document number
 // (PO-000042), or the first eight characters of its id when a response from
 // an older core carries none.

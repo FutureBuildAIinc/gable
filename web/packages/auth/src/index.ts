@@ -17,6 +17,7 @@ export {
   DevModeDisabledError,
   InvalidTokenError,
   type AuthSession,
+  type DevPersona,
   type StorageLike,
 } from './custody.ts';
 export {
@@ -30,3 +31,4 @@ export {
   SESSION_EXPIRED_EVENT,
   type FetchWithAuthOptions,
 } from './fetchClient.ts';
+export { BRANCH_STORAGE_KEY } from './branch.ts';

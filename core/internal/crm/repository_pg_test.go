@@ -206,3 +206,64 @@ func TestWrites_MoveTheRevision(t *testing.T) {
 		t.Errorf("revision after update = %d, want 2", after.Revision)
 	}
 }
+
+// createCounter counts the inserts a service makes, so a refusal that comes
+// before any insert is told from one that only a later read back and a
+// rollback undo.
+type createCounter struct {
+	Repository
+	creates int
+}
+
+func (c *createCounter) Create(ctx context.Context, a *Activity) error {
+	c.creates++
+	return c.Repository.Create(ctx, a)
+}
+
+// CORRECTNESS: CustomerVisible carries the file's three arm wall (r6 P3-2,
+// r5 P3-5). A user with no branch in context is held to the user's grants, so
+// an activity create on another branch's customer is the 404 reading that
+// customer gives, refused before the insert ever runs; it used to pass the
+// check, insert, and be undone only by the walled read back and the
+// transaction's rollback. Both nil (an administrator with no header) still
+// sees every customer.
+func TestCustomerVisible_HoldsAUserWithNoHeaderToTheGrants(t *testing.T) {
+	f := newPGFixture(t)
+	ctx := context.Background()
+	sub := "crm-nohdr-" + uuid.NewString()[:8]
+	if _, err := f.db.Pool.Exec(ctx,
+		`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'crm test')`,
+		sub, f.branch); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.db.Pool.Exec(context.Background(), `DELETE FROM user_locations WHERE user_sub = $1`, sub)
+	})
+	user := branchctx.With(ctx, &branchctx.Context{UserSub: sub})
+
+	for customer, want := range map[uuid.UUID]bool{f.customer: true, f.other: false} {
+		if ok, err := f.repo.CustomerVisible(user, customer); err != nil || ok != want {
+			t.Errorf("no header user, customer %s visible = %v, %v; want %v", customer, ok, err, want)
+		}
+	}
+	admin := branchctx.With(ctx, &branchctx.Context{UserSub: "crm-admin", IsAdmin: true})
+	if ok, err := f.repo.CustomerVisible(admin, f.other); err != nil || !ok {
+		t.Errorf("administrator with no header, other branch's customer visible = %v, %v; want true", ok, err)
+	}
+
+	counter := &createCounter{Repository: f.repo}
+	svc := NewService(counter)
+	draft := &Draft{ActivityType: ActivityNote, Description: "no header user"}
+	if _, err := svc.Create(user, f.other, draft); err == nil {
+		t.Error("a no header user's activity create on another branch's customer succeeded, want the 404")
+	}
+	if counter.creates != 0 {
+		t.Errorf("the refused create reached the insert %d time(s), want the refusal before any insert", counter.creates)
+	}
+	if _, err := svc.Create(user, f.customer, draft); err != nil {
+		t.Errorf("the control: a create on the user's own customer failed: %v", err)
+	}
+	if counter.creates != 1 {
+		t.Errorf("the control create inserted %d time(s), want one", counter.creates)
+	}
+}

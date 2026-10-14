@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -122,7 +123,10 @@ func (s *Service) CancelOrder(ctx context.Context, orderID, customerID uuid.UUID
 	case "FULFILLED":
 		return nil, ErrOrderNotCancellable
 	}
-	if _, err := s.orderSvc.CancelInProcess(ctx, orderID, reason); err != nil {
+	// The system mark the portal's other ERP writes carry: the cancel
+	// transition's record branch rule refuses a context free caller, and the
+	// portal mounts no branch middleware.
+	if _, err := s.orderSvc.CancelInProcess(branchctx.WithSystem(ctx), orderID, reason); err != nil {
 		return nil, err
 	}
 

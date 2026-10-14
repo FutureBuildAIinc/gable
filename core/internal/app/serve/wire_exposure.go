@@ -6,14 +6,17 @@ package serve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/gablelbm/gable/internal/delivery"
 	"github.com/gablelbm/gable/internal/order"
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/pricing"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/audit"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/gablelbm/gable/pkg/outbox"
@@ -60,6 +63,12 @@ type exposureDeps struct {
 	// (EVENTS_ORG, "default" when unset): one database per dealer today, so
 	// the org is a property of the deployment.
 	EventsOrg string
+	// MW is the branch middleware (SEC-NOHEADER-1): the exposure routes
+	// mount it so a user request carries a branch context, grants and the
+	// default_branch_required check like every scoped surface.
+	MW func(http.Handler) http.Handler
+	// Guard is the branch guard the by id routes hold their quote to.
+	Guard *middleware.BranchGuard
 }
 
 // wireExposure builds and registers the entire lumber index-aware quote
@@ -116,6 +125,8 @@ func wireExposure(deps exposureDeps) *ExposureWiring {
 		DB:         deps.DB,
 		Logger:     logger,
 		AuditLog:   deps.AuditLog,
+		MW:         deps.MW,
+		Guard:      deps.Guard,
 	})
 
 	// DRAFT → SENT: freeze the index baseline, customer policy and threshold
@@ -162,6 +173,13 @@ type exposureRoutes struct {
 	// AuditLog writes the key.branch_refused rows the key branch wall on
 	// these routes records. Optional: nil leaves the refusals un-audited.
 	AuditLog *audit.Logger
+	// MW is the branch middleware that settles a request's branch context
+	// (SEC-NOHEADER-1): without it these routes carried no context branch,
+	// no grants and no default_branch_required check for a user.
+	MW func(http.Handler) http.Handler
+	// Guard holds a by id route's quote branch to the caller the middleware
+	// settled (the context branch, or a no header user's grants).
+	Guard *middleware.BranchGuard
 }
 
 // registerExposureRoutes attaches the twelve price-protection endpoints this
@@ -174,19 +192,24 @@ type exposureRoutes struct {
 // standing up a database (see wire_exposure_test.go).
 func registerExposureRoutes(mux *http.ServeMux, r exposureRoutes) {
 	// Salesperson + owner surface: at-risk list, per-quote detail and actions,
-	// portfolio report, admin scan trigger. The key branch wall holds a branch
-	// bound key to its pin on the by id routes (their quote's branch,
-	// CONFINED in the route allowlist); the two lists (the at-risk and
-	// portfolio reports) and the admin scan act across every branch and are
+	// portfolio report, admin scan trigger. The branch middleware settles the
+	// request's branch context, the user branch wall holds a by id route's
+	// quote to it (a read of a quote outside the caller's reach reads as
+	// missing, an act on one is refused, nothing written, SEC-NOHEADER-1),
+	// and the key branch wall holds a branch bound key to its pin on the by
+	// id routes (CONFINED in the route allowlist); the two lists (the at-risk
+	// and portfolio reports) carry the grants wall in their queries and are
 	// refused a bound key outright by the route allowlist gate.
 	var keyAuditor middleware.BranchRefusalAuditor // a nil logger must not ride a non nil interface
 	if r.AuditLog != nil {
 		keyAuditor = r.AuditLog
 	}
 	keyWall := middleware.NewKeyBranchWall(r.DB, keyAuditor)
-	exposureGuard := middleware.Compose(
-		middleware.RequireRole("admin", "owner", "sales"),
-		exposureKeyBranchWall(keyWall, r.quoteBranchOf))
+	guard := middleware.Compose(middleware.RequireRole("admin", "owner", "sales"), r.MW)
+	if r.Guard != nil {
+		guard = middleware.Compose(guard, exposureUserBranchWall(r.Guard, r.quoteBranchOf))
+	}
+	exposureGuard := middleware.Compose(guard, exposureKeyBranchWall(keyWall, r.quoteBranchOf))
 	pricing.NewExposureHandler(r.Scanner, r.Checker, r.Exposure, r.Service).
 		RegisterRoutes(mux, exposureGuard)
 
@@ -238,6 +261,63 @@ func exposureKeyBranchWall(keyWall *middleware.KeyBranchWall, quoteBranchOf func
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.PathValue("id") != "" {
 				byID.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// exposureUserBranchWall holds a by id exposure route's quote to the branch
+// context the branch middleware settled for a user (SEC-NOHEADER-1): the
+// quote's own branch must be one the caller may target, so a user granted
+// only A neither reads nor writes B's quote, with or without the header. A
+// read outside the reach answers missing (404, the wall a header caller
+// already met); an act is refused (403 naming id) before the handler runs,
+// so nothing is written. The wall fails closed: a lookup error answers 500
+// and a quote that does not exist (or of no branch, which names none the
+// caller could hold) answers 404, and neither hands the request on to the
+// handler, whose by id writes have no wall of their own beneath this one.
+func exposureUserBranchWall(guard *middleware.BranchGuard, quoteBranchOf func(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// A branch bound key is the key branch wall's caller, one wall
+			// down: its refusal names the pin rule and writes the
+			// key.branch_refused row, so this wall does not answer first.
+			if _, ok := branchctx.KeyBranchFromContext(r.Context()); ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			raw := r.PathValue("id")
+			if raw == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			id, err := uuid.Parse(raw)
+			if err != nil {
+				next.ServeHTTP(w, r) // the handler answers the malformed id
+				return
+			}
+			branch, err := quoteBranchOf(r.Context(), id)
+			if err != nil {
+				httpx.WriteError(w, r, fmt.Errorf("quote branch lookup: %w", err))
+				return
+			}
+			if branch == nil {
+				httpx.WriteError(w, r, httpx.NotFound("quote not found"))
+				return
+			}
+			if err := guard.CheckPayloadBranch(r.Context(), *branch); errors.Is(err, middleware.ErrPayloadBranchRefused) {
+				if r.Method == http.MethodGet || r.Method == http.MethodHead {
+					http.NotFound(w, r)
+					return
+				}
+				httpx.WriteError(w, r, &httpx.Error{Status: http.StatusForbidden, Code: httpx.CodeForbidden,
+					Message: "quote is outside the branches this caller may target",
+					Details: []httpx.FieldError{{Field: "id", Code: httpx.CodeForbidden, Message: "not a branch this caller may target"}}})
+				return
+			} else if err != nil {
+				httpx.WriteError(w, r, fmt.Errorf("quote branch lookup: %w", err))
 				return
 			}
 			next.ServeHTTP(w, r)

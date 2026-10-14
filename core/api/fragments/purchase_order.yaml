@@ -41,8 +41,13 @@ paths:
       summary: Create a manual purchase order
       description: >-
         Roles admin, owner, purchasing. Creates a DRAFT order with source
-        MANUAL. A vendor_id that is not a UUID is a 400. Any service failure
-        (unknown vendor, bad line product id) is a 500.
+        MANUAL. A vendor_id that is not a UUID is a 400, and so is a
+        branch_id that is not a UUID. With no X-Branch-Id the branch comes
+        from the caller's grants (one granted branch writes there; several
+        answer a 400 naming branch_id; none answer a 403 naming branch_id,
+        SEC-NOHEADER-1), never the deployment default; a body branch_id the
+        caller may not target is a 403 naming branch_id. Any other service
+        failure (unknown vendor, bad line product id) is a 500.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -610,6 +615,15 @@ components:
           type: string
           format: uuid
           description: Required in effect; a non UUID value is a 400.
+        branch_id:
+          type: string
+          format: uuid
+          description: >-
+            The branch the order is bought for. Required in effect for a
+            caller whose grants hold several branches and sends no
+            X-Branch-Id; with no branch anywhere the caller's grants decide
+            (one grant writes there, none is a 403), never the deployment
+            default.
         lines:
           type: array
           items:

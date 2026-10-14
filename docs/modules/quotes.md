@@ -45,7 +45,7 @@ package.
 | GET | `/api/v1/quotes/{id}` | One quote with its lines and revision as ETag. |
 | PUT | `/api/v1/quotes/{id}` | Replace a draft quote's header and lines, on the client's revision. |
 | POST | `/api/v1/quotes/{id}/transitions` | Move a quote along its lifecycle, on the client's revision. |
-| POST | `/api/v1/quotes/{id}/convert` | Accept the quote (the `quote.accepted` transition) and create the order in one transaction, answering 201 with the order (ETag and Location); the quote's `freight_cents` becomes one `FREIGHT` charge line on the order; a stocked line sold in a unit other than its product's stocking unit is 409 with the `unit_not_stock_unit` blocker until cycle 3; a quote that already has an order not cancelled is 409 with the `already_converted` blocker; events `quote.accepted` then `order.created`. |
+| POST | `/api/v1/quotes/{id}/convert` | Accept the quote (the `quote.accepted` transition) and create the order in one transaction, answering 201 with the order (ETag and Location); the quote's `freight_cents` becomes one `FREIGHT` charge line on the order; a stocked line sold in a unit other than its product's stocking unit is 409 with the `unit_not_stock_unit` blocker until cycle 3; a quote that already has an order not cancelled is 409 with the `already_converted` blocker, and one whose order was cancelled converts again into a new order; a quote already accepted (on the desk or by the customer) converts as it is, with no second transition, no second `quote.accepted` and no second auto purchase order; events `quote.accepted` (unless the quote was already accepted) then `order.created`. |
 | GET | `/api/v1/quotes/{id}/file` | Download the original parsed file. |
 | PUT | `/api/v1/quotes/{id}/file` | Attach the AI parse's original file after promotion; `application/octet-stream` body, 5 MiB bound (413 above it); the route takes no query parameter (any is a 400 `unsupported_query_parameter`); the revision precondition is the `If-Match` header, required (428 without); only while the quote is in status `draft`, else 409 with the `quote_not_draft` blocker; the quote is returned with its new ETag and revision plus one; the audit row `quote.file_attached` is written and no outbox event; the route is gated by `quotes:write`. |
 
@@ -234,6 +234,16 @@ is registered at the serve layer as `admin`, `owner`, `sales` (see
 ...)` line, the quote module being the wire template the recipe names).
 A key without the scope is `403 forbidden`; the route names the path
 segment of the scope so the audit row carries it.
+
+A user who sends no `X-Branch-Id` while `default_branch_required` is off
+is held to the user's own grants (ADR 0007 section 5.7): the by id and by
+number reads answer the module's `403 forbidden` naming `id` ("quote is
+outside the branches this caller may target") for a quote of a branch the
+user does not hold, the lists carry only the granted branches' rows, and a
+create whose body names no `branch_id` takes its branch from the user's
+grants (exactly one granted branch writes there; several refuse with a
+`400 validation_failed` naming `branch_id`; none is refused), never the
+deployment default.
 
 A key bound to one branch (ADR 0007 section 5.5) may create or update a
 quote only for a customer its branch holds, and only for a job that

@@ -5,11 +5,32 @@ package reporting
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
+
+// ErrCustomerNotVisible is the customer statement's visibility refusal: the
+// customer's branches sit entirely outside the caller's reach, so the
+// statement reads as missing (the wall a header caller already met).
+var ErrCustomerNotVisible = errors.New("customer is outside the caller's branches")
+
+// reach is the caller's reach every report query carries (SEC-NOHEADER-1,
+// the principal's ruling on the reporting surface): the branch a header
+// names, or the user sub whose user_locations grants scope a no header
+// caller, both nil for the every branch view an administrator or owner
+// keeps. A scheduled run builds the same reach from the schedule's
+// recorded creator before it reads anything (Scheduler.creatorRunContext),
+// so no report query here runs context free.
+func reach(ctx context.Context) (*uuid.UUID, *string) {
+	return branchctx.IDForQuery(ctx), branchctx.GrantsSubForQuery(ctx)
+}
 
 type Repository interface {
 	GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error)
@@ -27,6 +48,19 @@ type Repository interface {
 	ListReportSchedules(ctx context.Context) ([]ReportSchedule, error)
 	UpdateReportScheduleNextRun(ctx context.Context, scheduleID string, nextRun time.Time) error
 	DeleteReportSchedule(ctx context.Context, id string) error
+	// ScheduleCreatorGrants counts the creator's user_locations grants, the
+	// fail closed check a scheduled run makes for a creator the schedule
+	// does not record as an administrator: the grants are read afresh at
+	// every run, so a revoked grant takes effect at the next one.
+	ScheduleCreatorGrants(ctx context.Context, sub string) (int, error)
+	// MultiBranchEnabled reads the single branch switch the branch
+	// middleware reads (a missing row is off, as it is there). A lookup
+	// failure is returned, never read as off, so a scheduled run cannot
+	// widen its reach on a failed read.
+	MultiBranchEnabled(ctx context.Context) (bool, error)
+	// PauseReportSchedule sets a schedule's status to PAUSED, the state
+	// Scheduler.Start skips, once a run was refused.
+	PauseReportSchedule(ctx context.Context, id string) error
 }
 
 type PostgresRepository struct {
@@ -41,15 +75,17 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 	// Truncate to day
 	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
 	dayEnd := dayStart.Add(24 * time.Hour)
+	branch, grants := reach(ctx)
 
 	query := `
 		SELECT method, COALESCE(SUM(amount), 0), COUNT(*)
 		FROM payments
 		WHERE created_at >= $1 AND created_at < $2
+		  AND ` + middleware.Wall("", 3, 4) + `
 		GROUP BY method
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily till: %w", err)
 	}
@@ -82,14 +118,16 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		StartDate: start.Format("2006-01-02"),
 		EndDate:   end.Format("2006-01-02"),
 	}
+	branch, grants := reach(ctx)
 
 	// 1. Invoiced
 	queryInvoiced := `
 		SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
 		FROM invoices
 		WHERE created_at >= $1 AND created_at < $2 AND status != 'VOID'
+		  AND ` + middleware.Wall("", 3, 4) + `
 	`
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end).Scan(&report.TotalInvoiced, &report.InvoiceCount)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
@@ -99,8 +137,9 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		SELECT COALESCE(SUM(amount), 0)
 		FROM payments
 		WHERE created_at >= $1 AND created_at < $2
+		  AND ` + middleware.Wall("", 3, 4) + `
 	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end).Scan(&report.TotalCollected)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end, branch, grants).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
@@ -121,6 +160,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		SELECT COALESCE(SUM(total_amount), 0)
 		FROM invoices
 		WHERE created_at >= $1 AND created_at < $2 AND status IN ('UNPAID', 'PARTIAL')
+		  AND ` + middleware.Wall("", 3, 4) + `
 	`
 	// Note: accurate AR needs to subtract partial payments.
 	// Let's refine: Total Invoiced in Period - Total Payments applied to *those* invoices (even if payment is outside period? Mixed bag).
@@ -135,7 +175,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
 	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
 
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end).Scan(&report.OutstandingAR)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end, branch, grants).Scan(&report.OutstandingAR)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outstanding: %w", err)
 	}
@@ -144,6 +184,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 }
 
 func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingReport, error) {
+	branch, grants := reach(ctx)
 	query := `
 		SELECT
 			i.customer_id,
@@ -156,11 +197,12 @@ func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingRepo
 		FROM invoices i
 		LEFT JOIN customers c ON c.id = i.customer_id
 		WHERE i.status IN ('UNPAID', 'PARTIAL')
+		  AND ` + middleware.Wall("i", 1, 2) + `
 		GROUP BY i.customer_id, c.name
 		ORDER BY total DESC
 	`
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query AR aging: %w", err)
 	}
@@ -187,10 +229,23 @@ func (r *PostgresRepository) GetARAgingReport(ctx context.Context) (*ARAgingRepo
 }
 
 func (r *PostgresRepository) GetCustomerStatement(ctx context.Context, customerID string, start, end time.Time) (*CustomerStatement, error) {
-	// Get customer name
+	// The customer's visibility settles the whole statement: a customer whose
+	// branches sit outside the caller's reach reads as missing, the wall a
+	// header caller already met (the customer family's own wall shape).
+	branch, grants := reach(ctx)
 	var customerName string
-	nameQuery := `SELECT COALESCE(name, '') FROM customers WHERE id = $1`
-	_ = r.db.GetExecutor(ctx).QueryRow(ctx, nameQuery, customerID).Scan(&customerName)
+	nameQuery := `SELECT COALESCE(name, '') FROM customers c WHERE c.id = $1 AND (
+		    ($2::uuid IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb WHERE cb.customer_id = c.id AND cb.branch_id = $2))
+		    OR ($2::uuid IS NULL AND $3::text IS NOT NULL AND EXISTS (SELECT 1 FROM customer_branches cb
+		        WHERE cb.customer_id = c.id AND cb.branch_id IN (SELECT branch_id FROM user_locations WHERE user_sub = $3)))
+		    OR ($2::uuid IS NULL AND $3::text IS NULL)
+		  )`
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, nameQuery, customerID, branch, grants).Scan(&customerName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCustomerNotVisible
+		}
+		return nil, fmt.Errorf("failed to read the statement's customer: %w", err)
+	}
 
 	stmt := &CustomerStatement{
 		CustomerID:   customerID,
@@ -348,12 +403,13 @@ func (r *PostgresRepository) DeleteSavedReport(ctx context.Context, id string) e
 // time in pgx, so the casts are load-bearing, not cosmetic.
 func (r *PostgresRepository) CreateReportSchedule(ctx context.Context, schedule *ReportSchedule) error {
 	query := `
-INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO report_schedules (report_id, cron_expression, recipients, status, format, created_by, creator_is_admin)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, created_at::text, updated_at::text
 `
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query,
-		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status, schedule.Format).
+		schedule.ReportID, schedule.CronExpression, schedule.Recipients, schedule.Status, schedule.Format,
+		nullableText(schedule.CreatedBy), schedule.CreatorIsAdmin).
 		Scan(&schedule.ID, &schedule.CreatedAt, &schedule.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to create report schedule: %w", err)
@@ -361,10 +417,22 @@ RETURNING id, created_at::text, updated_at::text
 	return nil
 }
 
+// nullableText maps an absent creator to SQL NULL, the same mapping
+// nullableUUID makes for saved_reports.created_by: a schedule made where
+// no caller identity exists (authentication disabled) is a real state, and
+// a NULL creator is the row the run refuses to execute.
+func nullableText(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func (r *PostgresRepository) ListReportSchedules(ctx context.Context) ([]ReportSchedule, error) {
 	query := `
 SELECT id, report_id, cron_expression, recipients, status, format,
-       last_run_at::text, next_run_at::text, created_at::text, updated_at::text
+       last_run_at::text, next_run_at::text, COALESCE(created_by, ''), creator_is_admin,
+       created_at::text, updated_at::text
 FROM report_schedules
 ORDER BY created_at DESC
 `
@@ -381,12 +449,51 @@ ORDER BY created_at DESC
 			&schedule.ID, &schedule.ReportID, &schedule.CronExpression,
 			&schedule.Recipients, &schedule.Status, &schedule.Format,
 			&schedule.LastRunAt, &schedule.NextRunAt,
+			&schedule.CreatedBy, &schedule.CreatorIsAdmin,
 			&schedule.CreatedAt, &schedule.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan report schedule: %w", err)
 		}
 		schedules = append(schedules, schedule)
 	}
-	return schedules, nil
+	return schedules, rows.Err()
+}
+
+// ScheduleCreatorGrants counts the sub's current user_locations grants. The
+// read carries no wall on purpose: it answers the scheduler's fail closed
+// question (does this creator still hold any branch grant), not a scoped
+// list, and the count itself is what the run resolves its reach from.
+func (r *PostgresRepository) ScheduleCreatorGrants(ctx context.Context, sub string) (int, error) {
+	var n int
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COUNT(*) FROM user_locations WHERE user_sub = $1`, sub).Scan(&n); err != nil {
+		return 0, fmt.Errorf("failed to read the schedule creator's grants: %w", err)
+	}
+	return n, nil
+}
+
+// MultiBranchEnabled reads system_settings.multi_branch_enabled, the value
+// the branch middleware refreshes its kill switch from.
+func (r *PostgresRepository) MultiBranchEnabled(ctx context.Context) (bool, error) {
+	var val string
+	err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT value FROM system_settings WHERE key = $1`, middleware.MultiBranchSettingKey).Scan(&val)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("failed to read the single branch switch: %w", err)
+	}
+	return middleware.ParseBoolSetting(val, false), nil
+}
+
+// PauseReportSchedule marks the schedule PAUSED. It touches the status and
+// the update time only.
+func (r *PostgresRepository) PauseReportSchedule(ctx context.Context, id string) error {
+	if _, err := r.db.GetExecutor(ctx).Exec(ctx,
+		`UPDATE report_schedules SET status = $2, updated_at = NOW() WHERE id = $1`, id, ScheduleStatusPaused); err != nil {
+		return fmt.Errorf("failed to pause report schedule: %w", err)
+	}
+	return nil
 }
 
 func (r *PostgresRepository) DeleteReportSchedule(ctx context.Context, id string) error {
