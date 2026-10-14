@@ -74,6 +74,7 @@ describe('QuoteBuilder split pane', () => {
   it('adds an accepted parsed line to the quote with its product and quantity', async () => {
     const el = await builder()
     q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [ITEM], bubbles: true }))
+    await flush()
     await update(el, {})
     const row = q(el, '[data-testid="quote-line"]')
     expect(text(row)).toContain('SPF-2x4x8')
@@ -83,6 +84,7 @@ describe('QuoteBuilder split pane', () => {
   it('steps a quantity and removes a line', async () => {
     const el = await builder()
     q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [ITEM], bubbles: true }))
+    await flush()
     await update(el, {})
     q<HTMLButtonElement>(el, '[data-testid="line-qty-up"]').click()
     await update(el, {})
@@ -136,6 +138,7 @@ describe('QuoteBuilder split pane', () => {
     // No Accept anywhere; and the builder drops an accept that arrives anyway.
     expect(el.querySelector('[data-testid="intake-accept"]')).toBeNull()
     intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [ITEM], bubbles: true }))
+    await flush()
     await update(el, {})
     expect(el.querySelectorAll('[data-testid="quote-line"]').length).toBe(0)
   })
@@ -216,16 +219,14 @@ describe('QuoteBuilder accepted lines take the customer price', () => {
     expect(q<HTMLInputElement>(el, '[data-testid="quote-line"] input[aria-label="Unit price"]').value).toBe('16.575')
   })
 
-  it('keeps the order of the list and joins nothing twice when Accept is pressed again', async () => {
+  it('keeps the order of one batch and joins its lines once', async () => {
     let release: (v: CalculatedPrice) => void = () => {}
     vi.spyOn(PricingService, 'calculatePrice').mockImplementation((_c, productId) =>
       productId === OSB.product_id
         ? new Promise<CalculatedPrice>((res) => { release = res })
         : Promise.resolve(priced(productId, 36125)))
     const el = await withCustomer()
-    const intake = q(el, 'gable-material-intake')
-    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM, SPF_ITEM], bubbles: true }))
-    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM, SPF_ITEM], bubbles: true }))
+    q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM, SPF_ITEM], bubbles: true }))
     await flush()
     release(priced(OSB.product_id, 165750))
     await flush(); await flush()
@@ -234,6 +235,64 @@ describe('QuoteBuilder accepted lines take the customer price', () => {
     expect(rows.length).toBe(2)
     expect(rows[0]).toContain('OSB-716-4x8')
     expect(rows[1]).toContain('SPF-2x4x8')
+  })
+
+  it('joins a second Accept pressed while the first is still pricing, in the order accepted', async () => {
+    let release: (v: CalculatedPrice) => void = () => {}
+    vi.spyOn(PricingService, 'calculatePrice').mockImplementation((_c, productId) =>
+      productId === OSB.product_id
+        ? new Promise<CalculatedPrice>((res) => { release = res })
+        : Promise.resolve(priced(productId, 36125)))
+    const el = await withCustomer()
+    const intake = q(el, 'gable-material-intake')
+    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM], bubbles: true }))
+    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [SPF_ITEM], bubbles: true }))
+    await flush()
+    release(priced(OSB.product_id, 165750))
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    const rows = linePrices(el)
+    expect(rows.length).toBe(2)
+    expect(rows[0]).toContain('OSB-716-4x8')
+    expect(rows[1]).toContain('SPF-2x4x8')
+    const prices = Array.from(el.querySelectorAll<HTMLInputElement>('[data-testid="quote-line"] input[aria-label="Unit price"]')).map((i) => i.value)
+    expect(prices).toEqual(['16.575', '3.6125'])
+  })
+
+  it('reprices the batch at the base price when the customer is cleared while pricing runs', async () => {
+    let release: (v: CalculatedPrice) => void = () => {}
+    vi.spyOn(PricingService, 'calculatePrice').mockImplementation(
+      () => new Promise<CalculatedPrice>((res) => { release = res }))
+    const el = await withCustomer()
+    q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM], bubbles: true }))
+    await flush()
+    q<HTMLButtonElement>(el, '[data-testid="change-customer"]').click()
+    await update(el, {})
+    release(priced(OSB.product_id, 165750))
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    expect(q<HTMLInputElement>(el, '[data-testid="quote-line"] input[aria-label="Unit price"]').value).toBe('19.50')
+  })
+
+  it('reprices the batch for the new customer when the customer changes while pricing runs', async () => {
+    const OTHER = { ...CUSTOMER, id: 'c0000000-0000-4000-8000-000000000002', name: 'Other Builder Co' }
+    const releases: Array<(v: CalculatedPrice) => void> = []
+    const spy = vi.spyOn(PricingService, 'calculatePrice').mockImplementation((customerId, productId) =>
+      customerId === CUSTOMER.id
+        ? new Promise<CalculatedPrice>((res) => { releases.push(res) })
+        : Promise.resolve(priced(productId, 175000)))
+    const el = await withCustomer()
+    q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM], bubbles: true }))
+    await flush()
+    q<HTMLButtonElement>(el, '[data-testid="change-customer"]').click()
+    await update(el, {})
+    q(el, 'gable-customer-select').dispatchEvent(new CustomEvent('customer-select', { detail: OTHER, bubbles: true }))
+    await update(el, {})
+    releases.forEach((r) => r(priced(OSB.product_id, 165750)))
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    expect(spy).toHaveBeenCalledWith(OTHER.id, OSB.product_id)
+    expect(q<HTMLInputElement>(el, '[data-testid="quote-line"] input[aria-label="Unit price"]').value).toBe('17.50')
   })
 
   it('falls back to the base price when pricing fails, with one message for the batch', async () => {
@@ -248,12 +307,14 @@ describe('QuoteBuilder accepted lines take the customer price', () => {
     expect(inputs).toEqual(['19.50', '4.25'])
     const errors = toast.mock.calls.filter(([, type]) => type === 'error')
     expect(errors.length).toBe(1)
+    expect(errors[0][0]).toBe('Customer prices could not be read for 2 lines; the base price is on them')
   })
 
   it('uses the base price when the customer is not named, with no pricing call', async () => {
     const spy = vi.spyOn(PricingService, 'calculatePrice')
     const el = await builder()
     q(el, 'gable-material-intake').dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM], bubbles: true }))
+    await flush()
     await update(el, {})
     expect(spy).not.toHaveBeenCalled()
     expect(q<HTMLInputElement>(el, '[data-testid="quote-line"] input[aria-label="Unit price"]').value).toBe('19.50')
