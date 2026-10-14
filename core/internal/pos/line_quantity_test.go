@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 
@@ -348,5 +349,73 @@ func TestQuantityChangeEqualsRemoveAndAddForEveryLineKind(t *testing.T) {
 				t.Errorf("%d lines, remove and add %d", n, m)
 			}
 		})
+	}
+}
+
+// RULE (audit): a reprice writes no override row under a line id that is not
+// on the sale, keeps who adjusted the price, and logs the change as a
+// quantity change naming the line, the old and the new quantity.
+func TestQuantityChangeKeepsTheAuditTrailTrue(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	manager, cashierSub := mustUUID(t), mustUUID(t)
+	s := f.startSale(nil)
+	added := f.do("POST", "/api/v1/pos/transactions/"+s+"/items", map[string]any{"line": f.productLine("2")},
+		"X-Test-Role", "cashier", "X-Test-Sub", manager)
+	if added.status != http.StatusOK {
+		t.Fatalf("add = %d: %s", added.status, added.raw)
+	}
+	// an override price, by the manager
+	cur := f.getSale(t, s)
+	f.do("DELETE", "/api/v1/pos/transactions/"+s+"/items/"+lineIDs(t, resp{body: cur})[0], nil,
+		"X-Test-Role", "cashier", "X-Test-Sub", manager)
+	line := f.productLine("2")
+	line["unit_price_ten_thousandths"] = 70000
+	line["override_reason"] = "matched a quote"
+	added = f.do("POST", "/api/v1/pos/transactions/"+s+"/items", map[string]any{"line": line},
+		"X-Test-Role", "cashier", "X-Test-Sub", manager)
+	if added.status != http.StatusOK {
+		t.Fatalf("override add = %d: %s", added.status, added.raw)
+	}
+	lineID := lineIDs(t, added)[0]
+	r := f.do("PATCH", "/api/v1/pos/transactions/"+s+"/items/"+lineID,
+		map[string]any{"quantity": "5", "revision": rev(t, added)}, "X-Test-Role", "cashier", "X-Test-Sub", cashierSub)
+	if r.status != http.StatusOK {
+		t.Fatalf("patch = %d: %s", r.status, r.raw)
+	}
+	raw := r.body["lines"].([]any)[0].(map[string]any)
+	if got := fmt.Sprint(raw["price_adjusted_by"]); got != manager {
+		t.Errorf("price_adjusted_by = %s, want the manager %s who set the price", got, manager)
+	}
+	rows, err := f.db.Pool.Query(context.Background(),
+		`SELECT action, changes->>'line_id', changes FROM audit_log WHERE entity_id = $1 AND action LIKE 'pos_transaction.line_%'`, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	changes := 0
+	for rows.Next() {
+		var action string
+		var lid *string
+		var body []byte
+		if err := rows.Scan(&action, &lid, &body); err != nil {
+			t.Fatal(err)
+		}
+		if lid != nil && *lid != lineID && !strings.Contains(string(body), "removed") {
+			// the first, removed line's override row may name its own line
+			n := countOf(t, f.db, `SELECT count(*) FROM pos_line_items WHERE id = $1`, *lid)
+			if n == 0 && *lid != lineIDs(t, resp{body: cur})[0] {
+				t.Errorf("%s names line %s, which is no line of the sale", action, *lid)
+			}
+		}
+		if action == "pos_transaction.line_quantity_changed" {
+			changes++
+			if lid == nil || *lid != lineID {
+				t.Errorf("quantity change row names line %v, want %s", lid, lineID)
+			}
+		}
+	}
+	if changes != 1 {
+		t.Errorf("quantity change audit rows = %d, want 1", changes)
 	}
 }
