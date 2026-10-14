@@ -201,7 +201,7 @@ describe('QuoteDetail original file with the token', () => {
       expect(q<HTMLIFrameElement>(el, 'iframe[title="Original PDF"]').getAttribute('src')).toBe('blob:original-pdf')
       for (const a of Array.from(el.querySelectorAll('a'))) expect(a.getAttribute('href') ?? '').not.toMatch(/\/api\/v1\//)
       const link = Array.from(el.querySelectorAll('a')).find((a) => text(a).includes('Download Original')) as HTMLAnchorElement
-      link.click()
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
       await flush(); await flush()
       expect(saved).toContain('blob:original-pdf|list.pdf')
       for (const c of fetchMock.mock.calls.filter(([u]) => API.test(String(u)))) expect(authOf(c)).toBe('Bearer test-token')

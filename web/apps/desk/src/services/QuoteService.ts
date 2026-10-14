@@ -136,8 +136,9 @@ export const QuoteService = {
         return response.text();
     },
 
-    getOriginalFileUrl(quoteId: string): string {
-        return `${API_URL}/api/v1/quotes/${quoteId}/file`;
+    /** The API path of the stored original: fetch it with the token (a bare src or href carries none). */
+    originalFilePath(quoteId: string): string {
+        return `/api/v1/quotes/${quoteId}/file`;
     },
 };
 

@@ -127,8 +127,8 @@ export class GableInvoiceDetail extends LitElement {
 
     private async handlePrintInvoice(id: string) {
         try {
-            const shown = await openAuthedPdf(`/api/v1/documents/print/invoice/${id}`, 'Failed to read the invoice document');
-            if (shown.blocked) ToastService.show('Allow pop ups for this page to print the invoice', 'error');
+            const shown = await openAuthedPdf(`/api/v1/documents/print/invoice/${id}`, 'Failed to read the invoice document', 'invoice.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the invoice was saved as a download', 'success');
         } catch (err) {
             ToastService.show(apiErrorMessage(err, 'Failed to print the invoice'), 'error');
         }

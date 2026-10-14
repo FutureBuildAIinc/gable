@@ -82,8 +82,8 @@ export class CustomerStatementPage extends LitElement {
         if (!st || !this.customerId) return;
         const params = new URLSearchParams({ from: st.from, to: st.to });
         try {
-            const shown = await openAuthedPdf(`/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, 'Failed to read the statement document');
-            if (shown.blocked) ToastService.show('Allow pop ups for this page to print the statement', 'error');
+            const shown = await openAuthedPdf(`/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, 'Failed to read the statement document', 'statement.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the statement was saved as a download', 'success');
         } catch (err) {
             ToastService.show(err instanceof Error ? err.message : 'Failed to print the statement', 'error');
         }
@@ -326,7 +326,8 @@ export class CustomerStatementPage extends LitElement {
 
                     ${cur.open_documents.length > 0 ? html`
                         <div class="mt-6">
-                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">Open documents</h3>
+                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-1">Open documents</h3>
+                            <p class="text-xs text-zinc-500 mb-3" data-testid="open-documents-scope">Open documents follow the yard you are working at; the closing balance and the aging cover the whole account.</p>
                             <table class="w-full text-sm text-left">
                                 <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
                                     <tr>

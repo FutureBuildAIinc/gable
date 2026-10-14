@@ -78,20 +78,20 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
-    /**
-     * The confirm is the transition (ADR 0005 5.2). An over-the-limit
-     * customer lands the order on the credit hold: the answer is the held
-     * order, never an error, so the banner is the tell.
-     */
     private async handlePrintPickTicket(id: string) {
         try {
-            const shown = await openAuthedPdf(`/api/v1/documents/print/pickticket/${id}`, 'Failed to read the pick ticket');
-            if (shown.blocked) ToastService.show('Allow pop ups for this page to print the pick ticket', 'error');
+            const shown = await openAuthedPdf(`/api/v1/documents/print/pickticket/${id}`, 'Failed to read the pick ticket', 'pick-ticket.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the pick ticket was saved as a download', 'success');
         } catch (err) {
             ToastService.show(err instanceof Error ? err.message : 'Failed to print the pick ticket', 'error');
         }
     }
 
+    /**
+     * The confirm is the transition (ADR 0005 5.2). An over-the-limit
+     * customer lands the order on the credit hold: the answer is the held
+     * order, never an error, so the banner is the tell.
+     */
     private async handleConfirm() {
         if (!this.order) return;
         if (!confirm('Confirm this order?')) return;

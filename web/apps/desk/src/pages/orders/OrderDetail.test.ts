@@ -332,7 +332,7 @@ describe('gable-order-detail - the order contract', () => {
 
 describe('the order page source', () => {
   it('keeps the credit hold comment on handleConfirm, which it describes', () => {
-    const src = readFileSync(new URL('./OrderDetail.ts', import.meta.url), 'utf8')
+    const src = readFileSync('src/pages/orders/OrderDetail.ts', 'utf8')
     const at = src.indexOf('The confirm is the transition')
     expect(at).toBeGreaterThan(-1)
     const after = src.slice(at).split('private async ')[1]
