@@ -1151,6 +1151,16 @@ func Run() {
 	}
 	logger.Info("Shutdown step 1/4: HTTP server stopped")
 
+	// Step 1.5: let the document emails still in flight finish and write
+	// their email_deliveries rows, bounded by the shutdown deadline; the
+	// pool closes only after this.
+	logger.Info("Shutdown step 1.5/4: waiting for document emails in flight...")
+	if docHandler.WaitContext(ctx) {
+		logger.Info("Shutdown step 1.5/4: document emails recorded")
+	} else {
+		logger.Warn("Shutdown step 1.5/4: document emails still in flight at the deadline")
+	}
+
 	// Step 2: Cancel metrics collector goroutine
 	logger.Info("Shutdown step 2/4: stopping metrics collector...")
 	metricsCancel()

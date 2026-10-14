@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // The three transport modes SMTP_TLS names.
@@ -163,6 +164,11 @@ func (s *SMTPEmailService) send(ctx context.Context, to []string, subject, body,
 		a, err := mail.ParseAddress(t)
 		if err != nil {
 			return "", fmt.Errorf("recipient %q: %w", t, err)
+		}
+		// Address holds a quoted local part unquoted, so on the wire a
+		// quoted comma or bracket would add a recipient or close the path.
+		if strings.ContainsAny(a.Address, "<>,;\"() \t\\") || strings.ContainsFunc(a.Address, unicode.IsControl) {
+			return "", fmt.Errorf("recipient %q needs quoting and is refused", t)
 		}
 		rcpts = append(rcpts, a.Address)
 	}

@@ -103,3 +103,23 @@ func TestDispatchAHungSenderEndsInOneFailedRow(t *testing.T) {
 		t.Errorf("goroutines: %d before, %d after; the send left one behind", before, n)
 	}
 }
+
+// WaitContext is what shutdown calls: it returns true once the sends in
+// flight have recorded, and false when the context ends first, so a hung send
+// cannot hold the process past the shutdown deadline.
+func TestWaitContextIsBounded(t *testing.T) {
+	h := NewHandler(nil, nil, nil, nil, nil)
+	if !h.WaitContext(context.Background()) {
+		t.Fatal("nothing in flight should be waited out at once")
+	}
+	h.sends.Add(1)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if h.WaitContext(ctx) {
+		t.Error("a send in flight was reported finished")
+	}
+	h.sends.Done()
+	if !h.WaitContext(context.Background()) {
+		t.Error("the finished send was not waited out")
+	}
+}

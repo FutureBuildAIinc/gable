@@ -58,6 +58,23 @@ func (h *Handler) WithDeliveries(r emaildelivery.Recorder) *Handler { h.deliveri
 // Wait blocks until the sends in flight have finished and recorded.
 func (h *Handler) Wait() { h.sends.Wait() }
 
+// WaitContext is Wait bounded by ctx: true when every send in flight has
+// recorded, false when ctx ended first. Shutdown calls it so a send in flight
+// at SIGTERM finishes and writes its delivery row.
+func (h *Handler) WaitContext(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		h.sends.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
 func NewHandler(d *Service, o *order.Service, i *invoice.Service, c *customer.Service, e notification.EmailService) *Handler {
 	return &Handler{docSvc: d, orderSvc: o, invoiceSvc: i, customerSvc: c, emailSvc: e}
 }
@@ -412,10 +429,10 @@ func (h *Handler) loadStatement(w http.ResponseWriter, r *http.Request) (*custom
 		httpx.WriteError(w, r, httpx.NotFound("customer not found"))
 		return nil, nil, false
 	}
-	if err := h.wallErr(r, "customer", cust.PrimaryBranchID); err != nil {
-		httpx.WriteError(w, r, err)
-		return nil, nil, false
-	}
+	// The customer read above is the customer wall (header, grants and
+	// customer_branches, ADR 0007 section 5.7), so a customer the caller's
+	// branch shares prints its statement here as it reads on the AR route;
+	// the primary branch alone is not the rule.
 	if sq.To.IsZero() {
 		today, terr := h.docSvc.statements.LocalDate(r.Context(), cust.PrimaryBranchID, h.docSvc.statements.Now())
 		if terr != nil {

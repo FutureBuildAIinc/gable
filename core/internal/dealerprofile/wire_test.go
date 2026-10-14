@@ -254,6 +254,14 @@ func TestDealerProfileLogoRefusals(t *testing.T) {
 		t.Errorf("8000x8000: %d %s", r.status, r.raw)
 	}
 
+	var deep bytes.Buffer
+	if err := png.Encode(&deep, image.NewNRGBA64(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	if r := put(deep.Bytes()); r.status != http.StatusBadRequest {
+		t.Errorf("16 bit png: %d %s", r.status, r.raw)
+	}
+
 	good := pngBytes(t, 16, 16)
 	if r := put(good[:len(good)-20]); r.status != http.StatusBadRequest {
 		t.Errorf("truncated: %d %s", r.status, r.raw)

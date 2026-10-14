@@ -87,6 +87,28 @@ func (e *LogoSizeError) Error() string {
 		e.Width, e.Height, MaxLogoSide, MaxLogoPixels)
 }
 
+// LogoEmbeddable reports whether the form renderer can embed raw: a PNG or
+// JPEG within the dimension cap, and for a PNG not 16 bit and not interlaced
+// (the PDF writer refuses both, which would fail every form). Only headers
+// are read.
+func LogoEmbeddable(raw []byte) bool {
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(raw))
+	if err != nil {
+		return false
+	}
+	if cfg.Width < 1 || cfg.Height < 1 || cfg.Width > MaxLogoSide || cfg.Height > MaxLogoSide || cfg.Width*cfg.Height > MaxLogoPixels {
+		return false
+	}
+	if format == "png" {
+		// IHDR: 8 byte signature, 8 byte chunk head, width, height, then
+		// bit depth at 24, colour type, compression, filter, interlace at 28.
+		if len(raw) < 29 || raw[24] == 16 || raw[28] != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // CheckLogoImage accepts raw only when it is one whole image of the named
 // format ("png" or "jpeg") within the dimension cap: the header is read and
 // the size checked before any pixel is decoded, then the whole image is
@@ -101,6 +123,9 @@ func CheckLogoImage(raw []byte, format string) error {
 	}
 	if cfg.Width < 1 || cfg.Height < 1 || cfg.Width > MaxLogoSide || cfg.Height > MaxLogoSide || cfg.Width*cfg.Height > MaxLogoPixels {
 		return &LogoSizeError{Width: cfg.Width, Height: cfg.Height}
+	}
+	if !LogoEmbeddable(raw) {
+		return errors.New("the png is 16 bit or interlaced, which the forms cannot embed; save it as an 8 bit, non interlaced png")
 	}
 	rd := bytes.NewReader(raw)
 	switch format {

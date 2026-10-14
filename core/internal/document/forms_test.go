@@ -269,3 +269,23 @@ func TestOversizedStoredLogoPrintsWithoutTheImage(t *testing.T) {
 	mustContain(t, doc, "Test Yard")
 	mustNotContain(t, doc, "/Subtype /Image")
 }
+
+// A stored logo the PDF writer cannot embed (16 bit) prints without the
+// image rather than failing the form.
+func TestUnembeddableStoredLogoPrintsWithoutTheImage(t *testing.T) {
+	svc := brandedService(t)
+	var deep bytes.Buffer
+	if err := png.Encode(&deep, image.NewNRGBA64(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	p := svc.profiles.(fakeProfiles)
+	p.logo = &dealerprofile.Logo{Bytes: deep.Bytes(), ContentType: "image/png"}
+	svc.profiles = p
+
+	doc, err := svc.GenerateInvoicePDF(context.Background(), invoiceAt(yardNorth), &customer.Customer{Name: "Acme"})
+	if err != nil {
+		t.Fatalf("the form failed on a logo it cannot embed: %v", err)
+	}
+	mustContain(t, doc, "Test Yard")
+	mustNotContain(t, doc, "/Subtype /Image")
+}

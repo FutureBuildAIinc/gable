@@ -1715,6 +1715,31 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM quotes WHERE id IN ($1, $2)`, quoteA, quoteB)
 	})
 
+	// A customer whose primary branch is B but that branch A also holds
+	// (customer_branches) is the caller's to read, so its statement prints
+	// and emails; one that only B holds is not found at A.
+	shared, onlyB := uuid.New(), uuid.New()
+	for _, c := range []struct {
+		id    uuid.UUID
+		links []uuid.UUID
+	}{{shared, []uuid.UUID{f.branchA, f.branchB}}, {onlyB, []uuid.UUID{f.branchB}}} {
+		if _, err := db.Pool.Exec(ctx, `INSERT INTO customers (id, name, account_number, email, primary_branch_id) VALUES ($1, 'wall shared', $2, 'shared@example.test', $3)`,
+			c.id, "WLSH-"+c.id.String()[:8], f.branchB); err != nil {
+			t.Fatalf("seed customer: %v", err)
+		}
+		for _, b := range c.links {
+			if _, err := db.Pool.Exec(ctx, `INSERT INTO customer_branches (customer_id, branch_id) VALUES ($1, $2)`, c.id, b); err != nil {
+				t.Fatalf("seed customer branch: %v", err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		f.docHandler.Wait()
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM email_deliveries WHERE document_id IN ($1, $2)`, shared, onlyB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customer_branches WHERE customer_id IN ($1, $2)`, shared, onlyB)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM customers WHERE id IN ($1, $2)`, shared, onlyB)
+	})
+
 	const ok = http.StatusOK
 	for _, c := range []struct {
 		name, method, path, role, sub, header string
@@ -1733,6 +1758,9 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		{"finance emails the statement", "POST", "/api/v1/ar/customers/" + f.docCust.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
 		{"a bad statement date is a 400", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=nope", "sales", "u-a", A, http.StatusBadRequest},
 		{"an unknown statement customer is a 404", "GET", "/api/v1/documents/print/statement/" + uuid.NewString(), "sales", "u-a", A, http.StatusNotFound},
+		{"finance prints the statement of a customer branch A shares", "GET", "/api/v1/documents/print/statement/" + shared.String(), "finance", "u-a", A, ok},
+		{"finance emails the statement of a customer branch A shares", "POST", "/api/v1/ar/customers/" + shared.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
+		{"finance does not find a customer only branch B holds", "GET", "/api/v1/documents/print/statement/" + onlyB.String(), "finance", "u-a", A, http.StatusNotFound},
 		{"warehouse may not read deliveries", "GET", "/api/v1/email-deliveries", "warehouse", "u-a", A, http.StatusForbidden},
 	} {
 		if got := f.call(t, c.method, c.path, "", c.role, c.sub, c.header); got != c.want {

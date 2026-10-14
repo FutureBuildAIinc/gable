@@ -291,7 +291,18 @@ func TestSMTPRefusesHeaderInjection(t *testing.T) {
 	if err := s.SendDeliveryNotification(context.Background(), "not an address", "s", "b"); err == nil {
 		t.Error("a malformed recipient was accepted")
 	}
-	if f.data != "" {
+	// A quoted local part reaches the wire unquoted as the parsed address,
+	// where it would add a recipient or close the path early.
+	for _, bad := range []string{
+		`"a@evil.test,b"@x.test`,
+		`"a@evil.test>,<c"@x.test`,
+		`"a@evil.test> NOTIFY=NEVER"@x.test`,
+	} {
+		if err := s.SendDeliveryNotification(context.Background(), bad, "s", "b"); err == nil {
+			t.Errorf("recipient %s was accepted", bad)
+		}
+	}
+	if f.data != "" || len(f.rcpts) != 0 {
 		t.Error("something reached the server")
 	}
 }
