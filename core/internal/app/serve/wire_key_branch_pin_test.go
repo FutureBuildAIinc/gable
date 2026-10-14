@@ -1632,6 +1632,16 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 		t.Errorf("bound key foreign till close wrote Z reports: %d rows for the session", n)
 	}
 
+	// The register list carries the pin's own register and not the foreign one.
+	_, buf = f.key(t, f.bound, "GET", "/api/v1/pos/registers", "", nil)
+	f.twinLeg("GET", "/api/v1/pos/registers")
+	if strings.Contains(string(buf), f.regB) {
+		t.Errorf("bound key register list carries the foreign register: %s", buf)
+	}
+	if !strings.Contains(string(buf), f.regA) {
+		t.Errorf("bound key register list does not carry the pin's own register: %s", buf)
+	}
+
 	// The Z report of the foreign session answers what a missing one answers;
 	// the list carries the pin's own Z report and not the foreign one.
 	sMiss, _ = f.key(t, f.bound, "GET", "/api/v1/pos/till/"+missing+"/zreport", "", nil)
