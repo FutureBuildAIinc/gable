@@ -145,6 +145,10 @@ func (h *Handler) HandleUpload(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnsupportedMediaType, Code: "unsupported_type", Message: msg})
 			return
 		}
+		if msg, ok := ai.RefusedMessage(extractErr); ok {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusBadGateway, Code: ai.CodeAIRefused, Message: msg, Operator: true})
+			return
+		}
 		slog.Error("Failed to extract items", "error", extractErr)
 		httputil.RespondError(w, r, "Failed to extract items from file", http.StatusInternalServerError, extractErr)
 		return

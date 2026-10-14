@@ -326,9 +326,14 @@ func (h *Handler) HandleDeleteCollateral(w http.ResponseWriter, r *http.Request)
 }
 
 // respondAIOff answers an AI off error as the module's error envelope: a 409
-// with the stable code ai_off and the plain sentence a person reads. It
-// reports whether it answered.
+// with the stable code ai_off and the plain sentence a person reads; a
+// provider's refusal of the saved key is a 502 with the code ai_refused and
+// its own sentence. It reports whether it answered.
 func respondAIOff(w http.ResponseWriter, r *http.Request, err error) bool {
+	if msg, ok := ai.RefusedMessage(err); ok {
+		httpx.WriteError(w, r, &httpx.Error{Status: http.StatusBadGateway, Code: ai.CodeAIRefused, Message: msg, Operator: true})
+		return true
+	}
 	msg, ok := ai.OffMessage(err)
 	if !ok {
 		return false

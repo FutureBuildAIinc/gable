@@ -434,6 +434,8 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          $ref: '#/components/responses/AIRefused'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/descriptions:
@@ -477,6 +479,8 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          $ref: '#/components/responses/AIRefused'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/pim/generate/image:
@@ -570,6 +574,8 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '502':
+          $ref: '#/components/responses/AIRefused'
         '500':
           $ref: '#/components/responses/InternalError'
   /api/v1/products/{id}/margins:

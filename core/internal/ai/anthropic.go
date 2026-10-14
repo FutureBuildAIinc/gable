@@ -196,6 +196,9 @@ func (c *Client) anthropicMessages(ctx context.Context, req anthropicRequest) (*
 		if parsed && ar.Error != nil && ar.Error.Message != "" {
 			msg = ar.Error.Message
 		}
+		if refused := refusedIfAuth("Anthropic", resp.StatusCode, scrub(msg)); refused != nil {
+			return nil, refused
+		}
 		return nil, fmt.Errorf("Anthropic API error (%d): %s", resp.StatusCode, scrub(msg))
 	}
 	if !parsed {

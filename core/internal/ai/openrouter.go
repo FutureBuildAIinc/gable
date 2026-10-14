@@ -523,6 +523,9 @@ func (c *Client) chatCompletion(ctx context.Context, req chatRequest) (*chatResp
 		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != nil {
 			msg = errResp.Error.Message
 		}
+		if refused := refusedIfAuth("OpenRouter", resp.StatusCode, providerWords(msg, apiKey)); refused != nil {
+			return nil, refused
+		}
 		return nil, fmt.Errorf("OpenRouter API error (%d): %s", resp.StatusCode, providerWords(msg, apiKey))
 	}
 
