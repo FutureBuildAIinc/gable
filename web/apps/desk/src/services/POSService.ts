@@ -31,6 +31,38 @@ async function expectOk(response: Response, fallback: string): Promise<Response>
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 
+/** One category chip of the counter's catalogue read. */
+export interface CatalogCategory {
+    name: string;
+    count: number;
+}
+
+/** One tile of the counter's catalogue read (GET /api/v1/pos/tiles). */
+export interface CatalogItem {
+    product_id: string;
+    sku: string;
+    description: string;
+    uom: string;
+    unit_price_cents: number;
+    /** The yard's on hand, a decimal string. */
+    in_stock: string;
+    category: string;
+    image_url: string | null;
+}
+
+export interface CatalogTiles {
+    categories: CatalogCategory[];
+    items: CatalogItem[];
+    /** The product images setting; image_url is null while it is off. */
+    images: boolean;
+}
+
+export interface TilesQuery {
+    category?: string;
+    q?: string;
+    limit?: number;
+}
+
 /** Dollars typed by a cashier to integer cents; an empty or bad parse is NaN. */
 export function dollarsToCents(text: string): number {
     const t = text.trim();
@@ -136,6 +168,20 @@ export const posService = {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/products/search?q=${encodeURIComponent(query)}`),
             'Failed to search products',
+        );
+        return response.json();
+    },
+
+    /** The counter's catalogue for the caller's yard: category chips and product tiles. */
+    async tiles(query: TilesQuery = {}): Promise<CatalogTiles> {
+        const params = new URLSearchParams();
+        if (query.category) params.append('category', query.category);
+        if (query.q) params.append('q', query.q);
+        if (query.limit) params.append('limit', String(query.limit));
+        const qs = params.toString();
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/tiles${qs ? `?${qs}` : ''}`),
+            'Failed to read the catalogue',
         );
         return response.json();
     },
