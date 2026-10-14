@@ -82,7 +82,9 @@ export class GableSelect extends LitElement {
         this._open = false;
         document.removeEventListener('click', this._onDocClick, true);
         if (restoreFocus) {
-            this.updateComplete.then(() => this.querySelector<HTMLElement>('button')?.focus());
+            // Synchronously: a change handler that opens a dialog must not
+            // have a deferred focus steal it back from the dialog.
+            this.querySelector<HTMLElement>('button')?.focus();
         }
     }
 
