@@ -299,7 +299,7 @@ describe('BranchContext — the X-Branch-Id contract with fetchClient', () => {
  * code (the seed's yards.code), not by id. The persona role is irrelevant
  * here; the yard's selection is independent.
  */
-describe('BranchContext — persona home yard (dev mode)', () => {
+describe('BranchContext: persona home yard (dev mode)', () => {
   /** A branch whose `code` matches a persona's homeYardCode. */
   const KEL_HOME = branch('b-kel-main', 'KEL-MAIN')
   const WK = branch('b-wk', 'WK')

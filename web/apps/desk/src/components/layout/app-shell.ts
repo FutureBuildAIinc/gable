@@ -85,7 +85,7 @@ export class GableAppShell extends LitElement {
    * The signed in user's initials, name and role, read from the auth session.
    * A persona card sets the role and home yard; a token session uses the
    * email/name from the claims. When nothing is signed in this renders the
-   * empty state (the existing header avatar is gone — there is no signed in
+   * empty state (the existing header avatar is gone: there is no signed in
    * user to show).
    */
   private _renderUser() {

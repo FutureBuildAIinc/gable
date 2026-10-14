@@ -224,7 +224,7 @@ describe('custody — dev sign-in', () => {
   })
 })
 
-describe('custody — dev sign-in with a persona', () => {
+describe('custody: dev sign-in with a persona', () => {
   it('stores the persona on the session and exposes it through the getters', () => {
     authConfig.devMode = true
     const store = memoryStorage()
