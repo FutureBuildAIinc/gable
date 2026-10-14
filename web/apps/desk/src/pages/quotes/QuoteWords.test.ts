@@ -39,6 +39,8 @@ describe('Material list words outside the quote', () => {
     await update(el, {})
     expect(text(el)).toContain('Material list')
     expect(text(el)).not.toMatch(/\bAI\b/)
+    // The words and the styling agree: no violet AI colour on a Material list quote.
+    expect(el.innerHTML).not.toContain('violet')
   })
 
   it('the analytics card reads Material list vs manual and Material list quotes', async () => {
@@ -54,5 +56,6 @@ describe('Material list words outside the quote', () => {
     expect(text(el)).toContain('Material list vs manual')
     expect(text(el)).toContain('Material list quotes')
     expect(text(el)).not.toMatch(/AI vs Manual|AI-Parsed/i)
+    expect(el.innerHTML).not.toContain('violet')
   })
 })

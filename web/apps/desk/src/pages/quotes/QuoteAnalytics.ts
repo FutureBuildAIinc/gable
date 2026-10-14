@@ -155,20 +155,20 @@ export class GableQuoteAnalytics extends LitElement {
                     <!-- Material list vs Manual -->
                     <div class="bg-slate-steel border border-white/10 rounded-lg p-6">
                         <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-6 flex items-center gap-2">
-                            ${icon(ListChecks, 16, 'w-4 h-4 text-violet-400')}
+                            ${icon(ListChecks, 16, 'w-4 h-4 text-zinc-300')}
                             Material list vs manual
                         </h3>
                         <div class="space-y-5">
                             <div>
                                 <div class="flex items-center justify-between mb-2">
                                     <span class="text-zinc-400 text-sm flex items-center gap-2">
-                                        ${icon(ListChecks, 12, 'w-3 h-3 text-violet-400')} Material list quotes
+                                        ${icon(ListChecks, 12, 'w-3 h-3 text-zinc-300')} Material list quotes
                                     </span>
                                     <span class="font-mono text-white text-sm">${analytics.ai_sourced_count}</span>
                                 </div>
                                 <div class="flex items-center justify-between">
                                     <span class="text-zinc-500 text-xs ml-5">Conversion Rate</span>
-                                    <span class="font-mono text-violet-400 font-bold">${analytics.ai_conversion_rate.toFixed(1)}%</span>
+                                    <span class="font-mono text-zinc-300 font-bold">${analytics.ai_conversion_rate.toFixed(1)}%</span>
                                 </div>
                             </div>
                             <div>

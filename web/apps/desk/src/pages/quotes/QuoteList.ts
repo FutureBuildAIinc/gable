@@ -241,7 +241,7 @@ export class GableQuoteList extends LitElement {
                                         <td class="p-4 text-white font-medium">${quote.customer_name || quote.customer_id.slice(0, 8)}</td>
                                         <td class="p-4">
                                             ${quote.source === 'ai' ? html`
-                                                <span class="inline-flex items-center gap-1 text-xs text-violet-400">
+                                                <span class="inline-flex items-center gap-1 text-xs text-zinc-300">
                                                     ${icon(ListChecks, 12)} Material list
                                                 </span>
                                             ` : html`

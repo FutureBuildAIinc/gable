@@ -259,6 +259,47 @@ describe('QuoteBuilder accepted lines take the customer price', () => {
     expect(prices).toEqual(['16.575', '3.6125'])
   })
 
+  it('saves a draft only after an accepted batch that is still pricing has joined, so no line is lost', async () => {
+    const quote = { id: 'q1', number: 'Q-0001', status: 'draft', revision: 1 }
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes' && init?.method === 'POST') return jsonResponse(quote, 201)
+      return jsonResponse({ items: [], next_cursor: null })
+    })
+    let release: (v: CalculatedPrice) => void = () => {}
+    vi.spyOn(PricingService, 'calculatePrice').mockImplementation((_c, productId) =>
+      productId === OSB.product_id
+        ? new Promise<CalculatedPrice>((res) => { release = res })
+        : Promise.resolve(priced(productId, 36125)))
+    const el = await withCustomer()
+    const intake = q(el, 'gable-material-intake')
+    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [SPF_ITEM], bubbles: true }))
+    await flush(); await flush()
+    intake.dispatchEvent(new CustomEvent('accept-lines', { detail: [OSB_ITEM], bubbles: true }))
+    await flush()
+    await update(el, {})
+    // The first line has joined and the second is still pricing: neither save button may act.
+    const draft = q<HTMLButtonElement>(el, '[data-testid="save-draft"]')
+    const send = q<HTMLButtonElement>(el, '[data-primary="true"]')
+    expect(draft.disabled).toBe(true)
+    expect(send.disabled).toBe(true)
+    expect(text(draft)).toContain('Adding lines')
+    draft.click()
+    send.click()
+    await flush()
+    expect(fetchMock.mock.calls.some(([, i]) => (i as RequestInit | undefined)?.method === 'POST')).toBe(false)
+    release(priced(OSB.product_id, 165750))
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    expect(q<HTMLButtonElement>(el, '[data-testid="save-draft"]').disabled).toBe(false)
+    q<HTMLButtonElement>(el, '[data-testid="save-draft"]').click()
+    await flush(); await flush()
+    const post = fetchMock.mock.calls.find(([u, i]) => (i as RequestInit | undefined)?.method === 'POST' && new URL(u as string, 'http://localhost').pathname === '/api/v1/quotes')
+    expect(post).toBeTruthy()
+    const body = JSON.parse((post![1] as RequestInit).body as string)
+    expect(body.lines.map((l: { sku: string }) => l.sku)).toEqual(['SPF-2x4x8', 'OSB-716-4x8'])
+  })
+
   it('reprices the batch at the base price when the customer is cleared while pricing runs', async () => {
     let release: (v: CalculatedPrice) => void = () => {}
     vi.spyOn(PricingService, 'calculatePrice').mockImplementation(

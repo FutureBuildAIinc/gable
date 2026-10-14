@@ -78,6 +78,8 @@ export class GableQuoteDetail extends LitElement {
         } catch (error) {
             console.error(error);
         }
+        // The route moved on while this answered: the quote now shown loads its own text.
+        if (this.quote?.id !== quote.id) return;
         this.originalText = { quoteId: quote.id, text };
     }
 
@@ -507,7 +509,7 @@ export class GableQuoteDetail extends LitElement {
                                 ${quote.status}
                             </span>
                             ${quote.source === 'ai' ? html`
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-violet-500/15 text-violet-400 border border-violet-500/20">
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-zinc-300 border border-white/10">
                                     ${icon(ListChecks, 12, 'w-3 h-3')} Material list
                                 </span>
                             ` : nothing}

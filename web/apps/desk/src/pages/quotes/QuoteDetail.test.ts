@@ -114,6 +114,38 @@ describe('QuoteDetail material list words', () => {
     expect(q(el, '[data-testid="original-text"]').textContent).toContain('second quote text')
   })
 
+  it('keeps the new quote\'s text when the earlier quote\'s slow text answers last', async () => {
+    let answerQ1: (r: Response) => void = () => {}
+    const slowQ1 = new Promise<Response>((res) => { answerQ1 = res })
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes/q1/file') return slowQ1
+      if (path === '/api/v1/quotes/q1') return jsonResponse(QUOTE)
+      if (path === '/api/v1/quotes/q2/file') return new Response('second quote text', { status: 200, headers: { 'Content-Type': 'text/plain' } })
+      if (path === '/api/v1/quotes/q2') return jsonResponse({ ...QUOTE, id: 'q2', number: 'Q-0002' })
+      return jsonResponse({ message: 'none' }, 404)
+    })
+    const el = await detail()
+    tab(el, 'Original Upload').click()
+    await flush()
+    await update(el, { routeId: 'q2' } as Partial<GableQuoteDetail>)
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    expect(q(el, '[data-testid="original-text"]').textContent).toContain('second quote text')
+    answerQ1(new Response('first quote text', { status: 200, headers: { 'Content-Type': 'text/plain' } }))
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    expect(q(el, '[data-testid="original-text"]').textContent).toContain('second quote text')
+    expect(text(el)).not.toContain('Loading the list')
+  })
+
+  it('wears no violet AI styling on the Material list badge', async () => {
+    const el = await detail()
+    const badge = Array.from(el.querySelectorAll('span')).find((s) => text(s).trim() === 'Material list')
+    expect(badge).toBeTruthy()
+    expect(badge!.className).not.toContain('violet')
+  })
+
   it('does not show the sparkle (AI) icon on the Material list badge', async () => {
     const el = await detail()
     const badge = Array.from(el.querySelectorAll('span')).find((s) => text(s).trim() === 'Material list')
