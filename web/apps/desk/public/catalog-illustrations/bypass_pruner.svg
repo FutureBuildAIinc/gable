@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Bypass hand pruner with two curved blades crossing at a pivot</title>
+  <defs>
+    <style>
+      .handleMain{fill:#d96a2e}
+      .handleShade{fill:#a8521e}
+      .handleHi{fill:#f4a06c}
+      .gripB{fill:#3a3d44}
+      .bladeMain{fill:#c2c6cc}
+      .bladeHi{fill:#e8ebee}
+      .bladeShade{fill:#7a7d86}
+      .bladeEdge{fill:#3a3d44}
+      .rivet{fill:#2a2c34}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="76" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <path class="handleMain" d="M 124 156 L 64 232 L 84 232 L 132 168 Q 134 158 130 154 Z"/>
+    <path class="handleShade" d="M 124 156 L 64 232 L 76 232 L 128 168 Q 132 162 128 158 Z" opacity="0.6"/>
+    <path class="handleHi" d="M 128 162 L 80 232 L 88 232 L 130 174 Q 132 166 130 162 Z" opacity="0.5"/>
+    <rect class="gripB" x="62" y="226" width="30" height="10" rx="3" opacity="0.85"/>
+  </g>
+  <g>
+    <path class="handleMain" d="M 124 156 L 192 232 L 172 232 L 124 168 Q 122 158 124 156 Z"/>
+    <path class="handleShade" d="M 124 156 L 192 232 L 184 232 L 128 158 Q 124 156 124 156 Z" opacity="0.6"/>
+    <path class="handleHi" d="M 124 160 L 184 232 L 176 232 L 124 168 Z" opacity="0.5"/>
+    <rect class="gripB" x="164" y="226" width="30" height="10" rx="3" opacity="0.85"/>
+  </g>
+  <g>
+    <path class="bladeMain" d="M 124 156 Q 138 110 176 64 Q 188 56 196 70 Q 200 84 192 102 Q 162 142 134 158 Z"/>
+    <path class="bladeHi" d="M 124 152 Q 142 116 178 86 Q 192 76 194 84 Q 186 84 178 92 Q 152 124 134 152 Z" opacity="0.8"/>
+    <path class="bladeShade" d="M 134 158 Q 162 138 192 102 Q 198 88 196 80 Q 192 96 188 102 Q 162 134 138 156 Z" opacity="0.6"/>
+    <path class="bladeEdge" d="M 196 70 Q 198 80 192 102 Q 162 142 134 158 L 130 156 Q 132 152 134 150 Q 158 134 188 102 Q 194 88 196 70 Z" opacity="0.85"/>
+    <path class="bladeEdge" d="M 124 152 L 124 148 Q 138 132 162 116 Q 178 102 192 78 L 184 84 Q 174 76 162 88 Q 140 110 130 150 Z"/>
+  </g>
+  <g>
+    <path class="bladeMain" d="M 124 156 Q 142 134 174 124 Q 188 124 192 134 Q 188 146 174 152 Q 152 156 132 158 Z"/>
+    <path class="bladeHi" d="M 124 156 Q 144 132 174 124 Q 184 126 184 132 Q 176 130 168 132 Q 148 138 132 152 Z" opacity="0.7"/>
+    <path class="bladeEdge" d="M 192 134 Q 188 146 174 152 L 174 156 Q 188 152 192 144 Z" opacity="0.85"/>
+  </g>
+  <g>
+    <circle class="rivet" cx="124" cy="156" r="9"/>
+    <circle class="bladeShade" cx="124" cy="156" r="7" opacity="0.7"/>
+    <circle class="bladeHi" cx="124" cy="156" r="3.5" opacity="0.7"/>
+    <circle fill="#1a1a1a" cx="124" cy="156" r="1.5"/>
+  </g>
+</svg>

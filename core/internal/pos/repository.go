@@ -169,6 +169,9 @@ type Repository interface {
 	LookupChargeCodes(ctx context.Context, codes []string) (map[string]salesdoc.ChargeCode, error)
 	SearchProducts(ctx context.Context, query string, limit int) ([]QuickSearchResult, error)
 	GetProductCatalog(ctx context.Context) ([]CatalogProduct, error)
+	// CounterTiles reads the counter's catalogue for the caller's yard: the
+	// category chips, the tiles in top seller order and the picture setting.
+	CounterTiles(ctx context.Context, q TileQuery) (TileSet, error)
 	WalkInCustomer(ctx context.Context) (uuid.UUID, string, error)
 	CustomerFacts(ctx context.Context, customerID uuid.UUID) (CustomerFacts, error)
 	// FindCounterCustomers searches the customers the caller's wall reaches
@@ -1578,6 +1581,98 @@ func (r *PostgresRepository) SearchProducts(ctx context.Context, query string, l
 			return nil, err
 		}
 		out = append(out, q)
+	}
+	return out, rows.Err()
+}
+
+// tileHistoryCTE is the yard's units sold per product, positions $1 and $2
+// being the branch and the grants of the caller's reach. Counter lines count
+// from completed counter sales; invoice lines count from invoices that are not
+// void and not a counter sale's own (origin POS: that sale's lines are already
+// counted from the counter side).
+const tileHistoryCTE = `
+	WITH sold AS (
+		SELECT li.product_id, SUM(li.quantity) AS units
+		  FROM pos_line_items li
+		  JOIN pos_transactions t ON t.id = li.transaction_id
+		 WHERE t.status = 'COMPLETED' AND li.line_type IN ('PRODUCT', 'KIT') AND li.product_id IS NOT NULL
+		   AND ` + "%s" + `
+		 GROUP BY li.product_id
+		UNION ALL
+		SELECT il.product_id, SUM(il.quantity)
+		  FROM invoice_lines il
+		  JOIN invoices v ON v.id = il.invoice_id
+		 WHERE v.status <> 'VOID' AND v.origin <> 'POS' AND il.line_type IN ('PRODUCT', 'KIT') AND il.product_id IS NOT NULL
+		   AND ` + "%s" + `
+		 GROUP BY il.product_id
+	), top AS (
+		SELECT product_id, SUM(units) AS units FROM sold GROUP BY product_id
+	)`
+
+func tileHistory() string {
+	return fmt.Sprintf(tileHistoryCTE, middleware.Wall("t", 1, 2), middleware.Wall("v", 1, 2))
+}
+
+// CounterTiles answers GET /pos/tiles in two reads: the picture setting with
+// the chips, then the tiles. History, stock and the chips all follow the
+// caller's reach (the context branch, else the grants, else every branch).
+func (r *PostgresRepository) CounterTiles(ctx context.Context, q TileQuery) (TileSet, error) {
+	out := TileSet{Categories: []TileCategory{}, Items: []CounterTile{}}
+	branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+
+	rows, err := r.ex(ctx).Query(ctx, tileHistory()+`
+		SELECT s.on_flag, c.name, c.n
+		  FROM (SELECT COALESCE((SELECT value = 'on' FROM system_settings WHERE key = 'catalog.product_images'), FALSE) AS on_flag) s
+		  LEFT JOIN LATERAL (
+			SELECT p.category AS name, COUNT(*) AS n
+			  FROM products p LEFT JOIN top ON top.product_id = p.id
+			 WHERE COALESCE(p.category, '') <> ''
+			 GROUP BY p.category
+			 ORDER BY COALESCE(SUM(top.units), 0) DESC, COUNT(*) DESC, p.category
+			 LIMIT 8) c ON TRUE`, branch, grants)
+	if err != nil {
+		return out, fmt.Errorf("failed to read the tile categories: %w", err)
+	}
+	for rows.Next() {
+		var name *string
+		var n *int64
+		if err := rows.Scan(&out.Images, &name, &n); err != nil {
+			rows.Close()
+			return out, err
+		}
+		if name != nil && n != nil {
+			out.Categories = append(out.Categories, TileCategory{Name: *name, Count: *n})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+
+	rows, err = r.ex(ctx).Query(ctx, tileHistory()+`
+		SELECT p.id, COALESCE(p.sku, ''), COALESCE(p.description, ''), COALESCE(p.uom_primary::text, 'EA'),
+			COALESCE(ROUND(p.base_price * 100)::bigint, 0),
+			COALESCE(ROUND(SUM(i.quantity - i.allocated) * 10000)::bigint, 0),
+			COALESCE(p.category, ''),
+			CASE WHEN $6 THEN NULLIF(p.image_url, '') END
+		  FROM products p
+		  LEFT JOIN top ON top.product_id = p.id
+		  LEFT JOIN inventory i ON i.product_id = p.id`+counterStockScope(1, 2)+`
+		 WHERE ($3 = '' OR p.category = $3)
+		   AND ($4 = '' OR p.sku ILIKE '%' || $4 || '%' OR p.description ILIKE '%' || $4 || '%')
+		 GROUP BY p.id, p.sku, p.description, p.uom_primary, p.base_price, p.category, p.image_url, top.units
+		 ORDER BY ($4 <> '' AND LOWER(p.sku) = LOWER($4)) DESC, COALESCE(top.units, 0) DESC, p.description, p.sku
+		 LIMIT $5`, branch, grants, q.Category, q.Q, q.Limit, out.Images)
+	if err != nil {
+		return out, fmt.Errorf("failed to read the tiles: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t CounterTile
+		if err := rows.Scan(&t.ProductID, &t.SKU, &t.Description, &t.UOM, &t.UnitPriceCents, &t.InStock, &t.Category, &t.ImageURL); err != nil {
+			return out, err
+		}
+		out.Items = append(out.Items, t)
 	}
 	return out, rows.Err()
 }

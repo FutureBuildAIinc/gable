@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Coil of 14-2 NM Romex cable</title>
+  <defs><style>
+    .cable{fill:#e8d864}
+    .cableHi{fill:#f4e890}
+    .cableShade{fill:#a89a3a}
+    .cableDeep{fill:#7a6e24}
+    .text{fill:#3a2410}
+    .wrap{fill:#1a1d22}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="96" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <circle class="cableDeep" cx="128" cy="132" r="86"/>
+    <circle class="cableShade" cx="128" cy="132" r="82"/>
+    <circle class="cable" cx="128" cy="132" r="78"/>
+    <circle class="cableShade" cx="128" cy="132" r="74"/>
+    <circle class="cableHi" cx="128" cy="132" r="70"/>
+    <circle class="cableShade" cx="128" cy="132" r="66"/>
+    <circle class="cable" cx="128" cy="132" r="62"/>
+    <circle class="cableShade" cx="128" cy="132" r="58"/>
+    <circle class="cableHi" cx="128" cy="132" r="54"/>
+    <circle class="cableShade" cx="128" cy="132" r="50"/>
+    <circle class="cable" cx="128" cy="132" r="46"/>
+    <circle class="cableShade" cx="128" cy="132" r="42"/>
+    <circle class="cableHi" cx="128" cy="132" r="38"/>
+    <circle class="cableShade" cx="128" cy="132" r="34"/>
+    <circle class="cable" cx="128" cy="132" r="30"/>
+    <circle class="cableShade" cx="128" cy="132" r="26"/>
+    <circle class="cableHi" cx="128" cy="132" r="22"/>
+    <circle class="cableShade" cx="128" cy="132" r="18"/>
+    <circle class="cableDeep" cx="128" cy="132" r="14"/>
+    <circle class="cableShade" cx="128" cy="132" r="10"/>
+  </g>
+  <g>
+    <rect class="wrap" x="60" y="124" width="136" height="6"/>
+    <rect class="wrap" x="60" y="134" width="136" height="6"/>
+    <rect class="wrap" x="60" y="144" width="136" height="6"/>
+  </g>
+  <g>
+    <path class="cable" d="M 200 80 L 220 60 L 250 60 L 230 80 L 200 80" opacity="0"/>
+    <path class="cableDeep" d="M 200 80 Q 198 70 210 60 L 232 60 Q 244 60 240 76 Z"/>
+  </g>
+  <g>
+    <text x="128" y="138" font-family="Verdana,Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="0.5" fill="#3a2410" text-anchor="middle">14-2</text>
+    <text x="128" y="148" font-family="Verdana,Arial,sans-serif" font-size="6" font-weight="600" letter-spacing="0.5" fill="#3a2410" text-anchor="middle">NM W/G</text>
+  </g>
+</svg>

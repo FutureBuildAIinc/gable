@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Glulam laminated beam with stacked lamination lines</title>
+  <defs>
+    <style>
+      .lamA{fill:#b8804c}
+      .lamB{fill:#a87038}
+      .lamC{fill:#9a6230}
+      .lamD{fill:#8a5528}
+      .lamHi{fill:#cc9a64}
+      .endGrain{fill:#7a4a20}
+      .lamLine{fill:none;stroke:#5a3818}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="216" rx="86" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="lamA" x="36" y="74" width="184" height="20"/>
+    <rect class="lamB" x="36" y="94" width="184" height="20"/>
+    <rect class="lamC" x="36" y="114" width="184" height="20"/>
+    <rect class="lamD" x="36" y="134" width="184" height="20"/>
+    <rect class="lamA" x="36" y="154" width="184" height="20"/>
+    <rect class="lamB" x="36" y="174" width="184" height="14"/>
+    <rect class="lamHi" x="36" y="74" width="184" height="2" opacity="0.7"/>
+    <line class="lamLine" x1="36" y1="94" x2="220" y2="94" stroke-width="1"/>
+    <line class="lamLine" x1="36" y1="114" x2="220" y2="114" stroke-width="1"/>
+    <line class="lamLine" x1="36" y1="134" x2="220" y2="134" stroke-width="1"/>
+    <line class="lamLine" x1="36" y1="154" x2="220" y2="154" stroke-width="1"/>
+    <line class="lamLine" x1="36" y1="174" x2="220" y2="174" stroke-width="1"/>
+  </g>
+  <g opacity="0.55">
+    <line x1="44" y1="84" x2="216" y2="84" stroke="#5a3818" stroke-width="0.4"/>
+    <line x1="48" y1="104" x2="218" y2="104" stroke="#5a3818" stroke-width="0.4"/>
+    <line x1="44" y1="124" x2="216" y2="124" stroke="#5a3818" stroke-width="0.4"/>
+    <line x1="48" y1="144" x2="218" y2="144" stroke="#5a3818" stroke-width="0.4"/>
+    <line x1="44" y1="164" x2="216" y2="164" stroke="#5a3818" stroke-width="0.4"/>
+    <line x1="48" y1="182" x2="218" y2="182" stroke="#5a3818" stroke-width="0.4"/>
+  </g>
+  <g>
+    <rect class="endGrain" x="32" y="74" width="6" height="114"/>
+    <line x1="35" y1="74" x2="35" y2="188" stroke="#3a2410" stroke-width="0.4" opacity="0.7"/>
+    <line x1="33" y1="94" x2="33" y2="94" stroke="#3a2410" stroke-width="2"/>
+    <rect x="33" y="94" width="5" height="1" fill="#3a2410" opacity="0.7"/>
+    <rect x="33" y="114" width="5" height="1" fill="#3a2410" opacity="0.7"/>
+    <rect x="33" y="134" width="5" height="1" fill="#3a2410" opacity="0.7"/>
+    <rect x="33" y="154" width="5" height="1" fill="#3a2410" opacity="0.7"/>
+    <rect x="33" y="174" width="5" height="1" fill="#3a2410" opacity="0.7"/>
+    <ellipse class="endGrain" cx="32" cy="138" rx="2" ry="50" opacity="0.8"/>
+    <ellipse fill="none" cx="32" cy="138" rx="1" ry="48" stroke="#3a2410" stroke-width="0.3" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="endGrain" x="218" y="74" width="6" height="114" opacity="0.9"/>
+    <line x1="221" y1="94" x2="221" y2="94" stroke="#3a2410" stroke-width="0.4" opacity="0.7"/>
+    <rect x="218" y="94" width="6" height="1" fill="#3a2410" opacity="0.5"/>
+    <rect x="218" y="114" width="6" height="1" fill="#3a2410" opacity="0.5"/>
+    <rect x="218" y="134" width="6" height="1" fill="#3a2410" opacity="0.5"/>
+    <rect x="218" y="154" width="6" height="1" fill="#3a2410" opacity="0.5"/>
+    <rect x="218" y="174" width="6" height="1" fill="#3a2410" opacity="0.5"/>
+  </g>
+</svg>

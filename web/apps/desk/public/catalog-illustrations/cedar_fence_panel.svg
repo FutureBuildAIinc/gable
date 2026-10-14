@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Pre-built cedar fence panel 6x8 with frame and pickets</title>
+  <defs>
+    <style>
+      .frameMain{fill:#8a4a2c}
+      .frameHi{fill:#a85a3c}
+      .frameShade{fill:#5a2c1a}
+      .picketMain{fill:#a85a3c}
+      .picketHi{fill:#c4784c}
+      .picketShade{fill:#7a3c24}
+      .grain{fill:none;stroke:#7a3c24;stroke-linecap:round}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="230" rx="104" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <rect class="frameMain" x="22" y="50" width="212" height="14" rx="2"/>
+    <rect class="frameMain" x="22" y="186" width="212" height="14" rx="2"/>
+    <rect class="frameMain" x="22" y="50" width="14" height="150" rx="2"/>
+    <rect class="frameMain" x="220" y="50" width="14" height="150" rx="2"/>
+    <rect class="frameHi" x="22" y="50" width="212" height="3" opacity="0.6"/>
+    <rect class="frameShade" x="22" y="61" width="212" height="3" opacity="0.5"/>
+    <rect class="frameHi" x="22" y="186" width="212" height="3" opacity="0.6"/>
+    <rect class="frameShade" x="22" y="197" width="212" height="3" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="picketMain" x="40" y="64" width="20" height="130"/>
+    <rect class="picketHi" x="40" y="64" width="20" height="2" opacity="0.7"/>
+    <polygon class="picketMain" points="40,194 60,194 56,202 44,202"/>
+    <polygon class="picketShade" points="44,202 56,202 56,206 44,206"/>
+    <line class="grain" x1="50" y1="78" x2="50" y2="186" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="44" y1="100" x2="56" y2="100" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="44" y1="130" x2="56" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="44" y1="160" x2="56" y2="160" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="picketMain" x="68" y="64" width="20" height="130"/>
+    <rect class="picketHi" x="68" y="64" width="20" height="2" opacity="0.7"/>
+    <polygon class="picketMain" points="68,194 88,194 84,202 72,202"/>
+    <polygon class="picketShade" points="72,202 84,202 84,206 72,206"/>
+    <line class="grain" x1="78" y1="78" x2="78" y2="186" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="72" y1="100" x2="86" y2="100" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="72" y1="130" x2="86" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="72" y1="160" x2="86" y2="160" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="picketMain" x="96" y="64" width="20" height="130"/>
+    <rect class="picketHi" x="96" y="64" width="20" height="2" opacity="0.7"/>
+    <polygon class="picketMain" points="96,194 116,194 112,202 100,202"/>
+    <polygon class="picketShade" points="100,202 112,202 112,206 100,206"/>
+    <line class="grain" x1="106" y1="78" x2="106" y2="186" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="100" y1="100" x2="116" y2="100" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="100" y1="130" x2="116" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="100" y1="160" x2="116" y2="160" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="picketMain" x="124" y="64" width="20" height="130"/>
+    <rect class="picketHi" x="124" y="64" width="20" height="2" opacity="0.7"/>
+    <polygon class="picketMain" points="124,194 144,194 140,202 128,202"/>
+    <polygon class="picketShade" points="128,202 140,202 140,206 128,206"/>
+    <line class="grain" x1="134" y1="78" x2="134" y2="186" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="128" y1="100" x2="144" y2="100" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="128" y1="130" x2="144" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="128" y1="160" x2="144" y2="160" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="picketMain" x="152" y="64" width="20" height="130"/>
+    <rect class="picketHi" x="152" y="64" width="20" height="2" opacity="0.7"/>
+    <polygon class="picketMain" points="152,194 172,194 168,202 156,202"/>
+    <polygon class="picketShade" points="156,202 168,202 168,206 156,206"/>
+    <line class="grain" x1="162" y1="78" x2="162" y2="186" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="156" y1="100" x2="172" y2="100" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="156" y1="130" x2="172" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="156" y1="160" x2="172" y2="160" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="picketMain" x="180" y="64" width="20" height="130"/>
+    <rect class="picketHi" x="180" y="64" width="20" height="2" opacity="0.7"/>
+    <polygon class="picketMain" points="180,194 200,194 196,202 184,202"/>
+    <polygon class="picketShade" points="184,202 196,202 196,206 184,206"/>
+    <line class="grain" x1="190" y1="78" x2="190" y2="186" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="184" y1="100" x2="200" y2="100" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="184" y1="130" x2="200" y2="130" stroke-width="0.5" opacity="0.5"/>
+    <line class="grain" x1="184" y1="160" x2="200" y2="160" stroke-width="0.5" opacity="0.5"/>
+  </g>
+</svg>

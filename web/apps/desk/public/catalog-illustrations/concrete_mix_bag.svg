@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Bag of concrete mix 60 lb paper bag</title>
+  <defs>
+    <style>
+      .bagMain{fill:#b8a888}
+      .bagShade{fill:#8a7a5a}
+      .bagHi{fill:#d8c8a8}
+      .bagRim{fill:#7a6a4a}
+      .bagFold{fill:#a89878}
+      .label{fill:#faf3e0}
+      .labelBand{fill:#3a2a1a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+      .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+      .textWt{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="92" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="bagMain" points="58,42 198,42 214,72 198,220 58,220 42,72"/>
+    <polygon class="bagHi" points="58,42 198,42 196,48 60,48"/>
+    <polygon class="bagShade" points="198,42 214,72 210,222 198,220" opacity="0.7"/>
+    <polygon class="bagShade" points="58,42 42,72 46,222 58,220" opacity="0.7"/>
+    <polygon class="bagRim" points="58,42 198,42 214,72 42,72" opacity="0.6"/>
+    <polygon class="bagFold" points="86,42 170,42 178,72 78,72"/>
+    <polygon class="bagShade" points="86,42 170,42 170,46 86,46" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="label" x="62" y="100" width="132" height="106"/>
+    <rect class="label" x="62" y="100" width="132" height="106" fill="none" stroke="#7a6a4a" stroke-width="0.6"/>
+    <rect class="labelBand" x="62" y="100" width="132" height="22"/>
+    
+    <rect class="labelBand" x="62" y="196" width="132" height="10"/>
+    <text class="textSub" x="128" y="144" font-size="10" fill="#3a2a1a" text-anchor="middle">CONCRETE MIX</text>
+    <text class="textSub" x="128" y="160" font-size="7" fill="#3a2a1a" text-anchor="middle" opacity="0.7">HIGH STRENGTH  FAST SET</text>
+    <rect x="78" y="170" width="36" height="20" fill="#3a2a1a"/>
+    <text class="textWt" x="96" y="184" font-size="10" fill="#e8d4a8" text-anchor="middle">60 LB</text>
+    <text x="160" y="184" font-family="Verdana,Arial,sans-serif" font-weight="600" font-size="6" fill="#3a2a1a" text-anchor="middle" opacity="0.7">27 KG</text>
+  </g>
+</svg>

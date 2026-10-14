@@ -4670,6 +4670,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pos/transactions/{id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Print the sale's receipt
+         * @description The sale's invoice as the invoice print route answers it (the same renderer: Content-Type application/pdf, inline), under the counter's own roles admin, owner and cashier, so the till prints its own receipt without the documents roles. The sale is read as the sale read reads it: a sale that does not exist, or that the caller's branch context, wall or bound key pin hides, answers 404, the same for both. A sale that is not completed, or has no invoice, answers 409 with the blocker no_receipt.
+         */
+        get: operations["posTransactionReceipt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/transactions/{id}/receipt/email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email the sale's receipt
+         * @description Sends the sale's invoice to the account's contact exactly as the invoice email route does (the same service call, the same words, 202 and {"status":"queued"}; the outcome is written to email_deliveries), under the counter's own roles admin, owner and cashier. The sale is read as the sale read reads it (404 for a sale the caller cannot read). A sale that is not completed or has no invoice answers 409 with the blocker no_receipt; a walk in sale (no customer, or the shared walk in customer, whatever address that row holds), or an account with no email address on file, answers 409 with the blocker no_contact and words the card can show. Nothing is sent for any refusal.
+         */
+        post: operations["posTransactionReceiptEmail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/pos/customers": {
         parameters: {
             query?: never;
@@ -4822,6 +4862,26 @@ export interface paths {
          * @description Products matching the q text (sku or description prefix), at most 20, with the price and on hand the counter needs. A bare array, never null, the shape this counter's helper surface keeps (the product module owns the data). q empty answers [].
          */
         get: operations["posProductSearch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pos/tiles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The counter's catalogue tiles
+         * @description The counter's catalogue for the caller's yard (its branch context, as the product search takes it): up to eight category chips, the yard's categories by units sold, then by product count, then by name, and the product tiles. With neither category nor q the tiles are the yard's top sellers by quantity sold (completed counter sale lines and the lines of invoices at the yard that are not void; a counter sale's own invoice, origin POS, is not counted), then by description; category keeps one category's products in that order; q (two characters or more, sku or description) puts an exact sku first. unit_price_cents and in_stock mean what the product search answers. image_url is null unless the catalog.product_images setting is on and the product has a picture; images is that setting. Never null arrays.
+         */
+        get: operations["posTileList"];
         put?: never;
         post?: never;
         delete?: never;
@@ -12440,6 +12500,30 @@ export interface components {
             payload: components["schemas"]["PosTillReport"];
             /** Format: date-time */
             generated_at: string;
+        };
+        PosTileSet: {
+            categories: components["schemas"]["PosTileCategory"][];
+            items: components["schemas"]["PosTile"][];
+            /** @description The catalog.product_images setting. */
+            images: boolean;
+        };
+        PosTileCategory: {
+            name: string;
+            /** Format: int64 */
+            count: number;
+        };
+        PosTile: {
+            /** Format: uuid */
+            product_id: string;
+            sku: string;
+            description: string;
+            uom: string;
+            /** Format: int64 */
+            unit_price_cents: number;
+            /** @description A decimal string of the yard's on hand quantity. */
+            in_stock: string;
+            category: string;
+            image_url: string | null;
         };
         PosSearchResult: {
             /** Format: uuid */
@@ -24558,6 +24642,70 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posTransactionReceipt: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sale's invoice as a PDF document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTransactionReceiptEmail: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+                /** @description Opt in idempotent replay for POST, PUT and PATCH. The legacy name X-Idempotency-Key addresses the same claim. Claims are stored in Postgres and survive a restart; only 2xx and 3xx responses are stored. */
+                "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Email queued. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceEmailResponse"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posCustomerFind: {
         parameters: {
             query?: {
@@ -24829,6 +24977,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PosSearchResult"][];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    posTileList: {
+        parameters: {
+            query?: {
+                category?: string;
+                q?: string;
+                limit?: number;
+            };
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The chips and the tiles. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTileSet"];
                 };
             };
             400: components["responses"]["BadRequestEither"];

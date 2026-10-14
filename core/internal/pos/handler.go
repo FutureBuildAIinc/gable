@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -113,6 +114,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 
 	// History and search
 	mux.HandleFunc("GET /api/v1/pos/products/search", guard(h.SearchProducts))
+	mux.HandleFunc("GET /api/v1/pos/tiles", guard(h.ListTiles))
 
 	// The counter's customer: the lookup with the account's standing, and
 	// naming the customer (and the account's purchase order and job) on an
@@ -429,6 +431,40 @@ func (h *Handler) SearchProducts(w http.ResponseWriter, r *http.Request) {
 		results = []QuickSearchResult{}
 	}
 	writeJSON(w, http.StatusOK, results)
+}
+
+// ListTiles is GET /pos/tiles: the counter's catalogue for the caller's yard,
+// the category chips and the product tiles in top seller order (never null
+// arrays). q is two characters or more; limit is 1 to 48, default 24.
+func (h *Handler) ListTiles(w http.ResponseWriter, r *http.Request) {
+	vals, err := httpx.StrictQuery(r, "category", "q", "limit")
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	q := TileQuery{Category: vals.Get("category"), Q: vals.Get("q"), Limit: 24}
+	var bad []httpx.FieldError
+	if vals.Has("q") && len([]rune(q.Q)) < 2 {
+		bad = append(bad, httpx.FieldError{Field: "q", Message: "must be two characters or more"})
+	}
+	if raw := vals.Get("limit"); vals.Has("limit") {
+		n, convErr := strconv.Atoi(raw)
+		if convErr != nil || n < 1 || n > 48 {
+			bad = append(bad, httpx.FieldError{Field: "limit", Message: "must be a whole number from 1 to 48"})
+		} else {
+			q.Limit = n
+		}
+	}
+	if len(bad) > 0 {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", bad...))
+		return
+	}
+	set, err := h.service.repo.CounterTiles(r.Context(), q)
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, set)
 }
 
 // FindCustomers is GET /pos/customers: the counter's lookup by name or

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Steel job site gang box with hinged lid and side handles</title>
+  <defs>
+    <style>
+      .boxMain{fill:#c8945a}
+      .boxMid{fill:#a87a44}
+      .boxShade{fill:#6a4a20}
+      .boxHi{fill:#e6c488}
+      .lidMain{fill:#d8a468}
+      .lidHi{fill:#f0cc88}
+      .lidShade{fill:#a87a44}
+      .handleMain{fill:#2a2c34}
+      .handleShade{fill:#1a1d24}
+      .hinge{fill:#2a2c34}
+      .lock{fill:#3a3d44}
+      .lockHi{fill:#7a7d86}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <rect class="lidMain" x="38" y="58" width="180" height="46" rx="3"/>
+    <rect class="lidHi" x="38" y="58" width="180" height="5" rx="2" opacity="0.7"/>
+    <rect class="lidShade" x="38" y="98" width="180" height="6" rx="2" opacity="0.6"/>
+    <g opacity="0.6">
+      <line x1="48" y1="72" x2="208" y2="72" stroke="#7a4a20" stroke-width="0.5"/>
+      <line x1="48" y1="80" x2="208" y2="80" stroke="#7a4a20" stroke-width="0.5"/>
+      <line x1="48" y1="88" x2="208" y2="88" stroke="#7a4a20" stroke-width="0.5"/>
+    </g>
+  </g>
+  <g>
+    <rect class="boxMain" x="38" y="100" width="180" height="120" rx="2"/>
+    <rect class="boxHi" x="38" y="100" width="180" height="4" opacity="0.5"/>
+    <rect class="boxShade" x="38" y="212" width="180" height="8" opacity="0.65"/>
+    <rect class="boxShade" x="210" y="100" width="8" height="120" opacity="0.55"/>
+    <g opacity="0.5">
+      <line x1="46" y1="120" x2="210" y2="120" stroke="#7a4a20" stroke-width="0.4"/>
+      <line x1="46" y1="148" x2="210" y2="148" stroke="#7a4a20" stroke-width="0.4"/>
+      <line x1="46" y1="176" x2="210" y2="176" stroke="#7a4a20" stroke-width="0.4"/>
+    </g>
+  </g>
+  <g>
+    <rect class="hinge" x="48" y="100" width="14" height="6" rx="1"/>
+    <rect class="hinge" x="194" y="100" width="14" height="6" rx="1"/>
+    <rect class="hinge" x="48" y="56" width="14" height="6" rx="1" opacity="0.8"/>
+    <rect class="hinge" x="194" y="56" width="14" height="6" rx="1" opacity="0.8"/>
+  </g>
+  <g>
+    <rect class="handleMain" x="22" y="146" width="20" height="42" rx="3"/>
+    <rect class="handleShade" x="36" y="146" width="6" height="42" opacity="0.7"/>
+    <ellipse cx="32" cy="167" rx="6" ry="14" fill="#5a5d66"/>
+    <ellipse cx="32" cy="167" rx="3" ry="10" fill="#1a1a1a"/>
+    <rect class="handleMain" x="214" y="146" width="20" height="42" rx="3"/>
+    <rect class="handleShade" x="228" y="146" width="6" height="42" opacity="0.7"/>
+    <ellipse cx="224" cy="167" rx="6" ry="14" fill="#5a5d66"/>
+    <ellipse cx="224" cy="167" rx="3" ry="10" fill="#1a1a1a"/>
+  </g>
+  <g>
+    <rect class="lock" x="118" y="156" width="20" height="22" rx="2"/>
+    <rect class="lockHi" x="118" y="156" width="20" height="3" opacity="0.6"/>
+    <rect class="lock" x="120" y="148" width="16" height="8" rx="1"/>
+    <rect class="lock" x="124" y="142" width="8" height="8" rx="1" fill="#7a7d86"/>
+    <rect class="lockShade" x="120" y="167" width="20" height="11" opacity="0.6"/>
+    <circle fill="#1a1a1a" cx="128" cy="168" r="2"/>
+  </g>
+</svg>

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>50 ft 5/8 inch garden hose, green, coiled</title>
+  <defs>
+    <style>
+      .hoseMain{fill:#2a7a3a}
+      .hoseShade{fill:#1a5a2a}
+      .hoseHi{fill:#5aaa6a}
+      .hoseDark{fill:#0a3a1a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="226" rx="98" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <ellipse class="hoseMain" cx="128" cy="128" rx="100" ry="74"/>
+    <ellipse class="hoseHi" cx="128" cy="128" rx="100" ry="6" opacity="0.5"/>
+    <ellipse class="hoseShade" cx="128" cy="128" rx="100" ry="68" opacity="0.5"/>
+    <ellipse class="hoseMain" cx="128" cy="128" rx="86" ry="60" fill="none" stroke="#1a5a2a" stroke-width="6"/>
+    <ellipse class="hoseMain" cx="128" cy="128" rx="70" ry="46" fill="none" stroke="#1a5a2a" stroke-width="6"/>
+    <ellipse class="hoseMain" cx="128" cy="128" rx="54" ry="32" fill="none" stroke="#1a5a2a" stroke-width="6"/>
+    <ellipse class="hoseDark" cx="128" cy="128" rx="38" ry="18" fill="none" stroke="#0a3a1a" stroke-width="3" opacity="0.7"/>
+  </g>
+  <g>
+    <ellipse class="hoseMain" cx="40" cy="184" rx="22" ry="20"/>
+    <ellipse class="hoseShade" cx="40" cy="184" rx="22" ry="6" opacity="0.6"/>
+    <rect class="hoseDark" x="38" y="170" width="4" height="28" rx="1"/>
+    <rect class="hoseDark" x="34" y="178" width="12" height="14" rx="1"/>
+    <rect class="hoseMain" x="36" y="180" width="8" height="10" rx="1"/>
+  </g>
+</svg>

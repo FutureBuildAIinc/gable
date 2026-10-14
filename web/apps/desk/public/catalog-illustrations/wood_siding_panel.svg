@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <ellipse cx="128" cy="226" rx="80" ry="6" fill="#000" opacity="0.18"/>
+  <rect x="40" y="56" width="176" height="160" fill="#c89868"/>
+  <rect x="40" y="56" width="176" height="160" fill="none" stroke="#8a6042" stroke-width="1.5"/>
+  <path d="M 40 56 L 60 56 L 50 216 L 40 216 Z" fill="#a87a48"/>
+  <path d="M 60 56 L 80 56 L 78 216 L 50 216 Z" fill="#b88a58"/>
+  <path d="M 80 56 L 100 56 L 102 216 L 78 216 Z" fill="#a87a48"/>
+  <path d="M 100 56 L 120 56 L 122 216 L 102 216 Z" fill="#c89868"/>
+  <path d="M 120 56 L 140 56 L 142 216 L 122 216 Z" fill="#a87a48"/>
+  <path d="M 140 56 L 160 56 L 160 216 L 142 216 Z" fill="#b88a58"/>
+  <path d="M 160 56 L 180 56 L 180 216 L 160 216 Z" fill="#a87a48"/>
+  <path d="M 180 56 L 196 56 L 196 216 L 180 216 Z" fill="#c89868"/>
+  <line x1="60" y1="60" x2="62" y2="80" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="80" y1="80" x2="82" y2="120" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="100" y1="64" x2="102" y2="100" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="120" y1="100" x2="122" y2="160" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="140" y1="60" x2="142" y2="90" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="160" y1="120" x2="160" y2="180" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="180" y1="80" x2="180" y2="140" stroke="#8a6042" stroke-width="0.6"/>
+  <line x1="40" y1="56" x2="40" y2="216" stroke="#8a6042" stroke-width="1.5"/>
+  <line x1="216" y1="56" x2="216" y2="216" stroke="#8a6042" stroke-width="1.5"/>
+  <path d="M 40 56 L 216 56 L 210 70 L 46 70 Z" fill="#8a6042" opacity="0.5"/>
+</svg>

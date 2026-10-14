@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Bundle of charcoal asphalt shingles wrapped in plastic</title>
+  <defs>
+    <style>
+      .wrapMain{fill:#2a2c34}
+      .wrapShade{fill:#1a1c22}
+      .wrapHi{fill:#3a3c46}
+      .tabA{fill:#2a2c34}
+      .tabB{fill:#22242a}
+      .tabHi{fill:#4a4c56}
+      .shingleFace{fill:#3a3d44}
+      .shingleGrit{fill:#5a5d66}
+      .label{fill:#d8d4c4}
+      .labelBand{fill:#1a1a1a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="100" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="wrapMain" x="34" y="100" width="188" height="124" rx="3"/>
+    <rect class="wrapShade" x="34" y="210" width="188" height="14" rx="3"/>
+    <rect class="wrapHi" x="34" y="100" width="188" height="3" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="tabA" x="34" y="60" width="188" height="44"/>
+    <polygon class="tabA" points="34,104 60,104 60,116 34,116"/>
+    <polygon class="tabA" points="60,104 88,116 88,104"/>
+    <polygon class="tabB" points="88,104 116,104 116,116 88,116"/>
+    <polygon class="tabA" points="116,104 144,116 144,104"/>
+    <polygon class="tabA" points="144,104 172,104 172,116 144,116"/>
+    <polygon class="tabB" points="172,104 200,104 200,116 172,116"/>
+    <polygon class="tabA" points="200,104 222,104 222,116 200,116"/>
+    <rect class="tabHi" x="34" y="60" width="188" height="3" opacity="0.7"/>
+    <rect class="tabA" x="34" y="92" width="188" height="3" opacity="0.5"/>
+    <rect class="tabA" x="34" y="98" width="188" height="3" opacity="0.5"/>
+  </g>
+  <g>
+    <rect class="shingleFace" x="34" y="120" width="188" height="68"/>
+    <rect class="shingleGrit" x="34" y="120" width="188" height="2" opacity="0.7"/>
+    <g opacity="0.55" fill="#7a7d86">
+      <circle cx="50" cy="134" r="0.8"/>
+      <circle cx="78" cy="142" r="0.8"/>
+      <circle cx="104" cy="131" r="0.8"/>
+      <circle cx="132" cy="138" r="0.8"/>
+      <circle cx="160" cy="134" r="0.8"/>
+      <circle cx="188" cy="142" r="0.8"/>
+      <circle cx="64" cy="152" r="0.8"/>
+      <circle cx="92" cy="158" r="0.8"/>
+      <circle cx="120" cy="156" r="0.8"/>
+      <circle cx="148" cy="162" r="0.8"/>
+      <circle cx="176" cy="154" r="0.8"/>
+      <circle cx="204" cy="158" r="0.8"/>
+      <circle cx="56" cy="168" r="0.8"/>
+      <circle cx="84" cy="174" r="0.8"/>
+      <circle cx="112" cy="170" r="0.8"/>
+      <circle cx="140" cy="176" r="0.8"/>
+      <circle cx="168" cy="168" r="0.8"/>
+      <circle cx="196" cy="174" r="0.8"/>
+      <circle cx="46" cy="148" r="0.6"/>
+      <circle cx="100" cy="146" r="0.6"/>
+      <circle cx="156" cy="148" r="0.6"/>
+      <circle cx="210" cy="148" r="0.6"/>
+    </g>
+    <g>
+      <rect x="34" y="120" width="188" height="2" fill="#ffffff" opacity="0.18"/>
+      <rect x="34" y="186" width="188" height="2" fill="#000000" opacity="0.45"/>
+    </g>
+    <rect class="wrapShade" x="34" y="184" width="188" height="6" opacity="0.55"/>
+  </g>
+  <g>
+    <rect class="label" x="50" y="200" width="156" height="20" opacity="0.95"/>
+    <rect class="labelBand" x="50" y="200" width="156" height="4" opacity="0.5"/>
+    <text x="128" y="214" font-family="Verdana,Arial,sans-serif" font-size="9" fill="#3a3d44" text-anchor="middle" font-weight="700" letter-spacing="1">RIDGE 30 YR  CHARCOAL</text>
+  </g>
+</svg>

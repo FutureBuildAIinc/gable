@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Stack of MDF moulding lengths</title>
+  <defs><style>
+    .face{fill:#efe6d0}
+    .faceHi{fill:#fbf3df}
+    .faceShade{fill:#c8bda0}
+    .endGrain{fill:#d2c8ac}
+    .topEdge{fill:#c0b496}
+    .strap{fill:#3a3530}
+    .strapShade{fill:#5a524a}
+  </style></defs>
+  <ellipse cx="128" cy="222" rx="100" ry="7" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="face" x="32" y="170" width="192" height="14"/>
+    <rect class="faceHi" x="32" y="170" width="192" height="2"/>
+    <rect class="faceShade" x="32" y="180" width="192" height="4" opacity="0.55"/>
+    <rect class="endGrain" x="224" y="170" width="14" height="14"/>
+    <ellipse cx="231" cy="177" rx="4" ry="3" fill="none" stroke="#a89c84" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="face" x="32" y="156" width="192" height="14"/>
+    <rect class="faceHi" x="32" y="156" width="192" height="2"/>
+    <rect class="faceShade" x="32" y="166" width="192" height="4" opacity="0.55"/>
+    <rect class="endGrain" x="224" y="156" width="14" height="14"/>
+    <ellipse cx="231" cy="163" rx="4" ry="3" fill="none" stroke="#a89c84" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="face" x="32" y="142" width="192" height="14"/>
+    <rect class="faceHi" x="32" y="142" width="192" height="2"/>
+    <rect class="faceShade" x="32" y="152" width="192" height="4" opacity="0.55"/>
+    <rect class="endGrain" x="224" y="142" width="14" height="14"/>
+    <ellipse cx="231" cy="149" rx="4" ry="3" fill="none" stroke="#a89c84" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="face" x="32" y="128" width="192" height="14"/>
+    <rect class="faceHi" x="32" y="128" width="192" height="2"/>
+    <rect class="faceShade" x="32" y="138" width="192" height="4" opacity="0.55"/>
+    <rect class="endGrain" x="224" y="128" width="14" height="14"/>
+    <ellipse cx="231" cy="135" rx="4" ry="3" fill="none" stroke="#a89c84" stroke-width="0.5" opacity="0.6"/>
+  </g>
+  <g>
+    <path class="topEdge" d="M 32 128 L 84 100 L 246 92 L 224 128 Z"/>
+    <path class="face" d="M 32 128 L 84 100 L 246 92 L 240 110 L 80 122 L 32 132 Z" opacity="0.85"/>
+    <line x1="84" y1="100" x2="80" y2="122" stroke="#a89c84" stroke-width="0.5"/>
+  </g>
+  <rect class="strap" x="74" y="124" width="4" height="64"/>
+  <rect class="strapShade" x="74" y="124" width="1" height="64"/>
+  <rect class="strap" x="180" y="124" width="4" height="64"/>
+  <rect class="strapShade" x="180" y="124" width="1" height="64"/>
+</svg>
