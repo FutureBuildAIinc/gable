@@ -89,4 +89,18 @@ describe('account detail page: Statement action', () => {
     expect(statementLink, 'expected a Statement link').toBeDefined()
     expect(statementLink!.getAttribute('href')).toBe(`/reports/customer-statement?customer=${CUSTOMER_ID}`)
   })
+  it('offers no control without a target and no unfinished tab', async () => {
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: customer,
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: summary,
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => ({ items: [], next_cursor: null, limit: 50 }),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+
+    const el = await mountAsync<GableAccountDetail>('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    const buttons = Array.from(el.querySelectorAll('button')).map((b) => textOf(b).trim())
+    expect(buttons).not.toContain('New Transaction')
+    expect(buttons).not.toContain('Invoices')
+    expect(textOf(el)).not.toMatch(/under construction/i)
+  })
 })

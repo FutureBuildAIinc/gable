@@ -238,8 +238,9 @@ func TestNoHeader_PosMissingRecordIsNotFound(t *testing.T) {
 // TestNoHeader_CustomerAccountSurface is the customer account family (r4
 // P2-4, carried from r2 P3-2 and r3 P3-2): the account summary, its
 // subledger and the AR statement answer a customer outside the caller's
-// reach as missing, the same 404 /customers/{id} serves, with or without
-// the header.
+// reach as missing, with or without the header; the summary is the
+// customer record's own figures and reads through ruling A's reach (200,
+// as /customers/{id} serves).
 func TestNoHeader_CustomerAccountSurface(t *testing.T) {
 	f := newKeyPinFixture(t)
 	f.seedWalledTwins(t)
@@ -254,9 +255,13 @@ func TestNoHeader_CustomerAccountSurface(t *testing.T) {
 	for _, role := range []string{"sales", "finance"} {
 		for _, hdr := range []map[string]string{nil, headerA(f)} {
 			for _, p := range paths {
+				want := http.StatusNotFound
+				if summaryRoute(p) {
+					want = http.StatusOK // ruling A: the summary is dealer wide
+				}
 				status, buf := f.userAs(t, role, "GET", p, "", hdr)
-				if status != http.StatusNotFound {
-					t.Errorf("%s no header %t read of B's %s: %d %s, want 404", role, hdr != nil, p, status, buf)
+				if status != want {
+					t.Errorf("%s no header %t read of B's %s: %d %s, want %d", role, hdr != nil, p, status, buf, want)
 				}
 			}
 		}

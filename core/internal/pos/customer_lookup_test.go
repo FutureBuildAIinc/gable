@@ -299,3 +299,32 @@ func TestThePORecheckUnderTheLockRefusesAPOGoneWhileTheCardWasCharged(t *testing
 		t.Errorf("%d invoices after the refused charge, want none", got)
 	}
 }
+
+// RULE: an account number typed in full finds its own customer first, however
+// many other names or numbers contain it, so a read of one customer by its
+// account number is never lost to the cap on the list.
+func TestTheLookupPutsAnExactAccountNumberFirst(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	f := newFixture(t, testutil.RequireDB(t))
+	tag := "XQ" + strings.ToUpper(uuid.NewString()[:6])
+	target := uuid.New()
+	ids := []uuid.UUID{target}
+	mustExec(t, f.db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, 'Zulu Last', $2, $3)`, target, tag, f.branchID)
+	for i := 0; i < 12; i++ {
+		id := uuid.New()
+		ids = append(ids, id)
+		mustExec(t, f.db, `INSERT INTO customers (id, name, account_number, primary_branch_id) VALUES ($1, $2, $3, $4)`,
+			id, "Alpha "+tag+" "+uuid.NewString()[:4], tag+"-"+uuid.NewString()[:5], f.branchID)
+	}
+	t.Cleanup(func() {
+		mustExec(t, f.db, `DELETE FROM customers WHERE id = ANY($1::uuid[])`, ids)
+	})
+	var out []map[string]any
+	r := f.findCustomers(tag)
+	if r.status != http.StatusOK || !decodeArray(t, r.raw, &out) || len(out) != 10 {
+		t.Fatalf("lookup = %d with %d rows: %s", r.status, len(out), r.raw)
+	}
+	if out[0]["id"] != target.String() {
+		t.Errorf("first row is %v, want the customer whose account number is %s", out[0]["id"], tag)
+	}
+}

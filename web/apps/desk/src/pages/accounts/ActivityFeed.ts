@@ -44,6 +44,8 @@ export class GableActivityFeed extends LitElement {
             this.activities = activities;
             this.contacts = conts.items;
         } catch (err: unknown) {
+            // The account page shows the yard note itself (its subledger answers
+            // the wall); a 404 here is a customer that is gone, an honest error.
             console.error('Failed to load activity data', err);
             ToastService.show('Failed to load activity data', 'error');
         } finally {
