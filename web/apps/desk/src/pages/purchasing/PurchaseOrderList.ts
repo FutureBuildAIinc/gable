@@ -15,6 +15,7 @@ import { formatQuantity } from '../../lib/money';
 import { formatDollars } from '../../lib/utils.ts';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import { poLabel } from '../../lib/utils';
 
 const statusColors: Record<string, string> = {
     DRAFT: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
@@ -75,7 +76,8 @@ export class PurchaseOrderList extends LitElement {
                 PurchaseOrderService.getSourceSummary().catch(() => ({} as POSourceSummary)),
                 VendorService.listVendors().catch(() => []),
             ]);
-            this.vendorNames = Object.fromEntries((vendors || []).map((v) => [v.id, v.name]));
+            // The vendor list names each order's vendor; a missing or odd answer names none.
+            this.vendorNames = Object.fromEntries((Array.isArray(vendors) ? vendors : []).map((v) => [v.id, v.name]));
             this.pos = poData || [];
             this.alerts = alertData || [];
             this.sourceSummary = summary || {};
@@ -230,7 +232,7 @@ export class PurchaseOrderList extends LitElement {
                                         class="hover:bg-white/5 cursor-pointer transition-colors"
                                     >
                                         <td class="px-6 py-4 font-mono text-white">
-                                            ${po.id.slice(0, 8)}...
+                                            ${poLabel(po)}
                                         </td>
                                         <td class="px-6 py-4 text-zinc-200">
                                             ${po.vendor_name ?? (po.vendor_id ? this.vendorNames[po.vendor_id] : undefined) ?? html`<span class="text-zinc-500">Not set</span>`}

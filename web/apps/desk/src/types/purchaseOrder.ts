@@ -12,6 +12,7 @@ export interface PurchaseOrder {
     /** The PO's yard (the branch the wire stamped on create). The list and detail
      * pages resolve this to a branch name through `BranchContext.branches`. */
     branch_id?: string;
+    number?: string;
     vendor_id?: string;
     vendor_name?: string;
     status: POStatus;

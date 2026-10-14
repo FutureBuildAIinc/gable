@@ -25321,11 +25321,16 @@ components:
           description: The body revision, on update only. A create carrying one is a 400.
     PurchaseOrder:
       type: object
-      required: [id, branch_id, status, source, created_at, updated_at]
+      required: [id, number, branch_id, status, source, created_at, updated_at]
       description: >-
         A purchase order. Lines appear only on create and get; line_count and total_cost only on the list (omitted when zero). total_cost is float dollars today.
       properties:
         id: {type: string, format: uuid}
+        number:
+          type: string
+          readOnly: true
+          example: PO-000042
+          description: The document number, assigned on create and never taken from the body.
         branch_id: {type: string, format: uuid}
         vendor_id: {type: string, format: uuid}
         vendor_name: {type: string}

@@ -9,6 +9,7 @@ import { ScanBarcode, ChevronRight, ArrowLeft, Check, Package, Loader2, ScanLine
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import type { PurchaseOrder } from '../../types/purchaseOrder';
 import '../../components/BarcodeScanner.ts';
+import { poLabel } from '../../lib/utils';
 
 @customElement('gable-receive-po')
 export class ReceivePO extends LitElement {
@@ -137,7 +138,7 @@ export class ReceivePO extends LitElement {
                                                 ${po.vendor_name || 'Vendor'}
                                             </div>
                                             <div class="text-xs text-zinc-500 font-mono mt-0.5">
-                                                PO #${po.id.slice(-6).toUpperCase()}
+                                                ${poLabel(po)}
                                             </div>
                                         </div>
                                         <div class="flex items-center gap-2">
@@ -160,7 +161,7 @@ export class ReceivePO extends LitElement {
                             ${icon(Check, 32, 'text-emerald-400')}
                         </div>
                         <p class="text-white font-medium text-lg">Receiving Complete</p>
-                        <p class="text-zinc-500 text-sm">PO #${this.selectedPO.id.slice(-6).toUpperCase()} updated</p>
+                        <p class="text-zinc-500 text-sm">${poLabel(this.selectedPO)} updated</p>
                         <button
                             @click=${() => { this.selectedPO = null; this.submitted = false; }}
                             class="mt-4 px-6 py-2 bg-white/5 border border-white/10 text-white rounded-lg text-sm hover:bg-white/10 transition-colors"
@@ -182,7 +183,7 @@ export class ReceivePO extends LitElement {
                             <div>
                                 <div class="font-bold text-lg text-white">${this.selectedPO.vendor_name || 'Vendor'}</div>
                                 <div class="text-xs text-zinc-500 font-mono">
-                                    PO #${this.selectedPO.id.slice(-6).toUpperCase()}
+                                    ${poLabel(this.selectedPO)}
                                 </div>
                             </div>
                         </div>
