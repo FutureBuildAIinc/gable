@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/google/uuid"
 )
 
 func TestARStatementListsUnappliedCashAndStatesTheNetBalance(t *testing.T) {
@@ -75,5 +77,67 @@ func TestARStatementListsUnappliedCashAndStatesTheNetBalance(t *testing.T) {
 	_ = json.Unmarshal(raw, &wire)
 	if got := wire.Currencies[0]["unapplied_cents"]; got != float64(0) {
 		t.Errorf("unapplied cash before it arrived %v, want 0", got)
+	}
+}
+
+// The documents a statement lists follow the caller's reach; the balances
+// cover the whole account (FROM-PRINCIPAL 117): a caller pinned to one yard
+// sees only that yard's unapplied payments in the list, and the net balance
+// of the whole account, which is the unwalled aging's total.
+func TestARStatementUnappliedListFollowsTheWallAndTheBalanceDoesNot(t *testing.T) {
+	w := newARWorld(t)
+	today := w.businessDay()
+	w.invoice(100000, today.AddDate(0, 0, -20))
+	own := w.payment(50000, today.AddDate(0, 0, -5), "CHECK")
+
+	other := uuid.New()
+	w.exec(`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, other, "UW-"+other.String()[:8])
+	t.Cleanup(func() {
+		w.exec(`UPDATE payments SET branch_id = `+arBranch+` WHERE branch_id = $1`, other)
+		w.exec(`DELETE FROM locations WHERE id = $1`, other)
+	})
+	otherPay := uuid.New()
+	w.mustAct("a check at another yard", func(ctx context.Context) (*account.Effects, error) {
+		_, fx, e := w.svc.RecordPayment(ctx, account.RecordPaymentIn{PaymentID: otherPay, CustomerID: w.customerID, BranchID: other,
+			Currency: "USD", Method: "CHECK", AmountCents: 7700, ReceivedOn: today.AddDate(0, 0, -4), Actor: "u-test"})
+		return fx, e
+	})
+	var ownNumber, otherNumber string
+	for id, dst := range map[uuid.UUID]*string{own: &ownNumber, otherPay: &otherNumber} {
+		if err := w.db.Pool.QueryRow(context.Background(), `SELECT number FROM payments WHERE id = $1`, id).Scan(dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	q := account.StatementQuery{CustomerID: w.customerID, From: today.AddDate(0, 0, -30), To: today}
+
+	// pinned to the world's yard
+	pinned := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{BranchID: &w.branchID, IsAdmin: true})
+	st, err := w.svc.Statement(pinned, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := st.Currencies[0]
+	if len(c.UnappliedPayments) != 1 || c.UnappliedPayments[0].Number != ownNumber {
+		t.Errorf("a pinned caller lists %+v, want only its own yard's %s", c.UnappliedPayments, ownNumber)
+	}
+	if int64(c.UnappliedCents) != 57700 || int64(c.NetBalanceCents) != 100000-57700 {
+		t.Errorf("unapplied %d, net %d: the balances cover the whole account (57700, 42300)", c.UnappliedCents, c.NetBalanceCents)
+	}
+
+	// an unwalled caller lists both and agrees with the unwalled aging
+	st, err = w.svc.Statement(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c = st.Currencies[0]
+	if len(c.UnappliedPayments) != 2 {
+		t.Errorf("an unwalled caller lists %d payments, want 2", len(c.UnappliedPayments))
+	}
+	sum, err := w.svc.AgingSummary(context.Background(), account.AgingQuery{AsOf: today, Basis: "due_date", CustomerID: &w.customerID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(sum.Totals[0].TotalCents) != int64(c.NetBalanceCents) {
+		t.Errorf("aging total %d, net balance %d", sum.Totals[0].TotalCents, c.NetBalanceCents)
 	}
 }
