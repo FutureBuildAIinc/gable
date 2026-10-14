@@ -63,6 +63,9 @@ function statement(customerId: string) {
         closing_balance_cents: 0,
         lines: [],
         open_documents: [],
+        unapplied_payments: [],
+        unapplied_cents: 0,
+        net_balance_cents: 0,
       },
     ],
   }
@@ -194,6 +197,37 @@ describe('customer statement preselect via ?customer=<id>', () => {
       // can see who the statement is for before it loads.
       expect(textOf(el)).toContain('Ridgeview Framing')
       expect(textOf(el)).toContain('AC-001')
+    } finally {
+      history.replaceState(null, '', '/')
+    }
+  })
+})
+describe('customer statement unapplied cash', () => {
+  it('lists the payments still unapplied and states the net balance beside the closing balance', async () => {
+    const st = statement(CUSTOMER_ID)
+    st.currencies[0] = {
+      ...st.currencies[0],
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 50000,
+      net_balance_cents: 50000,
+    }
+    stubRoutes({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+      [`/ar/customers/${CUSTOMER_ID}/statement`]: st,
+    })
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      const body = textOf(el)
+      expect(body).toContain('PAY-000042')
+      expect(body).toContain('2031-12-20')
+      expect(body).toContain('$500.00')
+      expect(body).toMatch(/net balance/i)
     } finally {
       history.replaceState(null, '', '/')
     }
