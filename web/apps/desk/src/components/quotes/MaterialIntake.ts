@@ -70,14 +70,16 @@ export class GableMaterialIntake extends LitElement {
   }
 
   private _accept(index: number) {
-    if (this._result?.synthetic) return;
+    // While the quote saves, an accepted line could join after the save was
+    // sent and be lost: nothing leaves the list until the save is done.
+    if (this.disabled || this._result?.synthetic) return;
     this._emitAccept([this._items[index]]);
     this._items = this._items.filter((_, i) => i !== index);
     this._open = new Set();
   }
 
   private _acceptConfident() {
-    if (this._result?.synthetic) return;
+    if (this.disabled || this._result?.synthetic) return;
     const keep: ParsedItem[] = [];
     const accepted: ParsedItem[] = [];
     for (const item of this._items) {
@@ -147,8 +149,8 @@ export class GableMaterialIntake extends LitElement {
           `}
           <div class="font-mono text-sm text-white shrink-0">${item.quantity} <span class="text-zinc-500 text-[10px]">${item.uom}</span></div>
           ${sample ? nothing : html`<div class="flex items-center gap-1.5 shrink-0">
-            <button type="button" data-testid="intake-accept" @click=${() => this._accept(idx)}
-              class="inline-flex items-center gap-1 rounded-md border border-gable-green/30 bg-gable-green/10 text-gable-green text-xs font-medium px-2.5 py-1.5 hover:bg-gable-green/20">
+            <button type="button" data-testid="intake-accept" @click=${() => this._accept(idx)} ?disabled=${this.disabled}
+              class="inline-flex items-center gap-1 rounded-md border border-gable-green/30 bg-gable-green/10 text-gable-green text-xs font-medium px-2.5 py-1.5 hover:bg-gable-green/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gable-green/10">
               ${icon(Check, 12)} Accept
             </button>
             <button type="button" data-testid="intake-reject" aria-label="Reject this line" @click=${() => this._reject(idx)}
@@ -222,8 +224,8 @@ export class GableMaterialIntake extends LitElement {
           <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
             <p class="text-xs text-zinc-500">${this._items.length} line${this._items.length === 1 ? '' : 's'} to review</p>
             ${!result.synthetic && confident > 0 ? html`
-              <button type="button" data-testid="intake-accept-confident" @click=${this._acceptConfident}
-                class="inline-flex items-center rounded-lg text-xs font-medium border border-gable-green/30 bg-gable-green/10 text-gable-green px-3 py-1.5 hover:bg-gable-green/20">
+              <button type="button" data-testid="intake-accept-confident" @click=${this._acceptConfident} ?disabled=${this.disabled}
+                class="inline-flex items-center rounded-lg text-xs font-medium border border-gable-green/30 bg-gable-green/10 text-gable-green px-3 py-1.5 hover:bg-gable-green/20 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-gable-green/10">
                 ${icon(Check, 12, 'mr-1.5')} Accept confident lines (${confident})
               </button>
             ` : nothing}
