@@ -84,3 +84,20 @@ describe('the chord rules', () => {
     expect(keycap('alt-q')).toBe('Alt+Q');
   });
 });
+
+describe('the chord rules on a keyboard that composes characters', () => {
+  it('spells an Alt or Ctrl letter from its physical key, so Option on a Mac still resolves', () => {
+    expect(chordFromEvent({ key: 'œ', code: 'KeyQ', altKey: true })).toBe('alt-q');
+    expect(chordFromEvent({ key: 'Ω', code: 'KeyZ', altKey: true })).toBe('alt-z');
+    expect(chordFromEvent({ key: 'Dead', code: 'KeyN', altKey: true })).toBe('alt-n');
+    expect(chordFromEvent({ key: '¡', code: 'Digit1', altKey: true })).toBe('alt-1');
+    expect(chordFromEvent({ key: 'k', code: 'KeyK', ctrlKey: true })).toBe('ctrl-k');
+  });
+
+  it('still leaves a bare or shifted key as typing, and function keys on their key', () => {
+    expect(chordFromEvent({ key: 'q', code: 'KeyQ' })).toBe('');
+    expect(chordFromEvent({ key: 'Q', code: 'KeyQ', shiftKey: true })).toBe('');
+    expect(chordFromEvent({ key: 'F4', code: 'F4', shiftKey: true })).toBe('shift-f4');
+    expect(chordFromEvent({ key: 'Enter', code: 'Enter', altKey: true })).toBe('');
+  });
+});
