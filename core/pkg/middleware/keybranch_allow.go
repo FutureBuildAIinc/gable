@@ -264,6 +264,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/pos/customers":                                    {KeyBranchClassWalled, "customer_branches (ruling A at the counter: a user finds every customer, a bound key keeps its pin); the counter's lookup reads only what the pin reaches"},
 	"GET /api/v1/pos/registers":                                    {KeyBranchClassWalled, "the register's location branch, else pos_registers.branch_id, active registers only (a bound key sees only its pin's registers); TestRegistersListHoldsTheBranchWalls"},
 	"GET /api/v1/pos/products/search":                              {KeyBranchClassStatedLimit, "the dealer wide product catalogue"},
+	"GET /api/v1/pos/tiles":                                        {KeyBranchClassWalled, "the yard's sales history and on hand follow the caller's branch (a bound key keeps its pin); the product list itself is the dealer wide catalogue; TestTilesHoldTheCallersReach"},
 	"GET /api/v1/price_levels":                                     {KeyBranchClassStatedLimit, "the dealer wide price level vocabulary"},
 	"GET /api/v1/pricing/categories":                               {KeyBranchClassStatedLimit, "product category reference data, no branch fact"},
 	"GET /api/v1/pricing/rebates/programs":                         {KeyBranchClassStatedLimit, "programs are dealer wide and a claim uses supplied volumes"},

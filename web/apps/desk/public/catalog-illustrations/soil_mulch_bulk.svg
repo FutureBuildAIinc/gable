@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Bulk bag of cedar mulch</title>
+  <defs><style>
+    .bagBody{fill:#a05a2a}
+    .bagHi{fill:#c07848}
+    .bagShade{fill:#6e3a18}
+    .bagDeep{fill:#3e1e0e}
+    .bagTop{fill:#c07848}
+    .bagTopShade{fill:#7a4a20}
+    .lift{fill:#3a3530}
+    .liftHi{fill:#5a524a}
+    .strap{fill:#3a3530}
+    .tag{fill:#faf3e0}
+    .stamp{fill:#3a2410}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:2px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="106" ry="8" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <path class="bagBody" d="M 36 76 L 220 76 L 230 218 L 26 218 Z"/>
+    <path class="bagHi" d="M 36 76 L 220 76 L 222 84 L 36 84 Z"/>
+    <path class="bagShade" d="M 26 210 L 230 210 L 230 218 L 26 218 Z"/>
+    <line x1="36" y1="120" x2="220" y2="120" stroke="#3e1e0e" stroke-width="0.5" opacity="0.5"/>
+    <line x1="36" y1="160" x2="220" y2="160" stroke="#3e1e0e" stroke-width="0.5" opacity="0.5"/>
+    <line x1="36" y1="200" x2="220" y2="200" stroke="#3e1e0e" stroke-width="0.5" opacity="0.5"/>
+  </g>
+  <g>
+    <path class="bagTop" d="M 36 76 L 220 76 L 220 60 L 36 60 Z"/>
+    <path class="bagTopShade" d="M 36 76 L 220 76 L 220 64 L 36 64 Z" opacity="0.7"/>
+    <ellipse class="bagHi" cx="128" cy="60" rx="92" ry="6"/>
+  </g>
+  <g>
+    <path class="lift" d="M 60 56 L 60 76 L 196 76 L 196 56 L 184 50 L 72 50 Z"/>
+    <ellipse class="lift" cx="128" cy="50" rx="68" ry="6"/>
+    <rect class="liftHi" x="68" y="54" width="120" height="3" opacity="0.6"/>
+  </g>
+  <g>
+    <rect class="tag" x="84" y="118" width="92" height="68" rx="1"/>
+    <rect class="stamp" x="84" y="118" width="92" height="6"/>
+    <text class="textBrand" x="130" y="134" font-size="12" fill="#faf3e0" text-anchor="middle">RIDGELINE</text>
+    <rect x="92" y="138" width="76" height="2" fill="#3a2410" opacity="0.6"/>
+    <text class="textSub" x="130" y="152" font-size="7" fill="#3a2410" text-anchor="middle">CEDAR MULCH</text>
+    <text class="textSub" x="130" y="164" font-size="5" fill="#7a4a20" text-anchor="middle">PREMIUM BARK</text>
+    <text class="textSub" x="130" y="178" font-size="6" fill="#3a2410" font-weight="700" text-anchor="middle">2 CU FT</text>
+  </g>
+  <g opacity="0.55">
+    <rect x="58" y="100" width="6" height="6" fill="#3e1e0e"/>
+    <rect x="192" y="100" width="6" height="6" fill="#3e1e0e"/>
+    <rect x="58" y="200" width="6" height="6" fill="#3e1e0e"/>
+    <rect x="192" y="200" width="6" height="6" fill="#3e1e0e"/>
+  </g>
+</svg>

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>ProFrame 18V cordless drill, side view</title>
+  <defs>
+    <style>
+      .bodyMain{fill:#6a6f7a}
+      .bodyShade{fill:#4a4d56}
+      .bodyHi{fill:#8a8f98}
+      .accent{fill:#d96a2e}
+      .accentShade{fill:#a8521e}
+      .chuck{fill:#3a3d44}
+      .chuckRing{fill:#2a2d34}
+      .chuckJaw{fill:#1a1d24}
+      .handle{fill:#5a5d66}
+      .handleGrip{fill:#3a3d44}
+      .battery{fill:#2a2d33}
+      .batteryShade{fill:#1a1d24}
+      .batteryHi{fill:#3a3d44}
+      .trigger{fill:#2a2d33}
+      .vent{fill:#3a3d44}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+      .textSmall{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:1px}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="234" rx="84" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="battery" x="118" y="200" width="70" height="28" rx="2"/>
+    <rect class="batteryShade" x="118" y="220" width="70" height="8" rx="2"/>
+    <rect class="batteryHi" x="118" y="200" width="70" height="3" opacity="0.6"/>
+    <rect x="124" y="206" width="10" height="16" fill="#4a8a3a" opacity="0.8"/>
+    <rect x="124" y="206" width="10" height="8" fill="#7acc4a" opacity="0.7"/>
+    <rect x="137" y="208" width="22" height="3" fill="#5a5d66" opacity="0.5"/>
+    <rect x="137" y="214" width="22" height="3" fill="#5a5d66" opacity="0.5"/>
+  </g>
+  <g>
+    <polygon class="handle" points="118,124 158,124 168,200 128,200"/>
+    <polygon class="handleGrip" points="120,140 156,140 162,194 124,194"/>
+    <line x1="128" y1="148" x2="160" y2="148" stroke="#1a1d24" stroke-width="0.5" opacity="0.6"/>
+    <line x1="129" y1="156" x2="161" y2="156" stroke="#1a1d24" stroke-width="0.5" opacity="0.6"/>
+    <line x1="130" y1="164" x2="162" y2="164" stroke="#1a1d24" stroke-width="0.5" opacity="0.6"/>
+    <line x1="131" y1="172" x2="163" y2="172" stroke="#1a1d24" stroke-width="0.5" opacity="0.6"/>
+    <line x1="132" y1="180" x2="164" y2="180" stroke="#1a1d24" stroke-width="0.5" opacity="0.6"/>
+    <line x1="133" y1="188" x2="165" y2="188" stroke="#1a1d24" stroke-width="0.5" opacity="0.6"/>
+    <polygon class="trigger" points="116,128 116,148 124,148 124,128"/>
+    <rect class="battery" x="122" y="146" width="20" height="4" rx="1"/>
+  </g>
+  <g>
+    <rect class="bodyMain" x="46" y="76" width="124" height="58" rx="10"/>
+    <rect class="bodyHi" x="46" y="76" width="124" height="6" rx="3" opacity="0.6"/>
+    <rect class="bodyShade" x="46" y="120" width="124" height="14" rx="4" opacity="0.6"/>
+    <rect class="accent" x="46" y="96" width="124" height="14"/>
+    <rect class="accentShade" x="46" y="106" width="124" height="4" opacity="0.6"/>
+    <text class="textBrand" x="108" y="108" font-size="11" fill="#faf3e0" text-anchor="middle">ProFrame</text>
+    <text class="textSmall" x="108" y="80" font-size="5" fill="#faf3e0" text-anchor="middle" opacity="0.85">18V Li-Ion</text>
+    <g opacity="0.55">
+      <rect class="vent" x="58" y="124" width="22" height="2" rx="0.5"/>
+      <rect class="vent" x="58" y="128" width="22" height="2" rx="0.5"/>
+      <rect class="vent" x="58" y="132" width="22" height="2" rx="0.5"/>
+    </g>
+    <rect class="bodyShade" x="148" y="78" width="20" height="50" rx="3" opacity="0.5"/>
+    <circle cx="158" cy="100" r="5" fill="#3a3d44"/>
+    <circle cx="158" cy="100" r="3" fill="#5a5d66"/>
+    <line x1="153" y1="100" x2="163" y2="100" stroke="#1a1d24" stroke-width="0.5"/>
+    <line x1="158" y1="95" x2="158" y2="105" stroke="#1a1d24" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="chuckRing" x="38" y="84" width="14" height="42" rx="2"/>
+    <rect class="chuck" x="14" y="88" width="26" height="34" rx="2"/>
+    <rect class="chuckRing" x="14" y="86" width="26" height="4" rx="1"/>
+    <rect class="chuckRing" x="14" y="120" width="26" height="4" rx="1"/>
+    <ellipse class="chuckJaw" cx="14" cy="105" rx="2.5" ry="11"/>
+    <line x1="10" y1="98" x2="18" y2="98" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="10" y1="105" x2="18" y2="105" stroke="#5a5d66" stroke-width="0.6"/>
+    <line x1="10" y1="112" x2="18" y2="112" stroke="#5a5d66" stroke-width="0.6"/>
+  </g>
+  <g opacity="0.9">
+    <rect class="bodyShade" x="42" y="130" width="14" height="6" rx="1"/>
+  </g>
+</svg>

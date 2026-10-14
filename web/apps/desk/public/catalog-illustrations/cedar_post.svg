@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Western Red Cedar 4x4 post, S4S, with end grain and grain lines</title>
+  <defs>
+    <style>
+      .face{fill:#a85a3c}
+      .topEdge{fill:#c4784c}
+      .sideEdge{fill:#7a3c24}
+      .endGrain{fill:#6a2c1c}
+      .grain{fill:none;stroke:#7a3c24;stroke-linecap:round}
+      .ring{fill:none;stroke:#3a1f10}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="76" ry="6" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <polygon class="topEdge" points="60,30 196,30 214,48 78,48"/>
+    <polygon class="sideEdge" points="196,30 214,48 214,210 196,192"/>
+    <rect class="face" x="60" y="30" width="136" height="180"/>
+    <rect class="sideEdge" x="192" y="30" width="4" height="180" opacity="0.5"/>
+    <rect class="topEdge" x="60" y="30" width="136" height="2"/>
+    <rect class="topEdge" x="60" y="208" width="136" height="2" opacity="0.7"/>
+    <ellipse class="endGrain" cx="206" cy="120" rx="22" ry="68"/>
+    <ellipse class="ring" cx="206" cy="120" rx="16" ry="50" stroke-width="0.6"/>
+    <ellipse class="ring" cx="206" cy="120" rx="10" ry="32" stroke-width="0.5"/>
+    <ellipse class="ring" cx="206" cy="120" rx="5" ry="14" stroke-width="0.5"/>
+    <line x1="206" y1="52" x2="206" y2="188" stroke="#3a1f10" stroke-width="0.3" opacity="0.4"/>
+    <line x1="184" y1="120" x2="228" y2="120" stroke="#3a1f10" stroke-width="0.3" opacity="0.4"/>
+  </g>
+  <g opacity="0.55">
+    <line class="grain" x1="66" y1="48" x2="194" y2="48" stroke-width="0.5"/>
+    <line class="grain" x1="70" y1="68" x2="198" y2="68" stroke-width="0.6"/>
+    <line class="grain" x1="66" y1="88" x2="194" y2="88" stroke-width="0.5"/>
+    <line class="grain" x1="70" y1="110" x2="198" y2="110" stroke-width="0.6"/>
+    <line class="grain" x1="66" y1="132" x2="194" y2="132" stroke-width="0.5"/>
+    <line class="grain" x1="70" y1="156" x2="198" y2="156" stroke-width="0.6"/>
+    <line class="grain" x1="66" y1="178" x2="194" y2="178" stroke-width="0.5"/>
+    <line class="grain" x1="70" y1="200" x2="198" y2="200" stroke-width="0.5"/>
+  </g>
+</svg>

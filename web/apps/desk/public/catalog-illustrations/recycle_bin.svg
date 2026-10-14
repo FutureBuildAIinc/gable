@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>32 gallon recycle bin with lid</title>
+  <defs><style>
+    .body{fill:#2d6a2e}
+    .bodyHi{fill:#4a8a4a}
+    .bodyShade{fill:#1a4a1a}
+    .lid{fill:#3a8a3a}
+    .lidHi{fill:#5aaa5a}
+    .lidShade{fill:#2a5a2a}
+    .lidDeep{fill:#1a4a1a}
+    .rim{fill:#3a3e44}
+    .wheel{fill:#1a1d22}
+    .wheelHub{fill:#5a5e64}
+    .handle{fill:#1a1d22}
+    .stripe{fill:#e8dcc0}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="100" ry="6" fill="#1a1410" opacity="0.22"/>
+  <g>
+    <path class="body" d="M 56 80 L 80 200 Q 80 210 90 210 L 166 210 Q 176 210 176 200 L 200 80 Z"/>
+    <path class="bodyHi" d="M 56 80 L 80 200 Q 80 210 90 210 L 102 210 L 76 80 Z"/>
+    <path class="bodyShade" d="M 178 80 L 200 80 L 176 200 Q 176 210 166 210 L 154 210 Z"/>
+    <path class="bodyHi" d="M 80 80 L 176 80 L 178 84 L 78 84 Z"/>
+  </g>
+  <g>
+    <rect class="stripe" x="56" y="100" width="144" height="22"/>
+    <rect class="stripe" x="56" y="100" width="144" height="3" opacity="0.6"/>
+    <rect class="stripe" x="56" y="119" width="144" height="3" opacity="0.6"/>
+    <text class="textBrand" x="128" y="116" font-size="11" fill="#2d6a2e" text-anchor="middle">RECYCLE</text>
+  </g>
+  <g>
+    <ellipse class="lid" cx="128" cy="80" rx="80" ry="14"/>
+    <ellipse class="lidHi" cx="128" cy="74" rx="76" ry="6"/>
+    <ellipse class="lidShade" cx="128" cy="86" rx="76" ry="6"/>
+    <ellipse class="lidDeep" cx="128" cy="80" rx="68" ry="9"/>
+    <ellipse class="lid" cx="128" cy="80" rx="68" ry="9" opacity="0.5"/>
+    <ellipse class="lid" cx="128" cy="76" rx="68" ry="7"/>
+    <ellipse class="lidDeep" cx="128" cy="76" rx="64" ry="5"/>
+  </g>
+  <g>
+    <rect class="handle" x="118" y="42" width="20" height="22" rx="2"/>
+    <rect class="handle" x="114" y="46" width="28" height="14" rx="3"/>
+    <rect class="handle" x="118" y="42" width="20" height="22" rx="2"/>
+    <rect class="lidShade" x="118" y="42" width="20" height="6" rx="1" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="rim" x="60" y="200" width="14" height="8"/>
+    <rect class="rim" x="182" y="200" width="14" height="8"/>
+  </g>
+  <g>
+    <ellipse class="wheel" cx="74" cy="216" rx="10" ry="10"/>
+    <ellipse class="wheelHub" cx="74" cy="216" rx="5" ry="5"/>
+    <line x1="69" y1="216" x2="79" y2="216" stroke="#1a1d22" stroke-width="0.8"/>
+    <line x1="74" y1="211" x2="74" y2="221" stroke="#1a1d22" stroke-width="0.8"/>
+    <ellipse class="wheel" cx="182" cy="216" rx="10" ry="10"/>
+    <ellipse class="wheelHub" cx="182" cy="216" rx="5" ry="5"/>
+    <line x1="177" y1="216" x2="187" y2="216" stroke="#1a1d22" stroke-width="0.8"/>
+    <line x1="182" y1="211" x2="182" y2="221" stroke="#1a1d22" stroke-width="0.8"/>
+  </g>
+</svg>

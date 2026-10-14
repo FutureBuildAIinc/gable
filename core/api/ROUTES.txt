@@ -309,6 +309,7 @@ GET	/api/v1/pos/returns	internal/pos	h.ListReturns
 POST	/api/v1/pos/returns	internal/pos	h.CreateReturn
 GET	/api/v1/pos/returns/{id}	internal/pos	h.GetReturn
 POST	/api/v1/pos/sync	internal/pos	h.SyncOffline
+GET	/api/v1/pos/tiles	internal/pos	h.ListTiles
 GET	/api/v1/pos/till/current	internal/pos	h.CurrentTill
 POST	/api/v1/pos/till/open	internal/pos	h.OpenTill
 POST	/api/v1/pos/till/{id}/close	internal/pos	h.CloseTill

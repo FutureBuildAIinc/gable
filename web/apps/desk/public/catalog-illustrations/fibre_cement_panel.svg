@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Fibre cement siding panel with wood-grain texture</title>
+  <defs>
+    <style>
+      .panelMain{fill:#d8c8a8}
+      .panelShade{fill:#a89878}
+      .panelHi{fill:#f4ecd8}
+      .grainA{fill:#a89878}
+      .grainB{fill:#8a7a5a}
+      .grainC{fill:#d8c8a8}
+      .grainD{fill:#7a6a4a}
+      .topEdge{fill:#a89878}
+      .sideEdge{fill:#7a6a4a}
+      .endGrain{fill:#7a6a4a}
+      .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.2px}
+    </style>
+    <pattern id="fcgrain" x="0" y="0" width="60" height="14" patternUnits="userSpaceOnUse">
+      <rect width="60" height="14" fill="#d8c8a8"/>
+      <ellipse class="grainA" cx="10" cy="4" rx="14" ry="1.2"/>
+      <ellipse class="grainB" cx="30" cy="8" rx="20" ry="1.4"/>
+      <ellipse class="grainC" cx="46" cy="3" rx="12" ry="1"/>
+      <ellipse class="grainD" cx="22" cy="11" rx="16" ry="1.2"/>
+      <ellipse class="grainA" cx="50" cy="10" rx="14" ry="1.2"/>
+    </pattern>
+  </defs>
+  <ellipse cx="128" cy="226" rx="106" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="sideEdge" points="28,84 44,76 44,180 28,188"/>
+    <polygon class="topEdge" points="28,84 220,84 232,76 44,76"/>
+    <rect x="28" y="84" width="192" height="104" fill="url(#fcgrain)"/>
+    <rect class="sideEdge" x="216" y="84" width="4" height="104" opacity="0.5"/>
+    <rect class="topEdge" x="28" y="84" width="192" height="2"/>
+  </g>
+  <g>
+    <rect class="endGrain" x="220" y="84" width="14" height="104" opacity="0.7"/>
+    <rect class="endGrain" x="220" y="76" width="14" height="8" opacity="0.6"/>
+  </g>
+  <g>
+    <text class="textBrand" x="128" y="200" font-size="9" fill="#5a4a2a" text-anchor="middle">CEMTRIM</text>
+  </g>
+</svg>

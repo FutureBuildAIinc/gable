@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Roll of drywall joint tape</title>
+  <defs>
+    <style>
+      .tapeMain{fill:#faf3e0}
+      .tapeShade{fill:#dcd0b8}
+      .tapeHi{fill:#ffffff}
+      .coreMain{fill:#a8a8a8}
+      .coreShade{fill:#5a5a5a}
+      .coreHi{fill:#cdcdcd}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="78" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <ellipse class="tapeMain" cx="128" cy="128" rx="76" ry="62"/>
+    <ellipse class="tapeShade" cx="128" cy="128" rx="76" ry="58" opacity="0.5"/>
+    <ellipse class="tapeMain" cx="128" cy="128" rx="68" ry="56" fill="none" stroke="#dcd0b8" stroke-width="0.6"/>
+    <ellipse class="tapeMain" cx="128" cy="128" rx="60" ry="50" fill="none" stroke="#dcd0b8" stroke-width="0.6"/>
+    <ellipse class="tapeMain" cx="128" cy="128" rx="52" ry="44" fill="none" stroke="#dcd0b8" stroke-width="0.6"/>
+    <ellipse class="tapeMain" cx="128" cy="128" rx="44" ry="38" fill="none" stroke="#dcd0b8" stroke-width="0.6"/>
+    <ellipse class="coreMain" cx="128" cy="128" rx="22" ry="20"/>
+    <ellipse class="coreShade" cx="128" cy="128" rx="22" ry="20" fill="none" stroke="#5a5a5a" stroke-width="1" opacity="0.6"/>
+    <ellipse class="coreHi" cx="128" cy="128" rx="16" ry="14" fill="none" stroke="#cdcdcd" stroke-width="0.6" opacity="0.7"/>
+  </g>
+  <g>
+    <rect class="tapeMain" x="40" y="120" width="20" height="16" rx="1"/>
+    <rect class="tapeShade" x="40" y="132" width="20" height="4" opacity="0.5"/>
+    <line x1="6" y1="128" x2="36" y2="128" stroke="#dcd0b8" stroke-width="1"/>
+  </g>
+</svg>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Walk-behind broadcast spreader for fertilizer</title>
+  <defs>
+    <style>
+      .hopperMain{fill:#c84a3d}
+      .hopperShade{fill:#8a3024}
+      .hopperHi{fill:#e0685a}
+      .hopperRim{fill:#7a4e22}
+      .frame{fill:#3a3d44}
+      .frameShade{fill:#1a1d24}
+      .wheel{fill:#2a2a2a}
+      .wheelHub{fill:#7a7a7a}
+      .spinner{fill:#5a5d66}
+      .spinnerHi{fill:#7a7d86}
+      .handle{fill:#3a3d44}
+      .handleGrip{fill:#1a1a1a}
+      .handleFoam{fill:#3a3d44}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="100" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g>
+    <polygon class="hopperMain" points="58,82 210,82 198,170 70,170"/>
+    <polygon class="hopperHi" points="58,82 210,82 208,90 60,90"/>
+    <polygon class="hopperShade" points="70,162 198,170 196,170 70,170" opacity="0.5"/>
+    <rect class="hopperRim" x="56" y="78" width="156" height="6" rx="1"/>
+    <ellipse class="frame" cx="134" cy="82" rx="32" ry="4"/>
+  </g>
+  <g>
+    <rect class="frame" x="58" y="168" width="156" height="6"/>
+    <rect class="frame" x="62" y="170" width="4" height="20"/>
+    <rect class="frame" x="204" y="170" width="4" height="20"/>
+    <rect class="handle" x="60" y="60" width="4" height="22"/>
+    <rect class="handleFoam" x="50" y="42" width="24" height="22" rx="3"/>
+    <rect class="handleFoam" x="46" y="40" width="32" height="26" rx="3"/>
+    <rect class="handleGrip" x="48" y="42" width="4" height="22"/>
+    <rect class="handleGrip" x="72" y="42" width="4" height="22"/>
+    <rect class="handle" x="206" y="60" width="4" height="22"/>
+    <rect class="handleFoam" x="194" y="42" width="24" height="22" rx="3"/>
+    <rect class="handleFoam" x="190" y="40" width="32" height="26" rx="3"/>
+    <rect class="handleGrip" x="192" y="42" width="4" height="22"/>
+    <rect class="handleGrip" x="216" y="42" width="4" height="22"/>
+  </g>
+  <g>
+    <circle class="wheel" cx="76" cy="200" r="20"/>
+    <circle class="wheelHub" cx="76" cy="200" r="7"/>
+    <circle class="wheelHub" cx="76" cy="200" r="3" fill="#1a1a1a"/>
+    <line x1="76" y1="182" x2="76" y2="218" stroke="#1a1a1a" stroke-width="1.5"/>
+    <line x1="58" y1="200" x2="94" y2="200" stroke="#1a1a1a" stroke-width="1.5"/>
+    <line x1="64" y1="188" x2="88" y2="212" stroke="#1a1a1a" stroke-width="1.2"/>
+    <line x1="88" y1="188" x2="64" y2="212" stroke="#1a1a1a" stroke-width="1.2"/>
+    <circle class="wheel" cx="192" cy="200" r="20"/>
+    <circle class="wheelHub" cx="192" cy="200" r="7"/>
+    <circle class="wheelHub" cx="192" cy="200" r="3" fill="#1a1a1a"/>
+    <line x1="192" y1="182" x2="192" y2="218" stroke="#1a1a1a" stroke-width="1.5"/>
+    <line x1="174" y1="200" x2="210" y2="200" stroke="#1a1a1a" stroke-width="1.5"/>
+    <line x1="180" y1="188" x2="204" y2="212" stroke="#1a1a1a" stroke-width="1.2"/>
+    <line x1="204" y1="188" x2="180" y2="212" stroke="#1a1a1a" stroke-width="1.2"/>
+  </g>
+  <g>
+    <ellipse class="spinner" cx="134" cy="184" rx="22" ry="6"/>
+    <ellipse class="spinnerHi" cx="134" cy="184" rx="14" ry="4"/>
+    <line x1="112" y1="184" x2="156" y2="184" stroke="#1a1a1a" stroke-width="1.2"/>
+    <line x1="134" y1="178" x2="134" y2="190" stroke="#1a1a1a" stroke-width="1.2"/>
+  </g>
+</svg>

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Caulk tube, 10 ounce</title>
+  <defs><style>
+    .tubeBody{fill:#e8e2d2}
+    .tubeShade{fill:#b8b2a0}
+    .tubeHi{fill:#faf3df}
+    .cap{fill:#2a2e34}
+    .capShade{fill:#1a1d22}
+    .nozzle{fill:#3a3e44}
+    .nozzleHi{fill:#5a5e64}
+    .label{fill:#faf3e0}
+    .labelBand{fill:#2d4a3a}
+    .labelAccent{fill:#c84a3d}
+    .textBrand{font-family:Verdana,Arial,sans-serif;font-weight:700;letter-spacing:1.5px}
+    .textSub{font-family:Verdana,Arial,sans-serif;font-weight:600;letter-spacing:1.5px}
+  </style></defs>
+  <ellipse cx="128" cy="226" rx="92" ry="8" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="tubeBody" x="36" y="100" width="158" height="50" rx="3"/>
+    <rect class="tubeHi" x="36" y="100" width="158" height="4" rx="2"/>
+    <rect class="tubeShade" x="36" y="142" width="158" height="8" opacity="0.55"/>
+    <rect class="label" x="40" y="106" width="148" height="40"/>
+    <rect class="labelBand" x="40" y="106" width="148" height="6"/>
+    <rect class="labelBand" x="40" y="140" width="148" height="6"/>
+    <text class="textBrand" x="114" y="120" font-size="11" fill="#faf3e0" text-anchor="middle">RIDGELINE</text>
+    <text class="textSub" x="114" y="132" font-size="6" fill="#2d4a3a" text-anchor="middle">SILICONE CAULK</text>
+    <rect class="labelAccent" x="44" y="106" width="2" height="40"/>
+    <rect class="labelAccent" x="184" y="106" width="2" height="40"/>
+  </g>
+  <g>
+    <rect class="tubeBody" x="36" y="100" width="14" height="84" rx="2"/>
+    <rect class="tubeShade" x="36" y="176" width="14" height="8" opacity="0.7"/>
+    <line x1="42" y1="108" x2="42" y2="180" stroke="#a89c84" stroke-width="0.4" opacity="0.7"/>
+    <ellipse class="tubeShade" cx="42" cy="184" rx="8" ry="3"/>
+  </g>
+  <g>
+    <rect class="cap" x="194" y="106" width="34" height="38" rx="2"/>
+    <rect class="capShade" x="194" y="138" width="34" height="6"/>
+    <rect class="capShade" x="194" y="142" width="34" height="2" opacity="0.6"/>
+    <line x1="198" y1="112" x2="224" y2="112" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <line x1="198" y1="118" x2="224" y2="118" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <line x1="198" y1="124" x2="224" y2="124" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <line x1="198" y1="130" x2="224" y2="130" stroke="#5a5e64" stroke-width="0.5" opacity="0.7"/>
+    <rect class="nozzle" x="228" y="116" width="14" height="18"/>
+    <path class="nozzle" d="M 242 122 L 252 116 L 252 134 L 242 128 Z"/>
+    <rect class="nozzle" x="252" y="120" width="2" height="10"/>
+    <rect class="nozzleHi" x="228" y="116" width="14" height="2" opacity="0.7"/>
+  </g>
+</svg>

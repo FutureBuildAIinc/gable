@@ -520,6 +520,52 @@ paths:
           $ref: "#/components/responses/ForbiddenEither"
         "500":
           $ref: "#/components/responses/InternalError"
+  /api/v1/pos/tiles:
+    get:
+      operationId: posTileList
+      tags: [pos]
+      summary: The counter's catalogue tiles
+      description: >-
+        The counter's catalogue for the caller's yard (its branch context, as
+        the product search takes it): up to eight category chips, the yard's
+        categories by units sold, then by product count, then by name, and
+        the product tiles. With neither category nor q the tiles are the
+        yard's top sellers by quantity sold (completed counter sale lines and
+        the lines of invoices at the yard that are not void), then by
+        description; category keeps one category's products in that order; q
+        (two characters or more, sku or description) puts an exact sku first.
+        unit_price_cents and in_stock mean what the product search answers.
+        image_url is null unless the catalog.product_images setting is on and
+        the product has a picture; images is that setting. Never null arrays.
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema: {type: string}
+        - name: q
+          in: query
+          required: false
+          schema: {type: string, minLength: 2}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 48, default: 24}
+        - $ref: "#/components/parameters/XBranchId"
+      responses:
+        "200":
+          description: The chips and the tiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTileSet"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "500":
+          $ref: "#/components/responses/InternalError"
   /api/v1/pos/sync:
     post:
       operationId: posSyncOffline
@@ -1505,6 +1551,35 @@ components:
           - $ref: "#/components/schemas/PosTillReport"
           description: The frozen closing report, a JSON object.
         generated_at: {type: string, format: date-time}
+    PosTileSet:
+      type: object
+      required: [categories, items, images]
+      properties:
+        categories:
+          type: array
+          items: {$ref: "#/components/schemas/PosTileCategory"}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PosTile"}
+        images: {type: boolean, description: "The catalog.product_images setting."}
+    PosTileCategory:
+      type: object
+      required: [name, count]
+      properties:
+        name: {type: string}
+        count: {type: integer, format: int64}
+    PosTile:
+      type: object
+      required: [product_id, sku, description, uom, unit_price_cents, in_stock, category, image_url]
+      properties:
+        product_id: {type: string, format: uuid}
+        sku: {type: string}
+        description: {type: string}
+        uom: {type: string}
+        unit_price_cents: {type: integer, format: int64}
+        in_stock: {type: string, description: "A decimal string of the yard's on hand quantity."}
+        category: {type: string}
+        image_url: {type: [string, "null"]}
     PosSearchResult:
       type: object
       required: [product_id, sku, description, unit_price_cents, uom, in_stock]

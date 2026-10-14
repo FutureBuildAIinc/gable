@@ -123,6 +123,32 @@ func TestDemoImport(t *testing.T) {
 		}
 	})
 
+	t.Run("every imported product carries its picture and the setting is on", func(t *testing.T) {
+		var withPath, total int
+		if err := db.QueryRow(`SELECT COUNT(*) FILTER (WHERE image_url LIKE '/catalog-illustrations/%.svg'), COUNT(*)
+			FROM products WHERE sku = ANY($1)`, jsonlKeys(t, catalogData, "sku")).Scan(&withPath, &total); err != nil {
+			t.Fatalf("pictures: %v", err)
+		}
+		if total == 0 || withPath != total {
+			t.Errorf("%d of %d imported products carry a picture path", withPath, total)
+		}
+		var path string
+		if err := db.QueryRow(`SELECT image_url FROM products WHERE sku = 'DL_SPF_2X4_L08_S'`).Scan(&path); err != nil ||
+			path != "/catalog-illustrations/spf_framing_lumber.svg" {
+			t.Errorf("DL_SPF_2X4_L08_S picture = %q (%v)", path, err)
+		}
+		for _, sku := range []string{"LUM-248-PREM", "OSB-12"} {
+			var p *string
+			if err := db.QueryRow(`SELECT image_url FROM products WHERE sku = $1`, sku).Scan(&p); err != nil || p == nil {
+				t.Errorf("base product %s has no picture (%v)", sku, err)
+			}
+		}
+		var setting string
+		if err := db.QueryRow(`SELECT value FROM system_settings WHERE key = 'catalog.product_images'`).Scan(&setting); err != nil || setting != "on" {
+			t.Errorf("catalog.product_images = %q (%v), want on", setting, err)
+		}
+	})
+
 	t.Run("every imported product has a margin", func(t *testing.T) {
 		rows, err := db.Query(`
 			SELECT sku, target_margin, commission_rate

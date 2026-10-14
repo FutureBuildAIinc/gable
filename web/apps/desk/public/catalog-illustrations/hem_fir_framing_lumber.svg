@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Hem-Fir dimensional 2x framing lumber stack</title>
+  <defs>
+    <style>
+      .face{fill:#e8d4a8}
+      .topedge{fill:#f4e8c0}
+      .bottomedge{fill:#c8b488}
+      .endgrain{fill:#a89868}
+      .grain{stroke:#a89868;fill:none;stroke-linecap:round}
+      .ring{stroke:#5a4a1e;fill:none}
+      .strap{fill:#3a3530}
+      .strapshade{fill:#5a524a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="222" rx="100" ry="7" fill="#1a1410" opacity="0.2"/>
+  <g>
+    <rect class="face" x="30" y="162" width="196" height="22"/>
+    <rect class="topedge" x="30" y="162" width="196" height="2"/>
+    <line class="grain" x1="36" y1="170" x2="220" y2="170" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="178" x2="222" y2="178" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="162" width="14" height="22"/>
+    <ellipse class="ring" cx="233" cy="173" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="233" cy="173" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="140" width="196" height="22"/>
+    <rect class="topedge" x="30" y="140" width="196" height="2"/>
+    <line class="grain" x1="38" y1="148" x2="222" y2="148" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="34" y1="156" x2="218" y2="156" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="140" width="14" height="22"/>
+    <ellipse class="ring" cx="233" cy="151" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="233" cy="151" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="118" width="196" height="22"/>
+    <rect class="topedge" x="30" y="118" width="196" height="2"/>
+    <line class="grain" x1="40" y1="126" x2="220" y2="126" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="36" y1="134" x2="224" y2="134" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="118" width="14" height="22"/>
+    <ellipse class="ring" cx="233" cy="129" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="233" cy="129" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <g>
+    <rect class="face" x="30" y="96" width="196" height="22"/>
+    <rect class="topedge" x="30" y="96" width="196" height="2"/>
+    <line class="grain" x1="38" y1="104" x2="220" y2="104" stroke-width="0.5" opacity="0.55"/>
+    <line class="grain" x1="42" y1="112" x2="222" y2="112" stroke-width="0.6" opacity="0.5"/>
+    <rect class="endgrain" x="226" y="96" width="14" height="22"/>
+    <ellipse class="ring" cx="233" cy="107" rx="3.5" ry="3" stroke-width="0.6"/>
+    <ellipse class="ring" cx="233" cy="107" rx="1.8" ry="1.4" stroke-width="0.5"/>
+  </g>
+  <rect class="strap" x="78" y="92" width="5" height="98"/>
+  <rect class="strapshade" x="78" y="92" width="1.5" height="98"/>
+  <rect class="strap" x="172" y="92" width="5" height="98"/>
+  <rect class="strapshade" x="172" y="92" width="1.5" height="98"/>
+  <rect x="78" y="98" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="98" width="5" height="3" fill="#5a524a"/>
+  <rect x="78" y="180" width="5" height="3" fill="#5a524a"/>
+  <rect x="172" y="180" width="5" height="3" fill="#5a524a"/>
+</svg>

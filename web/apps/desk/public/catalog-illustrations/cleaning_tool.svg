@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Push broom 24 inch</title>
+  <defs>
+    <style>
+      .handleMain{fill:#a05a2c}
+      .handleHi{fill:#c4784c}
+      .handleShade{fill:#7a3c1c}
+      .blockMain{fill:#3a3d44}
+      .blockHi{fill:#5a5d66}
+      .blockShade{fill:#1a1d24}
+      .bristleMain{fill:#d8b878}
+      .bristleShade{fill:#a8884c}
+      .bristleHi{fill:#f4d8a8}
+      .connector{fill:#5a524a}
+    </style>
+  </defs>
+  <ellipse cx="128" cy="232" rx="106" ry="6" fill="#1a1410" opacity="0.18"/>
+  <g transform="rotate(15 128 128)">
+    <rect class="handleMain" x="120" y="40" width="14" height="160" rx="3"/>
+    <rect class="handleHi" x="120" y="40" width="3" height="160" opacity="0.6"/>
+    <rect class="handleShade" x="131" y="40" width="3" height="160" opacity="0.7"/>
+    <ellipse class="connector" cx="127" cy="40" rx="14" ry="6"/>
+    <ellipse class="connector" cx="127" cy="40" rx="10" ry="4"/>
+  </g>
+  <g>
+    <rect class="blockMain" x="38" y="186" width="180" height="20" rx="2"/>
+    <rect class="blockHi" x="38" y="186" width="180" height="3" opacity="0.5"/>
+    <rect class="blockShade" x="38" y="200" width="180" height="6" opacity="0.5"/>
+    <ellipse class="connector" cx="128" cy="190" rx="10" ry="4"/>
+    <ellipse class="connector" cx="128" cy="190" rx="6" ry="2" fill="#7a7a72"/>
+  </g>
+  <g>
+    <rect class="bristleMain" x="40" y="206" width="176" height="20"/>
+    <rect class="bristleHi" x="40" y="206" width="176" height="2" opacity="0.7"/>
+    <rect class="bristleShade" x="40" y="222" width="176" height="4" opacity="0.6"/>
+    <g opacity="0.5">
+      <line x1="46" y1="210" x2="46" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="52" y1="210" x2="52" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="58" y1="210" x2="58" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="64" y1="210" x2="64" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="70" y1="210" x2="70" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="76" y1="210" x2="76" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="82" y1="210" x2="82" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="88" y1="210" x2="88" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="94" y1="210" x2="94" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="100" y1="210" x2="100" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="106" y1="210" x2="106" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="112" y1="210" x2="112" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="118" y1="210" x2="118" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="124" y1="210" x2="124" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="130" y1="210" x2="130" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="136" y1="210" x2="136" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="142" y1="210" x2="142" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="148" y1="210" x2="148" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="154" y1="210" x2="154" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="160" y1="210" x2="160" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="166" y1="210" x2="166" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="172" y1="210" x2="172" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="178" y1="210" x2="178" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="184" y1="210" x2="184" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="190" y1="210" x2="190" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="196" y1="210" x2="196" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="202" y1="210" x2="202" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+      <line x1="208" y1="210" x2="208" y2="224" stroke="#7a5a2c" stroke-width="0.5"/>
+    </g>
+  </g>
+</svg>

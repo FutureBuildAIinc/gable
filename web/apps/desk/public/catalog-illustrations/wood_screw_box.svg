@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <ellipse cx="128" cy="226" rx="80" ry="6" fill="#000" opacity="0.18"/>
+  <rect x="56" y="76" width="144" height="148" fill="#a87a3a"/>
+  <rect x="56" y="76" width="144" height="148" fill="none" stroke="#6a4a20" stroke-width="1.5"/>
+  <rect x="56" y="76" width="144" height="14" fill="#8a6230"/>
+  <rect x="56" y="210" width="144" height="14" fill="#8a6230"/>
+  <rect x="64" y="100" width="128" height="56" fill="#faf6e8"/>
+  <rect x="64" y="100" width="128" height="56" fill="none" stroke="#6a4a20" stroke-width="1"/>
+  <rect x="70" y="106" width="116" height="6" fill="#c84a2e"/>
+  <text x="128" y="124" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#2a2c30" text-anchor="middle">ProFrame</text>
+  <text x="128" y="138" font-family="Arial, sans-serif" font-size="8" fill="#2a2c30" text-anchor="middle">WOOD SCREWS</text>
+  <text x="128" y="150" font-family="Arial, sans-serif" font-size="7" fill="#2a2c30" text-anchor="middle">3 IN #8 1 LB</text>
+  <g transform="translate(72,170)">
+    <ellipse cx="6" cy="6" rx="4" ry="6" fill="#5a5e64"/>
+    <line x1="6" y1="0" x2="6" y2="-4" stroke="#3a3c40" stroke-width="1"/>
+  </g>
+  <g transform="translate(92,170)">
+    <ellipse cx="6" cy="6" rx="4" ry="6" fill="#5a5e64"/>
+    <line x1="6" y1="0" x2="6" y2="-4" stroke="#3a3c40" stroke-width="1"/>
+  </g>
+  <g transform="translate(112,170)">
+    <ellipse cx="6" cy="6" rx="4" ry="6" fill="#5a5e64"/>
+    <line x1="6" y1="0" x2="6" y2="-4" stroke="#3a3c40" stroke-width="1"/>
+  </g>
+  <g transform="translate(132,170)">
+    <ellipse cx="6" cy="6" rx="4" ry="6" fill="#5a5e64"/>
+    <line x1="6" y1="0" x2="6" y2="-4" stroke="#3a3c40" stroke-width="1"/>
+  </g>
+  <g transform="translate(152,170)">
+    <ellipse cx="6" cy="6" rx="4" ry="6" fill="#5a5e64"/>
+    <line x1="6" y1="0" x2="6" y2="-4" stroke="#3a3c40" stroke-width="1"/>
+  </g>
+  <g transform="translate(172,170)">
+    <ellipse cx="6" cy="6" rx="4" ry="6" fill="#5a5e64"/>
+    <line x1="6" y1="0" x2="6" y2="-4" stroke="#3a3c40" stroke-width="1"/>
+  </g>
+</svg>
