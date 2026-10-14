@@ -182,14 +182,14 @@ func dayOf(t time.Time) string { return t.Format("2006-01-02") }
 
 // seedToday is the seed's own business day: the default branch's calendar day
 // now, in its time zone (the day the AR core refuses money past).
-func seedToday(db *sql.DB) time.Time {
+func seedToday(db *sql.DB) (time.Time, error) {
 	var d time.Time
 	err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
 		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`).Scan(&d)
 	if err != nil {
-		return time.Now()
+		return time.Time{}, fmt.Errorf("the seed's business day was not read: %w", err)
 	}
-	return d
+	return d, nil
 }
 
 // stampInvoice puts the documents' own days on the rows the base seed's acts
@@ -200,8 +200,8 @@ func (r *receivables) stampInvoice(ctx context.Context, in seedInvoice, payID uu
 	now := r.acct.Now()
 	at := func(d time.Time) time.Time {
 		t := time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, time.UTC)
-		if t.After(now) {
-			t = now
+		if t.After(now.Add(-time.Second)) {
+			t = now.Add(-time.Second)
 		}
 		return t
 	}

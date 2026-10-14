@@ -814,7 +814,10 @@ func Run() {
 		if branchID == uuid.Nil {
 			branchID = kelMainID
 		}
-		seedDay := seedToday(db)
+		seedDay, err := seedToday(db)
+		if err != nil {
+			log.Fatalf("Seed: %v", err)
+		}
 		for i := 0; i < numOrders; i++ {
 			status := "FULFILLED"
 			r := rand.Float32()

@@ -543,7 +543,15 @@ func (s *Service) RestampDay(ctx context.Context, invoiceID, paymentID uuid.UUID
 	if paidAt.Before(invoicedAt) {
 		return invalidField("paid_at", "a payment is not made before its invoice")
 	}
-	if paidAt.After(s.now()) || invoicedAt.After(s.now()) {
+	if invoicedAt.After(s.now()) {
+		return invalidField("invoiced_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil && !paidAt.After(invoicedAt) {
+		// a payment received the invoice's own day follows it by a second, so
+		// a statement orders the application behind its invoice
+		paidAt = invoicedAt.Add(time.Second)
+	}
+	if paidAt.After(s.now()) {
 		return invalidField("paid_at", "a day is not in the future")
 	}
 	if paymentID != uuid.Nil {
