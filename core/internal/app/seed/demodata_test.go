@@ -600,6 +600,48 @@ func TestDemoImport(t *testing.T) {
 		}
 	})
 
+	t.Run("every customer's statement net balance equals its aging total", func(t *testing.T) {
+		var today string
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date::text`).Scan(&today); err != nil {
+			t.Fatal(err)
+		}
+		mux := accountMux(t, dbURL)
+		rows, err := db.Query(`SELECT DISTINCT customer_id::text FROM customer_transactions`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if len(ids) == 0 {
+			t.Fatal("no customer has subledger rows")
+		}
+		for _, id := range ids {
+			var st account.Statement
+			getJSON(t, mux, fmt.Sprintf("/api/v1/ar/customers/%s/statement?from=2000-01-01&to=%s", id, today), &st)
+			var net int64
+			for _, c := range st.Currencies {
+				net += int64(c.NetBalanceCents)
+			}
+			var ag account.AgingSummary
+			getJSON(t, mux, fmt.Sprintf("/api/v1/ar/aging/summary?customer_id=%s&as_of=%s", id, today), &ag)
+			var total int64
+			for _, c := range ag.Totals {
+				total += int64(c.TotalCents)
+			}
+			if net != total {
+				t.Errorf("customer %s: the statement's net balance %d, the aging's total %d", id, net, total)
+			}
+		}
+	})
+
 	t.Run("the dashboard's Outstanding AR equals the aging summary's total", func(t *testing.T) {
 		ar, err := newReceivables(dbURL)
 		if err != nil {

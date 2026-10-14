@@ -42,13 +42,28 @@ type OpenDocument struct {
 	OpenCents  httpx.Cents `json:"open_cents"`
 }
 
-// StatementCurrency is the statement of one currency.
+// UnappliedPayment is a payment received on or before the statement's last day
+// that still holds cash no invoice has used as of that day.
+type UnappliedPayment struct {
+	ID             uuid.UUID   `json:"id"`
+	Number         string      `json:"number"`
+	ReceivedOn     string      `json:"received_on"`
+	UnappliedCents httpx.Cents `json:"unapplied_cents"`
+}
+
+// StatementCurrency is the statement of one currency. The subledger writes a
+// row when cash is applied, never when it is received, so the closing balance
+// does not net unapplied cash: the statement lists it and states the net
+// balance (closing less unapplied), the figure the aging totals on that day.
 type StatementCurrency struct {
-	Currency            string          `json:"currency"`
-	OpeningBalanceCents httpx.Cents     `json:"opening_balance_cents"`
-	Lines               []StatementLine `json:"lines"`
-	ClosingBalanceCents httpx.Cents     `json:"closing_balance_cents"`
-	OpenDocuments       []OpenDocument  `json:"open_documents"`
+	Currency            string             `json:"currency"`
+	OpeningBalanceCents httpx.Cents        `json:"opening_balance_cents"`
+	Lines               []StatementLine    `json:"lines"`
+	ClosingBalanceCents httpx.Cents        `json:"closing_balance_cents"`
+	OpenDocuments       []OpenDocument     `json:"open_documents"`
+	UnappliedPayments   []UnappliedPayment `json:"unapplied_payments"`
+	UnappliedCents      httpx.Cents        `json:"unapplied_cents"`
+	NetBalanceCents     httpx.Cents        `json:"net_balance_cents"`
 }
 
 // Statement is GET /api/v1/ar/customers/{id}/statement.
@@ -134,7 +149,7 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 		}
 		sc := byCur[cur]
 		if sc == nil {
-			sc = &StatementCurrency{Currency: cur, Lines: []StatementLine{}, OpenDocuments: []OpenDocument{}}
+			sc = &StatementCurrency{Currency: cur, Lines: []StatementLine{}, OpenDocuments: []OpenDocument{}, UnappliedPayments: []UnappliedPayment{}}
 			byCur[cur] = sc
 			order = append(order, cur)
 		}
@@ -186,7 +201,7 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 		d.TotalCents, d.OpenCents = httpx.Cents(total), httpx.Cents(open)
 		sc := byCur[cur]
 		if sc == nil {
-			sc = &StatementCurrency{Currency: cur, Lines: []StatementLine{}, OpenDocuments: []OpenDocument{}}
+			sc = &StatementCurrency{Currency: cur, Lines: []StatementLine{}, OpenDocuments: []OpenDocument{}, UnappliedPayments: []UnappliedPayment{}}
 			byCur[cur] = sc
 			order = append(order, cur)
 		}
@@ -196,8 +211,48 @@ func (s *Service) Statement(ctx context.Context, q StatementQuery) (*Statement, 
 	if err := docs.Err(); err != nil {
 		return nil, err
 	}
+	pays, err := s.ex(ctx).Query(ctx, `
+		SELECT p.id, p.number, p.currency, to_char(p.received_on, 'YYYY-MM-DD'),
+		       ROUND(p.amount * 100)::bigint
+		       - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+		            WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.applied_on <= $2::date AND (a.reversed_on IS NULL OR a.reversed_on > $2::date)), 0)
+		       - COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.payment_id = p.id AND f.refunded_on <= $2::date), 0)
+		       - ROUND(p.migrated_excess * 100)::bigint AS open
+		FROM payments p
+		WHERE p.customer_id = $1 AND p.received_on <= $2::date AND (p.voided_on IS NULL OR p.voided_on > $2::date)
+		  AND ($3::uuid IS NULL OR p.project_id = $3)
+		ORDER BY p.received_on, p.number`, q.CustomerID, date(q.To), q.JobID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the unapplied cash: %w", err)
+	}
+	for pays.Next() {
+		var u UnappliedPayment
+		var cur string
+		var open int64
+		if err := pays.Scan(&u.ID, &u.Number, &cur, &u.ReceivedOn, &open); err != nil {
+			pays.Close()
+			return nil, fmt.Errorf("failed to scan an unapplied payment: %w", err)
+		}
+		if open <= 0 {
+			continue
+		}
+		u.UnappliedCents = httpx.Cents(open)
+		sc := byCur[cur]
+		if sc == nil {
+			sc = &StatementCurrency{Currency: cur, Lines: []StatementLine{}, OpenDocuments: []OpenDocument{}, UnappliedPayments: []UnappliedPayment{}}
+			byCur[cur] = sc
+			order = append(order, cur)
+		}
+		sc.UnappliedPayments = append(sc.UnappliedPayments, u)
+		sc.UnappliedCents += u.UnappliedCents
+	}
+	pays.Close()
+	if err := pays.Err(); err != nil {
+		return nil, err
+	}
 	sort.Strings(order)
 	for _, c := range order {
+		byCur[c].NetBalanceCents = byCur[c].ClosingBalanceCents - byCur[c].UnappliedCents
 		out.Currencies = append(out.Currencies, *byCur[c])
 	}
 	return out, nil
