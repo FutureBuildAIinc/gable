@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/units"
 	"github.com/gablelbm/gable/pkg/database"
@@ -354,6 +355,9 @@ func (r *PostgresRepository) InsertQuote(ctx context.Context, q *Quote) error {
 	)
 	if err != nil {
 		return mapWriteError(err, "failed to insert quote header")
+	}
+	if err := customerlink.Ensure(ctx, r.db, "quotes", q.ID); err != nil {
+		return err
 	}
 	return r.insertLines(ctx, q, nil)
 }

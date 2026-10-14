@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/google/uuid"
@@ -464,6 +465,9 @@ func (r *PostgresRepository) CreateReorder(ctx context.Context, customerID, sour
 		`, newOrderID, customerID, now, sourceOrderID)
 		if err != nil {
 			return fmt.Errorf("failed to create reorder: %w", err)
+		}
+		if err := customerlink.Ensure(txCtx, r.db, "orders", newOrderID); err != nil {
+			return err
 		}
 
 		// 2. Copy the billable lines with fresh UUIDs and current product

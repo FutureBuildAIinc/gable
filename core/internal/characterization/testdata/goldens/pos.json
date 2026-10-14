@@ -177,7 +177,7 @@
         },
         {
           "description": "Vented Soffit Hardie Textured 1/4 X 16 X 12",
-          "in_stock": "552",
+          "in_stock": "339",
           "product_id": "<id-15>",
           "sku": "CORNSFT1612V",
           "unit_price_cents": 3923,
@@ -209,7 +209,7 @@
         },
         {
           "description": "Ext Door 36x80 Steel 6-Panel",
-          "in_stock": "923",
+          "in_stock": "766",
           "product_id": "<id-19>",
           "sku": "DR-EXT-3680-STL",
           "unit_price_cents": 28000,
@@ -305,7 +305,7 @@
         },
         {
           "description": "R-28 Fiberglass Batts 24x48",
-          "in_stock": "605",
+          "in_stock": "429",
           "product_id": "<id-31>",
           "sku": "INS-R30-24",
           "unit_price_cents": 9800,
@@ -425,7 +425,7 @@
         },
         {
           "description": "4x4x8 Western Red Cedar",
-          "in_stock": "900",
+          "in_stock": "674",
           "product_id": "<id-46>",
           "sku": "LUM-448-WRC",
           "unit_price_cents": 3400,
@@ -433,7 +433,7 @@
         },
         {
           "description": "6x6x12 Pressure Treated",
-          "in_stock": "499",
+          "in_stock": "406",
           "product_id": "<id-47>",
           "sku": "LUM-6612-PT",
           "unit_price_cents": 5500,
@@ -585,7 +585,7 @@
         },
         {
           "description": "Ice & Water Shield",
-          "in_stock": "525",
+          "in_stock": "359",
           "product_id": "<id-66>",
           "sku": "RF-ICE-WTR",
           "unit_price_cents": 9800,

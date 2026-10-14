@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/database"
@@ -586,6 +587,9 @@ func (r *PostgresRepository) InsertOrder(ctx context.Context, o *Order) error {
 		int64(o.TotalCents), o.CreatedAt.Time, branchArg)
 	if err != nil {
 		return mapWriteError(err, "failed to insert order")
+	}
+	if err := customerlink.Ensure(ctx, r.db, "orders", o.ID); err != nil {
+		return err
 	}
 	return r.insertLines(ctx, o)
 }

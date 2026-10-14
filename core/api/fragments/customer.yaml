@@ -1011,7 +1011,7 @@ components:
           type: string
     Customer:
       type: object
-      required: [id, account_number, name, email, phone, address, tier, is_active, primary_branch_id, price_level_id, price_level, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
+      required: [id, account_number, name, email, phone, address, tier, is_active, primary_branch_id, branch_ids, price_level_id, price_level, salesperson_id, salesperson_name, credit_limit_cents, balance_cents, currency, effective_currency, payment_terms_id, payment_terms, po_required, revision, created_at, updated_at]
       properties:
         id:
           type: string
@@ -1034,6 +1034,16 @@ components:
         primary_branch_id:
           type: string
           format: uuid
+          description: The customer's home yard. It is always among branch_ids.
+        branch_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >-
+            The yards the customer trades at, home yard included, in id order. Customers
+            are dealer wide accounts (ruling A): the first document at a yard the customer
+            is not yet linked to adds the yard here.
         price_level_id:
           type: [string, "null"]
           format: uuid
