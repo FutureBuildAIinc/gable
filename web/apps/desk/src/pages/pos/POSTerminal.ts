@@ -469,12 +469,11 @@ export class POSTerminal extends LitElement {
             ${c.jobs.length > 0 ? html`
               <div>
                 <label class="block text-xs text-slate-400" for="pos-job">Job</label>
-                <div class="relative mt-1">
+                <div class="mt-1">
                   <gable-select id="pos-job" .value=${this._jobId} ?disabled=${finished}
                     .options=${[{ value: '', label: 'No job' }, ...c.jobs.map((j) => ({ value: j.id, label: j.name }))]}
                     @change=${(e: Event) => { this._jobId = (e.target as HTMLSelectElement).value; void this._saveAccountRefs(); }}
                   ></gable-select>
-                  <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center text-xs text-slate-400" aria-hidden="true">&#9662;</span>
                 </div>
               </div>` : nothing}
           </div>
