@@ -123,6 +123,49 @@ func TestNoHeader_TaxExemptionsHoldTheCustomerWall(t *testing.T) {
 	}
 }
 
+// r8 P1-1: a body that is not exactly one JSON value (a trailing value or
+// byte after the object) must not slip past the user wall to the handler,
+// which reads only the first value. Every caller held to A, header or not, and
+// a user with no grants, is refused 400 on the create and the preview naming
+// B's customer, and nothing is written.
+func TestNoHeader_TaxWallRefusesATrailingBody(t *testing.T) {
+	f := newKeyPinFixture(t)
+	noheaderGrant(t, f, "pin-finance", f.branchA)
+	B := f.custB.String()
+	create := fmt.Sprintf(`{"customer_id":%q,"exempt_reason":"pin"}`, B)
+	preview := fmt.Sprintf(`{"customer_id":%q,"document_type":"SalesInvoice","lines":[{"amount":100}]}`, B)
+
+	type caller struct {
+		label string
+		send  func(method, path, body string) (int, []byte)
+	}
+	callers := []caller{
+		{"finance granted A, no header", func(m, p, b string) (int, []byte) {
+			return f.userAs(t, "finance", m, p, b, nil)
+		}},
+		{"finance granted A, header A", func(m, p, b string) (int, []byte) {
+			return f.userAs(t, "finance", m, p, b, headerA(f))
+		}},
+		{"finance with no grants", func(m, p, b string) (int, []byte) {
+			return f.userSubAs(t, "pin-nogrants-tax-trailing", "finance", m, p, b, nil)
+		}},
+	}
+	for _, c := range callers {
+		for _, tail := range []string{" {}", " 1", "x"} {
+			before := f.exemptionsOf(t, f.custB)
+			if status, buf := c.send("POST", "/api/v1/tax/exemptions", create+tail); status != http.StatusBadRequest {
+				t.Errorf("%s: create on B's customer with %q after the body: %d %s, want 400", c.label, tail, status, buf)
+			}
+			if n := f.exemptionsOf(t, f.custB); n != before {
+				t.Errorf("%s: B's customer holds %d exemptions after the refused create with %q, want %d", c.label, n, tail, before)
+			}
+			if status, buf := c.send("POST", "/api/v1/tax/preview", preview+tail); status != http.StatusBadRequest {
+				t.Errorf("%s: preview naming B's customer with %q after the body: %d %s, want 400", c.label, tail, status, buf)
+			}
+		}
+	}
+}
+
 // rowlessCustomer inserts a customer with a primary branch and no
 // customer_branches row, the shape the seed wrote before it mirrored the
 // row (r5 P2-1), carrying a balance so the reconciliation can see it.
