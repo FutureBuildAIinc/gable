@@ -1219,7 +1219,7 @@ export interface paths {
         };
         /**
          * Products at or below their reorder point
-         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock (an administrator with no branch header sees that; a caller bound to a yard sees only products that yard holds a row of, so a product held only at another yard gives no alert here). A reorder point of NULL counts as 10.
          */
         get: operations["dashboardInventoryAlerts"];
         put?: never;
@@ -2852,7 +2852,7 @@ export interface paths {
         put?: never;
         /**
          * Adjust inventory (cycle count)
-         * @description A result that would leave negative stock answers 500.
+         * @description A result that would leave negative stock answers 500. An absolute count (is_delta false) that names no location, for a product held in more than one location in the caller's reach, answers 422 with the code location_required: a count is for one location.
          */
         post: operations["inventoryAdjust"];
         delete?: never;
@@ -8535,6 +8535,8 @@ export interface components {
              * @description The yard (the branch) the stock sum is for. Absent when the product has no inventory row.
              */
             location_id?: string;
+            /** @description The yard's name (its code when it has none). Absent with no yard. */
+            yard_name?: string;
         };
         /** @description dashboard.TopCustomer. Money is int64 cents. */
         DashboardTopCustomer: {

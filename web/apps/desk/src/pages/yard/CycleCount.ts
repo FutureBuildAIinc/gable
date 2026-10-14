@@ -8,15 +8,26 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ClipboardCheck, MapPin, ChevronRight, Check, AlertTriangle, Loader2, ScanLine } from 'lucide';
 import type { Product } from '../../types/product';
 import { InventoryService } from '../../services/InventoryService';
+import { LocationService } from '../../services/LocationService';
 import { ProductService } from '../../services/product.service';
+import type { Location } from '../../types/location';
 import '../../components/BarcodeScanner.ts';
 
 
-interface CountItem {
-    product: Product;
+/** One location that holds (or was found to hold) the product, with its own count. */
+interface CountLocation {
+    location_id: string;
+    name: string;
     expected: number;
     counted: string;
-    submitted: boolean;
+}
+
+/** A product counted by location: the yard's own row and each zone or bin, never the yard's sum. */
+interface CountItem {
+    product: Product;
+    locations: CountLocation[];
+    /** The locations a found pallet may be added from, loaded on first use. */
+    picking: boolean;
 }
 
 const ZONES = [
@@ -38,6 +49,8 @@ export class CycleCount extends LitElement {
     @state() private submitting = false;
     @state() private submitted = false;
     @state() private isScanning = false;
+    private _yardLocations: Location[] | null = null;
+    @state() private yardLocations: Location[] = [];
 
     updated(changed: Map<string, unknown>) {
         if (changed.has('selectedZone') && this.selectedZone) {
@@ -54,12 +67,23 @@ export class CycleCount extends LitElement {
             const data: Product[] = await ProductService.listAllProducts();
             const zoneIndex = ZONES.findIndex(z => z.code === this.selectedZone);
             const subset = data.slice(zoneIndex * 7, zoneIndex * 7 + 7);
-            this.items = subset.map(p => ({
-                product: p,
-                // The inventory adjust route is not converted and counts in numbers, so the on-hand string is read once, here.
-                expected: Number(p.on_hand),
-                counted: '',
-                submitted: false,
+            // A count is per location: the levels rows of each product are the yard's own row and
+            // every zone or bin that holds it, each with its own expected figure.
+            this.items = await Promise.all(subset.map(async (p): Promise<CountItem> => {
+                const rows = await InventoryService.getInventoryByProduct(p.id);
+                return {
+                    product: p,
+                    picking: false,
+                    locations: rows
+                        .filter(r => r.location_id)
+                        .map(r => ({
+                            location_id: r.location_id as string,
+                            name: r.location_name || (r.location_id as string),
+                            // The inventory adjust route counts in numbers, so the quantity string is read once, here.
+                            expected: Number(r.quantity),
+                            counted: '',
+                        })),
+                };
             }));
         } catch {
             this.items = [];
@@ -75,20 +99,52 @@ export class CycleCount extends LitElement {
         );
 
         if (index >= 0) {
-            const next = [...this.items];
-            const currentCount = parseFloat(next[index].counted);
+            const item = this.items[index];
+            if (item.locations.length === 0) {
+                ToastService.show(`${item.product.description} has no location here: add the one you found it in`, 'error');
+                return;
+            }
+            // A scan adds one to the first location listed; the person moves it with the count field.
+            const first = item.locations[0];
+            const currentCount = parseFloat(first.counted);
             const newCount = isNaN(currentCount) ? 1 : currentCount + 1;
-            next[index] = { ...next[index], counted: newCount.toString() };
-            this.items = next;
-            ToastService.show(`Scanned: ${this.items[index].product.description} (+1)`, 'success');
+            this._setCount(index, 0, newCount.toString());
+            ToastService.show(`Scanned: ${item.product.description} (+1)`, 'success');
         } else {
             ToastService.show(`Item not found in current zone: ${barcode}`, 'error');
         }
     }
 
-    private _updateCount(idx: number, value: string) {
+    private _setCount(idx: number, locIdx: number, value: string) {
         const next = [...this.items];
-        next[idx] = { ...next[idx], counted: value };
+        const locations = [...next[idx].locations];
+        locations[locIdx] = { ...locations[locIdx], counted: value };
+        next[idx] = { ...next[idx], locations };
+        this.items = next;
+    }
+
+    /** A found pallet: add a location the product was not listed in, to count it there. */
+    private async _togglePicking(idx: number) {
+        if (this._yardLocations === null) {
+            try {
+                this._yardLocations = await LocationService.listAllLocations();
+            } catch {
+                this._yardLocations = [];
+            }
+            this.yardLocations = this._yardLocations;
+        }
+        const next = [...this.items];
+        next[idx] = { ...next[idx], picking: !next[idx].picking };
+        this.items = next;
+    }
+
+    private _addLocation(idx: number, loc: Location) {
+        const next = [...this.items];
+        const item = next[idx];
+        if (!item.locations.some(l => l.location_id === loc.id)) {
+            item.locations = [...item.locations, { location_id: loc.id, name: loc.path || loc.code, expected: 0, counted: '' }];
+        }
+        next[idx] = { ...item, picking: false };
         this.items = next;
     }
 
@@ -96,12 +152,15 @@ export class CycleCount extends LitElement {
         this.submitting = true;
         let failCount = 0;
         for (const item of this.items) {
-            const counted = parseFloat(item.counted);
-            if (isNaN(counted)) continue;
-            if (counted !== item.expected) {
+            for (const loc of item.locations) {
+                const counted = parseFloat(loc.counted);
+                if (isNaN(counted) || counted === loc.expected) continue;
+                // Each count is written to its own location, so the yard's total after the count is
+                // the sum of the counts and never one figure forced onto one row.
                 try {
                     await InventoryService.adjustStock({
                         product_id: item.product.id,
+                        location_id: loc.location_id,
                         quantity: counted,
                         reason: `Cycle count - Zone ${this.selectedZone}`,
                         is_delta: false,
@@ -119,11 +178,12 @@ export class CycleCount extends LitElement {
         this.submitted = true;
     }
 
-    private get _countedCount() { return this.items.filter(i => i.counted !== '').length; }
+    private get _allLocations() { return this.items.flatMap(i => i.locations); }
+    private get _countedCount() { return this._allLocations.filter(l => l.counted !== '').length; }
     private get _discrepancies() {
-        return this.items.filter(i => {
-            const c = parseFloat(i.counted);
-            return !isNaN(c) && c !== i.expected;
+        return this._allLocations.filter(l => {
+            const c = parseFloat(l.counted);
+            return !isNaN(c) && c !== l.expected;
         }).length;
     }
 
@@ -141,7 +201,7 @@ export class CycleCount extends LitElement {
                         <p class="text-sm text-zinc-400">Select a zone to count:</p>
                         ${ZONES.map(z => html`
                             <div
-                                class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
+                                class="rounded-2xl border border-white/[0.06] bg-surface-2/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
                                 @click=${() => { this.selectedZone = z.code; }}
                             >
                                 <div class="p-4 flex items-center justify-between">
@@ -196,7 +256,7 @@ export class CycleCount extends LitElement {
                             <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-amber-400"></div>
                         </div>
                     ` : this.submitted ? html`
-                        <div class="text-center py-16 flex flex-col items-center gap-4">
+                        <div data-testid="count-done" class="text-center py-16 flex flex-col items-center gap-4">
                             <div class="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center">
                                 ${icon(Check, 32, 'text-emerald-400')}
                             </div>
@@ -212,7 +272,7 @@ export class CycleCount extends LitElement {
                     ` : html`
                         <!-- Progress -->
                         <div class="flex items-center gap-3 text-xs text-zinc-500">
-                            <span>${this._countedCount}/${this.items.length} counted</span>
+                            <span>${this._countedCount}/${this._allLocations.length} locations counted</span>
                             ${this._discrepancies > 0 ? html`
                                 <span class="flex items-center gap-1 text-amber-400">
                                     ${icon(AlertTriangle, 12)}
@@ -222,39 +282,63 @@ export class CycleCount extends LitElement {
                         </div>
 
                         <div class="space-y-2">
-                            ${this.items.map((item, idx) => {
-                                const counted = parseFloat(item.counted);
-                                const hasDiscrep = !isNaN(counted) && counted !== item.expected;
-                                return html`
-                                    <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl transition-all ${hasDiscrep ? 'border-amber-400/30' : 'border-white/5'}">
-                                        <div class="p-4">
-                                            <div class="flex items-center gap-3">
-                                                <div class="flex-1 min-w-0">
-                                                    <div class="font-medium text-white text-sm truncate">${item.product.description}</div>
-                                                    <div class="text-xs text-zinc-500 font-mono">${item.product.sku}</div>
-                                                </div>
-                                                <div class="text-right shrink-0 mr-2">
-                                                    <div class="text-[10px] text-zinc-500 font-mono">Expected</div>
-                                                    <div class="font-mono text-sm text-zinc-300">${item.expected}</div>
-                                                </div>
-                                                <input
-                                                    type="number"
-                                                    inputmode="numeric"
-                                                    .value=${item.counted}
-                                                    @input=${(e: InputEvent) => this._updateCount(idx, (e.target as HTMLInputElement).value)}
-                                                    placeholder="-"
-                                                    class="w-20 text-center bg-black/20 border rounded-lg py-2 font-mono text-sm focus:outline-none transition-colors ${hasDiscrep
-                                                        ? 'border-amber-400/50 text-amber-400 focus:border-amber-400'
-                                                        : item.counted !== ''
-                                                            ? 'border-emerald-500/30 text-emerald-400'
-                                                            : 'border-white/10 text-white focus:border-amber-400/50'
-                                                    }"
-                                                />
+                            ${this.items.map((item, idx) => html`
+                                <div class="rounded-2xl border border-white/[0.06] bg-surface-2/80 backdrop-blur-xl border-white/5">
+                                    <div class="p-4 space-y-3">
+                                        <div class="flex items-center gap-3">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="font-medium text-white text-sm truncate">${item.product.description}</div>
+                                                <div class="text-xs text-zinc-500 font-mono">${item.product.sku}</div>
                                             </div>
+                                            <button
+                                                @click=${() => this._togglePicking(idx)}
+                                                class="text-xs text-amber-400 hover:underline shrink-0"
+                                            >Found elsewhere</button>
                                         </div>
+                                        ${item.locations.length === 0 ? html`
+                                            <p class="text-xs text-zinc-500">No location holds this product here.</p>
+                                        ` : nothing}
+                                        ${item.locations.map((loc, locIdx) => {
+                                            const counted = parseFloat(loc.counted);
+                                            const hasDiscrep = !isNaN(counted) && counted !== loc.expected;
+                                            return html`
+                                                <div data-testid="count-location" class="flex items-center gap-3">
+                                                    <div class="flex-1 min-w-0 text-xs font-mono text-zinc-400 truncate">${loc.name}</div>
+                                                    <div class="text-right shrink-0 mr-2">
+                                                        <div class="text-[10px] text-zinc-500 font-mono">Expected</div>
+                                                        <div class="font-mono text-sm text-zinc-300">${loc.expected}</div>
+                                                    </div>
+                                                    <input
+                                                        data-testid="count-input"
+                                                        type="number"
+                                                        inputmode="numeric"
+                                                        aria-label="Count at ${loc.name}"
+                                                        .value=${loc.counted}
+                                                        @input=${(e: InputEvent) => this._setCount(idx, locIdx, (e.target as HTMLInputElement).value)}
+                                                        placeholder="-"
+                                                        class="w-20 text-center bg-black/20 border rounded-lg py-2 font-mono text-sm focus:outline-none transition-colors ${hasDiscrep
+                                                            ? 'border-amber-400/50 text-amber-400 focus:border-amber-400'
+                                                            : loc.counted !== ''
+                                                                ? 'border-emerald-500/30 text-emerald-400'
+                                                                : 'border-white/10 text-white focus:border-amber-400/50'
+                                                        }"
+                                                    />
+                                                </div>
+                                            `;
+                                        })}
+                                        ${item.picking ? html`
+                                            <div class="rounded-lg border border-white/10 p-2 max-h-40 overflow-y-auto space-y-1">
+                                                ${this.yardLocations.filter(l => !item.locations.some(x => x.location_id === l.id)).map(l => html`
+                                                    <button
+                                                        @click=${() => this._addLocation(idx, l)}
+                                                        class="block w-full text-left text-xs font-mono text-zinc-300 hover:text-amber-400 py-1"
+                                                    >${l.path || l.code}</button>
+                                                `)}
+                                            </div>
+                                        ` : nothing}
                                     </div>
-                                `;
-                            })}
+                                </div>
+                            `)}
                         </div>
 
                         <!-- Submit -->

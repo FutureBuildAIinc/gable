@@ -3117,7 +3117,7 @@ paths:
       tags: [dashboard]
       summary: Products at or below their reorder point
       description: >-
-        Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+        Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock (an administrator with no branch header sees that; a caller bound to a yard sees only products that yard holds a row of, so a product held only at another yard gives no alert here). A reorder point of NULL counts as 10.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       responses:
@@ -6787,7 +6787,8 @@ paths:
       tags:
         - inventory
       summary: Adjust inventory (cycle count)
-      description: A result that would leave negative stock answers 500.
+      description: >-
+        A result that would leave negative stock answers 500. An absolute count (is_delta false) that names no location, for a product held in more than one location in the caller's reach, answers 422 with the code location_required: a count is for one location.
       parameters:
         - $ref: '#/components/parameters/XBranchId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -18234,6 +18235,9 @@ components:
           type: string
           format: uuid
           description: The yard (the branch) the stock sum is for. Absent when the product has no inventory row.
+        yard_name:
+          type: string
+          description: The yard's name (its code when it has none). Absent with no yard.
     DashboardTopCustomer:
       type: object
       description: dashboard.TopCustomer. Money is int64 cents.
