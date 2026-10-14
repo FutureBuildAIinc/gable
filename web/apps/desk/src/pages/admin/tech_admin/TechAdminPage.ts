@@ -7,7 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
-import { aiHeadline, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
+import { aiHeadline, aiIsOn, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
@@ -168,8 +168,8 @@ export class TechAdminPage extends LitElement {
             this.aiNewKey = '';
             this.aiNewBaseUrl = '';
             this.aiShowInput = false;
-            this.aiSuccess = 'API key saved. All AI features are now active.';
             await this._loadAISettings();
+            this._noteSavedKey('API key saved');
         } catch (err) {
             this.aiError = err instanceof Error ? err.message : 'Failed to save';
         } finally {
@@ -184,12 +184,25 @@ export class TechAdminPage extends LitElement {
         try {
             await techAdminService.saveAIProvider(this.aiProvider, this.aiModel, this.aiAnthropicKey.trim() || undefined);
             this.aiAnthropicKey = '';
-            this.aiSuccess = 'AI provider saved.';
             await this._loadAISettings();
+            this._noteSavedKey('AI provider saved');
         } catch (err) {
             this.aiError = err instanceof Error ? err.message : 'Failed to save';
         } finally {
             this.aiSaving = false;
+        }
+    }
+
+    /** The saved key was tested by the save: say what that test found. */
+    private _noteSavedKey(saved: string) {
+        const s = this.aiSettings;
+        if (s?.test_status === 'passed') {
+            this.aiSuccess = `${saved} and tested. AI is on.`;
+        } else if (s?.test_status === 'refused' || s?.test_status === 'failed') {
+            this.aiSuccess = null;
+            this.aiError = s.test_message || aiStatusLine(s);
+        } else {
+            this.aiSuccess = `${saved}.`;
         }
     }
 
@@ -198,6 +211,7 @@ export class TechAdminPage extends LitElement {
         this.aiTestResult = null;
         try {
             this.aiTestResult = await techAdminService.testAIConnection();
+            await this._loadAISettings();
         } catch (err) {
             this.aiTestResult = { ok: false, message: err instanceof Error ? err.message : 'Test failed' };
         } finally {
@@ -597,11 +611,11 @@ export class TechAdminPage extends LitElement {
 
                 ${this._renderProviderCard()}
 
-                <div class="${cn('border rounded-lg p-6', this.aiSettings?.configured ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
+                <div class="${cn('border rounded-lg p-6', aiIsOn(this.aiSettings) ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
                     <div class="flex items-start justify-between">
                         <div class="flex items-start gap-4">
-                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', this.aiSettings?.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
-                                ${this.aiSettings?.configured ? icon(Check, 20) : icon(AlertCircle, 20)}
+                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', aiIsOn(this.aiSettings) ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
+                                ${aiIsOn(this.aiSettings) ? icon(Check, 20) : icon(AlertCircle, 20)}
                             </div>
                             <div>
                                 <h3 class="text-white font-medium">
@@ -612,6 +626,7 @@ export class TechAdminPage extends LitElement {
                                         <p>Provider: <span class="text-white">${providerLabel(savedProvider)}</span>${isAnthropic ? html`, model <span class="text-white">${modelLabel(this.aiSettings.model)}</span>` : nothing}</p>
                                         <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${isAnthropic ? this.aiSettings.anthropic_key_hint : this.aiSettings.key_hint}</code></p>
                                         <p>Source: <span class="${cn('text-xs font-medium px-2 py-0.5 rounded', this.aiSettings.source === 'admin' ? 'bg-violet-500/15 text-violet-400' : 'bg-zinc-500/15 text-zinc-400')}">${this.aiSettings.source === 'admin' ? 'Admin configured' : 'Environment variable'}</span></p>
+                                        ${this.aiSettings.test_status === 'refused' || this.aiSettings.test_status === 'failed' ? html`<p class="text-amber-400" data-testid="ai-test-message">${this.aiSettings.test_message}</p>` : nothing}
                                         ${this.aiSettings.base_url && !isAnthropic ? html`<p>Base URL: <code class="text-blueprint-blue bg-blueprint-blue/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.base_url}</code></p>` : nothing}
                                     </div>
                                 ` : html`<p class="text-sm text-slate-400 mt-1">${aiStatusLine(this.aiSettings)}</p>`}

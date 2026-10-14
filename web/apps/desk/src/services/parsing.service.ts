@@ -3,6 +3,7 @@
 
 import type { ParseResponse } from '../types/parsing';
 import { fetchWithAuth } from './fetchClient';
+import { parseApiError } from './apiError';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -24,18 +25,9 @@ export const ParsingService = {
             timeout: AI_PARSE_TIMEOUT,
         });
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            // The wire error envelope carries the words a person reads.
-            let words = '';
-            try {
-                const body = JSON.parse(errorText) as { error?: { message?: string } };
-                words = body.error?.message ?? '';
-            } catch {
-                words = errorText;
-            }
-            throw new Error(words || 'Failed to parse material list');
-        }
+        // The wire error envelope carries the words a person reads and the
+        // code a caller branches on (ai_refused, unsupported_type).
+        if (!response.ok) throw await parseApiError(response, 'Failed to parse material list');
 
         return response.json();
     },

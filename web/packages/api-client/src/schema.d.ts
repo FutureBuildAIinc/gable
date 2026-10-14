@@ -7487,11 +7487,20 @@ export interface components {
             anthropic_configured: boolean;
             anthropic_key_hint: string | null;
             vault_present: boolean;
+            /**
+             * @description The last test of the saved key: none with no key saved, untested for a key never tested, passed, refused (the provider refused the key) or failed (the test could not finish). A save runs the test.
+             * @enum {string}
+             */
+            test_status: "none" | "untested" | "passed" | "refused" | "failed";
+            /** @description The plain sentence for refused and failed; absent otherwise. */
+            test_message?: string;
         };
         /** @description Go type techadmin.TestResult. A provider failure is ok false with its words, never the key. */
         AdminTestAIResult: {
             ok: boolean;
             message: string;
+            /** @enum {string} */
+            status: "passed" | "refused" | "failed";
         };
         /** @description Go type techadmin.RoutingSettings, the AI settings' shape without the base URL. */
         RoutingSettings: {
@@ -14662,6 +14671,15 @@ export interface components {
         };
         /** @description The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope. */
         UnsupportedType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The AI provider refused the saved key (code ai_refused; a 401 or 403 from the provider). It is not AI off: a key is saved and was not accepted. The message names the provider and says an administrator can enter the key again in Tech Admin, AI Settings. Nothing answers a canned result for it. ADR 0001 envelope. */
+        AIRefused: {
             headers: {
                 [name: string]: unknown;
             };
@@ -23297,6 +23315,7 @@ export interface operations {
             415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     partnerDashboard: {
@@ -26891,6 +26910,7 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     productPimGenerateDescriptions: {
@@ -26929,6 +26949,7 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     productPimGenerateImage: {
@@ -27005,6 +27026,7 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     productUpdateMargins: {

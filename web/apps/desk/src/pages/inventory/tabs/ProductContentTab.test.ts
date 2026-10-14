@@ -10,7 +10,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './ProductContentTab'
 import './ProductSEOTab'
 import './ProductCollateralTab'
+import type { LitElement } from 'lit'
 import { mount, flush, q, text, update } from '../../../test/dom'
+
+type Tab = LitElement & { productId: string }
 
 const WORDS = 'Anthropic refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.'
 
@@ -34,26 +37,26 @@ function press(el: HTMLElement, label: string) {
 
 describe('PIM generate shows a provider refusal on the page', () => {
   it('on the description tab', async () => {
-    const el = await mount<HTMLElement & { productId: string }>('gable-product-content-tab', { productId: 'p1' })
+    const el = await mount<Tab>('gable-product-content-tab', { productId: 'p1' })
     press(el, 'Generate')
     await flush()
-    await update(el as never, {})
+    await update(el, {})
     expect(text(q(el, '[data-testid="pim-ai-notice"]'))).toContain(WORDS)
   })
 
   it('on the SEO tab', async () => {
-    const el = await mount<HTMLElement & { productId: string }>('gable-product-seo-tab', { productId: 'p1' })
+    const el = await mount<Tab>('gable-product-seo-tab', { productId: 'p1' })
     press(el, 'Generate')
     await flush()
-    await update(el as never, {})
+    await update(el, {})
     expect(text(q(el, '[data-testid="pim-ai-notice"]'))).toContain(WORDS)
   })
 
   it('on the collateral tab', async () => {
-    const el = await mount<HTMLElement & { productId: string }>('gable-product-collateral-tab', { productId: 'p1' })
+    const el = await mount<Tab>('gable-product-collateral-tab', { productId: 'p1' })
     press(el, 'Generate')
     await flush()
-    await update(el as never, {})
+    await update(el, {})
     expect(text(q(el, '[data-testid="pim-ai-notice"]'))).toContain(WORDS)
   })
 })
