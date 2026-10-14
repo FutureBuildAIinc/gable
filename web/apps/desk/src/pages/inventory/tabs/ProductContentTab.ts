@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Save, Loader2 } from 'lucide';
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { formatDateTime } from '../../../lib/dates.ts';
 import { apiErrorMessage } from '../../../services/apiError';
 import type { PIMContent } from '../../../types/pim.ts';
 
@@ -106,7 +107,7 @@ export class GableProductContentTab extends LitElement {
                         </h3>
                         ${this.content?.last_gen_at ? html`
                             <span class="text-xs text-zinc-500">
-                                Last generated: ${new Date(this.content.last_gen_at).toLocaleString()}
+                                Last generated: ${formatDateTime(this.content.last_gen_at)}
                             </span>
                         ` : nothing}
                     </div>

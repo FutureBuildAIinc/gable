@@ -7,6 +7,7 @@ import { icon } from '../../../lib/icons.ts';
 import { Sparkles, Trash2, Copy, Loader2, FileText, RefreshCw, AlertTriangle } from 'lucide';
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
+import { formatDateTime } from '../../../lib/dates.ts';
 import type { PIMCollateral, CollateralType } from '../../../types/pim.ts';
 
 const TYPES: { value: CollateralType; label: string }[] = [
@@ -174,7 +175,7 @@ export class GableProductCollateralTab extends LitElement {
                                     <pre class="whitespace-pre-wrap text-sm text-zinc-300 bg-zinc-800/50 rounded-lg p-3 font-sans">${c.content}</pre>
                                     ${c.generated_at ? html`
                                         <div class="mt-2 text-xs text-zinc-600">
-                                            Generated ${new Date(c.generated_at).toLocaleString()} by ${c.gen_model}
+                                            Generated ${formatDateTime(c.generated_at)} by ${c.gen_model}
                                         </div>
                                     ` : nothing}
                                 </div>

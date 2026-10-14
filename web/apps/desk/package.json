@@ -22,7 +22,6 @@
     "@gable/design-system": "*",
     "chart.js": "^4.4.8",
     "clsx": "^2.1.1",
-    "date-fns": "^4.1.0",
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
     "lit": "^3.2.1",
