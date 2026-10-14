@@ -10,7 +10,10 @@ package pos_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/pkg/branchctx"
 	"net/http"
 	"strings"
 	"sync"
@@ -417,5 +420,48 @@ func TestQuantityChangeKeepsTheAuditTrailTrue(t *testing.T) {
 	}
 	if changes != 1 {
 		t.Errorf("quantity change audit rows = %d, want 1", changes)
+	}
+}
+
+// RULE (SEC-NOHEADER-1): a caller with no branch header whose grants miss the
+// sale's branch is refused 403 by name, as the line add refuses it, never
+// answered as a missing sale. This holds the change's own holdSaleBranch.
+func TestQuantityChangeNoHeaderArmRefusesByName(t *testing.T) {
+	testutil.LockOutboxTables(t)
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	branchB := uuid.New()
+	sub := "qty-nh-" + uuid.NewString()[:8]
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO locations (id, type, code, name) VALUES ($1, 'BRANCH', $2, 'quantity no header branch B')`, []any{branchB, "QNH-" + branchB.String()[:8]}},
+		{`INSERT INTO user_locations (user_sub, branch_id, is_home, granted_by) VALUES ($1, $2, TRUE, 'test')`, []any{sub, branchB}},
+	} {
+		if _, err := db.Pool.Exec(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = $1`, sub)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM locations WHERE id = $1`, branchB)
+	})
+	f := newFixture(t, db)
+	s := f.startSale(nil)
+	added := f.addLine(s, f.productLine("2"))
+	line := uuid.MustParse(lineIDs(t, added)[0])
+	saleID := uuid.MustParse(s)
+	revision := rev(t, added)
+
+	held := branchctx.With(ctx, &branchctx.Context{UserSub: sub})
+	_, addErr := f.service.AddLine(held, saleID, nil, sub)
+	_, err := f.service.ChangeLineQuantity(held, saleID, line, httpx.Quantity(50000), "", &revision, sub)
+	var he, addHE *httpx.Error
+	if !errors.As(err, &he) || !errors.As(addErr, &addHE) {
+		t.Fatalf("change = %v, add = %v, want typed refusals", err, addErr)
+	}
+	if he.Status != http.StatusForbidden || he.Status != addHE.Status {
+		t.Errorf("change refused %d, add refused %d, want both 403 by name", he.Status, addHE.Status)
 	}
 }
