@@ -670,6 +670,74 @@ export class POSTerminal extends LitElement {
     this._tenderAmount = '';
   }
 
+  /** The lines whose quantity change is on its way, so one commit is sent once. */
+  private _changing = new Set<string>();
+
+  /**
+   * Sets a line's quantity on the sale's revision. A change that cannot be
+   * made says why and puts the number back.
+   */
+  private async _changeQuantity(item: SaleLine, text: string, input: HTMLInputElement | null) {
+    const sale = this._sale;
+    const restore = () => { if (input) input.value = item.quantity; };
+    if (!sale || sale.status !== 'open' || this._changing.has(item.id)) return;
+    const qty = normalizeQuantity(text);
+    if (qty === null) {
+      this._error = 'Enter a quantity above zero';
+      restore();
+      return;
+    }
+    if (qty.includes('.') && isCountedUnit(item.uom)) {
+      this._error = `${item.uom} is counted in whole units`;
+      restore();
+      return;
+    }
+    if (Number(qty) === Number(item.quantity)) {
+      restore();
+      return;
+    }
+    this._changing.add(item.id);
+    this.requestUpdate();
+    try {
+      this._error = null;
+      this._sale = await posService.changeQuantity(sale.id, item.id, qty, sale.revision);
+      if (input) input.value = this._sale.lines.find((l) => l.id === item.id)?.quantity ?? qty;
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to change the quantity';
+      restore();
+    } finally {
+      this._changing.delete(item.id);
+      this.requestUpdate();
+    }
+  }
+
+  /** The line's quantity one step either way, as the number a cashier would type. */
+  private _stepQuantity(item: SaleLine, by: 1 | -1) {
+    const next = Math.round((Number(item.quantity) + by) * 10000) / 10000;
+    if (!(next > 0)) return;
+    void this._changeQuantity(item, String(next), null);
+  }
+
+  private _renderQuantityControl(item: SaleLine) {
+    const busy = this._changing.has(item.id);
+    const button = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded border border-white/20 text-lg text-white hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent';
+    return html`
+      <div class="flex shrink-0 items-center gap-1" data-testid="pos-line-quantity">
+        <button type="button" aria-label="Decrease quantity of ${item.description}"
+          ?disabled=${busy || !(Number(item.quantity) > 1)}
+          @click=${() => this._stepQuantity(item, -1)} class=${button}>−</button>
+        <input type="text" inputmode="decimal" autocomplete="off" aria-label="Quantity of ${item.description}"
+          .value=${item.quantity} ?disabled=${busy}
+          @keydown=${(e: KeyboardEvent) => {
+            if (e.key === 'Enter') { e.preventDefault(); void this._changeQuantity(item, (e.target as HTMLInputElement).value, e.target as HTMLInputElement); }
+          }}
+          @change=${(e: Event) => void this._changeQuantity(item, (e.target as HTMLInputElement).value, e.target as HTMLInputElement)}
+          class="h-11 w-16 rounded border border-white/10 bg-deep-space px-1 text-center font-mono text-sm text-white outline-none focus:border-gable-green disabled:opacity-60" />
+        <button type="button" aria-label="Increase quantity of ${item.description}" ?disabled=${busy}
+          @click=${() => this._stepQuantity(item, 1)} class=${button}>+</button>
+      </div>`;
+  }
+
   private async _removeItem(itemId: string) {
     if (!this._sale) return;
     try {
@@ -1248,6 +1316,7 @@ export class POSTerminal extends LitElement {
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
                 </div>
+                ${open && item.line_type === 'product' ? this._renderQuantityControl(item) : nothing}
                 <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
                 ${open ? html`
                 <button @click=${() => this._removeItem(item.id)} title="Remove"

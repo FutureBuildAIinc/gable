@@ -64,3 +64,17 @@ describe('the counter receipt routes', () => {
     await expect(posService.emailReceipt('sale-1')).rejects.toThrow('no email address');
   });
 });
+
+describe('the counter line quantity route', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('patches the line with the quantity and the sale revision, and answers the sale', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 's1', revision: 5 }), { status: 200 }));
+    const sale = await posService.changeQuantity('s1', 'l1', '4', 4);
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/v1/pos/transactions/s1/items/l1');
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ quantity: '4', revision: 4 });
+    expect(sale).toMatchObject({ id: 's1', revision: 5 });
+  });
+});
