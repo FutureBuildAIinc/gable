@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -190,6 +191,9 @@ func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *POSTrans
 	).Scan(&tx.BranchID)
 	if err != nil {
 		return fmt.Errorf("failed to create POS transaction: %w", err)
+	}
+	if err := customerlink.Ensure(ctx, r.db, "pos_transactions", tx.ID); err != nil {
+		return err
 	}
 	return nil
 }

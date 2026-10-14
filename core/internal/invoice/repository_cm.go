@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/middleware"
@@ -230,6 +231,9 @@ func (r *PostgresRepository) InsertCreditMemo(ctx context.Context, h *CreditHead
 		h.TotalCents, h.MemoDate.Format("2006-01-02"), h.SubtotalCents, h.TaxCents, h.TaxRate)
 	if err != nil {
 		return mapWriteError(err, "failed to insert credit memo")
+	}
+	if err := customerlink.Ensure(ctx, r.db, "credit_memos", h.ID); err != nil {
+		return err
 	}
 	return nil
 }
