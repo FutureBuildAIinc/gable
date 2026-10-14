@@ -16,7 +16,7 @@ import (
 	"mime"
 	"net"
 	"net/mail"
-	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -120,15 +120,24 @@ func NewSMTPEmailService(cfg SMTPConfig) (*SMTPEmailService, error) {
 }
 
 func (s *SMTPEmailService) SendInvoice(ctx context.Context, to string, invoiceID string, pdfBytes []byte) error {
-	return s.send(ctx, []string{to}, fmt.Sprintf("Invoice %s", invoiceID), "Please find your invoice attached.",
+	_, err := s.send(ctx, []string{to}, fmt.Sprintf("Invoice %s", invoiceID), "Please find your invoice attached.",
 		"invoice-"+safeFilename(invoiceID)+".pdf", pdfBytes)
+	return err
 }
 
 func (s *SMTPEmailService) SendDeliveryNotification(ctx context.Context, to string, subject string, body string) error {
-	return s.send(ctx, []string{to}, subject, body, "", nil)
+	_, err := s.send(ctx, []string{to}, subject, body, "", nil)
+	return err
 }
 
 func (s *SMTPEmailService) SendEmailWithAttachment(ctx context.Context, to []string, subject string, body string, filename string, content []byte) error {
+	_, err := s.send(ctx, to, subject, body, safeFilename(filename), content)
+	return err
+}
+
+// SendWithAnswer is SendEmailWithAttachment that also returns the server's
+// reply to the end of the message, which is what the delivery record keeps.
+func (s *SMTPEmailService) SendWithAnswer(ctx context.Context, to []string, subject string, body string, filename string, content []byte) (string, error) {
 	return s.send(ctx, to, subject, body, safeFilename(filename), content)
 }
 
@@ -142,27 +151,27 @@ func safeFilename(name string) string {
 	}, name)
 }
 
-func (s *SMTPEmailService) send(ctx context.Context, to []string, subject, body, filename string, content []byte) error {
+func (s *SMTPEmailService) send(ctx context.Context, to []string, subject, body, filename string, content []byte) (string, error) {
 	if len(to) == 0 {
-		return errors.New("no recipient")
+		return "", errors.New("no recipient")
 	}
 	rcpts := make([]string, 0, len(to))
 	for _, t := range to {
 		if strings.ContainsAny(t, "\r\n") {
-			return fmt.Errorf("recipient %q holds a line break", t)
+			return "", fmt.Errorf("recipient %q holds a line break", t)
 		}
 		a, err := mail.ParseAddress(t)
 		if err != nil {
-			return fmt.Errorf("recipient %q: %w", t, err)
+			return "", fmt.Errorf("recipient %q: %w", t, err)
 		}
 		rcpts = append(rcpts, a.Address)
 	}
 	if strings.ContainsAny(subject, "\r\n") {
-		return errors.New("subject holds a line break")
+		return "", errors.New("subject holds a line break")
 	}
 	msg, err := s.buildMessage(rcpts, subject, body, filename, content)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if _, has := ctx.Deadline(); !has {
@@ -170,44 +179,107 @@ func (s *SMTPEmailService) send(ctx context.Context, to []string, subject, body,
 		ctx, cancel = context.WithTimeout(ctx, smtpTimeout)
 		defer cancel()
 	}
-	c, err := s.dial(ctx)
+	sess, err := s.dial(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer sess.conn.Close()
+
+	if s.cfg.Username != "" {
+		if _, ok := sess.ext["AUTH"]; !ok {
+			return "", errors.New("smtp server does not offer AUTH but credentials are configured")
+		}
+		if s.cfg.TLS == SMTPTLSNone && !isLoopback(s.cfg.Host) {
+			return "", errors.New("smtp: refusing to send credentials in clear text (SMTP_TLS is none)")
+		}
+		cred := base64.StdEncoding.EncodeToString([]byte("\x00" + s.cfg.Username + "\x00" + s.cfg.Password))
+		if _, err := sess.cmd(235, "AUTH PLAIN %s", cred); err != nil {
+			return "", fmt.Errorf("smtp auth: %w", err)
+		}
+	}
+	if _, err := sess.cmd(250, "MAIL FROM:<%s>", s.from.Address); err != nil {
+		return "", fmt.Errorf("smtp MAIL FROM: %w", err)
+	}
+	for _, r := range rcpts {
+		if _, err := sess.cmd(250, "RCPT TO:<%s>", r); err != nil {
+			return "", fmt.Errorf("smtp RCPT TO %s: %w", r, err)
+		}
+	}
+	if _, err := sess.cmd(354, "DATA"); err != nil {
+		return "", fmt.Errorf("smtp DATA: %w", err)
+	}
+	w := sess.text.DotWriter()
+	if _, err := w.Write(msg); err != nil {
+		return "", fmt.Errorf("smtp write: %w", err)
+	}
+	if err := w.Close(); err != nil {
+		return "", fmt.Errorf("smtp end of data: %w", err)
+	}
+	answer, err := sess.read(250)
+	if err != nil {
+		return "", fmt.Errorf("smtp end of data: %w", err)
+	}
+	_, _ = sess.cmd(221, "QUIT") // the message is accepted; a QUIT hiccup does not undo it
+	return answer, nil
+}
+
+func isLoopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// smtpSession is one connection past its greeting (and its TLS upgrade).
+type smtpSession struct {
+	conn net.Conn
+	text *textproto.Conn
+	ext  map[string]string
+}
+
+// read reads one reply and checks its code; the returned text is the reply as
+// "code message", which is what the delivery record keeps.
+func (s *smtpSession) read(expect int) (string, error) {
+	code, msg, err := s.text.ReadResponse(expect)
+	text := fmt.Sprintf("%d %s", code, strings.ReplaceAll(msg, "\n", " | "))
+	if len(text) > 500 {
+		text = text[:500]
+	}
+	if err != nil {
+		return text, errors.New(strings.TrimSpace(text))
+	}
+	return text, nil
+}
+
+func (s *smtpSession) cmd(expect int, format string, args ...any) (string, error) {
+	if err := s.text.PrintfLine(format, args...); err != nil {
+		return "", err
+	}
+	return s.read(expect)
+}
+
+func (s *smtpSession) ehlo() error {
+	text, err := s.cmd(250, "EHLO %s", ehloName)
 	if err != nil {
 		return err
 	}
-	defer c.Close()
-
-	if s.cfg.Username != "" {
-		if ok, _ := c.Extension("AUTH"); !ok {
-			return errors.New("smtp server does not offer AUTH but credentials are configured")
+	s.ext = map[string]string{}
+	for i, line := range strings.Split(text, " | ") {
+		if i == 0 {
+			continue // "250 greeting"
 		}
-		if err := c.Auth(smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)); err != nil {
-			return fmt.Errorf("smtp auth: %w", err)
-		}
+		k, v, _ := strings.Cut(strings.TrimSpace(line), " ")
+		s.ext[strings.ToUpper(k)] = v
 	}
-	if err := c.Mail(s.from.Address); err != nil {
-		return fmt.Errorf("smtp MAIL FROM: %w", err)
-	}
-	for _, r := range rcpts {
-		if err := c.Rcpt(r); err != nil {
-			return fmt.Errorf("smtp RCPT TO %s: %w", r, err)
-		}
-	}
-	w, err := c.Data()
-	if err != nil {
-		return fmt.Errorf("smtp DATA: %w", err)
-	}
-	if _, err := w.Write(msg); err != nil {
-		return fmt.Errorf("smtp write: %w", err)
-	}
-	if err := w.Close(); err != nil {
-		return fmt.Errorf("smtp end of data: %w", err)
-	}
-	return c.Quit()
+	return nil
 }
 
-// dial opens the connection in the configured mode and returns a client that
+const ehloName = "localhost"
+
+// dial opens the connection in the configured mode and returns a session that
 // has finished its greeting and, where asked, its TLS upgrade.
-func (s *SMTPEmailService) dial(ctx context.Context) (*smtp.Client, error) {
+func (s *SMTPEmailService) dial(ctx context.Context) (*smtpSession, error) {
 	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", addr)
@@ -224,22 +296,34 @@ func (s *SMTPEmailService) dial(ctx context.Context) (*smtp.Client, error) {
 	if s.cfg.TLS == SMTPTLSImplicit {
 		conn = tls.Client(conn, tlsCfg)
 	}
-	c, err := smtp.NewClient(conn, s.cfg.Host)
-	if err != nil {
+	sess := &smtpSession{conn: conn, text: textproto.NewConn(conn)}
+	fail := func(err error) (*smtpSession, error) {
 		conn.Close()
-		return nil, fmt.Errorf("smtp greeting: %w", err)
+		return nil, err
+	}
+	if _, err := sess.read(220); err != nil {
+		return fail(fmt.Errorf("smtp greeting: %w", err))
+	}
+	if err := sess.ehlo(); err != nil {
+		return fail(fmt.Errorf("smtp EHLO: %w", err))
 	}
 	if s.cfg.TLS == SMTPTLSStartTLS {
-		if ok, _ := c.Extension("STARTTLS"); !ok {
-			c.Close()
-			return nil, errors.New("smtp server does not offer STARTTLS and SMTP_TLS is starttls: refusing to send in clear text")
+		if _, ok := sess.ext["STARTTLS"]; !ok {
+			return fail(errors.New("smtp server does not offer STARTTLS and SMTP_TLS is starttls: refusing to send in clear text"))
 		}
-		if err := c.StartTLS(tlsCfg); err != nil {
-			c.Close()
-			return nil, fmt.Errorf("smtp STARTTLS: %w", err)
+		if _, err := sess.cmd(220, "STARTTLS"); err != nil {
+			return fail(fmt.Errorf("smtp STARTTLS: %w", err))
+		}
+		tconn := tls.Client(conn, tlsCfg)
+		if err := tconn.HandshakeContext(ctx); err != nil {
+			return fail(fmt.Errorf("smtp STARTTLS handshake: %w", err))
+		}
+		sess.conn, sess.text = tconn, textproto.NewConn(tconn)
+		if err := sess.ehlo(); err != nil {
+			return fail(fmt.Errorf("smtp EHLO after STARTTLS: %w", err))
 		}
 	}
-	return c, nil
+	return sess, nil
 }
 
 func (s *SMTPEmailService) buildMessage(rcpts []string, subject, body, filename string, content []byte) ([]byte, error) {

@@ -97,3 +97,28 @@ func (s *LogEmailService) DeliveryDescription() string {
 		"which records the recipients, subject, filename and size in the server log instead of sending. " +
 		"Replace the NewLogEmailService call in cmd/server/main.go with an SMTP-backed EmailService to deliver for real."
 }
+
+// AnswerSender is an EmailService that can also say what the receiving side
+// answered, so a delivery record keeps the sender's own words.
+type AnswerSender interface {
+	SendWithAnswer(ctx context.Context, to []string, subject string, body string, filename string, content []byte) (string, error)
+}
+
+// SendWithAnswer sends through svc and returns the answer where svc gives one
+// (the SMTP sender returns the server's reply, the log sender says nothing was
+// sent); for any other sender the answer is empty.
+func SendWithAnswer(ctx context.Context, svc EmailService, to []string, subject, body, filename string, content []byte) (string, error) {
+	if a, ok := svc.(AnswerSender); ok {
+		return a.SendWithAnswer(ctx, to, subject, body, filename, content)
+	}
+	return "", svc.SendEmailWithAttachment(ctx, to, subject, body, filename, content)
+}
+
+// SendWithAnswer logs the email like SendEmailWithAttachment and answers that
+// it was logged, not sent.
+func (s *LogEmailService) SendWithAnswer(ctx context.Context, to []string, subject string, body string, filename string, content []byte) (string, error) {
+	if err := s.SendEmailWithAttachment(ctx, to, subject, body, filename, content); err != nil {
+		return "", err
+	}
+	return "logged by the log sender, not sent", nil
+}

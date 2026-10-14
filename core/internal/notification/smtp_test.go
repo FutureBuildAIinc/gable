@@ -369,3 +369,27 @@ func TestNewEmailServiceFromEnv(t *testing.T) {
 		t.Error("a host without a From address must refuse, so serve refuses to start")
 	}
 }
+
+func TestSMTPAnswerIsTheServersReply(t *testing.T) {
+	f := newFakeSMTP(t, nil, false)
+	s := senderFor(t, f, SMTPTLSNone, nil, "", "")
+	ans, err := SendWithAnswer(context.Background(), s, []string{"c@example.test"}, "Statement", "Body", "statement.pdf", []byte("%PDF-1.4 stub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ans != "250 queued as test1" {
+		t.Errorf("answer = %q", ans)
+	}
+	f.failData = true
+	ans, err = SendWithAnswer(context.Background(), s, []string{"c@example.test"}, "Statement", "Body", "statement.pdf", []byte("x"))
+	if err == nil || !strings.Contains(err.Error(), "554") {
+		t.Errorf("refusal: ans=%q err=%v", ans, err)
+	}
+}
+
+func TestLogSenderAnswerSaysNothingWasSent(t *testing.T) {
+	ans, err := SendWithAnswer(context.Background(), NewLogEmailService(testLogger()), []string{"c@example.test"}, "s", "b", "f.pdf", []byte("x"))
+	if err != nil || !strings.Contains(ans, "not sent") {
+		t.Errorf("ans=%q err=%v", ans, err)
+	}
+}
