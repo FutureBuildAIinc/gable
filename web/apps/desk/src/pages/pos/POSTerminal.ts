@@ -348,7 +348,7 @@ export class POSTerminal extends LitElement {
               @click=${() => this._clearCustomer()}
               ?disabled=${hasLines || this._loading}
               title=${hasLines ? 'The customer is named before the first line: start a new sale to change it' : 'Back to a walk-in sale'}
-              class="rounded border border-white/10 px-2 py-1 text-xs text-slate-300 disabled:cursor-not-allowed disabled:opacity-40"
+              class="rounded border border-white/20 px-3 py-1.5 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent"
             >Change</button>
           </div>
           <div class="mt-2 font-mono text-xs font-semibold ${toneClass(st.tone)}" data-testid="pos-customer-standing">${st.text}</div>
@@ -506,6 +506,14 @@ export class POSTerminal extends LitElement {
     }
     this._tenderMethod = method;
     this._tenderAmount = '';
+  }
+
+  /** Shows a typed tender amount with two decimals once the cashier leaves the field. */
+  private _formatTenderAmount() {
+    const text = this._tenderAmount.trim();
+    if (text === '') return;
+    const cents = dollarsToCents(text);
+    if (cents !== null && !isNaN(cents) && cents > 0) this._tenderAmount = (cents / 100).toFixed(2);
   }
 
   /** Add the entered tender to the added list; a split names several. */
@@ -782,7 +790,7 @@ export class POSTerminal extends LitElement {
       tendered: this._pendingTenders.length > 0,
     });
     return html`
-      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-steel px-6 py-3" data-testid="pos-header">
+      <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-white/10 bg-slate-steel px-6 py-3" data-testid="pos-header">
         <div class="flex flex-wrap items-center gap-3">
           <h1 class="text-lg font-bold text-white">Counter</h1>
           <span class="rounded-full bg-white/10 px-2 py-0.5 font-mono text-xs text-slate-200" data-testid="pos-register">${REGISTER_ID}</span>
@@ -794,7 +802,7 @@ export class POSTerminal extends LitElement {
           <span class="text-xs text-slate-400" data-testid="pos-cashier">Cashier <span class="text-slate-200">${cashier}</span></span>
           ${sale ? html`<span class="font-mono text-xs text-slate-400">${sale.number} &middot; ${sale.status}</span>` : nothing}
         </div>
-        <nav class="flex items-center gap-2" aria-label="Sale progress">
+        <nav class="order-last flex w-full items-center gap-2 xl:order-none xl:w-auto" aria-label="Sale progress">
           ${this._progressChip('Customer', 1, progress.customer)}
           ${this._progressChip('Payment', 2, progress.payment)}
           ${this._progressChip('Summary', 3, progress.summary)}
@@ -802,7 +810,8 @@ export class POSTerminal extends LitElement {
         <div class="flex gap-2">
           ${this._till ? html`
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
-              class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till &middot; Z-Report</button>` : html`
+              title="Count the drawer and close the till with its Z report"
+              class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till</button>` : html`
             <button @click=${() => { this._showTillOpen = true; }}
               class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
           <button @click=${() => this._startNewSale()}
@@ -863,7 +872,7 @@ export class POSTerminal extends LitElement {
                 <th class="${th} text-center">Qty</th>
                 <th class="${th} text-right">Price</th>
                 <th class="${th} text-right">Total</th>
-                <th class="${th} w-10"></th>
+                <th class="${th} w-12"></th>
               </tr></thead>
               <tbody>
                 ${productLines.map((item) => html`
@@ -877,7 +886,7 @@ export class POSTerminal extends LitElement {
                     <td class="px-3 py-3">
                       <button @click=${() => this._removeItem(item.id)} title="Remove"
                         aria-label="Remove ${item.description}"
-                        class="rounded px-2 text-lg text-safety-red">×</button>
+                        class="inline-flex h-10 w-10 items-center justify-center rounded text-lg text-safety-red hover:bg-safety-red/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-safety-red">×</button>
                     </td>
                   </tr>`)}
               </tbody>
@@ -924,10 +933,11 @@ export class POSTerminal extends LitElement {
         <label class="mt-3 block text-xs text-slate-400" for="pos-tender-amount">
           ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
         </label>
-        <input id="pos-tender-amount" type="number" step="0.01" inputmode="decimal"
+        <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
           placeholder=${(owed / 100).toFixed(2)} .value=${this._tenderAmount}
           ?disabled=${!hasLines || !open}
           @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
+          @blur=${() => this._formatTenderAmount()}
           class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
           aria-label="Tender amount" />
         ${isCash && change > 0 ? html`
@@ -950,19 +960,20 @@ export class POSTerminal extends LitElement {
     const total = sale?.total_cents ?? 0;
     const open = sale?.status === 'open';
     const plan = payPlan(total, this._pendingTenders, this._entry);
-    const canPay = hasLines && open && !this._loading && plan.ok;
+    const canPay = this._till !== null && hasLines && open && !this._loading && plan.ok;
     const label = this._loading ? 'Processing...'
+      : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
       <section class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="panel-summary">
-        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Summary</div>
+        <div class="hidden text-xs font-semibold uppercase tracking-wide text-slate-400 xl:block">Summary</div>
         <dl class="mt-2 text-sm">
-          <div class="flex justify-between py-1 text-slate-400"><dt>Lines</dt>
+          <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Lines</dt>
             <dd class="font-mono" data-testid="summary-lines">${(sale?.lines ?? []).filter((l) => l.parent_line_id === null).length}</dd></div>
-          <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
+          <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Subtotal</dt>
             <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
-          <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
+          <div class="hidden justify-between py-1 text-slate-400 xl:flex"><dt>Tax</dt>
             <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
           <div class="mt-1 flex items-baseline justify-between border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
             <dd class="font-mono text-2xl text-gable-green" data-testid="summary-total">${fmt(total)}</dd></div>
@@ -971,14 +982,14 @@ export class POSTerminal extends LitElement {
               <dd class="font-mono">${fmt(owed)}</dd></div>` : nothing}
         </dl>
         <button data-testid="pos-pay" @click=${() => this._pay()} ?disabled=${!canPay}
-          class="mt-3 w-full rounded-lg bg-gable-green px-4 py-4 text-base font-bold text-deep-space disabled:cursor-not-allowed disabled:opacity-40">
+          class="mt-3 w-full rounded-lg px-4 py-4 text-base font-bold ${canPay ? 'bg-gable-green text-deep-space' : 'cursor-not-allowed border border-white/10 bg-white/5 text-slate-400'}">
           ${label}
         </button>
         <div class="mt-3 flex gap-2">
           <button @click=${() => this._voidSale()} ?disabled=${!this._completed}
-            class="flex-1 rounded border border-safety-red/40 px-3 py-2 text-xs text-safety-red disabled:opacity-40">Void</button>
+            class="flex-1 rounded border border-safety-red/60 px-3 py-2 text-xs font-semibold text-safety-red hover:bg-safety-red/10 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Void</button>
           <button @click=${() => this._beginReturn()} ?disabled=${!this._completed}
-            class="flex-1 rounded border border-amber-400/40 px-3 py-2 text-xs text-amber-400 disabled:opacity-40">Return</button>
+            class="flex-1 rounded border border-white/30 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-white/5 disabled:cursor-not-allowed disabled:border-white/10 disabled:text-slate-400 disabled:hover:bg-transparent">Return</button>
         </div>
       </section>`;
   }
@@ -1008,11 +1019,15 @@ export class POSTerminal extends LitElement {
 
         <div class="flex min-h-0 flex-1 flex-col xl:flex-row">
           ${this._renderItems(productLines)}
-          <div class="max-h-[55%] overflow-y-auto border-t border-white/10 bg-slate-steel p-4 xl:max-h-none xl:w-[420px] xl:border-t-0"
+          <div class="flex max-h-[70%] min-h-0 flex-col border-t border-white/10 bg-slate-steel xl:max-h-none xl:w-[420px] xl:border-t-0"
             data-testid="pos-panels">
-            <div class="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-1">
-              <section data-testid="panel-customer">${this._renderCustomerPanel()}</section>
-              ${this._renderPaymentPanel(sale, hasLines)}
+            <div class="min-h-0 flex-1 overflow-y-auto p-4">
+              <div class="grid grid-cols-1 items-start gap-3 md:grid-cols-2 xl:grid-cols-1">
+                <section data-testid="panel-customer">${this._renderCustomerPanel()}</section>
+                ${this._renderPaymentPanel(sale, hasLines)}
+              </div>
+            </div>
+            <div class="shrink-0 border-t border-white/10 bg-slate-steel p-4" data-testid="pos-panel-foot">
               ${this._renderSummaryPanel(sale, hasLines)}
             </div>
           </div>

@@ -398,6 +398,57 @@ describe('the counter as the Panels layout', () => {
     expect(svc.startSale).toHaveBeenCalledTimes(2);
   });
 
+  describe('the visual review', () => {
+    const filled = (el: Element) => [...el.querySelectorAll('button')].filter((b) => b.className.includes('bg-gable-green'));
+
+    it('before a till is open, Pay is a disabled neutral button and Open Till the one primary', async () => {
+      const el = await mount(sale());
+      (el as unknown as { _till: unknown })._till = null;
+      await el.updateComplete;
+      const pay = q(el, 'pos-pay') as HTMLButtonElement;
+      expect(pay.disabled).toBe(true);
+      expect(pay.className).not.toContain('bg-gable-green');
+      const primaries = filled(el);
+      expect(primaries.length).toBe(1);
+      expect(primaries[0].textContent?.trim()).toBe('Open Till');
+    });
+
+    it('with a till open and a payable sale, Pay is the one primary', async () => {
+      const el = await mount(sale());
+      const primaries = filled(el);
+      expect(primaries.length).toBe(1);
+      expect(primaries[0]).toBe(q(el, 'pos-pay'));
+      expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('takes the tendered amount as text, with no spinner, and shows it with two decimals on leaving', async () => {
+      const el = await mount(sale());
+      const input = el.querySelector('#pos-tender-amount') as HTMLInputElement;
+      expect(input.type).toBe('text');
+      expect(input.inputMode).toBe('decimal');
+      await typeInto(el, '150.5');
+      input.dispatchEvent(new Event('blur'));
+      await el.updateComplete;
+      expect(input.value).toBe('150.50');
+    });
+
+    it('keeps Void and Return and Pay in the foot of the right column, outside its scrolling area', async () => {
+      const el = await mount(sale());
+      const foot = q(el, 'pos-panel-foot');
+      expect(foot.contains(q(el, 'pos-pay'))).toBe(true);
+      expect(foot.textContent).toContain('Void');
+      expect(foot.textContent).toContain('Return');
+      expect(foot.contains(q(el, 'panel-payment'))).toBe(false);
+    });
+
+    it('gives the line remove control a 40 pixel hit area', async () => {
+      const el = await mount(sale());
+      const remove = el.querySelector('[data-testid="pos-lines"] button[aria-label^="Remove"]') as HTMLElement;
+      expect(remove.className).toContain('h-10');
+      expect(remove.className).toContain('w-10');
+    });
+  });
+
   it('tells the cashier to name the customer first, from the start of an empty sale', async () => {
     const el = await mount(sale({ lines: [] }));
     expect(q(el, 'panel-customer').textContent).toContain('Name the customer before the first line');
