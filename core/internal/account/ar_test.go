@@ -1312,3 +1312,123 @@ func TestAREveryWriteKindKeepsTheReconciliationClean(t *testing.T) {
 		}
 	}
 }
+
+// RULE (the demo history's restamp, ADR 0005 section 9.3): RestampHistory
+// moves the stamps of a paid invoice and of the payment applied to it, and
+// links that payment to the invoice, moving no amount, status, open amount or
+// balance; it refuses a call with no transaction, an invoice that is not paid,
+// a payment not applied to the invoice and a day out of order or in the
+// future, and writes nothing when it refuses.
+func TestARRestampHistoryMovesOnlyTheStampsOfASettledInvoice(t *testing.T) {
+	w := newARWorld(t)
+	ctx := context.Background()
+	on := daysFromNow(-20)
+	paid := w.invoice(12500, on)
+	payPaid := w.payment(12500, on, "CHECK", account.ApplyLine{InvoiceID: paid.ID, AmountCents: 12500})
+	unpaid := w.invoice(4000, on)
+	partial := w.invoice(9000, on)
+	payPartial := w.payment(3000, on, "CHECK", account.ApplyLine{InvoiceID: partial.ID, AmountCents: 3000})
+
+	text := func(sql string) string {
+		t.Helper()
+		var s string
+		if err := w.db.Pool.QueryRow(ctx, sql, w.customerID, w.entries).Scan(&s); err != nil {
+			t.Fatalf("%s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+		return s
+	}
+	// Every amount, status and balance the world's documents and ledger hold.
+	amounts := func() string {
+		return text(`SELECT concat_ws(' | ',
+			(SELECT string_agg(id::text || '=' || status || '/' || ROUND(amount_open * 100)::bigint || '/' || ROUND(total_amount * 100)::bigint, ',' ORDER BY id) FROM invoices WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || status || '/' || ROUND(amount * 100)::bigint || '/' || ROUND(amount_unapplied * 100)::bigint, ',' ORDER BY id) FROM payments WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || ROUND(amount * 100)::bigint, ',' ORDER BY id) FROM ar_applications WHERE customer_id = $1),
+			(SELECT ROUND(SUM(amount) * 100)::bigint::text FROM customer_transactions WHERE customer_id = $1),
+			(SELECT ROUND(balance_due * 100)::bigint::text FROM customers WHERE id = $1),
+			(SELECT string_agg(l.id::text || '=' || l.debit || '/' || l.credit, ',' ORDER BY l.id) FROM gl_journal_lines l WHERE l.journal_entry_id = ANY($2)))`)
+	}
+	// Every stamp and link the restamp may write.
+	stamps := func() string {
+		return text(`SELECT concat_ws(' | ',
+			(SELECT string_agg(id::text || '=' || COALESCE(paid_at::text, '-') || '/' || updated_at, ',' ORDER BY id) FROM invoices WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at || '/' || COALESCE(invoice_id::text, '-'), ',' ORDER BY id) FROM payments WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM ar_applications WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM customer_transactions WHERE customer_id = $1),
+			(SELECT string_agg(id::text || '=' || created_at, ',' ORDER BY id) FROM gl_journal_entries WHERE id = ANY($2)))`)
+	}
+	restamp := func(inv, pay uuid.UUID, invoicedAt, paidAt time.Time) error {
+		return w.db.RunInTx(ctx, func(ctx context.Context) error {
+			return w.svc.RestampHistory(ctx, inv, pay, invoicedAt, paidAt)
+		})
+	}
+
+	// The refusals first, while every stamp is still the acts' own.
+	later := on.Add(10 * time.Hour)
+	beforeMoney, beforeStamps := amounts(), stamps()
+	if err := w.svc.RestampHistory(ctx, paid.ID, payPaid, later, later.Add(time.Second)); !errors.Is(err, account.ErrNoTransaction) {
+		t.Errorf("no transaction: err = %v, want ErrNoTransaction", err)
+	}
+	for _, c := range []struct {
+		name               string
+		inv, pay           uuid.UUID
+		invoicedAt, paidAt time.Time
+	}{
+		{"an unpaid invoice with another invoice's payment", unpaid.ID, payPaid, later, later.Add(time.Second)},
+		{"a part paid invoice", partial.ID, payPartial, later, later.Add(time.Second)},
+		{"a paid invoice with a payment not applied to it", paid.ID, payPartial, later, later.Add(time.Second)},
+		{"a payment day in the future", paid.ID, payPaid, later, time.Now().Add(24 * time.Hour)},
+		{"a payment day before the invoice's", paid.ID, payPaid, later, later.Add(-time.Second)},
+	} {
+		if err := restamp(c.inv, c.pay, c.invoicedAt, c.paidAt); err == nil {
+			t.Errorf("%s: the restamp was not refused", c.name)
+		}
+	}
+	if got := amounts(); got != beforeMoney {
+		t.Errorf("a refused restamp moved money:\n before %s\n after  %s", beforeMoney, got)
+	}
+	if got := stamps(); got != beforeStamps {
+		t.Errorf("a refused restamp wrote a stamp or a link:\n before %s\n after  %s", beforeStamps, got)
+	}
+
+	// The settled invoice and its payment take the history's day, and only
+	// the stamps and the link move.
+	invoicedAt := on.Add(9 * time.Hour)
+	paidAt := invoicedAt.Add(time.Second)
+	if err := restamp(paid.ID, payPaid, invoicedAt, paidAt); err != nil {
+		t.Fatalf("restamp a settled invoice: %v", err)
+	}
+	if got := amounts(); got != beforeMoney {
+		t.Errorf("the restamp moved money:\n before %s\n after  %s", beforeMoney, got)
+	}
+	w.assertInvariants("after the restamp")
+	at := func(sql string, args ...any) time.Time {
+		t.Helper()
+		var v time.Time
+		if err := w.db.Pool.QueryRow(ctx, sql, args...).Scan(&v); err != nil {
+			t.Fatalf("%s: %v", strings.Join(strings.Fields(sql), " "), err)
+		}
+		return v
+	}
+	for _, c := range []struct {
+		name string
+		got  time.Time
+		want time.Time
+	}{
+		{"the invoice's paid_at", at(`SELECT paid_at FROM invoices WHERE id = $1`, paid.ID), paidAt},
+		{"the payment's created_at", at(`SELECT created_at FROM payments WHERE id = $1`, payPaid), paidAt},
+		{"the application's created_at", at(`SELECT created_at FROM ar_applications WHERE invoice_id = $1 AND payment_id = $2`, paid.ID, payPaid), paidAt},
+		{"the invoice's subledger row", at(`SELECT created_at FROM customer_transactions WHERE source_kind = 'invoice' AND reference_id = $1`, paid.ID), invoicedAt},
+		{"the invoice's ledger entry", at(`SELECT created_at FROM gl_journal_entries WHERE source_ref_id = $1 AND reverses_entry_id IS NULL`, paid.ID), invoicedAt},
+	} {
+		if !c.got.Equal(c.want) {
+			t.Errorf("%s = %s, want %s", c.name, c.got.UTC(), c.want.UTC())
+		}
+	}
+	var linked uuid.UUID
+	if err := w.db.Pool.QueryRow(ctx, `SELECT invoice_id FROM payments WHERE id = $1`, payPaid).Scan(&linked); err != nil || linked != paid.ID {
+		t.Errorf("the payment links to %s (%v), want %s", linked, err, paid.ID)
+	}
+	if got := at(`SELECT created_at FROM payments WHERE id = $1`, payPartial); got.Equal(paidAt) {
+		t.Errorf("the other payment took the history's day")
+	}
+}

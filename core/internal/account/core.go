@@ -454,13 +454,37 @@ func (s *Service) insertApplication(ctx context.Context, a *appRow, on time.Time
 // statements and the ledger's created dates would otherwise collapse onto the
 // day of the seed) and links the payment to the invoice it paid, as the order
 // and invoice walks follow it. It writes stamps and that link in the caller's
-// transaction, never an amount, a status or a balance.
+// transaction, never an amount, a status or a balance. It is not an act: no
+// route or worker calls it. It refuses a call with no transaction, an invoice
+// that is not paid, a payment with no live application to that invoice, and a
+// payment day before the invoice's or after the present.
 func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	if err := s.requireTx(ctx); err != nil {
+		return err
+	}
+	if paidAt.Before(invoicedAt) {
+		return invalidField("paid_at", "a history payment is not made before its invoice")
+	}
+	if paidAt.After(s.now()) {
+		return invalidField("paid_at", "a history day is not in the future")
+	}
+	var settled bool
+	if err := s.ex(ctx).QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM invoices WHERE id = $1 AND status = 'PAID')
+			AND EXISTS (SELECT 1 FROM ar_applications
+				WHERE invoice_id = $1 AND payment_id = $2 AND reversed_at IS NULL)`,
+		invoiceID, paymentID).Scan(&settled); err != nil {
+		return fmt.Errorf("the history's invoice was not read: %w", err)
+	}
+	if !settled {
+		return conflict("not_settled", "only a paid invoice and a payment applied to it take a history day")
+	}
 	// One statement: each update is a CTE over the rows the acts just wrote, so
-	// a history invoice costs one more round trip, not seven.
+	// a history invoice costs one more round trip, not seven. Each is scoped to
+	// what the payment settled, so the guard above and the writes agree.
 	_, err := s.ex(ctx).Exec(ctx, `
 		WITH apps AS (
-			UPDATE ar_applications SET created_at = $2 WHERE invoice_id = $1 RETURNING id
+			UPDATE ar_applications SET created_at = $2 WHERE invoice_id = $1 AND payment_id = $4 RETURNING id
 		), ct_inv AS (
 			UPDATE customer_transactions SET created_at = $3 WHERE source_kind = 'invoice' AND reference_id = $1
 		), ct_pay AS (
@@ -469,7 +493,7 @@ func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.
 		), pay AS (
 			UPDATE payments SET invoice_id = $1, created_at = $2, updated_at = $2 WHERE id = $4
 		), inv AS (
-			UPDATE invoices SET paid_at = $2, updated_at = $2 WHERE id = $1
+			UPDATE invoices SET paid_at = $2, updated_at = $2 WHERE id = $1 AND status = 'PAID'
 		), gl_inv AS (
 			UPDATE gl_journal_entries SET created_at = $3, updated_at = $3 WHERE source_ref_id = $1
 		)
