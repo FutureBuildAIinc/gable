@@ -55,6 +55,9 @@ func (s *Service) RecordPayment(ctx context.Context, in RecordPaymentIn) (uuid.U
 	if in.AmountCents <= 0 {
 		return uuid.Nil, nil, invalidField("amount_cents", "must be greater than zero")
 	}
+	if err := s.refuseDayToCome(ctx, in.BranchID, in.ReceivedOn, "received_on"); err != nil {
+		return uuid.Nil, nil, err
+	}
 	id := in.PaymentID
 	if id == uuid.Nil {
 		id = uuid.New()
@@ -170,6 +173,9 @@ func lineField(prefix string, i int, name string) string {
 func (s *Service) applyLocked(ctx context.Context, fx *Effects, pay *paymentRow, lines []ApplyLine, on time.Time, actor, prefix string) error {
 	if len(lines) == 0 {
 		return invalidField(prefix, "name at least one invoice")
+	}
+	if err := s.refuseDayToCome(ctx, pay.BranchID, on, "applied_on"); err != nil {
+		return err
 	}
 	// the counter's hold first (C2-5, FROM-PRINCIPAL 60): a payment whose
 	// unapplied cash is a declined void tender's credit applies to no
@@ -337,6 +343,9 @@ func (s *Service) ApplyCreditMemo(ctx context.Context, in ApplyCreditMemoIn) (*E
 	if m.Status != "OPEN" && m.Status != "PARTIAL" {
 		return nil, httpx.InvalidStateTransition("only an open credit memo can be applied: it is " + lower(m.Status))
 	}
+	if err := s.refuseDayToCome(ctx, m.BranchID, in.On, "applied_on"); err != nil {
+		return nil, err
+	}
 	if len(in.Lines) == 0 {
 		return nil, invalidField("applications", "name at least one invoice")
 	}
@@ -437,6 +446,9 @@ func (s *Service) WriteOff(ctx context.Context, in WriteOffIn) (*Effects, error)
 	inv := byID[in.InvoiceID]
 	if inv.Status != invUnpaid && inv.Status != invPartial {
 		return nil, httpx.InvalidStateTransition("only an unpaid or partly paid invoice can be written off: it is " + lower(inv.Status))
+	}
+	if err := s.refuseDayToCome(ctx, inv.BranchID, in.On, "on"); err != nil {
+		return nil, err
 	}
 	// the counter's hold first (C2-5): a held interim invoice refuses before
 	// its amounts are even read
@@ -811,6 +823,9 @@ func (s *Service) RefundPayment(ctx context.Context, in RefundPaymentIn) (uuid.U
 	if pay.Status != "POSTED" {
 		return uuid.Nil, nil, conflict("payment_voided", "the payment is voided: it refunds nothing")
 	}
+	if err := s.refuseDayToCome(ctx, pay.BranchID, in.On, "refunded_on"); err != nil {
+		return uuid.Nil, nil, err
+	}
 	if in.AmountCents > pay.Unapplied {
 		return uuid.Nil, nil, conflict("exceeds_unapplied", fmt.Sprintf("the payment has %d cents unapplied: %d cents were asked", pay.Unapplied, in.AmountCents))
 	}
@@ -864,6 +879,9 @@ func (s *Service) RefundCreditMemo(ctx context.Context, in RefundCreditMemoIn) (
 	}
 	if m.Status != "OPEN" && m.Status != "PARTIAL" {
 		return uuid.Nil, nil, httpx.InvalidStateTransition("only an open credit memo can be refunded: it is " + lower(m.Status))
+	}
+	if err := s.refuseDayToCome(ctx, m.BranchID, in.On, "refunded_on"); err != nil {
+		return uuid.Nil, nil, err
 	}
 	if in.AmountCents > -m.Open {
 		return uuid.Nil, nil, conflict("exceeds_open_credit", fmt.Sprintf("the credit memo has %d cents of open credit: %d cents were asked", -m.Open, in.AmountCents))

@@ -67,6 +67,23 @@ func invalidField(field, message string) *httpx.Error {
 		Details: []httpx.FieldError{{Field: field, Message: message}}}
 }
 
+// refuseDayToCome refuses a money day after the business day of the branch
+// the act belongs to, in the branch's time zone (the aging's own rule for today):
+// cash is never received, applied or refunded on a day that has not come.
+func (s *Service) refuseDayToCome(ctx context.Context, branchID uuid.UUID, on time.Time, field string) error {
+	if on.IsZero() {
+		return nil
+	}
+	today, err := s.LocalDate(ctx, branchID, s.now())
+	if err != nil {
+		return err
+	}
+	if date(on) > date(today) {
+		return invalidField(field, fmt.Sprintf("%s has not come yet: money is dated no later than today, %s", date(on), date(today)))
+	}
+	return nil
+}
+
 // ErrNoTransaction is the refusal to run an act with no transaction open.
 var ErrNoTransaction = gl.ErrNoTransaction
 
@@ -483,6 +500,49 @@ func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.
 	if !settled {
 		return conflict("not_settled", "only a paid invoice and a payment applied to it take a history day")
 	}
+	return s.restampRows(ctx, invoiceID, paymentID, invoicedAt, paidAt)
+}
+
+// RestampDay is RestampHistory for the base seed, whose invoices are unpaid or
+// part paid as often as paid: it puts the documents' days on the rows an
+// invoice's posting and, when a payment is named, that payment's act stamped
+// with the present. The same writes and the same limits (a transaction, a
+// payment day not before the invoice's or after the present, a payment with a
+// live application to the invoice), without the settled invoice guard.
+// uuid.Nil names no payment.
+func (s *Service) RestampDay(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	if err := s.requireTx(ctx); err != nil {
+		return err
+	}
+	if invoicedAt.IsZero() {
+		return invalidField("invoiced_at", "a day is given for the invoice")
+	}
+	if paymentID == uuid.Nil {
+		paidAt = invoicedAt
+	}
+	if paidAt.Before(invoicedAt) {
+		return invalidField("paid_at", "a payment is not made before its invoice")
+	}
+	if paidAt.After(s.now()) || invoicedAt.After(s.now()) {
+		return invalidField("paid_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil {
+		var applied bool
+		if err := s.ex(ctx).QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM ar_applications WHERE invoice_id = $1 AND payment_id = $2 AND reversed_at IS NULL)`,
+			invoiceID, paymentID).Scan(&applied); err != nil {
+			return fmt.Errorf("the invoice's payment was not read: %w", err)
+		}
+		if !applied {
+			return conflict("not_settled", "only a payment applied to the invoice takes its day")
+		}
+	}
+	return s.restampRows(ctx, invoiceID, paymentID, invoicedAt, paidAt)
+}
+
+// restampRows writes the stamps and the payment's link in the caller's
+// transaction.
+func (s *Service) restampRows(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
 	// One statement: each update is a CTE over the rows the acts just wrote, so
 	// a history invoice costs one more round trip, not seven. Each is scoped to
 	// what the payment settled, so the guard above and the writes agree.

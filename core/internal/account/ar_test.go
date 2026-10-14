@@ -836,10 +836,12 @@ func TestARDiscountTakenAndReversed(t *testing.T) {
 	inv := w.invoice(10000, daysFromNow(-1), withDiscount(twoPct, daysFromNow(5)))
 	pay := w.payment(10000, daysFromNow(0), "CHECK")
 
-	// Past the due date: refused.
+	// Past the due date: refused (an invoice whose discount date has gone,
+	// applied today; money is never dated after the business day).
+	lateInv := w.invoice(10000, daysFromNow(-3), withDiscount(twoPct, daysFromNow(-1)))
 	_, err := w.act("discount late", func(ctx context.Context) (*account.Effects, error) {
-		return w.svc.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: inv.ID, AmountCents: 5000, DiscountCents: 100}},
-			On: daysFromNow(6), Actor: "u-test"})
+		return w.svc.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: lateInv.ID, AmountCents: 5000, DiscountCents: 100}},
+			On: daysFromNow(0), Actor: "u-test"})
 	})
 	if err == nil || !strings.Contains(err.Error(), "discount") {
 		t.Errorf("late discount = %v, want the discount refusal", err)
