@@ -62,7 +62,7 @@ Steps:
 5. The yard's receiving work: purchasing's purchase order list at `KEL-MAIN` must show one `SENT` order to
    Okanagan Hardware Distribution with two lines and nothing received, ready to receive.
 6. Credit: the customer directory shows `Glenmore Heritage Reno` over its credit limit (orders land on hold) and
-   `Kelbrook Construction` close to its limit.
+   `Ridgeline Formwork Ltd` close to its limit (a limit of $20,000.00 and $18,816.00 open).
 7. AR: the AR aging and `Kelbrook Construction`'s statement have open invoices at more than one yard.
 
 ### The cross yard sale (M1, ruling A)

@@ -13,9 +13,11 @@ package seed
 // writes by natural key, and it never moves a row an operator changed.
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -87,8 +89,8 @@ func upsertPersonas(db *sql.DB, yards map[string]uuid.UUID) error {
 }
 
 // seedMultiYard writes the multi yard world on top of the sections above it.
-func seedMultiYard(db *sql.DB, yards map[string]uuid.UUID, skuToID map[string]uuid.UUID, customerIDs map[string]uuid.UUID,
-	vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID) {
+func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[string]uuid.UUID, skuToID map[string]uuid.UUID,
+	customerIDs map[string]uuid.UUID, vendorIDs map[string]uuid.UUID, custToBranch map[uuid.UUID]uuid.UUID, priceLevelIDs map[string]uuid.UUID) {
 
 	// The single branch switch on: the desk's yard switcher shows the yards.
 	if _, err := db.Exec(`INSERT INTO system_settings (key, value) VALUES ('multi_branch_enabled', 'true')
@@ -130,14 +132,37 @@ func seedMultiYard(db *sql.DB, yards map[string]uuid.UUID, skuToID map[string]uu
 
 	kel := yards["KEL-MAIN"]
 
-	// Kelbrook Construction stands close to its limit: the limit is 6% over
-	// what its open invoices come to, through the AR core's own figures.
-	if id, ok := customerIDs["Kelbrook Construction"]; ok {
-		if _, err := db.Exec(`UPDATE customers c SET credit_limit = ROUND(COALESCE(
-				(SELECT SUM(i.amount_open) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0) * 1.06, 2)
-			WHERE c.id = $1 AND COALESCE((SELECT SUM(i.amount_open) FROM invoices i
-				WHERE i.customer_id = c.id AND i.status IN ('UNPAID', 'PARTIAL')), 0) > 0`, id); err != nil {
-			log.Printf("Seed: Kelbrook near its limit: %v", err)
+	// Ridgeline Formwork stands close to its credit limit: a $20,000 limit and
+	// one open invoice of $18,816.00 posted through the AR core. It is a
+	// customer of the seed's own, so no scenario that reads another customer's
+	// credit moves.
+	if ar != nil && yards["WK"] != uuid.Nil {
+		cid, branch, err := seedCustomer(db, demoCustomer{
+			Name: "Ridgeline Formwork Ltd", Acct: "RFC-001", Email: "billing@ridgelineformwork.example", Phone: "250-555-3300",
+			Addr: "610 Plywood Ct, West Kelowna BC", Tier: "SILVER", Terms: "NET30", PriceLevel: "Contractor",
+			CreditLimit: 20000, PrimaryBranch: yards["WK"],
+		}, priceLevelIDs["Contractor"])
+		if err != nil {
+			log.Printf("Seed: Ridgeline Formwork: %v", err)
+		} else {
+			db.Exec(`INSERT INTO customer_ship_tos (customer_id, code, name, line1, is_default)
+				VALUES ($1, 'MAIN', 'Ridgeline Formwork Ltd', '610 Plywood Ct, West Kelowna BC', TRUE)
+				ON CONFLICT (customer_id, code) DO NOTHING`, cid)
+			var invCount int
+			db.QueryRow(`SELECT COUNT(*) FROM invoices WHERE customer_id = $1`, cid).Scan(&invCount)
+			if invCount == 0 {
+				orderID, invID := uuid.New(), uuid.New()
+				on := time.Now().AddDate(0, 0, -12)
+				db.Exec(`INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
+					VALUES ($1, $2, $3, 18816.00, 16800.00, 'FULFILLED', $4, 'PICKUP',
+						COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'), 'LEGACY')`, orderID, cid, branch, on)
+				db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
+						due_date, payment_terms_id, invoice_date, created_at)
+					VALUES ($1, $2, $3, $4, 'UNPAID', 18816.00, 16800.00, 0.12, 2016.00, $5::date,
+						(SELECT payment_terms_id FROM customers WHERE id = $3), $6::date, $6)`,
+					invID, orderID, cid, branch, on.AddDate(0, 1, 0), on.AddDate(0, 0, 1))
+				ar.post(ctx, []seedInvoice{{ID: invID, CustomerID: cid, BranchID: branch, Date: on.AddDate(0, 0, 1), Subtotal: 1680000, Tax: 201600}})
+			}
 		}
 	}
 

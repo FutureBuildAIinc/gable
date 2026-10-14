@@ -1240,10 +1240,12 @@
       }
     },
     "response": {
-      "status": 409,
+      "status": 200,
       "content_type": "application/json",
       "body": {
-        "error": "order <id-82> created from quote but could not be confirmed: credit limit exceeded: order placed ON HOLD"
+        "id": "<id-82>",
+        "quote_id": "<id-81>",
+        "status": "CONFIRMED"
       }
     }
   },

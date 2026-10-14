@@ -38,7 +38,7 @@
             "credit": 0,
             "date": "<day+0>",
             "debit": 31.42,
-            "description": "Invoice IN-000051",
+            "description": "Invoice IN-000052",
             "type": "INVOICE"
           },
           {
@@ -62,7 +62,7 @@
             "credit": 20,
             "date": "<day+0>",
             "debit": 0,
-            "description": "Payment PAY-000045 applied to IN-000051",
+            "description": "Payment PAY-000045 applied to IN-000052",
             "type": "PAYMENT"
           },
           {
@@ -70,7 +70,7 @@
             "credit": 11.42,
             "date": "<day+0>",
             "debit": 0,
-            "description": "Payment PAY-000045 applied to IN-000051",
+            "description": "Payment PAY-000045 applied to IN-000052",
             "type": "PAYMENT"
           },
           {
@@ -78,7 +78,7 @@
             "credit": 0,
             "date": "<day+0>",
             "debit": 20,
-            "description": "Reversal of an application to IN-000051",
+            "description": "Reversal of an application to IN-000052",
             "type": "REVERSAL"
           },
           {
@@ -86,7 +86,7 @@
             "credit": 0,
             "date": "<day+0>",
             "debit": 11.42,
-            "description": "Reversal of an application to IN-000051",
+            "description": "Reversal of an application to IN-000052",
             "type": "REVERSAL"
           },
           {

@@ -1321,7 +1321,7 @@ func Run() {
 
 	// The multi yard world (multi_yard.go): personas, a register and stock per
 	// yard, a purchase order to receive, cross yard quotes.
-	seedMultiYard(db, branchIDs, skuToID, customerIDs, vendorIDs, custToBranch)
+	seedMultiYard(seedCtx, db, ar, branchIDs, skuToID, customerIDs, vendorIDs, custToBranch, priceLevelIDs)
 
 	// =========================================================================
 	// 23. EDI TRADING PARTNERS
