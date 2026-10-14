@@ -316,6 +316,20 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 			t.Errorf("two grants PO naming branch_id wrote at %s, want the named %s", row.BranchID, f.branchA)
 		}
 	}
+	// A body naming a branch the user is not granted is refused 403 naming
+	// branch_id with no header and with header A, nothing written (r6 P2-2:
+	// the hold on the field this PR introduced).
+	poNamingB := `{"vendor_id":"` + w.vendor.String() + `","branch_id":"` + f.branchB.String() + `","lines":[]}`
+	for label, hdr := range map[string]map[string]string{"no header": nil, "header A": headerA(f)} {
+		before := countAt("purchase_orders", f.branchB.String())
+		status, buf := f.userAs(t, "purchasing", "POST", "/api/v1/purchase-orders", poNamingB, hdr)
+		if status != http.StatusForbidden || !strings.Contains(string(buf), "branch_id") {
+			t.Errorf("%s PO naming an ungranted branch_id: %d %s, want the 403 naming branch_id", label, status, buf)
+		}
+		if after := countAt("purchase_orders", f.branchB.String()); after != before {
+			t.Errorf("%s PO naming an ungranted branch_id wrote %d row(s) at that branch, want none", label, after-before)
+		}
+	}
 	if _, err := f.db.Pool.Exec(ctx, `DELETE FROM user_locations WHERE user_sub = 'pin-sales' AND branch_id = $1`, f.branchC); err != nil {
 		t.Fatal(err)
 	}
