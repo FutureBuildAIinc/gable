@@ -32,7 +32,9 @@ export class POSTerminal extends LitElement {
 
   @state() private _sale: Sale | null = null;
   @state() private _pendingTenders: TenderIn[] = [];
-  @state() private _tenderMethod: TenderMethod = 'cash';
+  // Null until the cashier presses a tender: nothing is assumed, so Pay cannot
+  // complete a sale on a method nobody chose.
+  @state() private _tenderMethod: TenderMethod | null = null;
   @state() private _tenderAmount = '';
   @state() private _loading = false;
   @state() private _error: string | null = null;
@@ -333,6 +335,7 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: c.id });
       this._customer = c;
+      this._resetTender();
       this._custQuery = '';
       this._custResults = [];
       this._poText = '';
@@ -375,6 +378,7 @@ export class POSTerminal extends LitElement {
       this._error = null;
       this._sale = await posService.attachCustomer(this._sale.id, { customer_id: null });
       this._customer = null;
+      this._resetTender();
       this._poText = '';
       this._jobId = '';
       this._step = 'customer';
@@ -529,7 +533,7 @@ export class POSTerminal extends LitElement {
       if (reg !== this._registerId) return;
       this._sale = sale;
       this._tenderAmount = '';
-      this._tenderMethod = 'cash';
+      this._tenderMethod = null;
       this._step = 'customer';
       this._open = 'customer';
     } catch (err: unknown) {
@@ -664,6 +668,8 @@ export class POSTerminal extends LitElement {
       await this._removeItem(id);
       if (this._error) return;
     }
+    // a tender chosen or added for the cleared lines is not the next lines' tender
+    this._resetTender();
   }
 
   private async _removeItem(itemId: string) {
@@ -688,17 +694,26 @@ export class POSTerminal extends LitElement {
 
   /**
    * The tender being entered: the chosen method and the typed amount, which
-   * is what is still owed while the field is empty. Null when it does not
-   * parse to a positive amount.
+   * is what is still owed while the field is empty. Null when no method is
+   * chosen or the amount does not parse to a positive number.
    */
   private get _entry(): TenderIn | null {
+    if (this._tenderMethod === null) return null;
     const text = this._tenderAmount.trim();
     const cents = text === '' ? this._owedCents : dollarsToCents(text);
     if (isNaN(cents) || cents <= 0) return null;
     return { method: this._tenderMethod, amount_cents: cents };
   }
 
+  /** Nothing chosen and nothing added: the next tender is chosen again. */
+  private _resetTender() {
+    this._tenderMethod = null;
+    this._tenderAmount = '';
+    this._pendingTenders = [];
+  }
+
   private _chooseMethod(method: TenderMethod) {
+    if (this._till === null) return;
     if (method === 'account') {
       const refusal = this._accountRefusal;
       if (refusal) {
@@ -727,8 +742,8 @@ export class POSTerminal extends LitElement {
     }
     this._pendingTenders = [...this._pendingTenders, entry];
     this._tenderAmount = '';
-    // The next tender starts on a method the sale can still take.
-    if (this._tenderMethod === 'account') this._tenderMethod = 'cash';
+    // The next tender is chosen again, never assumed.
+    this._tenderMethod = null;
   }
 
   /** Pay: the added tenders plus the entry when they do not cover the total. */
@@ -770,6 +785,7 @@ export class POSTerminal extends LitElement {
       this._success = null;
       this._pendingTenders = [];
       this._tenderAmount = '';
+      this._tenderMethod = null;
       this._step = 'summary';
       this._open = null;
       if (tenders.some((t) => t.method === 'account')) void this._refreshStanding();
@@ -1129,7 +1145,7 @@ export class POSTerminal extends LitElement {
               const chosen = this._tenderMethod === m && this._till !== null;
               return html`
                 <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
-                  ?disabled=${!hasLines || !open || refused !== null}
+                  ?disabled=${this._till === null || !hasLines || !open || refused !== null}
                   title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
                   aria-pressed=${chosen ? 'true' : 'false'}
                   class="min-h-14 rounded-lg border px-3 py-3 text-base font-semibold ${m === 'account' ? '' : 'capitalize'} disabled:cursor-not-allowed ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white disabled:opacity-40'}">
@@ -1145,11 +1161,11 @@ export class POSTerminal extends LitElement {
                   class="mt-2 min-h-11 rounded border border-white/20 px-3 py-2 text-sm font-semibold text-white hover:bg-white/5">Enter the purchase order in Customer</button>` : nothing}
             </div>` : nothing}
           <label class="mt-3 block text-xs text-slate-400" for="pos-tender-amount">
-            ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
+            ${this._tenderMethod === null ? 'Amount' : isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
           </label>
           <input id="pos-tender-amount" type="text" inputmode="decimal" autocomplete="off"
             placeholder=${owed > 0 ? (owed / 100).toFixed(2) : ''} .value=${this._tenderAmount}
-            ?disabled=${!hasLines || !open}
+            ?disabled=${!hasLines || !open || this._tenderMethod === null}
             @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
             @blur=${() => this._formatTenderAmount()}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
@@ -1160,10 +1176,10 @@ export class POSTerminal extends LitElement {
             </div>` : nothing}
           <div class="mt-3 flex gap-2">
             <button data-testid="pos-add-tender" @click=${() => this._addPendingTender()}
-              ?disabled=${!hasLines || !open || entry === null || owed <= 0}
+              ?disabled=${!hasLines || !open || this._tenderMethod === null || entry === null || owed <= 0}
               class="min-h-11 flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
             ${this._pendingTenders.length > 0 ? html`
-              <button @click=${() => { this._pendingTenders = []; }}
+              <button @click=${() => { this._resetTender(); }}
                 class="min-h-11 rounded border border-white/10 px-3 py-2 text-xs text-slate-400">Clear tenders</button>` : nothing}
           </div>
           <div class="mt-4 flex items-center justify-between gap-2">
@@ -1226,6 +1242,7 @@ export class POSTerminal extends LitElement {
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
+      : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
       <section class="order-first rounded-xl border border-white/10 bg-slate-steel p-4 min-[900px]:order-none" data-testid="pos-order-summary">
