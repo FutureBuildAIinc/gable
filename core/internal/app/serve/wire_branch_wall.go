@@ -355,10 +355,13 @@ func (w *branchWall) emailDeliveries(mux *http.ServeMux, h *emaildelivery.Handle
 // dealerProfile mounts the dealer profile: every role that prints reads it
 // and its logo, and only admin and owner write them. The profile is one
 // dealer wide row, so it runs behind the role guard alone and a branch bound
-// key is refused the writes by the route allowlist gate.
+// key is refused the writes by the route allowlist gate. The locale alone is
+// the one read every signed in desk person may call (a cashier, the yard and
+// a driver format their dates for it too).
 func (w *branchWall) dealerProfile(mux *http.ServeMux, h *dealerprofile.Handler) {
 	h.RegisterRoutes(mux, dealerprofile.Guards{
-		Read:  middleware.RequireRole("admin", "owner", "sales", "finance", "purchasing"),
-		Write: middleware.RequireRole("admin", "owner"),
+		Read:   middleware.RequireRole("admin", "owner", "sales", "finance", "purchasing"),
+		Write:  middleware.RequireRole("admin", "owner"),
+		Locale: middleware.RequireRole("admin", "owner", "sales", "finance", "purchasing", "warehouse", "cashier", "driver"),
 	})
 }

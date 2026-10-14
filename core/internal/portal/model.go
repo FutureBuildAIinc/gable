@@ -33,7 +33,8 @@ type PortalInvite struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// PortalConfig holds white-label branding for the dealer portal.
+// PortalConfig holds white-label branding for the dealer portal. The locale
+// is the dealer profile's (the portal's pages format their dates for it).
 type PortalConfig struct {
 	ID           uuid.UUID `json:"id"`
 	DealerName   string    `json:"dealer_name"`
@@ -41,6 +42,7 @@ type PortalConfig struct {
 	PrimaryColor string    `json:"primary_color"`
 	SupportEmail string    `json:"support_email"`
 	SupportPhone string    `json:"support_phone"`
+	Locale       string    `json:"locale"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

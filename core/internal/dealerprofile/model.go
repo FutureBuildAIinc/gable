@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // Package dealerprofile holds the one dealer wide profile every printed form
-// shows: the dealer's legal and trading name, contact lines, remit to address
-// and logo. It is a single row (migration 115).
+// shows: the dealer's legal and trading name, contact lines, remit to address,
+// logo and locale (the BCP 47 tag every date the app shows is formatted for).
+// It is a single row (migration 115; the locale column is migration 119).
 package dealerprofile
 
 import (
@@ -17,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"golang.org/x/text/language"
 )
 
 // LogoPath is the route the logo is served from; Profile.LogoURL carries it
@@ -37,6 +39,7 @@ type Profile struct {
 	Email       string          `json:"email"`
 	Website     string          `json:"website"`
 	RemitTo     string          `json:"remit_to"`
+	Locale      string          `json:"locale"`
 	LogoURL     *string         `json:"logo_url"`
 	Revision    int64           `json:"revision"`
 	UpdatedAt   httpx.Timestamp `json:"updated_at"`
@@ -50,7 +53,9 @@ func (p Profile) DisplayName() string {
 	return strings.TrimSpace(p.LegalName)
 }
 
-// Input is the writable slice of the profile.
+// Input is the writable slice of the profile. An empty Locale leaves the
+// stored one alone (the service fills it from the locked row), so a caller
+// from before the field existed never resets it.
 type Input struct {
 	LegalName   string
 	TradingName string
@@ -58,12 +63,33 @@ type Input struct {
 	Email       string
 	Website     string
 	RemitTo     string
+	Locale      string
 }
 
 // Logo is the stored image.
 type Logo struct {
 	Bytes       []byte
 	ContentType string
+}
+
+// MaxLocaleTagLength caps a locale tag (BCP 47's own suggestion is 35).
+const MaxLocaleTagLength = 35
+
+// CheckLocale accepts a BCP 47 tag the date formatter can use ("en-US",
+// "en-CA", "fr-CA") and refuses anything else in words. The canonical form
+// the parser would rewrite to (it title cases the region, for example) is
+// not required; the tag is stored as given.
+func CheckLocale(tag string) error {
+	if tag == "" {
+		return errors.New("the locale must be a language tag such as en-US")
+	}
+	if len(tag) > MaxLocaleTagLength {
+		return fmt.Errorf("the locale must be at most %d characters", MaxLocaleTagLength)
+	}
+	if _, err := language.Parse(tag); err != nil {
+		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (a BCP 47 tag such as en-US)", tag)
+	}
+	return nil
 }
 
 // Reader is what a printing module needs: the profile and its logo.

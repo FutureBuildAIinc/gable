@@ -70,7 +70,7 @@ paths:
       operationId: portalGetConfig
       tags: [portal]
       summary: The dealer branding config
-      description: Public. The one row of white-label branding the login page renders before any session exists.
+      description: Public. The one row of white-label branding the login page renders before any session exists, with the dealer's locale for the portal's dates.
       security: []
       responses:
         "200":
@@ -1227,7 +1227,7 @@ components:
           format: date-time
     PortalConfig:
       type: object
-      required: [id, dealer_name, logo_url, primary_color, support_email, support_phone, created_at, updated_at]
+      required: [id, dealer_name, logo_url, primary_color, support_email, support_phone, locale, created_at, updated_at]
       description: The white-label branding row.
       properties:
         id:
@@ -1243,6 +1243,9 @@ components:
           type: string
         support_phone:
           type: string
+        locale:
+          type: string
+          description: The dealer profile's locale (a BCP 47 tag); the portal's pages format their dates for it.
         created_at:
           type: string
           format: date-time

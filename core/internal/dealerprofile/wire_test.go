@@ -49,17 +49,18 @@ func newFixture(t *testing.T, maxConns int32) *fixture {
 	}
 	var snapshot struct {
 		legal, trading, phone, email, website, remit string
+		locale                                       string
 		logo                                         []byte
 		ctype                                        *string
 		revision                                     int64
 	}
-	if err := db.Pool.QueryRow(context.Background(), `SELECT legal_name, trading_name, phone, email, website, remit_to, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
-		Scan(&snapshot.legal, &snapshot.trading, &snapshot.phone, &snapshot.email, &snapshot.website, &snapshot.remit, &snapshot.logo, &snapshot.ctype, &snapshot.revision); err != nil {
+	if err := db.Pool.QueryRow(context.Background(), `SELECT legal_name, trading_name, phone, email, website, remit_to, locale, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
+		Scan(&snapshot.legal, &snapshot.trading, &snapshot.phone, &snapshot.email, &snapshot.website, &snapshot.remit, &snapshot.locale, &snapshot.logo, &snapshot.ctype, &snapshot.revision); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(context.Background(), `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, logo=$7, logo_content_type=$8, revision=$9 WHERE id = 1`,
-			snapshot.legal, snapshot.trading, snapshot.phone, snapshot.email, snapshot.website, snapshot.remit, snapshot.logo, snapshot.ctype, snapshot.revision)
+		_, _ = db.Pool.Exec(context.Background(), `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, locale=$7, logo=$8, logo_content_type=$9, revision=$10 WHERE id = 1`,
+			snapshot.legal, snapshot.trading, snapshot.phone, snapshot.email, snapshot.website, snapshot.remit, snapshot.locale, snapshot.logo, snapshot.ctype, snapshot.revision)
 	})
 	svc := dealerprofile.NewService(dealerprofile.NewRepository(db), db, audit.NewLogger(db))
 	mux := http.NewServeMux()
@@ -137,7 +138,7 @@ func TestDealerProfileReadShape(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("get: %d %s", r.status, r.raw)
 	}
-	for _, k := range []string{"legal_name", "trading_name", "phone", "email", "website", "remit_to", "logo_url", "revision", "updated_at"} {
+	for _, k := range []string{"legal_name", "trading_name", "phone", "email", "website", "remit_to", "locale", "logo_url", "revision", "updated_at"} {
 		if _, ok := r.body[k]; !ok {
 			t.Errorf("field %q missing from %s", k, r.raw)
 		}
@@ -194,6 +195,51 @@ func TestDealerProfileWriteNeedsRevisionAndAudits(t *testing.T) {
 	}
 	if c.After["legal_name"] != "Test Yard Supply Ltd" || c.Before == nil || c.Before["legal_name"] == "Test Yard Supply Ltd" {
 		t.Errorf("audit before/after wrong: %s", changes)
+	}
+}
+
+// TestDealerProfileLocale: the locale rides the profile read, the locale
+// route answers it alone, the write validates the tag (a BCP 47 tag such as
+// en-CA, refused in words otherwise), and a write without the field keeps the
+// stored one.
+func TestDealerProfileLocale(t *testing.T) {
+	f := newFixture(t, 0)
+
+	stored := f.do("GET", "/api/v1/dealer-profile", nil)
+	if _, ok := stored.body["locale"].(string); !ok {
+		t.Fatalf("the profile read carries no locale: %s", stored.raw)
+	}
+
+	l := f.do("GET", "/api/v1/dealer-profile/locale", nil)
+	if l.status != http.StatusOK || l.body["locale"] != stored.body["locale"] || len(l.body) != 1 {
+		t.Errorf("the locale read: %d %s", l.status, l.raw)
+	}
+	if r := f.do("GET", "/api/v1/dealer-profile/locale?bogus=1", nil); r.status != http.StatusBadRequest {
+		t.Errorf("unknown parameter: %d", r.status)
+	}
+
+	rev := f.revision()
+	withLocale := strings.Replace(goodBody, `"remit_to":"PO Box 1\nTesttown"}`, `"remit_to":"PO Box 1\nTesttown","locale":"en-CA"}`, 1)
+	r := f.put(withLocale, "If-Match", `"`+strconv.FormatInt(rev, 10)+`"`)
+	if r.status != http.StatusOK || r.body["locale"] != "en-CA" {
+		t.Fatalf("write with a good tag: %d %s", r.status, r.raw)
+	}
+	if l := f.do("GET", "/api/v1/dealer-profile/locale", nil); l.body["locale"] != "en-CA" {
+		t.Errorf("the locale read after the write: %s", l.raw)
+	}
+
+	r = f.put(strings.Replace(withLocale, `"en-CA"`, `"not a locale"`, 1), "If-Match", `"`+strconv.FormatInt(rev+1, 10)+`"`)
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("a bad tag: %d %s", r.status, r.raw)
+	}
+	if d, _ := json.Marshal(r.body["error"]); !strings.Contains(string(d), "locale") {
+		t.Errorf("the refusal does not name the field: %s", d)
+	}
+
+	// A write without the field (a caller from before it existed) keeps en-CA.
+	r = f.put(goodBody, "If-Match", `"`+strconv.FormatInt(f.revision(), 10)+`"`)
+	if r.status != http.StatusOK || r.body["locale"] != "en-CA" {
+		t.Errorf("write without the field: %d %s", r.status, r.raw)
 	}
 }
 
