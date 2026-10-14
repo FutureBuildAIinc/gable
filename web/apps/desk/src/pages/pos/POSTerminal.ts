@@ -609,35 +609,41 @@ export class POSTerminal extends LitElement {
     });
   }
 
-  private async _addItem(product: QuickSearchResult, quantity: string) {
-    if (!(await this._readySale())) return;
-    if (!this._sale) return;
+  /** True once the line is on the sale; a refused add answers false. */
+  private async _addItem(product: QuickSearchResult, quantity: string): Promise<boolean> {
+    if (!(await this._readySale())) return false;
+    if (!this._sale) return false;
     const qty = normalizeQuantity(quantity);
     if (qty === null) {
       this._error = 'Enter a quantity above zero';
-      return;
+      return false;
     }
     if (qty.includes('.') && isCountedUnit(product.uom)) {
       this._error = `${product.uom} is counted in whole units`;
-      return;
+      return false;
     }
     try {
       this._error = null;
       const updated = await posService.addItem(this._sale.id, product.product_id, qty, product.uom);
       this._sale = updated;
       if (this._step === 'payment' && this._open === null) this._open = 'payment';
+      return true;
     } catch (err: unknown) {
       this._error = err instanceof Error ? err.message : 'Failed to add item';
+      return false;
     }
   }
 
-  /** The catalogue's Add: the same add path the search takes, with its quantity. */
+  /** The catalogue's Add: the same add path, with its quantity; the card resets only on an accepted add. */
   private _onCatalogAdd = (e: Event) => {
     const detail = (e as CustomEvent<{ product?: QuickSearchResult & { image_url?: string | null }; qty?: string }>).detail;
     const product = detail?.product;
     if (!product) return;
     if (product.image_url) this._images = { ...this._images, [product.product_id]: product.image_url };
-    void this._addItem(product, detail.qty ?? '1');
+    void this._addItem(product, detail.qty ?? '1').then((accepted) => {
+      if (!accepted) return;
+      (this.querySelector('gable-pos-catalog') as (HTMLElement & { resetQuantity?: () => void }) | null)?.resetQuantity?.();
+    });
   };
 
   /** Removes every line of the open sale through the line removal, after a confirm. */

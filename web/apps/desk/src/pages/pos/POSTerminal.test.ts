@@ -727,6 +727,41 @@ describe('the Panels board', () => {
       el.remove();
     });
 
+    it('resets the card once an add is accepted, and leaves it as typed when the add is refused', async () => {
+      svc.addItem.mockResolvedValue(sale({ lines: [line('z', 700)] as unknown as Sale['lines'] }));
+      const el = await mount(sale({ lines: [] }));
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { resetQuantity(): void };
+      const reset = vi.spyOn(cat, 'resetQuantity');
+      // refused: a decimal on a counted unit
+      fire(el, '1.5');
+      await flush(el);
+      expect(svc.addItem).not.toHaveBeenCalled();
+      expect(reset).not.toHaveBeenCalled();
+      // refused: the server turns the add away
+      svc.addItem.mockRejectedValueOnce(new Error('stale revision'));
+      fire(el, '2');
+      await flush(el);
+      expect(reset).not.toHaveBeenCalled();
+      // accepted
+      fire(el, '3');
+      await flush(el);
+      expect(svc.addItem).toHaveBeenLastCalledWith('s1', 'p-z', '3', 'EA');
+      expect(reset).toHaveBeenCalledTimes(1);
+      el.remove();
+    });
+
+    it('does not reset the card for an add made with no till', async () => {
+      const el = await mount(sale());
+      const cat = el.querySelector('gable-pos-catalog') as HTMLElement & { resetQuantity(): void };
+      const reset = vi.spyOn(cat, 'resetQuantity');
+      (el as unknown as Inner)._till = null;
+      await el.updateComplete;
+      fire(el, '1');
+      await flush(el);
+      expect(reset).not.toHaveBeenCalled();
+      el.remove();
+    });
+
     it('answers with no till and adds nothing', async () => {
       const el = await mount(sale());
       (el as unknown as Inner)._till = null;
