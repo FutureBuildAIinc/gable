@@ -50,6 +50,11 @@ type AgingQuery struct {
 	AsOf       time.Time
 	Basis      string // due_date | invoice_date
 	CustomerID *uuid.UUID
+	// WholeAccount reads the customer's whole receivable behind the customer
+	// wall alone, not narrowed to the caller's yard: the reach a statement's
+	// balance already has, so the two agree on one page. It is for a read
+	// that has already passed the customer wall.
+	WholeAccount bool
 }
 
 // agingSQL takes: $1 as_of, $2 basis, $3 group_by, $4 customer, $5 branch, $6 grants.
@@ -103,8 +108,11 @@ GROUP BY d.customer_id, c.name, d.currency, 4, 5`
 // Aging answers every group of the aging, ordered by (customer name, customer
 // id, group id, currency): the caller pages through it with the keyset.
 func (s *Service) Aging(ctx context.Context, q AgingQuery) ([]AgingItem, error) {
-	rows, err := s.ex(ctx).Query(ctx, agingSQL, date(q.AsOf), q.Basis, q.GroupBy, q.CustomerID,
-		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+	if q.WholeAccount {
+		branch, grants = nil, nil
+	}
+	rows, err := s.ex(ctx).Query(ctx, agingSQL, date(q.AsOf), q.Basis, q.GroupBy, q.CustomerID, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to age the receivable: %w", err)
 	}

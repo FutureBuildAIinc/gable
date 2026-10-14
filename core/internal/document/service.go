@@ -442,13 +442,19 @@ func (s *Service) statementAging(ctx context.Context, st *account.Statement) map
 		return out
 	}
 	cust := st.CustomerID
-	sum, err := s.statements.AgingSummary(ctx, account.AgingQuery{GroupBy: "customer", AsOf: asOf, Basis: "due_date", CustomerID: &cust})
+	sum, err := s.statements.AgingSummary(ctx, account.AgingQuery{GroupBy: "customer", AsOf: asOf, Basis: "due_date", CustomerID: &cust, WholeAccount: true})
 	if err != nil {
 		slog.Warn("document: statement aging unreadable", "customer_id", cust, "error", err)
 		return out
 	}
 	for i := range sum.Totals {
 		out[sum.Totals[i].Currency] = &sum.Totals[i]
+	}
+	// an account that owes nothing still draws its aging, with zeros
+	for _, c := range st.Currencies {
+		if out[c.Currency] == nil {
+			out[c.Currency] = &account.AgingTotal{Currency: c.Currency}
+		}
 	}
 	return out
 }
@@ -487,23 +493,37 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 		}
 		m.AddRow(10, text.NewCol(12, "Closing balance: "+money(c.ClosingBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
 		if t := aging[c.Currency]; t != nil {
+			right := props.Text{Size: 9, Align: align.Right}
+			rightBold := props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}
 			m.AddRow(10, text.NewCol(12, "Aging as of "+st.To, props.Text{Style: fontstyle.Bold, Top: 3}))
 			m.AddRow(8,
-				text.NewCol(2, "Current", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
-				text.NewCol(2, "1-30", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
-				text.NewCol(2, "31-60", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
-				text.NewCol(2, "61-90", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
-				text.NewCol(2, "Over 90", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
-				text.NewCol(2, "Total", props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}),
+				text.NewCol(2, "Current", rightBold),
+				text.NewCol(2, "1-30", rightBold),
+				text.NewCol(2, "31-60", rightBold),
+				text.NewCol(2, "61-90", rightBold),
+				text.NewCol(2, "Over 90", rightBold),
+				text.NewCol(2, "Unapplied", rightBold),
 			)
 			m.AddRow(8,
-				text.NewCol(2, money(t.CurrentCents), props.Text{Size: 9, Align: align.Right}),
-				text.NewCol(2, money(t.Days1To30), props.Text{Size: 9, Align: align.Right}),
-				text.NewCol(2, money(t.Days31To60), props.Text{Size: 9, Align: align.Right}),
-				text.NewCol(2, money(t.Days61To90), props.Text{Size: 9, Align: align.Right}),
-				text.NewCol(2, money(t.Over90), props.Text{Size: 9, Align: align.Right}),
-				text.NewCol(2, money(t.TotalCents), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, money(t.CurrentCents), right),
+				text.NewCol(2, money(t.Days1To30), right),
+				text.NewCol(2, money(t.Days31To60), right),
+				text.NewCol(2, money(t.Days61To90), right),
+				text.NewCol(2, money(t.Over90), right),
+				text.NewCol(2, money(t.UnappliedCents), right),
 			)
+			m.AddRow(8, text.NewCol(12, "Total: "+money(t.TotalCents), props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}))
+		}
+		if len(c.UnappliedPayments) > 0 {
+			m.AddRow(10, text.NewCol(12, "Unapplied cash", props.Text{Style: fontstyle.Bold, Top: 3}))
+			for _, p := range c.UnappliedPayments {
+				m.AddRow(8,
+					text.NewCol(3, p.Number, props.Text{Size: 9}),
+					text.NewCol(3, p.ReceivedOn, props.Text{Size: 9}),
+					text.NewCol(6, money(p.UnappliedCents), props.Text{Size: 9, Align: align.Right}),
+				)
+			}
+			m.AddRow(10, text.NewCol(12, "Net balance: "+money(c.NetBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
 		}
 		if len(c.OpenDocuments) > 0 {
 			m.AddRow(10, text.NewCol(12, "Open documents", props.Text{Style: fontstyle.Bold, Top: 3}))
