@@ -82,6 +82,16 @@ describe('gable-pos-catalog', () => {
     warn.mockRestore();
   });
 
+  it('shows no tile highlight while the card is disabled', async () => {
+    await open({ disabled: true });
+    const tiles = el.querySelectorAll('[data-testid="catalog-tile"]');
+    expect(tiles.length).toBeGreaterThan(0);
+    for (const t of tiles) expect(t.getAttribute('aria-current')).toBe('false');
+    el.disabled = false;
+    await el.updateComplete;
+    expect(el.querySelector('[data-testid="catalog-tile"]')?.getAttribute('aria-current')).toBe('true');
+  });
+
   it('resets only what the accepted add submitted', async () => {
     await open();
     qty(el).value = '5';

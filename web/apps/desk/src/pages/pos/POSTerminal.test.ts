@@ -451,14 +451,18 @@ describe('the counter as the Panels layout', () => {
       expect(el.querySelectorAll('[data-testid="pos-lines"] button[aria-label^="Remove"]').length).toBe(0);
     });
 
-    it('words the completion band with a colon', async () => {
+    it('leaves the completion to the card: no green band over the page, so nothing shifts', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000002', total_cents: 13810, change_cents: 0 }));
       const el = await mount(sale());
       await typeInto(el, '86.50');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
       await el.updateComplete;
-      expect(el.querySelector('[role="status"]')?.textContent?.trim()).toBe('Sale POS-000002 complete: $138.10');
+      expect(el.querySelector('div[role="status"]')).toBeNull();
+      expect(q(el, 'pos-complete').textContent).toContain('Sale complete');
+      expect(q(el, 'pos-complete').textContent).toContain('POS-000002');
+      expect(q(el, 'pos-complete').textContent).toContain('$138.10');
+      expect(q(el, 'pos-complete').getAttribute('aria-live')).toBe('polite');
     });
 
     it('gives the line remove control a 44 pixel touch target', async () => {
@@ -973,6 +977,9 @@ describe('the Panels board', () => {
       for (const b of [q(el, 'pos-void'), [...q(el, 'pos-complete').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'Return') as HTMLElement]) {
         expect(b.className).toContain('text-xs');
         expect(b.className).not.toContain('text-sm');
+        // a text button, not the same outlined box as Print and Email
+        expect(b.className).not.toContain('border-white/20');
+        expect(b.className).toContain('underline');
       }
       expect(print.className).toContain('text-sm');
       expect(q(el, 'pos-receipt-contact').textContent).toContain('contact on the account');
@@ -992,6 +999,17 @@ describe('the Panels board', () => {
       expect(text).toContain('$13.50');
       el.remove();
     });
+  });
+
+  it('keeps the header to one row from 900 pixels, with the sale number beside the title and short till and cashier words', async () => {
+    const el = await mount(sale());
+    const header = q(el, 'pos-header');
+    expect(header.className).toContain('min-[900px]:flex-nowrap');
+    expect(q(el, 'pos-title-row').textContent).toContain('S-1');
+    expect(q(el, 'pos-till-state').textContent?.trim()).toBe('Till open');
+    expect(q(el, 'pos-till-state').getAttribute('title')).toContain('$200.00');
+    expect(q(el, 'pos-cashier').textContent).not.toContain('Cashier');
+    el.remove();
   });
 
   it('shows the yard and register beneath New sale, and the till controls on the right', async () => {
@@ -1215,7 +1233,7 @@ describe('the register and the sale when the cashier moves', () => {
     await settle(el);
     lateTill({ id: 'lk-till', register_id: 'REG-LK', cashier_id: 'c', status: 'open', opening_float_cents: 99900 });
     await settle(el);
-    expect(q(el, 'pos-till-state').textContent).toContain('$50.00');
+    expect(q(el, 'pos-till-state').getAttribute('title')).toContain('$50.00');
     expect(q(el, 'pos-register').textContent).toContain('REG-WK');
     el.remove();
   });
@@ -1503,8 +1521,8 @@ describe('the counter before the till opens, and after a sale completes', () => 
         await vi.advanceTimersByTimeAsync(5000);
         await el.updateComplete;
         expect(svc.startSale).toHaveBeenCalledTimes(1);
-        expect(el.querySelector('[role="status"]')?.textContent).toContain('Sale POS-000001 complete');
-        expect(el.querySelector('[role="status"]')?.textContent).toContain('CHANGE DUE $13.50');
+        expect(q(el, 'pos-complete').textContent).toContain('POS-000001');
+        expect(q(el, 'pos-complete').textContent).toContain('change $13.50');
         expect(q(el, 'pos-header').textContent).toContain('completed');
         expect((q(el, 'pos-void') as HTMLButtonElement).disabled).toBe(false);
         const ret = [...q(el, 'pos-complete').querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Return') as HTMLButtonElement;
@@ -1532,7 +1550,11 @@ describe('the counter before the till opens, and after a sale completes', () => 
       expect(q(el, 'progress-summary').getAttribute('data-state')).toBe('done');
       expect(q(el, 'progress-summary').textContent).toContain('\u2713');
       expect(toggle(el, 'summary').textContent).toContain('\u2713');
-      expect(toggle(el, 'summary').textContent).toContain('Change');
+      // a finished sale's done lines show the check and the value, no Change
+      for (const key of ['customer', 'payment', 'summary']) {
+        expect(toggle(el, key).textContent).not.toContain('Change');
+        expect(toggle(el, key).disabled).toBe(true);
+      }
       // the clear control only exists once a customer is named; a walk in's own button is the choice
       const change = [...q(el, 'pos-customer').querySelectorAll('button:not([data-testid="pos-walk-in"])')].find((x) => x.textContent?.trim() === 'Walk-in sale') as HTMLButtonElement | undefined;
       if (change) expect(change.disabled).toBe(true);

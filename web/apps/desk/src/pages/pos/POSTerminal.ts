@@ -763,10 +763,8 @@ export class POSTerminal extends LitElement {
       const completed = await posService.completeSale(this._sale.id, this._sale.revision, tenders);
       this._sale = completed;
       this._completed = completed;
-      const change = completed.change_cents || 0;
-      this._success = change > 0
-        ? `Sale ${completed.number} complete: ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
-        : `Sale ${completed.number} complete: ${fmt(completed.total_cents)}`;
+      // The Sale complete card says it (number, total, tenders, change): no band over the page.
+      this._success = null;
       this._pendingTenders = [];
       this._tenderAmount = '';
       this._step = 'summary';
@@ -998,14 +996,17 @@ export class POSTerminal extends LitElement {
   }
 
   private _renderHeader(sale: Sale | null, progress: ReturnType<typeof panelProgress>) {
-    const cashier = authCustody.displayName ?? 'Cashier';
+    const cashier = authCustody.displayName ?? 'Signed in';
     return html`
-      <header class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 border-b border-white/10 bg-slate-steel px-6 py-4" data-testid="pos-header">
-        <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-          <div>
-            <h1 class="text-2xl font-bold text-white">New sale</h1>
+      <header class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-white/10 bg-slate-steel px-4 py-2 min-[900px]:flex-nowrap" data-testid="pos-header">
+        <div class="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 min-[900px]:flex-nowrap">
+          <div class="shrink-0">
+            <div class="flex items-baseline gap-2" data-testid="pos-title-row">
+              <h1 class="text-xl font-bold text-white">New sale</h1>
+              ${sale ? html`<span class="font-mono text-xs text-slate-400">${sale.number} &middot; ${sale.status}</span>` : nothing}
+            </div>
             ${this._register ? html`
-              <p class="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-slate-400" data-testid="pos-yard-register">
+              <p class="flex flex-wrap items-center gap-x-2 text-xs text-slate-400" data-testid="pos-yard-register">
                 <span>${this._register.branch_name}</span><span aria-hidden="true">&middot;</span>
                 <span class="font-mono" data-testid="pos-register">${this._registerId}</span>
                 ${this._registers.length > 1 ? html`
@@ -1026,23 +1027,20 @@ export class POSTerminal extends LitElement {
             ${this._progressChip('Summary', 3, progress.summary)}
           </nav>
         </div>
-        <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+        <div class="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-2 min-[900px]:flex-nowrap">
           ${this._till ? html`
-            <span title="Drawer open" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">
-              Till open &middot; float ${fmt(this._till.opening_float_cents)}
-            </span>` : html`
+            <span title="Drawer open with a float of ${fmt(this._till.opening_float_cents)}" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">Till open</span>` : html`
             <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
-          <span class="text-xs text-slate-400" data-testid="pos-cashier">Cashier <span class="text-slate-200">${cashier}</span></span>
-          ${sale ? html`<span class="font-mono text-xs text-slate-400">${sale.number} &middot; ${sale.status}</span>` : nothing}
+          <span class="max-w-[8rem] truncate text-xs text-slate-200" title="Cashier" data-testid="pos-cashier">${cashier}</span>
           ${!this._register ? nothing : this._till ? html`
             <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
               title="Count the drawer and close the till with its Z report"
-              class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till</button>` : html`
+              class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">Close Till</button>` : html`
             <button id="pos-open-till" @click=${() => { this._showTillOpen = true; }}
-              class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
+              class="whitespace-nowrap rounded bg-gable-green px-3 py-1 text-xs font-semibold text-deep-space">Open Till</button>`}
           ${this._register && this._till ? html`
           <button @click=${() => this._beginFresh()}
-            class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>` : nothing}
+            class="whitespace-nowrap rounded border border-white/20 px-3 py-1 text-xs text-slate-200">New Sale</button>` : nothing}
         </div>
       </header>`;
   }
@@ -1060,17 +1058,18 @@ export class POSTerminal extends LitElement {
   /** One linear panel's header: a disclosure button with its number or check, its value and Change. */
   private _panelHead(key: PanelKey, n: number, title: string, state: PanelState, isOpen: boolean, value: string) {
     const done = state === 'done';
+    const finished = this._sale?.status === 'completed';
     return html`
       <h3 class="m-0">
         <button type="button" id="pos-panel-${key}-head" data-testid="panel-${key}-toggle"
           aria-expanded=${isOpen ? 'true' : 'false'} aria-controls="pos-panel-${key}-body"
-          ?disabled=${this._till === null}
+          ?disabled=${this._till === null || finished}
           @click=${() => this._togglePanel(key)}
           class="flex min-h-11 w-full items-center gap-3 rounded-xl px-4 py-3 text-left disabled:cursor-not-allowed">
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border font-mono text-xs ${done ? 'border-gable-green text-gable-green' : isOpen ? 'border-gable-green text-white' : 'border-white/20 text-slate-400'}">${done ? '✓' : n}</span>
           <span class="text-base font-semibold ${isOpen || done ? 'text-white' : 'text-slate-400'}">${title}</span>
           ${!isOpen && value !== '' ? html`<span class="ml-auto min-w-0 truncate text-sm text-slate-300">${value}</span>` : nothing}
-          ${!isOpen && done ? html`<span class="${value === '' ? 'ml-auto ' : ''}shrink-0 text-sm font-semibold text-gable-green">Change</span>` : nothing}
+          ${!isOpen && done && !finished ? html`<span class="${value === '' ? 'ml-auto ' : ''}shrink-0 text-sm font-semibold text-gable-green">Change</span>` : nothing}
         </button>
       </h3>`;
   }
@@ -1314,12 +1313,12 @@ export class POSTerminal extends LitElement {
     // sale, whatever the one before it was, offers neither.
     const followOn = this._completed !== null && sale.id === this._completed.id;
     const follow = followOn
-      ? 'border-white/20 text-slate-300 hover:bg-white/5'
-      : 'cursor-not-allowed border-white/10 bg-white/5 text-slate-400 opacity-40';
+      ? 'border-transparent text-slate-400 underline underline-offset-2 hover:text-white'
+      : 'cursor-not-allowed border-transparent text-slate-500 underline underline-offset-2 opacity-40';
     const how = sale.tenders.map((t) => `${methodLabel(t.method)} ${fmt(t.amount_cents)}`).join(', ');
     const invoice = sale.invoice_id;
     return html`
-      <section class="rounded-xl border border-gable-green bg-slate-steel p-4" data-testid="pos-complete">
+      <section class="rounded-xl border border-gable-green bg-slate-steel p-4" data-testid="pos-complete" aria-live="polite">
         <div class="flex items-center gap-3">
           <span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gable-green text-2xl font-bold text-deep-space" aria-hidden="true">✓</span>
           <div class="min-w-0">

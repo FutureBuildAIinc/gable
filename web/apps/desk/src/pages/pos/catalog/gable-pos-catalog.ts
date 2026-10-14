@@ -399,7 +399,7 @@ export class GablePosCatalog extends LitElement {
                     : html`<ul data-testid="catalog-grid"
                           @keydown=${(e: KeyboardEvent) => { if (e.key !== 'Enter') this._onKey(e, false); }} class=${`mt-4 grid grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-3 ${this.disabled ? 'opacity-50' : ''}`}
                           aria-busy=${this._loading ? 'true' : 'false'}>
-                          ${this._items.map((i, n) => this._tile(i, n === this._highlight))}
+                          ${this._items.map((i, n) => this._tile(i, !this.disabled && n === this._highlight))}
                       </ul>`}
         </section>`;
     }
