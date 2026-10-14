@@ -21,6 +21,32 @@ import { formatDay, parseDay, todayDay, weekStart, weekdayNames, monthName } fro
 
 let nextId = 0;
 
+// The popover's box: w-64 is 256px; the grid with its header is about 320px.
+const POPOVER_W = 256;
+const POPOVER_H = 320;
+const POPOVER_GAP = 4;
+const VIEWPORT_MARGIN = 8;
+
+/**
+ * Where the calendar pops, from the field's box and the viewport: under the
+ * field, clamped sideways into the screen, and flipped above the field when
+ * the space below is short and the space above is longer. Fixed positioning,
+ * so a modal's scroll or hidden overflow never clips it.
+ */
+export function placePopover(
+    rect: { left: number; bottom: number; top: number },
+    viewportW: number,
+    viewportH: number,
+): { top: number; left: number } {
+    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportW - POPOVER_W - VIEWPORT_MARGIN));
+    const below = viewportH - rect.bottom;
+    if (below < POPOVER_H + POPOVER_GAP && rect.top > below) {
+        return { top: Math.max(VIEWPORT_MARGIN, rect.top - POPOVER_H - POPOVER_GAP), left };
+    }
+    const top = rect.bottom + POPOVER_GAP;
+    return { top: Math.min(top, viewportH - POPOVER_H - VIEWPORT_MARGIN), left };
+}
+
 @customElement('gable-date-field')
 export class GableDateField extends LitElement {
     createRenderRoot() { return this; }
@@ -40,6 +66,8 @@ export class GableDateField extends LitElement {
     @state() private _viewYear = 0;
     @state() private _viewMonth = 0;
     @state() private _focusDay = '';
+    @state() private _popTop = 0;
+    @state() private _popLeft = 0;
 
     private _id = `gable-date-field-${++nextId}`;
     // True while the grid holds the keyboard focus, so a re-render that
@@ -49,6 +77,10 @@ export class GableDateField extends LitElement {
     private _outside = (e: MouseEvent) => {
         if (this._open && !this.contains(e.target as Node)) this._close();
     };
+    // The calendar is placed from the field's box on the screen; a scroll or
+    // resize moves that box, so an open calendar closes rather than floats
+    // free of its field.
+    private _repositioning = () => this._close();
 
     connectedCallback() {
         super.connectedCallback();
@@ -57,7 +89,18 @@ export class GableDateField extends LitElement {
 
     disconnectedCallback() {
         document.removeEventListener('mousedown', this._outside);
+        this._unwatchViewport();
         super.disconnectedCallback();
+    }
+
+    private _watchViewport() {
+        window.addEventListener('scroll', this._repositioning, true);
+        window.addEventListener('resize', this._repositioning);
+    }
+
+    private _unwatchViewport() {
+        window.removeEventListener('scroll', this._repositioning, true);
+        window.removeEventListener('resize', this._repositioning);
     }
 
     willUpdate(changed: Map<string, unknown>) {
@@ -132,10 +175,18 @@ export class GableDateField extends LitElement {
         this._viewYear = y;
         this._viewMonth = m;
         this._focusDay = base;
+        const rect = this.querySelector('input')?.getBoundingClientRect();
+        if (rect) {
+            const at = placePopover(rect, window.innerWidth, window.innerHeight);
+            this._popTop = at.top;
+            this._popLeft = at.left;
+        }
         this._open = true;
+        this._watchViewport();
     }
 
     private _close() {
+        if (this._open) this._unwatchViewport();
         this._open = false;
     }
 
@@ -269,7 +320,8 @@ export class GableDateField extends LitElement {
             <div
                 role="dialog"
                 aria-label="Choose a date"
-                class="absolute z-50 mt-1 w-64 rounded-xl bg-slate-steel border border-white/10 p-3 shadow-xl"
+                style="position: fixed; top: ${this._popTop}px; left: ${this._popLeft}px;"
+                class="z-50 w-64 rounded-xl bg-slate-steel border border-white/10 p-3 shadow-xl"
             >
                 <div class="flex items-center justify-between mb-2">
                     <button

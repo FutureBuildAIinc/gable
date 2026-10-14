@@ -251,9 +251,9 @@ describe('the popover stays inside the screen', () => {
     // Near the bottom with more room above: flipped over the field.
     expect(placePopover({ left: 100, bottom: 740, top: 716 } as DOMRect, 1024, 768))
       .toEqual({ top: 716 - 320 - 4, left: 100 })
-    // Near the bottom but no room above either: below, at the bottom clamp.
-    const p = placePopover({ left: 100, bottom: 740, top: 420 } as DOMRect, 1024, 768)
-    expect(p.top).toBe(768 - 320 - 8)
+    // A viewport too short for either side: flipped, clamped to the top margin.
+    const p = placePopover({ left: 100, bottom: 204, top: 180 } as DOMRect, 1024, 340)
+    expect(p.top).toBe(8)
   })
 
   it('the open popover is fixed at the field, not clipped by a modal', async () => {
