@@ -6,6 +6,8 @@ import { customElement, state, query } from 'lit/decorators.js';
 import { posService, dollarsToCents, type TenderIn } from '../../services/POSService';
 import type { Sale, QuickSearchResult, SaleLine, TillSession, TillReport, TenderMethod, RefundMethod, CounterCustomer } from '../../types/pos';
 import { chargeRefusal, standingOf, money } from './standing';
+import { payPlan, panelProgress, type PanelState } from './panels';
+import { authCustody } from '@gable/auth';
 import '../../components/BarcodeScanner.ts';
 
 const REGISTER_ID = 'REG-01';
@@ -27,7 +29,6 @@ export class POSTerminal extends LitElement {
   @state() private _sale: Sale | null = null;
   @state() private _searchQuery = '';
   @state() private _searchResults: QuickSearchResult[] = [];
-  @state() private _showTender = false;
   @state() private _pendingTenders: TenderIn[] = [];
   @state() private _tenderMethod: TenderMethod = 'cash';
   @state() private _tenderAmount = '';
@@ -274,7 +275,7 @@ export class POSTerminal extends LitElement {
     if (c) {
       const st = standingOf(c);
       return html`
-        <div id="pos-customer" class="mb-4 rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
+        <div id="pos-customer" class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
           <div class="flex items-start justify-between gap-2">
             <div>
               <div class="text-sm font-semibold text-white" data-testid="pos-customer-name">${c.name}</div>
@@ -309,7 +310,7 @@ export class POSTerminal extends LitElement {
         </div>`;
     }
     return html`
-      <div id="pos-customer" class="mb-4 rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
+      <div id="pos-customer" class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="pos-customer">
         <div class="flex items-center justify-between">
           <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Customer</span>
           <span class="text-xs text-slate-400">Walk-in sale</span>
@@ -355,7 +356,8 @@ export class POSTerminal extends LitElement {
       // until the next completion replaces it.
       const sale = await posService.startSale(REGISTER_ID);
       this._sale = sale;
-      this._showTender = false;
+      this._tenderAmount = '';
+      this._tenderMethod = 'cash';
       // Focus the search input after render
       this.updateComplete.then(() => {
         this._searchInput?.focus();
@@ -395,8 +397,24 @@ export class POSTerminal extends LitElement {
     return this._pendingTenders.reduce((sum, t) => sum + t.amount_cents, 0);
   }
 
-  private _handleTender(method: TenderMethod) {
-    if (!this._sale) return;
+  /** What is still owed once the added tenders are taken (never negative). */
+  private get _owedCents(): number {
+    return Math.max((this._sale?.total_cents ?? 0) - this._tenderedSoFar, 0);
+  }
+
+  /**
+   * The tender being entered: the chosen method and the typed amount, which
+   * is what is still owed while the field is empty. Null when it does not
+   * parse to a positive amount.
+   */
+  private get _entry(): TenderIn | null {
+    const text = this._tenderAmount.trim();
+    const cents = text === '' ? this._owedCents : dollarsToCents(text);
+    if (isNaN(cents) || cents <= 0) return null;
+    return { method: this._tenderMethod, amount_cents: cents };
+  }
+
+  private _chooseMethod(method: TenderMethod) {
     if (method === 'account') {
       const refusal = this._accountRefusal;
       if (refusal) {
@@ -405,21 +423,39 @@ export class POSTerminal extends LitElement {
       }
     }
     this._tenderMethod = method;
-    const remaining = this._sale.total_cents - this._tenderedSoFar;
-    this._tenderAmount = (Math.max(remaining, 0) / 100).toFixed(2);
-    this._showTender = true;
+    this._tenderAmount = '';
   }
 
-  /** Add the entered tender to the pending list; a split names several. */
+  /** Add the entered tender to the added list; a split names several. */
   private _addPendingTender() {
-    const cents = dollarsToCents(this._tenderAmount);
-    if (isNaN(cents) || cents <= 0) {
+    const entry = this._entry;
+    if (!entry) {
       this._error = 'Invalid tender amount';
       return;
     }
-    this._pendingTenders = [...this._pendingTenders, { method: this._tenderMethod, amount_cents: cents }];
-    this._showTender = false;
+    this._pendingTenders = [...this._pendingTenders, entry];
     this._tenderAmount = '';
+    // The next tender starts on a method the sale can still take.
+    if (this._tenderMethod === 'account') this._tenderMethod = 'cash';
+  }
+
+  /** Pay: the added tenders plus the entry when they do not cover the total. */
+  private async _pay() {
+    if (!this._sale) return;
+    if (this._tenderedSoFar < this._sale.total_cents && this._entry?.method === 'account') {
+      const refusal = this._accountRefusal;
+      if (refusal) {
+        this._error = refusal;
+        return;
+      }
+    }
+    const plan = payPlan(this._sale.total_cents, this._pendingTenders, this._entry);
+    if (!plan.ok) {
+      this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
+      return;
+    }
+    this._pendingTenders = plan.tenders;
+    await this._completeSale();
   }
 
   private async _completeSale() {
@@ -435,7 +471,7 @@ export class POSTerminal extends LitElement {
         ? `Sale ${completed.number} complete - ${fmt(completed.total_cents)} \u00b7 CHANGE DUE ${fmt(change)}`
         : `Sale ${completed.number} complete - ${fmt(completed.total_cents)}`;
       this._pendingTenders = [];
-      this._showTender = false;
+      this._tenderAmount = '';
 
       // Auto-start the next sale after 2 seconds
       this._newTxTimer = setTimeout(() => {
@@ -639,269 +675,248 @@ export class POSTerminal extends LitElement {
 
   /* ---- Render ---- */
 
+  private _progressChip(label: string, n: number, state: PanelState) {
+    const tone = state === 'done'
+      ? 'border-gable-green/40 text-gable-green'
+      : state === 'current' ? 'border-white/30 text-white' : 'border-white/10 text-slate-500';
+    return html`
+      <span data-testid="progress-${label.toLowerCase()}" data-state=${state}
+        class="flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone}">
+        <span class="font-mono">${n}</span>${label}
+      </span>`;
+  }
+
+  private _renderHeader(sale: Sale | null) {
+    const cashier = authCustody.displayName ?? 'Cashier';
+    const progress = panelProgress({
+      hasLines: (sale?.lines.length ?? 0) > 0,
+      customerNamed: this._customer !== null,
+      tendered: this._pendingTenders.length > 0,
+    });
+    return html`
+      <header class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-steel px-6 py-3" data-testid="pos-header">
+        <div class="flex flex-wrap items-center gap-3">
+          <h1 class="text-lg font-bold text-white">Counter</h1>
+          <span class="rounded-full bg-white/10 px-2 py-0.5 font-mono text-xs text-slate-200" data-testid="pos-register">${REGISTER_ID}</span>
+          ${this._till ? html`
+            <span title="Drawer open" class="rounded-full border border-gable-green/40 px-2 py-0.5 font-mono text-xs font-semibold text-gable-green" data-testid="pos-till-state">
+              Till open &middot; float ${fmt(this._till.opening_float_cents)}
+            </span>` : html`
+            <span class="rounded-full border border-safety-red/40 px-2 py-0.5 text-xs font-semibold text-safety-red" data-testid="pos-till-state">No till</span>`}
+          <span class="text-xs text-slate-400" data-testid="pos-cashier">Cashier <span class="text-slate-200">${cashier}</span></span>
+          ${sale ? html`<span class="font-mono text-xs text-slate-400">${sale.number} &middot; ${sale.status}</span>` : nothing}
+        </div>
+        <nav class="flex items-center gap-2" aria-label="Sale progress">
+          ${this._progressChip('Customer', 1, progress.customer)}
+          ${this._progressChip('Payment', 2, progress.payment)}
+          ${this._progressChip('Summary', 3, progress.summary)}
+        </nav>
+        <div class="flex gap-2">
+          ${this._till ? html`
+            <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy}
+              class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">Close Till &middot; Z-Report</button>` : html`
+            <button @click=${() => { this._showTillOpen = true; }}
+              class="rounded bg-gable-green px-4 py-1.5 text-sm font-semibold text-deep-space">Open Till</button>`}
+          <button @click=${() => this._startNewSale()}
+            class="rounded border border-white/20 px-4 py-1.5 text-sm text-slate-200">New Sale</button>
+        </div>
+      </header>`;
+  }
+
+  private _renderItems(productLines: SaleLine[]) {
+    const th = 'border-b border-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-400';
+    return html`
+      <section class="flex min-h-0 flex-1 flex-col border-white/10 xl:border-r" data-testid="pos-items">
+        <div class="relative border-b border-white/10 p-4">
+          <div class="flex gap-2">
+            <input id="pos-search-input" type="text" autocomplete="off"
+              placeholder="Search by SKU or description"
+              .value=${this._searchQuery}
+              @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; }}
+              class="flex-1 rounded-lg border border-white/10 bg-deep-space px-4 py-3 text-base text-white outline-none focus:border-gable-green"
+              aria-label="Search product by SKU or description" />
+            <button @click=${() => { this._isScanning = true; }}
+              class="rounded-lg border border-white/20 px-4 text-sm font-semibold text-slate-200">Scan</button>
+          </div>
+          ${this._isScanning ? html`
+            <gable-barcode-scanner
+              @scan=${(e: CustomEvent) => { this._isScanning = false; this._handleScan(e.detail); }}
+              @close=${() => { this._isScanning = false; }}
+            ></gable-barcode-scanner>` : nothing}
+          ${this._searchResults.length > 0 ? html`
+            <div class="absolute left-4 right-4 top-full z-10 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-slate-steel shadow-2xl" data-testid="pos-results">
+              ${this._searchResults.map((r) => html`
+                <button @click=${() => this._addItem(r)}
+                  class="flex w-full items-center gap-3 border-b border-white/10 px-4 py-2 text-left text-sm text-white last:border-b-0 hover:bg-white/5">
+                  <span class="min-w-[100px] font-mono text-xs text-blueprint-blue">${r.sku}</span>
+                  <span class="flex-1 text-slate-200">${r.description}</span>
+                  <span class="font-mono font-semibold text-gable-green">${fmt(r.unit_price_cents)}/${r.uom}</span>
+                  <span class="font-mono text-xs text-slate-400">${r.in_stock} on hand</span>
+                </button>`)}
+            </div>` : nothing}
+        </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-2">
+          ${productLines.length === 0 ? html`
+            <div class="flex h-full min-h-[120px] items-center justify-center text-sm text-slate-500" data-testid="pos-empty">
+              Search and add products to start a sale
+            </div>` : html`
+            <table class="w-full border-collapse" aria-label="Ticket lines" data-testid="pos-lines">
+              <thead><tr>
+                <th class="${th} text-left">Item</th>
+                <th class="${th} text-center">Qty</th>
+                <th class="${th} text-right">Price</th>
+                <th class="${th} text-right">Total</th>
+                <th class="${th} w-10"></th>
+              </tr></thead>
+              <tbody>
+                ${productLines.map((item) => html`
+                  <tr class="border-b border-white/5">
+                    <td class="px-3 py-3 text-sm text-white">${item.description}</td>
+                    <td class="px-3 py-3 text-center font-mono text-sm text-slate-200">${item.quantity} ${item.uom}</td>
+                    <td class="px-3 py-3 text-right font-mono text-sm text-slate-200">
+                      ${item.unit_price_ten_thousandths !== null ? fmtPrice(item.unit_price_ten_thousandths) : '-'}</td>
+                    <td class="px-3 py-3 text-right font-mono text-sm font-semibold text-white">
+                      ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</td>
+                    <td class="px-3 py-3">
+                      <button @click=${() => this._removeItem(item.id)} title="Remove"
+                        aria-label="Remove ${item.description}"
+                        class="rounded px-2 text-lg text-safety-red">×</button>
+                    </td>
+                  </tr>`)}
+              </tbody>
+            </table>`}
+        </div>
+      </section>`;
+  }
+
+  private _renderPaymentPanel(sale: Sale | null, hasLines: boolean) {
+    const open = sale?.status === 'open';
+    const total = sale?.total_cents ?? 0;
+    const owed = this._owedCents;
+    const entry = this._entry;
+    const isCash = this._tenderMethod === 'cash';
+    const change = isCash && entry !== null && this._tenderedSoFar < total
+      ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
+    return html`
+      <section class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="panel-payment">
+        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Payment</div>
+        ${this._pendingTenders.length > 0 ? html`
+          <div class="mt-2 border-b border-dashed border-white/10 pb-2" data-testid="pos-added-tenders">
+            ${this._pendingTenders.map((t) => html`
+              <div class="flex justify-between py-0.5 text-sm text-slate-200">
+                <span class="capitalize">${t.method}</span><span class="font-mono">${fmt(t.amount_cents)}</span>
+              </div>`)}
+            <div class="flex justify-between pt-1 text-sm font-bold ${owed > 0 ? 'text-amber-400' : 'text-gable-green'}">
+              <span>${owed > 0 ? 'Still owed' : 'Covered'}</span><span class="font-mono">${fmt(owed)}</span>
+            </div>
+          </div>` : nothing}
+        <div class="mt-2 grid grid-cols-2 gap-2" role="group" aria-label="Tender">
+          ${METHODS.map((m) => {
+            const refused = m === 'account' ? this._accountRefusal : null;
+            const chosen = this._tenderMethod === m;
+            return html`
+              <button data-testid="tender-${m}" @click=${() => this._chooseMethod(m)}
+                ?disabled=${!hasLines || !open || refused !== null}
+                title=${m === 'account' ? (refused ?? 'Charge the sale to the customer’s account') : ''}
+                aria-pressed=${chosen ? 'true' : 'false'}
+                class="rounded-lg border px-3 py-3 text-sm font-semibold capitalize disabled:cursor-not-allowed disabled:opacity-40 ${chosen ? 'border-gable-green text-gable-green' : 'border-white/10 text-white'}">
+                ${m === 'account' ? 'Charge to account' : m}
+              </button>`;
+          })}
+        </div>
+        <label class="mt-3 block text-xs text-slate-400" for="pos-tender-amount">
+          ${isCash ? 'Cash tendered' : html`<span class="capitalize">${this._tenderMethod}</span> amount`}
+        </label>
+        <input id="pos-tender-amount" type="number" step="0.01" inputmode="decimal"
+          placeholder=${(owed / 100).toFixed(2)} .value=${this._tenderAmount}
+          ?disabled=${!hasLines || !open}
+          @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
+          class="mt-1 w-full rounded border border-white/10 bg-slate-steel px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
+          aria-label="Tender amount" />
+        ${isCash && change > 0 ? html`
+          <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
+            <span>Change due</span><span class="font-mono">${fmt(change)}</span>
+          </div>` : nothing}
+        <div class="mt-3 flex gap-2">
+          <button data-testid="pos-add-tender" @click=${() => this._addPendingTender()}
+            ?disabled=${!hasLines || !open || entry === null || owed <= 0}
+            class="flex-1 rounded border border-white/20 px-3 py-2 text-xs text-slate-200 disabled:opacity-40">Add as split tender</button>
+          ${this._pendingTenders.length > 0 ? html`
+            <button @click=${() => { this._pendingTenders = []; }}
+              class="rounded border border-white/10 px-3 py-2 text-xs text-slate-400">Clear tenders</button>` : nothing}
+        </div>
+      </section>`;
+  }
+
+  private _renderSummaryPanel(sale: Sale | null, hasLines: boolean) {
+    const owed = this._owedCents;
+    const total = sale?.total_cents ?? 0;
+    const open = sale?.status === 'open';
+    const plan = payPlan(total, this._pendingTenders, this._entry);
+    const canPay = hasLines && open && !this._loading && plan.ok;
+    const label = this._loading ? 'Processing...'
+      : plan.ok ? `Pay ${fmt(total)}`
+      : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
+    return html`
+      <section class="rounded-lg border border-white/10 bg-deep-space p-3" data-testid="panel-summary">
+        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">Summary</div>
+        <dl class="mt-2 text-sm">
+          <div class="flex justify-between py-1 text-slate-400"><dt>Lines</dt>
+            <dd class="font-mono" data-testid="summary-lines">${(sale?.lines ?? []).filter((l) => l.parent_line_id === null).length}</dd></div>
+          <div class="flex justify-between py-1 text-slate-400"><dt>Subtotal</dt>
+            <dd class="font-mono" data-testid="summary-subtotal">${fmt(sale?.subtotal_cents ?? 0)}</dd></div>
+          <div class="flex justify-between py-1 text-slate-400"><dt>Tax</dt>
+            <dd class="font-mono" data-testid="summary-tax">${fmt(sale?.tax_cents ?? 0)}</dd></div>
+          <div class="mt-1 flex items-baseline justify-between border-t border-white/10 pt-2 font-bold text-white"><dt>Total</dt>
+            <dd class="font-mono text-2xl text-gable-green" data-testid="summary-total">${fmt(total)}</dd></div>
+          ${this._pendingTenders.length > 0 ? html`
+            <div class="flex justify-between py-1 text-slate-400"><dt>Still owed</dt>
+              <dd class="font-mono">${fmt(owed)}</dd></div>` : nothing}
+        </dl>
+        <button data-testid="pos-pay" @click=${() => this._pay()} ?disabled=${!canPay}
+          class="mt-3 w-full rounded-lg bg-gable-green px-4 py-4 text-base font-bold text-deep-space disabled:cursor-not-allowed disabled:opacity-40">
+          ${label}
+        </button>
+        <div class="mt-3 flex gap-2">
+          <button @click=${() => this._voidSale()} ?disabled=${!this._completed}
+            class="flex-1 rounded border border-safety-red/40 px-3 py-2 text-xs text-safety-red disabled:opacity-40">Void</button>
+          <button @click=${() => this._beginReturn()} ?disabled=${!this._completed}
+            class="flex-1 rounded border border-amber-400/40 px-3 py-2 text-xs text-amber-400 disabled:opacity-40">Return</button>
+        </div>
+      </section>`;
+  }
+
   render() {
     const sale = this._sale;
-    const totalDollars = sale ? (sale.total_cents / 100).toFixed(2) : '0.00';
-    const subtotalDollars = sale ? (sale.subtotal_cents / 100).toFixed(2) : '0.00';
-    const taxDollars = sale ? (sale.tax_cents / 100).toFixed(2) : '0.00';
     const lines: SaleLine[] = sale?.lines ?? [];
-    const productLines = lines.filter(l => l.parent_line_id === null);
-    const remaining = sale ? sale.total_cents - this._tenderedSoFar : 0;
+    const productLines = lines.filter((l) => l.parent_line_id === null);
+    const hasLines = productLines.length > 0;
 
     return html`
-      <div style="display:flex;flex-direction:column;height:100vh;background:#0d1117;color:#e6edf3;font-family:'Outfit',-apple-system,sans-serif">
-        <!-- Header -->
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 24px;background:#161b22;border-bottom:1px solid #21262d">
-          <div style="display:flex;align-items:center;gap:12px">
-            <h1 style="font-size:18px;font-weight:700;margin:0;color:#e6edf3">POS Terminal</h1>
-            <span style="font-size:11px;padding:2px 8px;background:#238636;border-radius:12px;color:#fff;font-weight:600">REG-01</span>
-            ${this._till ? html`
-              <span title="Drawer open" style="font-size:11px;padding:2px 8px;background:#8957e5;border-radius:12px;color:#fff;font-weight:600">
-                \u25cf TILL OPEN \u00b7 float ${fmt(this._till.opening_float_cents)}
-              </span>
-            ` : html`
-              <span style="font-size:11px;padding:2px 8px;background:#6e2f2f;border-radius:12px;color:#ffb4b4;font-weight:600">
-                \u25cb NO TILL
-              </span>
-            `}
-            ${sale ? html`
-              <span style="font-size:11px;padding:2px 8px;background:#1f6feb;border-radius:12px;color:#fff;font-family:monospace">
-                ${sale.number} \u00b7 ${sale.status}
-              </span>
-            ` : nothing}
-          </div>
-          <div style="display:flex;gap:8px">
-            ${this._till ? html`
-              <button @click=${() => this._beginCloseTill()} ?disabled=${this._tillBusy} style="padding:6px 16px;background:#21262d;border:1px solid #8957e5;border-radius:6px;color:#d2a8ff;font-size:13px;cursor:pointer">
-                Close Till \u00b7 Z-Report
-              </button>
-            ` : html`
-              <button @click=${() => { this._showTillOpen = true; }} style="padding:6px 16px;background:#8957e5;border:none;border-radius:6px;color:#fff;font-size:13px;font-weight:600;cursor:pointer">
-                Open Till
-              </button>
-            `}
-            <button @click=${() => this._startNewSale()} style="padding:6px 16px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:13px;cursor:pointer">
-              New Sale
-            </button>
-          </div>
-        </div>
-
+      <div class="flex h-screen flex-col bg-deep-space font-sans text-white" data-testid="pos-terminal">
+        ${this._renderHeader(sale)}
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderReturnModal()}
 
-        <!-- Alerts -->
         ${this._error ? html`
-          <div style="padding:10px 16px;background:#3d1114;border-bottom:1px solid #f8514940;color:#f85149;font-size:13px;display:flex;justify-content:space-between;align-items:center">
+          <div class="flex items-center justify-between border-b border-safety-red/40 bg-safety-red/10 px-4 py-2 text-sm text-safety-red" role="alert">
             ${this._error}
-            <button @click=${() => { this._error = null; }} style="background:none;border:none;color:#f85149;font-size:16px;cursor:pointer" aria-label="Dismiss error">\u00d7</button>
-          </div>
-        ` : nothing}
+            <button @click=${() => { this._error = null; }} class="text-lg" aria-label="Dismiss error">×</button>
+          </div>` : nothing}
         ${this._success ? html`
-          <div style="padding:10px 16px;background:#0d2818;border-bottom:1px solid #2ea04340;color:#3fb950;font-size:14px;font-weight:600;text-align:center">
+          <div class="border-b border-gable-green/30 bg-gable-green/10 px-4 py-2 text-center text-sm font-semibold text-gable-green" role="status">
             ${this._success}
-          </div>
-        ` : nothing}
+          </div>` : nothing}
 
-        <!-- Main Layout -->
-        <div style="display:flex;flex:1;overflow:hidden">
-          <!-- Left: Cart -->
-          <div style="flex:1;display:flex;flex-direction:column;border-right:1px solid #21262d">
-            <!-- Search Bar -->
-            <div style="position:relative;padding:16px;border-bottom:1px solid #21262d">
-              <div style="display:flex;gap:8px">
-                <input
-                  id="pos-search-input"
-                  type="text"
-                  placeholder="Search product by SKU or description..."
-                  .value=${this._searchQuery}
-                  @input=${(e: Event) => { this._searchQuery = (e.target as HTMLInputElement).value; }}
-                  style="flex:1;padding:12px 16px;background:#0d1117;border:2px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;outline:none;box-sizing:border-box"
-                  aria-label="Search product by SKU or description"
-                />
-                <button
-                  @click=${() => { this._isScanning = true; }}
-                  style="background:#238636;border:none;border-radius:8px;color:#fff;padding:0 16px;cursor:pointer;font-weight:bold;display:flex;align-items:center;gap:8px"
-                >
-                  Scan
-                </button>
-              </div>
-              ${this._isScanning ? html`
-                <gable-barcode-scanner
-                  @scan=${(e: CustomEvent) => { this._isScanning = false; this._handleScan(e.detail); }}
-                  @close=${() => { this._isScanning = false; }}
-                ></gable-barcode-scanner>
-              ` : nothing}
-              ${this._searchResults.length > 0 ? html`
-                <div style="position:absolute;top:100%;left:16px;right:16px;background:#161b22;border:1px solid #30363d;border-radius:8px;z-index:10;max-height:300px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.4)">
-                  ${this._searchResults.map(result => html`
-                    <button
-                      @click=${() => this._addItem(result)}
-                      style="display:flex;width:100%;padding:10px 14px;background:transparent;border:none;border-bottom:1px solid #21262d;color:#e6edf3;cursor:pointer;text-align:left;gap:12px;align-items:center;font-size:13px"
-                    >
-                      <span style="font-family:monospace;font-size:12px;color:#58a6ff;min-width:100px">${result.sku}</span>
-                      <span style="flex:1;color:#c9d1d9">${result.description}</span>
-                      <span style="font-weight:600;color:#3fb950">${fmt(result.unit_price_cents)}/${result.uom}</span>
-                      <span style="font-size:11px;color:#8b949e">${result.in_stock} avail</span>
-                    </button>
-                  `)}
-                </div>
-              ` : nothing}
-            </div>
-
-            <!-- Lines -->
-            <div style="flex:1;overflow-y:auto;padding:8px 16px">
-              ${productLines.length === 0 ? html`
-                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:#484f58">
-                  <div style="font-size:48px;margin-bottom:12px">&#x1f6d2;</div>
-                  <p>Search and add products to start a sale</p>
-                </div>
-              ` : html`
-                <table style="width:100%;border-collapse:collapse" aria-label="Cart items">
-                  <thead>
-                    <tr>
-                      <th style="text-align:left;padding:8px 12px;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #21262d">Item</th>
-                      <th style="text-align:center;padding:8px 12px;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #21262d">Qty</th>
-                      <th style="text-align:right;padding:8px 12px;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #21262d">Price</th>
-                      <th style="text-align:right;padding:8px 12px;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #21262d">Total</th>
-                      <th style="padding:8px 12px;font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #21262d;width:40px"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${productLines.map((item: SaleLine) => html`
-                      <tr>
-                        <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22">${item.description}</td>
-                        <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:center">
-                          ${item.quantity} ${item.uom}
-                        </td>
-                        <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:right">
-                          ${item.unit_price_ten_thousandths !== null ? fmtPrice(item.unit_price_ten_thousandths) : '-'}
-                        </td>
-                        <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22;text-align:right;font-weight:600">
-                          ${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}
-                        </td>
-                        <td style="padding:10px 12px;font-size:14px;border-bottom:1px solid #161b22">
-                          <button
-                            @click=${() => this._removeItem(item.id)}
-                            style="background:none;border:none;color:#f85149;font-size:18px;cursor:pointer;padding:2px 6px;border-radius:4px"
-                            title="Remove"
-                            aria-label="Remove ${item.description}"
-                          >\u00d7</button>
-                        </td>
-                      </tr>
-                    `)}
-                  </tbody>
-                </table>
-              `}
-            </div>
-          </div>
-
-          <!-- Right: Totals + Tenders -->
-          <div style="width:360px;display:flex;flex-direction:column;background:#161b22;padding:24px;overflow-y:auto">
-            ${this._renderCustomerPanel()}
-            <div style="margin-bottom:24px">
-              <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#8b949e">
-                <span>Subtotal</span>
-                <span>$${subtotalDollars}</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:6px 0;font-size:14px;color:#8b949e">
-                <span>Tax</span>
-                <span>$${taxDollars}</span>
-              </div>
-              <div style="display:flex;justify-content:space-between;padding:12px 0;font-size:16px;font-weight:700;color:#e6edf3;border-top:1px solid #30363d;margin-top:8px">
-                <span>TOTAL</span>
-                <span style="font-size:28px;font-weight:800;color:#3fb950">$${totalDollars}</span>
-              </div>
-              ${this._pendingTenders.length > 0 ? html`
-                <div style="margin-top:8px;padding:8px 0;border-top:1px dashed #30363d">
-                  ${this._pendingTenders.map((t, i) => html`
-                    <div key=${i} style="display:flex;justify-content:space-between;font-size:13px;color:#c9d1d9;padding:3px 0">
-                      <span style="text-transform:capitalize">${t.method}</span>
-                      <span>${fmt(t.amount_cents)}</span>
-                    </div>
-                  `)}
-                  <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:${remaining > 0 ? '#d29922' : '#3fb950'};padding-top:6px">
-                    <span>${remaining > 0 ? 'Still owed' : 'Change'}</span>
-                    <span>${fmt(Math.abs(remaining))}</span>
-                  </div>
-                </div>
-              ` : nothing}
-            </div>
-
-            ${!this._showTender && this._pendingTenders.length === 0 ? html`
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;flex:1">
-                ${METHODS.map(m => html`
-                  <button @click=${() => this._handleTender(m)} style="padding:20px;background:#21262d;border:1px solid #30363d;border-radius:12px;color:#e6edf3;font-size:15px;font-weight:600;cursor:pointer;transition:all 0.15s;text-align:center;text-transform:capitalize" ?disabled=${productLines.length === 0 || sale?.status !== 'open' || (m === 'account' && this._accountRefusal !== null)} title=${m === 'account' ? (this._accountRefusal ?? 'Charge the sale to the customer\u2019s account') : ''}>
-                    ${m === 'account' ? 'Charge to account' : m}
-                  </button>
-                `)}
-              </div>
-            ` : this._showTender ? html`
-              <div style="display:flex;flex-direction:column;gap:12px">
-                <div style="font-size:18px;font-weight:700;text-align:center;padding:8px;text-transform:capitalize">
-                  ${this._tenderMethod}
-                </div>
-                <input
-                  type="number"
-                  .value=${this._tenderAmount}
-                  @input=${(e: Event) => { this._tenderAmount = (e.target as HTMLInputElement).value; }}
-                  style="padding:14px;background:#0d1117;border:2px solid #238636;border-radius:8px;color:#e6edf3;font-size:24px;font-weight:700;text-align:center;outline:none"
-                  step="0.01"
-                  aria-label="Tender amount"
-                />
-                <div style="display:flex;gap:8px">
-                  <button
-                    @click=${() => this._addPendingTender()}
-                    style="flex:1;padding:14px;background:#1f6feb;border:none;border-radius:8px;color:#fff;font-size:15px;font-weight:700;cursor:pointer"
-                  >Add Tender (split)</button>
-                </div>
-                <button
-                  @click=${() => { this._showTender = false; }}
-                  style="padding:10px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-            ` : html`
-              <div style="display:flex;flex-direction:column;gap:12px;flex:1">
-                <div style="font-size:14px;color:#8b949e;text-align:center">Tenders taken against $${totalDollars}</div>
-                ${METHODS.map(m => html`
-                  <button @click=${() => this._handleTender(m)} style="padding:12px;background:#21262d;border:1px solid #30363d;border-radius:8px;color:#e6edf3;font-size:14px;font-weight:600;cursor:pointer;text-transform:capitalize" ?disabled=${(remaining <= 0 && m !== 'cash') || (m === 'account' && this._accountRefusal !== null)} title=${m === 'account' ? (this._accountRefusal ?? '') : ''}>
-                    Add ${m}
-                  </button>
-                `)}
-                <button
-                  @click=${() => this._completeSale()}
-                  style="padding:16px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:16px;font-weight:700;cursor:pointer;margin-top:8px"
-                  ?disabled=${this._loading || remaining > 0}
-                >
-                  ${this._loading ? 'Processing...' : remaining > 0 ? `Still owed ${fmt(remaining)}` : `Complete Sale - $${totalDollars}`}
-                </button>
-                <button
-                  @click=${() => { this._pendingTenders = []; }}
-                  style="padding:10px;background:transparent;border:1px solid #30363d;border-radius:8px;color:#8b949e;font-size:14px;cursor:pointer"
-                >
-                  Clear tenders
-                </button>
-              </div>
-            `}
-
-            <!-- Quick Actions -->
-            <div style="padding:16px 0;margin-top:auto;display:flex;gap:8px">
-              <button
-                @click=${() => this._voidSale()}
-                style="flex:1;padding:10px;background:transparent;border:1px solid #f8514940;border-radius:8px;color:#f85149;font-size:13px;cursor:pointer"
-                ?disabled=${!this._completed}
-              >
-                Void
-              </button>
-              <button
-                @click=${() => this._beginReturn()}
-                style="flex:1;padding:10px;background:transparent;border:1px solid #d2992240;border-radius:8px;color:#d29922;font-size:13px;cursor:pointer"
-                ?disabled=${!this._completed}
-              >
-                Return
-              </button>
+        <div class="flex min-h-0 flex-1 flex-col xl:flex-row">
+          ${this._renderItems(productLines)}
+          <div class="max-h-[55%] overflow-y-auto border-t border-white/10 bg-slate-steel p-4 xl:max-h-none xl:w-[420px] xl:border-t-0"
+            data-testid="pos-panels">
+            <div class="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-1">
+              <section data-testid="panel-customer">${this._renderCustomerPanel()}</section>
+              ${this._renderPaymentPanel(sale, hasLines)}
+              ${this._renderSummaryPanel(sale, hasLines)}
             </div>
           </div>
         </div>
