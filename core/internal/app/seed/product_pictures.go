@@ -41,7 +41,8 @@ var baseProductFamilies = map[string]string{
 	"DW-12-REG": "drywall_sheet_stack", "DW-58-FC": "drywall_sheet_stack",
 	// hardware
 	"NAIL-16D-50": "common_nail_box", "NAIL-10D-50": "common_nail_box", "RF-NAIL-125": "galvanized_nail_box",
-	"HANGER-26": "joist_hanger", "HANGER-28": "joist_hanger", "HANGER-210": "joist_hanger",
+	"SCR-DECK-3-5": "deck_screw_box",
+	"HANGER-26":    "joist_hanger", "HANGER-28": "joist_hanger", "HANGER-210": "joist_hanger",
 	"SIMP-LUS28": "joist_hanger", "TIE-H1": "framing_connector",
 	// roofing
 	"RF-ARCH-30": "asphalt_shingle_bundle", "RF-SH-BLK": "asphalt_shingle_bundle",
