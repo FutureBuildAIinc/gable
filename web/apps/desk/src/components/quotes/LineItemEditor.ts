@@ -6,7 +6,7 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { Plus } from 'lucide';
 import type { Product } from '../../types/product';
-import { PricingService } from '../../services/pricing.service';
+import { resolveLinePrice } from '../../lib/line-price';
 import type { CalculatedPrice } from '../../types/pricing';
 import { ToastService } from '../../lib/toast-service';
 import { normalizeQuantity, dollarsToTenThousandths, tenThousandthsToInput, floatDollarsToTenThousandths } from '../../lib/money';
@@ -38,29 +38,11 @@ export class GableLineItemEditor extends LitElement {
     this._searchTerm = p.sku;
     this._isSearchOpen = false;
 
-    if (this.customerId) {
-      try {
-        const pricing = await PricingService.calculatePrice(this.customerId, p.id);
-        if (this._selectedProduct?.id !== p.id) return; // another product was picked while this answered
-        if (pricing.price_uom === p.stock_uom) {
-          // The exact scale 4 price per stocking unit, kept as the integer the quote line carries.
-          this._price = tenThousandthsToInput(Math.round(pricing.unit_price_ten_thousandths));
-          this._priceDetails = pricing;
-        } else {
-          // A price in another unit would need the line's conversion pair; use the base price until then.
-          this._price = tenThousandthsToInput(Math.round(p.base_price_ten_thousandths));
-          this._priceDetails = null;
-        }
-      } catch (err) {
-        console.error('Failed to fetch price', err);
-        ToastService.show('Resolved price failed, using fallback base price', 'error');
-        this._price = tenThousandthsToInput(Math.round(p.base_price_ten_thousandths));
-        this._priceDetails = null;
-      }
-    } else {
-      this._price = tenThousandthsToInput(Math.round(p.base_price_ten_thousandths));
-      this._priceDetails = null;
-    }
+    const priced = await resolveLinePrice(this.customerId, p.id, p.stock_uom, p.base_price_ten_thousandths);
+    if (this._selectedProduct?.id !== p.id) return; // another product was picked while this answered
+    if (priced.failed) ToastService.show('Resolved price failed, using fallback base price', 'error');
+    this._price = tenThousandthsToInput(priced.unitPriceTenThousandths);
+    this._priceDetails = priced.details;
   }
 
   private get _parsedQuantity(): string | null {

@@ -127,6 +127,15 @@ export const QuoteService = {
         return response.json();
     },
 
+    /** The stored original of a text list (plain text or csv), read as text. */
+    async getOriginalText(quoteId: string): Promise<string> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/quotes/${quoteId}/file`),
+            'Failed to fetch the original list',
+        );
+        return response.text();
+    },
+
     getOriginalFileUrl(quoteId: string): string {
         return `${API_URL}/api/v1/quotes/${quoteId}/file`;
     },
