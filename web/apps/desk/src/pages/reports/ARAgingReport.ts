@@ -45,20 +45,26 @@ export class ARAgingReportPage extends LitElement {
         this._unsubBranch = null;
     }
 
+    /** Each load's turn: a later load (a yard switch, a group, basis or day) makes an earlier answer stale. */
+    private _loadSeq = 0;
+
     private async _load() {
+        const seq = ++this._loadSeq;
         this.loading = true;
         try {
             const [rows, summary] = await Promise.all([
                 ArService.agingAll({ groupBy: this.groupBy, basis: this.basis, asOf: this.asOf || undefined }),
                 ArService.agingSummary({ basis: this.basis, asOf: this.asOf || undefined })
             ]);
+            if (seq !== this._loadSeq) return;
             this.rows = rows;
             this.totals = summary.totals;
         } catch (err) {
+            if (seq !== this._loadSeq) return;
             console.error(err);
             ToastService.show(err instanceof WalkTruncatedError ? err.message : 'Failed to load AR aging report', 'error');
         } finally {
-            this.loading = false;
+            if (seq === this._loadSeq) this.loading = false;
         }
     }
 

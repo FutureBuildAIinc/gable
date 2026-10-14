@@ -37,9 +37,6 @@ export const AccountService = {
     getUnappliedPayments: (customerId: string): Promise<Payment[]> => walkCursor(async (cursor) => {
         const qs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
         const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/payments?customer_id=${customerId}&unapplied=true&status=posted&limit=50${qs}`);
-        if (response.status === 404) {
-            throw new LedgerOutsideYardError();
-        }
         if (!response.ok) {
             throw new Error('Failed to fetch unapplied payments');
         }
@@ -52,9 +49,6 @@ export const AccountService = {
     getOpenInvoices: (customerId: string): Promise<{ id: string; number: string; open_cents: number }[]> => walkCursor(async (cursor) => {
         const qs = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
         const response = await fetchWithAuth(`${API_BASE_URL}/api/v1/invoices?customer_id=${customerId}&status=unpaid,partial&limit=50${qs}`);
-        if (response.status === 404) {
-            throw new LedgerOutsideYardError();
-        }
         if (!response.ok) {
             throw new Error('Failed to fetch open invoices');
         }

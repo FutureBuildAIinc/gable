@@ -91,8 +91,10 @@ describe('an account kept at another yard', () => {
       [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
       [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
       [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => missing(),
-      '/api/v1/payments': () => missing(),
-      '/api/v1/invoices': () => missing(),
+      // The walled lists answer an empty page for a customer kept at another
+      // yard, never 404; the tab must not read them at all.
+      '/api/v1/payments': () => ({ items: [], next_cursor: null }),
+      '/api/v1/invoices': () => ({ items: [], next_cursor: null }),
     })
     vi.stubGlobal('fetch', vi.fn(state.fn))
     const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
@@ -100,25 +102,81 @@ describe('an account kept at another yard', () => {
     const note = el.querySelector('[data-testid="payments-yard-note"]')
     expect(note?.textContent).toContain('West Kelowna Satellite')
     expect(text(el)).not.toContain('No unapplied cash on this account')
+    expect(state.calls.filter(c => c.url.pathname === '/api/v1/payments' || c.url.pathname === '/api/v1/invoices')).toHaveLength(0)
     expect(toast).not.toHaveBeenCalled()
   })
 
-  it('answers the CRM tab with a calm note when the activities answer 404, never a toast', async () => {
+  it('answers the CRM tab with the calm note from the page itself, never reading the walled activities', async () => {
     ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
     const toast = vi.spyOn(ToastService, 'show')
     const state = routedFetch({
       [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
       [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
       [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => missing(),
-      [`/api/v1/customers/${CUSTOMER_ID}/activities`]: () => missing(),
+      // what the server answers for a customer kept at another yard: an empty page, not 404
+      [`/api/v1/customers/${CUSTOMER_ID}/activities`]: () => ({ items: [], next_cursor: null }),
       [`/api/v1/customers/${CUSTOMER_ID}/contacts`]: () => ({ items: [], next_cursor: null }),
     })
     vi.stubGlobal('fetch', vi.fn(state.fn))
     const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
     await openTab(el, 'CRM Activity')
     await new Promise(r => setTimeout(r, 0))
-    expect(el.querySelector('[data-testid="activity-yard-note"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="activity-yard-note"]')?.textContent).toContain('West Kelowna Satellite')
+    expect(state.calls.filter(c => c.url.pathname.endsWith('/activities'))).toHaveLength(0)
     expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('keeps a missing customer on the CRM tab an honest error, not a yard note', async () => {
+    ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
+    const toast = vi.spyOn(ToastService, 'show')
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => ({ items: [], next_cursor: null }),
+      [`/api/v1/customers/${CUSTOMER_ID}/activities`]: () => ({ items: [], next_cursor: null }),
+      // the customer was removed after the page opened
+      [`/api/v1/customers/${CUSTOMER_ID}/contacts`]: () => missing(),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    await openTab(el, 'CRM Activity')
+    await new Promise(r => setTimeout(r, 0))
+    await new Promise(r => setTimeout(r, 0))
+    expect(el.querySelector('[data-testid="activity-yard-note"]')).toBeNull()
+    expect(toast).toHaveBeenCalledWith('Failed to load activity data', 'error')
+  })
+
+  it('follows the yard switcher: the ledger shows once the person is on a yard that keeps it', async () => {
+    ;(branchContext as unknown as { _branches: unknown[] })._branches = [{ id: YARD_A, name: 'West Kelowna Satellite', code: 'WKS', is_home: false }]
+    let walled = true
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => walled ? missing() : ({ items: [], next_cursor: null }),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    expect(el.querySelector('[data-testid="ledger-yard-note"]')).not.toBeNull()
+    walled = false
+    window.dispatchEvent(new CustomEvent('gable:branch-changed'))
+    await new Promise(r => setTimeout(r, 0))
+    await new Promise(r => setTimeout(r, 0))
+    await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    expect(el.querySelector('[data-testid="ledger-yard-note"]')).toBeNull()
+    expect(state.calls.filter(c => c.url.pathname.endsWith('/transactions'))).toHaveLength(2)
+  })
+
+  it('does not advise a yard switch when none of the person\'s yards keeps the ledger', async () => {
+    const state = routedFetch({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: () => customer(),
+      [`/api/v1/accounts/${CUSTOMER_ID}`]: () => summary(),
+      [`/api/v1/accounts/${CUSTOMER_ID}/transactions`]: () => missing(),
+    })
+    vi.stubGlobal('fetch', vi.fn(state.fn))
+    const el = await mountAsync('gable-account-detail', { routeId: CUSTOMER_ID } as never)
+    const note = el.querySelector('[data-testid="ledger-yard-note"]')?.textContent ?? ''
+    expect(note).toContain("This account's ledger is kept at another yard.")
+    expect(note).not.toContain('Switch')
   })
 
   it('keeps an unknown customer id on the statement page an honest error, not a yard note', async () => {

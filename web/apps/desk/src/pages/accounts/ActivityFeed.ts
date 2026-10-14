@@ -6,7 +6,6 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { crmApi } from '../../services/crmApi.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { ApiError } from '../../services/apiError.ts';
 import { format } from 'date-fns';
 import type { Activity, Contact } from '../../types/crm.ts';
 import '../../components/crm/LogActivityModal.ts';
@@ -21,8 +20,6 @@ export class GableActivityFeed extends LitElement {
     @state() private contacts: Contact[] = [];
     @state() private loading = true;
     @state() private showLogModal = false;
-    /** Set when the activities answer 404 for a customer kept at another yard. */
-    @state() private yardNote = '';
 
     connectedCallback() {
         super.connectedCallback();
@@ -40,7 +37,6 @@ export class GableActivityFeed extends LitElement {
     private async _fetchData() {
         try {
             this.loading = true;
-            this.yardNote = '';
             const [activities, conts] = await Promise.all([
                 crmApi.listAllActivities(this.customerId),
                 CustomerService.listContacts(this.customerId, { limit: 200 }),
@@ -48,11 +44,8 @@ export class GableActivityFeed extends LitElement {
             this.activities = activities;
             this.contacts = conts.items;
         } catch (err: unknown) {
-            if (err instanceof ApiError && err.status === 404) {
-                this.activities = [];
-                this.yardNote = "This account's activity is kept at another yard. Switch the yard to see it.";
-                return;
-            }
+            // The account page shows the yard note itself (its subledger answers
+            // the wall); a 404 here is a customer that is gone, an honest error.
             console.error('Failed to load activity data', err);
             ToastService.show('Failed to load activity data', 'error');
         } finally {
@@ -110,8 +103,6 @@ export class GableActivityFeed extends LitElement {
 
                 ${this.loading
                     ? html`<div class="py-8 text-center text-gray-500">Loading timeline...</div>`
-                    : this.yardNote
-                    ? html`<div class="py-8 text-center text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300" data-testid="activity-yard-note">${this.yardNote}</div>`
                     : this.activities.length === 0
                         ? html`
                             <div class="py-8 text-center text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">

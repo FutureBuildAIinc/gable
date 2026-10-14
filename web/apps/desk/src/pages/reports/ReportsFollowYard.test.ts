@@ -59,4 +59,58 @@ describe('reports follow the yard switcher', () => {
     await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
     expect(el.querySelector('[data-testid="statement-yard-note"]')).not.toBeNull()
   })
+  it('AR aging keeps the newest yard when an older answer lands last', async () => {
+    const held: Array<() => void> = []
+    let holding = true
+    const rowsFor = (name: string) => ({ items: [{ customer_id: name, customer_name: name, job_id: null, job_name: null,
+      ship_to_id: null, ship_to_code: null, currency: 'USD', current_cents: 100, days_1_30_cents: 0, days_31_60_cents: 0,
+      days_61_90_cents: 0, over_90_cents: 0, unapplied_cents: 0, total_cents: 100 }], next_cursor: null, totals: [] })
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      if (holding) {
+        await new Promise<void>(resolve => held.push(resolve))
+        return jsonResponse(rowsFor('Older Yard Co'))
+      }
+      return jsonResponse(rowsFor('Newer Yard Co'))
+    }))
+    const el = await mountAsync('gable-ar-aging-report')
+    holding = false
+    window.dispatchEvent(new CustomEvent('gable:branch-changed'))
+    await flush()
+    await flush()
+    held.splice(0).forEach(release => release())
+    await flush()
+    await flush()
+    await (el as unknown as { updateComplete: Promise<unknown> }).updateComplete
+    expect(el.textContent).toContain('Newer Yard Co')
+    expect(el.textContent).not.toContain('Older Yard Co')
+    expect((el as unknown as { loading: boolean }).loading).toBe(false)
+  })
+
+  it('the statement keeps the newest answer when an older one lands last', async () => {
+    const held: Array<() => void> = []
+    let holding = true
+    const statementFor = (name: string) => ({ customer_id: CUSTOMER_ID, customer_name: name, from: '', to: '', job_id: null, currencies: [] })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (!String(input).includes('/statement')) return jsonResponse({ items: [], next_cursor: null })
+      if (holding) {
+        await new Promise<void>(resolve => held.push(resolve))
+        return jsonResponse(statementFor('Older'))
+      }
+      return jsonResponse(statementFor('Newer'))
+    }))
+    const el = await mountAsync('gable-customer-statement')
+    ;(el as unknown as { selectedCustomer: unknown }).selectedCustomer = { id: CUSTOMER_ID, name: 'X', branch_ids: [] }
+    ;(el as unknown as { customerId: string }).customerId = CUSTOMER_ID
+    window.dispatchEvent(new CustomEvent('gable:branch-changed'))
+    await flush()
+    holding = false
+    window.dispatchEvent(new CustomEvent('gable:branch-changed'))
+    await flush()
+    await flush()
+    held.splice(0).forEach(release => release())
+    await flush()
+    await flush()
+    expect((el as unknown as { statement: { customer_name: string } | null }).statement?.customer_name).toBe('Newer')
+    expect((el as unknown as { loading: boolean }).loading).toBe(false)
+  })
 })

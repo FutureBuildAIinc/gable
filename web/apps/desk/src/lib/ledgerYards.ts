@@ -17,9 +17,13 @@ export class LedgerOutsideYardError extends Error {
     }
 }
 
-/** The calm note for a customer whose ledger lives at yards other than the current one. */
-export function ledgerYardNote(branchIds: readonly string[]): string {
+/**
+ * The calm note for a customer whose ledger (or activity) lives at yards other
+ * than the current one. It advises a switch only to a yard the person has in
+ * the switcher; with none, it says where the ledger is not.
+ */
+export function ledgerYardNote(branchIds: readonly string[], subject: 'ledger' | 'activity' = 'ledger'): string {
     const names = branchContext.branches.filter(b => branchIds.includes(b.id)).map(b => b.name);
-    const where = names.length > 0 ? names.join(' and ') : 'another yard';
-    return `This account's ledger is kept at ${where}. Switch the yard to see it.`;
+    if (names.length === 0) return `This account's ${subject} is kept at another yard.`;
+    return `This account's ${subject} is kept at ${names.join(' and ')}. Switch the yard to see it.`;
 }

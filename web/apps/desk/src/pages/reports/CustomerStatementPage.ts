@@ -108,16 +108,23 @@ export class CustomerStatementPage extends LitElement {
         this.searchOpen = false;
     }
 
+    /** Each statement read's turn: a later one (a yard switch, a new pick) makes an earlier answer stale. */
+    private _statementSeq = 0;
+
     private async _loadStatement() {
         if (!this.customerId.trim()) {
             ToastService.show('Pick a customer first', 'error');
             return;
         }
+        const seq = ++this._statementSeq;
         this.loading = true;
         this.yardNote = '';
         try {
-            this.statement = await ArService.statement(this.customerId.trim(), this.startDate || undefined, this.endDate || undefined);
+            const statement = await ArService.statement(this.customerId.trim(), this.startDate || undefined, this.endDate || undefined);
+            if (seq !== this._statementSeq) return;
+            this.statement = statement;
         } catch (err) {
+            if (seq !== this._statementSeq) return;
             // The yard note is for a customer the person can read; an id that is no
             // customer stays an honest not found.
             if (err instanceof LedgerOutsideYardError && this.selectedCustomer) {
@@ -129,7 +136,7 @@ export class CustomerStatementPage extends LitElement {
             this.statement = null;
             ToastService.show(err instanceof LedgerOutsideYardError ? 'Statement not found for that customer' : 'Failed to load statement', 'error');
         } finally {
-            this.loading = false;
+            if (seq === this._statementSeq) this.loading = false;
         }
     }
 

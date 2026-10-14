@@ -12,6 +12,7 @@ import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiErro
 import { keyed } from 'lit/directives/keyed.js';
 import { AccountService } from '../../services/AccountService.ts';
 import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
+import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
 import type { Customer, CustomerRequest, CustomerUpdateRequest, PaymentTermsRecord } from '../../types/customer.ts';
 import type { SalesPerson } from '../../types/salesteam.ts';
@@ -61,11 +62,30 @@ export class GableAccountDetail extends LitElement {
     @state() private editErrors: Record<string, string> = {};
     @state() private editMessage = '';
 
+    private _unsubBranch: (() => void) | null = null;
+    /** Each account load's turn: a yard switch while one is in flight makes its answer stale. */
+    private _loadSeq = 0;
+
     connectedCallback() {
         super.connectedCallback();
+        // A yard change moves the wall: the ledger may now be kept here (or no
+        // longer), so the page reads the account again, as the lists do.
+        this._unsubBranch = onBranchChanged(() => {
+            if (!this.routeId) return;
+            this.paymentsLoaded = false;
+            this.unappliedPayments = [];
+            this.openInvoices = [];
+            void this.loadData(this.routeId);
+        });
         if (this.routeId) {
             this.loadData(this.routeId);
         }
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._unsubBranch?.();
+        this._unsubBranch = null;
     }
 
     updated(changed: Map<string, unknown>) {
@@ -76,6 +96,7 @@ export class GableAccountDetail extends LitElement {
     }
 
     private async loadData(customerId: string) {
+        const seq = ++this._loadSeq;
         try {
             // The subledger keeps its yard's wall: for a customer kept at
             // another yard it answers 404, which is not a failure of the page.
@@ -90,6 +111,7 @@ export class GableAccountDetail extends LitElement {
                 AccountService.getAccountSummary(customerId),
                 ledger
             ]);
+            if (seq !== this._loadSeq) return;
             this.customer = cust;
             this.summary = summ;
             if (led.page) {
@@ -110,10 +132,11 @@ export class GableAccountDetail extends LitElement {
                 } catch { ToastService.show('Failed to load salesperson details', 'error'); }
             }
         } catch (error) {
+            if (seq !== this._loadSeq) return;
             console.error('Failed to load account data:', error);
             ToastService.show('Failed to load account data', 'error');
         } finally {
-            this.loading = false;
+            if (seq === this._loadSeq) this.loading = false;
         }
     }
 
@@ -143,11 +166,6 @@ export class GableAccountDetail extends LitElement {
             this.unappliedPayments = unapplied;
             this.openInvoices = open;
         } catch (error) {
-            if (error instanceof LedgerOutsideYardError) {
-                // The walled lists answer 404 for a customer kept at another yard.
-                this.ledgerNote = ledgerYardNote(this.customer?.branch_ids ?? []);
-                return;
-            }
             console.error('Failed to load payments:', error);
             ToastService.show(error instanceof WalkTruncatedError ? error.message : 'Failed to load payments', 'error');
         } finally {
@@ -725,7 +743,9 @@ export class GableAccountDetail extends LitElement {
 
                         ${this.activeTab === 'crm' ? html`
                             <div class="mt-4">
-                                <gable-activity-feed customerId=${customer.id}></gable-activity-feed>
+                                ${this.ledgerNote ? html`
+                                    <div class="border border-white/5 rounded-lg bg-slate-steel/20 px-4 py-8 text-center text-zinc-400" data-testid="activity-yard-note">${ledgerYardNote(customer.branch_ids, 'activity')}</div>
+                                ` : keyed(this._loadSeq, html`<gable-activity-feed customerId=${customer.id}></gable-activity-feed>`)}
                             </div>
                         ` : nothing}
 
