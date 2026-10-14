@@ -9,6 +9,10 @@ export type POSource = 'MANUAL' | 'REORDER' | 'SPECIAL_ORDER' | 'A2A';
 
 export interface PurchaseOrder {
     id: string;
+    /** The PO's yard (the branch the wire stamped on create). The list and detail
+     * pages resolve this to a branch name through `BranchContext.branches`. */
+    branch_id?: string;
+    number?: string;
     vendor_id?: string;
     vendor_name?: string;
     status: POStatus;
@@ -28,6 +32,10 @@ export interface PurchaseOrderLine {
     id: string;
     po_id: string;
     product_id?: string;
+    /** The product's SKU, resolved client-side from `product_id`. The wire
+     *  carries the description and the product id; the SKU is filled in by the
+     *  page when it loads. Absent on lines that do not reference a product. */
+    sku?: string;
     description: string;
     quantity: number;
     qty_received: number;
@@ -114,5 +122,6 @@ export interface RecommendationSummary {
     medium_count: number;
     low_count: number;
     total_estimated_cost: number;
-    items: PurchaseRecommendation[];
+    /** null when nothing needs reordering (the route answers `items: null`). */
+    items: PurchaseRecommendation[] | null;
 }

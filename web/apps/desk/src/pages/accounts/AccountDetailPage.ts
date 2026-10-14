@@ -427,6 +427,11 @@ export class GableAccountDetail extends LitElement {
                                 ?disabled=${this.editing}
                                 class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors disabled:opacity-50"
                             >Edit Profile</button>
+                            <a
+                                href=${`/reports/customer-statement?customer=${customer.id}`}
+                                data-testid="account-statement-link"
+                                class="border border-white/10 text-zinc-300 hover:text-white px-3 py-1.5 rounded text-sm font-medium transition-colors inline-flex items-center"
+                            >Statement</a>
                             <button
                                 disabled
                                 title="Not implemented: start a quote from Quotes > Quote Builder instead."

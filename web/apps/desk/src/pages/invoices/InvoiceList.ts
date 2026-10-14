@@ -212,7 +212,7 @@ export class GableInvoiceList extends LitElement {
                                             <td class="p-3 text-white">${inv.customer_name || inv.customer_id.slice(0, 8)}</td>
                                             <td class="p-3 font-mono text-xs">
                                                 ${inv.order_id
-                                                    ? html`<a href="/orders/${inv.order_id}" @click=${(e: Event) => e.stopPropagation()} class="text-blue-400 hover:underline">${inv.order_id.slice(0, 8)}</a>`
+                                                    ? html`<a href="/orders/${inv.order_id}" @click=${(e: Event) => e.stopPropagation()} class="text-blue-400 hover:underline">View order</a>`
                                                     : html`<span class="text-zinc-500">counter</span>`}
                                             </td>
                                             <td class="p-3 font-mono text-xs text-zinc-400">${inv.job_id ? inv.job_id.slice(0, 8) : '—'}</td>

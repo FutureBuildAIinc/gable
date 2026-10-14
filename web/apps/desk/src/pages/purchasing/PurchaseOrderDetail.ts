@@ -5,10 +5,13 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state, property, query } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
-import { formatCents } from '../../lib/utils.ts';
+import { formatCents, formatDollars, poLabel } from '../../lib/utils.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import { LocationService } from '../../services/LocationService';
+import { ProductService } from '../../services/product.service.ts';
+import { VendorService } from '../../services/VendorService';
+import { branchContext } from '../../services/BranchContext.ts';
 import type { PurchaseOrder, PurchaseOrderLine, FreightCharge, FreightUploadResponse } from '../../types/purchaseOrder';
 import type { Location } from '../../types/location';
 import { ArrowLeft, Send, PackageCheck, Upload, Truck, CheckCircle, ChevronDown, ChevronUp } from 'lucide';
@@ -45,6 +48,11 @@ export class PurchaseOrderDetail extends LitElement {
     private async _loadPO(poId: string) {
         try {
             const data = await PurchaseOrderService.getPO(poId);
+            // The wire carries neither the SKU nor the vendor's name; resolve the
+            // SKU for every product the lines reference (one fetch per unique
+            // product id) and the vendor's name from its id. A missing product
+            // or vendor is left blank rather than failed.
+            await Promise.all([this._enrichLinesWithSku(data), this._resolveVendorName(data)]);
             this.po = data;
             const initial: Record<string, { qty: number; locationId: string }> = {};
             (data.lines || []).forEach((line: PurchaseOrderLine) => {
@@ -57,6 +65,36 @@ export class PurchaseOrderDetail extends LitElement {
         }
     }
 
+    /** Fills `sku` on every line of `po` whose `product_id` references a product. */
+    private async _enrichLinesWithSku(po: PurchaseOrder): Promise<void> {
+        const lines = po.lines || [];
+        const ids = Array.from(new Set(
+            lines.map((l) => l.product_id).filter((id): id is string => Boolean(id)),
+        ));
+        if (ids.length === 0) return;
+        await Promise.all(ids.map(async (id) => {
+            try {
+                const product = await ProductService.getProduct(id);
+                for (const line of lines) {
+                    if (line.product_id === id && !line.sku) line.sku = product.sku;
+                }
+            } catch {
+                // A line whose product has been deleted still receives into stock;
+                // it just renders without a SKU.
+            }
+        }));
+    }
+
+    /** Fills `vendor_name` from `vendor_id` when the wire left it out. */
+    private async _resolveVendorName(po: PurchaseOrder): Promise<void> {
+        if (po.vendor_name || !po.vendor_id) return;
+        try {
+            po.vendor_name = (await VendorService.getVendor(po.vendor_id)).name;
+        } catch {
+            // The header simply omits the vendor.
+        }
+    }
+
     private async _loadFreightCharges(poId: string) {
         try {
             const charges = await PurchaseOrderService.getFreightCharges(poId);
@@ -64,6 +102,28 @@ export class PurchaseOrderDetail extends LitElement {
         } catch {
             // Freight charges may not exist yet
         }
+    }
+
+    /** The PO's yard, resolved to its display name. "Main Yard" reads better
+     *  than a UUID; empty when the branch is not in the caller's branch list
+     *  (the header then omits the yard rather than print an id). */
+    private get _yardName(): string {
+        const po = this.po;
+        if (!po?.branch_id) return '';
+        const branch = branchContext.branches.find((b) => b.id === po.branch_id);
+        return branch?.name ?? '';
+    }
+
+    /** Receive bins only: locations under the PO's own yard, no top-level
+     *  branch rows. `branch_id` on a Location is the link, and `type === 'branch'`
+     *  rows are skipped because a stray top-level location would let a user
+     *  receive into another yard by accident. */
+    private get _receiveLocations(): Location[] {
+        const po = this.po;
+        if (!po?.branch_id) return [];
+        return this.locations.filter(
+            (loc) => loc.branch_id === po.branch_id && loc.type !== 'branch',
+        );
     }
 
     private async _handleSubmitPO() {
@@ -179,12 +239,20 @@ export class PurchaseOrderDetail extends LitElement {
                     ${icon(ArrowLeft, 20, 'w-5 h-5')}
                 </button>
                 <div class="flex-1">
-                    <h1 class="text-2xl font-bold text-white">PO #${this.po.id.slice(0, 8)}</h1>
-                    <p class="text-sm text-zinc-400 flex items-center gap-2">
+                    <h1 class="text-2xl font-bold text-white">${poLabel(this.po)}</h1>
+                    <p class="text-sm text-zinc-400 flex items-center gap-2 flex-wrap">
                         <span>Status: <span class="font-bold uppercase">${this.po.status}</span></span>
                         <span class="px-2 py-0.5 rounded text-xs font-bold uppercase border border-white/10 bg-white/5">
                             ${this.po.source || 'MANUAL'}
                         </span>
+                        ${this.po.vendor_name ? html`
+                            <span class="text-zinc-300">·</span>
+                            <span>Vendor: <span class="text-white">${this.po.vendor_name}</span></span>
+                        ` : nothing}
+                        ${this._yardName ? html`
+                            <span class="text-zinc-300">·</span>
+                            <span>Yard: <span class="text-white">${this._yardName}</span></span>
+                        ` : nothing}
                     </p>
                 </div>
                 <div class="flex gap-3">
@@ -231,8 +299,8 @@ export class PurchaseOrderDetail extends LitElement {
                                     <tr class="hover:bg-white/5 transition-colors">
                                         <td class="px-6 py-4">
                                             <span class="text-white">${line.description}</span>
-                                            ${line.product_id ? html`
-                                                <span class="text-zinc-500 text-xs ml-2">(${line.product_id.slice(0, 8)})</span>
+                                            ${line.sku ? html`
+                                                <span class="text-zinc-500 text-xs ml-2">(${line.sku})</span>
                                             ` : nothing}
                                         </td>
                                         <td class="px-6 py-4 text-right font-mono text-zinc-300">${line.quantity}</td>
@@ -241,9 +309,9 @@ export class PurchaseOrderDetail extends LitElement {
                                                 ${line.qty_received}
                                             </span>
                                         </td>
-                                        <td class="px-6 py-4 text-right font-mono text-zinc-300">$${line.cost.toFixed(2)}</td>
+                                        <td class="px-6 py-4 text-right font-mono text-zinc-300">${formatDollars(line.cost)}</td>
                                         <td class="px-6 py-4 text-right font-mono text-emerald-400 font-bold">
-                                            $${(line.quantity * line.cost).toFixed(2)}
+                                            ${formatDollars(line.quantity * line.cost)}
                                         </td>
                                         ${this.receiving ? html`
                                             <td class="px-6 py-4 text-right">
@@ -268,7 +336,7 @@ export class PurchaseOrderDetail extends LitElement {
                                                     ?disabled=${remaining <= 0}
                                                 >
                                                     <option value="">Select...</option>
-                                                    ${this.locations.map(loc => html`
+                                                    ${this._receiveLocations.map(loc => html`
                                                         <option value="${loc.id}">${loc.path || loc.code}</option>
                                                     `)}
                                                 </select>
