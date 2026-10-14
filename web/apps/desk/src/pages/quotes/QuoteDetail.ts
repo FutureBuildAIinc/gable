@@ -6,11 +6,11 @@ import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
-import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, Sparkles, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
+import { FileText, Download, ArrowLeft, ShoppingCart, Send, Check, X, ListChecks, Eye, Map, Package, AlertTriangle, ShieldAlert, Truck, TrendingUp } from 'lucide';
 import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/QuoteService.ts';
 import type { Quote, QuoteStatus, ParseMapItem } from '../../types/quote.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
-import { extensionCents, dollarsToCents } from '../../lib/money.ts';
+import { extensionCents, dollarsToCents, floatDollarsToTenThousandths } from '../../lib/money.ts';
 import '../../components/quotes/exposure-banner.ts';
 
 /** How much of a text list the Original Upload tab shows. */
@@ -57,6 +57,8 @@ export class GableQuoteDetail extends LitElement {
         try {
             const data = await QuoteService.get(quoteId);
             this.quote = data;
+            // The Original Upload tab can already be open (a route change): load this quote's text now.
+            if (this.activeTab === 'original') void this.loadOriginalText(data);
         } catch (error) {
             console.error(error);
             ToastService.show(`Failed to load quote: ${quoteErrorMessage(error, 'Unknown error')}`, 'error');
@@ -136,6 +138,11 @@ export class GableQuoteDetail extends LitElement {
                 <span class="text-white font-mono text-xs">${new Date(date).toLocaleString()}</span>
             </div>
         `;
+    }
+
+    /** The catalogue price of a mapped product (float dollars on the wire), two to four decimals. */
+    private catalogPrice(baseDollars: number): string {
+        return formatPrice4(floatDollarsToTenThousandths(baseDollars));
     }
 
     private renderConfidenceBadge(confidence: number, isSpecialOrder: boolean) {
@@ -383,7 +390,7 @@ export class GableQuoteDetail extends LitElement {
                     ${!isImage && !isPdf && !(isText && original !== null) ? html`
                         <div class="p-12 text-center text-zinc-500">
                             ${icon(FileText, 48, 'w-12 h-12 mx-auto mb-4 opacity-50')}
-                            <p>${isText && !this.originalText ? 'Loading the list...' : 'The original is available to download.'}</p>
+                            <p>${isText && this.originalText?.quoteId !== quote.id ? 'Loading the list...' : 'The original is available to download.'}</p>
                             <a href="${fileUrl}" download class="text-gable-green hover:underline text-sm mt-2 inline-block">
                                 Download to view
                             </a>
@@ -432,7 +439,7 @@ export class GableQuoteDetail extends LitElement {
                                                 <div class="font-mono text-sm text-white">
                                                     ${item.quantity} <span class="text-zinc-500 text-xs">${item.uom}</span>
                                                 </div>
-                                                <div class="font-mono text-xs text-emerald-400">$${item.matched_product.base_price.toFixed(2)}/ea</div>
+                                                <div class="font-mono text-xs text-emerald-400">Catalogue ${this.catalogPrice(item.matched_product.base_price)} / ${item.matched_product.uom}</div>
                                             </div>
                                         </div>
                                     ` : html`
@@ -460,7 +467,7 @@ export class GableQuoteDetail extends LitElement {
                                         ${item.alternatives.map(alt => html`
                                             <div class="flex items-center justify-between text-xs text-zinc-500">
                                                 <span><span class="font-mono text-zinc-400">${alt.sku}</span> \u2014 ${alt.description}</span>
-                                                <span class="font-mono text-zinc-400">$${alt.base_price.toFixed(2)}</span>
+                                                <span class="font-mono text-zinc-400">Catalogue ${this.catalogPrice(alt.base_price)} / ${alt.uom}</span>
                                             </div>
                                         `)}
                                     </div>
@@ -501,7 +508,7 @@ export class GableQuoteDetail extends LitElement {
                             </span>
                             ${quote.source === 'ai' ? html`
                                 <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-violet-500/15 text-violet-400 border border-violet-500/20">
-                                    ${icon(Sparkles, 12, 'w-3 h-3')} Material list
+                                    ${icon(ListChecks, 12, 'w-3 h-3')} Material list
                                 </span>
                             ` : nothing}
                         </div>

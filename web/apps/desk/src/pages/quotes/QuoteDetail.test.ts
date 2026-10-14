@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './QuoteDetail'
 import type { GableQuoteDetail } from './QuoteDetail'
+import { createElement, Sparkles } from 'lucide'
 import { mount, flush, update, q, text, jsonResponse } from '../../test/dom'
 
 const QUOTE = {
@@ -16,7 +17,12 @@ const QUOTE = {
   customer_name: 'Test Builder Co', created_at: '2026-01-01T00:00:00Z', lines: [],
   subtotal_cents: 0, tax_cents: 0, total_cents: 0, freight_cents: 0, delivery_type: 'pickup',
   original_filename: 'list.txt', original_content_type: 'text/plain',
-  parse_map: [{ raw_text: '10 osb', matched_sku: 'OSB', confidence: 0.95, is_special_order: false }],
+  parse_map: [{
+    raw_text: '10 osb', matched_sku: 'OSB', confidence: 0.95, is_special_order: false,
+    matched_product: { product_id: 'p1', sku: 'OSB-716-4x8', description: '7/16 OSB 4x8', uom: 'PCS', base_price: 19.5 },
+    quantity: 10, uom: 'PCS',
+    alternatives: [{ product_id: 'p2', sku: 'OSB-12', description: '1/2 OSB', uom: 'PCS', base_price: 21.3725 }],
+  }],
 }
 
 let fetchMock: ReturnType<typeof vi.fn>
@@ -33,6 +39,10 @@ beforeEach(() => {
       return new Response(lines(250), { status: 200, headers: { 'Content-Type': 'text/plain' } })
     }
     if (path === '/api/v1/quotes/q1') return jsonResponse(QUOTE)
+    if (path === '/api/v1/quotes/q2/file') {
+      return new Response('second quote text', { status: 200, headers: { 'Content-Type': 'text/plain' } })
+    }
+    if (path === '/api/v1/quotes/q2') return jsonResponse({ ...QUOTE, id: 'q2', number: 'Q-0002' })
     return jsonResponse({ message: 'none' }, 404)
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -81,5 +91,33 @@ describe('QuoteDetail material list words', () => {
     expect(text(el)).not.toContain('text/plain')
     expect(text(el)).not.toContain('Preview not available')
     expect(el.querySelector('a[download]')).not.toBeNull()
+  })
+
+  it('labels the mapping price as the catalogue price with its unit, all four decimals kept', async () => {
+    const el = await detail()
+    tab(el, 'List mapping').click()
+    await update(el, {})
+    expect(text(el)).toContain('Catalogue $19.50 / PCS')
+    expect(text(el)).toContain('Catalogue $21.3725 / PCS')
+    expect(text(el)).not.toContain('/ea')
+  })
+
+  it('shows the new quote\'s own text when the route changes with the Original Upload tab open', async () => {
+    const el = await detail()
+    tab(el, 'Original Upload').click()
+    await flush(); await flush()
+    await update(el, {})
+    expect(q(el, '[data-testid="original-text"]').textContent).toContain('line 1 2x4x8 stud')
+    await update(el, { routeId: 'q2' } as Partial<GableQuoteDetail>)
+    await flush(); await flush(); await flush()
+    await update(el, {})
+    expect(q(el, '[data-testid="original-text"]').textContent).toContain('second quote text')
+  })
+
+  it('does not show the sparkle (AI) icon on the Material list badge', async () => {
+    const el = await detail()
+    const badge = Array.from(el.querySelectorAll('span')).find((s) => text(s).trim() === 'Material list')
+    expect(badge).toBeTruthy()
+    expect(badge!.querySelector('svg')!.innerHTML).not.toBe(createElement(Sparkles).innerHTML)
   })
 })
