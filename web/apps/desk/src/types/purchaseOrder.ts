@@ -114,5 +114,6 @@ export interface RecommendationSummary {
     medium_count: number;
     low_count: number;
     total_estimated_cost: number;
-    items: PurchaseRecommendation[];
+    /** null when nothing needs reordering (the route answers `items: null`). */
+    items: PurchaseRecommendation[] | null;
 }

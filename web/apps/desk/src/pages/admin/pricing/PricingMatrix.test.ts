@@ -111,6 +111,15 @@ describe('PricingMatrix', () => {
     expect(consoleError).not.toHaveBeenCalled()
   })
 
+  it.each([500, 403])('keeps the failure banner, and logs it, for a %i (only a 404 means switched off)', async (status) => {
+    respond = () => new Response(JSON.stringify({ error: { code: 'internal_error', message: 'boom' }, meta: { request_id: 'r' } }), { status, headers: { 'Content-Type': 'application/json' } })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const el = await open()
+    expect(text(el)).toContain('Failed to load pricing matrix')
+    expect(text(el)).not.toContain('Category pricing is off on this server')
+    expect(consoleError).toHaveBeenCalled()
+  })
+
   it('renders the rule value from value_pct and reads the matrix with a plain GET', async () => {
     const el = await open()
     expect(calls[0].method).toBe('GET')
