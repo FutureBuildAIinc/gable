@@ -527,8 +527,10 @@ func exemptionRowCustomers(db *database.DB) func(ctx context.Context, r *http.Re
 // passes, exactly the predicate /customers/{id} reads under. A customer the
 // wall hides answers like a missing one: 404 when the path or the row names
 // it, 403 naming customer_id when the body does. A bound key keeps its own
-// wall and is not held here. A body that does not decode passes to the
-// handler's 400, which writes nothing.
+// wall and is not held here. A body that is not exactly one complete JSON
+// value (unparsable, truncated, or a trailing value after the object) is
+// refused here with 400 and never handed on, since the handler would read only
+// its first value (r8 P1-1).
 func userCustomerWall(db *database.DB, resolve func(ctx context.Context, r *http.Request) ([]uuid.UUID, error), body bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -544,7 +546,11 @@ func userCustomerWall(db *database.DB, resolve func(ctx context.Context, r *http
 			}
 			customers, err := resolve(ctx, r)
 			if errors.Is(err, middleware.ErrBodyRefused) {
-				next.ServeHTTP(w, r)
+				// A body that is not exactly one JSON value is refused here,
+				// never handed on: the handler reads only the first value, so
+				// passing it would act on a customer this wall never saw
+				// (r8 P1-1).
+				httpx.WriteError(w, r, httpx.BadRequest("the request body must be exactly one JSON value"))
 				return
 			}
 			if err != nil {
