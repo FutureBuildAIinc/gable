@@ -11,11 +11,11 @@
       "body": {
         "by_method": {
           "CASH": 24.35,
-          "CHECK": 313596.85
+          "CHECK": 2138.03
         },
         "date": "<day+0>",
-        "total_collected": 313621.19999999995,
-        "transaction_count": 46
+        "total_collected": 2162.38,
+        "transaction_count": 8
       }
     }
   },
