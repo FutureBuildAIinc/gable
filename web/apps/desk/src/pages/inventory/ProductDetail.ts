@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
+import { isDrawablePath } from '../../components/ProductThumb.ts';
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import '../../components/ProductThumb.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import type { ProductDetail as ProductDetailType, PIMContent } from '../../types/pim.ts';
@@ -164,6 +166,7 @@ export class GableProductDetail extends LitElement {
                     >
                         ${icon(ArrowLeft, 20, 'w-5 h-5')}
                     </button>
+                    ${isDrawablePath(product.image_url) ? html`<gable-product-thumb .src=${product.image_url} .size=${72}></gable-product-thumb>` : nothing}
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-3 mb-1">
                             <h1 class="text-xl font-bold text-white truncate">${product.description}</h1>

@@ -9689,6 +9689,8 @@ export interface components {
             sku: string;
             description: string;
             stock_uom: components["schemas"]["UOM"];
+            /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
+            image_url: string | null;
         };
         /** @description The list envelope of ADR 0001 section 1. items is never null; total is present only under include=total. */
         InventoryLevelPage: {
@@ -13127,6 +13129,8 @@ export interface components {
             random_length: boolean;
             /** @description The product's unit set (ADR 0006 sections 3.1 and 3.2). */
             units: components["schemas"]["UnitSetRow"][];
+            /** @description The product's picture path while the catalog.product_images setting is on; null while it is off or the product has none. */
+            image_url: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

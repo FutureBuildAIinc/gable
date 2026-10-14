@@ -14,6 +14,7 @@ import (
 	"github.com/gablelbm/gable/internal/customer"
 	"github.com/gablelbm/gable/internal/customer/customerlink"
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"github.com/gablelbm/gable/internal/platform/pictures"
 	"github.com/gablelbm/gable/internal/salesdoc"
 	"github.com/gablelbm/gable/pkg/branchctx"
 	"github.com/gablelbm/gable/pkg/database"
@@ -1622,7 +1623,7 @@ func (r *PostgresRepository) CounterTiles(ctx context.Context, q TileQuery) (Til
 
 	rows, err := r.ex(ctx).Query(ctx, tileHistory()+`
 		SELECT s.on_flag, c.name, c.n
-		  FROM (SELECT COALESCE((SELECT value = 'on' FROM system_settings WHERE key = 'catalog.product_images'), FALSE) AS on_flag) s
+		  FROM (SELECT `+pictures.FlagSQL+` AS on_flag) s
 		  LEFT JOIN LATERAL (
 			SELECT p.category AS name, COUNT(*) AS n
 			  FROM products p LEFT JOIN top ON top.product_id = p.id

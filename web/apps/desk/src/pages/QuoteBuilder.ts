@@ -35,6 +35,7 @@ import { Save, Send, Printer, Calculator, AlertCircle, TrendingUp, Truck, Packag
 
 // Side-effect imports: register child custom elements
 import './quotes/QuoteList.ts';
+import { isDrawablePath } from '../components/ProductThumb.ts';
 import '../components/customers/CustomerSelect.ts';
 import '../components/quotes/MaterialIntake.ts';
 import '../components/quotes/LineItemEditor.ts';
@@ -543,19 +544,31 @@ export class GableQuoteBuilder extends LitElement {
         `;
     }
 
-    private renderLineRow(line: LineWithEscalator, idx: number) {
+    private pictureByProduct = new Map<string, string>();
+
+    /** The picture path of a line's product, from the catalogue the builder loaded (null when it has none). */
+    private pictureOf(line: LineWithEscalator): string | null {
+        return line.product_id ? this.pictureByProduct.get(line.product_id) ?? null : null;
+    }
+
+    private renderLineRow(line: LineWithEscalator, idx: number, pictures: boolean) {
         const err = this.lineErrors[idx];
         return html`
             <tr data-testid="quote-line" class="group hover:bg-white/5 transition-colors align-top">
                 <td class="px-4 py-3">
-                    <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
-                    <div class="text-zinc-400 text-xs">${line.description}</div>
-                    ${err ? html`<div class="text-[10px] text-rose-400 mt-1">${err}</div>` : nothing}
-                    <gable-escalator-toggle
-                        .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
-                        .escalator=${line.escalator}
-                        @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
-                    ></gable-escalator-toggle>
+                    <div class="flex items-start gap-3">
+                        ${pictures ? html`<gable-product-thumb .src=${this.pictureOf(line)} .size=${40} reserve></gable-product-thumb>` : nothing}
+                        <div class="min-w-0 flex-1">
+                            <div class="font-mono text-white group-hover:text-gable-green transition-colors">${line.sku}</div>
+                            <div class="text-zinc-400 text-xs">${line.description}</div>
+                            ${err ? html`<div class="text-[10px] text-rose-400 mt-1">${err}</div>` : nothing}
+                            <gable-escalator-toggle
+                                .basePrice=${Number(tenThousandthsToDecimal(line.unit_price_ten_thousandths))}
+                                .escalator=${line.escalator}
+                                @escalator-change=${(e: CustomEvent<QuoteLineEscalator>) => this.handleEscalatorChange(idx, e.detail)}
+                            ></gable-escalator-toggle>
+                        </div>
+                    </div>
                 </td>
                 <td class="px-2 py-3">
                     <div class="inline-flex items-center rounded-md border border-white/10 bg-deep-space">
@@ -618,6 +631,9 @@ export class GableQuoteBuilder extends LitElement {
         const blocked = !this.customer || this.lines.length === 0 || this.loading || adding || this.saveBlockedReason !== null;
         const secondary = 'inline-flex items-center justify-center rounded-lg text-sm font-medium border border-white/10 text-zinc-200 hover:bg-white/5 px-3 py-2 disabled:opacity-50';
         const card = 'bg-slate-steel/50 backdrop-blur border border-white/10 rounded-xl';
+        // The picture of each line's product, built once per render; room for a thumb only while some line has one.
+        this.pictureByProduct = new Map(this.products.filter(p => isDrawablePath(p.image_url)).map(p => [p.id, p.image_url as string]));
+        const linePictures = this.lines.some(l => this.pictureOf(l) !== null);
 
         return html`
             <div>
@@ -679,7 +695,7 @@ export class GableQuoteBuilder extends LitElement {
                                         ${this.lines.length === 0 ? html`
                                             <tr><td colspan="6" class="px-6 py-10 text-center text-zinc-500 italic">No items yet. Search a product above or read a material list.</td></tr>
                                         ` : nothing}
-                                        ${this.lines.map((line, idx) => this.renderLineRow(line, idx))}
+                                        ${this.lines.map((line, idx) => this.renderLineRow(line, idx, linePictures))}
                                     </tbody>
                                 </table>
                             </div>

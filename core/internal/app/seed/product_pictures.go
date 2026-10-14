@@ -7,6 +7,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/gablelbm/gable/internal/platform/pictures"
 )
 
 // pictureDir is where the desk serves the catalogue illustrations from
@@ -15,7 +17,7 @@ const pictureDir = "/catalog-illustrations/"
 
 // productImageSetting is the system_settings key the counter reads to show
 // product pictures; the demo import turns it on, the base seed leaves it off.
-const productImageSetting = "catalog.product_images"
+const productImageSetting = pictures.Setting
 
 // picturePath is the picture path a catalogue image family resolves to.
 func picturePath(family string) string { return pictureDir + family + ".svg" }
