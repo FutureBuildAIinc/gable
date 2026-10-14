@@ -164,7 +164,7 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 21,
-        "outstanding_ar": 11865877,
+        "outstanding_ar": 11056347,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
         "today_revenue": 31349485,

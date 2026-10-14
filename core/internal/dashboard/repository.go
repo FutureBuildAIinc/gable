@@ -40,6 +40,11 @@ func NewRepository(db *database.DB) *PostgresRepository {
 // GetDashboardSummary returns all aggregate KPIs in a single query using a CTE.
 // The caller's reach walls every arm (the payments arms through the order or
 // the invoice their payment settles, the rest through their own branch).
+// Outstanding AR is the yard's net open receivable as the aging reads it
+// today (account.agingSQL): each invoice's open amount, each numbered credit
+// memo's open amount and each payment's unapplied cash as a negative. It is
+// inlined, not read through the account module, so the one query, the per
+// reach cache and its reach keys stay as they are.
 func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	summary := &DashboardSummary{}
 
@@ -81,11 +86,35 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			WHERE d.status IN ('PENDING', 'ASSIGNED')
 			  AND ` + middleware.Wall("o", 4, 5) + `
 		),
+		open_docs AS (
+			SELECT ROUND(i.total_amount * 100)::bigint - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+			            WHERE a.invoice_id = i.id AND a.applied_on <= $6::date AND (a.reversed_on IS NULL OR a.reversed_on > $6::date)), 0) AS amt
+			FROM invoices i
+			WHERE i.invoice_date <= $6::date AND (i.voided_on IS NULL OR i.voided_on > $6::date)
+			  AND ` + middleware.Wall("i", 4, 5) + `
+			UNION ALL
+			SELECT ROUND(m.total_amount * 100)::bigint
+			       + COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+			            WHERE a.credit_memo_id = m.id AND a.applied_on <= $6::date AND (a.reversed_on IS NULL OR a.reversed_on > $6::date)), 0)
+			       + COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.credit_memo_id = m.id AND f.refunded_on <= $6::date), 0)
+			FROM credit_memos m
+			WHERE m.number IS NOT NULL AND m.memo_date <= $6::date AND (m.voided_on IS NULL OR m.voided_on > $6::date)
+			  AND ` + middleware.Wall("m", 4, 5) + `
+			UNION ALL
+			SELECT -GREATEST(0, ROUND(p.amount * 100)::bigint
+			       - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
+			            WHERE a.payment_id = p.id AND a.kind = 'PAYMENT' AND a.applied_on <= $6::date AND (a.reversed_on IS NULL OR a.reversed_on > $6::date)), 0)
+			       - COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.payment_id = p.id AND f.refunded_on <= $6::date), 0)
+			       - ROUND(p.migrated_excess * 100)::bigint)
+			FROM payments p
+			WHERE p.received_on <= $6::date AND (p.voided_on IS NULL OR p.voided_on > $6::date)
+			  AND ` + middleware.Wall("p", 4, 5) + `
+		),
 		outstanding AS (
-			SELECT (COALESCE(SUM(total_amount), 0) * 100)::bigint AS amount, COUNT(*) AS cnt
-			FROM invoices
-			WHERE status IN ('UNPAID', 'PARTIAL')
-			  AND ` + middleware.Wall("", 4, 5) + `
+			SELECT (SELECT COALESCE(SUM(amt), 0)::bigint FROM open_docs) AS amount,
+			       (SELECT COUNT(*) FROM invoices
+			         WHERE status IN ('UNPAID', 'PARTIAL')
+			           AND ` + middleware.Wall("", 4, 5) + `) AS cnt
 		)
 		SELECT
 			(SELECT val FROM today_rev),
@@ -97,7 +126,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	`
 
 	var todayRevenue, yesterdayRevenue int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID, grantsSub).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID, grantsSub, todayStart.Format("2006-01-02")).Scan(
 		&todayRevenue,
 		&yesterdayRevenue,
 		&summary.ActiveOrders,
