@@ -143,6 +143,21 @@ describe('MaterialIntake', () => {
     expect(el.querySelector('[data-testid="intake-accept-confident"]')).toBeNull()
   })
 
+  it('says the provider refused the saved key, with what to do, and shows no sample list', async () => {
+    const words = 'Anthropic refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.'
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ error: { code: 'ai_refused', message: words }, meta: { request_id: 'r' } }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } },
+    ))
+    const el = await mount<GableMaterialIntake>('gable-material-intake')
+    await paste(el, 'x')
+    const refused = q(el, '[data-testid="intake-ai-refused"]')
+    expect(text(refused)).toContain(words)
+    expect(el.querySelector('[data-testid="intake-sample-banner"]')).toBeNull()
+    expect(text(el)).not.toContain('No AI reader is set up')
+    expect(el.querySelectorAll('[data-testid="intake-line"]').length).toBe(0)
+  })
+
   it('shows a sample read only: no per line Accept, no swap, no accept all, and says how to turn AI on', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(result({ synthetic: true })))
     const el = await mount<GableMaterialIntake>('gable-material-intake')
