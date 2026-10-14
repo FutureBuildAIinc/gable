@@ -2852,7 +2852,7 @@ export interface paths {
         put?: never;
         /**
          * Adjust inventory (cycle count)
-         * @description A result that would leave negative stock answers 422 insufficient_stock. An absolute count (is_delta false) that names no location answers 422 location_required where the caller has no branch context, or where the product is held in more than one location in the caller's reach: a count is for one location. An absolute count below the figure already allocated to orders at that location answers 422 below_allocated.
+         * @description A result that would leave negative stock answers 422 insufficient_stock. An adjustment that names no location (a count or a delta) answers 422 location_required where the caller has no branch context; an absolute count (is_delta false) that names none answers it too where the product is held in more than one location in the caller's reach: a count is for one location. An absolute count below the figure already allocated to orders at that location answers 422 below_allocated.
          */
         post: operations["inventoryAdjust"];
         delete?: never;
