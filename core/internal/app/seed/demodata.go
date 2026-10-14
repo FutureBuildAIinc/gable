@@ -1005,8 +1005,8 @@ func writeHistoryDocs(ctx context.Context, tx *sql.Tx, customerID, branchID uuid
 	lines []historyLine, subtotal, taxCents int64) (seedInvoice, error) {
 	orderID, invID := uuid.New(), uuid.New()
 	total := subtotal + taxCents
-	// The order takes the currency the base seed's orders fall back to, which
-	// is the invoices' default: the documents of one sale agree.
+	// The order and its invoice both take the tenant's currency, so the
+	// documents of one sale agree (the payment follows its invoice).
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, tax_rate, tax_amount, status, created_at,
 			delivery_type, currency, tax_source)

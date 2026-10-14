@@ -89,6 +89,11 @@ func TestDemoImport(t *testing.T) {
 	}
 	db, dbURL := demoImportDB(t)
 	runCommand(t, dbURL, "./cmd/migrate")
+	// The tenant takes a currency other than the documents' column default
+	// (USD), so a history document that fell back to the default would show.
+	if _, err := db.Exec(`UPDATE system_settings SET value = 'CAD' WHERE key IN ('currency.default', 'currency.enabled')`); err != nil {
+		t.Fatalf("set the tenant's currency: %v", err)
+	}
 	runCommand(t, dbURL, "./cmd/seed")
 	first := snapshotCounts(t, db)
 	if first.products == 0 || first.customers == 0 || first.vendors == 0 {
@@ -400,9 +405,16 @@ func TestDemoImport(t *testing.T) {
 			Totals []account.AgingTotal `json:"totals"`
 		}
 		getJSON(t, mux, "/api/v1/ar/aging/summary?basis=due_date", &sum)
+		var tenant string
+		if err := db.QueryRow(`SELECT value FROM system_settings WHERE key = 'currency.default'`).Scan(&tenant); err != nil {
+			t.Fatal(err)
+		}
 		for _, tot := range sum.Totals {
-			if tot.Currency != "USD" {
-				t.Errorf("the aging summary carries %d cents in %s: the seed's documents are all USD", tot.TotalCents, tot.Currency)
+			// The history pays every invoice in full, so it leaves no cash
+			// unapplied in the tenant's currency (the base seed's own
+			// documents keep the column default and are not checked here).
+			if tot.Currency == tenant && tot.UnappliedCents != 0 {
+				t.Errorf("the aging summary carries %d cents of unapplied %s cash", tot.UnappliedCents, tenant)
 			}
 		}
 	})
