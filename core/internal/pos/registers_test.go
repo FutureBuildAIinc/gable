@@ -125,6 +125,37 @@ func TestRegistersListHoldsTheBranchWalls(t *testing.T) {
 	}
 }
 
+// RULE: a retired register (is_active false) is listed to nobody, so the
+// counter never opens on it.
+func TestRegistersListHoldsOnlyActiveRegisters(t *testing.T) {
+	y := seedTwoYards(t)
+	db := testutil.RequireDB(t)
+	ctx := context.Background()
+	retired := "RET-" + uuid.NewString()[:8]
+	if _, err := db.Pool.Exec(ctx, `INSERT INTO pos_registers (id, location_id, branch_id, name, is_active) VALUES ($1, $2, $3, 'AAA retired till', FALSE)`,
+		retired, uuid.New(), y.a); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Pool.Exec(ctx, `DELETE FROM pos_registers WHERE id = $1`, retired) })
+	admin := branchctx.With(ctx, &branchctx.Context{UserSub: "admin", IsAdmin: true})
+	for name, c := range map[string]context.Context{
+		"header A": y.header(y.a), "grants of A": branchctx.With(ctx, &branchctx.Context{UserSub: y.sub}),
+		"administrator": admin, "bound key pinned A": y.bound(y.a),
+	} {
+		regs, err := y.repo.ListRegisters(c)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		got := registerIDs(regs)
+		if _, ok := got[retired]; ok {
+			t.Errorf("%s: the retired register is listed", name)
+		}
+		if _, ok := got[y.regA]; !ok {
+			t.Errorf("%s: the active register A is missing", name)
+		}
+	}
+}
+
 // RULE (ruling A at the counter): the lookup answers every customer to a
 // user, whatever the user's yard or grants; a branch bound key keeps its pin.
 func TestCounterLookupFollowsRulingA(t *testing.T) {

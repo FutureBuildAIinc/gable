@@ -1808,6 +1808,7 @@ func (r *PostgresRepository) ListRegisters(ctx context.Context) ([]CounterRegist
 			  FROM pos_registers pr
 			  LEFT JOIN locations l ON l.id = pr.location_id
 			  JOIN locations b ON b.id = COALESCE(l.branch_id, pr.branch_id)
+			 WHERE pr.is_active
 		) x
 		WHERE `+middleware.Wall("x", 1, 2)+`
 		ORDER BY x.branch_name, x.branch_code, x.name, x.id LIMIT 200`,
