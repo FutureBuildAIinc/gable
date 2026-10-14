@@ -199,3 +199,35 @@ describe('customer statement preselect via ?customer=<id>', () => {
     }
   })
 })
+describe('customer statement print', () => {
+  it('opens the statement document for the period shown and never prints the page', async () => {
+    stubRoutes({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+      [`/ar/customers/${CUSTOMER_ID}/statement`]: statement(CUSTOMER_ID),
+    })
+    const open = vi.fn()
+    const print = vi.fn()
+    vi.stubGlobal('open', open)
+    vi.stubGlobal('print', print)
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).trim() === 'Print') as HTMLButtonElement
+      expect(button, 'expected a Print button once the statement is shown').toBeDefined()
+      button.click()
+
+      expect(print).not.toHaveBeenCalled()
+      expect(open).toHaveBeenCalledTimes(1)
+      const url = String(open.mock.calls[0][0])
+      expect(url).toContain(`/api/v1/documents/print/statement/${CUSTOMER_ID}`)
+      expect(url).toContain('from=2031-01-01')
+      expect(url).toContain('to=2031-12-31')
+    } finally {
+      history.replaceState(null, '', '/')
+    }
+  })
+})
