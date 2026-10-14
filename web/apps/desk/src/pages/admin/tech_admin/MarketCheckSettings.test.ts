@@ -87,6 +87,24 @@ describe('Market check settings card', () => {
     expect(el.innerHTML).not.toContain('test-hook-0002')
   })
 
+  it('keeps every field set before a re-render (autofill sets several at once)', async () => {
+    const el = await open()
+    const set = (name: string, value: string) => {
+      const input = q<HTMLInputElement>(el, `input[name="${name}"]`)
+      input.value = value
+      input.dispatchEvent(new Event('input'))
+    }
+    set('connect_url', 'https://other.example.test')
+    set('flow_name', 'Autofilled flow')
+    set('store_label', 'Autofilled store')
+    set('store_zip', '99201')
+    await update(el, {})
+    await click(el, '[data-testid="save"]')
+    expect(puts[0]).toMatchObject({
+      connect_url: 'https://other.example.test', flow_name: 'Autofilled flow', store_label: 'Autofilled store', store_zip: '99201',
+    })
+  })
+
   it('a plain save leaves the id out so the server keeps it', async () => {
     const el = await open()
     await click(el, '[data-testid="save"]')

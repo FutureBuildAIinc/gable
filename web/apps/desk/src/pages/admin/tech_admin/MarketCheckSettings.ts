@@ -95,7 +95,8 @@ export class GableMarketCheckSettings extends LitElement {
             <label class="block space-y-1">
                 <span class="text-xs uppercase tracking-wider text-slate-400">${label}</span>
                 <input type="text" name=${key} .value=${d[key]} placeholder=${placeholder}
-                    @input=${(e: Event) => { this._draft = { ...d, [key]: (e.target as HTMLInputElement).value }; }}
+                    @input=${(e: Event) => { // the current draft, not the one captured at render: several fields set before a re-render (autofill) all stand
+                    this._draft = { ...this._draft!, [key]: (e.target as HTMLInputElement).value }; }}
                     class="${FIELD_CLASS} ${mono ? 'font-mono' : ''}" />
                 ${err ? html`<span class="text-xs text-red-400">${err}</span>` : nothing}
             </label>
