@@ -14,6 +14,11 @@
  * inside, Escape cancels, Enter confirms when the focus is not on Cancel, and
  * the focus returns to the control that opened the dialog. A required prompt
  * keeps Confirm off until text is typed.
+ *
+ * The panel is a native <dialog> opened with showModal(): the browser's top
+ * layer puts it above every page layer (a question asked from inside a modal,
+ * like the fleet modals, stays answerable) and makes the page behind inert.
+ * The dim veil stays a plain div under it, styled like the other modals'.
  */
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
@@ -76,6 +81,15 @@ export class GableAppDialog extends LitElement {
     }
 
     firstUpdated() {
+        const dlg = this.querySelector('dialog');
+        if (dlg && !dlg.open) {
+            if (typeof dlg.showModal === 'function') {
+                dlg.showModal();
+            } else {
+                // jsdom and older engines: no top layer, so the attribute alone.
+                dlg.setAttribute('open', '');
+            }
+        }
         const target =
             this.mode === 'prompt'
                 ? this.querySelector<HTMLElement>('input')
@@ -90,12 +104,18 @@ export class GableAppDialog extends LitElement {
         this._finish(false);
     }
 
+    private _settled = false;
+
     private _finish(confirmed: boolean) {
+        if (this._settled) return;
+        this._settled = true;
         const detail: DialogDoneDetail = {
             confirmed,
             value: confirmed && this.mode === 'prompt' ? this._value.trim() : null,
         };
         if (openDialog === this) openDialog = null;
+        const dlg = this.querySelector('dialog');
+        if (dlg?.open && typeof dlg.close === 'function') dlg.close();
         this.dispatchEvent(new CustomEvent<DialogDoneDetail>('done', { detail }));
         if (this._returnFocus?.isConnected) this._returnFocus.focus();
     }
@@ -147,20 +167,34 @@ export class GableAppDialog extends LitElement {
         }
     }
 
+    private _onDialogClick(e: MouseEvent) {
+        // A click on the dialog element itself is a click on its backdrop.
+        if (e.target === e.currentTarget) this._cancel();
+    }
+
+    private _onDialogCancel(e: Event) {
+        // Escape on a modal dialog fires cancel; route it through our settle.
+        e.preventDefault();
+        this._cancel();
+    }
+
     render() {
         const promptInvalid = this.mode === 'prompt' && this.required && !this._value.trim();
         const describedBy = this.body ? `${this._ids}-body` : nothing;
         return html`
             <div class="relative z-50" @keydown=${this._onKeydown}>
+                <style>dialog::backdrop { background: transparent; }</style>
                 <div class="fixed inset-0 bg-black/80 backdrop-blur-sm" @click=${this._cancel}></div>
-                <div class="fixed inset-0 flex items-center justify-center p-4 pointer-events-none">
-                    <div
-                        role=${this.mode === 'prompt' ? 'dialog' : 'alertdialog'}
-                        aria-modal="true"
-                        aria-labelledby="${this._ids}-title"
-                        aria-describedby=${describedBy}
-                        class="pointer-events-auto w-full max-w-md rounded-2xl bg-slate-steel border border-white/10 p-6 shadow-xl"
-                    >
+                <dialog
+                    role=${this.mode === 'prompt' ? 'dialog' : 'alertdialog'}
+                    aria-modal="true"
+                    aria-labelledby="${this._ids}-title"
+                    aria-describedby=${describedBy}
+                    @click=${this._onDialogClick}
+                    @cancel=${this._onDialogCancel}
+                    class="fixed inset-0 m-auto w-full max-w-md h-fit max-h-[85vh] overflow-y-auto rounded-2xl bg-slate-steel border border-white/10 p-6 shadow-xl text-left"
+                >
+                    <div>
                         <h2 id="${this._ids}-title" class="text-lg font-bold text-white">${this.heading}</h2>
                         ${this.body
                             ? html`<p id="${this._ids}-body" class="mt-2 text-sm text-zinc-400 whitespace-pre-line">${this.body}</p>`
@@ -201,7 +235,7 @@ export class GableAppDialog extends LitElement {
                             >${this.confirmLabel}</button>
                         </div>
                     </div>
-                </div>
+                </dialog>
             </div>
         `;
     }

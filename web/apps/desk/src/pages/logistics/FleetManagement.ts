@@ -167,7 +167,9 @@ export class FleetManagement extends LitElement {
   }
 
   private async _handleVehicleDelete() {
-    if (!this._vehicleModalVehicle) return;
+    // Taken before the question: the modal can close while it is open.
+    const vehicle = this._vehicleModalVehicle;
+    if (!vehicle) return;
     if (!await confirmDialog({
       title: 'Delete this vehicle?',
       body: 'This action cannot be undone.',
@@ -176,7 +178,7 @@ export class FleetManagement extends LitElement {
     })) return;
     this._vDeleting = true;
     try {
-      await deliveryService.deleteVehicle(this._vehicleModalVehicle.id, this._vehicleModalVehicle.revision);
+      await deliveryService.deleteVehicle(vehicle.id, vehicle.revision);
       this._onSaved();
       this._closeVehicleModal();
     } catch { ToastService.error('Failed to delete vehicle'); } finally { this._vDeleting = false; }
@@ -243,7 +245,9 @@ export class FleetManagement extends LitElement {
   }
 
   private async _handleDriverDelete() {
-    if (!this._driverModalDriver) return;
+    // Taken before the question: the modal can close while it is open.
+    const driver = this._driverModalDriver;
+    if (!driver) return;
     if (!await confirmDialog({
       title: 'Remove this driver?',
       body: 'This action cannot be undone.',
@@ -252,7 +256,7 @@ export class FleetManagement extends LitElement {
     })) return;
     this._dDeleting = true;
     try {
-      await deliveryService.deleteDriver(this._driverModalDriver.id, this._driverModalDriver.revision);
+      await deliveryService.deleteDriver(driver.id, driver.revision);
       this._onSaved();
       this._closeDriverModal();
     } catch { ToastService.error('Failed to delete driver'); } finally { this._dDeleting = false; }
