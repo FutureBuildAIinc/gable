@@ -151,4 +151,74 @@ describe('the counter as the Panels layout', () => {
     expect(svc.completeSale).toHaveBeenCalledTimes(2);
     expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
   });
+
+  describe('the account refusal guards', () => {
+    type Inner = { _customer: CounterCustomer | null; _sale: Sale; _poText: string; _tenderMethod: string; _chooseMethod(m: string): void };
+    const inner = (el: POSTerminal) => el as unknown as Inner;
+    const withCustomer = async (c: CounterCustomer, po = ''): Promise<POSTerminal> => {
+      const el = await mount(sale({ customer_id: c.id }));
+      inner(el)._customer = c;
+      inner(el)._poText = po;
+      await el.updateComplete;
+      return el;
+    };
+    const onHold = { ...account, standing: 'no_credit', available_credit_cents: 0 } as unknown as CounterCustomer;
+    const overLimit = { ...account, standing: 'over_limit', available_credit_cents: -2000 } as unknown as CounterCustomer;
+    const needsPO = { ...account, po_required: true } as unknown as CounterCustomer;
+    const pay = async (el: POSTerminal) => {
+      q(el, 'pos-pay').click();
+      await new Promise((r) => setTimeout(r, 0));
+      await el.updateComplete;
+    };
+
+    for (const [name, c] of [['on hold', onHold], ['over the limit', overLimit], ['asking for a PO that is empty', needsPO]] as const) {
+      it(`refuses the choice of the account for a customer ${name}`, async () => {
+        const el = await withCustomer(c);
+        expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
+        inner(el)._chooseMethod('account');
+        await el.updateComplete;
+        expect(inner(el)._tenderMethod).toBe('cash');
+        expect(el.querySelector('[role="alert"]')).toBeTruthy();
+        expect(svc.completeSale).not.toHaveBeenCalled();
+      });
+
+      it(`refuses Pay on account for a customer ${name} and never completes the sale`, async () => {
+        const el = await withCustomer(c);
+        inner(el)._tenderMethod = 'account';
+        await el.updateComplete;
+        await pay(el);
+        expect(el.querySelector('[role="alert"]')).toBeTruthy();
+        expect(svc.completeSale).not.toHaveBeenCalled();
+      });
+    }
+
+    it('rechecks at Pay when the customer goes on hold after the account was chosen', async () => {
+      const el = await withCustomer(account);
+      q(el, 'tender-account').click();
+      await el.updateComplete;
+      expect(inner(el)._tenderMethod).toBe('account');
+      inner(el)._customer = onHold;
+      await el.updateComplete;
+      await pay(el);
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('no credit');
+      expect(svc.completeSale).not.toHaveBeenCalled();
+    });
+
+    it('rechecks at Pay when the PO is cleared after the account was chosen', async () => {
+      svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+      const el = await withCustomer(needsPO, 'PO-7');
+      q(el, 'tender-account').click();
+      await el.updateComplete;
+      expect(inner(el)._tenderMethod).toBe('account');
+      inner(el)._poText = '';
+      await el.updateComplete;
+      await pay(el);
+      expect(el.querySelector('[role="alert"]')?.textContent).toContain('purchase order');
+      expect(svc.completeSale).not.toHaveBeenCalled();
+      inner(el)._poText = 'PO-7';
+      await el.updateComplete;
+      await pay(el);
+      expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    });
+  });
 });
