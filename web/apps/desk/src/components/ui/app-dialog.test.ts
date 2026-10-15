@@ -206,6 +206,39 @@ describe('a select pick that opens the dialog', () => {
   })
 })
 
+describe('gable-app-dialog over another dialog', () => {
+  it('dims the modal behind it with a scrim at the modal\'s own radius', async () => {
+    // The page's modal (say the fleet's Edit Vehicle) is a card on its own
+    // veil; it carries data-modal-panel so a question asked over it can find it.
+    const veil = document.createElement('div')
+    veil.className = 'fixed inset-0 z-[60]'
+    const panel = document.createElement('div')
+    panel.setAttribute('data-modal-panel', '')
+    panel.style.borderRadius = '16px'
+    veil.appendChild(panel)
+    document.body.appendChild(veil)
+    const result = confirmDialog({ title: 'Delete this vehicle?', tone: 'danger' })
+    const el = await settleDialog()
+    const scrim = q<HTMLElement>(el, '[data-dialog-scrim]')
+    expect(scrim.style.position).toBe('fixed')
+    expect(scrim.style.borderRadius).toBe('16px')
+    expect(scrim.className).toContain('bg-backdrop')
+    expect(scrim.getAttribute('aria-hidden')).toBe('true')
+    clickCancel()
+    await expect(result).resolves.toBe(false)
+    expect(dialogElSafe()?.querySelector('[data-dialog-scrim]') ?? null).toBeNull()
+    veil.remove()
+  })
+
+  it('draws no scrim when no modal is open behind it', async () => {
+    const result = confirmDialog({ title: 'Confirm this order?' })
+    const el = await settleDialog()
+    expect(el.querySelector('[data-dialog-scrim]')).toBeNull()
+    clickCancel()
+    await result
+  })
+})
+
 describe('gable-app-dialog in the top layer', () => {
   it('renders as a native dialog element, open while the question is up', async () => {
     const result = confirmDialog({ title: 'Confirm this order?' })

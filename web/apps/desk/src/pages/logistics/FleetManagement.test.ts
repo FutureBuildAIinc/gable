@@ -158,3 +158,44 @@ describe('FleetManagement render wires the driver status colour from the row', (
     expect(distinct.size).toBe(3)
   })
 })
+
+// A question asked over a fleet modal (the app's dialog) dims the modal with
+// a scrim at its own radius; the modal names its panel with data-modal-panel
+// so the dialog can find it.
+describe('FleetManagement modals name their panels for a question over them', () => {
+  beforeEach(() => {
+    fetchMock.mockReset()
+  })
+
+  it('the vehicle modal panel carries data-modal-panel', async () => {
+    const el = await mount('gable-fleet-management')
+    await flush()
+    const add = Array.from(el.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Add Vehicle'),
+    ) as HTMLElement | undefined
+    add?.click()
+    await flush()
+    await el.updateComplete
+    expect(el.querySelector('[data-modal-panel]')).not.toBeNull()
+    el.remove()
+  })
+
+  it('the driver modal panel carries data-modal-panel', async () => {
+    const el = await mount('gable-fleet-management')
+    await flush()
+    const driversBtn = Array.from(el.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Drivers'),
+    ) as HTMLElement | undefined
+    driversBtn?.click()
+    await flush()
+    await el.updateComplete
+    const add = Array.from(el.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Add Driver'),
+    ) as HTMLElement | undefined
+    add?.click()
+    await flush()
+    await el.updateComplete
+    expect(el.querySelector('[data-modal-panel]')).not.toBeNull()
+    el.remove()
+  })
+})
