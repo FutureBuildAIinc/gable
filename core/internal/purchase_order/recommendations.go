@@ -358,7 +358,17 @@ func (rs *RecommendationService) GenerateRecommendations(ctx context.Context) (*
 		if ui != uj {
 			return ui < uj
 		}
-		return recommendations[i].DaysUntilOut < recommendations[j].DaysUntilOut
+		if recommendations[i].DaysUntilOut != recommendations[j].DaysUntilOut {
+			return recommendations[i].DaysUntilOut < recommendations[j].DaysUntilOut
+		}
+		// A stable order for ties: one product's yards sit together, by name.
+		if recommendations[i].ProductSKU != recommendations[j].ProductSKU {
+			return recommendations[i].ProductSKU < recommendations[j].ProductSKU
+		}
+		if recommendations[i].BranchName != recommendations[j].BranchName {
+			return recommendations[i].BranchName < recommendations[j].BranchName
+		}
+		return recommendations[i].BranchID.String() < recommendations[j].BranchID.String()
 	})
 
 	// Build summary

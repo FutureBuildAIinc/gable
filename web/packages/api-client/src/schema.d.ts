@@ -6076,7 +6076,7 @@ export interface paths {
         };
         /**
          * Purchasing recommendations
-         * @description Roles admin, owner, purchasing. Velocity based reorder suggestions. 503 when the recommendation service is not wired.
+         * @description Roles admin, owner, purchasing. Velocity based reorder suggestions, one row per product and yard (the yard's own stock and sales). With a branch header that yard; with none, every yard in the caller's reach, each row naming its yard. A product held at no yard in reach has no row. total_estimated_cost is a total of the rows' estimates and drives nothing. 503 when the recommendation service is not wired.
          */
         get: operations["purchaseOrderRecommendations"];
         put?: never;
@@ -13690,6 +13690,12 @@ export interface components {
             error_message?: string;
         };
         PurchaseOrderRecommendation: {
+            /**
+             * Format: uuid
+             * @description The yard this row is for; stock and sales are that yard's.
+             */
+            branch_id: string;
+            branch_name: string;
             /** Format: uuid */
             product_id: string;
             product_sku: string;
