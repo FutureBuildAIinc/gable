@@ -72,8 +72,8 @@ export class GableStockAdjustmentModal extends LitElement {
     if (!this.isOpen || !this.product) return nothing;
 
     return html`
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="stock-adjustment-modal-title">
-        <div class="bg-[#161821] w-full max-w-md rounded-lg shadow-2xl border border-white/10 p-6">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="stock-adjustment-modal-title">
+        <div class="bg-slate-steel w-full max-w-md rounded-lg shadow-2xl border border-white/10 p-6">
           <h2 id="stock-adjustment-modal-title" class="text-xl font-bold text-white mb-1">Adjust Stock</h2>
           <p class="text-sm text-gray-400 mb-6">${this.product.sku} - ${this.product.description}</p>
 
@@ -81,7 +81,7 @@ export class GableStockAdjustmentModal extends LitElement {
             <div>
               <label class="block text-xs uppercase tracking-wider text-gray-500 mb-1">Location</label>
               <select
-                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                 .value=${this._selectedLocationId}
                 @change=${(e: Event) => this._selectedLocationId = (e.target as HTMLSelectElement).value}
               >
@@ -98,7 +98,7 @@ export class GableStockAdjustmentModal extends LitElement {
               <input
                 type="number"
                 step="any"
-                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none font-mono"
+                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none font-mono"
                 .value=${String(this._quantity)}
                 @input=${(e: InputEvent) => this._quantity = Number((e.target as HTMLInputElement).value)}
               />
@@ -108,7 +108,7 @@ export class GableStockAdjustmentModal extends LitElement {
             <div>
               <label class="block text-xs uppercase tracking-wider text-gray-500 mb-1">Reason Code</label>
               <select
-                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                class="w-full bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                 .value=${this._reason}
                 @change=${(e: Event) => this._reason = (e.target as HTMLSelectElement).value}
               >
@@ -131,7 +131,7 @@ export class GableStockAdjustmentModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting}
-                class="bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transition-all disabled:opacity-50"
+                class="bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
               >
                 ${this._isSubmitting ? 'Saving...' : 'Confirm Adjustment'}
               </button>

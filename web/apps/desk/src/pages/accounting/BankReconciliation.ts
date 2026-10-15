@@ -17,6 +17,7 @@ import {
     unmatchTransaction,
     completeSession,
 } from '../../services/BankReconService';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 @customElement('gable-bank-reconciliation')
 export class BankReconciliation extends LitElement {
@@ -180,7 +181,7 @@ export class BankReconciliation extends LitElement {
     }
 
     private _statusColor(status: string) {
-        return status === 'MATCHED' ? '#22c55e' : status === 'EXCLUDED' ? '#6b7280' : '#eab308';
+        return cssVarColor(status === 'MATCHED' ? 'green-500' : status === 'EXCLUDED' ? 'gray-500' : 'yellow-500');
     }
 
     render() {
@@ -195,13 +196,13 @@ export class BankReconciliation extends LitElement {
                     <div class="flex gap-2">
                         <button
                             @click=${() => { this.tab = 'sessions'; this.activeSession = null; }}
-                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'sessions' ? 'bg-blue-500 text-white' : 'bg-transparent text-slate-400 hover:text-white'}"
+                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'sessions' ? 'bg-blue-500 text-plate' : 'bg-transparent text-slate-400 hover:text-white'}"
                         >
                             Sessions
                         </button>
                         <button
                             @click=${() => { this.tab = 'accounts'; }}
-                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'accounts' ? 'bg-blue-500 text-white' : 'bg-transparent text-slate-400 hover:text-white'}"
+                            class="px-4 py-1.5 rounded-lg border border-slate-600 text-sm font-medium transition-colors ${this.tab === 'accounts' ? 'bg-blue-500 text-plate' : 'bg-transparent text-slate-400 hover:text-white'}"
                         >
                             Bank Accounts
                         </button>
@@ -259,7 +260,7 @@ export class BankReconciliation extends LitElement {
                     </div>
                     <button
                         @click=${this._handleImport}
-                        class="px-5 py-2 rounded-lg bg-violet-600 text-white font-semibold text-sm hover:bg-violet-500 transition-colors h-10"
+                        class="px-5 py-2 rounded-lg bg-violet-600 text-plate font-semibold text-sm hover:bg-violet-500 transition-colors h-10"
                     >
                         Import CSV
                     </button>
@@ -267,7 +268,7 @@ export class BankReconciliation extends LitElement {
                         <button
                             @click=${this._handleComplete}
                             ?disabled=${s.difference !== 0}
-                            class="px-5 py-2 rounded-lg font-semibold text-sm text-white transition-colors h-10 ${s.difference === 0 ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-600 cursor-not-allowed'}"
+                            class="px-5 py-2 rounded-lg font-semibold text-sm text-plate transition-colors h-10 ${s.difference === 0 ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-slate-600 cursor-not-allowed'}"
                         >
                             Complete Reconciliation
                         </button>
@@ -305,7 +306,7 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300">${txn.description}</td>
                                         <td class="px-3 py-2.5 text-slate-500 text-xs font-mono">${txn.reference}</td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${this._statusColor(txn.status)}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${this._statusColor(txn.status)}">
                                                 ${txn.status}
                                             </span>
                                         </td>
@@ -351,7 +352,7 @@ export class BankReconciliation extends LitElement {
                                             this._handleMatch(this.selectedBankTxn, this.jeMatchValue);
                                         }
                                     }}
-                                    class="px-4 py-1.5 rounded bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors"
+                                    class="px-4 py-1.5 rounded bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors"
                                 >
                                     Match
                                 </button>
@@ -403,7 +404,7 @@ export class BankReconciliation extends LitElement {
                         </div>
                     </div>
                     <button @click=${this._handleCreateSession}
-                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors">
+                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors">
                         Start Session
                     </button>
                 </div>
@@ -439,7 +440,7 @@ export class BankReconciliation extends LitElement {
                                             ${this._formatBalance(s.difference)}
                                         </td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${s.status === 'COMPLETED' ? '#22c55e' : '#3b82f6'}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${s.status === 'COMPLETED' ? cssVarColor('green-500') : cssVarColor('blue-500')}">
                                                 ${s.status}
                                             </span>
                                         </td>
@@ -494,7 +495,7 @@ export class BankReconciliation extends LitElement {
                         </div>
                     </div>
                     <button @click=${this._handleCreateAccount}
-                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors">
+                        class="mt-3 px-5 py-2 rounded-lg bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors">
                         Add Account
                     </button>
                 </div>
@@ -523,7 +524,7 @@ export class BankReconciliation extends LitElement {
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${a.account_number || '---'}</td>
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${a.routing_number || '---'}</td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${a.is_active ? '#22c55e' : '#6b7280'}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${a.is_active ? cssVarColor('green-500') : cssVarColor('gray-500')}">
                                                 ${a.is_active ? 'Active' : 'Inactive'}
                                             </span>
                                         </td>

@@ -181,17 +181,17 @@ export class GableProductMediaTab extends LitElement {
                                     ${m.is_primary ? html`
                                         <div class="absolute top-2 left-2 px-2 py-0.5 bg-gable-green/80 text-black text-xs font-bold rounded">Primary</div>
                                     ` : nothing}
-                                    <div class="absolute top-2 right-2 px-2 py-0.5 bg-black/60 text-zinc-300 text-xs rounded">${m.media_type}</div>
+                                    <div class="absolute top-2 right-2 px-2 py-0.5 bg-chip-ground/60 text-zinc-300 text-xs rounded">${m.media_type}</div>
                                     <!-- Hover Actions (settled rows only) -->
                                     ${m.status !== 'generating' ? html`
-                                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-backdrop/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <div class="flex items-center justify-end gap-2">
                                             ${!m.is_primary && m.status !== 'failed' && m.status !== 'refused' ? html`
-                                                <button @click=${() => this._handleSetPrimary(m.id)} class="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-amber-400" title="Set as Primary">
+                                                <button @click=${() => this._handleSetPrimary(m.id)} class="p-1.5 rounded-md bg-photo-btn/10 hover:bg-photo-btn/20 text-amber-400" title="Set as Primary">
                                                     ${icon(Star, 16, 'w-4 h-4')}
                                                 </button>
                                             ` : nothing}
-                                            <button @click=${() => this._handleDelete(m.id)} class="p-1.5 rounded-md bg-white/10 hover:bg-rose-500/30 text-rose-400" title="Delete">
+                                            <button @click=${() => this._handleDelete(m.id)} class="p-1.5 rounded-md bg-photo-btn/10 hover:bg-rose-500/30 text-rose-400" title="Delete">
                                                 ${icon(Trash2, 16, 'w-4 h-4')}
                                             </button>
                                         </div>

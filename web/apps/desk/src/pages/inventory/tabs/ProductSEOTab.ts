@@ -190,7 +190,7 @@ export class GableProductSEOTab extends LitElement {
                             ${icon(Globe, 16, 'w-4 h-4')}
                             Google Search Preview
                         </h3>
-                        <div class="bg-white rounded-lg p-4 max-w-[600px]">
+                        <div class="bg-plate rounded-lg p-4 max-w-[600px]">
                             <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
                                 ${icon(Search, 12, 'w-3 h-3')}
                                 www.example.com/products/${this.slug || '...'}

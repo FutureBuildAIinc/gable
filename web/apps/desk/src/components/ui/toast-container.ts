@@ -68,7 +68,7 @@ export class GableToastContainer extends LitElement {
     return html`
       <div class="fixed bottom-6 right-6 z-[100] flex flex-col gap-2">
         ${this._toasts.map(toast => html`
-          <div class="min-w-[300px] p-4 rounded-lg border backdrop-blur-md shadow-2xl flex items-start gap-3 bg-[#161821]/90 ${this._bgClass(toast.type)} animate-fade-in">
+          <div class="min-w-[300px] p-4 rounded-lg border backdrop-blur-md shadow-2xl flex items-start gap-3 bg-slate-steel/90 ${this._bgClass(toast.type)} animate-fade-in">
             <div class="mt-0.5 shrink-0">${this._iconSvg(toast.type)}</div>
             <div class="flex-1 text-sm font-medium text-white">${toast.message}</div>
             <button @click=${() => this._removeToast(toast.id)} class="text-zinc-500 hover:text-white transition-colors">
