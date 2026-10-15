@@ -159,11 +159,13 @@ func (s *Service) branchFor(ctx context.Context, branch *uuid.UUID) (*uuid.UUID,
 // single "Unknown Vendor" row (upserted via vendor.EnsureVendorByName) so the
 // FK on purchase_orders.vendor_id is always satisfied.
 //
-// The run settles its branch the way every create does (SEC-NOHEADER-1): a
-// purchasing caller with no header and exactly one granted branch writes the
-// drafts there (never the deployment default), several grants answer the
-// choice refusal naming branch_id and none fail closed, while the cron
-// engine's system caller keeps the default resolution it always had.
+// Reorder is per yard (FROM-PRINCIPAL item 135 b): every alert names its yard
+// and the draft for it is that vendor's draft AT that yard, reused only for the
+// same vendor and the same yard. A caller who chose a yard (or holds exactly one
+// grant) orders that yard; the cron engine's system caller orders every yard,
+// each draft at its own. The run still settles its branch the way every create
+// does (SEC-NOHEADER-1): several grants and no header answer the choice refusal
+// naming branch_id and none fail closed.
 func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	if s.productSvc == nil {
 		return 0, fmt.Errorf("product service not configured")
@@ -171,8 +173,9 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	if s.vendorSvc == nil {
 		return 0, fmt.Errorf("vendor service not configured")
 	}
-	resolved, err := s.branchFor(ctx, nil)
-	if err != nil {
+	// The refusals (several grants and no header, none) are the create's own;
+	// the yard of each draft is its alert's, not the resolved one.
+	if _, err := s.branchFor(ctx, nil); err != nil {
 		return 0, err
 	}
 
@@ -198,23 +201,36 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	createdCount := 0
+	// One draft per vendor and yard.
+	type draftKey struct{ vendor, yard uuid.UUID }
+	groups := make(map[draftKey][]product.ReorderAlert)
+	var order []draftKey
 	for vendorID, items := range byVendor {
-		vid := vendorID // local copy for pointer
+		for _, a := range items {
+			k := draftKey{vendorID, a.BranchID}
+			if _, ok := groups[k]; !ok {
+				order = append(order, k)
+			}
+			groups[k] = append(groups[k], a)
+		}
+	}
 
-		// Reuse an existing DRAFT PO for this vendor if one exists. Note we
-		// intentionally do NOT overwrite the source of a reused PO — if an
-		// operator manually created a DRAFT for this vendor, it stays MANUAL.
-		po, err := s.repo.GetDraftPOByVendor(ctx, &vid)
+	createdCount := 0
+	for _, k := range order {
+		vid, items := k.vendor, groups[k]
+
+		// Reuse an existing DRAFT PO for this vendor at THIS yard if one
+		// exists. Note we intentionally do NOT overwrite the source of a
+		// reused PO: if an operator manually created a DRAFT for this vendor
+		// at this yard, it stays MANUAL.
+		po, err := s.repo.GetDraftPOByVendorAt(ctx, vid, k.yard)
 		if err != nil || po == nil {
 			po = &PurchaseOrder{
 				ID:       uuid.New(),
 				VendorID: &vid,
 				Status:   StatusDraft,
 				Source:   SourceReorder,
-			}
-			if resolved != nil {
-				po.BranchID = *resolved
+				BranchID: k.yard,
 			}
 			if err := s.repo.CreatePO(ctx, po); err != nil {
 				return createdCount, fmt.Errorf("create PO for vendor %s: %w", vid, err)
