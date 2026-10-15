@@ -9,7 +9,7 @@ import { LogIn, AlertCircle, Loader2 } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalConfig } from '../../types/portal';
 import { onThemeChange } from '@gable/design-system';
-import { themeHex, brandOnCard } from '../../lib/theme-colors.ts';
+import { themeHex, brandOnCard, brandLabelOnCard, brandFillWithLabel } from '../../lib/theme-colors.ts';
 
 @customElement('gable-portal-login')
 export class PortalLogin extends LitElement {
@@ -66,6 +66,7 @@ export class PortalLogin extends LitElement {
 
     render() {
         const primaryColor = brandOnCard(this.config?.primary_color || themeHex('gable-green'));
+        const signIn = brandFillWithLabel(primaryColor);
 
         return html`
             <div
@@ -147,8 +148,8 @@ export class PortalLogin extends LitElement {
                             <button
                                 type="submit"
                                 ?disabled=${this.loading}
-                                class="w-full py-3 rounded-lg font-semibold text-sm text-black flex items-center justify-center gap-2 transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                                style="background-color: ${primaryColor}; box-shadow: 0 4px 20px ${primaryColor}40"
+                                class="w-full py-3 rounded-lg font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                                style="background-color: ${signIn.fill}; color: ${signIn.label}; box-shadow: 0 4px 20px ${primaryColor}40"
                             >
                                 ${this.loading
                                     ? icon(Loader2, 18, 'animate-spin')
@@ -163,7 +164,7 @@ export class PortalLogin extends LitElement {
                                 <a
                                     href="mailto:${this.config.support_email}"
                                     class="hover:underline"
-                                    style="color: ${primaryColor}"
+                                    style="color: ${brandLabelOnCard(primaryColor)}"
                                 >
                                     ${this.config.support_email}
                                 </a>
