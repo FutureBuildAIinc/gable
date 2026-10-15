@@ -13738,7 +13738,7 @@ paths:
       tags: [purchaseOrder]
       summary: Purchasing recommendations
       description: >-
-        Roles admin, owner, purchasing. Velocity based reorder suggestions. 503 when the recommendation service is not wired.
+        Roles admin, owner, purchasing. Velocity based reorder suggestions, one row per product and yard (the yard's own stock and sales). With a branch header that yard; with none, every yard in the caller's reach, each row naming its yard. A product held at no yard in reach has no row. total_estimated_cost is a total of the rows' estimates and drives nothing. 503 when the recommendation service is not wired.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       responses:
@@ -26339,6 +26339,8 @@ components:
     PurchaseOrderRecommendation:
       type: object
       required:
+        - branch_id
+        - branch_name
         - product_id
         - product_sku
         - product_name
@@ -26353,6 +26355,11 @@ components:
         - urgency
         - days_until_out
       properties:
+        branch_id:
+          type: string
+          format: uuid
+          description: The yard this row is for; stock and sales are that yard's.
+        branch_name: {type: string}
         product_id: {type: string, format: uuid}
         product_sku: {type: string}
         product_name: {type: string}
