@@ -100,6 +100,11 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 				Message: "Name the location you counted or adjusted. A count or adjustment with no location is not written here, because this product may be held in more than one location or the caller is not working in one yard."})
 			return
 		}
+		if errors.Is(err, ErrYardHoldsNoRow) {
+			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "location_required",
+				Message: "Name the location you counted. This yard holds no row of this product yet, so nothing was written."})
+			return
+		}
 		if errors.Is(err, ErrWouldGoNegative) {
 			httpx.WriteError(w, r, &httpx.Error{Status: http.StatusUnprocessableEntity, Code: "insufficient_stock",
 				Message: "That adjustment would take the location below zero. Name the location the stock is in and adjust that one."})

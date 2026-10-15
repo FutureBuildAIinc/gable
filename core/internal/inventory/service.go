@@ -32,6 +32,11 @@ var ErrLocationOutsideBranch = errors.New("inventory: the named location is not 
 // the caller names the location it counted.
 var ErrCountNeedsLocation = errors.New("inventory: this product is held in more than one location here; name the location you counted")
 
+// ErrYardHoldsNoRow refuses a count or delta that names no location when the
+// caller's reach holds no row of the product: it would create a row with no
+// location, stock in no yard.
+var ErrYardHoldsNoRow = errors.New("inventory: this yard holds no row of this product yet; name the location you counted")
+
 // ErrWouldGoNegative refuses an adjustment whose result would be below zero at
 // the row it lands on; a delta that names no location lands on the oldest row,
 // which can be empty while the yard holds plenty.
@@ -97,6 +102,12 @@ func (s *Service) adjustStock(ctx context.Context, req StockAdjustmentRequest) e
 	}
 
 	if inv == nil {
+		// A row with no location is stock in no yard. The write never creates
+		// one: a count or delta that names no location and finds no row in the
+		// caller's reach is refused, whoever the caller is.
+		if req.LocationID == nil {
+			return ErrYardHoldsNoRow
+		}
 		// Create new record. On a non-existent record a delta starts from base 0.
 		newQty := req.Quantity
 		if newQty < 0 {
