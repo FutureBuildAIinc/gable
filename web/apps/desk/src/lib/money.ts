@@ -189,18 +189,3 @@ export function scaleTenThousandths(tt: number, numerator: number, denominator: 
     if ((absP % absD) * 2n >= absD) q += 1n;
     return Number(negative ? -q : q);
 }
-
-/**
- * Dollars as the house prints them: the sign before the dollar mark and a
- * thousands separator, "-$5.00" and "$1,234.50", never "$-5.00". The card and
- * the Daily Till both use it.
- */
-export function formatDollars(amount: number): string {
-  const abs = Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return `${amount < 0 && abs !== '0.00' ? '-' : ''}$${abs}`
-}
-
-/** formatDollars for a whole number of cents. */
-export function formatCents(cents: number): string {
-  return formatDollars(cents / 100)
-}
