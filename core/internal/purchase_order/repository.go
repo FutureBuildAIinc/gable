@@ -11,6 +11,7 @@ import (
 
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
+	"github.com/gablelbm/gable/pkg/yardstock"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
@@ -387,4 +388,42 @@ func (r *Repository) LocationBranch(ctx context.Context, id uuid.UUID) (uuid.UUI
 		return uuid.Nil, false, fmt.Errorf("failed to read the location's branch: %w", err)
 	}
 	return *branch, true, nil
+}
+
+// YardStock is one product's available stock (on hand less allocated) at one
+// yard, summed the way the low stock alert and the reorder list sum it
+// (pkg/yardstock): the yard's own row, its zones and its bins.
+type YardStock struct {
+	ProductID uuid.UUID
+	BranchID  uuid.UUID
+	YardName  string
+	Available float64
+}
+
+// ListYardStock returns every product's stock per yard in the caller's reach:
+// the context branch, else the granted branches, else every yard. A row in no
+// yard is in no yard's sum.
+func (r *Repository) ListYardStock(ctx context.Context) ([]YardStock, error) {
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, `
+		SELECT i.product_id, l.branch_id, COALESCE(y.name, y.code, ''),
+		       COALESCE(SUM(i.quantity - i.allocated), 0)::float8
+		FROM `+yardstock.Rows+`
+		LEFT JOIN locations y ON y.id = l.branch_id
+		WHERE `+middleware.Wall("l", 1, 2)+`
+		GROUP BY i.product_id, l.branch_id, y.name, y.code
+		ORDER BY y.name, y.code, l.branch_id`,
+		middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("list yard stock: %w", err)
+	}
+	defer rows.Close()
+	var out []YardStock
+	for rows.Next() {
+		var ys YardStock
+		if err := rows.Scan(&ys.ProductID, &ys.BranchID, &ys.YardName, &ys.Available); err != nil {
+			return nil, fmt.Errorf("scan yard stock: %w", err)
+		}
+		out = append(out, ys)
+	}
+	return out, rows.Err()
 }

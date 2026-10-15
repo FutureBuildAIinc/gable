@@ -197,6 +197,7 @@ export class GablePurchasingRecommendations extends LitElement {
                                                 <td class="py-3 px-4">
                                                     <div class="text-sm text-white font-medium">${rec.product_sku}</div>
                                                     <div class="text-xs text-zinc-500 truncate max-w-[200px]">${rec.product_name}</div>
+                                                    ${rec.branch_name ? html`<div data-testid="rec-yard" class="text-xs text-zinc-500">${rec.branch_name}</div>` : nothing}
                                                 </td>
                                                 <td class="py-3 px-4 text-sm text-zinc-400">${rec.vendor_name || '-'}</td>
                                                 <td class="py-3 px-4 text-right text-sm font-mono text-white">${rec.current_stock.toFixed(0)}</td>

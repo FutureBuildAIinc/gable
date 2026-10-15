@@ -98,6 +98,9 @@ export interface FreightUploadResponse {
 export type UrgencyLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface PurchaseRecommendation {
+    /** The yard this row is for: stock and sales are that yard's. */
+    branch_id: string;
+    branch_name: string;
     product_id: string;
     product_sku: string;
     product_name: string;
