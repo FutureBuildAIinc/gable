@@ -271,12 +271,17 @@ export class TechAdminPage extends LitElement {
                     ${vaultMissing ? html`<p class="text-xs text-amber-400">This server has no vault key, so an Anthropic key cannot be stored. Set PAYMENT_VAULT_KEY and restart.</p>` : nothing}
                 ` : nothing}
                 <div class="flex gap-2 justify-end items-center">
-                    ${this.aiTestResult ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
+                    ${this.aiTestResult && (this.aiTestResult.ok || !this._testFailureOnCard()) ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
                     <button @click=${this._handleTestAI} ?disabled=${this.aiTesting} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 disabled:opacity-50">Test connection</button>
                     <button @click=${this._handleSaveProvider} ?disabled=${this.aiSaving} class="bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Save provider</button>
                 </div>
             </div>
         `;
+    }
+
+    /** A failed test whose refusal the reloaded card already says: no red line repeats it. */
+    private _testFailureOnCard(): boolean {
+        return this.aiSettings?.test_status === 'refused' || this.aiSettings?.test_status === 'failed';
     }
 
     private async _handleDeleteAIKey() {
