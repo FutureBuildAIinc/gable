@@ -497,10 +497,11 @@ func (h *Handler) HandleEmailStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	dealer := h.docSvc.DealerName(r.Context())
-	label := fmt.Sprintf("Statement %s to %s", st.From, st.To)
+	period := h.docSvc.StatementPeriod(r.Context(), st)
+	label := "Statement " + period
 	h.dispatch(r.Context(), outgoing{
 		to: email, subject: withDealer(label, dealer),
-		body:     closing("Please find your account statement for "+st.From+" to "+st.To+" attached.", dealer),
+		body:     closing("Please find your account statement for "+period+" attached.", dealer),
 		filename: "statement-" + cust.AccountNumber + ".pdf", pdf: pdf,
 		entry: emaildelivery.Entry{
 			BranchID: branchPtr(cust.PrimaryBranchID), DocumentType: emaildelivery.DocStatement,

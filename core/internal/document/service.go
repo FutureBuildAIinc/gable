@@ -109,6 +109,19 @@ func (s *Service) DealerName(ctx context.Context) string {
 	return p.DisplayName()
 }
 
+// StatementPeriod is a statement's period as the email names it, in the
+// dealer's date style ("Jun 1, 2026 to Jun 30, 2026"), the same words the
+// attachment prints.
+func (s *Service) StatementPeriod(ctx context.Context, st *account.Statement) string {
+	style := newStyle("")
+	if s.profiles != nil {
+		if p, err := s.profiles.Get(ctx); err == nil && p != nil {
+			style = newStyle(p.Locale)
+		}
+	}
+	return style.Day(st.From) + " to " + style.Day(st.To)
+}
+
 // branding is what the header of every form is built from. Every part is
 // best effort: a form still prints when the profile, the logo or the yard
 // cannot be read.
