@@ -16,8 +16,11 @@ import (
 type fakeRepo struct {
 	mu sync.Mutex
 
-	tillCalls      []time.Time
-	salesCalls     [][2]time.Time
+	tillCalls  []time.Time
+	salesCalls [][2]string
+	// day is the business day the fake names; empty is a fake that cannot
+	// read it (an error), as a database that is down.
+	day            string
 	agingCalls     int
 	statementCalls []struct {
 		customerID string
@@ -58,10 +61,19 @@ func (f *fakeRepo) GetDailyTill(_ context.Context, date time.Time) (*DailyTillRe
 	return f.till, nil
 }
 
-func (f *fakeRepo) GetSalesSummary(_ context.Context, start, end time.Time) (*SalesSummaryReport, error) {
+func (f *fakeRepo) BusinessDay(context.Context) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.salesCalls = append(f.salesCalls, [2]time.Time{start, end})
+	if f.day == "" {
+		return "", errors.New("the fake repository cannot read the business day")
+	}
+	return f.day, nil
+}
+
+func (f *fakeRepo) GetSalesSummary(_ context.Context, from, to string) (*SalesSummaryReport, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.salesCalls = append(f.salesCalls, [2]string{from, to})
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -204,7 +216,7 @@ var _ Repository = (*fakeRepo)(nil)
 // end date must include the whole of that day — an invoice raised at 16:00 on
 // the last day of a period belongs in the period.
 func TestGetSalesSummary_DateWindow(t *testing.T) {
-	t.Run("explicit window covers the whole end day", func(t *testing.T) {
+	t.Run("an explicit window is the two dates", func(t *testing.T) {
 		repo := newFakeRepo()
 		svc := NewService(repo)
 
@@ -214,34 +226,22 @@ func TestGetSalesSummary_DateWindow(t *testing.T) {
 		if len(repo.salesCalls) != 1 {
 			t.Fatalf("repository called %d times, want 1", len(repo.salesCalls))
 		}
-		start, end := repo.salesCalls[0][0], repo.salesCalls[0][1]
-		if start.Format("2006-01-02 15:04:05") != "2026-03-01 00:00:00" {
-			t.Errorf("start = %v, want the beginning of 2026-03-01", start)
-		}
-		if end.Format("2006-01-02") != "2026-03-31" {
-			t.Errorf("end = %v, want a time on 2026-03-31", end)
-		}
-		// 23:59:59.999999999 — the last instant of the day.
-		if end.Hour() != 23 || end.Minute() != 59 || end.Second() != 59 {
-			t.Errorf("end = %v, want the last instant of the end day so same-day activity is included", end)
+		// Business dates, inclusive: the end day is wholly in the period.
+		if got := repo.salesCalls[0]; got != [2]string{"2026-03-01", "2026-03-31"} {
+			t.Errorf("period = %v, want the dates 2026-03-01 and 2026-03-31", got)
 		}
 	})
 
-	t.Run("an empty window defaults to the last 30 days", func(t *testing.T) {
+	t.Run("an empty window is the yard's day and the thirty days before it", func(t *testing.T) {
 		repo := newFakeRepo()
+		repo.day = "2026-03-31"
 		svc := NewService(repo)
 
-		before := time.Now()
 		if _, err := svc.GetSalesSummary(context.Background(), "", ""); err != nil {
 			t.Fatalf("GetSalesSummary: %v", err)
 		}
-		start, end := repo.salesCalls[0][0], repo.salesCalls[0][1]
-		span := end.Sub(start)
-		if span < 29*24*time.Hour || span > 31*24*time.Hour {
-			t.Errorf("default window spans %v, want about 30 days", span)
-		}
-		if end.Before(before.Add(-time.Minute)) {
-			t.Errorf("default end = %v, want approximately now", end)
+		if got := repo.salesCalls[0]; got != [2]string{"2026-03-01", "2026-03-31"} {
+			t.Errorf("default period = %v, want 2026-03-01 to the yard's day 2026-03-31", got)
 		}
 	})
 

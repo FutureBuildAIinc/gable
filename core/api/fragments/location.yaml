@@ -461,7 +461,7 @@ paths:
       summary: List the caller's branches
       description: >-
         The caller's grants with the home flag. Without auth claims (dev
-        mode) every active branch is returned with the first marked home.
+        mode) every active branch is returned and none is marked home.
       responses:
         "200":
           description: The branch summaries, a bare array, [] when none exist (no paging).
