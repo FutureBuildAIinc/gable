@@ -147,6 +147,27 @@ func TestDemoImport(t *testing.T) {
 		t.Fatalf("the import wrote nothing: %+v", first)
 	}
 
+	// FROM-PRINCIPAL 145 a: the seeded catalogue (the base seed and the import
+	// together) carries no two products with one name.
+	t.Run("no two products share a name", func(t *testing.T) {
+		rows, err := db.Query(`SELECT LOWER(BTRIM(description)), STRING_AGG(sku, ', ' ORDER BY sku)
+			FROM products GROUP BY LOWER(BTRIM(description)) HAVING COUNT(*) > 1 ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, skus string
+			if err := rows.Scan(&name, &skus); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the name %q is on more than one product: %s", name, skus)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
 	t.Run("every catalogue and customer row lands", func(t *testing.T) {
 		for _, c := range []struct {
 			name, query, key string
@@ -1202,5 +1223,28 @@ func TestVendorRecordsNameNoRidgeline(t *testing.T) {
 				t.Errorf("%s line %d names Ridgeline: %s", src, i+1, strings.TrimSpace(line))
 			}
 		}
+	}
+}
+
+// TestImportProductNamesAreUnique: no two import rows share a name (the whole
+// seeded catalogue is checked in TestDemoImport against the database).
+func TestImportProductNamesAreUnique(t *testing.T) {
+	seen := map[string]string{}
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row struct {
+			SKU         string `json:"sku"`
+			Description string `json:"description"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		key := strings.ToLower(strings.TrimSpace(row.Description))
+		if first, dup := seen[key]; dup {
+			t.Errorf("%q is the name of %s and of %s", row.Description, first, row.SKU)
+		}
+		seen[key] = row.SKU
 	}
 }
