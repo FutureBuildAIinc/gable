@@ -2585,4 +2585,35 @@ describe('the opening float field', () => {
     expect(field.className).toContain('placeholder:font-normal');
     el.remove();
   });
+
+  it('Open Till with the field empty sends nothing, says what is missing, and focuses the field', async () => {
+    const el = await mount(sale());
+    await openTillDialog(el);
+    openTillButton(el).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.openTill).not.toHaveBeenCalled();
+    const note = q(el, 'till-float-error');
+    expect(note.getAttribute('role')).toBe('alert');
+    expect(note.textContent?.toLowerCase()).toContain('opening float');
+    expect(document.activeElement).toBe(q(el, 'till-float-amount'));
+    el.remove();
+  });
+
+  it('a typed float opens the till with that figure, as before', async () => {
+    // The pinned behaviour the money read checks: a typed "200.00" still
+    // opens the till with 200.00. Passes before and after this PR by design.
+    svc.openTill.mockResolvedValue({ id: 't2', register_id: 'REG-01', cashier_id: 'c', status: 'open', opening_float_cents: 20000 });
+    const el = await mount(sale());
+    await openTillDialog(el);
+    const field = q(el, 'till-float-amount') as HTMLInputElement;
+    field.value = '200.00';
+    field.dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    openTillButton(el).click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    expect(svc.openTill).toHaveBeenCalledWith('REG-01', 20000);
+    el.remove();
+  });
 });
