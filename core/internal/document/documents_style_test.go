@@ -239,6 +239,7 @@ func TestAMomentsDayIsTheYardsDay(t *testing.T) {
 	uom, sku := "EA", "PT-4"
 	// each document names its own yard for the day it prints
 	yardQuote, yardPO, yardOrder := uuid.New(), uuid.New(), uuid.New()
+	expires := httpx.TimestampOf(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
 	for _, c := range []struct {
 		at   time.Time
 		want string
@@ -246,7 +247,7 @@ func TestAMomentsDayIsTheYardsDay(t *testing.T) {
 		fake := &fakeStatements{zone: zone}
 		svc := styledService("en-US").WithStatements(fake)
 		qdoc, err := svc.GenerateQuotePDF(context.Background(), &quote.Quote{QuoteSummary: quote.QuoteSummary{ID: uuid.New(), Number: "QT-1", BranchID: yardQuote,
-			CreatedAt: httpx.TimestampOf(c.at)}}, cust)
+			CreatedAt: httpx.TimestampOf(c.at), ExpiresAt: &expires}}, cust)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -272,6 +273,16 @@ func TestAMomentsDayIsTheYardsDay(t *testing.T) {
 			if !seen[yard] {
 				t.Errorf("the %s did not ask for its own yard's day (asked for %v)", name, fake.dayBranches)
 			}
+		}
+		// the quote's valid until asks for its yard's day too: two asks
+		asks := 0
+		for _, b := range fake.dayBranches {
+			if b == yardQuote {
+				asks++
+			}
+		}
+		if asks != 2 {
+			t.Errorf("the quote asked for its yard's day %d times, want 2 (its date and its valid until)", asks)
 		}
 		if seen[uuid.Nil] {
 			t.Errorf("a document asked for the day of no yard: %v", fake.dayBranches)
