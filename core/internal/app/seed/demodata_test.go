@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -935,9 +936,11 @@ func holdsDesignation(text string) (string, bool) {
 	return "", false
 }
 
-// TestSeedDataHoldsNoModelDesignation reads the import, the base seed's own
-// source and its picture keys for a removed designation as a whole token.
-func TestSeedDataHoldsNoModelDesignation(t *testing.T) {
+// designationSources are the texts the designation guard reads: the import,
+// the base seed's source and picture keys, and the illustrations' text and
+// file names (the SVG titles and drawn words).
+func designationSources(t *testing.T) map[string]string {
+	t.Helper()
 	sources := map[string]string{
 		"catalog": string(catalogData), "vendors": string(vendorsData), "vendorkeys": string(vendorKeysData),
 	}
@@ -948,10 +951,64 @@ func TestSeedDataHoldsNoModelDesignation(t *testing.T) {
 		}
 		sources[name] = string(data)
 	}
-	for name, text := range sources {
+	return sources
+}
+
+// TestSeedDataHoldsNoModelDesignation reads the import, the base seed's own
+// source and its picture keys for a removed designation as a whole token.
+func TestSeedDataHoldsNoModelDesignation(t *testing.T) {
+	for name, text := range designationSources(t) {
 		if d, ok := holdsDesignation(text); ok {
 			t.Errorf("%s holds the model designation %q", name, d)
 		}
+	}
+}
+
+// TestDesignationGuardReadsEverySeedSource: the guard's reach is every non
+// test Go file of the seed and of cmd/seed and every illustration, so a
+// designation cannot return through a file nobody listed.
+func TestDesignationGuardReadsEverySeedSource(t *testing.T) {
+	read := designationSources(t)
+	for _, dir := range []string{".", "../../../cmd/seed"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			key := name
+			if dir != "." {
+				key = dir + "/" + name
+			}
+			if _, ok := read[key]; !ok {
+				t.Errorf("the designation guard does not read %s", key)
+			}
+		}
+	}
+	files, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "web", "apps", "desk", "public", "catalog-illustrations", "*.svg"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no illustrations found: %v", err)
+	}
+	for _, f := range files {
+		if _, ok := read["illustration/"+filepath.Base(f)]; !ok {
+			t.Errorf("the designation guard does not read illustration %s", filepath.Base(f))
+		}
+	}
+}
+
+// TestHoldsDesignationFindsAToken proves the check itself on text that holds
+// one: an illustration title and a file name.
+func TestHoldsDesignationFindsAToken(t *testing.T) {
+	for _, text := range []string{`<title>Framing angle A35</title>`, "lus28_hanger.svg", "CN_H10A"} {
+		if _, ok := holdsDesignation(text); !ok {
+			t.Errorf("%q holds a designation and the check missed it", text)
+		}
+	}
+	if _, ok := holdsDesignation("joist hanger 2x8 face mount"); ok {
+		t.Errorf("a plain name was flagged")
 	}
 }
 
