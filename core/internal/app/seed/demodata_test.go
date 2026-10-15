@@ -1350,7 +1350,7 @@ var renamedCompanyNames = []string{
 	"Cascade Western Lumber Sales", "Cascadia Paint and Sundries", "ClearVue Window and Door",
 	"Mountain Metal Roofing", "OK Foam and Insulation", "Peak Roofing Supply", "StoneBridge Masonry Supply",
 	"Central Okanagan School District", "Cupola Custom Homes", "Aldridge Landscape and Stone",
-	"Trussway Custom Homes", "Vanderpol Framing and Truss",
+	"Trussway Custom Homes", "Vanderpol Framing and Truss", "Vanderpol Wall Framing",
 	"Kelbrook", "Oakvale Builders", "Ashgrove Masonry Supply", "Okanagan Homes",
 	"Larchwood Custom", "Gable Garden Supply",
 }

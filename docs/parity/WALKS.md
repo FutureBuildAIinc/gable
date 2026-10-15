@@ -71,7 +71,7 @@ offer and the server enforces no role; a real dealer signs in through its identi
 2. **A counter sale on account (Jordan Pike).** Open Point of Sale: the Counter opens on Kelowna Main Yard's register,
    `REG-01`, with the till closed: nothing can be rung until it opens. Open Till with a float of $200.00: the till's
    sale opens, `POS-000001`. In the Customer panel find "Tarnwick": Tarnwick Construction shows its credit available and
-   its open balance; enter a purchase order (`KB-2219`) and pick the job Glenmore Lofts. Type a quantity of 12, search
+   its open balance; enter a purchase order (`TC-2219`) and pick the job Glenmore Lofts. Type a quantity of 12, search
    `LUM-248-PREM` (the result shows the stock on hand at this yard) and press Enter: twelve 2x4x8 SPF Premium at the
    customer's price. Then 4 of `OSB-12` (7/16 OSB 4x8). Choose Charge to account and Pay: "Sale POS-000001 complete",
    and the customer's credit available drops by the sale's total. The completed sale stays on screen, with Void and
