@@ -5,6 +5,7 @@ package document
 
 import (
 	"bytes"
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -196,4 +197,29 @@ func TestLockupWithNoTradingNameHasNoLegalLine(t *testing.T) {
 		t.Errorf("the legal name is printed %d times, want once", n)
 	}
 	mustNotContain(t, doc, "Legal name:")
+}
+
+// The legal name and the remit to stay on one page: however many lines a
+// document has, no page holds the legal name alone with the remit to on the
+// next (the seeded quote's page 2 held only the legal name).
+func TestLegalNameAndRemitToShareAPage(t *testing.T) {
+	svc := styledService("en-US")
+	for n := 0; n <= 60; n++ {
+		inv := mkInvoice(100, func(i *invoice.Invoice) {
+			for k := 0; k < n; k++ {
+				i.Lines = append(i.Lines, mkLine("A", "x", "1", "EA", 100, 100))
+			}
+		})
+		doc, err := svc.GenerateInvoicePDF(context.Background(), inv, &customer.Customer{Name: "Acme"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		legal, remit := bytes.Index(doc, []byte("Legal name:")), bytes.Index(doc, []byte("REMIT TO:"))
+		if legal < 0 || remit < legal {
+			t.Fatalf("%d lines: legal name at %d, remit to at %d", n, legal, remit)
+		}
+		if bytes.Contains(doc[legal:remit], []byte("endstream")) {
+			t.Errorf("%d lines: the legal name and the remit to are on different pages", n)
+		}
+	}
 }
