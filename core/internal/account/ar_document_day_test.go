@@ -25,7 +25,7 @@ func TestBusinessDateIsTheBranchsThenTheDefaultBranchsDay(t *testing.T) {
 	if err := w.db.Pool.QueryRow(ctx, `SELECT timezone FROM locations WHERE id = `+arBranch).Scan(&prior); err != nil {
 		t.Fatal(err)
 	}
-	w.exec(`UPDATE locations SET timezone = 'America/Vancouver' WHERE id = `+arBranch)
+	w.exec(`UPDATE locations SET timezone = 'America/Vancouver' WHERE id = ` + arBranch)
 	t.Cleanup(func() { w.exec(`UPDATE locations SET timezone = $1 WHERE id = `+arBranch, prior) })
 
 	day := func(b uuid.UUID, at time.Time) string {

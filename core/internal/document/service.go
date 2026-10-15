@@ -59,6 +59,9 @@ type StatementReader interface {
 	Statement(ctx context.Context, q account.StatementQuery) (*account.Statement, error)
 	AgingSummary(ctx context.Context, q account.AgingQuery) (*account.AgingSummary, error)
 	LocalDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
+	// BusinessDate is the calendar day of a moment in the branch's zone, the
+	// default branch's when the branch is nil.
+	BusinessDate(ctx context.Context, branchID uuid.UUID, at time.Time) (time.Time, error)
 	Now() time.Time
 }
 
@@ -108,6 +111,22 @@ func (s *Service) DealerName(ctx context.Context) string {
 		return ""
 	}
 	return p.DisplayName()
+}
+
+// momentDay is the day a moment prints as: the document's branch's own day
+// (the AR core's and the dashboard's rule), the default branch's when the
+// document has none. A form built without the reader prints the moment's own
+// day.
+func (s *Service) momentDay(ctx context.Context, branch uuid.UUID, at time.Time) time.Time {
+	if s.statements == nil {
+		return at
+	}
+	d, err := s.statements.BusinessDate(ctx, branch, at)
+	if err != nil {
+		slog.Warn("document: yard day unreadable", "branch_id", branch, "error", err)
+		return at
+	}
+	return d
 }
 
 // StatementPeriod is a statement's period as the email names it, in the
@@ -438,7 +457,7 @@ func (s *Service) GeneratePickTicketPDF(ctx context.Context, o *order.Order, cus
 	if site := shipToLine(o.ShipTo); site != "" {
 		left = append(left, "Site: "+site)
 	}
-	block(m, left, joinLines(fmt.Sprintf("Order #: %s", number), fmt.Sprintf("Date: %s", b.style.Date(o.CreatedAt.Time))), 10)
+	block(m, left, joinLines(fmt.Sprintf("Order #: %s", number), fmt.Sprintf("Date: %s", b.style.Date(s.momentDay(ctx, o.BranchID, o.CreatedAt.Time)))), 10)
 
 	m.AddRow(10,
 		text.NewCol(8, "SKU / Description", props.Text{Style: fontstyle.Bold}),

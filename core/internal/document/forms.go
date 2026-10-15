@@ -28,9 +28,9 @@ func (s *Service) GenerateQuotePDF(ctx context.Context, q *quote.Quote, cust *cu
 	if n := s.jobName(ctx, q.JobID); n != "" {
 		left = append(left, "Job: "+n)
 	}
-	right := joinLines(fmt.Sprintf("Quote #: %s", q.Number), fmt.Sprintf("Date: %s", b.style.Date(q.CreatedAt.Time)))
+	right := joinLines(fmt.Sprintf("Quote #: %s", q.Number), fmt.Sprintf("Date: %s", b.style.Date(s.momentDay(ctx, q.BranchID, q.CreatedAt.Time))))
 	if q.ExpiresAt != nil {
-		right = append(right, "Valid until: "+b.style.Date(q.ExpiresAt.Time))
+		right = append(right, "Valid until: "+b.style.Date(s.momentDay(ctx, q.BranchID, q.ExpiresAt.Time)))
 	}
 	block(m, left, right, 10)
 
@@ -83,7 +83,7 @@ func (s *Service) GeneratePurchaseOrderPDF(ctx context.Context, po *purchase_ord
 	b.header(m, "PURCHASE ORDER", 18)
 
 	block(m, joinLines(fmt.Sprintf("Vendor: %s", po.VendorName)),
-		joinLines(fmt.Sprintf("PO #: %s", PurchaseOrderNumber(po)), fmt.Sprintf("Date: %s", b.style.Date(po.CreatedAt))), 10)
+		joinLines(fmt.Sprintf("PO #: %s", PurchaseOrderNumber(po)), fmt.Sprintf("Date: %s", b.style.Date(s.momentDay(ctx, po.BranchID, po.CreatedAt)))), 10)
 	m.AddRow(10,
 		text.NewCol(6, "Description", props.Text{Style: fontstyle.Bold}),
 		text.NewCol(2, "Qty", props.Text{Style: fontstyle.Bold, Align: align.Center}),
