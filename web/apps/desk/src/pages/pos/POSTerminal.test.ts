@@ -120,6 +120,23 @@ describe('the counter as the Panels layout', () => {
     expect(q(el, 'pos-till-state').textContent).toContain('Till open');
   });
 
+  it('ticks Payment on the Summary step only once a tender is chosen', async () => {
+    const el = await mount(sale());
+    q(el, 'pos-walk-in').click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    q(el, 'pos-next-summary').click();
+    await el.updateComplete;
+    // No tender chosen ("Tender: None yet"): Payment shows its number, not a
+    // tick, on the panel head and in the header's progress chip.
+    expect(q(el, 'panel-payment-toggle').querySelector('span')!.textContent).toBe('2');
+    expect(q(el, 'progress-payment').getAttribute('data-state')).not.toBe('done');
+    await chooseCash(el);
+    expect(q(el, 'panel-payment-toggle').querySelector('span')!.textContent).toBe('✓');
+    expect(q(el, 'progress-payment').getAttribute('data-state')).toBe('done');
+    el.remove();
+  });
+
   it('pays in cash with the tendered amount, sending one cash tender on the sale revision', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed', change_cents: 1350 }));
     const el = await mount(sale());
@@ -631,6 +648,8 @@ describe('the Panels board', () => {
     q(el, 'pos-walk-in').click();
     await flush(el);
     expect(states()).toEqual(['done', 'current', 'upcoming']);
+    // Payment ticks only once a tender is chosen; choose one before Summary.
+    await chooseCash(el);
     q(el, 'pos-next-summary').click();
     await el.updateComplete;
     expect(states()).toEqual(['done', 'done', 'current']);
@@ -2471,10 +2490,31 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     await press(el, 'check');
     await typeInto(el, '50.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
-    expect(q(el, 'pos-tenders-over').textContent).toContain('A card or check cannot be more than what is owed');
+    // The limit is the total less the other card, check and account tenders:
+    // 86.50 less the card 40.00 already added.
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card, check or account charge cannot be more than $46.50 here');
     expect(q(el, 'pos-tenders-over').textContent).not.toContain('added tenders');
     await typeInto(el, '46.50');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('names the real limit for a typed tender refused above it', async () => {
+    // Cash 60.00 added on 86.50: a card of 90.00 is refused with the real
+    // limit in words; a card of 40.00 pays.
+    const el = await mount(sale());
+    await addSplit(el, 'cash', '60.00');
+    await press(el, 'card');
+    await typeInto(el, '90.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card, check or account charge cannot be more than $86.50 here');
+    // Pay's label names the same limit the panel names, never "what is owed".
+    const pay = q(el, 'pos-pay');
+    expect(pay.textContent).toContain('Type no more than $86.50');
+    expect(pay.textContent).not.toContain('is owed');
+    await typeInto(el, '40.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-tenders-over')).toBeNull();
     el.remove();
   });
 

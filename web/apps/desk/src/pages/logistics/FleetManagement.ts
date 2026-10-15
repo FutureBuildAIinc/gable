@@ -509,7 +509,7 @@ export class FleetManagement extends LitElement {
 
     return html`
       <div class="fixed inset-0 z-[60] bg-backdrop/60 backdrop-blur-sm flex items-center justify-center p-4" @click=${() => this._closeVehicleModal()}>
-        <div class="bg-slate-steel border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" @click=${(e: Event) => e.stopPropagation()}>
+        <div data-modal-panel class="bg-slate-steel border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" @click=${(e: Event) => e.stopPropagation()}>
           <div class="flex items-center justify-between p-5 border-b border-white/5">
             <h2 class="text-lg font-semibold text-white">${isEdit ? 'Edit Vehicle' : 'Add Vehicle'}</h2>
             <button @click=${() => this._closeVehicleModal()} class="p-1 rounded hover:bg-white/10 text-zinc-400">${icon(X, 18)}</button>
@@ -582,7 +582,7 @@ export class FleetManagement extends LitElement {
 
     return html`
       <div class="fixed inset-0 z-[60] bg-backdrop/60 backdrop-blur-sm flex items-center justify-center p-4" @click=${() => this._closeDriverModal()}>
-        <div class="bg-slate-steel border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" @click=${(e: Event) => e.stopPropagation()}>
+        <div data-modal-panel class="bg-slate-steel border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" @click=${(e: Event) => e.stopPropagation()}>
           <div class="flex items-center justify-between p-5 border-b border-white/5">
             <h2 class="text-lg font-semibold text-white">${isEdit ? 'Edit Driver' : 'Add Driver'}</h2>
             <button @click=${() => this._closeDriverModal()} class="p-1 rounded hover:bg-white/10 text-zinc-400">${icon(X, 18)}</button>
