@@ -24,13 +24,13 @@ async function signIn(page: Page, name: string) {
 /**
  * The portal surface's own gate: the desk's portal pages redirect to
  * /portal/login until a portal user is stored, so sign the seeded demo
- * customer (demo@kelbrook.ca / password) in through the real form. The API
+ * customer (demo@kelbrook.example / password) in through the real form. The API
  * side needs no token in AUTH_MODE=dev (serve injects the demo customer's
  * claims); this step is what the page's client-side gate requires.
  */
 async function signInPortal(page: Page) {
   await page.goto('/portal/login');
-  await page.getByLabel('Email Address').fill('demo@kelbrook.ca');
+  await page.getByLabel('Email Address').fill('demo@kelbrook.example');
   await page.getByLabel('Password').fill('password');
   await page.getByRole('button', { name: 'Sign In' }).click();
   await page.waitForURL('**/portal');

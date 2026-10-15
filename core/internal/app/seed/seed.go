@@ -434,13 +434,13 @@ func Run() {
 	}
 	vendors := []vendor{
 		{"Gable Building Supply", "orders@gablebuildingsupply.example", "250-555-1100", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "Net 30", 3, 97.5, 485000},
-		{"Okanagan Hardware Distribution", "sales@okhardware.ca", "250-555-1200", "1500 Fastener Way", "Kelowna", "BC", "V1Y 4R9", "Net 30", 5, 94.2, 128000},
-		{"BC Roofing Wholesale", "contact@bcroofing.ca", "250-555-1300", "200 Shingle Ln", "Vernon", "BC", "V1T 2L8", "Net 45", 7, 91.0, 95000},
-		{"Interior Millwork Co", "info@interiormillwork.ca", "250-555-1400", "75 Cabinet Ct", "Kelowna", "BC", "V1Z 1G2", "Net 30", 14, 88.5, 72000},
-		{"Valley Ready-Mix Concrete", "dispatch@valleyreadymix.ca", "250-555-1500", "3200 Aggregate Dr", "Kelowna", "BC", "V1X 4L9", "Net 15", 2, 99.0, 45000},
-		{"Mountain Fastener Supply", "orders@mountainfastener.ca", "250-555-1600", "900 Bolt Blvd", "Penticton", "BC", "V2A 6J9", "Net 30", 4, 96.8, 67000},
-		{"Cariboo Insulation Ltd", "sales@caribooinsulation.ca", "250-555-1700", "400 Thermal Ave", "Vernon", "BC", "V1B 3T6", "Net 30", 6, 93.0, 52000},
-		{"Pacific Window & Door", "orders@pacificwindow.ca", "604-555-1800", "1200 Glass Pkwy", "Surrey", "BC", "V3T 5X8", "2% 10 Net 30", 21, 85.0, 110000},
+		{"Okanagan Hardware Distribution", "sales@okhardware.example", "250-555-1200", "1500 Fastener Way", "Kelowna", "BC", "V1Y 4R9", "Net 30", 5, 94.2, 128000},
+		{"BC Roofing Wholesale", "contact@bcroofing.example", "250-555-1300", "200 Shingle Ln", "Vernon", "BC", "V1T 2L8", "Net 45", 7, 91.0, 95000},
+		{"Interior Millwork Co", "info@interiormillwork.example", "250-555-1400", "75 Cabinet Ct", "Kelowna", "BC", "V1Z 1G2", "Net 30", 14, 88.5, 72000},
+		{"Valley Ready-Mix Concrete", "dispatch@valleyreadymix.example", "250-555-1500", "3200 Aggregate Dr", "Kelowna", "BC", "V1X 4L9", "Net 15", 2, 99.0, 45000},
+		{"Mountain Fastener Supply", "orders@mountainfastener.example", "250-555-1600", "900 Bolt Blvd", "Penticton", "BC", "V2A 6J9", "Net 30", 4, 96.8, 67000},
+		{"Cariboo Insulation Ltd", "sales@caribooinsulation.example", "250-555-1700", "400 Thermal Ave", "Vernon", "BC", "V1B 3T6", "Net 30", 6, 93.0, 52000},
+		{"Pacific Window & Door", "orders@pacificwindow.example", "604-555-1800", "1200 Glass Pkwy", "Surrey", "BC", "V3T 5X8", "2% 10 Net 30", 21, 85.0, 110000},
 	}
 	vendorIDs := make(map[string]uuid.UUID)
 	for _, v := range vendors {
@@ -664,18 +664,18 @@ func Run() {
 	//     IANA-reserved example.com. Never a real consumer ISP or provider.
 	// =========================================================================
 	customers := []demoCustomer{
-		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.ca", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Mission Hill Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
-		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.ca", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
-		{"Lake Country Builders", "LCB-001", "admin@lakecountrybuilders.ca", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
-		{"Predator Ridge Renos", "PRR-001", "office@predatorrenos.ca", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
-		{"Big White Cabin Co", "BWC-001", "jim@bigwhitecabins.ca", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
-		{"Mission Hill Custom", "MHC-001", "invoices@missionhillcustom.ca", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
-		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.ca", "250-555-2600", "150 Deckboard Rd, West Kelowna BC", "SILVER", "NET30", "Contractor", 20000, wkID, []string{"Shoreline Deck", "Smith Patio", "WK Clubhouse Veranda"}},
-		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.ca", "250-555-3200", "1800 Rebar Dr, Vernon BC", "GOLD", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Rebar Drive Pour"}},
-		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.ca", "250-555-2700", "780 Casement Ave, Kelowna BC", "GOLD", "NET30", "Contractor", 30000, kelMainID, []string{"123 Casement Ave Restore", "456 Millwright St Reno"}},
-		{"Knox Mountain Landscapes", "KML-001", "office@knoxmountainlandscapes.ca", "250-555-2900", "300 Topsoil Dr, Kelowna BC", "RETAIL", "NET30", "Retail", 10000, kelMainID, []string{"Knox Mountain Community Garden", "Waterfront Walk Beds"}},
-		{"Peachland Framing Crew", "PFC-001", "bills@peachlandframing.ca", "250-555-3000", "5500 Truss Ave, Peachland BC", "GOLD", "NET30", "Contractor", 80000, wkID, []string{"Truss Ave Warehouse Framing", "Highway 97 Strip Mall"}},
-		{"Summerland Roofers", "SRR-001", "admin@summerlandroofers.ca", "250-555-3100", "200 Ridgecap Rd, Summerland BC", "SILVER", "NET30", "Contractor", 40000, kelMainID, []string{"Summerland School Roof", "Community Chapel Reshingle"}},
+		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Mission Hill Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
+		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.example", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
+		{"Lake Country Builders", "LCB-001", "admin@lakecountrybuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
+		{"Predator Ridge Renos", "PRR-001", "office@predatorrenos.example", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
+		{"Big White Cabin Co", "BWC-001", "jim@bigwhitecabins.example", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
+		{"Mission Hill Custom", "MHC-001", "invoices@missionhillcustom.example", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
+		{"Westbank Decks & Fence", "WDF-001", "info@westbankdecks.example", "250-555-2600", "150 Deckboard Rd, West Kelowna BC", "SILVER", "NET30", "Contractor", 20000, wkID, []string{"Shoreline Deck", "Smith Patio", "WK Clubhouse Veranda"}},
+		{"Vernon Valley Construction", "VVC-001", "dispatch@vernonvalley.example", "250-555-3200", "1800 Rebar Dr, Vernon BC", "GOLD", "NET30", "Contractor", 35000, lkID, []string{"Vernon Lot 8 Foundation", "Rebar Drive Pour"}},
+		{"Glenmore Heritage Reno", "GHR-001", "pay@glenmoreheritage.example", "250-555-2700", "780 Casement Ave, Kelowna BC", "GOLD", "NET30", "Contractor", 30000, kelMainID, []string{"123 Casement Ave Restore", "456 Millwright St Reno"}},
+		{"Knox Mountain Landscapes", "KML-001", "office@knoxmountainlandscapes.example", "250-555-2900", "300 Topsoil Dr, Kelowna BC", "RETAIL", "NET30", "Retail", 10000, kelMainID, []string{"Knox Mountain Community Garden", "Waterfront Walk Beds"}},
+		{"Peachland Framing Crew", "PFC-001", "bills@peachlandframing.example", "250-555-3000", "5500 Truss Ave, Peachland BC", "GOLD", "NET30", "Contractor", 80000, wkID, []string{"Truss Ave Warehouse Framing", "Highway 97 Strip Mall"}},
+		{"Summerland Roofers", "SRR-001", "admin@summerlandroofers.example", "250-555-3100", "200 Ridgecap Rd, Summerland BC", "SILVER", "NET30", "Contractor", 40000, kelMainID, []string{"Summerland School Roof", "Community Chapel Reshingle"}},
 		{"Okanagan DIY Owner", "DIY-OKN", "okanagan.diy@example.com", "250-555-2310", "45 Sawhorse Ln, Lake Country BC", "RETAIL", "COD", "Retail", 5000, lkID, []string{"Backyard Shed"}},
 	}
 
@@ -1380,7 +1380,7 @@ func Run() {
 
 	// =========================================================================
 	// 21. PORTAL USERS
-	//    The demo portal account is `demo@kelbrook.ca` (Sam Kelbrook), linked
+	//    The demo portal account is `demo@kelbrook.example` (Sam Kelbrook), linked
 	//    to Kelbrook Construction — the persona referenced by the portal
 	//    dev-mode injection in internal/app/serve/serve.go.
 	// =========================================================================
@@ -1398,7 +1398,7 @@ func Run() {
 		// GET /users, GET/POST /invites, PUT /users/{id}/role and /status —
 		// returned 403 to every demo login, and the role-update endpoint would
 		// have refused to set the role back to anything it recognised.
-		{"Kelbrook Construction", "demo@kelbrook.ca", "Sam Kelbrook", "Admin"},
+		{"Kelbrook Construction", "demo@kelbrook.example", "Sam Kelbrook", "Admin"},
 		{"Okanagan Homes Ltd", "okhomes@gablebuildingsupply.example", "Olivia Homes", "Admin"},
 		{"Mission Hill Custom", "missionhill@gablebuildingsupply.example", "Marc Mission", "Buyer"},
 	}
@@ -1414,7 +1414,7 @@ func Run() {
 			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (email) DO UPDATE SET password_hash=$3, role=$5`, cid, pu.Email, string(pwHash), pu.Name, pu.Role)
 	}
-	fmt.Println("Seed: Portal Users (demo@kelbrook.ca / okhomes@gablebuildingsupply.example / missionhill@gablebuildingsupply.example, password: 'password')")
+	fmt.Println("Seed: Portal Users (demo@kelbrook.example / okhomes@gablebuildingsupply.example / missionhill@gablebuildingsupply.example, password: 'password')")
 
 	// =========================================================================
 	// 22. POS REGISTERS + OFFLINE POS SYNC LOGS

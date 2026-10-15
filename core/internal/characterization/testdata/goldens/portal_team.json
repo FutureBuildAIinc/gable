@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/portal/v1/login",
       "body": {
-        "email": "demo@kelbrook.ca",
+        "email": "demo@kelbrook.example",
         "password": "password"
       }
     },
@@ -27,7 +27,7 @@
         "user": {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.ca",
+          "email": "demo@kelbrook.example",
           "id": "<id-3>",
           "name": "Sam Kelbrook",
           "role": "Admin",
@@ -50,7 +50,7 @@
         {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.ca",
+          "email": "demo@kelbrook.example",
           "id": "<id-3>",
           "name": "Sam Kelbrook",
           "role": "Admin",

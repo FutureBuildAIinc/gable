@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -963,6 +964,46 @@ func TestSeedKeysAndVendorsNameNoProFrame(t *testing.T) {
 	} {
 		if strings.Contains(strings.ToLower(string(data)), "proframe") {
 			t.Errorf("%s names ProFrame", name)
+		}
+	}
+}
+
+// emailPattern finds an email address in text.
+var emailPattern = regexp.MustCompile(`[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}`)
+
+// TestSeedEmailsAreOnReservedDomains (item 108 b's rule): every email address
+// in the import files and in the seed's own source ends in ".example" or is on
+// "example.com", never on a real top level domain an invented customer or
+// vendor could be mistaken to own.
+func TestSeedEmailsAreOnReservedDomains(t *testing.T) {
+	sources := map[string]string{
+		"catalog": string(catalogData), "customers": string(customersData), "staff": string(staffData),
+		"vendors": string(vendorsData), "vendorkeys": string(vendorKeysData),
+	}
+	for _, dir := range []string{".", "../../../cmd/seed"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(dir + "/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sources[dir+"/"+name] = string(data)
+		}
+	}
+	for name, text := range sources {
+		for _, addr := range emailPattern.FindAllString(text, -1) {
+			domain := strings.ToLower(addr[strings.LastIndex(addr, "@")+1:])
+			if strings.HasSuffix(domain, ".example") || domain == "example.com" {
+				continue
+			}
+			t.Errorf("%s holds the email address %q on a real domain", name, addr)
 		}
 	}
 }

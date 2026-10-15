@@ -966,7 +966,7 @@ func Run() {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				claims := &middleware.PortalClaims{
 					CustomerID: demoCustomerID,
-					Email:      "demo@kelbrook.ca",
+					Email:      "demo@kelbrook.example",
 					Name:       "Sam Kelbrook",
 					// Role is load-bearing and was previously left empty, so
 					// getPortalUserRole returned "" and requireAdmin refused

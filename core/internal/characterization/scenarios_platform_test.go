@@ -212,7 +212,7 @@ func portalGroups() []groupDef {
 				name:   "portal.login",
 				method: "POST",
 				path:   "/api/portal/v1/login",
-				body:   map[string]any{"email": "demo@kelbrook.ca", "password": "password"},
+				body:   map[string]any{"email": "demo@kelbrook.example", "password": "password"},
 			},
 			// Session cookie from login rides along for the remaining steps.
 			{name: "portal.catalog", method: "GET", path: "/api/portal/v1/catalog?q=LUM-248"},
