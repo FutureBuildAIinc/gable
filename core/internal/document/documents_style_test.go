@@ -222,3 +222,42 @@ func TestLegalNameAndRemitToShareAPage(t *testing.T) {
 		}
 	}
 }
+
+// A moment prints as the yard's day, not the server's: a quote made in the
+// yard's evening carries that evening's date. One second either side of the
+// yard's midnight (Vancouver in July is UTC-7, so its midnight is 07:00:00Z).
+// This one date moves on purpose.
+func TestAMomentsDayIsTheYardsDay(t *testing.T) {
+	zone, err := time.LoadLocation("America/Vancouver")
+	if err != nil {
+		t.Skip("no zone data")
+	}
+	before := time.Date(2026, 7, 1, 6, 59, 59, 0, time.UTC)
+	after := time.Date(2026, 7, 1, 7, 0, 0, 0, time.UTC)
+	cust := &customer.Customer{Name: "Acme"}
+	qty := httpx.Quantity(10000)
+	uom, sku := "EA", "PT-4"
+	for _, c := range []struct {
+		at   time.Time
+		want string
+	}{{before, "Jun 30, 2026"}, {after, "Jul 1, 2026"}} {
+		svc := styledService("en-US").WithStatements(&fakeStatements{zone: zone})
+		qdoc, err := svc.GenerateQuotePDF(context.Background(), &quote.Quote{QuoteSummary: quote.QuoteSummary{ID: uuid.New(), Number: "QT-1",
+			CreatedAt: httpx.TimestampOf(c.at)}}, cust)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, qdoc, "Date: "+c.want)
+		pdoc, err := svc.GeneratePurchaseOrderPDF(context.Background(), &purchase_order.PurchaseOrder{ID: uuid.New(), Number: "PO-1", VendorName: "Mill", CreatedAt: c.at})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, pdoc, "Date: "+c.want)
+		kdoc, err := svc.GeneratePickTicketPDF(context.Background(), &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), Number: "SO-1", CreatedAt: httpx.TimestampOf(c.at)},
+			Lines: []order.OrderLine{{Line: salesdoc.Line{SKU: &sku, Description: "Post", Quantity: &qty, UOM: &uom, LineType: salesdoc.LineProduct}}}}, cust)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustContain(t, kdoc, "Date: "+c.want)
+	}
+}

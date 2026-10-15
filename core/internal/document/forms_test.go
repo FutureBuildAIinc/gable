@@ -68,6 +68,9 @@ type fakeStatements struct {
 	st      *account.Statement
 	aging   *account.AgingSummary
 	queries []account.AgingQuery
+	// zone is the yard's zone BusinessDate reads a moment in; nil leaves it be
+	zone        *time.Location
+	dayBranches []uuid.UUID
 }
 
 // AgingSummary answers the canned aging and records what it was asked.
@@ -81,6 +84,17 @@ func (f *fakeStatements) AgingSummary(_ context.Context, q account.AgingQuery) (
 
 func (*fakeStatements) LocalDate(_ context.Context, _ uuid.UUID, at time.Time) (time.Time, error) {
 	return at, nil
+}
+
+// BusinessDate answers the day in the zone the fake holds, and records the
+// branch it was asked for.
+func (f *fakeStatements) BusinessDate(_ context.Context, branch uuid.UUID, at time.Time) (time.Time, error) {
+	f.dayBranches = append(f.dayBranches, branch)
+	if f.zone == nil {
+		return at, nil
+	}
+	y, m, d := at.In(f.zone).Date()
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC), nil
 }
 func (*fakeStatements) Now() time.Time { return time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC) }
 
