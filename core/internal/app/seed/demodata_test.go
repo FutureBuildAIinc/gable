@@ -1111,3 +1111,84 @@ func TestImportDescriptionsNameNoMaker(t *testing.T) {
 		}
 	}
 }
+
+// FROM-PRINCIPAL 119 names "Ridgeline" and "Stone as a brand" among the brand
+// words, so no product is named for an invented brand. The word stone stays
+// where it is a material ("Landscape and Stone", a stone product); only a
+// product led by it as a mark, and the vendor named for it, are refused.
+func TestCatalogNamesNoInventedBrand(t *testing.T) {
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		sku, _ := row["sku"].(string)
+		for field, v := range row {
+			if s, ok := v.(string); ok && strings.Contains(strings.ToLower(s), "ridgeline") {
+				t.Errorf("%s: %s %q names the invented brand Ridgeline", sku, field, s)
+			}
+		}
+		if d, _ := row["description"].(string); strings.HasPrefix(strings.ToLower(d), "stone ") {
+			t.Errorf("%s: %q is led by the invented brand Stone", sku, d)
+		}
+	}
+	var keys struct {
+		Vendors []struct {
+			Key   string `json:"key"`
+			Name  string `json:"name"`
+			Notes string `json:"notes"`
+		} `json:"vendors"`
+	}
+	if err := json.Unmarshal(vendorKeysData, &keys); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range keys.Vendors {
+		if strings.Contains(strings.ToLower(v.Notes), "ridgeline") {
+			t.Errorf("vendor %s: the notes name the invented brand Ridgeline", v.Key)
+		}
+		if strings.Contains(strings.ToLower(v.Name), "stone hardware") {
+			t.Errorf("vendor %s: %q is the invented brand Stone", v.Key, v.Name)
+		}
+	}
+}
+
+// TestVendorNamesSitBesideNoRealBusiness: two vendor names read next to real
+// businesses of the same trade and region (the review of PR 161).
+func TestVendorNamesSitBesideNoRealBusiness(t *testing.T) {
+	for _, name := range []string{"fraser valley engineered", "okanagan power tool"} {
+		for src, data := range map[string][]byte{"vendors": vendorsData, "vendorkeys": vendorKeysData} {
+			if strings.Contains(strings.ToLower(string(data)), name) {
+				t.Errorf("%s holds the name %q, which sits beside a real business", src, name)
+			}
+		}
+	}
+}
+
+// TestEngineeredWoodAndHangersCarryTheirOwnKind: the LVL and I-joist rows are
+// not graded with a dimension lumber grade, and the face mount hangers draw as
+// joist hangers.
+func TestEngineeredWoodAndHangersCarryTheirOwnKind(t *testing.T) {
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row struct {
+			SKU         string `json:"sku"`
+			Category    string `json:"category_slug"`
+			Grade       string `json:"grade"`
+			ImageFamily string `json:"image_family"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		if row.Category == "lumber.engineered_wood" && strings.EqualFold(row.Grade, "standard") {
+			t.Errorf("%s: the engineered wood grade %q is a dimension lumber grade", row.SKU, row.Grade)
+		}
+		if (row.SKU == "CN_FMH28" || row.SKU == "CN_FMH210") && row.ImageFamily != "joist_hanger" {
+			t.Errorf("%s draws as %q, want joist_hanger", row.SKU, row.ImageFamily)
+		}
+	}
+}
