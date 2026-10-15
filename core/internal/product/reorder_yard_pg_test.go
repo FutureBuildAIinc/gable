@@ -167,3 +167,44 @@ func TestReorderList_AGrantedUserSeesOnlyTheirYards(t *testing.T) {
 		t.Errorf("one grant: rows = %v, want only yard A", got)
 	}
 }
+
+// A row at a location whose branch_id is null is in no yard's sum. The
+// location trigger refuses such a location on insert, so only a legacy row
+// makes one: the trigger is off for the one insert (a pin: the guard
+// l.branch_id IS NOT NULL in pkg/yardstock is what keeps the row from
+// grouping under a null yard and failing the scan).
+func TestReorderList_ALocationWithNoBranchIsInNoYard(t *testing.T) {
+	w := newReorderWorld(t)
+	db := testutil.RequireDB(t)
+	orphan := uuid.New()
+	ctx := context.Background()
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SET LOCAL session_replication_role = replica`); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("trigger off: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BIN', $2)`, orphan, "RO-"+orphan.String()[:8]); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("orphan location: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE location_id = $1`, orphan)
+		_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, orphan)
+	})
+	var branch *uuid.UUID
+	if err := db.Pool.QueryRow(ctx, `SELECT branch_id FROM locations WHERE id = $1`, orphan).Scan(&branch); err != nil || branch != nil {
+		t.Fatalf("orphan location branch = %v (err %v), want null", branch, err)
+	}
+	w.stock(&w.yardA, 100)
+	w.stock(&orphan, 60)
+	got := w.rows(w.as(&branchctx.Context{UserSub: "boss", IsAdmin: true}))
+	if len(got) != 1 || got[w.yardA.String()] != 100 {
+		t.Fatalf("rows = %v, want only yard A at 100 (the branchless location's 60 is in no yard)", got)
+	}
+}
