@@ -10982,6 +10982,53 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
   /api/v1/pos/transactions/{id}/items/{itemId}:
+    patch:
+      operationId: posTransactionChangeItemQuantity
+      tags: [pos]
+      summary: Change a line's quantity
+      description: >-
+        Sets the quantity of one line of an open sale. The line is priced again by the same step the add uses, at the new quantity (a quantity break, a kit's components and the sale's tax follow), keeps its id and its place, and the sale's subtotal, tax and total are summed again, so the result is what removing the line and adding it at the new quantity gives. A price the cashier overrode and a discount stay on the line. The body carries the sale's revision (or the request carries If-Match): a stale one is 409 stale_revision and none at all is 428. Only an open or held sale changes (409 invalid_state_transition), as the line add. A fixed cents discount stays the same cents at the new quantity (a percent discount scales), as it does when the line is removed and added again. A quantity of zero or less, or a line that has no quantity (a text line) or is a kit's component, is 400. A line that is not on this sale is 404. Roles, the branch wall and a bound key's pin are those of the line add.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: itemId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: "#/components/parameters/XBranchId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PosChangeQuantityRequest"
+      responses:
+        "200":
+          description: The whole sale with the line repriced.
+          headers:
+            ETag:
+              description: The document's new revision.
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PosTransaction"
+        "400":
+          $ref: "#/components/responses/BadRequestEither"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ForbiddenEither"
+        "404":
+          $ref: "#/components/responses/WireNotFound"
+        "409":
+          $ref: "#/components/responses/ConflictEither"
+        "428":
+          $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/InternalError"
     delete:
       operationId: posTransactionRemoveItem
       tags: [pos]
@@ -11345,7 +11392,7 @@ paths:
       tags: [pos]
       summary: Close the drawer
       description: >-
-        Closes the session on the counted cash: the over or short (counted less expected, expected being the session's cash payments net of change plus the float less cash refunds) is booked to 5030 inside the close's own transaction, the Z report snapshot is written and till.closed is the last statement. counted_by_method names the counted cents per lowercase method (cash, check, card, account); a refusal rolls everything back. A session that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the session's branch is refused 403 by name.
+        Closes the session on the counted cash: the over or short (counted less expected, expected being the session's cash payments net of change plus the float less cash refunds) is booked to 5030 inside the close's own transaction, the Z report snapshot is written and till.closed is the last statement. counted_by_method names the counted cents per lowercase method (cash, check, card); account is refused in the 400 envelope naming counted_by_method.account, since an account charge is not money in the drawer and counting it would book the whole charge as a shortage. A refusal rolls everything back. A session that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the session's branch is refused 403 by name.
       parameters:
         - name: id
           in: path
@@ -24389,6 +24436,12 @@ components:
       properties:
         line:
           $ref: "#/components/schemas/PosLineRequest"
+    PosChangeQuantityRequest:
+      type: object
+      required: [quantity, revision]
+      properties:
+        quantity: {type: string, description: "The line's new quantity, a decimal string greater than zero."}
+        revision: {type: integer, description: "The sale's revision the change is made on."}
     PosCompleteRequest:
       type: object
       required: [tenders]

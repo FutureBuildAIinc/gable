@@ -133,6 +133,19 @@ export const posService = {
         return response.json();
     },
 
+    /** Sets a line's quantity on the sale's revision; the answer is the whole sale, the line repriced. */
+    async changeQuantity(saleId: string, itemId: string, quantity: string, revision: number): Promise<Sale> {
+        const response = await expectOk(
+            await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items/${itemId}`, {
+                method: 'PATCH',
+                headers: JSON_HEADERS,
+                body: JSON.stringify({ quantity, revision }),
+            }),
+            'Failed to change the quantity',
+        );
+        return response.json();
+    },
+
     async removeItem(saleId: string, itemId: string): Promise<Sale> {
         const response = await expectOk(
             await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/items/${itemId}`, { method: 'DELETE' }),

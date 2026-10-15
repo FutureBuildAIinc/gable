@@ -114,8 +114,7 @@ offer and the server enforces no role; a real dealer signs in through its identi
 - AI unless an administrator enters an Anthropic key in Tech Admin, AI (and tests it there): with a key, the material
   list intake also reads photos and PDFs; without one, pasted lists, text files and spreadsheets are read without AI and
   every AI feature says plainly that AI is off.
-- Deposits and parked sales at the counter; changing the quantity of a line already on a sale (remove it and add it
-  again); a printed counter receipt.
+- Deposits and parked sales at the counter; a printed counter receipt.
 - One screen of every yard's stock or AR at once (steps 6 and 7 switch yards).
 - A void or a return of an earlier sale: the counter voids or returns the sale on its screen; there is no sale lookup
   yet.

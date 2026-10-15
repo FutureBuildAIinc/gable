@@ -108,6 +108,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux, roleGuard ...func(http.Hand
 	mux.HandleFunc("GET /api/v1/pos/transactions", guard(h.ListTransactions))
 	mux.HandleFunc("GET /api/v1/pos/transactions/{id}", guard(h.GetTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/items", guard(h.AddItem))
+	mux.HandleFunc("PATCH /api/v1/pos/transactions/{id}/items/{itemId}", guard(h.ChangeItemQuantity))
 	mux.HandleFunc("DELETE /api/v1/pos/transactions/{id}/items/{itemId}", guard(h.RemoveItem))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/complete", guard(h.CompleteTransaction))
 	mux.HandleFunc("POST /api/v1/pos/transactions/{id}/void", guard(h.VoidTransaction))
@@ -293,6 +294,38 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 	// section 4): a key holding pos scopes works it; the acting subject, if
 	// any, is the audit attribution.
 	sale, err := h.service.AddLine(r.Context(), id, parsed, actorFrom(r))
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	httpx.WriteRevisionETag(w, sale.Revision)
+	writeJSON(w, http.StatusOK, sale)
+}
+
+// ChangeItemQuantity is PATCH /pos/transactions/{id}/items/{itemId}: the
+// line's quantity on the sale's revision, repriced as the add prices it.
+func (h *Handler) ChangeItemQuantity(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "id", Message: "must be a UUID"}))
+		return
+	}
+	itemID, err := uuid.Parse(r.PathValue("itemId"))
+	if err != nil {
+		httpx.WriteError(w, r, httpx.BadRequest("one or more fields failed validation", httpx.FieldError{Field: "itemId", Message: "must be a UUID"}))
+		return
+	}
+	var req changeQuantityRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	qty, revision, err := req.parse()
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	sale, err := h.service.ChangeLineQuantity(r.Context(), id, itemID, qty, r.Header.Get("If-Match"), revision, actorFrom(r))
 	if err != nil {
 		httpx.WriteError(w, r, err)
 		return

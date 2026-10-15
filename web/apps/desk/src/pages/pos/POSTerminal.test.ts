@@ -14,6 +14,7 @@ const svc = vi.hoisted(() => ({
   attachCustomer: vi.fn(),
   addItem: vi.fn(),
   removeItem: vi.fn(),
+  changeQuantity: vi.fn(),
   getSale: vi.fn(),
   openTill: vi.fn(),
   tillReport: vi.fn(),
@@ -177,22 +178,22 @@ describe('the counter as the Panels layout', () => {
 
   it('sends only the corrected entry after a refused Pay, never the first attempt again', async () => {
     svc.completeSale
-      .mockRejectedValueOnce(new Error('only a cash tender can give change'))
+      .mockRejectedValueOnce(new Error('the drawer is closed'))
       .mockResolvedValueOnce(sale({ status: 'completed' }));
     const el = await mount(sale());
-    q(el, 'tender-card').click();
+    q(el, 'tender-cash').click();
     await el.updateComplete;
     await typeInto(el, '100.00');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     expect(svc.completeSale).toHaveBeenCalledTimes(1);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 10000 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 10000 }]);
     await typeInto(el, '86.50');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
     expect(svc.completeSale).toHaveBeenCalledTimes(2);
-    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    expect(svc.completeSale).toHaveBeenLastCalledWith('s1', 3, [{ method: 'cash', amount_cents: 8650 }]);
   });
 
   describe('the account refusal guards', () => {
@@ -1985,6 +1986,540 @@ describe('a changed customer starts the tender over', () => {
     await inner(el)._clearCustomer();
     expect(inner(el)._tenderMethod).toBeNull();
     expect(inner(el)._pendingTenders).toEqual([]);
+    el.remove();
+  });
+});
+
+describe('a quantity on each counter line', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const byLabel = (el: Element, label: string) => el.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const lineQty = (id: string, qty: string, cents: number) => ({ ...line(id, cents), quantity: qty });
+
+  it('sends the change on the sale revision and shows the repriced line', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({
+      revision: 4, subtotal_cents: 13000, tax_cents: 1054, total_cents: 14054,
+      lines: [lineQty('a', '2', 10000), line('b', 3000)] as unknown as Sale['lines'],
+    }));
+    const el = await mount(sale());
+    byLabel(el, 'Increase quantity of Item a').click();
+    await settle();
+    await el.updateComplete;
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '2', 3);
+    expect((byLabel(el, 'Quantity of Item a') as HTMLInputElement).value).toBe('2');
+    expect(q(el, 'pos-lines').textContent).toContain('$100.00');
+    expect(q(el, 'summary-total').textContent?.trim()).toBe('$140.54');
+    el.remove();
+  });
+
+  it('turns minus off at one and sends one less above it', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({ lines: [lineQty('a', '2', 10000), line('b', 3000)] as unknown as Sale['lines'] }));
+    const el = await mount(sale({ lines: [lineQty('a', '3', 15000), line('b', 3000)] as unknown as Sale['lines'] }));
+    expect((byLabel(el, 'Decrease quantity of Item b') as HTMLButtonElement).disabled).toBe(true);
+    const minus = byLabel(el, 'Decrease quantity of Item a') as HTMLButtonElement;
+    expect(minus.disabled).toBe(false);
+    minus.click();
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '2', 3);
+    el.remove();
+  });
+
+  it('commits a typed number on Enter and when the field is left', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({ lines: [lineQty('a', '12', 60000), line('b', 3000)] as unknown as Sale['lines'] }));
+    const el = await mount(sale());
+    const input = byLabel(el, 'Quantity of Item a') as HTMLInputElement;
+    input.value = '12';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledTimes(1);
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '12', 3);
+    const second = byLabel(el, 'Quantity of Item b') as HTMLInputElement;
+    second.value = '4';
+    second.dispatchEvent(new Event('change'));
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledTimes(2);
+    el.remove();
+  });
+
+  it('says why a change failed and puts the number back', async () => {
+    svc.changeQuantity.mockRejectedValue(new Error('only 3 in stock at this yard'));
+    const el = await mount(sale());
+    const input = byLabel(el, 'Quantity of Item a') as HTMLInputElement;
+    input.value = '9';
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await settle();
+    await el.updateComplete;
+    expect(el.textContent).toContain('only 3 in stock at this yard');
+    expect((byLabel(el, 'Quantity of Item a') as HTMLInputElement).value).toBe('1');
+    el.remove();
+  });
+
+  it('sizes each control for touch', async () => {
+    const el = await mount(sale());
+    for (const l of ['Decrease quantity of Item a', 'Increase quantity of Item a', 'Quantity of Item a']) {
+      expect(byLabel(el, l).className).toMatch(/min-h-11|h-11/);
+    }
+    el.remove();
+  });
+});
+
+describe('the counter hotkeys and their pinned legend', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const key = async (el: POSTerminal, k: string, mods: KeyboardEventInit = {}) => {
+    const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...mods });
+    document.dispatchEvent(ev);
+    await el.updateComplete;
+    return ev;
+  };
+  const pressed = (el: Element) => ['cash', 'check', 'card', 'account']
+    .filter((m) => q(el, `tender-${m}`)?.getAttribute('aria-pressed') === 'true');
+
+  it('pins a legend above the counter showing each key and its action', async () => {
+    const el = await mount(sale());
+    const legend = q(el, 'pos-hotkey-legend');
+    expect(legend).toBeTruthy();
+    expect(legend.compareDocumentPosition(q(el, 'pos-body')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(legend.textContent).toContain('F12');
+    expect(legend.textContent).toContain('Pay');
+    expect(legend.querySelectorAll('[data-action]').length).toBe(14);
+    el.remove();
+  });
+
+  it('chooses a tender and pays from the keys', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await key(el, 'F12');
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    await key(el, 'F8');
+    expect(pressed(el)).toEqual(['card']);
+    const ev = await key(el, 'F12');
+    expect(ev.defaultPrevented).toBe(true);
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'card', amount_cents: 8650 }]);
+    el.remove();
+  });
+
+  it('moves between the panels with Next and Back', async () => {
+    const el = await mount(sale());
+    expect(q(el, 'panel-customer-body').hasAttribute('hidden')).toBe(false);
+    await key(el, 'F4');
+    expect(q(el, 'panel-payment-body').hasAttribute('hidden')).toBe(false);
+    await key(el, 'F4', { shiftKey: true });
+    expect(q(el, 'panel-customer-body').hasAttribute('hidden')).toBe(false);
+    el.remove();
+  });
+
+  it('focuses the search, the customer lookup and the selected line\'s quantity', async () => {
+    const el = await mount(sale());
+    await key(el, 'F2');
+    expect(document.activeElement).toBe(q(el, 'catalog-search'));
+    await key(el, 'q', { altKey: true });
+    expect(document.activeElement).toBe(el.querySelector('[aria-label="Quantity of Item b"]'));
+    // the customer is named before the first line, so the lookup key is for an empty sale
+    await key(el, 'F3');
+    expect(document.activeElement).not.toBe(el.querySelector('#pos-customer-search'));
+    el.remove();
+    const empty = await mount(sale({ lines: [] }));
+    await key(empty, 'F3');
+    expect(document.activeElement).toBe(empty.querySelector('#pos-customer-search'));
+    empty.remove();
+  });
+
+  it('never fires while a dialog of the app is open, and a bare letter is only typing', async () => {
+    const el = await mount(sale());
+    (el as unknown as { _showTillOpen: boolean })._showTillOpen = true;
+    await el.updateComplete;
+    const ev = await key(el, 'F6');
+    expect(pressed(el)).toEqual([]);
+    expect(ev.defaultPrevented).toBe(false);
+    (el as unknown as { _showTillOpen: boolean })._showTillOpen = false;
+    await el.updateComplete;
+    const typed = await key(el, 'c');
+    expect(pressed(el)).toEqual([]);
+    expect(typed.defaultPrevented).toBe(false);
+    el.remove();
+  });
+
+  it('leaves a key the counter does not claim to the browser', async () => {
+    const el = await mount(sale());
+    const ev = await key(el, 'F5');
+    expect(ev.defaultPrevented).toBe(false);
+    el.remove();
+  });
+});
+
+describe('the blind count at close', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('shows one row per method and posts the counted figures under lowercase keys', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 2, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000, CHECK: 4000, CARD: 9000 },
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { over_short_cents: 0, expected_by_method: {}, counted_by_method: {} },
+      sale_count: 2, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const labels = [...el.querySelectorAll('label')].map((l) => l.textContent?.trim()).filter((t) => ['Cash', 'Check', 'Card', 'CASH', 'CHECK', 'CARD'].includes(t ?? ''));
+    expect(labels).toEqual(['Cash', 'Check', 'Card']);
+    const inputs = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    expect(inputs.length).toBe(3);
+    inputs[0].value = '250.00'; inputs[0].dispatchEvent(new Event('input'));
+    inputs[1].value = '40.00'; inputs[1].dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    const post = [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count')) as HTMLElement;
+    post.click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.closeTill).toHaveBeenCalledTimes(1);
+    expect(svc.closeTill.mock.calls[0][1]).toEqual({ cash: 25000, check: 4000 });
+    el.remove();
+  });
+});
+
+describe('PR 150 fix round 1: quantity edits, controls and the blind count', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const byLabel = (el: Element, label: string) => el.querySelector(`[aria-label="${label}"]`) as HTMLElement | null;
+  const key = async (el: POSTerminal, k: string, init: KeyboardEventInit = {}) => {
+    const ev = new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true, ...init });
+    (document.activeElement ?? document.body).dispatchEvent(ev);
+    await el.updateComplete;
+    return ev;
+  };
+  const withType = (id: string, type: string, cents: number, qty = '1') =>
+    ({ ...line(id, cents), line_type: type, quantity: qty });
+
+  it('commits a typed quantity before a key acts, so Pay never completes at the old quantity', async () => {
+    svc.changeQuantity.mockResolvedValue(sale({ revision: 4, lines: [{ ...line('a', 25000), quantity: '5' }, line('b', 3000)] as unknown as Sale['lines'] }));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    const input = byLabel(el, 'Quantity of Item a') as HTMLInputElement;
+    input.focus();
+    input.value = '5';
+    input.dispatchEvent(new Event('input'));
+    await key(el, 'F12');
+    await settle();
+    expect(svc.changeQuantity).toHaveBeenCalledWith('s1', 'a', '5', 3);
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('keeps Pay and the money keys off while a quantity change is on its way', async () => {
+    svc.changeQuantity.mockReturnValue(new Promise(() => {}));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    (byLabel(el, 'Increase quantity of Item a') as HTMLButtonElement).click();
+    await el.updateComplete;
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    (document.activeElement as HTMLElement | null)?.blur();
+    await key(el, 'F12');
+    await key(el, 'F6');
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    expect(q(el, 'tender-cash').getAttribute('aria-pressed')).toBe('false');
+    el.remove();
+  });
+
+  it('gives a kit line and a charge line the quantity control, and a component none', async () => {
+    const lines = [
+      withType('k', 'kit', 9000),
+      { ...withType('c1', 'component', 0), parent_line_id: 'k' },
+      withType('f', 'charge', 2500),
+    ];
+    const el = await mount(sale({ lines: lines as unknown as Sale['lines'] }));
+    expect(byLabel(el, 'Quantity of Item k')).toBeTruthy();
+    expect(byLabel(el, 'Quantity of Item f')).toBeTruthy();
+    expect(byLabel(el, 'Quantity of Item c1')).toBeNull();
+    el.remove();
+  });
+
+  it('picks the last line that has a control for Alt+Q, and a plus press selects its line', async () => {
+    const lines = [withType('a', 'product', 5000), withType('t', 'text', 0)];
+    svc.changeQuantity.mockResolvedValue(sale({ lines: [{ ...withType('a', 'product', 10000), quantity: '2' }, lines[1]] as unknown as Sale['lines'] }));
+    const el = await mount(sale({ lines: lines as unknown as Sale['lines'] }));
+    await key(el, 'q', { altKey: true, code: 'KeyQ' });
+    expect(document.activeElement).toBe(byLabel(el, 'Quantity of Item a'));
+    el.remove();
+
+    const two = await mount(sale({ lines: [withType('a', 'product', 5000), withType('b', 'product', 3000)] as unknown as Sale['lines'] }));
+    (byLabel(two, 'Increase quantity of Item a') as HTMLButtonElement).click();
+    await settle();
+    await two.updateComplete;
+    (document.activeElement as HTMLElement | null)?.blur();
+    await key(two, 'q', { altKey: true, code: 'KeyQ' });
+    expect(document.activeElement).toBe(byLabel(two, 'Quantity of Item a'));
+    two.remove();
+  });
+
+  it('counts only what the drawer holds: no Account row, and Post sends only cash', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 1, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000, ACCOUNT: 12000 },
+    });
+    svc.closeTill.mockResolvedValue({
+      session: { over_short_cents: 0, expected_by_method: {}, counted_by_method: {} },
+      sale_count: 1, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await settle();
+    await el.updateComplete;
+    const inputs = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    expect(inputs.length).toBe(1);
+    inputs[0].value = '250.00';
+    inputs[0].dispatchEvent(new Event('input'));
+    await el.updateComplete;
+    ([...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Post Count')) as HTMLElement).click();
+    await settle();
+    expect(svc.closeTill.mock.calls[0][1]).toEqual({ cash: 25000 });
+    el.remove();
+  });
+
+  it('is silenced by any element with role dialog, not only the till dialogs', async () => {
+    const el = await mount(sale());
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'dialog');
+    document.body.appendChild(dialog);
+    const ev = await key(el, 'F6');
+    expect(q(el, 'tender-cash').getAttribute('aria-pressed')).toBe('false');
+    expect(ev.defaultPrevented).toBe(false);
+    dialog.remove();
+    el.remove();
+  });
+});
+
+describe('a quantity change under tenders already added', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const reduced = () => sale({
+    revision: 4, subtotal_cents: 5000, tax_cents: 0, total_cents: 5000,
+    lines: [{ ...line('a', 5000), quantity: '1' }] as unknown as Sale['lines'],
+  });
+  const addTender = async (el: POSTerminal, method: 'cash' | 'card', amount: string) => {
+    q(el, `tender-${method}`).click();
+    await el.updateComplete;
+    await typeInto(el, amount);
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+  };
+  const start = async () => mount(sale({
+    lines: [{ ...line('a', 8650), quantity: '2' }] as unknown as Sale['lines'], subtotal_cents: 8000, tax_cents: 650, total_cents: 8650,
+  }));
+  const minus = async (el: POSTerminal) => {
+    (el.querySelector('[aria-label="Decrease quantity of Item a"]') as HTMLButtonElement).click();
+    await settle();
+    await el.updateComplete;
+  };
+
+  it('shows the amount owed at once when the total rises over added tenders', async () => {
+    const el = await start();
+    await addTender(el, 'cash', '50.00');
+    expect(q(el, 'pos-amount-due').textContent?.trim()).toBe('$36.50');
+    svc.changeQuantity.mockResolvedValue(sale({ revision: 4, total_cents: 12000, subtotal_cents: 12000, tax_cents: 0,
+      lines: [{ ...line('a', 12000), quantity: '3' }] as unknown as Sale['lines'] }));
+    (el.querySelector('[aria-label="Increase quantity of Item a"]') as HTMLButtonElement).click();
+    await settle();
+    await el.updateComplete;
+    expect(q(el, 'pos-amount-due').textContent?.trim()).toBe('$70.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+
+  it('turns Pay on with the change due when cash only is added above a reduced total', async () => {
+    svc.changeQuantity.mockResolvedValue(reduced());
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await start();
+    await addTender(el, 'cash', '40.00');
+    await addTender(el, 'cash', '46.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    await minus(el);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$36.50');
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 4, [
+      { method: 'cash', amount_cents: 4000 }, { method: 'cash', amount_cents: 4650 },
+    ]);
+    el.remove();
+  });
+
+  it('keeps Pay off, in words, when a non cash tender is added above a reduced total', async () => {
+    svc.changeQuantity.mockResolvedValue(reduced());
+    const el = await start();
+    await addTender(el, 'card', '86.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    await minus(el);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('The added tenders are more than the sale now: clear them and choose again');
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+});
+
+describe('PR 150 fix round 2: the Z table, the guard in _pay and a typed non cash tender', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('leaves account out of the closed drawer table and names methods in words', async () => {
+    const el = await mount(sale({ lines: [] }));
+    const inner = el as unknown as { _closeResult: unknown; _showTillClose: boolean };
+    inner._closeResult = {
+      session: {
+        over_short_cents: 0,
+        expected_by_method: { CASH: 30000, CHECK: 5000, ACCOUNT: 4000 },
+        counted_by_method: { CASH: 30000, CHECK: 5000 },
+      },
+      sale_count: 3, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0,
+    };
+    inner._showTillClose = true;
+    await el.updateComplete;
+    expect(el.textContent).toContain('Z-Report');
+    const table = el.querySelector('table')?.textContent ?? '';
+    expect(table.toLowerCase()).not.toContain('account');
+    expect(table).not.toContain('CASH');
+    expect(table).toContain('Cash');
+    expect(table).toContain('Check');
+    el.remove();
+  });
+
+  it('refuses inside _pay while a quantity change is on its way', async () => {
+    svc.changeQuantity.mockReturnValue(new Promise(() => {}));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    (el.querySelector('[aria-label="Increase quantity of Item a"]') as HTMLButtonElement).click();
+    await el.updateComplete;
+    await (el as unknown as { _pay(): Promise<void> })._pay();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('keeps Pay off, in words, for a non cash amount typed above what is owed', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    await typeInto(el, '100.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over')).toBeTruthy();
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    // a cash amount above what is owed still gives change
+    q(el, 'tender-cash').click();
+    await el.updateComplete;
+    await typeInto(el, '100.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$13.50');
+    el.remove();
+  });
+});
+
+describe('PR 150 fix round 3: a normal split pays, and the two refused cases say why', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+  const press = async (el: POSTerminal, method: string) => { q(el, `tender-${method}`).click(); await el.updateComplete; };
+  const addSplit = async (el: POSTerminal, method: string, amount: string) => {
+    await press(el, method);
+    await typeInto(el, amount);
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+  };
+
+  it('pays a card added and cash typed above what is still owed, with the change due', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await addSplit(el, 'card', '40.00');
+    await press(el, 'cash');
+    await typeInto(el, '60.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$13.50');
+    expect(q(el, 'pos-tenders-over')).toBeNull();
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 6000 },
+    ]);
+    el.remove();
+  });
+
+  it('refuses a typed card or check that takes the non cash tenders above the total, in words', async () => {
+    const el = await mount(sale());
+    await addSplit(el, 'card', '40.00');
+    await press(el, 'check');
+    await typeInto(el, '50.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card or check cannot be more than what is owed');
+    expect(q(el, 'pos-tenders-over').textContent).not.toContain('added tenders');
+    await typeInto(el, '46.50');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('pays a card typed beside cash that already covers the change, as the server accepts it', async () => {
+    const el = await mount(sale());
+    await addSplit(el, 'cash', '60.00');
+    await press(el, 'card');
+    await typeInto(el, '40.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$13.50');
+    el.remove();
+  });
+
+  it('keeps the added tenders case and its words for a card added above a reduced total', async () => {
+    const el = await mount(sale());
+    await addSplit(el, 'card', '86.50');
+    (el as unknown as { _sale: Sale })._sale = sale({ total_cents: 5000, subtotal_cents: 5000, tax_cents: 0 });
+    await el.updateComplete;
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('The added tenders are more than the sale now');
+    el.remove();
+  });
+});
+
+describe('PR 150 round 4: one rule for splits', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('pays a card added then cash added above what is owed, with 3.50 change', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    for (const [m, amt] of [['card', '40.00'], ['cash', '50.00']] as const) {
+      q(el, `tender-${m}`).click();
+      await el.updateComplete;
+      await typeInto(el, amt);
+      q(el, 'pos-add-tender').click();
+      await el.updateComplete;
+    }
+    expect(q(el, 'pos-tenders-over')).toBeNull();
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-change').textContent).toContain('$3.50');
+    q(el, 'pos-pay').click();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [
+      { method: 'card', amount_cents: 4000 }, { method: 'cash', amount_cents: 5000 },
+    ]);
     el.remove();
   });
 });

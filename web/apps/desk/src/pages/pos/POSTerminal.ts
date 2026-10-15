@@ -10,6 +10,7 @@ import { chargeRefusal, standingOf, money, PO_REFUSAL } from './standing';
 import { formatPrice4 } from '../../lib/utils';
 import { isCountedUnit, normalizeQuantity } from '../../lib/money';
 import { payPlan, panelProgress, type PanelState, type PanelKey } from './panels';
+import { chordFromEvent, resolveHotkey, legendKeys, type HotkeyAction } from './hotkeys';
 import { authCustody } from '@gable/auth';
 import './catalog/gable-pos-catalog';
 
@@ -18,6 +19,8 @@ const REGISTER_STORAGE_PREFIX = 'gable.pos.register.';
 const SALE_STORAGE_PREFIX = 'gable.pos.sale.';
 const fmt = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const METHODS: TenderMethod[] = ['cash', 'check', 'card', 'account'];
+/** A line carries a quantity control when it has a quantity the route reprices. */
+const hasQuantityControl = (l: SaleLine) => l.parent_line_id === null && ['product', 'kit', 'charge'].includes(l.line_type);
 const methodLabel = (m: TenderMethod) => (m === 'account' ? 'Charge to account' : m.charAt(0).toUpperCase() + m.slice(1));
 
 /**
@@ -95,6 +98,7 @@ export class POSTerminal extends LitElement {
     super.connectedCallback();
     window.addEventListener('gable:branch-changed', this._onYardChanged);
     this.addEventListener('pos-catalog-add', this._onCatalogAdd);
+    document.addEventListener('keydown', this._onHotkey);
     this._yardId = branchContext.currentId;
     void this._loadRegisters();
   }
@@ -262,7 +266,10 @@ export class POSTerminal extends LitElement {
       this._tillBusy = true;
       this._tillReport = await posService.tillReport(this._till.id);
       // Seed blind-count inputs for every method the drawer expects (+ cash).
-      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {})]);
+      // The report answers in storage spelling (CASH, CHECK); the close route
+      // takes the wire's lowercase, so each method is one lowercase row.
+      // account charges are not money in the drawer: never a row, never posted
+      const methods = new Set<string>(['cash', ...Object.keys(this._tillReport.expected_by_method || {}).map((m) => m.toLowerCase()).filter((m) => m !== 'account')]);
       const seed: Record<string, string> = {};
       methods.forEach((m) => { seed[m] = ''; });
       this._counts = seed;
@@ -299,6 +306,7 @@ export class POSTerminal extends LitElement {
     super.disconnectedCallback();
     window.removeEventListener('gable:branch-changed', this._onYardChanged);
     this.removeEventListener('pos-catalog-add', this._onCatalogAdd);
+    document.removeEventListener('keydown', this._onHotkey);
     this._registerSeq++;
     if (this._errorTimer) clearTimeout(this._errorTimer);
     if (this._custDebounce) clearTimeout(this._custDebounce);
@@ -672,6 +680,222 @@ export class POSTerminal extends LitElement {
     this._resetTender();
   }
 
+  /* ---- Hotkeys (the roster and the chord rules are in ./hotkeys) ---- */
+
+  /** The line a quantity key lands on: the last one touched, else the last on the sale. */
+  @state() private _selectedLineId: string | null = null;
+
+  /** True while a dialog of the app is open: no key acts behind it. */
+  private get _dialogOpen(): boolean {
+    return this._showTillOpen || this._showTillClose || this._showReturn
+      || document.querySelector('[role="dialog"], [aria-modal="true"]') !== null;
+  }
+
+  /** What Pay is live on: the order summary's own predicate. */
+  private get _canPay(): boolean {
+    const sale = this._sale;
+    if (!sale || this._till === null || sale.status !== 'open' || this._loading) return false;
+    // a quantity change on its way would leave the sale paid at the old quantity
+    if (this._changing.size > 0) return false;
+    if (!sale.lines.some((l) => l.parent_line_id === null)) return false;
+    return payPlan(sale.total_cents, this._pendingTenders, this._entry).ok;
+  }
+
+  /** The same facts the controls disable on, so a dimmed key means a disabled control. */
+  private _hotkeyLive(action: HotkeyAction): boolean {
+    const sale = this._sale;
+    const open = sale?.status === 'open';
+    const hasLines = (sale?.lines ?? []).some((l) => l.parent_line_id === null);
+    const till = this._till !== null;
+    switch (action) {
+      case 'search':
+      case 'add':
+        return till && open;
+      case 'customer':
+        // the lookup is off once the sale has a line: the customer is named first
+        return till && open && this._customer === null && !hasLines;
+      case 'quantity':
+        return open && hasLines;
+      case 'next':
+        return till && open && hasLines && (this._step === 'customer' || this._step === 'payment');
+      case 'back':
+        return open && (this._step === 'payment' || this._step === 'summary');
+      case 'tender-cash':
+      case 'tender-check':
+      case 'tender-card':
+        return till && open && hasLines && this._changing.size === 0;
+      case 'tender-account':
+        return till && open && hasLines && this._changing.size === 0 && this._accountRefusal === null;
+      case 'pay':
+        return this._canPay;
+      case 'new-sale':
+        return this._register !== null && till && this._changing.size === 0;
+      case 'clear-sale':
+        return open && hasLines && !this._loading && this._changing.size === 0;
+      case 'void':
+        return this._completed !== null && sale?.id === this._completed.id;
+      default:
+        return false;
+    }
+  }
+
+  private _onHotkey = (e: KeyboardEvent) => {
+    if (e.defaultPrevented || this._dialogOpen) return;
+    const action = resolveHotkey(chordFromEvent(e));
+    if (action === null || !this._hotkeyLive(action)) return;
+    e.preventDefault();
+    // a typed quantity not yet committed is committed first and the key is
+    // not run over the old figure: the cashier presses it again
+    const field = document.activeElement;
+    if (field instanceof HTMLInputElement && field.dataset.lineId) {
+      const item = this._sale?.lines.find((l) => l.id === field.dataset.lineId);
+      if (item && field.value.trim() !== (item.quantity ?? '').trim()) {
+        void this._changeQuantity(item, field.value, field).then((saved) => {
+          if (!saved) return;
+          this._success = 'Quantity saved. Press the key again.';
+          if (this._errorTimer) clearTimeout(this._errorTimer);
+          this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
+        });
+        return;
+      }
+    }
+    void this._runHotkey(action);
+  };
+
+  private async _runHotkey(action: HotkeyAction) {
+    // the control may be on screen already; a panel that just opened is waited for
+    const focus = async (selector: string) => {
+      const here = this.querySelector(selector) as HTMLElement | null;
+      if (here) { here.focus(); return; }
+      await this.updateComplete;
+      (this.querySelector(selector) as HTMLElement | null)?.focus();
+    };
+    switch (action) {
+      case 'search':
+        return focus('[data-testid="catalog-search"]');
+      case 'add':
+        return (this.querySelector('[data-testid="catalog-add"]') as HTMLButtonElement | null)?.click();
+      case 'customer':
+        this._step = 'customer';
+        this._open = 'customer';
+        return focus('#pos-customer-search');
+      case 'quantity': {
+        const lines = (this._sale?.lines ?? []).filter((l) => l.parent_line_id === null && hasQuantityControl(l));
+        const target = lines.find((l) => l.id === this._selectedLineId) ?? lines[lines.length - 1];
+        if (!target) return;
+        const input = this.querySelector(`input[data-line-id="${target.id}"]`) as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+        return;
+      }
+      case 'next':
+        if (this._step === 'customer') { this._step = 'payment'; this._open = 'payment'; }
+        else if (this._step === 'payment') { this._step = 'summary'; this._open = 'summary'; }
+        return;
+      case 'back':
+        if (this._step === 'payment') { this._step = 'customer'; this._open = 'customer'; }
+        else if (this._step === 'summary') { this._step = 'payment'; this._open = 'payment'; }
+        return;
+      case 'tender-cash': return this._chooseMethod('cash');
+      case 'tender-check': return this._chooseMethod('check');
+      case 'tender-card': return this._chooseMethod('card');
+      case 'tender-account': return this._chooseMethod('account');
+      case 'pay': return this._pay();
+      case 'new-sale': return this._beginFresh();
+      case 'clear-sale': return this._clearSale();
+      case 'void': return this._voidSale();
+      default: {
+        // a new action in the roster must be given a handler here
+        const unhandled: never = action;
+        return unhandled;
+      }
+    }
+  }
+
+  /** The legend pinned above the counter: every key at every state, the unavailable ones dimmed. */
+  private _renderHotkeyLegend() {
+    return html`
+      <div role="group" aria-label="Keyboard shortcuts" data-testid="pos-hotkey-legend"
+        class="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/10 bg-slate-steel px-4 py-1.5 text-xs text-slate-300">
+        ${legendKeys((a) => this._hotkeyLive(a)).map((k) => html`
+          <span data-action=${k.action} class="inline-flex items-center gap-1 whitespace-nowrap ${k.live ? '' : 'opacity-40'}">
+            <kbd class="rounded border border-white/20 px-1.5 font-mono text-slate-200">${k.keycap}</kbd>${k.label}
+          </span>`)}
+      </div>`;
+  }
+
+  /** The lines whose quantity change is on its way, so one commit is sent once. */
+  private _changing = new Set<string>();
+
+  /**
+   * Sets a line's quantity on the sale's revision. A change that cannot be
+   * made says why and puts the number back.
+   */
+  private async _changeQuantity(item: SaleLine, text: string, input: HTMLInputElement | null): Promise<boolean> {
+    const sale = this._sale;
+    const restore = () => { if (input) input.value = item.quantity ?? ''; };
+    if (!sale || sale.status !== 'open' || this._changing.has(item.id)) return false;
+    const qty = normalizeQuantity(text);
+    if (qty === null) {
+      this._error = 'Enter a quantity above zero';
+      restore();
+      return false;
+    }
+    if (qty.includes('.') && isCountedUnit(item.uom ?? '')) {
+      this._error = `${item.uom} is counted in whole units`;
+      restore();
+      return false;
+    }
+    if (Number(qty) === Number(item.quantity)) {
+      restore();
+      return false;
+    }
+    this._changing.add(item.id);
+    this.requestUpdate();
+    try {
+      this._error = null;
+      this._sale = await posService.changeQuantity(sale.id, item.id, qty, sale.revision);
+      if (input) input.value = this._sale.lines.find((l) => l.id === item.id)?.quantity ?? qty;
+      return true;
+    } catch (err: unknown) {
+      this._error = err instanceof Error ? err.message : 'Failed to change the quantity';
+      restore();
+      return false;
+    } finally {
+      this._changing.delete(item.id);
+      this.requestUpdate();
+    }
+  }
+
+  /** The line's quantity one step either way, as the number a cashier would type. */
+  private _stepQuantity(item: SaleLine, by: 1 | -1) {
+    this._selectedLineId = item.id;
+    const next = Math.round((Number(item.quantity) + by) * 10000) / 10000;
+    if (!(next > 0)) return;
+    void this._changeQuantity(item, String(next), null);
+  }
+
+  private _renderQuantityControl(item: SaleLine) {
+    const busy = this._changing.has(item.id);
+    const button = 'inline-flex h-11 w-11 shrink-0 items-center justify-center rounded border border-white/20 text-lg text-white hover:bg-white/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-gable-green disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent';
+    return html`
+      <div class="flex shrink-0 items-center gap-1" data-testid="pos-line-quantity">
+        <button type="button" aria-label="Decrease quantity of ${item.description}"
+          ?disabled=${busy || !(Number(item.quantity) > 1)}
+          @click=${() => this._stepQuantity(item, -1)} class=${button}>−</button>
+        <input type="text" inputmode="decimal" autocomplete="off" aria-label="Quantity of ${item.description}"
+          .value=${item.quantity} ?disabled=${busy} data-line-id=${item.id}
+          @focus=${() => { this._selectedLineId = item.id; }}
+          @keydown=${(e: KeyboardEvent) => {
+            if (e.key === 'Enter') { e.preventDefault(); void this._changeQuantity(item, (e.target as HTMLInputElement).value, e.target as HTMLInputElement); }
+          }}
+          @change=${(e: Event) => void this._changeQuantity(item, (e.target as HTMLInputElement).value, e.target as HTMLInputElement)}
+          class="h-11 w-16 rounded border border-white/10 bg-deep-space px-1 text-center font-mono text-sm text-white outline-none focus:border-gable-green disabled:opacity-60" />
+        <button type="button" aria-label="Increase quantity of ${item.description}" ?disabled=${busy}
+          @click=${() => this._stepQuantity(item, 1)} class=${button}>+</button>
+      </div>`;
+  }
+
   private async _removeItem(itemId: string) {
     if (!this._sale) return;
     try {
@@ -749,6 +973,8 @@ export class POSTerminal extends LitElement {
   /** Pay: the added tenders plus the entry when they do not cover the total. */
   private async _pay() {
     if (!this._sale) return;
+    // a quantity change on its way would leave the sale paid at the old quantity
+    if (this._changing.size > 0) return;
     const plan = payPlan(this._sale.total_cents, this._pendingTenders, this._entry);
     if (!plan.ok) {
       this._error = plan.owedCents > 0 ? `Still owed ${fmt(plan.owedCents)}` : 'Nothing to pay';
@@ -924,12 +1150,12 @@ export class POSTerminal extends LitElement {
             <th style="text-align:left;padding:4px 0">Method</th><th>Expected</th><th>Counted</th><th>\u0394</th>
           </tr></thead>
           <tbody>
-            ${Object.keys(r.session.expected_by_method || {}).map((m) => {
+            ${Object.keys(r.session.expected_by_method || {}).filter((m) => m.toLowerCase() !== 'account').map((m) => {
               const exp = r.session.expected_by_method?.[m] ?? 0;
               const cnt = r.session.counted_by_method?.[m] ?? 0;
               const d = cnt - exp;
               return html`<tr style="text-align:right;border-top:1px solid rgb(var(--gb-till-rule))">
-                <td style="text-align:left;padding:6px 0">${m}</td>
+                <td style="text-align:left;padding:6px 0">${methodLabel(m.toLowerCase() as TenderMethod)}</td>
                 <td>${fmt(exp)}</td><td>${fmt(cnt)}</td>
                 <td style="color:${d === 0 ? 'rgb(var(--gb-till-muted))' : d < 0 ? 'rgb(var(--gb-till-bad))' : 'rgb(var(--gb-till-warn))'}">${fmt(d)}</td>
               </tr>`;
@@ -952,7 +1178,7 @@ export class POSTerminal extends LitElement {
       </p>
       ${methods.map((m) => html`
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-          <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft));text-transform:capitalize">${m}</label>
+          <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft))">${methodLabel(m as TenderMethod)}</label>
           <input type="number" step="0.01" .value=${this._counts[m]}
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
             style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="0.00" />
@@ -1115,8 +1341,15 @@ export class POSTerminal extends LitElement {
     const owed = this._owedCents;
     const entry = this._entry;
     const isCash = this._tenderMethod === 'cash';
-    const change = isCash && entry !== null && this._tenderedSoFar < total
-      ? Math.max(this._tenderedSoFar + entry.amount_cents - total, 0) : 0;
+    const payPlanNow = payPlan(total, this._pendingTenders, entry);
+    // the change due is the plan's: the tendered amount above the total, given from the cash
+    const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
+    const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
+    const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
+      ? (payPlanNow.typedMethod === 'account'
+        ? 'A charge to account cannot be more than what is owed'
+        : 'A card or check cannot be more than what is owed')
+      : 'The added tenders are more than the sale now: clear them and choose again';
     const ready = this._till !== null && hasLines && open;
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.
     const accountWhy = this._customer !== null && open ? this._accountRefusal : null;
@@ -1170,7 +1403,11 @@ export class POSTerminal extends LitElement {
             @blur=${() => this._formatTenderAmount()}
             class="mt-1 w-full rounded border border-white/10 bg-deep-space px-3 py-2 text-right font-mono text-xl font-bold text-white outline-none focus:border-gable-green"
             aria-label="Tender amount" />
-          ${isCash && change > 0 ? html`
+          ${tendersOver ? html`
+            <div class="mt-2 rounded-lg border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-300" role="status" data-testid="pos-tenders-over">
+              ${overWords}
+            </div>` : nothing}
+          ${change > 0 ? html`
             <div class="mt-2 flex justify-between text-sm font-bold text-gable-green" data-testid="pos-change">
               <span>Change due</span><span class="font-mono">${fmt(change)}</span>
             </div>` : nothing}
@@ -1236,12 +1473,14 @@ export class POSTerminal extends LitElement {
     const open = sale?.status === 'open';
     const completed = sale?.status === 'completed';
     const plan = payPlan(total, this._pendingTenders, this._entry);
-    const canPay = this._till !== null && hasLines && open && !this._loading && plan.ok;
+    const canPay = this._canPay;
     const clearable = open && hasLines && !this._loading;
     const label = this._loading ? 'Processing...'
       : completed ? 'Paid in full'
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
+      : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
+      : !plan.ok && plan.over === 'typed' ? 'Type no more than is owed'
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
@@ -1258,6 +1497,7 @@ export class POSTerminal extends LitElement {
                   <div class="truncate text-sm font-semibold text-white">${item.description}</div>
                   <div class="font-mono text-xs text-slate-400">${item.quantity} ${item.uom} at ${item.unit_price_ten_thousandths !== null ? formatPrice4(item.unit_price_ten_thousandths) : '-'}</div>
                 </div>
+                ${open && hasQuantityControl(item) ? this._renderQuantityControl(item) : nothing}
                 <div class="font-mono text-sm font-semibold text-white">${item.line_total_cents !== null ? fmt(item.line_total_cents) : '-'}</div>
                 ${open ? html`
                 <button @click=${() => this._removeItem(item.id)} title="Remove"
@@ -1392,6 +1632,7 @@ export class POSTerminal extends LitElement {
     return html`
       <div class="flex h-screen flex-col bg-deep-space font-sans text-white" data-testid="pos-terminal">
         ${this._renderHeader(sale, progress)}
+        ${this._renderHotkeyLegend()}
         ${this._renderTillOpenModal()}
         ${this._renderTillCloseModal()}
         ${this._renderReturnModal()}

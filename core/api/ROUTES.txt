@@ -324,6 +324,7 @@ POST	/api/v1/pos/transactions/{id}/complete	internal/pos	h.CompleteTransaction
 PUT	/api/v1/pos/transactions/{id}/customer	internal/pos	h.AttachCustomer
 POST	/api/v1/pos/transactions/{id}/items	internal/pos	h.AddItem
 DELETE	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.RemoveItem
+PATCH	/api/v1/pos/transactions/{id}/items/{itemId}	internal/pos	h.ChangeItemQuantity
 GET	/api/v1/pos/transactions/{id}/receipt	internal/document	h.HandlePrintSaleReceipt
 POST	/api/v1/pos/transactions/{id}/receipt/email	internal/document	h.HandleEmailSaleReceipt
 POST	/api/v1/pos/transactions/{id}/void	internal/pos	h.VoidTransaction

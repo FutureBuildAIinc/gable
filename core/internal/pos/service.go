@@ -34,6 +34,7 @@ const (
 
 	auditLinePriceOverridden = "pos_transaction.line_price_overridden"
 	auditLineDiscounted      = "pos_transaction.line_discounted"
+	auditLineQuantityChanged = "pos_transaction.line_quantity_changed"
 )
 
 // PriceEngine prices a product line for a customer and quantity at the
@@ -628,6 +629,159 @@ func (s *Service) AddLine(ctx context.Context, saleID uuid.UUID, parsed []salesd
 		return nil, err
 	}
 	return out, nil
+}
+
+// ChangeLineQuantity sets one line's quantity on an open cart. The line is
+// priced again by priceLine, the add's own pricing step, at the new
+// quantity (so a quantity break, a kit's components and a sale's tax follow),
+// keeps its id and its place, and the sale's totals are summed as every other
+// line write sums them. A price the cashier overrode and a discount stay on
+// the line; a list price is read afresh.
+func (s *Service) ChangeLineQuantity(ctx context.Context, saleID, lineID uuid.UUID, qty httpx.Quantity,
+	ifMatch string, bodyRevision *int64, actor string) (*Sale, error) {
+	if err := s.holdSaleBranch(ctx, saleID); err != nil {
+		return nil, err
+	}
+	var out *Sale
+	err := s.inTx(ctx, func(ctx context.Context) error {
+		if err := s.repo.LockSale(ctx, saleID); err != nil {
+			return err
+		}
+		sale, err := s.repo.GetSale(ctx, saleID)
+		if err != nil {
+			return err
+		}
+		if err := httpx.CheckRevision(sale.Revision, ifMatch, bodyRevision); err != nil {
+			return err
+		}
+		if sale.Status != StatusOpen && sale.Status != StatusHeld {
+			return httpx.InvalidStateTransition(fmt.Sprintf("cannot change a line of a %s sale", sale.Status.Status()))
+		}
+		existing, err := s.repo.GetLines(ctx, saleID)
+		if err != nil {
+			return err
+		}
+		var old *salesdoc.Line
+		for i := range existing {
+			if existing[i].ID == lineID {
+				old = &existing[i]
+			}
+		}
+		if old == nil {
+			return httpx.NotFound("line not found on this sale")
+		}
+		if old.ParentLineID != nil {
+			return invalid("line_id", "is a kit component: change the kit line, its components follow")
+		}
+		if old.LineType == salesdoc.LineText || old.Quantity == nil {
+			return invalid("line_id", "has no quantity to change")
+		}
+		if sale.CustomerID == nil {
+			walkInID, _, err := s.repo.WalkInCustomer(ctx)
+			if err != nil {
+				return err
+			}
+			sale.WalkInID = walkInID
+		}
+		line, priced, err := s.priceLine(ctx, sale, parsedFromLine(old, qty), actor)
+		if err != nil {
+			return err
+		}
+		line.ID = old.ID
+		// whoever set the price keeps the credit for it: pressing plus does
+		// not make the cashier the author of a manager's override
+		line.PriceAdjustedBy = old.PriceAdjustedBy
+		lines, err := s.explodeAndExtend(ctx, []salesdoc.Line{line})
+		if err != nil {
+			return err
+		}
+		// the line and its components take the places the old family held
+		var places []int
+		for i := range existing {
+			if existing[i].ID == old.ID || (existing[i].ParentLineID != nil && *existing[i].ParentLineID == old.ID) {
+				places = append(places, existing[i].Position)
+			}
+		}
+		for i := range lines {
+			if i < len(places) {
+				lines[i].Position = places[i]
+			} else {
+				lines[i].Position = places[len(places)-1] + (i - len(places) + 1)
+			}
+		}
+		if err := s.repo.RemoveLine(ctx, saleID, old.ID); err != nil {
+			return err
+		}
+		if err := s.repo.AddLines(ctx, saleID, lines); err != nil {
+			return err
+		}
+		if s.auditLog != nil {
+			// an override that was already on the line has its row; only an
+			// override this change brings (the engine's price moved with the
+			// quantity) is new, and it names the line it is on
+			if old.PriceSource != salesdoc.PriceSourceOverride {
+				for _, e := range priced.overrides {
+					e.Changes["line_id"] = old.ID
+					if err := s.auditLog.Log(ctx, e); err != nil {
+						return fmt.Errorf("failed to write the audit row: %w", err)
+					}
+				}
+			}
+			if err := s.auditLog.Log(ctx, audit.Entry{
+				Action: auditLineQuantityChanged, EntityType: "pos_transaction", EntityID: sale.ID, UserID: actor,
+				Changes: map[string]any{"line_id": old.ID, "product_id": old.ProductID,
+					"from_quantity": old.Quantity.WireString(), "to_quantity": qty.WireString()}}); err != nil {
+				return fmt.Errorf("failed to write the audit row: %w", err)
+			}
+		}
+		if err := s.recalcTotals(ctx, sale); err != nil {
+			return err
+		}
+		out, err = s.GetSale(ctx, saleID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// parsedFromLine turns a stored line back into the request line that made it,
+// at a new quantity: what the cashier fixed (an override price and its reason,
+// a discount, a charge's price) is carried, a list price is left to the engine.
+func parsedFromLine(l *salesdoc.Line, qty httpx.Quantity) salesdoc.ParsedLine {
+	pl := salesdoc.ParsedLine{
+		LineType:    l.LineType,
+		ProductID:   l.ProductID,
+		SKU:         derefString(l.SKU),
+		Description: l.Description,
+		Quantity:    qty,
+		UOM:         derefString(l.UOM),
+		PriceUOM:    derefString(l.PriceUOM),
+	}
+	if l.UOMQty != nil {
+		pl.UOMQty = *l.UOMQty
+	}
+	if l.PriceUOMQty != nil {
+		pl.PriceUOMQty = *l.PriceUOMQty
+	}
+	if l.ChargeCode != nil {
+		pl.ChargeCode = *l.ChargeCode
+	}
+	// a charge line and a non stock product line carry their own taxable
+	// flag; a stocked product's comes from the product
+	taxable := l.Taxable
+	if l.LineType == salesdoc.LineCharge || l.ProductID == nil {
+		pl.Taxable = &taxable
+	}
+	if l.PriceSource == salesdoc.PriceSourceOverride || l.PriceSource == salesdoc.PriceSourceManual || l.LineType == salesdoc.LineCharge {
+		pl.UnitPrice = l.UnitPrice
+		pl.OverrideReason = derefString(l.OverrideReason)
+	}
+	pl.DiscountPercent = l.DiscountPercent
+	pl.DiscountAmount = l.DiscountAmount
+	pl.DiscountReason = derefString(l.DiscountReason)
+	return pl
 }
 
 // RemoveLine removes a line from an open cart.

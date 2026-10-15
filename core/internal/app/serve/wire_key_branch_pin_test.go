@@ -1728,6 +1728,24 @@ func TestKeyBranchPin_PosAndAccountRows(t *testing.T) {
 	if after := linesOn(f.txnB); after != before {
 		t.Errorf("bound key line delete on the foreign transaction wrote: %d rows then %d", before, after)
 	}
+	// a quantity change on the foreign sale is refused as a missing sale
+	// answers and writes nothing
+	var qtyBefore, qtyAfter string
+	qtyOf := func(dst *string) {
+		t.Helper()
+		if err := f.db.Pool.QueryRow(context.Background(),
+			`SELECT quantity::text FROM pos_line_items WHERE id = $1`, f.lineB).Scan(dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	qtyOf(&qtyBefore)
+	sPatch, _ := f.key(t, f.bound, "PATCH", "/api/v1/pos/transactions/"+f.txnB.String()+"/items/"+f.lineB.String(),
+		`{"quantity":"9","revision":1}`, nil)
+	f.twinLeg("PATCH", "/api/v1/pos/transactions/"+f.txnB.String()+"/items/"+f.lineB.String())
+	if qtyOf(&qtyAfter); qtyAfter != qtyBefore || sPatch != http.StatusNotFound {
+		t.Errorf("bound key quantity change on the foreign transaction: %d, quantity %s then %s, want 404 and no write",
+			sPatch, qtyBefore, qtyAfter)
+	}
 	before = linesOn(f.txnA)
 	f.allow(t, "bound", "POST", "/api/v1/pos/transactions/"+f.txnA.String()+"/items",
 		fmt.Sprintf(`{"line":{"product_id":%q,"quantity":"1"}}`, f.posProd.String()), nil, http.StatusOK)
