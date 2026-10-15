@@ -2508,6 +2508,10 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     await typeInto(el, '90.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
     expect(q(el, 'pos-tenders-over').textContent).toContain('A card, check or account charge cannot be more than $86.50 here');
+    // Pay's label names the same limit the panel names, never "what is owed".
+    const pay = q(el, 'pos-pay');
+    expect(pay.textContent).toContain('Type no more than $86.50');
+    expect(pay.textContent).not.toContain('is owed');
     await typeInto(el, '40.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
     expect(q(el, 'pos-tenders-over')).toBeNull();
