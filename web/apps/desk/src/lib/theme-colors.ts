@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
+// SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
+
+/**
+ * Colours for code that cannot use a Tailwind class: a value that is built
+ * into a string with an alpha suffix, or handed to a canvas. Every colour
+ * reads the --gb-* channel variables, so it follows Industrial Dark and
+ * Gable light.
+ */
+
+/** A channel triple such as "4 108 67" as #rrggbb. */
+export function channelsToHex(raw: string): string | null {
+  const parts = raw.trim().split(/\s+/).map(Number)
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return null
+  return '#' + parts.map((n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0')).join('')
+}
+
+/** Industrial Dark values for a colour read before the stylesheet is loaded. */
+const DARK_FALLBACK: Record<string, string> = { 'gable-green': '#00FFA3' }
+
+/** A theme colour as #rrggbb (for a suffix such as `${hex}15`), read at call time. */
+export function themeHex(name: string, fallback = DARK_FALLBACK[name] ?? 'transparent'): string {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(`--gb-${name}`)
+  return channelsToHex(raw) ?? fallback
+}
+
+/** A CSS colour that follows the mode with no read: for a style attribute. */
+export function cssVarColor(name: string, alpha?: number): string {
+  return alpha === undefined ? `rgb(var(--gb-${name}))` : `rgb(var(--gb-${name}) / ${alpha})`
+}
+
+function luminance(hex: string): number {
+  const h = hex.replace('#', '')
+  const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h.slice(0, 6)
+  const lin = [0, 2, 4].map((i) => {
+    const c = parseInt(full.slice(i, i + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+}
+
+/**
+ * A tenant's brand colour, made legible on the card. A brand colour that
+ * suits dark (a bright green) can be about 1.3:1 on Gable light's card; there
+ * it gives way to the mode's own Gable green. Dark keeps the brand colour as
+ * it is, and a brand colour that already reads at 3:1 (a control or large
+ * text) is kept in light too.
+ */
+export function brandOnCard(brand: string): string {
+  if (document.documentElement.dataset.theme !== 'light') return brand
+  if (!/^#[0-9A-Fa-f]{3}$|^#[0-9A-Fa-f]{6}$/.test(brand)) return brand
+  const card = themeHex('slate-steel', '')
+  if (!card.startsWith('#')) return brand
+  const [hi, lo] = [luminance(brand), luminance(card)].sort((a, b) => b - a)
+  return (hi + 0.05) / (lo + 0.05) >= 3 ? brand : themeHex('gable-green')
+}

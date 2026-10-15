@@ -208,7 +208,7 @@ export class GableDeliveryList extends LitElement {
             ` : nothing}
             ${this._deliveries.length > 0 && this.routeStatus !== 'completed' && this.routeStatus !== 'cancelled' ? html`
               ${this.routeStatus === 'in_transit' && this._allTerminal ? html`
-                <button class="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-white inline-flex items-center justify-center rounded-lg font-medium transition-all" @click=${this._completeRoute} ?disabled=${this._completing}>
+                <button class="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-500 text-plate inline-flex items-center justify-center rounded-lg font-medium transition-all" @click=${this._completeRoute} ?disabled=${this._completing}>
                   ${icon(CheckCircle2, 12, 'mr-1')} ${this._completing ? 'Completing...' : 'Complete Route'}
                 </button>
               ` : html`
@@ -231,11 +231,11 @@ export class GableDeliveryList extends LitElement {
 
           ${this._deliveries.map((delivery, index) => html`
             <div class="relative pl-12 group">
-              <div class="absolute left-6 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-[#0A0B10] border-2 border-gable-green flex items-center justify-center shadow-[0_0_10px_rgba(0,255,163,0.3)] z-10 text-[10px] font-bold text-white">
+              <div class="absolute left-6 top-6 -translate-x-1/2 w-6 h-6 rounded-full bg-deep-space border-2 border-gable-green flex items-center justify-center shadow-glow-10-30 z-10 text-[10px] font-bold text-white">
                 ${index + 1}
               </div>
 
-              <div class="bg-[#161821] border border-white/5 p-5 rounded-xl hover:border-gable-green/30 hover:bg-white/5 transition-all duration-300 group-hover:translate-x-1">
+              <div class="bg-slate-steel border border-white/5 p-5 rounded-xl hover:border-gable-green/30 hover:bg-white/5 transition-all duration-300 group-hover:translate-x-1">
                 <div class="flex justify-between items-start mb-2">
                   <span class="font-bold text-lg text-white group-hover:text-gable-green transition-colors">${delivery.customer_name}</span>
                   <div class="flex items-center gap-2">

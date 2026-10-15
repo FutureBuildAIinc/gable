@@ -32,7 +32,7 @@ export class GableAppDisabled extends LitElement {
         </p>
         <a
           href="/admin/apps"
-          class="mt-6 inline-flex items-center gap-2 rounded-lg bg-gable-green/10 px-4 py-2 text-sm font-medium text-gable-green shadow-[inset_0_0_0_1px_rgba(0,255,163,0.2)] hover:bg-gable-green/20 transition-colors"
+          class="mt-6 inline-flex items-center gap-2 rounded-lg bg-gable-green/10 px-4 py-2 text-sm font-medium text-gable-green ring-1 ring-inset ring-gable-green/20 hover:bg-gable-green/20 transition-colors"
         >
           Manage apps
         </a>

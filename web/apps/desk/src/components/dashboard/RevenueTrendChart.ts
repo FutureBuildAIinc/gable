@@ -4,6 +4,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
+import { onThemeChange, themeColor } from '@gable/design-system';
 import type { RevenueTrendPoint } from '../../types/dashboard.ts';
 
 @customElement('gable-revenue-trend-chart')
@@ -14,6 +15,12 @@ export class GableRevenueTrendChart extends LitElement {
     @property({ type: Boolean }) loading = false;
 
     private _chart: Chart<'line'> | null = null;
+    private _offTheme: (() => void) | null = null;
+
+    connectedCallback() {
+        super.connectedCallback();
+        this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
+    }
 
     updated(changedProperties: Map<string, unknown>) {
         super.updated(changedProperties);
@@ -26,6 +33,8 @@ export class GableRevenueTrendChart extends LitElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
+        this._offTheme?.();
+        this._offTheme = null;
         this._destroyChart();
     }
 
@@ -55,8 +64,8 @@ export class GableRevenueTrendChart extends LitElement {
 
             // Create gradient
             const gradient = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 300);
-            gradient.addColorStop(0, 'rgba(0, 255, 163, 0.3)');
-            gradient.addColorStop(1, 'rgba(0, 255, 163, 0)');
+            gradient.addColorStop(0, themeColor('gable-green', 0.3));
+            gradient.addColorStop(1, themeColor('gable-green', 0));
 
             this._chart = new Chart(canvas, {
                 type: 'line',
@@ -64,14 +73,14 @@ export class GableRevenueTrendChart extends LitElement {
                     labels: formattedData.map(d => d.date),
                     datasets: [{
                         data: formattedData.map(d => d.revenue),
-                        borderColor: '#00FFA3',
+                        borderColor: themeColor('gable-green'),
                         borderWidth: 3,
                         backgroundColor: gradient,
                         fill: true,
                         tension: 0.4,
                         pointRadius: 0,
                         pointHoverRadius: 6,
-                        pointHoverBackgroundColor: '#ffffff',
+                        pointHoverBackgroundColor: themeColor('white'),
                         pointHoverBorderWidth: 0,
                     }],
                 },
@@ -88,12 +97,12 @@ export class GableRevenueTrendChart extends LitElement {
                     plugins: {
                         legend: { display: false },
                         tooltip: {
-                            backgroundColor: 'rgba(22, 24, 33, 0.9)',
-                            titleColor: '#a1a1aa',
+                            backgroundColor: themeColor('slate-steel', 0.9),
+                            titleColor: themeColor('zinc-400'),
                             titleFont: { size: 11 },
-                            bodyColor: '#00FFA3',
+                            bodyColor: themeColor('gable-green'),
                             bodyFont: { family: 'JetBrains Mono, monospace', weight: 'bold', size: 16 },
-                            borderColor: 'rgba(255,255,255,0.1)',
+                            borderColor: themeColor('white', 0.1),
                             borderWidth: 1,
                             cornerRadius: 8,
                             padding: 12,
@@ -109,7 +118,7 @@ export class GableRevenueTrendChart extends LitElement {
                         x: {
                             grid: { display: false },
                             ticks: {
-                                color: '#52525b',
+                                color: themeColor('chart-tick'),
                                 font: { size: 12 },
                                 padding: 10,
                             },
@@ -117,10 +126,10 @@ export class GableRevenueTrendChart extends LitElement {
                         },
                         y: {
                             grid: {
-                                color: 'rgba(255,255,255,0.05)',
+                                color: themeColor('white', 0.05),
                             },
                             ticks: {
-                                color: '#52525b',
+                                color: themeColor('chart-tick'),
                                 font: { size: 12 },
                                 padding: 10,
                                 callback: (value) => `$${Number(value).toLocaleString()}`,

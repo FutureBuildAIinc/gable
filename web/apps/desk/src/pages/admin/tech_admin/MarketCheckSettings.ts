@@ -164,7 +164,7 @@ export class GableMarketCheckSettings extends LitElement {
 
                     <div class="flex justify-end">
                         <button type="button" data-testid="save" @click=${() => this._save()} ?disabled=${this._saving}
-                            class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                            class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                             Save
                         </button>
                     </div>

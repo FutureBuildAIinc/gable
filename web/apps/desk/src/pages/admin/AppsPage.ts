@@ -93,7 +93,7 @@ export class AppsPage extends LitElement {
                   @click=${() => this._toggle(app)}
                   class="relative h-6 w-11 shrink-0 rounded-full transition-colors ${app.enabled ? 'bg-gable-green/80' : 'bg-white/10'} ${busy ? 'opacity-50 cursor-wait' : 'cursor-pointer'}"
                 >
-                  <span class="absolute top-0.5 ${app.enabled ? 'left-[22px]' : 'left-0.5'} h-5 w-5 rounded-full bg-white shadow transition-all"></span>
+                  <span class="absolute top-0.5 ${app.enabled ? 'left-[22px]' : 'left-0.5'} h-5 w-5 rounded-full bg-plate shadow transition-all"></span>
                 </button>
               `
             : app.orphaned
