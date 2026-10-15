@@ -147,8 +147,6 @@ func TestDemoImport(t *testing.T) {
 		t.Fatalf("the import wrote nothing: %+v", first)
 	}
 
-	// FROM-PRINCIPAL 145 a: the seeded catalogue (the base seed and the import
-	// together) carries no two products with one name.
 	t.Run("no vendor carries the dealer's own name", func(t *testing.T) {
 		// The dealer buying from a vendor of its own name reads as the dealer
 		// buying from itself on every product and purchase order. A vendor that
@@ -173,6 +171,75 @@ func TestDemoImport(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	// FROM-PRINCIPAL 141 c, round 7: the walk is a script a person follows, so
+	// every name it tells them to search finds a record.
+	t.Run("every name the walk tells a person to search finds its record", func(t *testing.T) {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "parity", "WALKS.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var terms []string
+		for _, re := range []*regexp.Regexp{
+			regexp.MustCompile(`[Ff]ind "([^"]+)"`),
+			regexp.MustCompile("search `([^`]+)`"),
+			regexp.MustCompile(`[?&]q=([^"&\s]+)`),
+		} {
+			for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
+				term, err := url.QueryUnescape(m[1])
+				if err != nil {
+					t.Fatalf("the walk's search %q: %v", m[1], err)
+				}
+				terms = append(terms, term)
+			}
+		}
+		if len(terms) < 3 {
+			t.Fatalf("the walk's searches were not found: %v", terms)
+		}
+		for _, term := range terms {
+			var n int
+			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM customers WHERE name ILIKE '%'||$1||'%' OR account_number ILIKE '%'||$1||'%' OR email ILIKE '%'||$1||'%')
+				+ (SELECT COUNT(*) FROM products WHERE description ILIKE '%'||$1||'%' OR sku ILIKE '%'||$1||'%')`, term).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n == 0 {
+				t.Errorf("the walk tells a person to search %q and no customer or product matches it", term)
+			}
+		}
+	})
+	t.Run("no customer user sits on the dealer's own domain", func(t *testing.T) {
+		rows, err := db.Query(`SELECT email FROM customer_users WHERE email ILIKE '%@gablebuildingsupply.example' ORDER BY email`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var email string
+			if err := rows.Scan(&email); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the customer user %s is on the dealer's domain, not its own company's", email)
+		}
+	})
+	// The region word is a place, not an invented company word.
+	t.Run("no customer and vendor share their first word", func(t *testing.T) {
+		rows, err := db.Query(`SELECT DISTINCT split_part(c.name, ' ', 1), c.name, v.name FROM customers c
+			JOIN vendors v ON LOWER(split_part(v.name, ' ', 1)) = LOWER(split_part(c.name, ' ', 1))
+			WHERE c.account_number !~ '^RET-' AND LOWER(split_part(c.name, ' ', 1)) <> 'okanagan' ORDER BY 2, 3`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var word, customer, vendor string
+			if err := rows.Scan(&word, &customer, &vendor); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the customer %q and the vendor %q share the word %q", customer, vendor, word)
+		}
+	})
+	// FROM-PRINCIPAL 145 a: the seeded catalogue (the base seed and the import
+	// together) carries no two products with one name. This database leg is the
+	// red first leg; TestImportProductNamesAreUnique only guards the import file.
 	t.Run("no two products share a name", func(t *testing.T) {
 		rows, err := db.Query(`SELECT LOWER(BTRIM(description)), STRING_AGG(sku, ', ' ORDER BY sku)
 			FROM products GROUP BY LOWER(BTRIM(description)) HAVING COUNT(*) > 1 ORDER BY 1`)
@@ -1273,7 +1340,7 @@ func TestImportProductNamesAreUnique(t *testing.T) {
 	}
 }
 
-// FROM-PRINCIPAL 145 a: every invented company name was searched against real
+// FROM-PRINCIPAL 141 c: every invented company name was searched against real
 // businesses; these matched (or came close enough to be mistaken) and were
 // replaced with plain invented names, so none of them stays in the seed or the
 // import, in any record, address, email domain or key.
@@ -1295,6 +1362,56 @@ func TestRenamedCompanyNamesStayOut(t *testing.T) {
 			if strings.Contains(text, name) {
 				t.Errorf("%s still names the company %q", src, name)
 			}
+		}
+	}
+}
+
+// FROM-PRINCIPAL 141 c, round 7: a renamed company's old word must not live on
+// in another field of its record: an email local part, a contact, a portal
+// user's name, a job.
+func TestRenamedCompanyWordsLeaveNoOtherField(t *testing.T) {
+	words := []string{"trussway", "cupola", "central", "kelbrook", "oakvale", "ashgrove", "silverpine", "mission", "larchwood custom"}
+	for i, line := range strings.Split(string(customersData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("customers line %d: %v", i+1, err)
+		}
+		// the street, city and region are places, not companies
+		for _, k := range []string{"address_line1", "city", "region"} {
+			delete(row, k)
+		}
+		if sites, ok := row["job_sites"].([]any); ok {
+			for _, site := range sites {
+				if m, ok := site.(map[string]any); ok {
+					delete(m, "line1")
+				}
+			}
+		}
+		flat, _ := json.Marshal(row)
+		for _, w := range words {
+			if strings.Contains(strings.ToLower(string(flat)), w) {
+				t.Errorf("customers line %d still carries the old company word %q: %s", i+1, w, flat)
+			}
+		}
+	}
+	for src, text := range designationSources(t) {
+		for _, pun := range []string{"Olivia Homes", "Marc Mission", "Larchwood Custom Home"} {
+			if strings.Contains(text, pun) {
+				t.Errorf("%s still carries %q, a name built on a renamed company", src, pun)
+			}
+		}
+	}
+}
+
+// FROM-PRINCIPAL 145 a, round 7: the lumber vendor is a supplier, not the
+// dealer's own yard, in every field of its import row.
+func TestLumberVendorRowIsNotTheDealersOwnFeed(t *testing.T) {
+	for _, w := range []string{"internal yard feed", "in-house"} {
+		if strings.Contains(strings.ToLower(string(vendorKeysData)), w) {
+			t.Errorf("vendor_keys.json still says %q", w)
 		}
 	}
 }
