@@ -58,7 +58,7 @@ export class GableQuoteList extends LitElement {
     @state() private updatingState: string | null = null;
 
     private stateColors: Record<string, string> = {
-        draft: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        draft: 'bg-voice-fill/20 text-voice-text border-voice-fill/30',
         sent: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
         accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -179,7 +179,7 @@ export class GableQuoteList extends LitElement {
                         <p class="text-gray-400 text-sm mb-4">${this.error}</p>
                         <button
                             @click=${() => { this.error = null; this.loadQuotes(); }}
-                            class="px-4 py-2 bg-[#00FFA3] text-[#0A0B10] rounded font-medium hover:opacity-90"
+                            class="px-4 py-2 bg-gable-green text-deep-space rounded font-medium hover:opacity-90"
                         >
                             Retry
                         </button>

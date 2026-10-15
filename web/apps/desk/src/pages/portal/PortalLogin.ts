@@ -8,6 +8,8 @@ import { router } from '../../lib/router.ts';
 import { LogIn, AlertCircle, Loader2 } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalConfig } from '../../types/portal';
+import { onThemeChange } from '@gable/design-system';
+import { themeHex, brandOnCard } from '../../lib/theme-colors.ts';
 
 @customElement('gable-portal-login')
 export class PortalLogin extends LitElement {
@@ -19,11 +21,20 @@ export class PortalLogin extends LitElement {
     @state() private loading = false;
     @state() private config: PortalConfig | null = null;
 
+    private _offTheme: (() => void) | null = null;
+
     connectedCallback() {
         super.connectedCallback();
+        this._offTheme = onThemeChange(() => { this.requestUpdate(); });
         PortalService.getConfig()
             .then(c => { this.config = c; })
             .catch(() => { /* Ignore — show default branding */ });
+    }
+
+    disconnectedCallback() {
+        super.disconnectedCallback();
+        this._offTheme?.();
+        this._offTheme = null;
     }
 
     private async _handleSubmit(e: Event) {
@@ -45,7 +56,7 @@ export class PortalLogin extends LitElement {
     }
 
     private _onFocus(e: FocusEvent) {
-        const primaryColor = this.config?.primary_color || '#00FFA3';
+        const primaryColor = brandOnCard(this.config?.primary_color || themeHex('gable-green'));
         (e.target as HTMLInputElement).style.borderColor = primaryColor;
     }
 
@@ -54,12 +65,11 @@ export class PortalLogin extends LitElement {
     }
 
     render() {
-        const primaryColor = this.config?.primary_color || '#00FFA3';
+        const primaryColor = brandOnCard(this.config?.primary_color || themeHex('gable-green'));
 
         return html`
             <div
-                class="min-h-screen flex items-center justify-center font-sans"
-                style="background-color: #0C0E14"
+                class="min-h-screen flex items-center justify-center font-sans bg-portal-ground"
             >
                 <!-- Background glow -->
                 <div
@@ -87,8 +97,7 @@ export class PortalLogin extends LitElement {
 
                     <!-- Login Card -->
                     <div
-                        class="rounded-2xl border border-white/10 p-8 backdrop-blur-xl shadow-2xl"
-                        style="background-color: #111320"
+                        class="rounded-2xl border border-white/10 p-8 backdrop-blur-xl shadow-2xl bg-portal-panel"
                     >
                         <form @submit=${(e: Event) => this._handleSubmit(e)} class="space-y-6">
                             ${this.error
