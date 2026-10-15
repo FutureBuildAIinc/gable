@@ -8,7 +8,7 @@ import { ToastService } from '../lib/toast-service.ts';
 import { formatDay } from '../lib/dates.ts';
 import { ReportingService } from '../services/ReportingService.ts';
 import type { DailyTillReport, SalesSummaryReport } from '../types/reporting.ts';
-import { formatDollars } from '../lib/money.ts';
+import { formatDollars } from '../lib/utils.ts';
 import { DollarSign, CreditCard, BarChart2 } from 'lucide';
 
 @customElement('gable-daily-till')
