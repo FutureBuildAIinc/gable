@@ -2563,3 +2563,26 @@ describe('PR 150 round 4: one rule for splits', () => {
     el.remove();
   });
 });
+
+describe('the opening float field', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const openTillDialog = async (el: POSTerminal) => {
+    (el as unknown as { _showTillOpen: boolean })._showTillOpen = true;
+    await el.updateComplete;
+  };
+  const openTillButton = (el: POSTerminal) =>
+    [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Open Till') as HTMLElement;
+
+  it('reads empty: no figure may look entered, the placeholder is words in the till\'s muted tone', async () => {
+    const el = await mount(sale());
+    await openTillDialog(el);
+    const field = q(el, 'till-float-amount') as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(field.placeholder.length).toBeGreaterThan(0);
+    expect(field.placeholder, 'a placeholder that is a figure reads as entered').not.toMatch(/\d/);
+    expect(field.className).toContain('placeholder:text-[rgb(var(--gb-till-muted))]');
+    expect(field.className).toContain('placeholder:font-normal');
+    el.remove();
+  });
+});
