@@ -436,7 +436,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		m.AddRow(10,
 			text.NewCol(4, desc, props.Text{Size: 9}),
 			text.NewCol(2, line.Quantity.WireString()+uom, props.Text{Size: 9, Align: align.Center}),
-			text.NewCol(3, b.style.Money(line.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, b.style.UnitPrice(*line.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
 			text.NewCol(3, b.style.Money(line.LineTotal), props.Text{Size: 9, Align: align.Right}),
 		)
 	}

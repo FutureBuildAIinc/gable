@@ -46,7 +46,7 @@ func TestInvoiceAndReceiptReadGroupedAmountsAndWordDates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Date: Jun 30, 2026", "TOTAL DUE: $3,929.97", "SUBTOTAL: $3,680.00", "$3,929.9700/PCS", "$3,929.97"} {
+	for _, want := range []string{"Date: Jun 30, 2026", "TOTAL DUE: $3,929.97", "SUBTOTAL: $3,680.00", "$3,929.97/PCS", "$3,929.97"} {
 		mustContain(t, doc, want)
 	}
 	for _, unwanted := range []string{"2026-06-30", "$3929.97", "$3680.00"} {

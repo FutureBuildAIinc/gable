@@ -53,7 +53,7 @@ func (s *Service) GenerateQuotePDF(ctx context.Context, q *quote.Quote, cust *cu
 		m.AddRow(10,
 			text.NewCol(4, desc, props.Text{Size: 9}),
 			text.NewCol(2, l.Quantity.WireString()+" "+string(l.UOM), props.Text{Size: 9, Align: align.Center}),
-			text.NewCol(3, b.style.Money(l.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, b.style.UnitPrice(l.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
 			text.NewCol(3, b.style.Money(l.LineTotal), props.Text{Size: 9, Align: align.Right}),
 		)
 	}

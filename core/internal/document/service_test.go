@@ -175,11 +175,11 @@ func TestGenerateInvoicePDF_LineArithmetic(t *testing.T) {
 		wantLine   string
 		wantQtyStr string
 	}{
-		{"two at $4.75", "2", 47500, 950, "$4.7500/PCS", "$9.50", "2 PCS"},
-		{"one at $128.45", "1", 1284500, 12845, "$128.4500/PCS", "$128.45", "1 PCS"},
-		{"fractional quantity", "2.5", 40000, 1000, "$4.0000/PCS", "$10.00", "2.5 PCS"},
-		{"a thousand board feet", "1000", 6850000, 68500000, "$685.0000/PCS", "$685,000.00", "1000 PCS"},
-		{"a sub cent price", "3", 100, 3, "$0.0100/PCS", "$0.03", "3 PCS"},
+		{"two at $4.75", "2", 47500, 950, "$4.75/PCS", "$9.50", "2 PCS"},
+		{"one at $128.45", "1", 1284500, 12845, "$128.45/PCS", "$128.45", "1 PCS"},
+		{"fractional quantity", "2.5", 40000, 1000, "$4.00/PCS", "$10.00", "2.5 PCS"},
+		{"a thousand board feet", "1000", 6850000, 68500000, "$685.00/PCS", "$685,000.00", "1000 PCS"},
+		{"a sub cent price", "3", 100, 3, "$0.01/PCS", "$0.03", "3 PCS"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -391,7 +391,7 @@ func TestGenerateInvoicePDF_IsDeterministicApartFromMetadata(t *testing.T) {
 
 	// The PDF trailer carries a creation timestamp, so the whole byte stream
 	// is not expected to match; the rendered content must.
-	for _, want := range []string{"TOTAL DUE: $9.50", "2X4-8 - SPF Stud", "$4.7500/PCS", "Mar 4, 2026"} {
+	for _, want := range []string{"TOTAL DUE: $9.50", "2X4-8 - SPF Stud", "$4.75/PCS", "Mar 4, 2026"} {
 		mustContain(t, first, want)
 		mustContain(t, second, want)
 	}

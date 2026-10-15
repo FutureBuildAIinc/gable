@@ -4,6 +4,7 @@
 package document
 
 import (
+	"github.com/gablelbm/gable/internal/platform/httpx"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +119,20 @@ type decimalStringer interface{ DecimalString() string }
 // Money writes an amount with digit groups and the minus before the sign:
 // "$3,929.97", "-$2,487.63".
 func (style) Money(c decimalStringer) string { return groupAmount(c.DecimalString()) }
+
+// UnitPrice writes a unit price (held in ten thousandths) with two places, and
+// a third or fourth only when the price truly has it: "$6.00", "$1.4025",
+// "$0.0525", "$1,234.5678". The figure is the one stored; only trailing zeros
+// beyond the cents are left off.
+func (style) UnitPrice(p httpx.Price) string {
+	d := p.DecimalString()
+	if i := strings.IndexByte(d, '.'); i >= 0 {
+		for len(d)-i-1 > 2 && strings.HasSuffix(d, "0") {
+			d = d[:len(d)-1]
+		}
+	}
+	return groupAmount(d)
+}
 
 // MoneyFloat is Money for a float amount (a purchase order's cost), rounded to
 // the cent exactly as "%.2f" rounds it; only the digit groups are new.
