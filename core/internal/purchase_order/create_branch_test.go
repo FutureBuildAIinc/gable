@@ -20,8 +20,9 @@ import (
 )
 
 // createBranchSeed is the shared ground of the create legs below: two
-// branches, a vendor and a product below its reorder point (no stock
-// anywhere, so the alert fires for every caller), cleaned up after the
+// branches, a vendor and a product below its reorder point (an empty row at
+// branch A: reorder is per yard, so the yard must hold the product to be
+// signalled), cleaned up after the
 // test. Each leg grants its own user so the arms cannot read each other's
 // grants.
 type createBranchSeed struct {
@@ -50,7 +51,13 @@ func seedCreateBranch(t *testing.T) *createBranchSeed {
 		 VALUES ($1, $2, 'pin create branch', 'EA', 1, $3, 5, 10)`, s.product, "CB-"+s.product.String()[:8], s.vendor); err != nil {
 		t.Fatalf("seed product: %v", err)
 	}
+	if _, err := db.Pool.Exec(ctx,
+		`INSERT INTO inventory (product_id, location_id, location, quantity, allocated) VALUES ($1, $2, 'row', 0, 0)`,
+		s.product, s.branchA); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
 	t.Cleanup(func() {
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM inventory WHERE product_id = $1`, s.product)
 		// A reorder run drafts for every alerting product in the shared
 		// database, not only this test's, so the drafts it wrote at this
 		// test's branches go with it (a draft left at a branch blocks the
@@ -169,15 +176,15 @@ func TestCreateReorders_TakesTheGrantsBranch(t *testing.T) {
 	}
 	clearReorderDrafts(t, s)
 
-	// The cron engine's system caller keeps the default resolution it always
-	// had: the reorder timer is not a user act, and its drafts stay where the
-	// run has always put them.
+	// The cron engine's system caller orders every yard, each draft at its
+	// own yard (reorder is per yard, item 135 b): the seeded product's empty
+	// row is at branch A.
 	if _, err := svc.CreateReorders(branchctx.WithSystem(context.Background())); err != nil {
 		t.Fatalf("system reorder run: %v", err)
 	}
 	branch, ok = s.poBranch(t)
-	if !ok || branch != s.defaultBranch(t) {
-		t.Errorf("system reorder draft sits at branch %v (found %t), want the deployment default %s", branch, ok, s.defaultBranch(t))
+	if !ok || branch != s.branchA {
+		t.Errorf("system reorder draft sits at branch %v (found %t), want the product's own yard %s", branch, ok, s.branchA)
 	}
 }
 

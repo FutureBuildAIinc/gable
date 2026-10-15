@@ -747,7 +747,10 @@ func r1bCPurchaseOrderGroups() []groupDef {
 	return []groupDef{{
 		name: "purchase_order_flow",
 		steps: []stepDef{
-			{name: "purchase_order.recommendations", method: "GET", path: "/api/v1/purchase-orders/recommendations"},
+			// Per yard rows over the demo seed carry each yard's sales, which the seed draws
+			// inside map iteration (differs per run): the status and content type are
+			// pinned here, and the per yard rows by the purchase_order and serve legs.
+			{name: "purchase_order.recommendations", method: "GET", path: "/api/v1/purchase-orders/recommendations", maskBody: true},
 			{name: "purchase_order.source_summary", method: "GET", path: "/api/v1/purchase-orders/source-summary"},
 			{name: "purchase_order.reorder_runs.before", method: "GET", path: "/api/v1/purchase-orders/reorder-runs"},
 			{name: "purchase_order.refresh_targets.default_dry_run", method: "POST", path: "/api/v1/purchase-orders/refresh-reorder-targets"},

@@ -20,7 +20,7 @@ import type {
 // Side-effect imports: register child custom elements
 import '../components/dashboard/KPICard.ts';
 import '../components/dashboard/RevenueTrendChart.ts';
-import { formatCents } from '../lib/money.ts';
+import { formatCents } from '../lib/utils.ts';
 import '../components/dashboard/OrderStatusChart.ts';
 import '../components/dashboard/TopCustomersTable.ts';
 import '../components/dashboard/InventoryAlertsWidget.ts';

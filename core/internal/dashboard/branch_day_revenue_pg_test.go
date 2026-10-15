@@ -436,3 +436,48 @@ func TestToday_APaymentWithNoReceivedOnLandsOnTheYardsDay(t *testing.T) {
 		t.Errorf("card %d, trend %d, till %d, want all 1500", got.today, got.trendToday, got.tillNet)
 	}
 }
+
+// invoice records an UNPAID invoice at yard whose business date is the yard's
+// today plus dayOffset, made now (created_at is the instant the row is
+// written, as the document's date is its own).
+func (w *dayWorld) invoice(cents int64, dayOffset int) {
+	w.t.Helper()
+	id := uuid.New()
+	if _, err := w.db.Pool.Exec(context.Background(), `INSERT INTO invoices (id, customer_id, branch_id, status, origin, number, currency,
+			total_amount, subtotal, tax_rate, tax_amount, amount_open, due_date, invoice_date)
+		VALUES ($1, $2, $3, 'UNPAID', 'POS', $4, 'USD', $5::bigint::numeric / 100, $5::bigint::numeric / 100, 0, 0, $5::bigint::numeric / 100,
+			$6::date + 30, $6::date)`,
+		id, w.customer, w.yard, "IN-"+id.String()[:8], cents, w.day().AddDate(0, 0, dayOffset).Format("2006-01-02")); err != nil {
+		w.t.Fatalf("seed invoice: %v", err)
+	}
+}
+
+// The invoiced and outstanding halves cut on the document's own business date
+// (invoice_date), the same dates the collected half uses: an invoice made now
+// at a yard west of UTC with its date the yard's today is in the default
+// window; one dated thirty days back is in, thirty one is out.
+func TestSalesSummary_InvoicesAreCutOnTheirBusinessDate(t *testing.T) {
+	w := newDayWorld(t)
+	w.invoice(12345, 0)
+	w.invoice(2000, -30)
+	w.invoice(4000, -31)
+	ctx := branchctx.With(context.Background(), &branchctx.Context{UserSub: "u", BranchID: &w.yard})
+	svc := reporting.NewService(reporting.NewRepository(w.db))
+
+	got, err := svc.GetSalesSummary(ctx, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Round(got.TotalInvoiced*100) != 14345 || got.InvoiceCount != 2 || math.Round(got.OutstandingAR*100) != 14345 {
+		t.Errorf("invoiced %v over %d, outstanding %v, want 143.45 over 2 and 143.45 (123.45 today and 20.00 thirty days back; the thirty first day's 40.00 out)",
+			got.TotalInvoiced, got.InvoiceCount, got.OutstandingAR)
+	}
+	day := w.day().Format("2006-01-02")
+	explicit, err := svc.GetSalesSummary(ctx, day, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Round(explicit.TotalInvoiced*100) != 12345 || explicit.InvoiceCount != 1 {
+		t.Errorf("explicit day: invoiced %v over %d, want 123.45 over 1", explicit.TotalInvoiced, explicit.InvoiceCount)
+	}
+}

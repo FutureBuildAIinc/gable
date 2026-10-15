@@ -48,11 +48,6 @@ func NewService(repo Repository) *Service {
 	}
 }
 
-// dayReader is the repository's optional read of the branch's business day.
-type dayReader interface {
-	BusinessDay(ctx context.Context) (string, error)
-}
-
 func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillReport, error) {
 	// Cache Key
 	key := "daily_till:" + reachKey(ctx) + ":" + dateStr
@@ -99,15 +94,35 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 }
 
 func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) (*SalesSummaryReport, error) {
+	// Validate the dates first: a bad date never reaches the repository.
+	var fromT, toT time.Time
+	var err error
+	if startStr != "" {
+		if fromT, err = time.Parse("2006-01-02", startStr); err != nil {
+			return nil, err
+		}
+	}
+	if endStr != "" {
+		if toT, err = time.Parse("2006-01-02", endStr); err != nil {
+			return nil, err
+		}
+	}
+
+	// The yard's business day, read once: the cache key and the default window
+	// both use it, and a failed read is an error, never a fall back to the
+	// server's clock (in the yard's evening west of UTC the server's date is
+	// the yard's tomorrow). A default bound is the day, or thirty days before.
+	var day string
+	if startStr == "" || endStr == "" {
+		if day, err = s.repo.BusinessDay(ctx); err != nil {
+			return nil, fmt.Errorf("could not read the yard's business day for the summary's window: %w", err)
+		}
+	}
+
 	// Cache Key
 	key := "sales_summary:" + reachKey(ctx) + ":" + startStr + ":" + endStr
-	if startStr == "" || endStr == "" {
-		// A default bound moves with the yard's day: key it by that day.
-		if d, ok := s.repo.(dayReader); ok {
-			if day, err := d.BusinessDay(ctx); err == nil {
-				key += ":" + day
-			}
-		}
+	if day != "" {
+		key += ":" + day
 	}
 
 	// Read Cache
@@ -120,39 +135,20 @@ func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) 
 	}
 	s.cacheMutex.RUnlock()
 
-	// The default window is the yard's business day (the default branch's,
-	// the day the dashboard's card is cut on) and the thirty days before it,
-	// never the server's clock: in the yard's evening west of UTC the server's
-	// date is the yard's tomorrow.
-	now := time.Now()
-	start := now.AddDate(0, 0, -30) // Default last 30 days
-	end := now
-	if d, ok := s.repo.(dayReader); ok {
-		if day, derr := d.BusinessDay(ctx); derr == nil {
-			if parsed, perr := time.Parse("2006-01-02", day); perr == nil {
-				start = parsed.AddDate(0, 0, -30)
-				end = parsed.Add(24*time.Hour - time.Nanosecond) // the whole of the yard's day
-			}
+	to := toT.Format("2006-01-02")
+	from := fromT.Format("2006-01-02")
+	if endStr == "" {
+		to = day
+	}
+	if startStr == "" {
+		dayT, perr := time.Parse("2006-01-02", day)
+		if perr != nil {
+			return nil, fmt.Errorf("the yard's business day %q is not a date: %w", day, perr)
 		}
+		from = dayT.AddDate(0, 0, -30).Format("2006-01-02")
 	}
 
-	var err error
-	if startStr != "" {
-		start, err = time.Parse("2006-01-02", startStr)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if endStr != "" {
-		end, err = time.Parse("2006-01-02", endStr)
-		if err != nil {
-			return nil, err
-		}
-		// Move end to end of day
-		end = end.Add(24*time.Hour - time.Nanosecond)
-	}
-
-	data, err := s.repo.GetSalesSummary(ctx, start, end)
+	data, err := s.repo.GetSalesSummary(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}
