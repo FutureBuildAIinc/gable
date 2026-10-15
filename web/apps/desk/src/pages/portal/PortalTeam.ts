@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { Users, UserPlus, RefreshCw, AlertTriangle, Shield, CheckCircle2, XCircle, Clock } from 'lucide';
@@ -182,7 +183,7 @@ export class PortalTeam extends LitElement {
                                                 <div>
                                                     <div class="font-medium text-white">${invite.email}</div>
                                                     <div class="text-sm text-zinc-500">
-                                                        Invited on ${new Date(invite.created_at).toLocaleDateString()} · Expires ${new Date(invite.expires_at).toLocaleDateString()}
+                                                        Invited on ${formatDate(invite.created_at)} · Expires ${formatDate(invite.expires_at)}
                                                     </div>
                                                 </div>
                                             </div>

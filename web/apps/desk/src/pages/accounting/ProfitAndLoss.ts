@@ -4,6 +4,9 @@
 import { LitElement, html } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import '../../components/ui/gable-date-field.ts';
+import { todayDay } from '../../lib/dates.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { formatStatementCents, statementAmountClasses } from './statement-format';
 import { ToastService } from '../../lib/toast-service.ts';
 import { fetchProfitAndLoss } from '../../services/GLService';
@@ -20,7 +23,7 @@ export class ProfitAndLoss extends LitElement {
         const now = new Date();
         return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
     })();
-    @state() private endDate = new Date().toISOString().split('T')[0];
+    @state() private endDate = todayDay();
 
     connectedCallback() {
         super.connectedCallback();
@@ -90,19 +93,17 @@ export class ProfitAndLoss extends LitElement {
                     </div>
                     <div class="flex items-center gap-3">
                         <label class="text-sm text-zinc-400">From:</label>
-                        <input
-                            type="date"
-                            class="bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                        <gable-date-field
+                            label="From"
                             .value=${this.startDate}
-                            @change=${(e: Event) => { this.startDate = (e.target as HTMLInputElement).value; }}
-                        />
+                            @change=${(e: Event) => { this.startDate = (e.target as GableDateField).value; }}
+                        ></gable-date-field>
                         <label class="text-sm text-zinc-400">To:</label>
-                        <input
-                            type="date"
-                            class="bg-zinc-800 border border-zinc-700 rounded px-3 py-2 text-white text-sm focus:border-emerald-500 outline-none"
+                        <gable-date-field
+                            label="To"
                             .value=${this.endDate}
-                            @change=${(e: Event) => { this.endDate = (e.target as HTMLInputElement).value; }}
-                        />
+                            @change=${(e: Event) => { this.endDate = (e.target as GableDateField).value; }}
+                        ></gable-date-field>
                         <button
                             @click=${() => this._load()}
                             class="px-4 py-2 bg-gable-green/10 text-gable-green border border-gable-green/30 rounded-lg text-sm font-medium hover:bg-gable-green/20 transition-colors"

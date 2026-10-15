@@ -5,6 +5,9 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { formatCents, formatPrice4 } from '../../lib/utils';
+import { formatDay, formatDateTime, todayDay, addDays } from '../../lib/dates.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { APService } from '../../services/APService.ts';
 import { VendorService } from '../../services/VendorService.ts';
@@ -71,12 +74,8 @@ export class AccountsPayable extends LitElement {
     // Log Bill Form State
     @state() private billVendorId = '';
     @state() private billInvoiceNumber = '';
-    @state() private billInvoiceDate = new Date().toISOString().split('T')[0];
-    @state() private billDueDate = (() => {
-        const d = new Date();
-        d.setDate(d.getDate() + 30);
-        return d.toISOString().split('T')[0];
-    })();
+    @state() private billInvoiceDate = todayDay();
+    @state() private billDueDate = addDays(todayDay(), 30);
     @state() private billTaxAmount = 0.00;
     @state() private billNotes = '';
     @state() private billLines: { description: string; quantity: number; unit_price: number; gl_account_id: string }[] = [
@@ -89,7 +88,7 @@ export class AccountsPayable extends LitElement {
     @state() private payMethod: 'CHECK' | 'ACH' | 'WIRE' = 'CHECK';
     @state() private payCheckNumber = '';
     @state() private payReference = '';
-    @state() private payDate = new Date().toISOString().split('T')[0];
+    @state() private payDate = todayDay();
     @state() private paySelectedInvoiceIds: string[] = [];
     @state() private vendorOutstandingInvoices: VendorInvoice[] = [];
 
@@ -160,10 +159,8 @@ export class AccountsPayable extends LitElement {
     private _openLogBillModal() {
         this.billVendorId = this.vendors[0]?.id || '';
         this.billInvoiceNumber = '';
-        this.billInvoiceDate = new Date().toISOString().split('T')[0];
-        const d = new Date();
-        d.setDate(d.getDate() + 30);
-        this.billDueDate = d.toISOString().split('T')[0];
+        this.billInvoiceDate = todayDay();
+        this.billDueDate = addDays(todayDay(), 30);
         this.billTaxAmount = 0.00;
         this.billNotes = '';
         this.billLines = [{ description: '', quantity: 1, unit_price: 0.00, gl_account_id: this.glAccounts[0]?.id || '' }];
@@ -187,6 +184,10 @@ export class AccountsPayable extends LitElement {
         e.preventDefault();
         if (!this.billVendorId || !this.billInvoiceNumber.trim()) {
             ToastService.show('Please fill in required fields', 'error');
+            return;
+        }
+        if (!this.billInvoiceDate || !this.billDueDate) {
+            ToastService.show('Choose the invoice date and the due date', 'error');
             return;
         }
 
@@ -241,7 +242,7 @@ export class AccountsPayable extends LitElement {
         this.payMethod = 'CHECK';
         this.payCheckNumber = '';
         this.payReference = '';
-        this.payDate = new Date().toISOString().split('T')[0];
+        this.payDate = todayDay();
         this.paySelectedInvoiceIds = [];
         this._updateVendorOutstandingInvoices();
         this.showPayVendorModal = true;
@@ -283,6 +284,10 @@ export class AccountsPayable extends LitElement {
         const amountCents = Math.round(this.payAmount * 100);
         if (!this.payVendorId || amountCents <= 0) {
             ToastService.show('Please select a vendor and enter a positive payment amount', 'error');
+            return;
+        }
+        if (!this.payDate) {
+            ToastService.show('Choose the payment date', 'error');
             return;
         }
 
@@ -523,8 +528,8 @@ export class AccountsPayable extends LitElement {
                                                 </button>
                                             </td>
                                             <td class="px-4 py-3 text-white">${inv.vendor_name || 'Seeded Vendor'}</td>
-                                            <td class="px-4 py-3 text-zinc-400 text-xs">${new Date(inv.invoice_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</td>
-                                            <td class="px-4 py-3 text-zinc-400 text-xs">${new Date(inv.due_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</td>
+                                            <td class="px-4 py-3 text-zinc-400 text-xs">${formatDay(inv.invoice_date)}</td>
+                                            <td class="px-4 py-3 text-zinc-400 text-xs">${formatDay(inv.due_date)}</td>
                                             <td class="px-4 py-3 text-right font-mono text-zinc-200">${formatCents(inv.total_cents)}</td>
                                             <td class="px-4 py-3 text-right font-mono text-zinc-400">${formatCents(inv.amount_paid_cents)}</td>
                                             <td class="px-4 py-3 text-center">
@@ -580,7 +585,7 @@ export class AccountsPayable extends LitElement {
                                                 ${pmt.check_number || pmt.reference || `PMT-${pmt.id.substring(0, 8)}`}
                                             </td>
                                             <td class="px-4 py-3 text-white">${pmt.vendor_name || 'Vendor'}</td>
-                                            <td class="px-4 py-3 text-zinc-400 text-xs">${new Date(pmt.payment_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</td>
+                                            <td class="px-4 py-3 text-zinc-400 text-xs">${formatDay(pmt.payment_date)}</td>
                                             <td class="px-4 py-3 text-zinc-300 font-medium font-mono text-xs">${pmt.method}</td>
                                             <td class="px-4 py-3 text-right font-mono text-emerald-400">${formatCents(pmt.amount)}</td>
                                             <td class="px-4 py-3 text-center">
@@ -671,23 +676,19 @@ export class AccountsPayable extends LitElement {
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Invoice Date *</label>
-                                        <input
-                                            type="date"
+                                        <gable-date-field
+                                            label="Invoice Date"
                                             .value=${this.billInvoiceDate}
-                                            @change=${(e: Event) => { this.billInvoiceDate = (e.target as HTMLInputElement).value; }}
-                                            class="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-emerald-500"
-                                            required
-                                        />
+                                            @change=${(e: Event) => { this.billInvoiceDate = (e.target as GableDateField).value; }}
+                                        ></gable-date-field>
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Due Date *</label>
-                                        <input
-                                            type="date"
+                                        <gable-date-field
+                                            label="Due Date"
                                             .value=${this.billDueDate}
-                                            @change=${(e: Event) => { this.billDueDate = (e.target as HTMLInputElement).value; }}
-                                            class="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-emerald-500"
-                                            required
-                                        />
+                                            @change=${(e: Event) => { this.billDueDate = (e.target as GableDateField).value; }}
+                                        ></gable-date-field>
                                     </div>
                                     <div class="col-span-2">
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Invoice Notes</label>
@@ -887,13 +888,11 @@ export class AccountsPayable extends LitElement {
                                     </div>
                                     <div>
                                         <label class="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Payment Date *</label>
-                                        <input
-                                            type="date"
+                                        <gable-date-field
+                                            label="Payment Date"
                                             .value=${this.payDate}
-                                            @change=${(e: Event) => { this.payDate = (e.target as HTMLInputElement).value; }}
-                                            class="w-full bg-zinc-800 border border-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none focus:border-emerald-500"
-                                            required
-                                        />
+                                            @change=${(e: Event) => { this.payDate = (e.target as GableDateField).value; }}
+                                        ></gable-date-field>
                                     </div>
                                     ${this.payMethod === 'CHECK' ? html`
                                         <div>
@@ -946,7 +945,7 @@ export class AccountsPayable extends LitElement {
                                                     />
                                                     <div>
                                                         <span class="text-sm font-semibold text-white font-mono">${inv.vendor_invoice_number}</span>
-                                                        <span class="text-[10px] text-zinc-500 ml-2">Due ${new Date(inv.due_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</span>
+                                                        <span class="text-[10px] text-zinc-500 ml-2">Due ${formatDay(inv.due_date)}</span>
                                                     </div>
                                                 </div>
                                                 <div class="text-right">
@@ -1009,11 +1008,11 @@ export class AccountsPayable extends LitElement {
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Invoice Date</span>
-                                        <span class="text-zinc-300 font-mono text-xs">${new Date(this.selectedInvoice.invoice_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</span>
+                                        <span class="text-zinc-300 font-mono text-xs">${formatDay(this.selectedInvoice.invoice_date)}</span>
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Due Date</span>
-                                        <span class="text-zinc-300 font-mono text-xs">${new Date(this.selectedInvoice.due_date).toLocaleDateString('en-US', { timeZone: 'UTC' })}</span>
+                                        <span class="text-zinc-300 font-mono text-xs">${formatDay(this.selectedInvoice.due_date)}</span>
                                     </div>
                                     <div>
                                         <span class="text-xs text-zinc-500 block">Subtotal</span>
@@ -1035,7 +1034,7 @@ export class AccountsPayable extends LitElement {
                                         <div class="col-span-2 border-t border-white/5 pt-2 mt-2">
                                             <span class="text-xs text-zinc-500 block">Approval Info</span>
                                             <span class="text-zinc-400 text-xs">
-                                                Approved on ${new Date(this.selectedInvoice.approved_at).toLocaleString()} by ${this.selectedInvoice.approved_by || 'Finance System'}
+                                                Approved on ${formatDateTime(this.selectedInvoice.approved_at)} by ${this.selectedInvoice.approved_by || 'Finance System'}
                                             </span>
                                         </div>
                                     ` : nothing}

@@ -1859,3 +1859,40 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		t.Errorf("the refused foreign quote email left %d delivery rows (%v), want 0", n, err)
 	}
 }
+
+// TestBranchWall_DealerProfileLocale: the locale read every signed in desk
+// person may call (G1 walk note N15: the pages format their dates for it).
+// Every desk role gets 200 with {"locale": ...}; a cashier, the yard and a
+// driver included, though the profile read itself still refuses them (its
+// guard is unchanged); no role at all is refused.
+func TestBranchWall_DealerProfileLocale(t *testing.T) {
+	db := testutil.RequireDB(t)
+	f := newWallFixture(t, db, true)
+
+	var want string
+	if err := db.Pool.QueryRow(context.Background(), `SELECT locale FROM dealer_profile WHERE id = 1`).Scan(&want); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range []string{"admin", "owner", "sales", "finance", "purchasing", "warehouse", "cashier", "driver"} {
+		status, buf := f.callBody(t, "GET", "/api/v1/dealer-profile/locale", "", role, "u-"+role, "")
+		if status != http.StatusOK {
+			t.Errorf("locale read as %s: %d %s", role, status, buf)
+			continue
+		}
+		var body struct {
+			Locale string `json:"locale"`
+		}
+		if err := json.Unmarshal(buf, &body); err != nil || body.Locale != want {
+			t.Errorf("locale read as %s: %s (want locale %q)", role, buf, want)
+		}
+	}
+
+	// The profile's own read keeps its guard: a cashier is refused it.
+	if s := f.call(t, "GET", "/api/v1/dealer-profile", "", "cashier", "u-cashier", ""); s != http.StatusForbidden {
+		t.Errorf("the profile read as cashier: %d, want 403", s)
+	}
+	// Signed out (the stand-in auth injects no role) is refused the locale.
+	if s := f.call(t, "GET", "/api/v1/dealer-profile/locale", "", "", "", ""); s != http.StatusForbidden {
+		t.Errorf("the locale read with no role: %d, want 403", s)
+	}
+}

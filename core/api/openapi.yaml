@@ -3244,7 +3244,7 @@ paths:
       tags: [dealer-profile]
       summary: Replace the dealer profile
       description: >-
-        Replaces the writable fields (the logo has its own route). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
+        Replaces the writable fields (the logo has its own route; a locale left out keeps the stored one). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
       security:
         - BearerJWT: []
       parameters:
@@ -3277,6 +3277,30 @@ paths:
           $ref: "#/components/responses/WireConflict"
         "428":
           $ref: "#/components/responses/WirePreconditionRequired"
+        "500":
+          $ref: "#/components/responses/WireInternalError"
+  /api/v1/dealer-profile/locale:
+    get:
+      operationId: dealerProfileLocaleGet
+      tags: [dealer-profile]
+      summary: Read the dealer's locale alone
+      description: >-
+        The locale alone, {"locale": "en-CA"}: every signed in desk person may call it (the profile read itself is held to the roles that print), so every page can format its dates for the dealer's locale.
+      security:
+        - BearerJWT: []
+      responses:
+        "200":
+          description: The dealer's locale.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DealerProfileLocale"
+        "400":
+          $ref: "#/components/responses/WireBadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/WireInternalError"
   /api/v1/dealer-profile/logo:
@@ -9623,7 +9647,7 @@ paths:
       operationId: portalGetConfig
       tags: [portal]
       summary: The dealer branding config
-      description: Public. The one row of white-label branding the login page renders before any session exists.
+      description: Public. The one row of white-label branding the login page renders before any session exists, with the dealer's locale for the portal's dates.
       security: []
       responses:
         "200":
@@ -18389,9 +18413,16 @@ components:
           type: integer
           format: int64
           description: Cents.
+    DealerProfileLocale:
+      type: object
+      required: [locale]
+      properties:
+        locale:
+          type: string
+          description: The dealer's locale (a BCP 47 tag).
     DealerProfile:
       type: object
-      required: [legal_name, trading_name, phone, email, website, remit_to, logo_url, revision, updated_at]
+      required: [legal_name, trading_name, phone, email, website, remit_to, locale, logo_url, revision, updated_at]
       properties:
         legal_name:
           type: string
@@ -18406,6 +18437,9 @@ components:
         remit_to:
           type: string
           description: The address payments are sent to; invoices and statements print it.
+        locale:
+          type: string
+          description: The dealer's locale (a BCP 47 tag, default en-US); every date the app shows is formatted for it.
         logo_url:
           type: [string, "null"]
           description: /api/v1/dealer-profile/logo when a logo is set, otherwise null.
@@ -18437,6 +18471,10 @@ components:
         remit_to:
           type: string
           maxLength: 1000
+        locale:
+          type: string
+          maxLength: 35
+          description: A BCP 47 tag (en-US, en-CA), refused in words otherwise. Leave it out to keep the stored one.
         revision:
           type: integer
           format: int64
@@ -23741,7 +23779,7 @@ components:
           format: date-time
     PortalConfig:
       type: object
-      required: [id, dealer_name, logo_url, primary_color, support_email, support_phone, created_at, updated_at]
+      required: [id, dealer_name, logo_url, primary_color, support_email, support_phone, locale, created_at, updated_at]
       description: The white-label branding row.
       properties:
         id:
@@ -23757,6 +23795,9 @@ components:
           type: string
         support_phone:
           type: string
+        locale:
+          type: string
+          description: The dealer profile's locale (a BCP 47 tag); the portal's pages format their dates for it.
         created_at:
           type: string
           format: date-time

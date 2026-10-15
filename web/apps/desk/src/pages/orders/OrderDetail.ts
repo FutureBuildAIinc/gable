@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatDateTime } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { OrderService } from '../../services/OrderService.ts';
@@ -230,7 +231,7 @@ export class GableOrderDetail extends LitElement {
                             </span>
                         </div>
                         <p class="text-muted-foreground">
-                            Created on ${new Date(order.created_at).toLocaleString()}
+                            Created on ${formatDateTime(order.created_at)}
                             · ${order.currency}
                             · ${order.delivery_type === 'pickup' ? 'Pickup' : 'Delivery'}
                             ${order.tax_rate_percent !== null ? html` · tax ${order.tax_rate_percent}%` : html` · tax by provider`}

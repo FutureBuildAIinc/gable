@@ -2,8 +2,9 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 // Package dealerprofile holds the one dealer wide profile every printed form
-// shows: the dealer's legal and trading name, contact lines, remit to address
-// and logo. It is a single row (migration 115).
+// shows: the dealer's legal and trading name, contact lines, remit to address,
+// logo and locale (the BCP 47 tag every date the app shows is formatted for).
+// It is a single row (migration 115; the locale column is migration 119).
 package dealerprofile
 
 import (
@@ -14,9 +15,11 @@ import (
 	"image"
 	"image/jpeg"
 	"image/png"
+	"regexp"
 	"strings"
 
 	"github.com/gablelbm/gable/internal/platform/httpx"
+	"golang.org/x/text/language"
 )
 
 // LogoPath is the route the logo is served from; Profile.LogoURL carries it
@@ -37,6 +40,7 @@ type Profile struct {
 	Email       string          `json:"email"`
 	Website     string          `json:"website"`
 	RemitTo     string          `json:"remit_to"`
+	Locale      string          `json:"locale"`
 	LogoURL     *string         `json:"logo_url"`
 	Revision    int64           `json:"revision"`
 	UpdatedAt   httpx.Timestamp `json:"updated_at"`
@@ -50,7 +54,9 @@ func (p Profile) DisplayName() string {
 	return strings.TrimSpace(p.LegalName)
 }
 
-// Input is the writable slice of the profile.
+// Input is the writable slice of the profile. An empty Locale leaves the
+// stored one alone (the service fills it from the locked row), so a caller
+// from before the field existed never resets it.
 type Input struct {
 	LegalName   string
 	TradingName string
@@ -58,12 +64,50 @@ type Input struct {
 	Email       string
 	Website     string
 	RemitTo     string
+	Locale      string
 }
 
 // Logo is the stored image.
 type Logo struct {
 	Bytes       []byte
 	ContentType string
+}
+
+// MaxLocaleTagLength caps a locale tag (BCP 47's own suggestion is 35).
+const MaxLocaleTagLength = 35
+
+// localeShape is exactly the column's check (migration 119), so a tag the
+// write accepts never fails the database: letters and hyphens, no singleton
+// subtags, no underscore.
+var localeShape = regexp.MustCompile(`^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$`)
+
+// CheckLocale accepts a BCP 47 tag the date formatter and the column both
+// take ("en-US", "en-CA", "fr-CA") and refuses anything else in words. The
+// tag must hold the column's shape, parse, and be its own canonical form up
+// to case (an "en_US" or an "i-klingon" is another tag misspelled); the root
+// tag and the local use block (qaa through qtz) are refused: no person means
+// them.
+func CheckLocale(tag string) error {
+	if tag == "" {
+		return errors.New("the locale must be a language tag such as en-US")
+	}
+	if len(tag) > MaxLocaleTagLength {
+		return fmt.Errorf("the locale must be at most %d characters", MaxLocaleTagLength)
+	}
+	if !localeShape.MatchString(tag) {
+		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (letters and hyphens, such as en-US)", tag)
+	}
+	t, err := language.Parse(tag)
+	if err != nil {
+		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (a BCP 47 tag such as en-US)", tag)
+	}
+	if !strings.EqualFold(t.String(), tag) || t.String() == "und" {
+		return fmt.Errorf("the locale %q is not a language tag the date formatter accepts (a BCP 47 tag such as en-US)", tag)
+	}
+	if base, _ := t.Base(); base.String() >= "qaa" && base.String() <= "qtz" {
+		return fmt.Errorf("the locale %q is reserved for local use, not a language tag the date formatter accepts", tag)
+	}
+	return nil
 }
 
 // Reader is what a printing module needs: the profile and its logo.

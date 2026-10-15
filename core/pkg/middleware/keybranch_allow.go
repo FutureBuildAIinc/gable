@@ -284,6 +284,7 @@ var keyBranchRoutes = map[string]KeyBranchRouteNote{
 	"GET /api/v1/products/{id}/units":                              {KeyBranchClassStatedLimit, "the dealer wide product unit sets"},
 	"GET /api/v1/units":                                            {KeyBranchClassStatedLimit, "the dealer wide unit catalogue"},
 	"GET /api/v1/dealer-profile":                                   {KeyBranchClassStatedLimit, "the one dealer wide profile every printed form shows"},
+	"GET /api/v1/dealer-profile/locale":                            {KeyBranchClassStatedLimit, "the one dealer wide locale, read alone so every role's pages format their dates for it"},
 	"GET /api/v1/dealer-profile/logo":                              {KeyBranchClassStatedLimit, "the one dealer wide profile every printed form shows"},
 	"GET /api/v1/units/{code}":                                     {KeyBranchClassStatedLimit, "the dealer wide unit catalogue"},
 	"GET /api/v1/vendors":                                          {KeyBranchClassStatedLimit, "the dealer wide vendor master"},

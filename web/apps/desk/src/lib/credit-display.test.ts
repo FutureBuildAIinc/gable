@@ -88,8 +88,11 @@ describe('credit money display', () => {
 })
 
 describe('formatDay', () => {
+  // The one style of lib/dates.ts (N15): the dealer's locale, the month a
+  // short word; the business day still never shifts a day west of UTC (the
+  // module's own legs prove it under a western TZ).
   it('renders a business date without a time zone shift', () => {
-    expect(formatDay('2026-01-01')).toBe(new Date(2026, 0, 1).toLocaleDateString())
+    expect(formatDay('2026-01-01')).toBe('Jan 1, 2026')
     expect(formatDay(null)).toBe('—')
     expect(formatDay('not a date')).toBe('not a date')
   })

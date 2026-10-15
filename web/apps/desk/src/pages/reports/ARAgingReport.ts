@@ -7,7 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { ArService } from '../../services/ArService.ts';
 import type { ArAgingItem, ArAgingTotal, AgingGroupBy } from '../../types/account.ts';
 import { DollarSign } from 'lucide';
@@ -80,8 +83,8 @@ export class ARAgingReportPage extends LitElement {
         this._load();
     }
 
-    private _setAsOf(e: InputEvent) {
-        this.asOf = (e.target as HTMLInputElement).value;
+    private _setAsOf(e: Event) {
+        this.asOf = (e.target as GableDateField).value;
         this._load();
     }
 
@@ -121,7 +124,7 @@ export class ARAgingReportPage extends LitElement {
                     AR Aging Report
                 </h1>
                 <p class="text-zinc-500 mt-1">
-                    Accounts receivable aging as of ${this.asOf || 'today'}, never adding two currencies
+                    Accounts receivable aging as of ${this.asOf ? formatDay(this.asOf) : 'today'}, never adding two currencies
                 </p>
             </div>
 
@@ -146,8 +149,7 @@ export class ARAgingReportPage extends LitElement {
                 </div>
                 <label class="flex items-center gap-2 text-sm text-zinc-400">
                     As of
-                    <input type="date" .value=${this.asOf} @input=${this._setAsOf}
-                        class="bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-zinc-100" />
+                    <gable-date-field label="As of" .value=${this.asOf} @change=${this._setAsOf}></gable-date-field>
                 </label>
             </div>
 

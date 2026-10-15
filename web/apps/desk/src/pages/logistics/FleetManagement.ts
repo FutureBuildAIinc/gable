@@ -7,6 +7,9 @@ import { icon } from '../../lib/icons.ts';
 import { Truck, Users, Plus, Pencil, Trash2, AlertTriangle, RefreshCw, X, Upload } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatDay } from '../../lib/dates.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import type { Vehicle, Driver, CreateVehicleRequest, UpdateVehicleRequest, CreateDriverRequest, UpdateDriverRequest, VehicleType, DriverStatus } from '../../types/delivery';
 
 type Tab = 'vehicles' | 'drivers';
@@ -49,9 +52,9 @@ function dateBadgeClass(level: 'expired' | 'warning' | null): string {
   return 'text-zinc-300';
 }
 
+// A vehicle or driver document day, in the one style every page shares.
 function formatDate(d?: string | null): string {
-  if (!d) return '\u2014';
-  return new Date(d).toLocaleDateString();
+  return formatDay(d);
 }
 
 @customElement('gable-fleet-management')
@@ -650,7 +653,7 @@ export class FleetManagement extends LitElement {
     return html`
       <div>
         <label class="block text-xs text-zinc-500 mb-1">${label}</label>
-        <input type="date" .value=${value} @input=${(e: Event) => onChange((e.target as HTMLInputElement).value)} class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-gable-green/50" />
+        <gable-date-field label=${label} .value=${value} @change=${(e: Event) => onChange((e.target as GableDateField).value)}></gable-date-field>
       </div>
     `;
   }

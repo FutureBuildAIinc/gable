@@ -10,6 +10,7 @@ import { OrderService } from '../../services/OrderService.ts';
 import { type OrderSummary, type OrderStatus, formatOrderStatus, getStatusColor } from '../../types/order.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 const STATUS_FILTERS: (OrderStatus | 'all')[] = ['all', 'draft', 'on_hold', 'confirmed', 'backordered', 'fulfilled', 'cancelled'];
 
@@ -160,7 +161,7 @@ export class GableOrderList extends LitElement {
                                             ${order.hold_reason ? html`<span class="ml-2 text-xs text-amber-400">${order.hold_reason === 'credit_limit' ? 'credit hold' : 'held'}</span>` : ''}
                                         </td>
                                         <td class="p-4 text-gable-green font-mono text-right">${formatCents(order.total_cents)}</td>
-                                        <td class="p-4 text-zinc-400 text-right">${new Date(order.created_at).toLocaleDateString()}</td>
+                                        <td class="p-4 text-zinc-400 text-right">${formatDate(order.created_at)}</td>
                                         <td class="p-4 text-right">${icon(ArrowRight, 16, 'text-zinc-500')}</td>
                                     </tr>
                                 `)}

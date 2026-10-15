@@ -1304,9 +1304,29 @@ export interface paths {
         get: operations["dealerProfileGet"];
         /**
          * Replace the dealer profile
-         * @description Replaces the writable fields (the logo has its own route). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
+         * @description Replaces the writable fields (the logo has its own route; a locale left out keeps the stored one). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
          */
         put: operations["dealerProfilePut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dealer-profile/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the dealer's locale alone
+         * @description The locale alone, {"locale": "en-CA"}: every signed in desk person may call it (the profile read itself is held to the roles that print), so every page can format its dates for the dealer's locale.
+         */
+        get: operations["dealerProfileLocaleGet"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -4103,7 +4123,7 @@ export interface paths {
         };
         /**
          * The dealer branding config
-         * @description Public. The one row of white-label branding the login page renders before any session exists.
+         * @description Public. The one row of white-label branding the login page renders before any session exists, with the dealer's locale for the portal's dates.
          */
         get: operations["portalGetConfig"];
         put?: never;
@@ -8616,6 +8636,10 @@ export interface components {
              */
             revenue: number;
         };
+        DealerProfileLocale: {
+            /** @description The dealer's locale (a BCP 47 tag). */
+            locale: string;
+        };
         DealerProfile: {
             legal_name: string;
             trading_name: string;
@@ -8624,6 +8648,8 @@ export interface components {
             website: string;
             /** @description The address payments are sent to; invoices and statements print it. */
             remit_to: string;
+            /** @description The dealer's locale (a BCP 47 tag, default en-US); every date the app shows is formatted for it. */
+            locale: string;
             /** @description /api/v1/dealer-profile/logo when a logo is set, otherwise null. */
             logo_url: string | null;
             /** Format: int64 */
@@ -8639,6 +8665,8 @@ export interface components {
             /** @description An http or https address, or empty. */
             website?: string;
             remit_to?: string;
+            /** @description A BCP 47 tag (en-US, en-CA), refused in words otherwise. Leave it out to keep the stored one. */
+            locale?: string;
             /**
              * Format: int64
              * @description The precondition, beside If-Match.
@@ -11664,6 +11692,8 @@ export interface components {
             primary_color: string;
             support_email: string;
             support_phone: string;
+            /** @description The dealer profile's locale (a BCP 47 tag); the portal's pages format their dates for it. */
+            locale: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -18050,6 +18080,30 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["WireConflict"];
             428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    dealerProfileLocaleGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dealer's locale. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealerProfileLocale"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["WireInternalError"];
         };
     };

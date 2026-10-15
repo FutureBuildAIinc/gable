@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { Truck, Camera, RefreshCw, AlertTriangle, X, User, Clock, Phone, MapPin, FileText, ChevronDown, ChevronUp } from 'lucide';
 import { PortalService } from '../../services/PortalService';
+import { formatDay, formatDate, formatDateTime, formatTime } from '../../lib/dates.ts';
 import type { PortalDelivery } from '../../types/portal';
 import { cssVarColor } from '../../lib/theme-colors.ts';
 
@@ -21,7 +22,7 @@ function etaLabel(eta: string | null): string | null {
     if (diffMs <= 0) return 'Arriving now';
     const diffMin = Math.round(diffMs / 60000);
     if (diffMin < 120) return `Arriving in ${diffMin} min`;
-    return `ETA ${arrival.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return `ETA ${formatTime(arrival)}`;
 }
 
 const deliveryStatusColor = (status: string): { fg: string; bg: string } => {
@@ -160,8 +161,8 @@ export class PortalDeliveries extends LitElement {
                                         Order ${(del.order_number ?? del.order_id).substring(0, 8).toUpperCase()}
                                     </span>
                                     ${del.scheduled_date
-                                        ? html`<span class="flex items-center gap-1">${icon(Clock, 10)} ${new Date(del.scheduled_date).toLocaleDateString()}</span>`
-                                        : html`<span>${new Date(del.created_at).toLocaleDateString()}</span>`
+                                        ? html`<span class="flex items-center gap-1">${icon(Clock, 10)} ${formatDay(del.scheduled_date)}</span>`
+                                        : html`<span>${formatDate(del.created_at)}</span>`
                                     }
                                 </div>
                             </div>
@@ -239,7 +240,7 @@ export class PortalDeliveries extends LitElement {
                                 ${del.pod_timestamp ? html`
                                     <div class="flex items-center gap-1 text-xs text-zinc-500">
                                         ${icon(Clock, 12)}
-                                        <span>${new Date(del.pod_timestamp).toLocaleString()}</span>
+                                        <span>${formatDateTime(del.pod_timestamp)}</span>
                                     </div>
                                 ` : nothing}
                                 ${del.pod_proof_url ? html`

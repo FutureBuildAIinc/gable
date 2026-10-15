@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { Truck, MapPin, Calendar, ChevronRight, User } from 'lucide';
 import { deliveryService } from '../../services/deliveryService';
 import type { Driver, Route } from '../../types/delivery';
@@ -92,7 +93,7 @@ export class DriverRouteList extends LitElement {
                                 <div class="flex justify-between items-start mb-3">
                                     <div class="flex items-center gap-2 text-zinc-400 text-sm font-mono">
                                         ${icon(Calendar, 14)}
-                                        ${new Date(route.scheduled_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+                                        ${formatDay(route.scheduled_date)}
                                     </div>
                                     <span class="text-[10px] font-mono px-2 py-0.5 rounded border uppercase tracking-wide ${this._statusConfig(route.status)}">
                                         ${route.status.replace('_', ' ')}

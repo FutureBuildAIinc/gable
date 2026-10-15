@@ -426,7 +426,10 @@ func TestPosRegisterUpsert_MovesOnlyTheSeedsOwnRow(t *testing.T) {
 }
 
 // The demo seed sets an invented dealer profile and logo, once: a profile the
-// operator has filled in is not overwritten by a re-seed.
+// operator has filled in is not overwritten by a re-seed. The locale is
+// en-CA (the demo dealer is in British Columbia): set on the blank write, and
+// lifted from the migration's en-US default on a profile the demo already
+// seeded; an operator's own tag is kept.
 //
 // DB-gated: it runs the seeder's actual statement against the single row.
 func TestDealerProfileSeed_SetsOnlyABlankProfile(t *testing.T) {
@@ -434,28 +437,29 @@ func TestDealerProfileSeed_SetsOnlyABlankProfile(t *testing.T) {
 	ctx := context.Background()
 	type snap struct {
 		legal, trading, phone, email, website, remit string
+		locale                                       string
 		logo                                         []byte
 		ctype                                        *string
 		revision                                     int64
 	}
 	var orig snap
-	if err := db.Pool.QueryRow(ctx, `SELECT legal_name, trading_name, phone, email, website, remit_to, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
-		Scan(&orig.legal, &orig.trading, &orig.phone, &orig.email, &orig.website, &orig.remit, &orig.logo, &orig.ctype, &orig.revision); err != nil {
+	if err := db.Pool.QueryRow(ctx, `SELECT legal_name, trading_name, phone, email, website, remit_to, locale, logo, logo_content_type, revision FROM dealer_profile WHERE id = 1`).
+		Scan(&orig.legal, &orig.trading, &orig.phone, &orig.email, &orig.website, &orig.remit, &orig.locale, &orig.logo, &orig.ctype, &orig.revision); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, logo=$7, logo_content_type=$8, revision=$9 WHERE id = 1`,
-			orig.legal, orig.trading, orig.phone, orig.email, orig.website, orig.remit, orig.logo, orig.ctype, orig.revision)
+		_, _ = db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name=$1, trading_name=$2, phone=$3, email=$4, website=$5, remit_to=$6, locale=$7, logo=$8, logo_content_type=$9, revision=$10 WHERE id = 1`,
+			orig.legal, orig.trading, orig.phone, orig.email, orig.website, orig.remit, orig.locale, orig.logo, orig.ctype, orig.revision)
 	})
 	blank := func() {
 		t.Helper()
-		if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name='', trading_name='', phone='', email='', website='', remit_to='', logo=NULL, logo_content_type=NULL WHERE id = 1`); err != nil {
+		if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name='', trading_name='', phone='', email='', website='', remit_to='', locale='en-US', logo=NULL, logo_content_type=NULL WHERE id = 1`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	read := func() (legal, remit string, hasLogo bool) {
+	read := func() (legal, remit, locale string, hasLogo bool) {
 		t.Helper()
-		if err := db.Pool.QueryRow(ctx, `SELECT legal_name, remit_to, logo IS NOT NULL FROM dealer_profile WHERE id = 1`).Scan(&legal, &remit, &hasLogo); err != nil {
+		if err := db.Pool.QueryRow(ctx, `SELECT legal_name, remit_to, locale, logo IS NOT NULL FROM dealer_profile WHERE id = 1`).Scan(&legal, &remit, &locale, &hasLogo); err != nil {
 			t.Fatal(err)
 		}
 		return
@@ -472,16 +476,31 @@ func TestDealerProfileSeed_SetsOnlyABlankProfile(t *testing.T) {
 
 	blank()
 	seedDealerProfile(sqlDB)
-	legal, remit, hasLogo := read()
+	legal, remit, locale, hasLogo := read()
 	if legal != "Gable Building Supply Ltd" || !strings.Contains(remit, "Accounts Receivable") || !hasLogo {
 		t.Fatalf("a blank profile was not seeded: %q %q logo=%v", legal, remit, hasLogo)
 	}
-	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name = 'Edited By The Operator Ltd' WHERE id = 1`); err != nil {
+	if locale != "en-CA" {
+		t.Errorf("the seeded locale = %q, want en-CA", locale)
+	}
+	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name = 'Edited By The Operator Ltd', locale = 'fr-CA' WHERE id = 1`); err != nil {
 		t.Fatal(err)
 	}
 	seedDealerProfile(sqlDB)
-	if legal, _, _ := read(); legal != "Edited By The Operator Ltd" {
+	if legal, _, locale, _ := read(); legal != "Edited By The Operator Ltd" {
 		t.Errorf("a re-seed overwrote the operator's profile: %q", legal)
+	} else if locale != "fr-CA" {
+		t.Errorf("a re-seed overwrote the operator's locale: %q", locale)
+	}
+
+	// A profile the demo already seeded that still sits on the migration's
+	// en-US default is lifted to en-CA.
+	if _, err := db.Pool.Exec(ctx, `UPDATE dealer_profile SET legal_name='Gable Building Supply Ltd', trading_name='Gable Building Supply', locale='en-US' WHERE id = 1`); err != nil {
+		t.Fatal(err)
+	}
+	seedDealerProfile(sqlDB)
+	if _, _, locale, _ := read(); locale != "en-CA" {
+		t.Errorf("the demo default was not lifted to en-CA: %q", locale)
 	}
 }
 

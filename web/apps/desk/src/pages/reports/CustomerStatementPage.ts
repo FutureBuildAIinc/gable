@@ -7,9 +7,12 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
@@ -220,21 +223,19 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                         <div>
                             <label class="text-xs text-zinc-500 uppercase tracking-wider block mb-1">From</label>
-                            <input
-                                type="date"
+                            <gable-date-field
+                                label="From"
                                 .value=${this.startDate}
-                                @input=${(e: Event) => this.startDate = (e.target as HTMLInputElement).value}
-                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
-                            />
+                                @change=${(e: Event) => this.startDate = (e.target as GableDateField).value}
+                            ></gable-date-field>
                         </div>
                         <div>
                             <label class="text-xs text-zinc-500 uppercase tracking-wider block mb-1">To</label>
-                            <input
-                                type="date"
+                            <gable-date-field
+                                label="To"
                                 .value=${this.endDate}
-                                @input=${(e: Event) => this.endDate = (e.target as HTMLInputElement).value}
-                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
-                            />
+                                @change=${(e: Event) => this.endDate = (e.target as GableDateField).value}
+                            ></gable-date-field>
                         </div>
                         <button
                             @click=${this._loadStatement}
@@ -285,7 +286,7 @@ export class CustomerStatementPage extends LitElement {
                         <div>
                             <h2 class="text-xl font-bold text-white">${st.customer_name}</h2>
                             <p class="text-sm text-zinc-400">
-                                Period: ${st.from} to ${st.to} · ${cur.currency}
+                                Period: ${formatDay(st.from)} to ${formatDay(st.to)} · ${cur.currency}
                             </p>
                         </div>
                         <div class="text-right">
@@ -313,7 +314,7 @@ export class CustomerStatementPage extends LitElement {
                                 </tr>
                             ` : cur.lines.map((line) => html`
                                 <tr class="hover:bg-white/5 transition-colors">
-                                    <td class="px-4 py-3 font-mono text-zinc-300">${line.date}</td>
+                                    <td class="px-4 py-3 font-mono text-zinc-300">${formatDay(line.date)}</td>
                                     <td class="px-4 py-3">
                                         <span class="px-2 py-0.5 rounded text-xs font-bold uppercase ${
                                             line.type === 'INVOICE' ? 'text-blue-400 bg-blue-500/10' :
@@ -353,8 +354,8 @@ export class CustomerStatementPage extends LitElement {
                                     ${cur.open_documents.map(doc => html`
                                         <tr>
                                             <td class="px-4 py-2 font-mono ${doc.kind === 'invoice' ? 'text-white' : 'text-teal-300'}">${doc.number}</td>
-                                            <td class="px-4 py-2 text-zinc-400">${doc.date}</td>
-                                            <td class="px-4 py-2 text-zinc-400">${doc.due_date || 'Not set'}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${formatDay(doc.date)}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${doc.due_date ? formatDay(doc.due_date) : 'Not set'}</td>
                                             <td class="px-4 py-2 text-right font-mono text-zinc-300">${formatCents(doc.total_cents)}</td>
                                             <td class="px-4 py-2 text-right font-mono text-amber-400">${formatCents(doc.open_cents)}</td>
                                         </tr>

@@ -28,13 +28,13 @@ type PostgresRepository struct{ db *database.DB }
 
 func NewRepository(db *database.DB) *PostgresRepository { return &PostgresRepository{db: db} }
 
-const columns = `legal_name, trading_name, phone, email, website, remit_to,
+const columns = `legal_name, trading_name, phone, email, website, remit_to, locale,
 	CASE WHEN logo IS NULL THEN NULL ELSE '` + LogoPath + `' END, revision, updated_at`
 
 func scan(row pgx.Row) (*Profile, error) {
 	var p Profile
 	var updated = new(httpx.Timestamp)
-	if err := row.Scan(&p.LegalName, &p.TradingName, &p.Phone, &p.Email, &p.Website, &p.RemitTo, &p.LogoURL, &p.Revision, &updated.Time); err != nil {
+	if err := row.Scan(&p.LegalName, &p.TradingName, &p.Phone, &p.Email, &p.Website, &p.RemitTo, &p.Locale, &p.LogoURL, &p.Revision, &updated.Time); err != nil {
 		return nil, err
 	}
 	p.UpdatedAt = *updated
@@ -60,9 +60,9 @@ func (r *PostgresRepository) Lock(ctx context.Context) (*Profile, error) {
 func (r *PostgresRepository) Update(ctx context.Context, in Input) (*Profile, error) {
 	p, err := scan(r.db.GetExecutor(ctx).QueryRow(ctx, `
 		UPDATE dealer_profile SET legal_name = $1, trading_name = $2, phone = $3, email = $4,
-		       website = $5, remit_to = $6, revision = revision + 1, updated_at = NOW()
+		       website = $5, remit_to = $6, locale = $7, revision = revision + 1, updated_at = NOW()
 		 WHERE id = 1 RETURNING `+columns,
-		in.LegalName, in.TradingName, in.Phone, in.Email, in.Website, in.RemitTo))
+		in.LegalName, in.TradingName, in.Phone, in.Email, in.Website, in.RemitTo, in.Locale))
 	if err != nil {
 		return nil, fmt.Errorf("update dealer profile: %w", err)
 	}

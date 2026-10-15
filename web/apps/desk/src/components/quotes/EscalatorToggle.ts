@@ -7,6 +7,9 @@ import { icon } from '../../lib/icons';
 import { TrendingUp, AlertTriangle, Link2, Calendar, Percent, BarChart3 } from 'lucide';
 import { PricingService } from '../../services/pricing.service';
 import { ToastService } from '../../lib/toast-service';
+import { todayDay, addDays } from '../../lib/dates.ts';
+import '../ui/gable-date-field.ts';
+import type { GableDateField } from '../ui/gable-date-field.ts';
 import type { EscalationType, MarketIndex, EscalationResult, QuoteLineEscalator } from '../../types/pricing';
 
 @customElement('gable-escalator-toggle')
@@ -40,8 +43,8 @@ export class GableEscalatorToggle extends LitElement {
   }
 
   private _handleToggle() {
-    const today = new Date().toISOString().split('T')[0];
-    const threeMonthsOut = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const today = todayDay();
+    const threeMonthsOut = addDays(today, 90);
 
     this._emit({
       ...this.escalator,
@@ -170,19 +173,17 @@ export class GableEscalatorToggle extends LitElement {
                 <label class="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center gap-1">
                   ${icon(Calendar, 12)} Effective Date
                 </label>
-                <input type="date" .value=${this.escalator.effective_date}
-                  @input=${(e: InputEvent) => this._handleDateChange('effective_date', (e.target as HTMLInputElement).value)}
-                  class="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-gable-green/50 focus:outline-none focus:ring-1 focus:ring-gable-green/20 transition-colors"
-                />
+                <gable-date-field label="Effective Date" .value=${this.escalator.effective_date}
+                  @change=${(e: Event) => this._handleDateChange('effective_date', (e.target as GableDateField).value)}
+                ></gable-date-field>
               </div>
               <div>
                 <label class="block text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5 flex items-center gap-1">
                   ${icon(Calendar, 12)} Target Date
                 </label>
-                <input type="date" .value=${this.escalator.target_date}
-                  @input=${(e: InputEvent) => this._handleDateChange('target_date', (e.target as HTMLInputElement).value)}
-                  class="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-gable-green/50 focus:outline-none focus:ring-1 focus:ring-gable-green/20 transition-colors"
-                />
+                <gable-date-field label="Target Date" .value=${this.escalator.target_date}
+                  @change=${(e: Event) => this._handleDateChange('target_date', (e.target as GableDateField).value)}
+                ></gable-date-field>
               </div>
             </div>
 

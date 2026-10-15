@@ -4,6 +4,7 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { ArrowLeft, AlertTriangle, ShoppingCart, Truck, FileText, Calendar } from 'lucide';
 import { ProjectService } from '../../services/ProjectService.ts';
 import { ApiError, apiErrorMessage } from '../../services/apiError.ts';
@@ -92,7 +93,7 @@ export class ProjectDashboard extends LitElement {
                             </span>
                         </div>
                         <div class="text-xs text-zinc-500 mt-1 flex items-center gap-1">
-                            ${icon(Calendar, 12)} ${new Date(item.created_at).toLocaleDateString()}
+                            ${icon(Calendar, 12)} ${formatDate(item.created_at)}
                         </div>
                     </div>
                 </div>

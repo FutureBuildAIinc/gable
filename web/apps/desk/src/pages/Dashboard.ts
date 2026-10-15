@@ -8,6 +8,7 @@ import { RefreshCw, DollarSign, ShoppingCart, Truck, CreditCard, Calendar, Alert
 import { DashboardService } from '../services/DashboardService.ts';
 import { ToastService } from '../lib/toast-service.ts';
 import { onBranchChanged } from '../lib/branch-listener.ts';
+import { formatDay, formatTime, todayDay } from '../lib/dates.ts';
 import type {
     DashboardSummary,
     InventoryAlert,
@@ -100,7 +101,7 @@ export class GableDashboard extends LitElement {
     }
 
     render() {
-        const currentDate = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        const currentDate = formatDay(todayDay());
 
         const hour = new Date().getHours();
         const timeGreeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
@@ -127,7 +128,7 @@ export class GableDashboard extends LitElement {
 
                     <div class="flex items-center gap-3">
                         <div class="text-right text-xs text-zinc-500 hidden md:block">
-                            <div class="font-mono">Last updated: ${this.lastRefresh.toLocaleTimeString()}</div>
+                            <div class="font-mono">Last updated: ${formatTime(this.lastRefresh)}</div>
                             <div class="flex items-center gap-1 justify-end mt-1">
                                 <span class="w-2 h-2 rounded-full ${this.error ? 'bg-rose-500' : 'bg-gable-green'} animate-pulse"></span>
                                 ${this.error ? 'Error' : 'Live'}

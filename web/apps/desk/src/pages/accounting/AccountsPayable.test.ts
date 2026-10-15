@@ -287,13 +287,13 @@ describe('accounts payable: writing the wire scales', () => {
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    // Two text inputs in this drawer: the vendor invoice number, then the
-    // single line item's description. Both are `required` and the submit
-    // handler rejects a blank description, so the draft is not submittable
-    // without it.
-    const textInputs = Array.from(el.querySelectorAll<HTMLInputElement>('input[type="text"]'))
-    setText(textInputs[0], 'CL-9001')
-    setText(textInputs[1], opts.description ?? '2x4 SPF #2')
+    // The vendor invoice number, then the single line item's description,
+    // picked by their placeholders (the date fields are gable-date-field's
+    // own text boxes now, so a positional input[type=text] read would land
+    // on them). The submit handler rejects a blank description, so the draft
+    // is not submittable without it.
+    setText(q<HTMLInputElement>(el, 'input[placeholder="e.g. INV-1002"]'), 'CL-9001')
+    setText(q<HTMLInputElement>(el, 'input[placeholder="Item details..."]'), opts.description ?? '2x4 SPF #2')
 
     const numbers = Array.from(el.querySelectorAll<HTMLInputElement>('input[type="number"]'))
     // Line inputs come first (qty, unit price), tax is the last number field.

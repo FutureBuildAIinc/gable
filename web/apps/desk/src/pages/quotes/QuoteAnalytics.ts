@@ -10,6 +10,7 @@ import { ArrowLeft, TrendingUp, Target, Clock, ListChecks, BarChart3, Percent } 
 import { QuoteService } from '../../services/QuoteService.ts';
 import type { QuoteAnalytics as QuoteAnalyticsType } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
 
 @customElement('gable-quote-analytics')
 export class GableQuoteAnalytics extends LitElement {
@@ -191,7 +192,7 @@ export class GableQuoteAnalytics extends LitElement {
                         <h3 class="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-6">30-Day Quote Trend</h3>
                         <div class="flex items-end gap-1 h-32">
                             ${analytics.trend_data.map(day => html`
-                                <div class="flex-1 flex flex-col items-center gap-0.5 group relative" title="${day.date}: ${day.created} created, ${day.accepted} accepted">
+                                <div class="flex-1 flex flex-col items-center gap-0.5 group relative" title="${formatDay(day.date)}: ${day.created} created, ${day.accepted} accepted">
                                     <!-- Created bar -->
                                     <div
                                         class="w-full bg-zinc-600 rounded-t-sm transition-colors group-hover:bg-zinc-500"
@@ -208,12 +209,12 @@ export class GableQuoteAnalytics extends LitElement {
                             `)}
                         </div>
                         <div class="flex justify-between mt-2 text-[10px] text-zinc-600">
-                            <span>${analytics.trend_data[0]?.date}</span>
+                            <span>${analytics.trend_data[0]?.date ? formatDay(analytics.trend_data[0].date) : ''}</span>
                             <div class="flex items-center gap-4">
                                 <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-zinc-600 inline-block"></span> Created</span>
                                 <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-sm bg-gable-green inline-block"></span> Accepted</span>
                             </div>
-                            <span>${analytics.trend_data[analytics.trend_data.length - 1]?.date}</span>
+                            <span>${analytics.trend_data[analytics.trend_data.length - 1]?.date ? formatDay(analytics.trend_data[analytics.trend_data.length - 1].date) : ''}</span>
                         </div>
                     </div>
                 ` : nothing}
