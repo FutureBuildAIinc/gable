@@ -36,7 +36,7 @@ func TestGetSalesSummary_ReadsTheBusinessDayOnce(t *testing.T) {
 	if n := atomic.LoadInt32(&repo.reads); n != 1 {
 		t.Errorf("the business day was read %d times, want once", n)
 	}
-	if got := repo.fakeRepo.salesCalls[0][1].Format("2006-01-02"); got != "2026-10-14" {
+	if got := repo.fakeRepo.salesCalls[0][1]; got != "2026-10-14" {
 		t.Errorf("window ends on %s, want the yard's day 2026-10-14", got)
 	}
 }
