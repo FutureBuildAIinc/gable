@@ -143,7 +143,7 @@ var productGeometry = []geometry{
 	noGeometry("HANGER-26"),
 	noGeometry("HANGER-28"),
 	noGeometry("HANGER-210"),
-	noGeometry("TIE-H1"),
+	noGeometry("TIE-LT"),
 	noGeometry("HANGER-28FM"),
 
 	// --- Insulation: compressed bags ---

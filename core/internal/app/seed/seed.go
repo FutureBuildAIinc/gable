@@ -495,7 +495,7 @@ func Run() {
 		{"Joist Hanger 2x6", "HANGER-26", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.80, 1.45, 0.5, 200, 500},
 		{"Joist Hanger 2x8", "HANGER-28", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.95, 1.65, 0.6, 150, 400},
 		{"Joist Hanger 2x10", "HANGER-210", "PCS", "Okanagan Hardware Distribution", "Hardware", 1.10, 1.85, 0.7, 100, 300},
-		{"Hurricane Tie H1", "TIE-H1", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.65, 1.15, 0.3, 200, 500},
+		{"Hurricane Tie Light", "TIE-LT", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.65, 1.15, 0.3, 200, 500},
 		{"Face Mount Joist Hanger 2x8", "HANGER-28FM", "PCS", "Okanagan Hardware Distribution", "Hardware", 0.90, 1.50, 0.4, 150, 400},
 		{"Architectural Shingles 30yr", "RF-ARCH-30", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},
 		{"Architectural Shingles (Black)", "RF-SH-BLK", "BUNDLE", "BC Roofing Wholesale", "Roofing", 28.00, 42.00, 70.0, 50, 100},

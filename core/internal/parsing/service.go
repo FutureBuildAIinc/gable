@@ -152,7 +152,7 @@ func generateFallbackMaterialList() string {
 4 rolls - House wrap
 100 lf - 2x4 Pressure Treated
 Custom powder-coat railing 12ft bronze
-6 pcs - Framing angle A35
+6 pcs - Framing angle light
 Specialty glass panel 48x72 frosted`
 }
 

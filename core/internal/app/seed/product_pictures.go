@@ -45,7 +45,7 @@ var baseProductFamilies = map[string]string{
 	"NAIL-16D-50": "common_nail_box", "NAIL-10D-50": "common_nail_box", "RF-NAIL-125": "galvanized_nail_box",
 	"SCR-DECK-3-5": "deck_screw_box",
 	"HANGER-26":    "joist_hanger", "HANGER-28": "joist_hanger", "HANGER-210": "joist_hanger",
-	"HANGER-28FM": "joist_hanger", "TIE-H1": "framing_connector",
+	"HANGER-28FM": "joist_hanger", "TIE-LT": "framing_connector",
 	// roofing
 	"RF-ARCH-30": "asphalt_shingle_bundle", "RF-SH-BLK": "asphalt_shingle_bundle",
 	"RF-SH-WW": "asphalt_shingle_bundle", "RF-START": "asphalt_shingle_bundle",
