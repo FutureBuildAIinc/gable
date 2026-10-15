@@ -225,9 +225,10 @@ describe('purchase order detail receive form', () => {
     await flush()
     await el.updateComplete
 
-    const select = q<HTMLSelectElement>(el, 'select')
-    const optionLabels = Array.from(select.querySelectorAll('option'))
-      .map((o) => textOf(o as Element))
+    // the picker is the app's own select (gable-select): its options are a property
+    const select = q<HTMLElement & { options: { value: string; label: string }[] }>(el, 'gable-select')
+    const optionLabels = select.options
+      .map((o) => o.label)
       .filter((label) => label !== 'Select...')
     expect(optionLabels).toEqual(['BIN-2', 'BIN-10', 'KEL-A', 'KEL-B', 'KEL-C', 'KEL-D'])
   })
@@ -282,7 +283,7 @@ describe('purchase order receipt confirmation', () => {
     await openReceiveForm(el)
 
     const qtyInputs = Array.from(el.querySelectorAll('input[type="number"]')) as HTMLInputElement[]
-    const selects = Array.from(el.querySelectorAll('select')) as HTMLSelectElement[]
+    const selects = Array.from(el.querySelectorAll('gable-select')) as (HTMLElement & { value: string })[]
     expect(qtyInputs.length).toBe(2)
     expect(selects.length).toBe(2)
 
