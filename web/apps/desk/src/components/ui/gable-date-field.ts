@@ -83,6 +83,10 @@ export class GableDateField extends LitElement {
     /** The accessible name of the text box. */
     @property({ type: String }) label = '';
     @property({ type: Boolean }) disabled = false;
+    /** Required, as the app's select reads it (aria-required on the box). */
+    @property({ type: Boolean }) required = false;
+    /** Marked wrong by the form that holds it (aria-invalid, the red edge). */
+    @property({ type: Boolean }) invalid = false;
 
     @state() private _text = '';
     @state() private _open = false;
@@ -348,7 +352,8 @@ export class GableDateField extends LitElement {
     }
 
     render() {
-        const inputClasses = `w-full bg-white/5 border rounded-lg px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-gable-green/50 ${this._invalid ? 'border-safety-red' : 'border-white/10'}`;
+        const wrong = this._invalid || this.invalid;
+        const inputClasses = `w-full bg-white/5 border rounded-lg px-3 py-2 pr-9 text-sm text-white placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-gable-green/50 ${wrong ? 'border-safety-red' : 'border-white/10'}`;
         return html`
             <div class="relative">
                 <input
@@ -359,7 +364,8 @@ export class GableDateField extends LitElement {
                     aria-haspopup="dialog"
                     aria-controls="${this._id}-grid"
                     aria-label=${this.label || 'Date'}
-                    aria-invalid=${this._invalid ? 'true' : 'false'}
+                    aria-required=${this.required ? 'true' : nothing}
+                    aria-invalid=${wrong ? 'true' : 'false'}
                     placeholder="Choose a date"
                     .value=${this._text}
                     ?disabled=${this.disabled}
