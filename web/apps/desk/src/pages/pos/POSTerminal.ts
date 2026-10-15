@@ -1643,7 +1643,8 @@ export class POSTerminal extends LitElement {
     const productLines = lines.filter((l) => l.parent_line_id === null);
     const hasLines = productLines.length > 0;
     const completed = sale?.status === 'completed';
-    const progress = panelProgress(this._step, completed);
+    const tenderChosen = this._tenderMethod !== null || this._pendingTenders.length > 0;
+    const progress = panelProgress(this._step, completed, tenderChosen);
     const openKey = completed || this._till === null ? null : this._open;
     const customerValue = this._customer?.name ?? 'Walk-in sale';
 

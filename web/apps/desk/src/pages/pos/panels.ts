@@ -56,14 +56,17 @@ const ORDER: PanelKey[] = ['customer', 'payment', 'summary'];
 
 /**
  * The three panels as one linear walk: the panels before the current step are
- * done, the current one is lit, the rest wait. A completed sale has walked all
- * three, so all three are done.
+ * done, the current one is lit, the rest wait. Payment is the exception: it
+ * ticks only once a tender is chosen, so a Summary reached with no tender
+ * ("Tender: None yet") does not show Payment as done. A completed sale has
+ * walked all three, so all three are done.
  */
-export function panelProgress(step: PanelKey, completed: boolean): PanelProgress {
+export function panelProgress(step: PanelKey, completed: boolean, tenderChosen: boolean): PanelProgress {
     if (completed) return { customer: 'done', payment: 'done', summary: 'done' };
     const at = ORDER.indexOf(step);
     const stateOf = (k: PanelKey): PanelState => {
         const i = ORDER.indexOf(k);
+        if (k === 'payment' && i < at && !tenderChosen) return 'upcoming';
         return i < at ? 'done' : i === at ? 'current' : 'upcoming';
     };
     return { customer: stateOf('customer'), payment: stateOf('payment'), summary: stateOf('summary') };

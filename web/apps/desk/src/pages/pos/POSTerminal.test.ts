@@ -122,7 +122,8 @@ describe('the counter as the Panels layout', () => {
 
   it('ticks Payment on the Summary step only once a tender is chosen', async () => {
     const el = await mount(sale());
-    q(el, 'pos-next-payment').click();
+    q(el, 'pos-walk-in').click();
+    await new Promise((r) => setTimeout(r, 0));
     await el.updateComplete;
     q(el, 'pos-next-summary').click();
     await el.updateComplete;
@@ -647,6 +648,8 @@ describe('the Panels board', () => {
     q(el, 'pos-walk-in').click();
     await flush(el);
     expect(states()).toEqual(['done', 'current', 'upcoming']);
+    // Payment ticks only once a tender is chosen; choose one before Summary.
+    await chooseCash(el);
     q(el, 'pos-next-summary').click();
     await el.updateComplete;
     expect(states()).toEqual(['done', 'done', 'current']);
