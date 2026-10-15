@@ -193,9 +193,13 @@ func (w *txWorld) payment(amount int64, apps ...account.ApplyLine) uuid.UUID {
 	w.t.Helper()
 	var id uuid.UUID
 	err := w.db.RunInTx(context.Background(), func(ctx context.Context) error {
-		var e error
+		// the branch's own day: the core refuses a day that has not come there
+		day, e := w.core.LocalDate(ctx, w.branch, time.Now())
+		if e != nil {
+			return e
+		}
 		id, _, e = w.core.RecordPayment(ctx, account.RecordPaymentIn{CustomerID: w.customer, BranchID: w.branch, Currency: "USD",
-			Method: "CASH", AmountCents: amount, ReceivedOn: time.Now(), Actor: "u-test", Applications: apps})
+			Method: "CASH", AmountCents: amount, ReceivedOn: day, Actor: "u-test", Applications: apps})
 		return e
 	})
 	if err != nil {
