@@ -206,6 +206,35 @@ describe('the calendar', () => {
     expect(document.activeElement).toBe(landed)
   })
 
+  it('opened by keyboard, the calendar opens on the day the box shows, with that day focused', async () => {
+    // The box holds a day typed but not yet committed (no blur, no Enter):
+    // ArrowDown opens the calendar on that day's month, commits it, and puts
+    // the focus on it.
+    const el = await mount<GableDateField>(TAG, { value: '2026-10-14' })
+    const box = input(el)
+    box.focus()
+    box.value = 'Sep 30, 2026'
+    box.dispatchEvent(new Event('input'))
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    await update(el, {})
+    expect(el.value).toBe('2026-09-30')
+    expect(el.textContent).toContain('September 2026')
+    const focused = gridDays(el).find((b) => b.tabIndex === 0)
+    expect(focused?.textContent).toBe('30')
+    expect(document.activeElement).toBe(focused)
+  })
+
+  it('opened by keyboard on an empty field, today is focused', async () => {
+    const el = await mount<GableDateField>(TAG)
+    const box = input(el)
+    box.focus()
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    await update(el, {})
+    const focused = gridDays(el).find((b) => b.tabIndex === 0)
+    expect(document.activeElement).toBe(focused)
+    expect(focused?.getAttribute('aria-current')).toBe('date')
+  })
+
   it('the week starts as the locale starts it', async () => {
     // Oct 2026 starts on a Thursday: four blanks under en-US, three under en-GB.
     const el = await mount<GableDateField>(TAG, { value: '2026-10-01' })
