@@ -161,7 +161,7 @@ export class GableRevenueTrendChart extends LitElement {
         return html`
             <div class="rounded-xl border border-white/10 bg-slate-steel/30 backdrop-blur-sm h-[400px] flex flex-col">
                 <div class="p-4 border-b border-white/5">
-                    <h3 class="text-base font-semibold text-white">Revenue Trend</h3>
+                    <h3 class="text-base font-semibold text-white">Collected, last 7 days</h3>
                 </div>
                 <div class="flex-1 min-h-0 p-4">
                     <canvas id="revenueTrendCanvas" class="w-full h-full"></canvas>

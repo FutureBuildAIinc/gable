@@ -363,7 +363,7 @@ func TestKeyBranchPin_SharedRefusalWordsNameTheCaller(t *testing.T) {
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
 	sh := "/api/v1/customers/" + s.id.String()
 	change := func() string {
-		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 666000 + int(time.Now().UnixNano()%1000)})
+		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": nextCreditLimit(666000)})
 	}
 	lowest := f.branchA
 	if f.branchB.String() < f.branchA.String() {
