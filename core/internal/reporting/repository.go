@@ -73,6 +73,16 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// BusinessDay is the default branch's business date now: the day the till, the
+// dashboard's card and the Sales Summary's default window are for.
+func (r *PostgresRepository) BusinessDay(ctx context.Context) (string, error) {
+	var day string
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+collections.TodaySQL+`::text`).Scan(&day); err != nil {
+		return "", fmt.Errorf("failed to read the business day: %w", err)
+	}
+	return day, nil
+}
+
 // GetDailyTill reads one business day's collections in the default branch's
 // zone. A zero date is the branch's today (the day the dashboard's Today's
 // Revenue card is cut on); a date is that calendar day in the same zone. The

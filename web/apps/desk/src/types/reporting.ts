@@ -3,7 +3,7 @@
 
 export interface DailyTillReport {
     date: string;
-    /** The day's net collections, equal to net_collected and to the dashboard's Today's Revenue. */
+    /** The day's net collections, equal to net_collected and to the dashboard's Collected today. */
     total_collected: number;
     received: number;
     refunds: number;
