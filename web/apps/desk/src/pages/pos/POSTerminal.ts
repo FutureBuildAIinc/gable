@@ -1496,7 +1496,7 @@ export class POSTerminal extends LitElement {
       : this._till === null ? `Pay ${fmt(total)}`
       : plan.ok ? `Pay ${fmt(total)}`
       : !plan.ok && plan.over === 'added' ? 'Clear the added tenders'
-      : !plan.ok && plan.over === 'typed' ? 'Type no more than is owed'
+      : !plan.ok && plan.over === 'typed' ? `Type no more than ${fmt(plan.limitCents ?? total)}`
       : hasLines && open && this._tenderMethod === null ? 'Choose how the customer pays'
       : hasLines ? `Still owed ${fmt(plan.owedCents)}` : `Pay ${fmt(total)}`;
     return html`
