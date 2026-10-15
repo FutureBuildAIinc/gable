@@ -167,24 +167,46 @@ func (s *Service) branchFor(ctx context.Context, branch *uuid.UUID) (*uuid.UUID,
 // does (SEC-NOHEADER-1): several grants and no header answer the choice refusal
 // naming branch_id and none fail closed.
 func (s *Service) CreateReorders(ctx context.Context) (int, error) {
+	res, err := s.CreateReordersRun(ctx)
+	return res.Created, err
+}
+
+// ReorderRunResult is what one reorder run did: the drafts it created and the
+// products it left alone because they carry no reorder quantity and no
+// deficit (a yard exactly at its point), by SKU, so the run's record can say
+// why nothing was ordered for them.
+type ReorderRunResult struct {
+	Created      int
+	NoReorderQty []string
+}
+
+// CreateReordersRun is CreateReorders with the run's account of itself.
+func (s *Service) CreateReordersRun(ctx context.Context) (ReorderRunResult, error) {
+	var res ReorderRunResult
+	n, noQty, err := s.createReorders(ctx)
+	res.Created, res.NoReorderQty = n, noQty
+	return res, err
+}
+
+func (s *Service) createReorders(ctx context.Context) (int, []string, error) {
 	if s.productSvc == nil {
-		return 0, fmt.Errorf("product service not configured")
+		return 0, nil, fmt.Errorf("product service not configured")
 	}
 	if s.vendorSvc == nil {
-		return 0, fmt.Errorf("vendor service not configured")
+		return 0, nil, fmt.Errorf("vendor service not configured")
 	}
 	// The refusals (several grants and no header, none) are the create's own;
 	// the yard of each draft is its alert's, not the resolved one.
 	if _, err := s.branchFor(ctx, nil); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	alerts, err := s.productSvc.ListBelowReorder(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("failed to list reorder alerts: %w", err)
+		return 0, nil, fmt.Errorf("failed to list reorder alerts: %w", err)
 	}
 	if len(alerts) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 
 	// Group by canonical vendor UUID. Alerts with NULL vendor_id are bucketed
@@ -198,7 +220,7 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	}
 	byVendor, err := groupAlertsByVendor(alerts, resolveUnknown)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
 	// One draft per vendor and yard.
@@ -216,6 +238,8 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 	}
 
 	createdCount := 0
+	var noQty []string
+	seenNoQty := map[string]bool{}
 	for _, k := range order {
 		vid, items := k.vendor, groups[k]
 
@@ -223,7 +247,7 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 		// exists. Note we intentionally do NOT overwrite the source of a
 		// reused PO: if an operator manually created a DRAFT for this vendor
 		// at this yard, it stays MANUAL.
-		po, err := s.repo.GetDraftPOByVendorAt(ctx, vid, k.yard)
+		po, err := s.repo.GetDraftPOByVendorAt(ctx, vid, k.yard, SourceReorder, SourceManual)
 		if err != nil || po == nil {
 			po = &PurchaseOrder{
 				ID:       uuid.New(),
@@ -233,7 +257,7 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				BranchID: k.yard,
 			}
 			if err := s.repo.CreatePO(ctx, po); err != nil {
-				return createdCount, fmt.Errorf("create PO for vendor %s: %w", vid, err)
+				return createdCount, noQty, fmt.Errorf("create PO for vendor %s: %w", vid, err)
 			}
 			createdCount++
 		}
@@ -247,7 +271,14 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				qty = product.QtyFloat(item.Deficit)
 			}
 			if qty <= 0 {
-				qty = 1
+				// A yard exactly at its point has no deficit, and with no
+				// reorder quantity set there is nothing to order: no line,
+				// never a one unit line, and the run names the product.
+				if !seenNoQty[item.SKU] {
+					seenNoQty[item.SKU] = true
+					noQty = append(noQty, item.SKU)
+				}
+				continue
 			}
 
 			productID := item.ProductID
@@ -258,12 +289,12 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 			// duplicate line each tick (which otherwise doubles on-order qty).
 			existing, err := s.repo.GetPOLineByProduct(ctx, po.ID, productID)
 			if err != nil {
-				return createdCount, fmt.Errorf("lookup existing PO line: %w", err)
+				return createdCount, noQty, fmt.Errorf("lookup existing PO line: %w", err)
 			}
 			if existing != nil {
 				if existing.Quantity != qty {
 					if err := s.repo.UpdatePOLineQuantity(ctx, existing.ID, qty); err != nil {
-						return createdCount, fmt.Errorf("update PO line: %w", err)
+						return createdCount, noQty, fmt.Errorf("update PO line: %w", err)
 					}
 				}
 				continue
@@ -286,12 +317,12 @@ func (s *Service) CreateReorders(ctx context.Context) (int, error) {
 				if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "purchase_order_lines_product_id_fkey" {
 					continue
 				}
-				return createdCount, fmt.Errorf("add PO line: %w", err)
+				return createdCount, noQty, fmt.Errorf("add PO line: %w", err)
 			}
 		}
 	}
 
-	return createdCount, nil
+	return createdCount, noQty, nil
 }
 
 func (s *Service) ListPOs(ctx context.Context) ([]PurchaseOrder, error) {
@@ -419,7 +450,7 @@ func (s *Service) CreateFromSOLine(ctx context.Context, soLineId uuid.UUID, bran
 		var err error
 
 		if vendorId != nil {
-			po, err = s.repo.GetDraftPOByVendorAt(ctx, *vendorId, branch)
+			po, err = s.repo.GetDraftPOByVendorAt(ctx, *vendorId, branch, SourceSpecialOrder, SourceManual)
 		}
 
 		if po == nil || err != nil {

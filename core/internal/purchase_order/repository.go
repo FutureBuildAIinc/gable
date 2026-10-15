@@ -133,16 +133,20 @@ func (r *Repository) GetDraftPOByVendor(ctx context.Context, vendorID *uuid.UUID
 }
 
 // GetDraftPOByVendorAt is the draft purchase order of the vendor at one
-// branch, for the special order draft, whose branch is the linked order's
-// own: it carries no wall, because the branch is the order's and the caller
-// asked for it by name, not by reach.
-func (r *Repository) GetDraftPOByVendorAt(ctx context.Context, vendorID, branch uuid.UUID) (*PurchaseOrder, error) {
+// branch whose source is one of sources. It carries no wall, because the
+// branch is named by the caller (a reorder alert's yard, or the linked order's
+// own branch), not found by reach. The source keeps the two automatic flows
+// apart: a reorder line never lands on a special order's draft and a special
+// order's line never lands on a reorder draft. A person's own MANUAL draft is
+// named by both callers, because it is theirs to receive either kind of line.
+func (r *Repository) GetDraftPOByVendorAt(ctx context.Context, vendorID, branch uuid.UUID, sources ...string) (*PurchaseOrder, error) {
 	var po PurchaseOrder
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, `
 		SELECT id, vendor_id, status, source, created_at, updated_at, branch_id
 		FROM purchase_orders
-		WHERE vendor_id = $1 AND status = 'DRAFT' AND branch_id = $2
-		LIMIT 1`, vendorID, branch).Scan(
+		WHERE vendor_id = $1 AND status = 'DRAFT' AND branch_id = $2 AND source = ANY($3::text[])
+		ORDER BY created_at
+		LIMIT 1`, vendorID, branch, sources).Scan(
 		&po.ID, &po.VendorID, &po.Status, &po.Source, &po.CreatedAt, &po.UpdatedAt, &po.BranchID)
 	if err != nil {
 		return nil, err
