@@ -509,7 +509,7 @@ func Run() {
 		{"Step Flashing", "RF-FLASH-STEP", "PCS", "BC Roofing Wholesale", "Roofing", 2.50, 4.50, 0.5, 60, 120},
 		{"Pipe Boot Flashing", "RF-FLASH-PIPE", "PCS", "BC Roofing Wholesale", "Roofing", 8.00, 14.00, 1.5, 20, 40},
 		{"Ice and Water Barrier", "RF-ICE-WTR", "RL", "BC Roofing Wholesale", "Roofing", 65.00, 98.00, 36.0, 20, 50},
-		{"Roof Edge Drip 10'", "RF-EDGE-WHT", "PCS", "BC Roofing Wholesale", "Roofing", 4.50, 7.50, 2.0, 60, 150},
+		{"Roof Edge Drip White 10'", "RF-EDGE-WHT", "PCS", "BC Roofing Wholesale", "Roofing", 4.50, 7.50, 2.0, 60, 150},
 		{"R-14 Fiberglass Batts 15x93", "INS-R13-15", "BAG", "Cariboo Insulation Ltd", "Insulation", 45.00, 68.00, 32.0, 30, 60},
 		{"R-20 Fiberglass Batts 15x93", "INS-R19-15", "BAG", "Cariboo Insulation Ltd", "Insulation", 55.00, 82.00, 42.0, 25, 50},
 		{"R-28 Fiberglass Batts 24x48", "INS-R30-24", "BAG", "Cariboo Insulation Ltd", "Insulation", 65.00, 98.00, 48.0, 20, 40},

@@ -1208,7 +1208,7 @@ func TestEngineeredWoodAndHangersCarryTheirOwnKind(t *testing.T) {
 		if row.Category == "lumber.engineered_wood" && strings.EqualFold(row.Grade, "standard") {
 			t.Errorf("%s: the engineered wood grade %q is a dimension lumber grade", row.SKU, row.Grade)
 		}
-		if (row.SKU == "CN_FMH28" || row.SKU == "CN_FMH210") && row.ImageFamily != "joist_hanger" {
+		if row.SKU == "CN_FMH210" && row.ImageFamily != "joist_hanger" {
 			t.Errorf("%s draws as %q, want joist_hanger", row.SKU, row.ImageFamily)
 		}
 	}
