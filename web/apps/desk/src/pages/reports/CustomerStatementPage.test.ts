@@ -274,6 +274,16 @@ describe('customer statement scope at a yard', () => {
     expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
   })
 
+  it('names the unapplied cash at other yards for a caller scoped by grants with no yard chosen', async () => {
+    const body = await shown({
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 57700, net_balance_cents: 42300,
+    })
+    expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
+    expect(body).not.toContain('are this yard')
+  })
+
   it('has no other yards row when everything is listed, and no scope line without a yard', async () => {
     const body = await shown({
       closing_balance_cents: 100000,
