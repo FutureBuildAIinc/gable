@@ -151,10 +151,12 @@ func TestDemoImport(t *testing.T) {
 	// together) carries no two products with one name.
 	t.Run("no vendor carries the dealer's own name", func(t *testing.T) {
 		// The dealer buying from a vendor of its own name reads as the dealer
-		// buying from itself on every product and purchase order.
+		// buying from itself on every product and purchase order. A vendor that
+		// begins with the dealer's brand word reads as the dealer's own arm.
 		rows, err := db.Query(`SELECT v.name, d.trading_name FROM vendors v, dealer_profile d
 			WHERE d.id = 1 AND d.trading_name <> ''
-			  AND (LOWER(v.name) LIKE LOWER(d.trading_name) || '%' OR LOWER(v.name) LIKE LOWER(d.legal_name) || '%')
+			  AND (LOWER(v.name) LIKE LOWER(d.trading_name) || '%' OR LOWER(v.name) LIKE LOWER(d.legal_name) || '%'
+			       OR LOWER(v.name) LIKE LOWER(split_part(d.trading_name, ' ', 1)) || ' %')
 			ORDER BY v.name`)
 		if err != nil {
 			t.Fatal(err)
