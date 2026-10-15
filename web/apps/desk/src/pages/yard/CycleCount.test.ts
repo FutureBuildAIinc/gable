@@ -163,7 +163,7 @@ describe('Cycle count by location', () => {
     await flush()
     await update(el, {})
     expect(posts.length).toBe(2)
-    expect(q(el, '[data-testid="count-done"]')).toBeNull()
+    expect(el.querySelector('[data-testid="count-done"]')).toBeNull()
     const failed = q(el, '[data-testid="count-failed"]')
     expect(text(failed)).toContain('KEL-MAIN/KEL-A')
     expect(text(failed)).toContain('Name the location you counted.')
