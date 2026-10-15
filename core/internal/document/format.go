@@ -100,9 +100,15 @@ type decimalStringer interface{ DecimalString() string }
 // "$3,929.97", "-$2,487.63".
 func (style) Money(c decimalStringer) string { return groupAmount(c.DecimalString()) }
 
-// MoneyFloat is Money for a float amount (a purchase order's cost), rounded
-// to the cent.
-func (style) MoneyFloat(f float64) string { return groupAmount(formatCents(f)) }
+// MoneyFloat is Money for a float amount (a purchase order's cost), rounded to
+// the cent exactly as "%.2f" rounds it; only the digit groups are new.
+func (style) MoneyFloat(f float64) string {
+	d := strconv.FormatFloat(f, 'f', 2, 64)
+	if d == "-0.00" {
+		d = "0.00"
+	}
+	return groupAmount(d)
+}
 
 // groupAmount takes a plain decimal ("-3929.97") and returns "-$3,929.97".
 func groupAmount(d string) string {
@@ -122,19 +128,4 @@ func groupAmount(d string) string {
 		b.WriteRune(r)
 	}
 	return sign + "$" + b.String() + frac
-}
-
-// formatCents rounds a float to two decimals as text. A rounded zero is "0.00"
-// with no sign.
-func formatCents(f float64) string {
-	neg := f < 0
-	if neg {
-		f = -f
-	}
-	n := int64(f*100 + 0.5)
-	s := strconv.FormatInt(n/100, 10) + "." + string([]byte{byte('0' + n%100/10), byte('0' + n%10)})
-	if neg && n != 0 {
-		return "-" + s
-	}
-	return s
 }
