@@ -6688,7 +6688,7 @@ export interface paths {
         };
         /**
          * Net collections on one day at the caller's yard, by method
-         * @description Roles admin, owner, finance. The date defaults to the default branch's business day, the day the dashboard's Today's Revenue card is cut on; a date is that calendar day in the same zone. The day's figures are the card's: payments received at the caller's yard by their business date received_on (their own branch, never a voided payment), the refunds paid out that day by refunded_on, and the net of the two. A dated report is cached for 60 seconds per date; one with no date never is. A date that is not YYYY-MM-DD is a 500.
+         * @description Roles admin, owner, finance. The date defaults to the default branch's business day, the day the dashboard's Collected today card is cut on; a date is that calendar day in the same zone. The day's figures are the card's: payments received at the caller's yard by their business date received_on (their own branch, never a voided payment), the refunds paid out that day by refunded_on, and the net of the two. A dated report is cached for 60 seconds per date; one with no date never is. A date that is not YYYY-MM-DD is a 500.
          */
         get: operations["reportsDailyTill"];
         put?: never;
@@ -14228,7 +14228,7 @@ export interface components {
             received: number;
             /** @description Refunds paid out that day. */
             refunds: number;
-            /** @description Received less refunds, equal to the dashboard's Today's Revenue. */
+            /** @description Received less refunds, equal to the dashboard's Collected today. */
             net_collected: number;
             /** @description Dollars received per payment method, before refunds. */
             by_method: {

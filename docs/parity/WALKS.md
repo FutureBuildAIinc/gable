@@ -104,7 +104,7 @@ offer and the server enforces no role; a real dealer signs in through its identi
    Big White Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
    invoice and payment in the period with the running balance, and Print for the dealer's statement.
 8. **The manager's view (Morgan Hale).** Open the Dashboard: active orders, pending dispatch, outstanding AR (the
-   counter's account charges included), the revenue trend over the recent days, the top customers, the stock alerts
+   counter's account charges included), the collected trend over the last 7 days, the top customers, the stock alerts
    and the recent activity, with the order converted in step 3 on top. Collected today counts the cash received at the
    yard today, less refunds, against yesterday's; the walk's sales went on account, so they show in outstanding AR instead.
 
