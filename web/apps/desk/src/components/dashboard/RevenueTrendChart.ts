@@ -17,9 +17,12 @@ export class GableRevenueTrendChart extends LitElement {
 
     private _chart: Chart<'line'> | null = null;
     private _offTheme: (() => void) | null = null;
+    private _resizeObserver: ResizeObserver | null = null;
 
     connectedCallback() {
         super.connectedCallback();
+        // A block host: an inline custom element would size from its content.
+        this.style.display = 'block';
         this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
     }
 
@@ -39,7 +42,24 @@ export class GableRevenueTrendChart extends LitElement {
         this._destroyChart();
     }
 
+    /**
+     * Chart.js's own responsive resize did not reach the canvas when the
+     * window narrowed (the wrapper shrank, the canvas kept its pixel width),
+     * so the wrapper is watched and the chart resized by hand. Re-observed
+     * each time the chart is rebuilt; disconnected when it is destroyed.
+     */
+    private _observeWrapper(canvas: HTMLCanvasElement) {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
+        const wrapper = canvas.parentElement;
+        if (!wrapper || typeof ResizeObserver === 'undefined') return;
+        this._resizeObserver = new ResizeObserver(() => { this._chart?.resize(); });
+        this._resizeObserver.observe(wrapper);
+    }
+
     private _destroyChart() {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         if (this._chart) {
             this._chart.destroy();
             this._chart = null;
@@ -48,6 +68,8 @@ export class GableRevenueTrendChart extends LitElement {
 
     private _renderChart() {
         requestAnimationFrame(() => {
+            // Gone before its frame: build nothing, so no chart or observer is left.
+            if (!this.isConnected) return;
             const canvas = this.querySelector<HTMLCanvasElement>('#revenueTrendCanvas');
             if (!canvas) return;
 
@@ -63,10 +85,17 @@ export class GableRevenueTrendChart extends LitElement {
             const ctx = canvas.getContext('2d');
             if (!ctx) return;
 
-            // Create gradient
-            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.clientHeight || 300);
-            gradient.addColorStop(0, themeColor('gable-green', 0.3));
-            gradient.addColorStop(1, themeColor('gable-green', 0));
+            // The fill is scriptable: it is built from the chart's own drawing
+            // area (top to the axis), so it is right at creation and after any
+            // resize, whatever the canvas's own height was when it was made.
+            const gradient = (c: { chart: Chart }) => {
+                const area = c.chart.chartArea;
+                if (!area) return 'transparent';
+                const g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                g.addColorStop(0, themeColor('gable-green', 0.3));
+                g.addColorStop(1, themeColor('gable-green', 0));
+                return g;
+            };
 
             this._chart = new Chart(canvas, {
                 type: 'line',
@@ -142,6 +171,7 @@ export class GableRevenueTrendChart extends LitElement {
                     },
                 },
             });
+            this._observeWrapper(canvas);
         });
     }
 
@@ -167,7 +197,9 @@ export class GableRevenueTrendChart extends LitElement {
                     <h3 class="text-base font-semibold text-white">Collected, last 7 days</h3>
                 </div>
                 <div class="flex-1 min-h-0 p-4">
-                    <canvas id="revenueTrendCanvas" class="w-full h-full"></canvas>
+                    <div data-testid="chart-canvas-wrap" class="relative h-full w-full">
+                        <canvas id="revenueTrendCanvas" class="absolute inset-0"></canvas>
+                    </div>
                 </div>
             </div>
         `;
