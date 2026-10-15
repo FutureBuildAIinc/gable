@@ -12,6 +12,7 @@ import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
+import { BRANCH_STORAGE_KEY } from '@gable/auth';
 import { FileText, Search } from 'lucide';
 
 @customElement('gable-customer-statement')
@@ -247,6 +248,17 @@ export class CustomerStatementPage extends LitElement {
         `;
     }
 
+    /** A yard is chosen: the open documents and unapplied payments follow it, the balances do not. */
+    private _scopedToYard(): boolean {
+        return !!localStorage.getItem(BRANCH_STORAGE_KEY);
+    }
+
+    /** Unapplied cash the listed payments do not cover: it sits at yards this one cannot see. */
+    private _unappliedElsewhere(cur: ArStatementCurrency): number {
+        const listed = cur.unapplied_payments.reduce((sum, p) => sum + p.unapplied_cents, 0);
+        return Math.max(0, cur.unapplied_cents - listed);
+    }
+
     /** One currency's statement: never mixed with another's amounts. */
     private _renderCurrency(cur: ArStatementCurrency) {
         const st = this.statement!;
@@ -360,8 +372,15 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                     ` : nothing}
 
-                    ${cur.unapplied_payments.length > 0 || cur.open_documents.length > 0 ? html`
-                        <p class="text-xs text-zinc-500 mt-4" data-testid="statement-scope">Documents listed are those this yard can see; the balance covers the whole account.</p>
+                    ${this._scopedToYard() ? html`
+                        <div class="mt-4 space-y-1">
+                            ${this._unappliedElsewhere(cur) > 0 ? html`
+                                <p class="text-sm text-zinc-400" data-testid="statement-unapplied-elsewhere">
+                                    Unapplied cash at other yards: <span class="font-mono">${formatCents(this._unappliedElsewhere(cur))}</span>
+                                </p>
+                            ` : nothing}
+                            <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account.</p>
+                        </div>
                     ` : nothing}
 
                     <div class="flex justify-end gap-8 mt-4 pt-4 border-t border-white/10">
