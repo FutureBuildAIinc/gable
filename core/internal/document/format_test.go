@@ -4,6 +4,9 @@
 package document
 
 import (
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,6 +51,38 @@ func TestFloatAmountsGroupToo(t *testing.T) {
 	for in, want := range map[float64]string{0: "$0.00", 3.5: "$3.50", 1234567.891: "$1,234,567.89", -2487.6: "-$2,487.60"} {
 		if got := st.MoneyFloat(in); got != want {
 			t.Errorf("MoneyFloat(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A float amount rounds exactly as "%.2f" did (the float's own binary value,
+// ties to even where exact); only the digit groups and the sign are new, and a
+// negative zero reads as zero.
+func TestFloatAmountsRoundAsPercentDotTwoDid(t *testing.T) {
+	st := newStyle("en-US")
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{1.5 * 0.01, "$0.01"},
+		{0.125, "$0.12"},
+		{12.5 * 0.01, "$0.12"},
+		{1.5 * 0.03, "$0.04"},
+		{1.115, "$1.11"},
+		{10.995, "$10.99"},
+		{238897.055, "$238,897.05"},
+		{-1.115, "-$1.11"},
+		{-0.001, "$0.00"},
+		{math.Copysign(0, -1), "$0.00"},
+		{1234567.891, "$1,234,567.89"},
+	}
+	for _, c := range cases {
+		if got := st.MoneyFloat(c.in); got != c.want {
+			t.Errorf("MoneyFloat(%v) = %q, want %q (the %%.2f figure)", c.in, got, c.want)
+		}
+		// the same figure %.2f prints, grouped
+		if raw := fmt.Sprintf("%.2f", c.in); raw != "-0.00" && raw != "0.00" && !strings.HasSuffix(c.want, raw[len(raw)-3:]) {
+			t.Errorf("leg %v: want %q does not end like %%.2f %q", c.in, c.want, raw)
 		}
 	}
 }

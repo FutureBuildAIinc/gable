@@ -79,16 +79,16 @@ func TestPurchaseOrderReadsGroupedAmountsAndWordDates(t *testing.T) {
 	po := &purchase_order.PurchaseOrder{
 		ID: uuid.New(), Number: "PO-000042", VendorName: "Mill Supply Co", Status: "SENT",
 		CreatedAt: time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC),
-		Lines:     []purchase_order.PurchaseOrderLine{{Description: "Pallet", Quantity: 2, Cost: 1964.985}},
+		Lines:     []purchase_order.PurchaseOrderLine{{Description: "Pallet", Quantity: 2, Cost: 1964.99}},
 	}
 	doc, err := svc.GeneratePurchaseOrderPDF(context.Background(), po)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Date: Jun 30, 2026", "TOTAL: $3,929.97"} {
+	for _, want := range []string{"Date: Jun 30, 2026", "$1,964.99", "TOTAL: $3,929.98"} {
 		mustContain(t, doc, want)
 	}
-	for _, unwanted := range []string{"2026-06-30", "$3929.97"} {
+	for _, unwanted := range []string{"2026-06-30", "$3929.98", "$1964.99"} {
 		mustNotContain(t, doc, unwanted)
 	}
 }
