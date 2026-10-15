@@ -134,23 +134,6 @@ type vendorKeyCatalog struct {
 	} `json:"vendors"`
 }
 
-// legacyVendorRename maps the eight seed.go vendor names the catalogue data
-// references to the names the seed actually writes (the dealer was renamed,
-// so the legacy "@gablelumber.ca" leftovers are gone).
-// When the demo data's vendor_keys.json names a row in this map the import
-// resolves to the right-hand value, so the seed's vendor (preserved on a
-// conflict) is the row the catalogue's vendor_key references.
-var legacyVendorRename = map[string]string{
-	"Larkmere Building Products":     "Larkmere Building Products",
-	"Fernbank Hardware Distribution": "Fernbank Hardware Distribution",
-	"BC Roofing Wholesale":           "BC Roofing Wholesale",
-	"Interior Millwork Co":           "Interior Millwork Co",
-	"Bramblewood Ready-Mix Concrete": "Bramblewood Ready-Mix Concrete",
-	"Mountain Fastener Supply":       "Mountain Fastener Supply",
-	"Cariboo Insulation Ltd":         "Cariboo Insulation Ltd",
-	"Tamarack Window & Door":         "Tamarack Window & Door",
-}
-
 // customerRow is one row of demodata/customers.jsonl.
 type customerRow struct {
 	AccountNumber    string   `json:"account_number"`
@@ -326,10 +309,9 @@ func importCategories(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, er
 // upserts the vendors by their unique name, and returns the vendor_key ->
 // vendors.id map the catalogue uses to resolve its vendor_key references.
 //
-// Eight of the vendor_keys.json rows are legacy seed vendors. legacyVendorRename
-// maps each to the row the rest of this seed already writes (the lumber vendor
-// is the invented supplier "Larkmere Building Products", never a vendor named
-// after the dealer), so the catalogue's vendor_id references the canonical row.
+// A vendor_keys.json row whose name the base seed already writes resolves to
+// that row (the upsert is keyed on the unique name), so the catalogue's
+// vendor_id references the canonical row.
 func importVendors(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, error) {
 	var catalog vendorKeyCatalog
 	if err := json.Unmarshal(vendorKeysData, &catalog); err != nil {
@@ -339,9 +321,6 @@ func importVendors(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, error
 	keyToID := make(map[string]uuid.UUID)
 	for _, k := range catalog.Vendors {
 		name := k.Name
-		if renamed, ok := legacyVendorRename[name]; ok {
-			name = renamed
-		}
 		// Upsert vendor by name. A row that exists is preserved (the legacy
 		// seed's contact_email is on a reserved example domain already, so
 		// the demo data's empty placeholder does not overwrite it).
@@ -373,9 +352,6 @@ func importVendors(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, error
 			continue
 		}
 		vendorName := vr.Name
-		if renamed, ok := legacyVendorRename[vendorName]; ok {
-			vendorName = renamed
-		}
 		var id string
 		err := db.QueryRowContext(ctx, `INSERT INTO vendors
 			(name, contact_email, phone, address_line1, city, state, zip, payment_terms,

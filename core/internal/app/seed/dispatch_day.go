@@ -323,7 +323,7 @@ var dispatchStops = []dispatchStop{
 	// --- West side: Mission Hill -> Westbank -> Peachland (flatbed, 30 000 lb) --
 	// Small finish package: it rides on top and the crated door seals the load.
 	{
-		Customer: "Larchwood Custom", Lat: 49.8404, Lng: -119.6003,
+		Customer: "Pellmoor Custom", Lat: 49.8404, Lng: -119.6003,
 		Instructions: "Finish package — unload in the garage, door stays crated until the painter signs off.",
 		Lines: []dispatchLine{
 			{"DR-EXT-3680-STL", 1}, // non-stackable: seals the top tier

@@ -215,7 +215,7 @@ var dispatchRecencyOrder = []string{
 	"Summerland Roofers",
 	"Snowfern Cabin Co",
 	"Tarnwick Construction",
-	"Larchwood Custom",
+	"Pellmoor Custom",
 	"Westbank Decks & Fence",
 	"Glenmore Heritage Reno",
 	"Vernon Valley Construction",

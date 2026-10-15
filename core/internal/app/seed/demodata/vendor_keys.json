@@ -9,12 +9,12 @@
     {
       "key": "GABLE_INTERNAL",
       "name": "Larkmere Building Products",
-      "category": "Internal yard feed",
+      "category": "Lumber and sheet goods",
       "payment_terms": "Net 30",
       "average_lead_time_days": 3,
       "fill_rate": 97.5,
       "ship_to": ["KEL-MAIN", "WK", "LK"],
-      "notes": "In-house yard feed."
+      "notes": "Dimension lumber, sheet goods and cornice trim."
     },
     {
       "key": "OK_HDW",

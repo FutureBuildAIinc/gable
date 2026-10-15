@@ -1352,6 +1352,7 @@ var renamedCompanyNames = []string{
 	"Central Okanagan School District", "Cupola Custom Homes", "Aldridge Landscape and Stone",
 	"Trussway Custom Homes", "Vanderpol Framing and Truss",
 	"Kelbrook", "Oakvale Builders", "Ashgrove Masonry Supply", "Okanagan Homes",
+	"Larchwood Custom", "Gable Garden Supply",
 }
 
 func TestRenamedCompanyNamesStayOut(t *testing.T) {

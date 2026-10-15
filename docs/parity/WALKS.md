@@ -86,7 +86,7 @@ offer and the server enforces no role; a real dealer signs in through its identi
    each line to its product. Mark it sent and Convert to Order: the order opens with the quote's lines and prices,
    ready to confirm.
 4. **A sale at a second yard for a customer of the first (Drew Patel).** Sign in as Drew Patel: the Counter opens on Lake
-   Country Outpost's register, `REG-LK`. Open Till. Find "Big White": Snowfern Cabin Co, a Kelowna Main Yard account,
+   Country Outpost's register, `REG-LK`. Open Till. Find "Snowfern": Snowfern Cabin Co, a Kelowna Main Yard account,
    is found here too, with its standing (every customer is a dealer wide account that any yard may sell to). Sell 10 of
    `LUM-248-PREM` on account (the stock shown is Lake Country's own) and Pay. The customer now trades at Lake Country as
    well: its first document here linked it to the yard, and the link is audited.
@@ -184,8 +184,8 @@ Proves: AR-01 (customers are dealer wide accounts, the link follows trade). Act 
 yard `WK`, granted `WK` only), or send `X-Branch-Id` of `WK` through the API.
 
 1. Find a customer whose home yard is the main yard. In the desk's customer directory with the switcher on `WK`,
-   search `Big White Cabin`. It must be found, with its home yard shown as Kelowna Main Yard. Through the API:
-   `curl -s -H "X-Branch-Id: <WK branch id>" "http://127.0.0.1:8080/api/v1/customers?q=Big%20White"` must return it
+   search `Snowfern Cabin`. It must be found, with its home yard shown as Kelowna Main Yard. Through the API:
+   `curl -s -H "X-Branch-Id: <WK branch id>" "http://127.0.0.1:8080/api/v1/customers?q=Snowfern"` must return it
    (before ruling A a yard's desk saw only its own customers), and its `branch_ids` must list `KEL-MAIN` only.
 2. Quote it at `KEL-MAIN`: switcher on `KEL-MAIN`, new quote for Snowfern Cabin Co with one line of any product, send
    it. API: `curl -s -X POST -H "X-Branch-Id: <KEL-MAIN id>" -H 'Content-Type: application/json'
