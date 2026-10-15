@@ -313,6 +313,14 @@ func TestDemoImport(t *testing.T) {
 		if now.Weekday() == time.Sunday || now.Sub(dayStart) < 30*time.Minute {
 			t.Skip("the yards are closed today, or the day is too young for the history to hold it")
 		}
+		var branchDay string
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date::text`).Scan(&branchDay); err != nil {
+			t.Fatal(err)
+		}
+		if branchDay != now.Format("2006-01-02") {
+			t.Skip("the server's UTC day is ahead of the branch's: the history trades the branch's day, which this check does not read")
+		}
 		keys := jsonlKeys(t, customersData, "account_number")
 		var today int64
 		var future int
