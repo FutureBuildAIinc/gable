@@ -51,7 +51,13 @@ export class GableCreateRouteModal extends LitElement {
   private async _handleSubmit(e: Event) {
     e.preventDefault();
     if (!this._vehicleId || !this._driverId || !this._scheduledDate) {
-      this._formError = 'Choose a vehicle and a driver, and pick a date.';
+      const missing: string[] = [];
+      if (!this._vehicleId) missing.push('a vehicle');
+      if (!this._driverId) missing.push('a driver');
+      this._formError = [
+        missing.length ? `Choose ${missing.join(' and ')}.` : '',
+        this._scheduledDate ? '' : 'Pick a scheduled date.',
+      ].filter(Boolean).join(' ');
       return;
     }
     this._formError = '';
@@ -138,8 +144,10 @@ export class GableCreateRouteModal extends LitElement {
               </label>
               <gable-date-field
                 label="Scheduled Date"
+                required
+                ?invalid=${this._formError !== '' && !this._scheduledDate}
                 .value=${this._scheduledDate}
-                @change=${(e: Event) => this._scheduledDate = (e.target as GableDateField).value}
+                @change=${(e: Event) => { this._scheduledDate = (e.target as GableDateField).value; this._formError = ''; }}
               ></gable-date-field>
             </div>
 

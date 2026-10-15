@@ -5,6 +5,7 @@ import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import Chart from 'chart.js/auto';
 import { onThemeChange, themeColor } from '@gable/design-system';
+import { formatDay } from '../../lib/dates.ts';
 import type { RevenueTrendPoint } from '../../types/dashboard.ts';
 
 @customElement('gable-revenue-trend-chart')
@@ -70,7 +71,9 @@ export class GableRevenueTrendChart extends LitElement {
             this._chart = new Chart(canvas, {
                 type: 'line',
                 data: {
-                    labels: formattedData.map(d => d.date),
+                    // The axis reads its days in the date module's style,
+                    // like the rest of the page; the tooltip's title follows.
+                    labels: formattedData.map(d => formatDay(d.date)),
                     datasets: [{
                         data: formattedData.map(d => d.revenue),
                         borderColor: themeColor('gable-green'),

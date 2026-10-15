@@ -37,13 +37,20 @@ describe('payPlan', () => {
 
 describe('panelProgress', () => {
   it('walks Customer, Payment, Summary one step at a time', () => {
-    expect(panelProgress('customer', false)).toEqual({ customer: 'current', payment: 'upcoming', summary: 'upcoming' });
-    expect(panelProgress('payment', false)).toEqual({ customer: 'done', payment: 'current', summary: 'upcoming' });
-    expect(panelProgress('summary', false)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
+    expect(panelProgress('customer', false, false)).toEqual({ customer: 'current', payment: 'upcoming', summary: 'upcoming' });
+    expect(panelProgress('payment', false, false)).toEqual({ customer: 'done', payment: 'current', summary: 'upcoming' });
+    expect(panelProgress('summary', false, true)).toEqual({ customer: 'done', payment: 'done', summary: 'current' });
+  });
+
+  it('ticks Payment on the Summary step only once a tender is chosen', () => {
+    // A cashier can reach Summary with no tender chosen ("Tender: None
+    // yet"); Payment is not done until a tender is chosen.
+    expect(panelProgress('summary', false, false)).toEqual({ customer: 'done', payment: 'upcoming', summary: 'current' });
+    expect(panelProgress('summary', false, true).payment).toBe('done');
   });
 
   it('marks all three steps done on a completed sale', () => {
-    expect(panelProgress('customer', true)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
+    expect(panelProgress('customer', true, false)).toEqual({ customer: 'done', payment: 'done', summary: 'done' });
   });
 });
 
@@ -96,5 +103,17 @@ describe('payPlan, the one rule for splits', () => {
     const plan = payPlan(5000, [t('card', 4000), t('cash', 4650)], null);
     expect(plan.ok).toBe(true);
     if (plan.ok) expect(plan.changeCents).toBe(3650);
+  });
+
+  it('a typed refusal carries the real limit: the total less the other non cash tenders', () => {
+    const plan = payPlan(8650, [t('cash', 6000)], t('card', 9000));
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) {
+      expect(plan.over).toBe('typed');
+      expect(plan.limitCents).toBe(8650);
+    }
+    const split = payPlan(8650, [t('card', 4000)], t('check', 5000));
+    expect(split.ok).toBe(false);
+    if (!split.ok) expect(split.limitCents).toBe(4650);
   });
 });
