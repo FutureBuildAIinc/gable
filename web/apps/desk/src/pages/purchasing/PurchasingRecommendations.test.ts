@@ -23,4 +23,19 @@ describe('purchasing recommendations', () => {
     const el = await mountAsync<LitElement>('gable-purchasing-recommendations')
     expect(text(el)).toContain('No recommendations found')
   })
+
+  it('names the yard on each row: a recommendation is one product at one yard', async () => {
+    const item = (branch_id: string, branch_name: string, stock: number) => ({
+      branch_id, branch_name, product_id: 'p1', product_sku: 'HANGER-28', product_name: 'Joist Hanger 2x8',
+      current_stock: stock, avg_daily_sales: 2, std_dev_sales: 0.6, lead_time_days: 7, reorder_point: 20,
+      safety_stock: 4, suggested_qty: 40, estimated_cost: 100, urgency: 'HIGH', days_until_out: 5,
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      total_items: 2, critical_count: 0, high_count: 2, medium_count: 0, low_count: 0,
+      total_estimated_cost: 200, items: [item('y1', 'Lake Country Outpost', 10), item('y2', 'West Kelowna Satellite', 12)],
+    })))
+    const el = await mountAsync<LitElement>('gable-purchasing-recommendations')
+    const yards = Array.from(el.querySelectorAll('[data-testid="rec-yard"]')).map((n) => (n.textContent ?? '').trim())
+    expect(yards).toEqual(['Lake Country Outpost', 'West Kelowna Satellite'])
+  })
 })
