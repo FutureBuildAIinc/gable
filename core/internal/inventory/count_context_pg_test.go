@@ -192,3 +192,55 @@ func TestCount_BelowTheAllocatedFigureIsRefusedInWords(t *testing.T) {
 		t.Errorf("total = %g after a refused count, want 50", w.sum())
 	}
 }
+
+// CORRECTNESS (item 130, N20, PR 149 round 4): a caller bound to a yard that
+// holds no row of the product, naming no location, never writes a row with no
+// location. Held only at another yard (50 counted as 45 became 95) or held
+// nowhere: refused in words, nothing written, the other yard unchanged.
+func TestCount_BoundCallerWithNoRowInTheirYardIsRefused(t *testing.T) {
+	refusal := func(t *testing.T, code int, body string) {
+		t.Helper()
+		if code != http.StatusUnprocessableEntity {
+			t.Fatalf("write with no location = %d, want 422: %s", code, body)
+		}
+		var e struct {
+			Error struct{ Code, Message string } `json:"error"`
+		}
+		if json.Unmarshal([]byte(body), &e) != nil || e.Error.Code != "location_required" || !strings.Contains(e.Error.Message, "location") {
+			t.Errorf("refusal = %s", body)
+		}
+	}
+	for _, kind := range []struct {
+		name  string
+		qty   float64
+		delta bool
+	}{{"absolute count", 45, false}, {"delta", 5, true}} {
+		t.Run("held only at another yard, "+kind.name, func(t *testing.T) {
+			w := newCountWorld(t)
+			db := testutil.RequireDB(t)
+			other := uuid.New()
+			if _, err := db.Pool.Exec(context.Background(),
+				`INSERT INTO locations (id, type, code, branch_id) VALUES ($1, 'BRANCH', $2, $1)`, other, "CO-"+other.String()[:8]); err != nil {
+				t.Fatalf("other yard: %v", err)
+			}
+			t.Cleanup(func() {
+				_, _ = db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE location_id = $1`, other)
+				_, _ = db.Pool.Exec(context.Background(), `DELETE FROM locations WHERE id = $1`, other)
+			})
+			w.stock(other, 50, 0, true)
+			code, body := w.count(&branchctx.Context{UserSub: "u", BranchID: &w.yard}, w.countBody(kind.qty, kind.delta))
+			refusal(t, code, body)
+			if w.rows() != 1 || w.sum() != 50 {
+				t.Errorf("rows = %g, total = %g, want the other yard's 1 row of 50 and nothing new", w.rows(), w.sum())
+			}
+		})
+		t.Run("held nowhere, "+kind.name, func(t *testing.T) {
+			w := newCountWorld(t)
+			code, body := w.count(&branchctx.Context{UserSub: "u", BranchID: &w.yard}, w.countBody(kind.qty, kind.delta))
+			refusal(t, code, body)
+			if w.rows() != 0 {
+				t.Errorf("rows = %g, want none written", w.rows())
+			}
+		})
+	}
+}

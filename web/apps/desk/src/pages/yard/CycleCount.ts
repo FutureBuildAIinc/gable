@@ -53,6 +53,8 @@ export class CycleCount extends LitElement {
     @state() private loading = false;
     @state() private submitting = false;
     @state() private submitted = false;
+    /** Counts the server refused, kept on the page with its words so each can be corrected and sent again. */
+    @state() private failures: Array<{ name: string; message: string }> = [];
     @state() private isScanning = false;
     private _yardLocations: Location[] | null = null;
     @state() private yardLocations: Location[] = [];
@@ -67,6 +69,7 @@ export class CycleCount extends LitElement {
         if (!this.selectedZone) return;
         this.loading = true;
         this.submitted = false;
+        this.failures = [];
         try {
             // Zones slice the catalog, so every page through the cursor is needed (capped at 2000 products).
             const data: Product[] = await ProductService.listAllProducts();
@@ -186,9 +189,9 @@ export class CycleCount extends LitElement {
 
     private async _handleSubmit() {
         this.submitting = true;
-        let failCount = 0;
-        let firstFailure: string | null = null;
-        for (const item of this.items) {
+        const failures: Array<{ name: string; message: string }> = [];
+        const next = this.items.map(i => ({ ...i, locations: i.locations.map(l => ({ ...l })) }));
+        for (const item of next) {
             for (const loc of item.locations) {
                 const counted = parseFloat(loc.counted);
                 if (isNaN(counted) || counted === loc.expected) continue;
@@ -202,18 +205,26 @@ export class CycleCount extends LitElement {
                         reason: `Cycle count - Zone ${this.selectedZone}`,
                         is_delta: false,
                     });
+                    // Written: the figure is now what was counted, so it is not sent twice.
+                    loc.expected = counted;
+                    loc.counted = '';
                 } catch (err) {
-                    failCount++;
-                    firstFailure ??= apiErrorMessage(err, 'Failed to adjust stock');
+                    failures.push({
+                        name: `${item.product.sku} at ${loc.name}`,
+                        message: apiErrorMessage(err, 'Failed to adjust stock'),
+                    });
                     console.error('Failed to adjust stock');
                 }
             }
         }
-        if (failCount > 0) {
-            ToastService.show(`${failCount} adjustment(s) failed to save: ${firstFailure}`, 'error');
+        this.items = next;
+        this.failures = failures;
+        if (failures.length > 0) {
+            ToastService.show(`${failures.length} count(s) were not written. They stay on the page with the reason.`, 'error');
         }
         this.submitting = false;
-        this.submitted = true;
+        // The done screen is for a count that was written in full.
+        this.submitted = failures.length === 0;
     }
 
     private get _allLocations() { return this.items.flatMap(i => i.locations); }
@@ -325,6 +336,13 @@ export class CycleCount extends LitElement {
                                 </span>
                             ` : nothing}
                         </div>
+
+                        ${this.failures.length > 0 ? html`
+                            <div data-testid="count-failed" class="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300 space-y-1">
+                                <p class="font-medium">Not written. Correct these counts and submit again.</p>
+                                ${this.failures.map(f => html`<p>${f.name}: ${f.message}</p>`)}
+                            </div>
+                        ` : nothing}
 
                         <div class="space-y-2">
                             ${this.items.map((item, idx) => html`
