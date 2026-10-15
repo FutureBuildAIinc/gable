@@ -38,7 +38,7 @@ type PIMMedia struct {
 	AltText     string     `json:"alt_text"`
 	SortOrder   int        `json:"sort_order"`
 	IsPrimary   bool       `json:"is_primary"`
-	Status      string     `json:"status"` // generating | ready | failed (async image gen)
+	Status      string     `json:"status"` // generating | ready | failed | refused (async image gen)
 	GenModel    string     `json:"gen_model"`
 	GenPrompt   string     `json:"gen_prompt"`
 	GenStyle    string     `json:"gen_style"`

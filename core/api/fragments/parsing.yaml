@@ -59,6 +59,7 @@ paths:
         "415": { $ref: "#/components/responses/UnsupportedType" }
         "422": { $ref: "#/components/responses/UnprocessableEntity" }
         "500": { $ref: "#/components/responses/InternalError" }
+        "502": { $ref: "#/components/responses/AIRefused" }
 components:
   schemas:
     ParsingParseResponse:

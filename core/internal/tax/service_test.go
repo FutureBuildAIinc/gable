@@ -62,9 +62,9 @@ func TestFlatRateCalculation(t *testing.T) {
 
 	req := &TaxPreviewRequest{
 		Lines: []TaxLineInput{
-			{LineNumber: 1, ItemCode: "2x4x8", Description: "2x4x8 SPF #2", Quantity: 10, Amount: 6500}, // $65.00
-			{LineNumber: 2, ItemCode: "2x6x12", Description: "2x6x12 DF #1", Quantity: 4, Amount: 8800}, // $88.00
-			{LineNumber: 3, ItemCode: "HD2A", Description: "Simpson HD2A", Quantity: 20, Amount: 9400},  // $94.00
+			{LineNumber: 1, ItemCode: "2x4x8", Description: "2x4x8 SPF #2", Quantity: 10, Amount: 6500},  // $65.00
+			{LineNumber: 2, ItemCode: "2x6x12", Description: "2x6x12 DF #1", Quantity: 4, Amount: 8800},  // $88.00
+			{LineNumber: 3, ItemCode: "HD2A", Description: "Hold down HD2A", Quantity: 20, Amount: 9400}, // $94.00
 		},
 	}
 

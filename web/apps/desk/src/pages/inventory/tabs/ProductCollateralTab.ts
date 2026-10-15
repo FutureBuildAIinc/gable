@@ -8,6 +8,7 @@ import { Sparkles, Trash2, Copy, Loader2, FileText, RefreshCw, AlertTriangle } f
 import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import type { PIMCollateral, CollateralType } from '../../../types/pim.ts';
+import { aiRefusalWords, renderAiNotice } from '../../../components/inventory/PimAiNotice.ts';
 
 const TYPES: { value: CollateralType; label: string }[] = [
     { value: 'sell_sheet', label: 'Sell Sheet' },
@@ -31,6 +32,7 @@ export class GableProductCollateralTab extends LitElement {
     @state() private tone = 'professional';
     @state() private audience = 'contractors and builders';
     @state() private generating = false;
+    @state() private aiNotice: string | null = null;
     @state() private copiedId: string | null = null;
     @state() private error: string | null = null;
 
@@ -44,12 +46,15 @@ export class GableProductCollateralTab extends LitElement {
     private async _handleGenerate() {
         this.generating = true;
         this.error = null;
+        this.aiNotice = null;
         try {
             await PIMService.generateCollateral(this.productId, { type: this.type, tone: this.tone, audience: this.audience });
             this.dispatchEvent(new CustomEvent('collateral-update', { bubbles: true, composed: true }));
         } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : 'Collateral generation failed';
-            this.error = msg;
+            this.aiNotice = aiRefusalWords(err);
+            if (!this.aiNotice) {
+                this.error = err instanceof Error ? err.message : 'Collateral generation failed';
+            }
         } finally {
             this.generating = false;
         }
@@ -78,6 +83,7 @@ export class GableProductCollateralTab extends LitElement {
     render() {
         return html`
             <div class="space-y-6">
+                ${renderAiNotice(this.aiNotice)}
                 <!-- Generation Controls -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <h3 class="text-sm font-medium text-zinc-300 flex items-center gap-2 mb-4">

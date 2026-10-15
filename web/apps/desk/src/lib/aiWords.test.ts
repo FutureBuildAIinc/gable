@@ -5,10 +5,26 @@ import { describe, it, expect } from 'vitest';
 import { aiHeadline, aiStatusLine, imageWords, modelLabel, providerLabel } from './aiWords.ts';
 
 describe('aiWords', () => {
-    it('names the chosen provider and model when a key is saved', () => {
-        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true })).toBe('AI on: Anthropic, Sonnet 5.5');
-        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-opus-5-5', configured: true })).toBe('AI on: Anthropic, Opus 5.5');
-        expect(aiStatusLine({ provider: 'openrouter', model: 'claude-sonnet-5-5', configured: true })).toBe('AI on: OpenRouter');
+    it('names the chosen provider and model once the saved key passed its test', () => {
+        const passed = { configured: true, test_status: 'passed' as const };
+        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-sonnet-5-5', ...passed })).toBe('AI on: Anthropic, Sonnet 5.5');
+        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-opus-5-5', ...passed })).toBe('AI on: Anthropic, Opus 5.5');
+        expect(aiStatusLine({ provider: 'openrouter', model: 'claude-sonnet-5-5', ...passed })).toBe('AI on: OpenRouter');
+    });
+
+    it('says AI is off when the provider refused the saved key', () => {
+        const refused = { configured: true, test_status: 'refused' as const };
+        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-sonnet-5-5', ...refused })).toBe('AI off: Anthropic refused the saved key');
+        expect(aiStatusLine({ provider: 'openrouter', model: '', ...refused })).toBe('AI off: OpenRouter refused the saved key');
+        expect(aiHeadline({ provider: 'anthropic', model: '', ...refused })).toBe('AI Features Off');
+    });
+
+    it('says a saved key was not tested yet, and that a failed test is not a pass', () => {
+        const untested = { configured: true, test_status: 'untested' as const };
+        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-sonnet-5-5', ...untested })).toBe('Key saved, not tested yet. Press Test connection to turn AI on.');
+        expect(aiHeadline({ provider: 'anthropic', model: '', ...untested })).toBe('AI Features Not Tested');
+        const failed = { configured: true, test_status: 'failed' as const };
+        expect(aiStatusLine({ provider: 'anthropic', model: 'claude-sonnet-5-5', ...failed })).toBe('AI off: the test of the saved Anthropic key did not pass');
     });
 
     it('asks for the chosen provider\'s key, never the other one\'s', () => {
@@ -18,7 +34,7 @@ describe('aiWords', () => {
     });
 
     it('reads the headline from the state', () => {
-        expect(aiHeadline({ provider: 'anthropic', model: '', configured: true })).toBe('AI Features Active');
+        expect(aiHeadline({ provider: 'anthropic', model: '', configured: true, test_status: 'passed' })).toBe('AI Features Active');
         expect(aiHeadline(null)).toBe('AI Features Inactive');
     });
 
@@ -27,6 +43,15 @@ describe('aiWords', () => {
         expect(modelLabel('claude-fable-5-1')).toBe('Fable 5.1');
         expect(modelLabel('some-other-model')).toBe('some-other-model');
         expect(providerLabel('anthropic')).toBe('Anthropic');
+    });
+
+    it('never tells a person to try again with a key the provider refused', () => {
+        for (const p of ['anthropic', 'openrouter'] as const) {
+            const w = imageWords(p);
+            expect(w.failed).not.toContain('try again');
+            expect(w.failed).toContain('Tech Admin, AI Settings');
+            expect(w.refused).toBe(`${providerLabel(p)} refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.`);
+        }
     });
 
     it('says which image kind the button makes', () => {

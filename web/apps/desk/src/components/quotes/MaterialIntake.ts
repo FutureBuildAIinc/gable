@@ -7,6 +7,7 @@ import { icon } from '../../lib/icons';
 import { Upload, Check, X, AlertTriangle, Loader2, Package, ShieldAlert, ListChecks } from 'lucide';
 import type { MatchedProduct, ParseResponse, ParsedItem } from '../../types/parsing';
 import { ParsingService } from '../../services/parsing.service';
+import { ApiError } from '../../services/apiError';
 
 /** A line at or above this confidence is accepted by "Accept confident lines". */
 const CONFIDENT = 0.9;
@@ -28,6 +29,8 @@ export class GableMaterialIntake extends LitElement {
   @state() private _pasted = '';
   @state() private _busy = false;
   @state() private _error: string | null = null;
+  /** The provider's refusal of the saved key, in the server's words. */
+  @state() private _refused: string | null = null;
   @state() private _result: ParseResponse | null = null;
   @state() private _items: ParsedItem[] = [];
   @state() private _open: Set<number> = new Set();
@@ -36,6 +39,7 @@ export class GableMaterialIntake extends LitElement {
   private async _run(task: () => Promise<ParseResponse>) {
     this._busy = true;
     this._error = null;
+    this._refused = null;
     try {
       const result = await task();
       this._result = result;
@@ -44,7 +48,11 @@ export class GableMaterialIntake extends LitElement {
       this._expanded = true;
       this.dispatchEvent(new CustomEvent('parse-complete', { detail: result, bubbles: true, composed: true }));
     } catch (err) {
-      this._error = err instanceof Error ? err.message : 'Failed to parse the material list';
+      if (err instanceof ApiError && err.code === 'ai_refused') {
+        this._refused = err.message;
+      } else {
+        this._error = err instanceof Error ? err.message : 'Failed to parse the material list';
+      }
     } finally {
       this._busy = false;
     }
@@ -213,6 +221,12 @@ export class GableMaterialIntake extends LitElement {
           </label>
         </div>
         ${this._error ? html`<p role="alert" class="mt-2 text-xs text-rose-400">${this._error}</p>` : nothing}
+        ${this._refused ? html`
+          <div data-testid="intake-ai-refused" role="alert" class="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+            <p class="text-sm font-semibold text-amber-300">${this._refused}</p>
+            <p class="mt-1 text-xs text-amber-200/80">Nothing was read from your file. A pasted text list is read without AI.</p>
+          </div>
+        ` : nothing}
 
         ${result ? html`
           ${result.synthetic ? html`

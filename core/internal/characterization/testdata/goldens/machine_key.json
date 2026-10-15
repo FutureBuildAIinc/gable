@@ -365,6 +365,7 @@
         "provider": "openrouter",
         "revision": 1,
         "source": "none",
+        "test_status": "none",
         "vault_present": false
       }
     }

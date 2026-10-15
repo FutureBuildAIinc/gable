@@ -9,6 +9,7 @@ import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import { apiErrorMessage } from '../../../services/apiError';
 import type { PIMContent } from '../../../types/pim.ts';
+import { aiRefusalWords, renderAiNotice } from '../../../components/inventory/PimAiNotice.ts';
 
 const TONES = ['professional', 'casual', 'technical', 'persuasive'];
 const AUDIENCES = ['contractors and builders', 'DIY homeowners', 'architects and designers', 'wholesale buyers'];
@@ -23,6 +24,7 @@ export class GableProductContentTab extends LitElement {
     @state() private tone = 'professional';
     @state() private audience = 'contractors and builders';
     @state() private generating = false;
+    @state() private aiNotice: string | null = null;
     @state() private saving = false;
     @state() private shortDesc = '';
     @state() private longDesc = '';
@@ -43,12 +45,14 @@ export class GableProductContentTab extends LitElement {
 
     private async _handleGenerate() {
         this.generating = true;
+        this.aiNotice = null;
         try {
             const result = await PIMService.generateDescriptions(this.productId, { tone: this.tone, audience: this.audience });
             this.dispatchEvent(new CustomEvent('content-update', { detail: result, bubbles: true, composed: true }));
         } catch (err) {
             console.error('Generate failed:', err);
-            ToastService.show(apiErrorMessage(err, 'Failed to generate content'), 'error');
+            this.aiNotice = aiRefusalWords(err);
+            if (!this.aiNotice) ToastService.show(apiErrorMessage(err, 'Failed to generate content'), 'error');
         } finally {
             this.generating = false;
         }
@@ -97,6 +101,7 @@ export class GableProductContentTab extends LitElement {
     render() {
         return html`
             <div class="space-y-6">
+                ${renderAiNotice(this.aiNotice)}
                 <!-- Generation Controls -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <div class="flex items-center justify-between mb-4">
