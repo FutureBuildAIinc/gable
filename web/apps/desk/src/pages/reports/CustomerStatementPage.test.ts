@@ -281,7 +281,6 @@ describe('customer statement unapplied cash', () => {
       expect(body).toContain('2031-12-20')
       expect(body).toContain('$500.00')
       expect(body).toMatch(/net balance/i)
-      expect(body).toContain('Documents listed are those this yard can see; the balance covers the whole account')
     } finally {
       history.replaceState(null, '', '/')
     }
@@ -323,30 +322,54 @@ describe('customer statement print when the tab is blocked', () => {
   })
 })
 
-describe('customer statement open documents scope', () => {
-  it('says the open documents follow the yard while the balance covers the account', async () => {
+describe('customer statement scope at a yard', () => {
+  const BRANCH_KEY = 'gable_current_branch_id'
+  afterEach(() => localStorage.removeItem(BRANCH_KEY))
+
+  async function shown(cur: Record<string, unknown>) {
     const st = statement(CUSTOMER_ID)
-    st.currencies[0] = {
-      ...st.currencies[0],
-      open_documents: [{ kind: 'invoice', id: '00000000-0000-4000-8000-0000000000i1', number: 'IN-000001', date: '2031-12-01',
-        due_date: '2031-12-31', job_id: null, total_cents: 1000, open_cents: 1000 }],
-    } as never
+    st.currencies[0] = { ...st.currencies[0], ...cur } as never
     stubRoutes({
       [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
       [`/ar/customers/${CUSTOMER_ID}/statement`]: st,
     })
     history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
-    try {
-      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
-      for (let i = 0; i < 4; i++) {
-        await new Promise((r) => setTimeout(r, 0))
-        await el.updateComplete
-      }
-      expect(textOf(el)).toContain('Documents listed are those this yard can see; the balance covers the whole account')
-      expect(el.querySelectorAll('[data-testid="statement-scope"]').length, 'said once').toBe(1)
-    } finally {
-      history.replaceState(null, '', '/')
+    const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
     }
+    history.replaceState(null, '', '/')
+    return textOf(el)
+  }
+
+  it('says the scope and names the unapplied cash at other yards when this yard sees none of it', async () => {
+    localStorage.setItem(BRANCH_KEY, 'b-yard-a')
+    const body = await shown({ closing_balance_cents: 100000, unapplied_payments: [], unapplied_cents: 7700, net_balance_cents: 92300, open_documents: [] })
+    expect(body).toContain("Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account")
+    expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
+    expect(body).toContain('$923.00')
+  })
+
+  it('names only the part of the unapplied cash this yard cannot list', async () => {
+    localStorage.setItem(BRANCH_KEY, 'b-yard-a')
+    const body = await shown({
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 57700, net_balance_cents: 42300,
+    })
+    expect(body).toContain('PAY-000042')
+    expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
+  })
+
+  it('has no other yards row when everything is listed, and no scope line without a yard', async () => {
+    const body = await shown({
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 50000, net_balance_cents: 50000,
+    })
+    expect(body).not.toMatch(/other yards/i)
+    expect(body).not.toContain('are this yard')
   })
 })
 
