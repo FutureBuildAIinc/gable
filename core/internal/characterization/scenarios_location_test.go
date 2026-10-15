@@ -64,7 +64,7 @@ func locationGroups() []groupDef {
 			{name: "location.get", method: "GET", path: "/api/v1/locations/{myLocation}"},
 			// The branch reader refuses a non-branch row: type discipline.
 			{name: "branch.get.not_a_branch", method: "GET", path: "/api/v1/branches/{myLocation}"},
-			// Dev mode without claims: all active branches, first flagged home.
+			// Dev mode without claims: all active branches, none flagged home.
 			{name: "me.branches", method: "GET", path: "/api/v1/me/branches"},
 			// No grants and no audit rows yet: pins [] rather than null.
 			{name: "users.list_empty", method: "GET", path: "/api/v1/users"},
