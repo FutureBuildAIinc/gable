@@ -99,4 +99,22 @@ describe('purchase order list columns', () => {
     const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
     expect(textOf(el)).toContain('Not set')
   })
+
+  it('names the yard on each reorder row when the rows span yards (reorder is per yard)', async () => {
+    const alert = (branch_id: string, branch_name: string, stock: string) => ({
+      branch_id, branch_name, product_id: 'p1', sku: 'HANGER-28', description: 'Joist Hanger 2x8', vendor: null, vendor_id: null,
+      reorder_point: '150', reorder_qty: '200', current_stock: stock, deficit: String(150 - Number(stock)),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/reorder-alerts')) {
+        return jsonResponse({ items: [alert('y1', 'Lake Country Outpost', '100'), alert('y2', 'West Kelowna Satellite', '100')], next_cursor: null, limit: 0 })
+      }
+      if (url.includes('/source-summary')) return jsonResponse({})
+      if (url.includes('/purchase-orders')) return jsonResponse([])
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    const yards = Array.from(el.querySelectorAll('[data-testid="reorder-yard"]')).map((n) => textOf(n))
+    expect(yards).toEqual(['Lake Country Outpost', 'West Kelowna Satellite'])
+  })
 })
