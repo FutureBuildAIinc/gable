@@ -48,6 +48,7 @@ func newARWorld(t *testing.T) *arWorld {
 
 func newARWorldOn(t *testing.T, db *database.DB) *arWorld {
 	t.Helper()
+	loadBranchZone(db)
 	w := &arWorld{t: t, db: db, customerID: uuid.New()}
 	w.svc = account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
@@ -245,8 +246,39 @@ func (w *arWorld) netOf(code string, debitMinusCredit bool, upTo *time.Time) int
 // The world's documents.
 // ---------------------------------------------------------------------------
 
+// daysFromNow is the business day n days from today in the default branch's
+// zone, as a UTC midnight date. The AR core refuses money dated after the
+// branch's own day, so a test that dated "today" by the UTC clock would be
+// refused in the hours between UTC's midnight and the branch's.
 func daysFromNow(n int) time.Time {
-	return time.Now().UTC().AddDate(0, 0, n).Truncate(24 * time.Hour)
+	now := time.Now().In(testBranchZone())
+	return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)
+}
+
+var (
+	branchZoneOnce sync.Once
+	branchZone     = time.UTC
+)
+
+// testBranchZone is the default branch's time zone, read once from the test
+// database by the first world.
+func testBranchZone() *time.Location {
+	return branchZone
+}
+
+func loadBranchZone(db *database.DB) {
+	branchZoneOnce.Do(func() {
+		var name string
+		err := db.Pool.QueryRow(context.Background(), `
+			SELECT COALESCE((SELECT l.timezone FROM locations l
+			        WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`).Scan(&name)
+		if err != nil {
+			return
+		}
+		if loc, err := time.LoadLocation(name); err == nil {
+			branchZone = loc
+		}
+	})
 }
 
 func date(t time.Time) string { return t.Format("2006-01-02") }
