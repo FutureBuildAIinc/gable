@@ -62,7 +62,7 @@ func TestKeyBranchPin_SharedCallerRefusalRow(t *testing.T) {
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
 	sh := "/api/v1/customers/" + s.id.String()
 	change := func() string {
-		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 555000 + int(time.Now().UnixNano()%1000)})
+		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": nextCreditLimit(555000)})
 	}
 	lowest := f.branchA
 	if f.branchB.String() < f.branchA.String() {
@@ -150,7 +150,7 @@ func TestKeyBranchPin_BoundKeyWithTheScopeIsRefused(t *testing.T) {
 		[]string{"customers:read", "customers:write", "customers:restricted"}, &f.branchA)
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
 	change := func(id uuid.UUID) string {
-		return f.customerReplace(t, id, map[string]any{"credit_limit_cents": 444000 + int(time.Now().UnixNano()%1000)})
+		return f.customerReplace(t, id, map[string]any{"credit_limit_cents": nextCreditLimit(444000)})
 	}
 	// The refusal row names the path, which is this customer's alone.
 	refusals := func() (n int) {

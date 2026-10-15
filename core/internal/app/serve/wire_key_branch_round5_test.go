@@ -15,11 +15,22 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// creditLimitDraws numbers every draw nextCreditLimit hands out in this test
+// process.
+var creditLimitDraws atomic.Int64
+
+// nextCreditLimit returns a credit limit above base that no earlier call in
+// this process returned, so a write that sets it always changes the stored
+// value (a write that changes no restricted field is never asked of the
+// guard, and a drawn value could repeat the stored one).
+func nextCreditLimit(base int) int { return base + int(creditLimitDraws.Add(1)) }
 
 // round5FirstMint is the fixture's first mint (the pos and pricing scopes),
 // kept for the legs that need it once the fixture has swapped to the document
@@ -295,7 +306,7 @@ func TestKeyBranchPin_SharedRestrictedScope(t *testing.T) {
 	s := seedSharedCustomer(t, f, f.branchA, f.branchB)
 	sh := "/api/v1/customers/" + s.id.String()
 	change := func() string {
-		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": 777000 + int(time.Now().UnixNano()%1000)})
+		return f.customerReplace(t, s.id, map[string]any{"credit_limit_cents": nextCreditLimit(777000)})
 	}
 
 	// The mint: only an owner may grant the scope, and the mint is audited.
