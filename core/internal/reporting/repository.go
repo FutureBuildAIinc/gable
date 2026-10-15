@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/collections"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -71,15 +73,12 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-// defaultBranchZoneSQL is the default branch's IANA zone (UTC when it has
-// none): the zone of the business day the dashboard cuts today on.
-const defaultBranchZoneSQL = `COALESCE((SELECT l.timezone FROM locations l
-	WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`
-
 // GetDailyTill reads one business day's collections in the default branch's
 // zone. A zero date is the branch's today (the day the dashboard's Today's
-// Revenue card is cut on, so the card and this page agree); a date is that
-// calendar day in the same zone.
+// Revenue card is cut on); a date is that calendar day in the same zone. The
+// day's figures are the card's: payments received at the caller's yard (their
+// own branch_id, never a voided payment), the refunds paid out that day, and
+// their net, all from pkg/collections.
 func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error) {
 	var asked *string
 	if !date.IsZero() {
@@ -87,34 +86,25 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 		asked = &d
 	}
 	branch, grants := reach(ctx)
+	ex := r.db.GetExecutor(ctx)
 
 	// The day first, so a day with no collections still names itself.
 	var day string
-	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
-		`SELECT COALESCE($1::date, (NOW() AT TIME ZONE `+defaultBranchZoneSQL+`)::date)::text`, asked).Scan(&day); err != nil {
+	if err := ex.QueryRow(ctx,
+		`SELECT COALESCE($1::date, `+collections.TodaySQL+`)::text`, asked).Scan(&day); err != nil {
 		return nil, fmt.Errorf("failed to read the till day: %w", err)
 	}
 
-	query := `
-		SELECT method, COALESCE(SUM(amount), 0), COUNT(*)
-		FROM payments
-		WHERE (created_at AT TIME ZONE ` + defaultBranchZoneSQL + `)::date = $1::date
-		  AND ` + middleware.Wall("", 2, 3) + `
-		GROUP BY method
-	`
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, day, branch, grants)
+	rows, err := ex.Query(ctx, `
+		SELECT p.method, COALESCE(SUM(p.amount), 0), COUNT(*)
+		FROM `+collections.ReceivedFrom("$1::date", 2, 3)+`
+		GROUP BY p.method`, day, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily till: %w", err)
 	}
 	defer rows.Close()
 
-	report := &DailyTillReport{
-		Date:             day,
-		ByMethod:         make(map[string]float64),
-		TransactionCount: 0,
-		TotalCollected:   0,
-	}
-
+	report := &DailyTillReport{Date: day, ByMethod: make(map[string]float64)}
 	for rows.Next() {
 		var method string
 		var amount float64
@@ -123,10 +113,25 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 			return nil, fmt.Errorf("failed to scan till row: %w", err)
 		}
 		report.ByMethod[method] = amount
-		report.TotalCollected += amount
+		report.Received += amount
 		report.TransactionCount += count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
 
+	var refunds float64
+	if err := ex.QueryRow(ctx, `
+		SELECT COALESCE(SUM(r.amount), 0)::float8
+		FROM `+collections.RefundedFrom("$1::date", 2, 3), day, branch, grants).Scan(&refunds); err != nil {
+		return nil, fmt.Errorf("failed to query daily till refunds: %w", err)
+	}
+	report.Refunds = refunds
+	// Cents, so the sum of two dollar floats carries no binary dust.
+	report.Received = math.Round(report.Received*100) / 100
+	report.NetCollected = math.Round((report.Received-refunds)*100) / 100
+	report.TotalCollected = report.NetCollected
 	return report, nil
 }
 
@@ -149,14 +154,11 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
 
-	// 2. Collected
-	queryCollected := `
-		SELECT COALESCE(SUM(amount), 0)
-		FROM payments
-		WHERE created_at >= $1 AND created_at < $2
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end, branch, grants).Scan(&report.TotalCollected)
+	// 2. Collected: the day's net collections over the period, counted as the
+	// dashboard's card and the Daily Till count them (pkg/collections: by the
+	// payment's received_on and own yard, voided payments out, refunds in).
+	queryCollected := `SELECT ` + collections.NetCentsBetween("$1::date", "$2::date", 3, 4) + `::float8 / 100`
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start.Format("2006-01-02"), end.Format("2006-01-02"), branch, grants).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
