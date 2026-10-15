@@ -46,6 +46,8 @@ export class PurchaseOrderList extends LitElement {
 
     @state() private pos: PurchaseOrder[] = [];
     @state() private alerts: ReorderAlert[] = [];
+    /** SKUs the last Generate left alone for want of a reorder quantity. */
+    @state() private leftAlone: string[] = [];
     @state() private loading = true;
     @state() private sourceSummary: POSourceSummary = {};
     /** Vendor names by id: the list route carries only `vendor_id`. */
@@ -107,6 +109,8 @@ export class PurchaseOrderList extends LitElement {
         try {
             const res = await PurchaseOrderService.generateReorders();
             ToastService.show(`Generated ${res.count} draft purchase orders`, 'success');
+            // The products left alone for want of a reorder quantity, in words.
+            this.leftAlone = res.no_reorder_qty ?? [];
             this._loadData();
         } catch (err) {
             console.error(err);
@@ -170,6 +174,11 @@ export class PurchaseOrderList extends LitElement {
                                 Generate Replenishment POs
                             </button>
                         </div>
+                        ${this.leftAlone.length > 0 ? html`
+                            <p data-testid="reorder-left-alone" class="text-xs text-amber-300 mb-3">
+                                No order was written for ${this.leftAlone.join(', ')}: ${this.leftAlone.length === 1 ? 'it has' : 'they have'} no reorder quantity set and ${this.leftAlone.length === 1 ? 'is' : 'are'} only at the reorder point. Set a reorder quantity on the product to order it.
+                            </p>
+                        ` : nothing}
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                             ${this.alerts.map((alert) => html`
                                 <div class="bg-amber-500/5 border border-amber-500/10 rounded-lg p-3">

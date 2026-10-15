@@ -27746,7 +27746,10 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         status: "success";
+                        /** @description Draft orders created; a vendor and yard group with no line writes none. */
                         count: number;
+                        /** @description SKUs the run left alone because they carry no reorder quantity and no deficit (a yard exactly at its point). */
+                        no_reorder_qty: string[];
                     };
                 };
             };

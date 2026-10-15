@@ -13799,13 +13799,20 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status, count]
+                required: [status, count, no_reorder_qty]
                 properties:
                   status:
                     type: string
                     enum: [success]
                   count:
                     type: integer
+                    description: Draft orders created; a vendor and yard group with no line writes none.
+                  no_reorder_qty:
+                    type: array
+                    description: >-
+                      SKUs the run left alone because they carry no reorder quantity and no deficit (a yard exactly at its point).
+                    items:
+                      type: string
         "400": {$ref: "#/components/responses/IdempotencyBadRequest"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/ForbiddenEither"}

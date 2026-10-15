@@ -243,6 +243,38 @@ func (s *Service) createReorders(ctx context.Context) (int, []string, error) {
 	for _, k := range order {
 		vid, items := k.vendor, groups[k]
 
+		// Settle each item's quantity first: a group with no line to write
+		// (a yard exactly at its point with no reorder quantity) writes no
+		// draft and is not counted as created.
+		type pendingLine struct {
+			item product.ReorderAlert
+			qty  float64
+		}
+		var pending []pendingLine
+		for _, item := range items {
+			// The reorder targets are scale 4 quantities on the product wire
+			// (C3-1); the unconverted PO line still carries a float quantity,
+			// so the conversion happens here at the boundary.
+			qty := product.QtyFloat(item.ReorderQty)
+			if qty <= 0 {
+				qty = product.QtyFloat(item.Deficit)
+			}
+			if qty <= 0 {
+				// A yard exactly at its point has no deficit, and with no
+				// reorder quantity set there is nothing to order: no line,
+				// never a one unit line, and the run names the product.
+				if !seenNoQty[item.SKU] {
+					seenNoQty[item.SKU] = true
+					noQty = append(noQty, item.SKU)
+				}
+				continue
+			}
+			pending = append(pending, pendingLine{item, qty})
+		}
+		if len(pending) == 0 {
+			continue
+		}
+
 		// Reuse an existing DRAFT PO for this vendor at THIS yard if one
 		// exists. Note we intentionally do NOT overwrite the source of a
 		// reused PO: if an operator manually created a DRAFT for this vendor
@@ -262,24 +294,8 @@ func (s *Service) createReorders(ctx context.Context) (int, []string, error) {
 			createdCount++
 		}
 
-		for _, item := range items {
-			// The reorder targets are scale 4 quantities on the product wire
-			// (C3-1); the unconverted PO line still carries a float quantity,
-			// so the conversion happens here at the boundary.
-			qty := product.QtyFloat(item.ReorderQty)
-			if qty <= 0 {
-				qty = product.QtyFloat(item.Deficit)
-			}
-			if qty <= 0 {
-				// A yard exactly at its point has no deficit, and with no
-				// reorder quantity set there is nothing to order: no line,
-				// never a one unit line, and the run names the product.
-				if !seenNoQty[item.SKU] {
-					seenNoQty[item.SKU] = true
-					noQty = append(noQty, item.SKU)
-				}
-				continue
-			}
+		for _, pl := range pending {
+			item, qty := pl.item, pl.qty
 
 			productID := item.ProductID
 
