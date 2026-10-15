@@ -6,6 +6,7 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"github.com/gablelbm/gable/pkg/collections"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -30,23 +31,7 @@ type Repository interface {
 // PostgresRepository implements Repository for Postgres.
 type PostgresRepository struct {
 	db *database.DB
-	// now is the server's clock (time.Now unless a test sets it). No figure
-	// is cut on it any more: today, yesterday, the trend's days and the open
-	// receivable all read the default branch's business date in the database.
-	now func() time.Time
 }
-
-func (r *PostgresRepository) clock() time.Time {
-	if r.now != nil {
-		return r.now()
-	}
-	return time.Now()
-}
-
-// defaultBranchZoneSQL is the default branch's IANA zone (UTC when it has
-// none): the zone of the business day the dashboard and the aging read.
-const defaultBranchZoneSQL = `COALESCE((SELECT l.timezone FROM locations l
-	WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`
 
 // NewRepository creates a new dashboard repository.
 func NewRepository(db *database.DB) *PostgresRepository {
@@ -54,8 +39,8 @@ func NewRepository(db *database.DB) *PostgresRepository {
 }
 
 // GetDashboardSummary returns all aggregate KPIs in a single query using a CTE.
-// The caller's reach walls every arm (the payments arms through the order or
-// the invoice their payment settles, the rest through their own branch).
+// The caller's reach walls every arm (the payments by their own yard, the
+// rest through their own branch).
 // Outstanding AR is the yard's net open receivable as the aging reads it
 // today (account.agingSQL): each invoice's open amount, each numbered credit
 // memo's open amount and each payment's unapplied cash as a negative. It is
@@ -64,31 +49,22 @@ func NewRepository(db *database.DB) *PostgresRepository {
 func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	summary := &DashboardSummary{}
 
-	// Payments are joined to invoices→orders so the reach covers the payment
-	// through either document's branch, the pair the header rule read before.
-	paymentWall := "(" + middleware.Wall("o", 1, 2) + " OR " + middleware.Wall("i", 1, 2) + ")"
+	// Today's and yesterday's figures are the day's NET collections at the
+	// caller's yard (pkg/collections): payments received, walled by the
+	// payment's own branch_id (the AR core never writes an invoice_id), less
+	// refunds paid out, never a voided payment.
 	query := `
 		WITH asof AS (
 			-- The open receivable's day: the default branch's business date,
 			-- the aging's default (account.todayInDefaultBranch), never the
 			-- server process's local day.
-			SELECT (NOW() AT TIME ZONE ` + defaultBranchZoneSQL + `)::date AS d, ` + defaultBranchZoneSQL + ` AS tz
+			SELECT ` + collections.TodaySQL + ` AS d
 		),
 		today_rev AS (
-			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
-			FROM payments p
-			LEFT JOIN invoices i ON i.id = p.invoice_id
-			LEFT JOIN orders o ON o.id = i.order_id
-			WHERE (p.created_at AT TIME ZONE (SELECT tz FROM asof))::date = (SELECT d FROM asof)
-			  AND ` + paymentWall + `
+			SELECT ` + collections.NetCentsAt("(SELECT d FROM asof)", 1, 2) + ` AS val
 		),
 		yesterday_rev AS (
-			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
-			FROM payments p
-			LEFT JOIN invoices i ON i.id = p.invoice_id
-			LEFT JOIN orders o ON o.id = i.order_id
-			WHERE (p.created_at AT TIME ZONE (SELECT tz FROM asof))::date = (SELECT d FROM asof) - 1
-			  AND ` + paymentWall + `
+			SELECT ` + collections.NetCentsAt("(SELECT d FROM asof) - 1", 1, 2) + ` AS val
 		),
 		active_ord AS (
 			SELECT COUNT(*) AS val
@@ -317,18 +293,36 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 // caller's reach through the order or the invoice each payment settles.
 func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, grantsSub *string, days int) ([]RevenueTrendPoint, error) {
 	// The days are the default branch's business days, in its zone, the day
-	// Today's Revenue is cut on: the last N days are today and the N-1 before it.
+	// Today's Revenue is cut on: the last N days are today and the N-1 before
+	// it, each the day's net collections (payments received by their own yard,
+	// less refunds paid out, never a voided payment).
+	zone := collections.DefaultBranchZoneSQL
 	query := `
-		SELECT
-			(p.created_at AT TIME ZONE ` + defaultBranchZoneSQL + `)::date as date,
-			(COALESCE(SUM(p.amount), 0) * 100)::bigint as revenue
-		FROM payments p
-		LEFT JOIN invoices i ON i.id = p.invoice_id
-		LEFT JOIN orders o ON o.id = i.order_id
-		WHERE (p.created_at AT TIME ZONE ` + defaultBranchZoneSQL + `)::date
-		        >= (NOW() AT TIME ZONE ` + defaultBranchZoneSQL + `)::date - ($1::int - 1)
-		  AND (` + middleware.Wall("o", 2, 3) + " OR " + middleware.Wall("i", 2, 3) + `)
-		GROUP BY 1
+		WITH win AS (
+			SELECT ` + collections.TodaySQL + ` AS d, $1::int AS n
+		),
+		received AS (
+			SELECT (p.created_at AT TIME ZONE ` + zone + `)::date AS day, SUM(ROUND(p.amount * 100)::bigint) AS cents
+			FROM payments p
+			WHERE p.status = 'POSTED'
+			  AND p.created_at >= (((SELECT d - (n - 1) FROM win))::timestamp AT TIME ZONE ` + zone + `)
+			  AND p.created_at < (((SELECT d + 1 FROM win))::timestamp AT TIME ZONE ` + zone + `)
+			  AND ` + middleware.Wall("p", 2, 3) + `
+			GROUP BY 1
+		),
+		refunded AS (
+			SELECT r.refunded_on AS day, SUM(ROUND(r.amount * 100)::bigint) AS cents
+			FROM payment_refunds r
+			LEFT JOIN payments rp ON rp.id = r.payment_id
+			LEFT JOIN credit_memos rm ON rm.id = r.credit_memo_id
+			WHERE r.status = 'COMPLETE'
+			  AND r.refunded_on BETWEEN (SELECT d - (n - 1) FROM win) AND (SELECT d FROM win)
+			  AND (rp.id IS NULL OR rp.status = 'POSTED')
+			  AND (` + middleware.Wall("rp", 2, 3) + ` OR ` + middleware.Wall("rm", 2, 3) + `)
+			GROUP BY 1
+		)
+		SELECT COALESCE(rc.day, rf.day) AS date, (COALESCE(rc.cents, 0) - COALESCE(rf.cents, 0))::bigint AS revenue
+		FROM received rc FULL JOIN refunded rf ON rf.day = rc.day
 		ORDER BY date ASC
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, days, branchID, grantsSub)
