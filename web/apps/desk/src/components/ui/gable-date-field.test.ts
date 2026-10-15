@@ -260,21 +260,48 @@ describe('min and max', () => {
 })
 
 describe('the popover stays inside the screen', () => {
+  // The estimate the field places with before the popover is measured.
+  const ESTIMATE = { width: 256, height: 320 }
+
   it('placePopover clamps sideways and flips upward when the space below is short', () => {
     // Room below: under the field, at the field's left.
-    expect(placePopover({ left: 100, bottom: 200, top: 176 } as DOMRect, 1024, 768))
+    expect(placePopover({ left: 100, bottom: 200, top: 176 } as DOMRect, ESTIMATE, 1024, 768))
       .toEqual({ top: 204, left: 100 })
     // At the right edge: clamped to the viewport.
-    expect(placePopover({ left: 1000, bottom: 200, top: 176 } as DOMRect, 1024, 768).left)
+    expect(placePopover({ left: 1000, bottom: 200, top: 176 } as DOMRect, ESTIMATE, 1024, 768).left)
       .toBe(1024 - 264)
     // At the left edge: clamped to the margin.
-    expect(placePopover({ left: -30, bottom: 200, top: 176 } as DOMRect, 1024, 768).left).toBe(8)
+    expect(placePopover({ left: -30, bottom: 200, top: 176 } as DOMRect, ESTIMATE, 1024, 768).left).toBe(8)
     // Near the bottom with more room above: flipped over the field.
-    expect(placePopover({ left: 100, bottom: 740, top: 716 } as DOMRect, 1024, 768))
+    expect(placePopover({ left: 100, bottom: 740, top: 716 } as DOMRect, ESTIMATE, 1024, 768))
       .toEqual({ top: 716 - 320 - 4, left: 100 })
     // A viewport too short for either side: flipped, clamped to the top margin.
-    const p = placePopover({ left: 100, bottom: 204, top: 180 } as DOMRect, 1024, 340)
+    const p = placePopover({ left: 100, bottom: 204, top: 180 } as DOMRect, ESTIMATE, 1024, 340)
     expect(p.top).toBe(8)
+  })
+
+  it('flipped, the bottom edge sits a few pixels above the field, by the measured height', () => {
+    // The calendar measured shorter than the estimate: its bottom edge is
+    // still the field's top, less the gap; it does not float above the field.
+    const size = { width: 256, height: 260 }
+    const at = placePopover({ left: 100, bottom: 740, top: 716 } as DOMRect, size, 1024, 768)
+    expect(at).toEqual({ top: 716 - 260 - 4, left: 100 })
+    expect(at.top + size.height).toBe(716 - 4)
+  })
+
+  it('opens below when the room is below, whatever the measured height', () => {
+    expect(placePopover({ left: 100, bottom: 200, top: 176 } as DOMRect, { width: 256, height: 260 }, 1024, 768))
+      .toEqual({ top: 204, left: 100 })
+  })
+
+  it('with no room either way it clamps inside the viewport', () => {
+    const size = { width: 256, height: 260 }
+    const at = placePopover({ left: 100, bottom: 204, top: 180 } as DOMRect, size, 1024, 340)
+    expect(at.top).toBe(8)
+    expect(at.top + size.height).toBeLessThanOrEqual(340 - 8)
+    // A field at the very top opens downward, never above the screen.
+    const low = placePopover({ left: 100, bottom: 32, top: 8 } as DOMRect, size, 1024, 340)
+    expect(low.top).toBe(36)
   })
 
   it('the open popover is fixed at the field, not clipped by a modal', async () => {
@@ -284,6 +311,48 @@ describe('the popover stays inside the screen', () => {
     expect(pop.style.position).toBe('fixed')
     expect(pop.style.top).toBe('4px')
     expect(pop.style.left).toBe('8px')
+  })
+
+  // A field near the bottom of a dialog, its label drawn by the page just
+  // above it (the way every form rows them).
+  async function fieldNearTheFloor(withLabel = true) {
+    const wrap = document.createElement('div')
+    const label = document.createElement('label')
+    label.textContent = 'Insurance Expiry'
+    if (withLabel) wrap.appendChild(label)
+    document.body.appendChild(wrap)
+    const el = document.createElement(TAG) as GableDateField
+    el.value = '2026-10-14'
+    wrap.appendChild(el)
+    await update(el, {})
+    const rect = (r: { left: number; right: number; top: number; bottom: number }) =>
+      ({ ...r, width: r.right - r.left, height: r.bottom - r.top, x: r.left, y: r.top, toJSON: () => ({}) }) as DOMRect
+    input(el).getBoundingClientRect = () => rect({ left: 100, right: 356, top: 676, bottom: 700 })
+    label.getBoundingClientRect = () => rect({ left: 100, right: 220, top: 656, bottom: 672 })
+    return el
+  }
+
+  it('flipped, the popover sits against the field and its label, never over either', async () => {
+    const el = await fieldNearTheFloor()
+    await openCalendar(el)
+    const pop = q<HTMLElement>(el, '[role="dialog"]')
+    // The label's top is 656: the bottom edge sits the gap above it, so the
+    // calendar covers neither the label nor the field.
+    expect(pop.style.top).toBe(`${656 - 4 - 320}px`)
+    el.remove()
+  })
+
+  it('re-places itself once it has measured its own height', async () => {
+    const el = await fieldNearTheFloor()
+    await openCalendar(el)
+    const pop = q<HTMLElement>(el, '[role="dialog"]')
+    Object.defineProperty(pop, 'offsetWidth', { value: 256, configurable: true })
+    Object.defineProperty(pop, 'offsetHeight', { value: 260, configurable: true })
+    el.requestUpdate()
+    await update(el, {})
+    // Measured at 260, the bottom edge moves down against the label's top.
+    expect(pop.style.top).toBe(`${656 - 4 - 260}px`)
+    el.remove()
   })
 })
 
