@@ -333,7 +333,7 @@ export class GableDateField extends LitElement {
                 role="dialog"
                 aria-label="Choose a date"
                 popover="manual"
-                style="position: fixed; top: ${this._popTop}px; left: ${this._popLeft}px;"
+                style="position: fixed; inset: auto; margin: 0; top: ${this._popTop}px; left: ${this._popLeft}px;"
                 class="z-50 w-64 rounded-xl bg-slate-steel border border-white/10 p-3 shadow-xl"
             >
                 <div class="flex items-center justify-between mb-2">
