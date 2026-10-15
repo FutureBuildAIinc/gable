@@ -211,3 +211,72 @@ describe('QuoteDetail original file with the token', () => {
   })
 })
 
+describe('QuoteDetail original blob lifecycle', () => {
+  const IMG = { ...QUOTE, original_filename: 'list.png', original_content_type: 'image/png' }
+  let revoked: string[]
+  let made: number
+
+  function routes(fileGate?: Promise<void>) {
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url, 'http://localhost').pathname
+      if (path === '/api/v1/quotes/q1/file' || path === '/api/v1/quotes/q2/file') {
+        if (fileGate) await fileGate
+        return new Response('PNGBYTES', { status: 200, headers: { 'Content-Type': 'image/png' } })
+      }
+      if (path === '/api/v1/quotes/q1') return jsonResponse(IMG)
+      if (path === '/api/v1/quotes/q2') return jsonResponse({ ...IMG, id: 'q2', number: 'Q-0002' })
+      return jsonResponse({ message: 'none' }, 404)
+    })
+  }
+  beforeEach(() => {
+    revoked = []
+    made = 0
+    URL.createObjectURL = vi.fn(() => `blob:original-${++made}`)
+    URL.revokeObjectURL = vi.fn((u: string) => { revoked.push(u) })
+  })
+
+  it('revokes a url that answers after the page has gone', async () => {
+    let open!: () => void
+    routes(new Promise<void>((r) => { open = r }))
+    const el = await detail()
+    tab(el, 'Original Upload').click()
+    await flush()
+    el.remove()
+    open()
+    await flush(); await flush()
+    expect(made).toBe(1)
+    expect(revoked).toEqual(['blob:original-1'])
+  })
+
+  it('fetches the original once for overlapping asks', async () => {
+    let open!: () => void
+    routes(new Promise<void>((r) => { open = r }))
+    const el = await detail()
+    tab(el, 'Original Upload').click()
+    await flush()
+    const link = Array.from(el.querySelectorAll('a')).find((a) => text(a).includes('Download Original')) as HTMLAnchorElement
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+      open()
+      await flush(); await flush()
+    } finally {
+      click.mockRestore()
+    }
+    expect(fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/v1/quotes/q1/file'))).toHaveLength(1)
+    expect(revoked).toEqual([])
+  })
+
+  it('releases the old quote\'s blob when the route moves to another quote', async () => {
+    routes()
+    const el = await detail()
+    tab(el, 'Original Upload').click()
+    await flush(); await flush()
+    expect(made).toBe(1)
+    await update(el, { routeId: 'q2' } as Partial<GableQuoteDetail>)
+    await flush(); await flush()
+    expect(revoked).toContain('blob:original-1')
+  })
+})
+

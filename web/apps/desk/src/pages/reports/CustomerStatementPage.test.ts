@@ -347,6 +347,7 @@ describe('customer statement scope at a yard', () => {
     localStorage.setItem(BRANCH_KEY, 'b-yard-a')
     const body = await shown({ closing_balance_cents: 100000, unapplied_payments: [], unapplied_cents: 7700, net_balance_cents: 92300, open_documents: [] })
     expect(body).toContain("Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account")
+    expect(body.split('the balances cover the whole account').length - 1, 'said once').toBe(1)
     expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
     expect(body).toContain('$923.00')
   })
