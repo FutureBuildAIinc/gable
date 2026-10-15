@@ -23,7 +23,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// recentDate returns a timestamp drawn from the last `daysBack` days.
 // seedBranchZoneEnv names the time zone the seed gives the branches it writes.
 // The production seed leaves it unset and keeps its own zone; the
 // characterization run sets it to the zone its server reads, so the seed's
@@ -38,8 +37,9 @@ func seedBranchZone() string {
 	return "America/Vancouver"
 }
 
+// recentDate returns a timestamp drawn from the last `daysBack` days.
 func recentDate(daysBack int) time.Time {
-	return time.Now().AddDate(0, 0, -rand.Intn(daysBack))
+	return seedNow().AddDate(0, 0, -rand.Intn(daysBack))
 }
 
 // dedupeBranches resets the locations hierarchy when prior seed runs left
@@ -252,6 +252,9 @@ func demoHistoryRequested() bool {
 // entry point: without DEMO_SEED set it logs and returns without touching
 // any database.
 func Run() {
+	if err := checkSeedEnv(); err != nil {
+		log.Fatalf("Seed: %v", err)
+	}
 	// Checked before anything else, so an install that did not ask for demo
 	// data needs no database and no credentials.
 	//
@@ -1088,7 +1091,7 @@ func Run() {
 	if len(vehicleIDs) > 0 && len(driverIDs) > 0 && len(orderIDs) > 0 {
 		for i := 0; i < 15; i++ {
 			rStatus := routeStatuses[rand.Intn(len(routeStatuses))]
-			sDate := time.Now().AddDate(0, 0, -(1 + rand.Intn(60)))
+			sDate := seedNow().AddDate(0, 0, -(1 + rand.Intn(60)))
 			vid := vehicleIDs[rand.Intn(len(vehicleIDs))]
 			did := driverIDs[rand.Intn(len(driverIDs))]
 			var rid string

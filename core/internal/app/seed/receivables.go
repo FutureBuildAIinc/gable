@@ -34,7 +34,7 @@ func newReceivables(dbURL string) (*receivables, error) {
 		return nil, fmt.Errorf("the seed's AR core could not connect: %w", err)
 	}
 	logger := slog.Default()
-	return &receivables{db: pdb, acct: account.NewService(pdb, gl.NewService(gl.NewRepository(pdb), nil, logger), logger)}, nil
+	return &receivables{db: pdb, acct: account.NewService(pdb, gl.NewService(gl.NewRepository(pdb), nil, logger), logger).WithClockForTest(seedNow)}, nil
 }
 
 func (r *receivables) close() { r.db.Close() }
@@ -184,8 +184,8 @@ func dayOf(t time.Time) string { return t.Format("2006-01-02") }
 // now, in its time zone (the day the AR core refuses money past).
 func seedToday(db *sql.DB) (time.Time, error) {
 	var d time.Time
-	err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
-		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`).Scan(&d)
+	err := db.QueryRow(`SELECT ($1::timestamptz AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`, seedNow()).Scan(&d)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("the seed's business day was not read: %w", err)
 	}
