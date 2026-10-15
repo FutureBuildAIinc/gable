@@ -20,7 +20,7 @@ import '../ui/omnibar.ts';
 import '../ui/shortcuts-modal.ts';
 import './branch-switcher.ts';
 import { icon } from '../../lib/icons.ts';
-import { Search, X, Plus } from 'lucide';
+import { Search, X, Plus, LogOut } from 'lucide';
 
 /** Initials for a display name (the same rule the door uses). */
 function initialsFor(name: string): string {
@@ -44,10 +44,16 @@ export class GableAppShell extends LitElement {
 
   @state() private _shortcutsOpen = false;
   @state() private _isOffline = !navigator.onLine;
+  @state() private _userMenuOpen = false;
 
   private _boundKeyDown = this._handleKeyDown.bind(this);
   private _boundOnline = () => { this._isOffline = false; };
   private _boundOffline = () => { this._isOffline = true; };
+  private _boundDocClick = (e: Event) => {
+    if (!this._userMenuOpen) return;
+    if ((e.target as HTMLElement).closest?.('[data-user-menu]')) return;
+    this._userMenuOpen = false;
+  };
   private _boundRouteChanged = () => {
     workspace.syncToPath(router.currentPath);
     this.requestUpdate();
@@ -59,6 +65,7 @@ export class GableAppShell extends LitElement {
     window.addEventListener('keydown', this._boundKeyDown);
     window.addEventListener('online', this._boundOnline);
     window.addEventListener('offline', this._boundOffline);
+    document.addEventListener('click', this._boundDocClick);
     router.addEventListener('route-changed', this._boundRouteChanged);
     workspace.addEventListener('workspace-changed', this._boundWorkspaceChanged);
     workspace.restore();
@@ -70,6 +77,7 @@ export class GableAppShell extends LitElement {
     window.removeEventListener('keydown', this._boundKeyDown);
     window.removeEventListener('online', this._boundOnline);
     window.removeEventListener('offline', this._boundOffline);
+    document.removeEventListener('click', this._boundDocClick);
     router.removeEventListener('route-changed', this._boundRouteChanged);
     workspace.removeEventListener('workspace-changed', this._boundWorkspaceChanged);
   }
@@ -82,11 +90,11 @@ export class GableAppShell extends LitElement {
   }
 
   /**
-   * The signed in user's initials, name and role, read from the auth session.
-   * A persona card sets the role and home yard; a token session uses the
-   * email/name from the claims. When nothing is signed in this renders the
-   * empty state (the existing header avatar is gone: there is no signed in
-   * user to show).
+   * The signed in user's name chip and its menu. The chip opens a small
+   * menu with the person's name and role and Sign out; signing out clears
+   * the shared auth custody and leaves the desk for the front door. When
+   * nothing is signed in this renders the empty state (there is no signed
+   * in user to show).
    */
   private _renderUser() {
     const session = authCustody.session;
@@ -101,19 +109,145 @@ export class GableAppShell extends LitElement {
         : 'local development';
     const initials = name === '' ? '??' : initialsFor(name);
     return html`
-      <div class="hidden lg:flex items-center gap-2">
-        <div class="h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow">
-          ${initials}
-        </div>
-        <div class="leading-tight">
-          ${name !== '' ? html`<div class="text-sm font-medium text-white">${name}</div>` : nothing}
-          <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${roleWords}</div>
-        </div>
-      </div>
-      <div class="lg:hidden h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow">
-        ${initials}
+      <div class="relative" data-user-menu @focusout=${this._handleUserMenuFocusout}>
+        <button
+          @click=${() => this._toggleUserMenu()}
+          @keydown=${this._handleUserChipKeydown}
+          aria-haspopup="menu"
+          aria-expanded=${this._userMenuOpen ? 'true' : 'false'}
+          aria-label="Account menu"
+          class="flex items-center gap-2 rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
+        >
+          <div class="hidden lg:flex items-center gap-2">
+            <div class="h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow">
+              ${initials}
+            </div>
+            <div class="leading-tight text-left">
+              ${name !== '' ? html`<div class="text-sm font-medium text-white">${name}</div>` : nothing}
+              <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${roleWords}</div>
+            </div>
+          </div>
+          <div class="lg:hidden h-9 w-9 rounded-full bg-gradient-to-br from-gable-green/20 to-emerald-500/20 border border-gable-green/30 flex items-center justify-center text-xs font-mono font-bold text-gable-green shadow-glow">
+            ${initials}
+          </div>
+        </button>
+        ${this._userMenuOpen ? html`
+          <div
+            class="absolute right-0 top-full mt-2 w-64 rounded-xl border border-white/10 bg-slate-steel shadow-xl z-50 overflow-hidden"
+          >
+            <div class="px-4 py-3 border-b border-white/5">
+              ${name !== '' ? html`<div class="text-sm font-medium text-white">${name}</div>` : nothing}
+              <div class="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">${roleWords}</div>
+            </div>
+            <div
+              role="menu"
+              aria-label="Account"
+              @keydown=${this._handleUserMenuKeydown}
+            >
+              <button
+                role="menuitem"
+                @click=${() => this._handleSignOut()}
+                class="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-white/5 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+              >
+                ${icon(LogOut, 16, 'w-4 h-4')}
+                Sign out
+              </button>
+            </div>
+          </div>
+        ` : nothing}
       </div>
     `;
+  }
+
+  /** Open the menu and move the focus to its first (or last) item. */
+  private _openUserMenu(focus: 'first' | 'last') {
+    this._userMenuOpen = true;
+    void this.updateComplete.then(() => {
+      const items = Array.from(this.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+      if (items.length === 0) return;
+      (focus === 'last' ? items[items.length - 1] : items[0]).focus();
+    });
+  }
+
+  /** Click, Enter or Space on the chip (all fire click): toggle; an open
+   *  moves the focus into the menu, the ARIA menu button pattern. */
+  private _toggleUserMenu() {
+    if (this._userMenuOpen) {
+      this._closeUserMenu(false);
+    } else {
+      this._openUserMenu('first');
+    }
+  }
+
+  /** On the chip: ArrowDown opens on the first item, ArrowUp on the last,
+   *  Escape closes an open menu (the focus is already on the chip). */
+  private _handleUserChipKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      if (!this._userMenuOpen) return;
+      e.preventDefault();
+      this._closeUserMenu(false);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      this._openUserMenu('first');
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      this._openUserMenu('last');
+    }
+  }
+
+  /** The menu closes when the focus leaves the chip and menu for good
+   *  (a Tab past the menu, a click elsewhere that moves the focus). */
+  private _handleUserMenuFocusout(e: FocusEvent) {
+    if (!this._userMenuOpen) return;
+    const next = e.relatedTarget as Node | null;
+    const wrap = this.querySelector('[data-user-menu]');
+    if (next && wrap?.contains(next)) return;
+    this._userMenuOpen = false;
+  }
+
+  /** In the menu: the arrows move between items, Escape closes and
+   *  returns the focus to the chip. */
+  private _handleUserMenuKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this._closeUserMenu(true);
+      return;
+    }
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const items = Array.from(this.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLElement);
+    const next = e.key === 'ArrowDown'
+      ? (idx + 1) % items.length
+      : (idx - 1 + items.length) % items.length;
+    items[next].focus();
+  }
+
+  private _closeUserMenu(returnFocus: boolean) {
+    this._userMenuOpen = false;
+    if (returnFocus) {
+      void this.updateComplete.then(() => {
+        this.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')?.focus();
+      });
+    }
+  }
+
+  private _handleSignOut() {
+    this._userMenuOpen = false;
+    authCustody.signOut();
+    this._goToDoor();
+  }
+
+  /** The front door is a separate document served at /, so leaving the
+   *  desk for it is a full navigation, the same way the door's tiles open
+   *  the desk. */
+  private _goToDoor() {
+    window.location.assign('/');
   }
 
   private _tab(tab: WorkspaceTab) {
