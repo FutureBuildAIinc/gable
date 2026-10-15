@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/portal/v1/login",
       "body": {
-        "email": "demo@kelbrook.ca",
+        "email": "demo@tarnwick.example",
         "password": "password"
       }
     },
@@ -27,9 +27,9 @@
         "user": {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.ca",
+          "email": "demo@tarnwick.example",
           "id": "<id-3>",
-          "name": "Sam Kelbrook",
+          "name": "Sam Tarnwick",
           "role": "Admin",
           "status": "Active",
           "updated_at": "<ts+0d>"
@@ -190,7 +190,7 @@
         "species": "",
         "uom": "PCS",
         "upc": "",
-        "vendor": "Gable Building Supply",
+        "vendor": "Larkmere Building Products",
         "volume_breaks": [],
         "weight_lbs": 9
       }

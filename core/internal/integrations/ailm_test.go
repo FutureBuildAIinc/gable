@@ -200,7 +200,7 @@ func fixtureOrders() []IntegrationOrderResponse {
 			ID:            orderUUID,
 			Status:        "CONFIRMED",
 			BranchID:      branchUUID,
-			CustomerName:  "Kelbrook Homes",
+			CustomerName:  "Tarnwick Homes",
 			Address:       "1885 Formwork Rd, Kelowna BC",
 			Latitude:      f64(49.8801),
 			Longitude:     f64(-119.4436),
@@ -783,7 +783,7 @@ func TestListOrdersWireShape(t *testing.T) {
 			wantStatus: "CONFIRMED",
 			wantJSON: `[
 			  {"id":"` + orderUUID + `","status":"CONFIRMED","branch_id":"` + branchUUID + `",
-			   "customer_name":"Kelbrook Homes",
+			   "customer_name":"Tarnwick Homes",
 			   "address":"1885 Formwork Rd, Kelowna BC","latitude":49.8801,"longitude":-119.4436,
 			   "scheduled_date":"2026-08-21",
 			   "lines":[
