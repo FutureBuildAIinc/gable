@@ -21,6 +21,21 @@ import { formatDay, parseDay, todayDay, weekStart, weekdayNames, monthName } fro
 
 let nextId = 0;
 
+/**
+ * The open calendars, last opened last. While any calendar is open, the first
+ * Escape anywhere in the page or its dialog closes only the topmost one (the
+ * key is captured at the document, so a modal behind never sees it; the next
+ * Escape is the dialog's own).
+ */
+const openCalendars: GableDateField[] = [];
+
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || openCalendars.length === 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openCalendars[openCalendars.length - 1].closeFromAnywhere();
+}, true);
+
 // The popover's box estimate for the first render (w-64 is 256px; the grid
 // with its header is about 320px); the measured size replaces it on the next.
 const POPOVER_W = 256;
@@ -107,6 +122,8 @@ export class GableDateField extends LitElement {
 
     disconnectedCallback() {
         document.removeEventListener('mousedown', this._outside);
+        const at = openCalendars.indexOf(this);
+        if (at >= 0) openCalendars.splice(at, 1);
         this._unwatchViewport();
         super.disconnectedCallback();
     }
@@ -180,10 +197,9 @@ export class GableDateField extends LitElement {
         } else if (e.key === 'ArrowDown' && !this._open) {
             e.preventDefault();
             this._openCalendar();
-        } else if (e.key === 'Escape' && this._open) {
-            e.preventDefault();
-            this._close();
         }
+        // Escape while the calendar is open is the document listener's: it
+        // fires ahead of this one and keeps the key from the dialog behind.
     }
 
     /**
@@ -221,12 +237,27 @@ export class GableDateField extends LitElement {
         this._placedSize = { width: POPOVER_W, height: POPOVER_H };
         this._place();
         this._open = true;
+        if (!openCalendars.includes(this)) openCalendars.push(this);
         this._watchViewport();
     }
 
     private _close() {
         if (this._open) this._unwatchViewport();
+        const at = openCalendars.indexOf(this);
+        if (at >= 0) openCalendars.splice(at, 1);
         this._open = false;
+    }
+
+    /**
+     * Escape anywhere while this calendar is open (the document listener):
+     * close, and hand the focus back to the box only when the calendar held
+     * it; a focus elsewhere in the page stays where it was.
+     */
+    closeFromAnywhere() {
+        if (!this._open) return;
+        const held = this.contains(document.activeElement);
+        this._close();
+        if (held) this.querySelector('input')?.focus();
     }
 
     private _pick(day: string) {
@@ -275,11 +306,6 @@ export class GableDateField extends LitElement {
             case ' ':
                 e.preventDefault();
                 this._pick(day);
-                break;
-            case 'Escape':
-                e.preventDefault();
-                this._close();
-                this.querySelector('input')?.focus();
                 break;
             case 'Tab':
                 this._close();
