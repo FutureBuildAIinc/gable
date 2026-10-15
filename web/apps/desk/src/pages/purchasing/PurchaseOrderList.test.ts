@@ -134,4 +134,30 @@ describe('purchase order list columns', () => {
     const yards = Array.from(el.querySelectorAll('[data-testid="reorder-yard"]')).map((n) => textOf(n))
     expect(yards).toEqual(['Lake Country Outpost'])
   })
+
+  it('says in words which products Generate Replenishment POs left alone', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes('/reorder-check') && init?.method === 'POST') {
+        return jsonResponse({ status: 'success', count: 0, no_reorder_qty: ['HANGER-28', 'NAIL-16D'] })
+      }
+      if (url.includes('/reorder-alerts')) {
+        return jsonResponse({ items: [{
+          branch_id: 'y1', branch_name: 'Lake Country Outpost', product_id: 'p1', sku: 'HANGER-28', description: 'Joist Hanger 2x8',
+          vendor: null, vendor_id: null, reorder_point: '150', reorder_qty: '0', current_stock: '150', deficit: '0',
+        }], next_cursor: null, limit: 0 })
+      }
+      if (url.includes('/source-summary')) return jsonResponse({})
+      return jsonResponse([])
+    }))
+    const el = await mountAsync<PurchaseOrderList>('gable-purchase-order-list')
+    const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).includes('Generate Replenishment POs')) as HTMLButtonElement
+    button.click()
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
+    const note = el.querySelector('[data-testid="reorder-left-alone"]')
+    expect(note).toBeTruthy()
+    expect(textOf(note as Element)).toContain('HANGER-28')
+    expect(textOf(note as Element)).toContain('NAIL-16D')
+    expect(textOf(note as Element)).toContain('no reorder quantity')
+  })
 })
