@@ -4,6 +4,7 @@
 package document
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -136,4 +137,63 @@ func TestStatementReadsGroupedAmountsAndWordDates(t *testing.T) {
 	for _, unwanted := range []string{"2026-06-30", "2026-06-01", "2026-07-15", "$3929.97", "-$2487.63"} {
 		mustNotContain(t, doc, unwanted)
 	}
+}
+
+// The lockup names the dealer once, by its trading name. The legal name is
+// printed once, labelled, ahead of the remit to (or alone at the foot of a
+// form that asks for no money), the same way on every document (V3 item 5).
+func TestLockupShowsTheTradingNameOnceAndTheLegalNameOnceLabelled(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9"}
+	qty := httpx.Quantity(10000)
+	uom, sku := "EA", "PT-4"
+	forms := map[string]func(*Service) ([]byte, error){
+		"invoice": func(s *Service) ([]byte, error) {
+			return s.GenerateInvoicePDF(context.Background(), mkInvoice(100, nil), cust)
+		},
+		"quote": func(s *Service) ([]byte, error) {
+			return s.GenerateQuotePDF(context.Background(), &quote.Quote{QuoteSummary: quote.QuoteSummary{ID: uuid.New(), Number: "QT-1",
+				CreatedAt: httpx.TimestampOf(time.Now())}}, cust)
+		},
+		"purchase order": func(s *Service) ([]byte, error) {
+			return s.GeneratePurchaseOrderPDF(context.Background(), &purchase_order.PurchaseOrder{ID: uuid.New(), Number: "PO-1", VendorName: "Mill", CreatedAt: time.Now()})
+		},
+		"pick ticket": func(s *Service) ([]byte, error) {
+			return s.GeneratePickTicketPDF(context.Background(), &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), Number: "SO-1", CreatedAt: httpx.TimestampOf(time.Now())},
+				Lines: []order.OrderLine{{Line: salesdoc.Line{SKU: &sku, Description: "Post", Quantity: &qty, UOM: &uom, LineType: salesdoc.LineProduct}}}}, cust)
+		},
+		"statement": func(s *Service) ([]byte, error) {
+			st := &account.Statement{CustomerID: uuid.New(), From: "2026-06-01", To: "2026-06-30", Currencies: []account.StatementCurrency{}}
+			return s.WithStatements(&fakeStatements{st: st}).GenerateStatementPDF(context.Background(), st, cust)
+		},
+	}
+	for name, gen := range forms {
+		t.Run(name, func(t *testing.T) {
+			doc, err := gen(styledService("en-US"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := bytes.Count(doc, []byte("Granite Yard Holdings Ltd")); n != 1 {
+				t.Errorf("the legal name is printed %d times, want once", n)
+			}
+			mustContain(t, doc, "Legal name: Granite Yard Holdings Ltd")
+			if n := bytes.Count(doc, []byte("Granite Yard")); n != 2 {
+				// once as the lockup, once inside the labelled legal name
+				t.Errorf("\"Granite Yard\" appears %d times, want 2 (the lockup and the legal line)", n)
+			}
+		})
+	}
+}
+
+// A dealer whose trading name is blank prints its legal name as the lockup and
+// has no second line.
+func TestLockupWithNoTradingNameHasNoLegalLine(t *testing.T) {
+	svc := NewService(newRepo()).WithProfile(fakeProfiles{profile: &dealerprofile.Profile{LegalName: "Granite Yard Holdings Ltd"}})
+	doc, err := svc.GenerateInvoicePDF(context.Background(), mkInvoice(100, nil), &customer.Customer{Name: "Acme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(doc, []byte("Granite Yard Holdings Ltd")); n != 1 {
+		t.Errorf("the legal name is printed %d times, want once", n)
+	}
+	mustNotContain(t, doc, "Legal name:")
 }
