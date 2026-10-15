@@ -8,6 +8,7 @@ import { ToastService } from '../../lib/toast-service.ts';
 import { ShoppingCart, RefreshCw, AlertTriangle, ChevronDown, ChevronUp } from 'lucide';
 import { PortalService } from '../../services/PortalService';
 import type { PortalOrder } from '../../types/portal';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 const formatCurrency = (val: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
@@ -103,7 +104,7 @@ export class PortalOrders extends LitElement {
 
                 ${this.orders.length === 0
                     ? html`
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-12 text-center">
                                 ${icon(ShoppingCart, 48, 'text-zinc-600 mx-auto mb-4')}
                                 <p class="text-zinc-400">No orders yet.</p>
@@ -113,16 +114,16 @@ export class PortalOrders extends LitElement {
                     : html`
                         <div class="space-y-3">
                             ${this.orders.map(order => html`
-                                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                                     <!-- Order Row -->
                                     <div
-                                        class="flex items-center justify-between p-4 cursor-pointer hover:bg-white/5 transition-colors"
+                                        class="flex items-center justify-between p-4 cursor-pointer hover:bg-hover-row transition-colors"
                                         @click=${() => this._toggleExpand(order.id)}
                                     >
                                         <div class="flex items-center gap-4">
                                             <div
                                                 class="w-10 h-10 rounded-lg flex items-center justify-center"
-                                                style="background-color: rgba(56,189,248,0.1)"
+                                                style="background-color: ${cssVarColor('blueprint-blue', 0.1)}"
                                             >
                                                 ${icon(ShoppingCart, 18, 'text-blue-400')}
                                             </div>

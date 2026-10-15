@@ -46,6 +46,13 @@ func LockProductImageSetting(t *testing.T) {
 
 func lockKey(t *testing.T, key int64, what string) {
 	t.Helper()
+	lockKeyMode(t, key, what, false)
+}
+
+// lockKeyMode takes the advisory lock exclusively, or shared when shared is
+// true: shared holders run together and wait only for an exclusive one.
+func lockKeyMode(t *testing.T, key int64, what string, shared bool) {
+	t.Helper()
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -71,7 +78,11 @@ func lockKey(t *testing.T, key int64, what string) {
 	// pg_advisory_lock waits for the holder; the wait is bounded by the
 	// test binary's own timeout, which is what turns a stuck holder into a
 	// failure rather than a silent hang.
-	if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, key); err != nil {
+	sql := `SELECT pg_advisory_lock($1)`
+	if shared {
+		sql = `SELECT pg_advisory_lock_shared($1)`
+	}
+	if _, err := conn.Exec(context.Background(), sql, key); err != nil {
 		t.Fatalf("take the %s lock: %v", what, err)
 	}
 }

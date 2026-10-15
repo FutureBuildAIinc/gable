@@ -97,7 +97,7 @@ export class ChartOfAccounts extends LitElement {
                     </div>
                     <button
                         @click=${() => this.showCreate = true}
-                        class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded transition-colors"
+                        class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors"
                     >
                         ${icon(Plus, 16, 'w-4 h-4')}
                         New Account
@@ -166,7 +166,7 @@ export class ChartOfAccounts extends LitElement {
                             </div>
                             <div class="flex justify-end gap-2 pt-2">
                                 <button @click=${() => this.showCreate = false} class="px-4 py-2 text-zinc-400 hover:text-white transition-colors">Cancel</button>
-                                <button @click=${this._handleCreate} class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded transition-colors">
+                                <button @click=${this._handleCreate} class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors">
                                     Create Account
                                 </button>
                             </div>
