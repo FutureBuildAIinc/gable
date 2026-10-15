@@ -52,15 +52,19 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 	// Cache Key
 	key := "daily_till:" + reachKey(ctx) + ":" + dateStr
 
-	// Read Cache
-	s.cacheMutex.RLock()
-	if item, ok := s.cache[key]; ok {
-		if time.Since(item.timestamp) < 60*time.Second {
-			s.cacheMutex.RUnlock()
-			return item.data.(*DailyTillReport), nil
+	// Read Cache. An empty date is the branch's today, a day that can change
+	// under a cached answer at the branch's midnight and a till read a
+	// moment after a payment must show it: it is never served from the cache.
+	if dateStr != "" {
+		s.cacheMutex.RLock()
+		if item, ok := s.cache[key]; ok {
+			if time.Since(item.timestamp) < 60*time.Second {
+				s.cacheMutex.RUnlock()
+				return item.data.(*DailyTillReport), nil
+			}
 		}
+		s.cacheMutex.RUnlock()
 	}
-	s.cacheMutex.RUnlock()
 
 	// Parse date; empty is the default branch's business day (a zero date),
 	// the day the dashboard's Today's Revenue card is cut on.
@@ -77,12 +81,14 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 		return nil, err
 	}
 
-	// Write Cache
-	s.cacheMutex.Lock()
-	if len(s.cache) < maxCacheEntries {
-		s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	// Write Cache (a dated read only)
+	if dateStr != "" {
+		s.cacheMutex.Lock()
+		if len(s.cache) < maxCacheEntries {
+			s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+		}
+		s.cacheMutex.Unlock()
 	}
-	s.cacheMutex.Unlock()
 
 	return data, nil
 }
