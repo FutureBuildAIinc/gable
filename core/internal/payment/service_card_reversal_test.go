@@ -92,6 +92,9 @@ type cardWorld struct {
 func newCardWorld(t *testing.T) *cardWorld {
 	t.Helper()
 	db := testutil.RequireDB(t)
+	// the card legs date money by the default branch's day, read twice in one
+	// act: hold the branch day shared so no leg changes the zone between reads
+	testutil.LockBranchDay(t)
 	w := &cardWorld{t: t, db: db, customerID: uuid.New(), invoiceID: uuid.New()}
 	must := func(sql string, args ...any) {
 		if _, err := db.Pool.Exec(context.Background(), sql, args...); err != nil {
