@@ -19,6 +19,8 @@ export class GableRevenueTrendChart extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        // A block host: an inline custom element would size from its content.
+        this.style.display = 'block';
         this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
     }
 
@@ -164,7 +166,9 @@ export class GableRevenueTrendChart extends LitElement {
                     <h3 class="text-base font-semibold text-white">Revenue Trend</h3>
                 </div>
                 <div class="flex-1 min-h-0 p-4">
-                    <canvas id="revenueTrendCanvas" class="w-full h-full"></canvas>
+                    <div data-testid="chart-canvas-wrap" class="relative h-full w-full">
+                        <canvas id="revenueTrendCanvas" class="absolute inset-0"></canvas>
+                    </div>
                 </div>
             </div>
         `;

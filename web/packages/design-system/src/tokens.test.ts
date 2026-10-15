@@ -25,7 +25,7 @@ function block(selector: string): Record<string, string> {
   return out
 }
 
-/** The donut's second light series: the palette's blue mixed a tenth toward white, so it sits between the deep green and the sage in lightness. */
+/** The donut's second light series: the palette's blue mixed a tenth toward the card (`#f8f3ec`), so it sits between the deep green and the sage in lightness. */
 const LIGHT_DONUT_BLUE = '#1c7798'
 
 const dark = block(':root')

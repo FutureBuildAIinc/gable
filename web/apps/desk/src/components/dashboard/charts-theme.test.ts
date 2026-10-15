@@ -89,14 +89,28 @@ describe('dashboard charts follow the mode', () => {
     el.remove()
   })
 
-  it('the order card is contained: it cannot grow its grid track or spill', async () => {
-    const el = await mount<GableOrderStatusChart>('gable-order-status-chart', { statusBreakdown: { confirmed: 3, draft: 1 } })
+  // A chart must follow its card when the page narrows after it was drawn
+  // wide. Chart.js sizes the canvas in pixels, so the canvas must take no
+  // layout space of its own: it sits absolutely inside a relatively positioned
+  // wrapper that takes its width from the card, and the host is a block.
+  it.each([
+    ['gable-order-status-chart', { statusBreakdown: { confirmed: 3, draft: 1 } }],
+    ['gable-revenue-trend-chart', { data: [{ date: 'd1', revenue: 1000 }] }],
+  ])('%s sizes from its card: block host, relative wrapper, absolute canvas', async (tag, props) => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    } as unknown as CanvasRenderingContext2D)
+    const el = await mount<GableOrderStatusChart>(tag, props as never)
     await frame()
-    const card = el.querySelector('[data-testid="order-status-card"]') as HTMLElement
-    const wrap = el.querySelector('[data-testid="order-status-canvas-wrap"]') as HTMLElement
-    expect(card.className).toContain('min-w-0')
-    expect(card.className).toContain('overflow-hidden')
-    expect(wrap.className).toContain('min-w-0')
+    const wrap = el.querySelector('[data-testid="chart-canvas-wrap"]') as HTMLElement
+    const canvas = wrap.querySelector('canvas') as HTMLCanvasElement
+    expect(el.style.display).toBe('block')
+    expect(wrap.className).toContain('relative')
+    expect(wrap.className).toContain('h-full')
+    expect(canvas.className).toContain('absolute')
+    expect(canvas.className).not.toContain('w-full')
+    // the card is not clipped: the donut, its legend and its centre are never cut
+    expect(el.querySelector('.overflow-hidden')).toBeNull()
     el.remove()
   })
 })

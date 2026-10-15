@@ -34,6 +34,8 @@ export class GableOrderStatusChart extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        // A block host: an inline custom element would size from its content.
+        this.style.display = 'block';
         this._offTheme = onThemeChange(() => { if (!this.loading) this._renderChart(); });
     }
 
@@ -136,16 +138,18 @@ export class GableOrderStatusChart extends LitElement {
         }
 
         return html`
-            <div data-testid="order-status-card" class="min-w-0 overflow-hidden rounded-xl border border-white/10 bg-slate-steel/30 backdrop-blur-sm h-[400px] flex flex-col">
+            <div data-testid="order-status-card" class="rounded-xl border border-white/10 bg-slate-steel/30 backdrop-blur-sm h-[400px] flex flex-col">
                 <div class="p-4 border-b border-white/5">
                     <h3 class="text-base font-semibold text-white">Order Status</h3>
                 </div>
-                <div data-testid="order-status-canvas-wrap" class="flex-1 min-h-0 min-w-0 relative p-4">
+                <div class="flex-1 min-h-0 relative p-4">
                     <div class="absolute inset-0 flex items-center justify-center flex-col pointer-events-none z-10">
                         <span class="text-4xl font-bold text-white font-mono">${this._totalOrders}</span>
                         <span class="text-xs text-zinc-500 uppercase tracking-widest">Orders</span>
                     </div>
-                    <canvas id="orderStatusCanvas" class="w-full h-full"></canvas>
+                    <div data-testid="chart-canvas-wrap" class="relative h-full w-full">
+                        <canvas id="orderStatusCanvas" class="absolute inset-0"></canvas>
+                    </div>
                 </div>
             </div>
         `;

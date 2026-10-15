@@ -174,6 +174,35 @@ describe('gable-portal-layout — chrome and branding', () => {
     }
   })
 
+  describe('the active nav label is text on the brand tint (light)', () => {
+    const light = () => {
+      document.documentElement.dataset.theme = 'light'
+      document.documentElement.style.setProperty('--gb-slate-steel', '248 243 236')
+      document.documentElement.style.setProperty('--gb-portal-panel', '248 243 236')
+      document.documentElement.style.setProperty('--gb-gable-green', '4 108 67')
+    }
+    afterEach(() => {
+      document.documentElement.removeAttribute('data-theme')
+      document.documentElement.removeAttribute('style')
+    })
+
+    async function activeLabelStyle(brand: string): Promise<string> {
+      signIn({ primary_color: brand, support_email: 'x@y.test', company_name: 'Ridgeview' })
+      at('/portal')
+      light()
+      const el = await mount<GablePortalLayout>('gable-portal-layout')
+      return q(el, 'nav a[style*="background-color"]').getAttribute('style') ?? ''
+    }
+
+    it.each(['#8a8a8a', '#736f6b'])('a brand of %s that does not read on the row gives the deep green', async (brand) => {
+      expect(await activeLabelStyle(brand)).toMatch(/color: #046c43/i)
+    })
+
+    it('keeps a dark brand', async () => {
+      expect(await activeLabelStyle('#1b2a4a')).toMatch(/[^-]color: #1b2a4a/i)
+    })
+  })
+
   it('shows the signed-in contractor with initials, name and email', async () => {
     signIn()
     at('/portal')
