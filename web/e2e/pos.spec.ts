@@ -54,7 +54,7 @@ async function openCounter(page: Page) {
   await expect(tillState).toBeVisible();
   if ((await tillState.textContent())?.includes('No till')) {
     await page.getByRole('button', { name: 'Open Till' }).click();
-    await page.getByPlaceholder('200.00').fill('100.00');
+    await page.getByTestId('till-float-amount').fill('100.00');
     await page.getByRole('button', { name: 'Open Till' }).last().click();
   }
   await expect(tillState).toContainText('Till open');
