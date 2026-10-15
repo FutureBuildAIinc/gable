@@ -134,7 +134,7 @@
       "average_lead_time_days": 8,
       "fill_rate": 94.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Invented. Composite decking of invented brand Ridgeline Deck."
+      "notes": "Invented. Composite decking."
     },
     {
       "key": "FAST_GR",
@@ -274,7 +274,7 @@
       "average_lead_time_days": 5,
       "fill_rate": 95.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Invented. Paint of invented brand Ridgeline Paint. Interior and exterior paint, stain, brushes, rollers, sundries."
+      "notes": "Invented. Interior and exterior paint, stain, brushes, rollers, sundries."
     },
     {
       "key": "OK_TOOLS",
@@ -288,13 +288,13 @@
     },
     {
       "key": "HARD_WON",
-      "name": "Stone Hardware",
+      "name": "Anvilgrove Hand Tools",
       "category": "Hand tools",
       "payment_terms": "Net 30",
       "average_lead_time_days": 5,
       "fill_rate": 95.0,
       "ship_to": ["KEL-MAIN", "WK"],
-      "notes": "Invented hand tools brand. Hammers, saws, levels, tape measures."
+      "notes": "Invented hand tools vendor. Hammers, saws, levels, tape measures."
     },
     {
       "key": "OK_PLUMB",
@@ -317,7 +317,7 @@
       "notes": "Invented. Wire, boxes, conduit, devices, lighting."
     },
     {
-      "key": "RIDGELINE_GARDEN",
+      "key": "GARDEN_SUPPLY",
       "name": "Gable Garden Supply",
       "category": "Lawn and garden",
       "payment_terms": "Net 30",
