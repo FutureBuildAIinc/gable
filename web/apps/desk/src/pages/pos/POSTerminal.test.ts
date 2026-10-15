@@ -2490,10 +2490,27 @@ describe('PR 150 fix round 3: a normal split pays, and the two refused cases say
     await press(el, 'check');
     await typeInto(el, '50.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
-    expect(q(el, 'pos-tenders-over').textContent).toContain('A card or check cannot be more than what is owed');
+    // The limit is the total less the other card, check and account tenders:
+    // 86.50 less the card 40.00 already added.
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card, check or account charge cannot be more than $46.50 here');
     expect(q(el, 'pos-tenders-over').textContent).not.toContain('added tenders');
     await typeInto(el, '46.50');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    el.remove();
+  });
+
+  it('names the real limit for a typed tender refused above it', async () => {
+    // Cash 60.00 added on 86.50: a card of 90.00 is refused with the real
+    // limit in words; a card of 40.00 pays.
+    const el = await mount(sale());
+    await addSplit(el, 'cash', '60.00');
+    await press(el, 'card');
+    await typeInto(el, '90.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-tenders-over').textContent).toContain('A card, check or account charge cannot be more than $86.50 here');
+    await typeInto(el, '40.00');
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
+    expect(q(el, 'pos-tenders-over')).toBeNull();
     el.remove();
   });
 

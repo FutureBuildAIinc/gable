@@ -104,4 +104,15 @@ describe('payPlan, the one rule for splits', () => {
     expect(plan.ok).toBe(true);
     if (plan.ok) expect(plan.changeCents).toBe(3650);
   });
+
+  it('a typed refusal carries the real limit: the total less the other non cash tenders', () => {
+    const plan = payPlan(8650, [t('cash', 6000)], t('card', 9000));
+    expect(plan.ok).toBe(false);
+    if (!plan.ok) {
+      expect(plan.over).toBe('typed');
+      expect(plan.limitCents).toBe(8650);
+    }
+    const split = payPlan(8650, [t('card', 4000)], t('check', 5000));
+    if (!split.ok) expect(split.limitCents).toBe(4650);
+  });
 });

@@ -1364,9 +1364,7 @@ export class POSTerminal extends LitElement {
     const change = payPlanNow.ok ? payPlanNow.changeCents : 0;
     const tendersOver = !payPlanNow.ok && payPlanNow.over !== undefined;
     const overWords = !payPlanNow.ok && payPlanNow.over === 'typed'
-      ? (payPlanNow.typedMethod === 'account'
-        ? 'A charge to account cannot be more than what is owed'
-        : 'A card or check cannot be more than what is owed')
+      ? `A card, check or account charge cannot be more than ${fmt(payPlanNow.limitCents ?? total)} here`
       : 'The added tenders are more than the sale now: clear them and choose again';
     const ready = this._till !== null && hasLines && open;
     // Why Charge to account is off, in words, once a customer is named; the way on when it is the PO.

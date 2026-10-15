@@ -10,7 +10,7 @@ import type { TenderIn } from '../../services/POSService';
 
 export type PayPlan =
     | { ok: true; tenders: TenderIn[]; changeCents: number }
-    | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method'] };
+    | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method']; limitCents?: number };
 
 const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents, 0);
 
@@ -31,7 +31,9 @@ export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn |
     let tenders = added;
     if (sum(added) < totalCents && entry !== null && entry.amount_cents > 0) {
         if (entry.method !== 'cash' && addedNonCash + entry.amount_cents > totalCents) {
-            return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method };
+            // The limit a typed card, check or account tender must stay under:
+            // the total less the other non cash tenders already added.
+            return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method, limitCents: totalCents - addedNonCash };
         }
         tenders = [...added, entry];
     }
