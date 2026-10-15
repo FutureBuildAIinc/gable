@@ -11,6 +11,7 @@ import type { LitElement } from 'lit'
 import './Dashboard'
 import './DailyTill'
 import { mountAsync, text } from '../test/dom'
+import { formatDay } from '../lib/dates'
 
 function json(body: unknown) {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -81,7 +82,7 @@ describe('the Daily Till', () => {
     expect(parts).toContain('refunds $4.00')
     expect(parts).toContain('net $36.00')
     // The page shows the day in the house's date style (the train's date sweep).
-    expect(text(el)).toMatch(/Collected \(/)
+    expect(text(el)).toContain(`Collected (${formatDay('2026-10-14')})`)
   })
 
   it('prints a refund only day as -$4.00, never $-4.00', async () => {
