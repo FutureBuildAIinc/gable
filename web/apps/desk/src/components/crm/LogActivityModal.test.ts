@@ -27,8 +27,15 @@ function serveSpy() {
 }
 
 async function fillAndSubmit(el: GableLogActivityModal, day: string, time: string) {
+  // Drive the day field as a person does: type the day, leave the box; the
+  // field commits and fires change, which the modal reads. (Assigning the
+  // field's value property fires nothing, and the modal would save its
+  // default day instead.)
   const field = q<HTMLElement & { value: string }>(el, 'gable-date-field')
-  field.value = day
+  const box = q<HTMLInputElement>(field, 'input[type="text"]')
+  box.value = day
+  box.dispatchEvent(new Event('input', { bubbles: true }))
+  box.dispatchEvent(new FocusEvent('blur'))
   await update(el, {})
   const timeBox = q<HTMLInputElement>(el, 'input[aria-label="Activity time"]')
   timeBox.value = time
@@ -51,14 +58,22 @@ afterEach(() => {
 
 describe('Log Activity keeps a time', () => {
   it('posts the picked day at the picked time', async () => {
-    const calls = serveSpy()
-    const el = await mount<GableLogActivityModal>('gable-log-activity-modal', { customerId: 'c-1' })
-    await fillAndSubmit(el, '2026-10-14', '09:30')
-    const post = calls.find((c) => c.url.includes('/activities'))
-    expect(post).toBeTruthy()
-    const body = JSON.parse(post!.body)
-    expect(body.activity_date).toBe(new Date(2026, 9, 14, 9, 30).toISOString())
-    expect(body.activity_date).not.toContain('T12:00')
+    // Under a western zone, so the local day and the UTC day differ and the
+    // wire's zone handling is what is proven (CI runs in UTC).
+    const tz = process.env.TZ
+    process.env.TZ = 'America/Los_Angeles'
+    try {
+      const calls = serveSpy()
+      const el = await mount<GableLogActivityModal>('gable-log-activity-modal', { customerId: 'c-1' })
+      await fillAndSubmit(el, '2026-10-14', '09:30')
+      const post = calls.find((c) => c.url.includes('/activities'))
+      expect(post).toBeTruthy()
+      const body = JSON.parse(post!.body)
+      expect(body.activity_date).toBe('2026-10-14T16:30:00.000Z')
+      expect(body.activity_date).not.toContain('T12:00')
+    } finally {
+      process.env.TZ = tz
+    }
   })
 
   it('defaults the time to now and refuses a non time in words', async () => {
