@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './TechAdminPage'
 import type { TechAdminPage } from './TechAdminPage'
-import { mountAsync, update, flush, text, jsonResponse } from '../../../test/dom'
+import { mountAsync, update, flush, text, jsonResponse, q } from '../../../test/dom'
 
 function serve(settings: Record<string, unknown>) {
   vi.stubGlobal(
@@ -58,9 +58,36 @@ describe('Tech Admin AI words follow the chosen provider', () => {
   it('does not say AI is on for a key the provider refused', async () => {
     serve({ ...BASE, provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true, anthropic_configured: true, anthropic_key_hint: '****dmin', source: 'admin', test_status: 'refused', test_message: 'Anthropic refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.' })
     const body = text(await openAITab())
-    expect(body).toContain('AI off: Anthropic refused the saved key')
     expect(body).not.toContain('AI on:')
     expect(body).not.toContain('AI Features Active')
+  })
+
+  it('says the refusal once, in the card, the lead line naming only the state', async () => {
+    serve({ ...BASE, provider: 'anthropic', model: 'claude-sonnet-5-5', configured: true, anthropic_configured: true, anthropic_key_hint: '****dmin', source: 'admin', test_status: 'refused', test_message: 'Anthropic refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.' })
+    const el = await openAITab()
+    expect(text(q(el, '[data-testid="ai-status-line"]'))).toBe('AI off')
+    expect(q(el, '[data-testid="ai-test-message"]')).toBeTruthy()
+    const body = text(el)
+    expect(body.match(/refused the saved key/g)?.length ?? 0, 'the refusal sentence shows once').toBe(1)
+  })
+
+  it('a save the provider refuses adds no red banner repeating the sentence', async () => {
+    serve({ ...BASE, provider: 'openrouter', model: '', configured: true, key_hint: '****stub', source: 'admin', test_status: 'refused', test_message: 'OpenRouter refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.' })
+    const el = await openAITab()
+    const updateKey = Array.from(el.querySelectorAll('button')).find((b) => text(b).includes('Update Key'))
+    if (!updateKey) throw new Error('no Update Key button')
+    updateKey.click()
+    await update(el, {})
+    const keyBox = q<HTMLInputElement>(el, 'input[type="password"]')
+    keyBox.value = 'sk-or-' + 'teststubteststub'
+    keyBox.dispatchEvent(new Event('input'))
+    const save = Array.from(el.querySelectorAll('button')).find((b) => text(b) === 'Save Key')
+    if (!save) throw new Error('no Save Key button')
+    save.click()
+    await flush()
+    await update(el, {})
+    const body = text(el)
+    expect(body.match(/refused the saved key/g)?.length ?? 0, 'still said once, in the card').toBe(1)
   })
 
   it('dims the features grid for a key the provider refused and lights it for a passed one', async () => {
