@@ -145,6 +145,21 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 	return report, nil
 }
 
+// salesInvoicedSQL and salesOutstandingSQL are the Sales Summary's invoice
+// reads, over a period of business dates ($1 and $2) at the caller's reach ($3
+// and $4): invoices are cut on their own business date (invoice_date).
+var salesInvoicedSQL = `
+	SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
+	FROM invoices
+	WHERE invoice_date BETWEEN $1::date AND $2::date AND status != 'VOID'
+	  AND ` + middleware.Wall("", 3, 4)
+
+var salesOutstandingSQL = `
+	SELECT COALESCE(SUM(total_amount), 0)
+	FROM invoices
+	WHERE invoice_date BETWEEN $1::date AND $2::date AND status IN ('UNPAID', 'PARTIAL')
+	  AND ` + middleware.Wall("", 3, 4)
+
 func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end time.Time) (*SalesSummaryReport, error) {
 	report := &SalesSummaryReport{
 		StartDate: start.Format("2006-01-02"),
@@ -159,13 +174,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	from, to := start.Format("2006-01-02"), end.Format("2006-01-02")
 
 	// 1. Invoiced
-	queryInvoiced := `
-		SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
-		FROM invoices
-		WHERE invoice_date BETWEEN $1::date AND $2::date AND status != 'VOID'
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, from, to, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, salesInvoicedSQL, from, to, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
@@ -191,12 +200,6 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Let's just do: Total Invoiced - Paid (where invoice is fully paid).
 	// Simplification: OutstandingAR = SUM(total_amount) of invoices in period where status != PAID.
 
-	queryOutstanding := `
-		SELECT COALESCE(SUM(total_amount), 0)
-		FROM invoices
-		WHERE invoice_date BETWEEN $1::date AND $2::date AND status IN ('UNPAID', 'PARTIAL')
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
 	// Note: accurate AR needs to subtract partial payments.
 	// Let's refine: Total Invoiced in Period - Total Payments applied to *those* invoices (even if payment is outside period? Mixed bag).
 	// Let's stick to: Total Invoiced in Period - Total Paid against those invoices.
@@ -210,7 +213,7 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
 	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
 
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, from, to, branch, grants).Scan(&report.OutstandingAR)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, salesOutstandingSQL, from, to, branch, grants).Scan(&report.OutstandingAR)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outstanding: %w", err)
 	}
