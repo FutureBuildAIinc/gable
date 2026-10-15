@@ -1192,3 +1192,15 @@ func TestEngineeredWoodAndHangersCarryTheirOwnKind(t *testing.T) {
 		}
 	}
 }
+
+// FROM-PRINCIPAL 119 counts Ridgeline as a brand word: no vendor record names
+// it in any field, the vendor's name, address and email domain included.
+func TestVendorRecordsNameNoRidgeline(t *testing.T) {
+	for src, data := range map[string][]byte{"vendors": vendorsData, "vendorkeys": vendorKeysData} {
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(strings.ToLower(line), "ridgeline") {
+				t.Errorf("%s line %d names Ridgeline: %s", src, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
