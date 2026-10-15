@@ -599,7 +599,7 @@
         {
           "address": "1525 Trowel Dr, Vernon BC",
           "branch_id": "<id-3>",
-          "customer_name": "Predator Ridge Renos",
+          "customer_name": "Stonehollow Renos",
           "id": "<id-44>",
           "latitude": 50.2004,
           "lines": [
@@ -695,7 +695,7 @@
         {
           "address": "1885 Formwork Rd, Kelowna BC",
           "branch_id": "<id-1>",
-          "customer_name": "Kelbrook Construction",
+          "customer_name": "Tarnwick Construction",
           "id": "<id-48>",
           "latitude": 49.899,
           "lines": [
@@ -743,7 +743,7 @@
         {
           "address": "1885 Formwork Rd, Kelowna BC",
           "branch_id": "<id-1>",
-          "customer_name": "Kelbrook Construction",
+          "customer_name": "Tarnwick Construction",
           "id": "<id-51>",
           "lines": [
             {
@@ -813,7 +813,7 @@
         {
           "address": "2100 Joist Rd, Lake Country BC",
           "branch_id": "<id-2>",
-          "customer_name": "Lake Country Builders",
+          "customer_name": "Alderfold Builders",
           "id": "<id-60>",
           "latitude": 50.0503,
           "lines": [
@@ -891,7 +891,7 @@
         {
           "address": "3200 Cornice Rd, West Kelowna BC",
           "branch_id": "<id-3>",
-          "customer_name": "Mission Hill Custom",
+          "customer_name": "Pellmoor Custom",
           "id": "<id-63>",
           "latitude": 49.8404,
           "lines": [
@@ -963,7 +963,7 @@
         {
           "address": "5315 Snowload Way, Big White BC",
           "branch_id": "<id-1>",
-          "customer_name": "Big White Cabin Co",
+          "customer_name": "Snowfern Cabin Co",
           "id": "<id-70>",
           "latitude": 49.7208,
           "lines": [
@@ -1095,7 +1095,7 @@
         {
           "address": "9000 Blueprint Pkwy, Kelowna BC",
           "branch_id": "<id-1>",
-          "customer_name": "Okanagan Homes Ltd",
+          "customer_name": "Thornmere Homes Ltd",
           "id": "<id-75>",
           "latitude": 49.9204,
           "lines": [

@@ -230,7 +230,7 @@ describe('accounts payable: reading cents', () => {
     serve({
       agingSummary: [
         aging(),
-        aging({ vendor_id: 'v2', vendor_name: 'Ridgeline Supply', current: 100_000, past_30: 0, past_60: 0, past_90: 0, total: 100_000 }),
+        aging({ vendor_id: 'v2', vendor_name: 'Quillfield Supply', current: 100_000, past_30: 0, past_60: 0, past_90: 0, total: 100_000 }),
       ],
     })
     const el = await mountAsync<LitElement>('gable-accounts-payable')
@@ -240,7 +240,7 @@ describe('accounts payable: reading cents', () => {
     expect(text(el)).toContain('$6,000.00')
     // total 900,000 + 100,000 = 1,000,000 cents
     expect(text(el)).toContain('$10,000.00')
-    expect(text(el)).toContain('Ridgeline Supply')
+    expect(text(el)).toContain('Quillfield Supply')
   })
 
   it('shows payments on the payments tab', async () => {

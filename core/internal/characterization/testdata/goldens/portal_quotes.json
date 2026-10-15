@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/portal/v1/login",
       "body": {
-        "email": "demo@kelbrook.ca",
+        "email": "demo@tarnwick.example",
         "password": "password"
       }
     },
@@ -27,9 +27,9 @@
         "user": {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.ca",
+          "email": "demo@tarnwick.example",
           "id": "<id-3>",
-          "name": "Sam Kelbrook",
+          "name": "Sam Tarnwick",
           "role": "Admin",
           "status": "Active",
           "updated_at": "<ts+0d>"
@@ -889,7 +889,7 @@
           "notes": "",
           "priced": true,
           "project_id": "<id-64>",
-          "project_name": "Mission Hill Custom Home",
+          "project_name": "Lakeview Custom Home",
           "rejected_at": null,
           "sent_at": null,
           "status": "PRICED",
@@ -1130,7 +1130,7 @@
         "branch_id": "<id-78>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "delivery_type": "delivery",
         "expires_at": null,
         "exposure_cents": 0,
@@ -1218,7 +1218,7 @@
         "branch_id": "<id-78>",
         "created_at": "<ts+0d>",
         "customer_id": "<id-2>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "delivery_type": "pickup",
         "expires_at": null,
         "exposure_cents": 0,

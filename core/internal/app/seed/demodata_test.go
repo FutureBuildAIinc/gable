@@ -15,6 +15,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -92,7 +94,7 @@ var bannedSeedWords = []string{
 	"simpson", "strong-tie", "hardie", "cemtrim", "channellock", "romex",
 	"dryline", "firecode", "brownwood", "turtle", "gable.com",
 	"nordstrom", "kellogg", "zellweger",
-	"quikrete", "tyvek", "proframe angle",
+	"quikrete", "tyvek", "proframe",
 	"simp-", "ice & water shield", "speed square",
 }
 
@@ -144,6 +146,118 @@ func TestDemoImport(t *testing.T) {
 	if first.products == 0 || first.customers == 0 || first.vendors == 0 {
 		t.Fatalf("the import wrote nothing: %+v", first)
 	}
+
+	t.Run("no vendor carries the dealer's own name", func(t *testing.T) {
+		// The dealer buying from a vendor of its own name reads as the dealer
+		// buying from itself on every product and purchase order. A vendor that
+		// begins with the dealer's brand word reads as the dealer's own arm.
+		rows, err := db.Query(`SELECT v.name, d.trading_name FROM vendors v, dealer_profile d
+			WHERE d.id = 1 AND d.trading_name <> ''
+			  AND (LOWER(v.name) LIKE LOWER(d.trading_name) || '%' OR LOWER(v.name) LIKE LOWER(d.legal_name) || '%'
+			       OR LOWER(v.name) LIKE LOWER(split_part(d.trading_name, ' ', 1)) || ' %')
+			ORDER BY v.name`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var vendor, dealer string
+			if err := rows.Scan(&vendor, &dealer); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the vendor %q carries the dealer's own name %q", vendor, dealer)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// FROM-PRINCIPAL 141 c, round 7: the walk is a script a person follows, so
+	// every name it tells them to search finds a record.
+	t.Run("every name the walk tells a person to search finds its record", func(t *testing.T) {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "parity", "WALKS.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var terms []string
+		for _, re := range []*regexp.Regexp{
+			regexp.MustCompile(`[Ff]ind "([^"]+)"`),
+			regexp.MustCompile("search\\s+`([^`]+)`"),
+			regexp.MustCompile(`[?&]q=([^"&\s]+)`),
+		} {
+			for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
+				term, err := url.QueryUnescape(m[1])
+				if err != nil {
+					t.Fatalf("the walk's search %q: %v", m[1], err)
+				}
+				terms = append(terms, term)
+			}
+		}
+		if len(terms) < 3 {
+			t.Fatalf("the walk's searches were not found: %v", terms)
+		}
+		for _, term := range terms {
+			var n int
+			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM customers WHERE name ILIKE '%'||$1||'%' OR account_number ILIKE '%'||$1||'%')
+				+ (SELECT COUNT(*) FROM products WHERE description ILIKE '%'||$1||'%' OR sku ILIKE '%'||$1||'%')`, term).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if n == 0 {
+				t.Errorf("the walk tells a person to search %q and no customer or product matches it", term)
+			}
+		}
+	})
+	t.Run("no customer user sits on the dealer's own domain", func(t *testing.T) {
+		rows, err := db.Query(`SELECT email FROM customer_users WHERE email ILIKE '%@gablebuildingsupply.example' ORDER BY email`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var email string
+			if err := rows.Scan(&email); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the customer user %s is on the dealer's domain, not its own company's", email)
+		}
+	})
+	// The region word is a place, not an invented company word.
+	t.Run("no customer and vendor share their first word", func(t *testing.T) {
+		rows, err := db.Query(`SELECT DISTINCT split_part(c.name, ' ', 1), c.name, v.name FROM customers c
+			JOIN vendors v ON LOWER(split_part(v.name, ' ', 1)) = LOWER(split_part(c.name, ' ', 1))
+			WHERE c.account_number !~ '^RET-' AND LOWER(split_part(c.name, ' ', 1)) <> 'okanagan' ORDER BY 2, 3`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var word, customer, vendor string
+			if err := rows.Scan(&word, &customer, &vendor); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the customer %q and the vendor %q share the word %q", customer, vendor, word)
+		}
+	})
+	// FROM-PRINCIPAL 145 a: the seeded catalogue (the base seed and the import
+	// together) carries no two products with one name. This database leg is the
+	// red first leg; TestImportProductNamesAreUnique only guards the import file.
+	t.Run("no two products share a name", func(t *testing.T) {
+		rows, err := db.Query(`SELECT LOWER(BTRIM(description)), STRING_AGG(sku, ', ' ORDER BY sku)
+			FROM products GROUP BY LOWER(BTRIM(description)) HAVING COUNT(*) > 1 ORDER BY 1`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var name, skus string
+			if err := rows.Scan(&name, &skus); err != nil {
+				t.Fatal(err)
+			}
+			t.Errorf("the name %q is on more than one product: %s", name, skus)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	t.Run("every catalogue and customer row lands", func(t *testing.T) {
 		for _, c := range []struct {
@@ -904,6 +1018,191 @@ func getJSON(t *testing.T, mux http.Handler, path string, dst any) {
 	}
 }
 
+// removedDesignations are one maker's model designations the demo copied
+// (FROM-PRINCIPAL item 135 a). A product is named for its kind and size, so no
+// whole token of these appears in the import, the base seed, the picture keys
+// or the sample list, in any case.
+var removedDesignations = []string{
+	"h1", "h2.5", "hd88", "a35", "lus28", "lus210", "h10a", "tp35", "phd2", "cs16",
+	"ht1", "ht2", "tie-h1",
+}
+
+// holdsDesignation reports the first removed designation that appears in text
+// as a whole token (the characters around it are not letters or digits).
+func holdsDesignation(text string) (string, bool) {
+	lower := strings.ToLower(text)
+	for _, d := range removedDesignations {
+		for from := 0; ; {
+			i := strings.Index(lower[from:], d)
+			if i < 0 {
+				break
+			}
+			start, end := from+i, from+i+len(d)
+			isWord := func(b byte) bool { return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' }
+			if (start == 0 || !isWord(lower[start-1])) && (end == len(lower) || !isWord(lower[end])) {
+				return d, true
+			}
+			from = start + 1
+		}
+	}
+	return "", false
+}
+
+// designationSources are the texts the designation guard reads: the import,
+// the base seed's source and picture keys, and the illustrations' text and
+// file names (the SVG titles and drawn words).
+func designationSources(t *testing.T) map[string]string {
+	t.Helper()
+	sources := map[string]string{
+		"catalog": string(catalogData), "vendors": string(vendorsData), "vendorkeys": string(vendorKeysData),
+	}
+	for _, dir := range []string{".", "../../../cmd/seed"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := name
+			if dir != "." {
+				key = dir + "/" + name
+			}
+			sources[key] = string(data)
+		}
+	}
+	files, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "web", "apps", "desk", "public", "catalog-illustrations", "*.svg"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no illustrations found: %v", err)
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// the file's name is part of what a person can read of it
+		sources["illustration/"+filepath.Base(f)] = filepath.Base(f) + "\n" + string(data)
+	}
+	return sources
+}
+
+// TestSeedDataHoldsNoModelDesignation reads the import, the base seed's own
+// source and its picture keys for a removed designation as a whole token.
+func TestSeedDataHoldsNoModelDesignation(t *testing.T) {
+	for name, text := range designationSources(t) {
+		if d, ok := holdsDesignation(text); ok {
+			t.Errorf("%s holds the model designation %q", name, d)
+		}
+	}
+}
+
+// TestDesignationGuardReadsEverySeedSource: the guard's reach is every non
+// test Go file of the seed and of cmd/seed and every illustration, so a
+// designation cannot return through a file nobody listed.
+func TestDesignationGuardReadsEverySeedSource(t *testing.T) {
+	read := designationSources(t)
+	for _, dir := range []string{".", "../../../cmd/seed"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			key := name
+			if dir != "." {
+				key = dir + "/" + name
+			}
+			if _, ok := read[key]; !ok {
+				t.Errorf("the designation guard does not read %s", key)
+			}
+		}
+	}
+	files, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "web", "apps", "desk", "public", "catalog-illustrations", "*.svg"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no illustrations found: %v", err)
+	}
+	for _, f := range files {
+		if _, ok := read["illustration/"+filepath.Base(f)]; !ok {
+			t.Errorf("the designation guard does not read illustration %s", filepath.Base(f))
+		}
+	}
+}
+
+// TestHoldsDesignationFindsAToken proves the check itself on text that holds
+// one: an illustration title and a file name.
+func TestHoldsDesignationFindsAToken(t *testing.T) {
+	for _, text := range []string{`<title>Framing angle A35</title>`, "lus28_hanger.svg", "CN_H10A"} {
+		if _, ok := holdsDesignation(text); !ok {
+			t.Errorf("%q holds a designation and the check missed it", text)
+		}
+	}
+	if _, ok := holdsDesignation("joist hanger 2x8 face mount"); ok {
+		t.Errorf("a plain name was flagged")
+	}
+}
+
+// TestSeedKeysAndVendorsNameNoProFrame: "proframe" in any field of the import,
+// the keys and the email domains (item 134), not only in descriptions.
+func TestSeedKeysAndVendorsNameNoProFrame(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"catalog": catalogData, "vendors": vendorsData, "vendorkeys": vendorKeysData,
+		"customers": customersData, "staff": staffData, "categories": categoriesData,
+	} {
+		if strings.Contains(strings.ToLower(string(data)), "proframe") {
+			t.Errorf("%s names ProFrame", name)
+		}
+	}
+}
+
+// emailPattern finds an email address in text.
+var emailPattern = regexp.MustCompile(`[A-Za-z0-9._%+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}`)
+
+// TestSeedEmailsAreOnReservedDomains (item 108 b's rule): every email address
+// in the import files and in the seed's own source ends in ".example" or is on
+// "example.com", never on a real top level domain an invented customer or
+// vendor could be mistaken to own.
+func TestSeedEmailsAreOnReservedDomains(t *testing.T) {
+	sources := map[string]string{
+		"catalog": string(catalogData), "customers": string(customersData), "staff": string(staffData),
+		"vendors": string(vendorsData), "vendorkeys": string(vendorKeysData),
+	}
+	for _, dir := range []string{".", "../../../cmd/seed"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(dir + "/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sources[dir+"/"+name] = string(data)
+		}
+	}
+	for name, text := range sources {
+		for _, addr := range emailPattern.FindAllString(text, -1) {
+			domain := strings.ToLower(addr[strings.LastIndex(addr, "@")+1:])
+			if strings.HasSuffix(domain, ".example") || domain == "example.com" {
+				continue
+			}
+			t.Errorf("%s holds the email address %q on a real domain", name, addr)
+		}
+	}
+}
+
 // FROM-PRINCIPAL 118 a (review round 1): a product is named for what it is, so
 // no product description in the import names a maker. The invented vendor
 // records and their keys stay; only the descriptions are checked.
@@ -921,6 +1220,229 @@ func TestImportDescriptionsNameNoMaker(t *testing.T) {
 		}
 		if strings.Contains(strings.ToLower(row.Description), "proframe") {
 			t.Errorf("%s: description %q names a maker", row.SKU, row.Description)
+		}
+	}
+}
+
+// FROM-PRINCIPAL 119 names "Ridgeline" and "Stone as a brand" among the brand
+// words, so no product is named for an invented brand. The word stone stays
+// where it is a material ("Landscape and Stone", a stone product); only a
+// product led by it as a mark, and the vendor named for it, are refused.
+func TestCatalogNamesNoInventedBrand(t *testing.T) {
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row map[string]any
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		sku, _ := row["sku"].(string)
+		for field, v := range row {
+			if s, ok := v.(string); ok && strings.Contains(strings.ToLower(s), "ridgeline") {
+				t.Errorf("%s: %s %q names the invented brand Ridgeline", sku, field, s)
+			}
+		}
+		if d, _ := row["description"].(string); strings.HasPrefix(strings.ToLower(d), "stone ") {
+			t.Errorf("%s: %q is led by the invented brand Stone", sku, d)
+		}
+	}
+	var keys struct {
+		Vendors []struct {
+			Key   string `json:"key"`
+			Name  string `json:"name"`
+			Notes string `json:"notes"`
+		} `json:"vendors"`
+	}
+	if err := json.Unmarshal(vendorKeysData, &keys); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range keys.Vendors {
+		if strings.Contains(strings.ToLower(v.Notes), "ridgeline") {
+			t.Errorf("vendor %s: the notes name the invented brand Ridgeline", v.Key)
+		}
+		if strings.Contains(strings.ToLower(v.Name), "stone hardware") {
+			t.Errorf("vendor %s: %q is the invented brand Stone", v.Key, v.Name)
+		}
+	}
+}
+
+// TestVendorNamesSitBesideNoRealBusiness: two vendor names read next to real
+// businesses of the same trade and region (the review of PR 161).
+func TestVendorNamesSitBesideNoRealBusiness(t *testing.T) {
+	for _, name := range []string{"fraser valley engineered", "okanagan power tool"} {
+		for src, data := range map[string][]byte{"vendors": vendorsData, "vendorkeys": vendorKeysData} {
+			if strings.Contains(strings.ToLower(string(data)), name) {
+				t.Errorf("%s holds the name %q, which sits beside a real business", src, name)
+			}
+		}
+	}
+}
+
+// TestEngineeredWoodAndHangersCarryTheirOwnKind: the LVL and I-joist rows are
+// not graded with a dimension lumber grade, and the face mount hangers draw as
+// joist hangers.
+func TestEngineeredWoodAndHangersCarryTheirOwnKind(t *testing.T) {
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row struct {
+			SKU         string `json:"sku"`
+			Category    string `json:"category_slug"`
+			Grade       string `json:"grade"`
+			ImageFamily string `json:"image_family"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		if row.Category == "lumber.engineered_wood" && strings.EqualFold(row.Grade, "standard") {
+			t.Errorf("%s: the engineered wood grade %q is a dimension lumber grade", row.SKU, row.Grade)
+		}
+		if row.SKU == "CN_FMH210" && row.ImageFamily != "joist_hanger" {
+			t.Errorf("%s draws as %q, want joist_hanger", row.SKU, row.ImageFamily)
+		}
+	}
+}
+
+// FROM-PRINCIPAL 119 counts Ridgeline as a brand word: no vendor record names
+// it in any field, the vendor's name, address and email domain included.
+func TestVendorRecordsNameNoRidgeline(t *testing.T) {
+	for src, data := range map[string][]byte{"vendors": vendorsData, "vendorkeys": vendorKeysData} {
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(strings.ToLower(line), "ridgeline") {
+				t.Errorf("%s line %d names Ridgeline: %s", src, i+1, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// TestImportProductNamesAreUnique: no two import rows share a name (the whole
+// seeded catalogue is checked in TestDemoImport against the database).
+func TestImportProductNamesAreUnique(t *testing.T) {
+	seen := map[string]string{}
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row struct {
+			SKU         string `json:"sku"`
+			Description string `json:"description"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		key := strings.ToLower(strings.TrimSpace(row.Description))
+		if first, dup := seen[key]; dup {
+			t.Errorf("%q is the name of %s and of %s", row.Description, first, row.SKU)
+		}
+		seen[key] = row.SKU
+	}
+}
+
+// FROM-PRINCIPAL 141 c: every invented company name was searched against real
+// businesses; these matched (or came close enough to be mistaken) and were
+// replaced with plain invented names, so none of them stays in the seed or the
+// import, in any record, address, email domain or key.
+var renamedCompanyNames = []string{
+	"Lake Country Builders", "Predator Ridge Renos", "Big White Cabin Co", "Mission Hill Custom",
+	"Ridgeline Formwork", "Okanagan Hardware Distribution", "Pacific Window & Door", "Valley Ready-Mix Concrete",
+	"Cascade Western Lumber Sales", "Cascadia Paint and Sundries", "ClearVue Window and Door",
+	"Mountain Metal Roofing", "OK Foam and Insulation", "Peak Roofing Supply", "StoneBridge Masonry Supply",
+	"Central Okanagan School District", "Cupola Custom Homes", "Aldridge Landscape and Stone",
+	"Trussway Custom Homes", "Vanderpol Framing and Truss", "Vanderpol Wall Framing",
+	"Kelbrook", "Oakvale Builders", "Ashgrove Masonry Supply", "Okanagan Homes",
+	"Larchwood Custom", "Gable Garden Supply",
+}
+
+func TestRenamedCompanyNamesStayOut(t *testing.T) {
+	sources := designationSources(t)
+	sources["customers"] = string(customersData)
+	for src, text := range sources {
+		for _, name := range renamedCompanyNames {
+			if strings.Contains(text, name) {
+				t.Errorf("%s still names the company %q", src, name)
+			}
+		}
+	}
+}
+
+// FROM-PRINCIPAL 141 c, round 7: a renamed company's old word must not live on
+// in another field of its record: an email local part, a contact, a portal
+// user's name, a job.
+func TestRenamedCompanyWordsLeaveNoOtherField(t *testing.T) {
+	words := []string{"trussway", "cupola", "central", "kelbrook", "oakvale", "ashgrove", "silverpine", "mission", "larchwood custom", "vanderpol"}
+	// Words that name a renamed company, and so may not appear in the source
+	// files of the seed (a comment there may use a place such as Mission).
+	sourceWords := []string{"trussway", "cupola", "kelbrook", "oakvale", "ashgrove", "silverpine", "larchwood custom", "vanderpol"}
+	// The renamed company's own record may not keep the word it was renamed
+	// from, while three other companies keep a surname of their own.
+	rowWords := map[string][]string{"KEL-0257": {"aldridge"}}
+	check := func(where string, row map[string]any, words []string) {
+		// the street, city and region are places, not companies
+		for _, k := range []string{"address_line1", "city", "region"} {
+			delete(row, k)
+		}
+		if sites, ok := row["job_sites"].([]any); ok {
+			for _, site := range sites {
+				if m, ok := site.(map[string]any); ok {
+					delete(m, "line1")
+				}
+			}
+		}
+		flat, _ := json.Marshal(row)
+		for _, w := range words {
+			if strings.Contains(strings.ToLower(string(flat)), w) {
+				t.Errorf("%s still carries the old company word %q: %s", where, w, flat)
+			}
+		}
+	}
+	for src, data := range map[string][]byte{"customers": customersData, "staff": staffData} {
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var row map[string]any
+			if err := json.Unmarshal([]byte(line), &row); err != nil {
+				t.Fatalf("%s line %d: %v", src, i+1, err)
+			}
+			w := words
+			if acct, _ := row["account_number"].(string); acct != "" {
+				w = append(append([]string{}, words...), rowWords[acct]...)
+			}
+			check(fmt.Sprintf("%s line %d", src, i+1), row, w)
+		}
+	}
+	for src, text := range designationSources(t) {
+		if strings.HasPrefix(src, "illustration/") || src == "catalog" || src == "vendors" || src == "vendorkeys" {
+			continue
+		}
+		for _, w := range sourceWords {
+			if strings.Contains(strings.ToLower(text), w) {
+				t.Errorf("%s still carries the old company word %q", src, w)
+			}
+		}
+		for _, pun := range []string{"Olivia Homes", "Marc Mission", "Larchwood Custom Home", "KB-2219"} {
+			if strings.Contains(text, pun) {
+				t.Errorf("%s still carries %q, a name built on a renamed company", src, pun)
+			}
+		}
+	}
+	walk, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "parity", "WALKS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(walk), "KB-") {
+		t.Errorf("the walk still uses a KB- number, the initials of a renamed company")
+	}
+}
+
+// FROM-PRINCIPAL 145 a, round 7: the lumber vendor is a supplier, not the
+// dealer's own yard, in every field of its import row.
+func TestLumberVendorRowIsNotTheDealersOwnFeed(t *testing.T) {
+	for _, w := range []string{"internal yard feed", "in-house"} {
+		if strings.Contains(strings.ToLower(string(vendorKeysData)), w) {
+			t.Errorf("vendor_keys.json still says %q", w)
 		}
 	}
 }

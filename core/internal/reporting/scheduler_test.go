@@ -290,7 +290,7 @@ func TestExecuteAndSendReport_StopsBeforeSendingOnExecutionFailure(t *testing.T)
 // document and no way to find out why.
 func TestRenderSchedule_ExtensionMatchesTheBytes(t *testing.T) {
 	columns := []ReportColumn{{Field: "customer_name", Label: "Customer"}}
-	results := []map[string]interface{}{{"customer_name": "Kelbrook Homes"}}
+	results := []map[string]interface{}{{"customer_name": "Tarnwick Homes"}}
 
 	t.Run("CSV", func(t *testing.T) {
 		buf, ext, note, err := renderSchedule("CSV", columns, results)

@@ -484,8 +484,8 @@ func seedVars(t *testing.T, dbURL string) map[string]string {
 		vars[v] = s.String
 	}
 
-	one("customer", `SELECT id FROM customers WHERE account_number = 'KELBROOK-001'`)
-	one("customerEmail", `SELECT email FROM customers WHERE account_number = 'KELBROOK-001'`)
+	one("customer", `SELECT id FROM customers WHERE account_number = 'TARNWICK-001'`)
+	one("customerEmail", `SELECT email FROM customers WHERE account_number = 'TARNWICK-001'`)
 	one("product", `SELECT id FROM products WHERE sku = 'LUM-248-PREM'`)
 	one("productSheet", `SELECT id FROM products WHERE sku = 'PLY-34-CDX'`)
 	one("branch", `SELECT id FROM locations WHERE code = 'KEL-MAIN'`)
