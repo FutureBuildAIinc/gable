@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
@@ -13,7 +14,6 @@ import type { SalesPerson } from '../../types/salesteam.ts';
 import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 @customElement('gable-order-detail')
 export class GableOrderDetail extends LitElement {
@@ -75,6 +75,15 @@ export class GableOrderDetail extends LitElement {
             this.invoiceNumbers = numbers;
         } catch {
             // the number is a convenience: the link works by id
+        }
+    }
+
+    private async handlePrintPickTicket(id: string) {
+        try {
+            const shown = await openAuthedPdf(`/api/v1/documents/print/pickticket/${id}`, 'Failed to read the pick ticket', 'pick-ticket.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the pick ticket was saved as a download', 'success');
+        } catch (err) {
+            ToastService.show(err instanceof Error ? err.message : 'Failed to print the pick ticket', 'error');
         }
     }
 
@@ -275,7 +284,7 @@ export class GableOrderDetail extends LitElement {
                         ` : nothing}
                         ${(order.status === 'confirmed' || order.status === 'backordered' || order.status === 'fulfilled') ? html`
                             <button
-                                @click=${() => window.open(`${API_URL}/api/v1/documents/print/pickticket/${order.id}`, '_blank')}
+                                @click=${() => this.handlePrintPickTicket(order.id)}
                                 class="bg-white/10 text-white font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-white/20 transition-colors flex items-center gap-2"
                             >
                                 ${icon(Printer, 18)} Pick Ticket

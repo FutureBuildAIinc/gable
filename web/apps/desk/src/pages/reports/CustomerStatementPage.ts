@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
@@ -14,6 +15,7 @@ import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
 import { BRANCH_STORAGE_KEY } from '@gable/auth';
 import { FileText, Search } from 'lucide';
+
 
 @customElement('gable-customer-statement')
 export class CustomerStatementPage extends LitElement {
@@ -73,6 +75,19 @@ export class CustomerStatementPage extends LitElement {
         }
         // The statement read owns the loading state from here, in its own turn.
         await this._loadStatement();
+    }
+
+    /** Print opens the statement's own document for the period shown, as the invoice's print does. */
+    private async _printStatement() {
+        const st = this.statement;
+        if (!st || !this.customerId) return;
+        const params = new URLSearchParams({ from: st.from, to: st.to });
+        try {
+            const shown = await openAuthedPdf(`/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, 'Failed to read the statement document', 'statement.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the statement was saved as a download', 'success');
+        } catch (err) {
+            ToastService.show(err instanceof Error ? err.message : 'Failed to print the statement', 'error');
+        }
     }
 
     private _onSearchInput(e: Event) {
@@ -232,7 +247,8 @@ export class CustomerStatementPage extends LitElement {
                         </button>
                         ${this.statement ? html`
                             <button
-                                @click=${() => window.print()}
+                                @click=${() => this._printStatement()}
+                                data-testid="print-statement"
                                 class="inline-flex items-center gap-2 border border-white/10 text-white px-4 py-2 rounded hover:bg-white/5 transition-colors"
                             >
                                 ${icon(FileText, 16, 'w-4 h-4')}
@@ -379,8 +395,8 @@ export class CustomerStatementPage extends LitElement {
                                     Unapplied cash at other yards: <span class="font-mono">${formatCents(this._unappliedElsewhere(cur))}</span>
                                 </p>
                             ` : nothing}
-                            ${this._scopedToYard() ? html`
-                                <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account.</p>
+                            ${this._scopedToYard() || this._unappliedElsewhere(cur) > 0 ? html`
+                                <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are ${this._scopedToYard() ? "this yard's" : 'those of your yards'}; the activity and the balances cover the whole account.</p>
                             ` : nothing}
                         </div>
                     ` : nothing}

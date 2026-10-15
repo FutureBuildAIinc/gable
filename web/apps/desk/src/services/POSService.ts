@@ -21,6 +21,7 @@ import type {
 } from '../types/pos.ts';
 import { fetchWithAuth } from './fetchClient';
 import { parseApiError, ifMatch } from './apiError';
+import { openAuthedPdf } from '../lib/authedPdf';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -109,23 +110,7 @@ export const posService = {
      * a refusal closes the tab and throws the server's words.
      */
     async printReceipt(saleId: string): Promise<{ url: string; blocked: boolean }> {
-        // The tab opens during the click, before any await, so a pop up blocker lets it through.
-        const tab = window.open('', '_blank');
-        try {
-            const response = await expectOk(
-                await fetchWithAuth(`${API_URL}/api/v1/pos/transactions/${saleId}/receipt`),
-                'Failed to read the receipt',
-            );
-            const url = URL.createObjectURL(await response.blob());
-            if (tab === null) return { url, blocked: true };
-            tab.location.href = url;
-            // the tab has the document by then
-            setTimeout(() => URL.revokeObjectURL(url), 60_000);
-            return { url, blocked: false };
-        } catch (err) {
-            tab?.close();
-            throw err;
-        }
+        return openAuthedPdf(`/api/v1/pos/transactions/${saleId}/receipt`, 'Failed to read the receipt');
     },
 
     /** Sends the completed sale's receipt to the account's contact; a refusal carries the server's words. */

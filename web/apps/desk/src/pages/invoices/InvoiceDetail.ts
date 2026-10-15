@@ -5,6 +5,7 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { CreditMemoService } from '../../services/CreditMemoService.ts';
@@ -30,7 +31,6 @@ import { renderSalesLines } from '../../components/invoices/lines-table.ts';
 import '../../components/invoices/PaymentModal.ts';
 import '../../components/invoices/SalesDialog.ts';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 /** Plain words for the blockers a void can be refused with. */
 export function voidBlockerHint(err: unknown): string {
@@ -125,6 +125,15 @@ export class GableInvoiceDetail extends LitElement {
         if (this.routeId) this.loadAll(this.routeId);
     }
 
+    private async handlePrintInvoice(id: string) {
+        try {
+            const shown = await openAuthedPdf(`/api/v1/documents/print/invoice/${id}`, 'Failed to read the invoice document', 'invoice.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the invoice was saved as a download', 'success');
+        } catch (err) {
+            ToastService.show(apiErrorMessage(err, 'Failed to print the invoice'), 'error');
+        }
+    }
+
     private async handleEmailInvoice() {
         if (!this.invoice?.id) return;
         try {
@@ -194,7 +203,7 @@ export class GableInvoiceDetail extends LitElement {
                     ${!isVoid ? html`
                         <div class="flex gap-3 flex-wrap">
                             <button
-                                @click=${() => window.open(`${API_URL}/api/v1/documents/print/invoice/${inv.id}`, '_blank')}
+                                @click=${() => this.handlePrintInvoice(inv.id)}
                                 class="bg-white/10 text-white hover:bg-white/20 px-4 py-2 rounded flex items-center gap-2 transition-colors border border-white/10 whitespace-nowrap"
                             >
                                 ${icon(Download, 18)} Print PDF

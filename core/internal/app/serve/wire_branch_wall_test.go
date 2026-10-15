@@ -1779,6 +1779,8 @@ func TestBranchWall_FormsAndDeliveries(t *testing.T) {
 		{"sales may not print a purchase order", "GET", "/api/v1/documents/print/purchase-order/" + f.poA.String(), "sales", "u-a", A, http.StatusForbidden},
 		{"sales prints the statement of a customer of branch A", "GET", "/api/v1/documents/print/statement/" + f.docCust.String(), "sales", "u-a", A, ok},
 		{"finance emails the statement", "POST", "/api/v1/ar/customers/" + f.docCust.String() + "/statement/email", "finance", "u-a", A, http.StatusAccepted},
+		{"the statement document takes the period the page shows", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=2026-01-01&to=2026-01-31", "sales", "u-a", A, ok},
+		{"a statement period that runs backwards is a 400", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=2026-02-01&to=2026-01-31", "sales", "u-a", A, http.StatusBadRequest},
 		{"a bad statement date is a 400", "GET", "/api/v1/documents/print/statement/" + f.docCust.String() + "?from=nope", "sales", "u-a", A, http.StatusBadRequest},
 		{"an unknown statement customer is a 404", "GET", "/api/v1/documents/print/statement/" + uuid.NewString(), "sales", "u-a", A, http.StatusNotFound},
 		{"finance prints the statement of a customer branch A shares", "GET", "/api/v1/documents/print/statement/" + shared.String(), "finance", "u-a", A, ok},

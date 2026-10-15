@@ -4,6 +4,7 @@
 package account_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -58,5 +59,16 @@ func TestARAgingByCustomerPagesThroughItsCursor(t *testing.T) {
 	}
 	if !seen[w.customerID.String()] || !seen[other.String()] {
 		t.Errorf("the pages hold %d customers, want both of the world's", len(seen))
+	}
+}
+
+// A whole account read names its customer: with none it would age every
+// customer with both walls dropped.
+func TestARWholeAccountAgingRefusesToRunWithoutACustomer(t *testing.T) {
+	w := newARWorld(t)
+	w.invoice(10000, daysFromNow(-3))
+	_, err := w.svc.AgingSummary(context.Background(), account.AgingQuery{AsOf: w.businessDay(), Basis: "due_date", WholeAccount: true})
+	if err == nil {
+		t.Fatal("a whole account aging with no customer was answered")
 	}
 }
