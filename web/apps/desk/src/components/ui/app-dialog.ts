@@ -19,6 +19,9 @@
  * layer puts it above every page layer (a question asked from inside a modal,
  * like the fleet modals, stays answerable) and makes the page behind inert.
  * The dim veil stays a plain div under it, styled like the other modals'.
+ * A page modal whose own veil paints above this one (the fleet modals) names
+ * its panel with data-modal-panel, and this dialog dims that panel with a
+ * scrim at the panel's own radius while the question is up.
  */
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
@@ -70,6 +73,8 @@ export class GableAppDialog extends LitElement {
     @property({ type: String }) placeholder = '';
 
     @state() private _value = '';
+    /** The panel-sized scrim over a modal open behind this dialog, if any. */
+    @state() private _scrim: { top: number; left: number; width: number; height: number; radius: string } | null = null;
 
     private _ids = `gable-app-dialog-${++dialogSeq}`;
     private _returnFocus: HTMLElement | null = null;
@@ -90,6 +95,7 @@ export class GableAppDialog extends LitElement {
                 dlg.setAttribute('open', '');
             }
         }
+        this._coverModalBehind();
         const target =
             this.mode === 'prompt'
                 ? this.querySelector<HTMLElement>('input')
@@ -133,6 +139,26 @@ export class GableAppDialog extends LitElement {
         return Array.from(
             this.querySelectorAll<HTMLElement>('[data-dialog-input], [data-dialog-cancel], [data-dialog-confirm]'),
         ).filter((el) => !(el as HTMLButtonElement).disabled);
+    }
+
+    /**
+     * A page modal that can sit under this dialog names its panel with
+     * data-modal-panel (its own veil paints above this dialog's, so the plain
+     * veil cannot dim it): draw a scrim over the panel's own box, at its own
+     * radius, under this dialog's top layer panel.
+     */
+    private _coverModalBehind() {
+        const panels = Array.from(document.querySelectorAll<HTMLElement>('[data-modal-panel]'));
+        const panel = panels[panels.length - 1];
+        if (!panel) return;
+        const r = panel.getBoundingClientRect();
+        this._scrim = {
+            top: r.top,
+            left: r.left,
+            width: r.width,
+            height: r.height,
+            radius: getComputedStyle(panel).borderRadius || panel.style.borderRadius || '0',
+        };
     }
 
     private _onKeydown(e: KeyboardEvent) {
@@ -237,6 +263,16 @@ export class GableAppDialog extends LitElement {
                     </div>
                 </dialog>
             </div>
+            ${this._scrim
+                ? html`
+                    <div
+                        data-dialog-scrim
+                        aria-hidden="true"
+                        style="position: fixed; z-index: 70; top: ${this._scrim.top}px; left: ${this._scrim.left}px; width: ${this._scrim.width}px; height: ${this._scrim.height}px; border-radius: ${this._scrim.radius};"
+                        class="bg-backdrop/60 backdrop-blur-sm pointer-events-none"
+                    ></div>
+                `
+                : nothing}
         `;
     }
 }
