@@ -50,10 +50,12 @@ export interface PopoverSize {
 
 /**
  * Where the calendar pops, from the field's box, the popover's size and the
- * viewport: under the field when there is room, otherwise directly above it
- * (its bottom edge the gap over the field's top edge, so it never covers the
- * field or its label), clamped inside the screen on every side. Fixed
- * positioning, so a modal's scroll or hidden overflow never clips it.
+ * viewport: under the field when there is room (height, the gap and the
+ * screen margin all counted, so a near fit never clamps up over the field),
+ * otherwise directly above it (its bottom edge the gap over the field's top
+ * edge, so it never covers the field or its label), clamped inside the
+ * screen on every side. Fixed positioning, so a modal's scroll or hidden
+ * overflow never clips it.
  */
 export function placePopover(
     rect: { left: number; bottom: number; top: number },
@@ -64,7 +66,7 @@ export function placePopover(
     const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportW - size.width - VIEWPORT_MARGIN));
     const below = viewportH - rect.bottom;
     const above = rect.top;
-    if (below >= size.height + POPOVER_GAP || below >= above) {
+    if (below >= size.height + POPOVER_GAP + VIEWPORT_MARGIN || (below >= above && above < size.height + POPOVER_GAP + VIEWPORT_MARGIN)) {
         const top = Math.min(rect.bottom + POPOVER_GAP, viewportH - size.height - VIEWPORT_MARGIN);
         return { top, left };
     }
@@ -200,14 +202,22 @@ export class GableDateField extends LitElement {
             this._onTextCommit();
         } else if (e.key === 'ArrowDown' && !this._open) {
             e.preventDefault();
-            // A typed day not yet committed leads: the calendar opens on the
-            // day the box shows, committed first.
-            const typed = parseDay(this._text);
-            if (typed && this._inBounds(typed) && typed !== this.value) this._commit(typed);
-            this._openCalendar(true);
+            this._openCommittingTyped(true);
         }
         // Escape while the calendar is open is the document listener's: it
         // fires ahead of this one and keeps the key from the dialog behind.
+    }
+
+    /**
+     * Open the calendar, committing a typed day first: the calendar opens on
+     * the day the box shows. The button's click needs this as much as
+     * ArrowDown does: the button keeps the box's focus (its mousedown is
+     * prevented), so no blur commit happens before a mouse open.
+     */
+    private _openCommittingTyped(byKeyboard = false) {
+        const typed = parseDay(this._text);
+        if (typed && this._inBounds(typed) && typed !== this.value) this._commit(typed);
+        this._openCalendar(byKeyboard);
     }
 
     /**
@@ -379,7 +389,7 @@ export class GableDateField extends LitElement {
                     tabindex="-1"
                     aria-label=${this._open ? 'Close the calendar' : 'Open the calendar'}
                     ?disabled=${this.disabled}
-                    @click=${() => (this._open ? this._close() : this._openCalendar())}
+                    @click=${() => (this._open ? this._close() : this._openCommittingTyped())}
                     @mousedown=${(e: Event) => e.preventDefault()}
                     class="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white transition-colors"
                 >${icon(Calendar, 16)}</button>
