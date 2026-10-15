@@ -1207,7 +1207,8 @@ export class POSTerminal extends LitElement {
           <label style="width:90px;font-size:13px;color:rgb(var(--gb-till-soft))">${methodLabel(m as TenderMethod)}</label>
           <input type="number" step="0.01" .value=${this._counts[m]}
             @input=${(e: Event) => { this._counts = { ...this._counts, [m]: (e.target as HTMLInputElement).value }; }}
-            style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="0.00" />
+            class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
+            style="flex:1;box-sizing:border-box;padding:10px;background:rgb(var(--gb-till-field));border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-text));font-size:16px;text-align:right;outline:none" placeholder="Enter the count" />
         </div>
       `)}
       <div style="display:flex;gap:8px;margin-top:20px">
