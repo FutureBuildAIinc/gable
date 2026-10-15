@@ -214,12 +214,15 @@ func (r *Repository) GetSourceSummary(ctx context.Context) (map[string]int, erro
 
 func (r *Repository) GetPO(ctx context.Context, id uuid.UUID) (*PurchaseOrder, error) {
 	branchID := middleware.BranchIDForQuery(ctx)
-	query := `SELECT id, number, vendor_id, status, source, created_at, updated_at, branch_id FROM purchase_orders WHERE id = $1 AND ($2::uuid IS NULL OR branch_id = $2)`
+	query := `SELECT po.id, po.number, po.vendor_id, COALESCE(v.name, ''), po.status, po.source, po.created_at, po.updated_at, po.branch_id
+		FROM purchase_orders po LEFT JOIN vendors v ON v.id = po.vendor_id
+		WHERE po.id = $1 AND ($2::uuid IS NULL OR po.branch_id = $2)`
 	var po PurchaseOrder
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, id, branchID).Scan(
 		&po.ID,
 		&po.Number,
 		&po.VendorID,
+		&po.VendorName,
 		&po.Status,
 		&po.Source,
 		&po.CreatedAt,
