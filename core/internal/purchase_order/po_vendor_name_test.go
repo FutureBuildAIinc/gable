@@ -13,7 +13,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// RULE: the by id read names the vendor, so the printed purchase order's
+// RULE: the print read names the vendor, so the printed purchase order's
 // Vendor line is never blank (the print route passes this record to the form).
 func TestGetPO_NamesItsVendor(t *testing.T) {
 	db := testutil.RequireDB(t)
@@ -36,7 +36,7 @@ func TestGetPO_NamesItsVendor(t *testing.T) {
 		t.Fatal(err)
 	}
 	poID = po.ID
-	got, err := svc.GetPO(ctx, po.ID)
+	got, err := svc.GetPOForPrint(ctx, po.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

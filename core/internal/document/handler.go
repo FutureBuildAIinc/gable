@@ -589,7 +589,7 @@ func (h *Handler) HandlePrintPurchaseOrder(w http.ResponseWriter, r *http.Reques
 		httpx.WriteError(w, r, err)
 		return
 	}
-	po, err := h.poSvc.GetPO(r.Context(), id)
+	po, err := h.poSvc.GetPOForPrint(r.Context(), id)
 	if err != nil {
 		httpx.WriteError(w, r, httpx.NotFound("purchase order not found"))
 		return
