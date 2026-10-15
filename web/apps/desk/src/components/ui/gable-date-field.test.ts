@@ -363,6 +363,50 @@ describe('the field follows its host surface', () => {
   })
 })
 
+describe('Escape with the focus elsewhere', () => {
+  it('Escape closes only the open calendar; the next Escape reaches the dialog', async () => {
+    // A dialog carries a date field; the calendar was opened by mouse, so the
+    // focus sits elsewhere in the dialog.
+    const dialog = document.createElement('div')
+    let dialogEscapes = 0
+    dialog.addEventListener('keydown', (e) => {
+      if ((e as KeyboardEvent).key === 'Escape') dialogEscapes++
+    })
+    document.body.appendChild(dialog)
+    const el = document.createElement(TAG) as GableDateField
+    el.value = '2026-10-14'
+    dialog.appendChild(el)
+    await update(el, {})
+    const elsewhere = document.createElement('button')
+    elsewhere.textContent = 'Some other control'
+    dialog.appendChild(elsewhere)
+    await openCalendar(el)
+    expect(q(el, '[role="dialog"]')).toBeTruthy()
+    elsewhere.focus()
+    elsewhere.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await update(el, {})
+    expect(el.querySelector('[role="dialog"]'), 'the first Escape closes the calendar').toBeNull()
+    expect(dialogEscapes, 'the dialog never sees the first Escape').toBe(0)
+    expect(document.activeElement, 'the focus stays where it was').toBe(elsewhere)
+    elsewhere.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    expect(dialogEscapes, 'the next Escape is the dialog\'s own').toBe(1)
+    dialog.remove()
+  })
+
+  it('Escape with the focus in the page outside the dialog still closes only the calendar', async () => {
+    const el = await mount<GableDateField>(TAG, { value: '2026-10-14' })
+    await openCalendar(el)
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    outside.focus()
+    outside.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await update(el, {})
+    expect(el.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(outside)
+    outside.remove()
+  })
+})
+
 describe('the calendar opens in the browser top layer', () => {
   it('inside a transform and overflow hidden ancestor, nothing can offset or clip it', async () => {
     // jsdom has no popover API; stub it to watch the calls a real engine gets.
