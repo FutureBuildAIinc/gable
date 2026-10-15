@@ -47,10 +47,22 @@ function luminance(hex: string): number {
  * text) is kept in light too.
  */
 export function brandOnCard(brand: string): string {
+  return brandAtLeast(brand, 3)
+}
+
+/**
+ * A tenant's brand colour used as text (a nav label at about 14 pixels, medium
+ * weight): it needs 4.5:1 on the card, not the 3:1 a bar or a fill needs.
+ */
+export function brandLabelOnCard(brand: string): string {
+  return brandAtLeast(brand, 4.5)
+}
+
+function brandAtLeast(brand: string, needed: number): string {
   if (document.documentElement.dataset.theme !== 'light') return brand
   if (!/^#[0-9A-Fa-f]{3}$|^#[0-9A-Fa-f]{6}$/.test(brand)) return brand
   const card = themeHex('slate-steel', '')
   if (!card.startsWith('#')) return brand
   const [hi, lo] = [luminance(brand), luminance(card)].sort((a, b) => b - a)
-  return (hi + 0.05) / (lo + 0.05) >= 3 ? brand : themeHex('gable-green')
+  return (hi + 0.05) / (lo + 0.05) >= needed ? brand : themeHex('gable-green')
 }

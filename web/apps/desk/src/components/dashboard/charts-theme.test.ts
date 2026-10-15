@@ -45,7 +45,7 @@ describe('dashboard charts follow the mode', () => {
     built.length = 0
     localStorage.clear()
     setTheme('dark')
-    setVars({ 'zinc-400': '161 161 170', 'gable-green': '0 255 163', 'chart-tick': '82 82 91' })
+    setVars({ 'zinc-400': '161 161 170', 'gable-green': '0 255 163', 'chart-series-1': '0 255 163', 'chart-tick': '82 82 91' })
   })
   afterEach(() => {
     root.removeAttribute('style')
@@ -58,11 +58,11 @@ describe('dashboard charts follow the mode', () => {
     expect(built.at(-1)?.options.plugins.legend.labels.color).toBe('rgb(161 161 170 / 1)')
     expect(built.at(-1)?.data.datasets[0].backgroundColor[0]).toBe('rgb(0 255 163 / 1)')
 
-    setVars({ 'zinc-400': '90 86 81', 'gable-green': '4 108 67' })
+    setVars({ 'zinc-400': '90 86 81', 'gable-green': '4 108 67', 'chart-series-1': '4 92 56' })
     setTheme('light')
     await frame()
     expect(built.at(-1)?.options.plugins.legend.labels.color).toBe('rgb(90 86 81 / 1)')
-    expect(built.at(-1)?.data.datasets[0].backgroundColor[0]).toBe('rgb(4 108 67 / 1)')
+    expect(built.at(-1)?.data.datasets[0].backgroundColor[0]).toBe('rgb(4 92 56 / 1)')
     el.remove()
   })
 
@@ -86,6 +86,17 @@ describe('dashboard charts follow the mode', () => {
     const light = built.at(-1)!
     expect(light.data.datasets[0].borderColor).toBe('rgb(4 108 67 / 1)')
     expect(light.options.scales.y.ticks.color).toBe('rgb(109 104 99 / 1)')
+    el.remove()
+  })
+
+  it('the order card is contained: it cannot grow its grid track or spill', async () => {
+    const el = await mount<GableOrderStatusChart>('gable-order-status-chart', { statusBreakdown: { confirmed: 3, draft: 1 } })
+    await frame()
+    const card = el.querySelector('[data-testid="order-status-card"]') as HTMLElement
+    const wrap = el.querySelector('[data-testid="order-status-canvas-wrap"]') as HTMLElement
+    expect(card.className).toContain('min-w-0')
+    expect(card.className).toContain('overflow-hidden')
+    expect(wrap.className).toContain('min-w-0')
     el.remove()
   })
 })

@@ -261,6 +261,8 @@
     --gb-hover-row: 255 255 255;
     --gb-hover-row-a: 0.05;
     --gb-chart-fulfilled: 129 140 248;
+    --gb-chart-series-1: 0 255 163;
+    --gb-chart-series-2: 56 189 248;
     --gb-picture-plate: 255 255 255;
     --gb-tile: 10 11 16;
     --gb-tile-shadow: 0 0 #0000;
@@ -597,7 +599,9 @@
     --gb-chart-tick: 109 104 99;
     --gb-hover-row: 240 232 224;
     --gb-hover-row-a: 0.7;
-    --gb-chart-fulfilled: 86 100 61;
+    --gb-chart-fulfilled: 125 141 97;
+    --gb-chart-series-1: 4 92 56;
+    --gb-chart-series-2: 28 119 152;
     --gb-picture-plate: 240 232 224;
     --gb-tile: 251 249 244;
     --gb-tile-shadow: 0 1px 2px rgb(34 31 29 / 0.14);

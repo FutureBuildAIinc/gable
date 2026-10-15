@@ -9,7 +9,7 @@ import { clearToken } from '../../services/PortalService.ts';
 import type { PortalConfig, PortalUser } from '../../types/portal.ts';
 import '@gable/design-system';
 import { onThemeChange } from '@gable/design-system';
-import { themeHex, brandOnCard } from '../../lib/theme-colors.ts';
+import { themeHex, brandOnCard, brandLabelOnCard } from '../../lib/theme-colors.ts';
 import { icon } from '../../lib/icons.ts';
 import { LayoutDashboard, FileText, ShoppingCart, Truck, LogOut, ChevronLeft, ChevronRight, Users, FolderGit2 } from 'lucide';
 
@@ -112,7 +112,7 @@ export class GablePortalLayout extends LitElement {
                 <a href="${item.path}" class="${cn(
                   'flex items-center gap-3 px-3 py-3 rounded-lg transition-all duration-200 group relative overflow-hidden',
                   isActive ? 'text-white shadow-lg' : 'text-zinc-400 hover:text-zinc-100 hover:bg-hover-row'
-                )}" style="${isActive ? `background-color: ${primary}15; color: ${primary}; box-shadow: 0 0 20px ${primary}15;` : ''}">
+                )}" style="${isActive ? `background-color: ${primary}15; color: ${brandLabelOnCard(primary)}; box-shadow: 0 0 20px ${primary}15;` : ''}">
                   ${isActive ? html`<div class="absolute inset-y-0 left-0 w-1 rounded-r-full" style="background-color: ${primary}"></div>` : nothing}
                   <span class="${cn('transition-transform duration-200 group-hover:scale-110', isActive && 'scale-110')}">
                     ${icon(item.iconData, 20)}

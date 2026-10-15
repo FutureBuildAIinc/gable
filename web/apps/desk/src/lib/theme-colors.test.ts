@@ -2,7 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { describe, it, expect, afterEach } from 'vitest'
-import { channelsToHex, themeHex, cssVarColor, brandOnCard } from './theme-colors.ts'
+import { channelsToHex, themeHex, cssVarColor, brandOnCard, brandLabelOnCard } from './theme-colors.ts'
 
 describe('theme colours', () => {
   afterEach(() => document.documentElement.removeAttribute('style'))
@@ -42,6 +42,32 @@ describe('theme colours', () => {
       document.documentElement.dataset.theme = 'light'
       document.documentElement.style.setProperty('--gb-slate-steel', '248 243 236')
       expect(brandOnCard('#1b50a7')).toBe('#1b50a7')
+    })
+  })
+
+  describe('brandLabelOnCard (a label is text: 4.5:1)', () => {
+    afterEach(() => document.documentElement.removeAttribute('data-theme'))
+
+    function light() {
+      document.documentElement.dataset.theme = 'light'
+      document.documentElement.style.setProperty('--gb-slate-steel', '248 243 236')
+      document.documentElement.style.setProperty('--gb-gable-green', '4 108 67')
+    }
+
+    it('keeps the brand colour in dark', () => {
+      expect(brandLabelOnCard('#00FFA3')).toBe('#00FFA3')
+    })
+
+    it('a brand between 3:1 and 4.5:1 serves a bar or a fill but not a label', () => {
+      light()
+      // #8a8a8a is about 3.2:1 on the card: a control, not text
+      expect(brandOnCard('#8a8a8a')).toBe('#8a8a8a')
+      expect(brandLabelOnCard('#8a8a8a')).toBe('#046c43')
+    })
+
+    it('keeps a brand that reads as text', () => {
+      light()
+      expect(brandLabelOnCard('#1b50a7')).toBe('#1b50a7')
     })
   })
 })
