@@ -4,10 +4,11 @@
 package document
 
 import (
-	"github.com/gablelbm/gable/internal/platform/httpx"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gablelbm/gable/internal/platform/httpx"
 )
 
 // style is the one way every printed document writes an amount and a date,
