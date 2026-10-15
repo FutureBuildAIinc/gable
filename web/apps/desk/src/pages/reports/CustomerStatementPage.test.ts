@@ -371,6 +371,7 @@ describe('customer statement scope at a yard', () => {
     })
     expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
     expect(body).not.toContain('are this yard')
+    expect(body).toContain("Open documents and unapplied payments are those of your yards; the activity and the balances cover the whole account")
   })
 
   it('has no other yards row when everything is listed, and no scope line without a yard', async () => {
