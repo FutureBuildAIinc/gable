@@ -32,6 +32,30 @@ func TestSalesSummaryInvoiceReadsAreServedByAnIndex(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer tx.Rollback(ctx)
+				// A scratch history, rolled back with the transaction, so the
+				// planner chooses by selectivity as it does on a dealer's
+				// table (on an empty one it takes whichever index is first).
+				cust, year, other := uuid.New(), 2016, uuid.New()
+				for _, y := range []uuid.UUID{yard, other} {
+					if _, err := tx.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, y, "IX-"+y.String()[:8]); err != nil {
+						t.Fatalf("scratch yard: %v", err)
+					}
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO customers (id, name, account_number, primary_branch_id)
+					VALUES ($1, 'index leg', $2, $3)`, cust, "IX-"+cust.String()[:8], yard); err != nil {
+					t.Fatalf("scratch customer: %v", err)
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO invoices (id, customer_id, branch_id, status, origin, number, currency,
+						total_amount, subtotal, tax_rate, tax_amount, amount_open, due_date, invoice_date)
+					SELECT gen_random_uuid(), $1, CASE WHEN g % 2 = 0 THEN $2::uuid ELSE $5::uuid END,
+						CASE WHEN g % 5 = 0 THEN 'UNPAID' ELSE 'PAID' END, 'POS', 'IX-' || $4 || '-' || g, 'USD',
+						10, 10, 0, 0, 0, make_date($3, 1, 1) + (g % 3000), make_date($3, 1, 1) + (g % 3000)
+					FROM generate_series(1, 30000) g`, cust, yard, year, cust.String()[:8], other); err != nil {
+					t.Fatalf("scratch invoices: %v", err)
+				}
+				if _, err := tx.Exec(ctx, `ANALYZE invoices`); err != nil {
+					t.Fatalf("analyze: %v", err)
+				}
 				for _, set := range []string{`SET LOCAL enable_seqscan = off`, `SET LOCAL enable_indexscan = off`} {
 					if _, err := tx.Exec(ctx, set); err != nil {
 						t.Fatal(err)
