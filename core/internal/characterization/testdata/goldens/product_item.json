@@ -99,7 +99,7 @@
             "reorder_point": "1000",
             "reorder_qty": "5000",
             "sku": "LUMB24RLN3",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -112,7 +112,7 @@
             "reorder_point": "1000",
             "reorder_qty": "5000",
             "sku": "LUMB24RLN3",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -125,7 +125,7 @@
             "reorder_point": "500",
             "reorder_qty": "2000",
             "sku": "LUMB14RLN3+",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -138,7 +138,7 @@
             "reorder_point": "500",
             "reorder_qty": "2000",
             "sku": "LUMBUT24RL",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -151,7 +151,7 @@
             "reorder_point": "500",
             "reorder_qty": "2000",
             "sku": "LUMBUT24RL",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -164,7 +164,7 @@
             "reorder_point": "500",
             "reorder_qty": "2000",
             "sku": "LUMB14RLN3+",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -177,7 +177,7 @@
             "reorder_point": "300",
             "reorder_qty": "600",
             "sku": "LUM-2492-STUD",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -190,7 +190,7 @@
             "reorder_point": "200",
             "reorder_qty": "600",
             "sku": "LUM-166-WRC",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -203,7 +203,7 @@
             "reorder_point": "300",
             "reorder_qty": "600",
             "sku": "LUM-2492-STUD",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -216,7 +216,7 @@
             "reorder_point": "200",
             "reorder_qty": "500",
             "sku": "LUM-248-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -229,7 +229,7 @@
             "reorder_point": "200",
             "reorder_qty": "500",
             "sku": "HANGER-26",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -242,7 +242,7 @@
             "reorder_point": "150",
             "reorder_qty": "400",
             "sku": "HANGER-28FM",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -250,12 +250,12 @@
             "branch_name": "West Kelowna Satellite",
             "current_stock": "79",
             "deficit": "121",
-            "description": "Hurricane Tie H1",
+            "description": "Hurricane Tie Light",
             "product_id": "<id-13>",
             "reorder_point": "200",
             "reorder_qty": "500",
-            "sku": "TIE-H1",
-            "vendor": "Okanagan Hardware Distribution",
+            "sku": "TIE-LT",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -263,12 +263,12 @@
             "branch_name": "Lake Country Outpost",
             "current_stock": "83",
             "deficit": "117",
-            "description": "Hurricane Tie H1",
+            "description": "Hurricane Tie Light",
             "product_id": "<id-13>",
             "reorder_point": "200",
             "reorder_qty": "500",
-            "sku": "TIE-H1",
-            "vendor": "Okanagan Hardware Distribution",
+            "sku": "TIE-LT",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -281,7 +281,7 @@
             "reorder_point": "150",
             "reorder_qty": "400",
             "sku": "HANGER-28",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -294,7 +294,7 @@
             "reorder_point": "200",
             "reorder_qty": "600",
             "sku": "LUM-166-WRC",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -307,7 +307,7 @@
             "reorder_point": "150",
             "reorder_qty": "400",
             "sku": "LUM-2410-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -320,7 +320,7 @@
             "reorder_point": "120",
             "reorder_qty": "300",
             "sku": "LUM-2610-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -333,7 +333,7 @@
             "reorder_point": "200",
             "reorder_qty": "500",
             "sku": "LUM-248-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -346,7 +346,7 @@
             "reorder_point": "100",
             "reorder_qty": "250",
             "sku": "LUM-2612-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -359,7 +359,7 @@
             "reorder_point": "100",
             "reorder_qty": "250",
             "sku": "OSB-34-TG",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -372,7 +372,7 @@
             "reorder_point": "100",
             "reorder_qty": "300",
             "sku": "HANGER-210",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -385,7 +385,7 @@
             "reorder_point": "150",
             "reorder_qty": "400",
             "sku": "HANGER-28",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -398,7 +398,7 @@
             "reorder_point": "100",
             "reorder_qty": "250",
             "sku": "LUM-2612-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -411,7 +411,7 @@
             "reorder_point": "80",
             "reorder_qty": "200",
             "sku": "LUM-2616-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -424,7 +424,7 @@
             "reorder_point": "80",
             "reorder_qty": "200",
             "sku": "LUM-2810-NO2",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -437,7 +437,7 @@
             "reorder_point": "100",
             "reorder_qty": "200",
             "sku": "LUM-448-PT",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -450,7 +450,7 @@
             "reorder_point": "150",
             "reorder_qty": "400",
             "sku": "LUM-2410-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -463,7 +463,7 @@
             "reorder_point": "100",
             "reorder_qty": "250",
             "sku": "DW-12-REG",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -489,7 +489,7 @@
             "reorder_point": "150",
             "reorder_qty": "400",
             "sku": "HANGER-28FM",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -502,7 +502,7 @@
             "reorder_point": "120",
             "reorder_qty": "300",
             "sku": "OSB-12",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -515,7 +515,7 @@
             "reorder_point": "100",
             "reorder_qty": "300",
             "sku": "LUM-2412-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -528,7 +528,7 @@
             "reorder_point": "80",
             "reorder_qty": "200",
             "sku": "PLY-34-CDX",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -541,7 +541,7 @@
             "reorder_point": "80",
             "reorder_qty": "200",
             "sku": "PLY-12-CDX",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -567,7 +567,7 @@
             "reorder_point": "80",
             "reorder_qty": "150",
             "sku": "LUM-4410-PT",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -580,7 +580,7 @@
             "reorder_point": "40",
             "reorder_qty": "100",
             "sku": "CORNSHTGR49",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -593,7 +593,7 @@
             "reorder_point": "500",
             "reorder_qty": "2000",
             "sku": "LUMBUT24RL",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -606,7 +606,7 @@
             "reorder_point": "80",
             "reorder_qty": "150",
             "sku": "LUM-4410-PT",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -645,7 +645,7 @@
             "reorder_point": "100",
             "reorder_qty": "200",
             "sku": "LUM-448-PT",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -658,7 +658,7 @@
             "reorder_point": "120",
             "reorder_qty": "300",
             "sku": "LUM-2610-PREM",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -671,7 +671,7 @@
             "reorder_point": "20",
             "reorder_qty": "50",
             "sku": "CORN2006",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -697,7 +697,7 @@
             "reorder_point": "20",
             "reorder_qty": "50",
             "sku": "CORNSFT2408V",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -710,7 +710,7 @@
             "reorder_point": "200",
             "reorder_qty": "500",
             "sku": "HANGER-26",
-            "vendor": "Okanagan Hardware Distribution",
+            "vendor": "Fernbank Hardware Distribution",
             "vendor_id": null
           },
           {
@@ -736,7 +736,7 @@
             "reorder_point": "30",
             "reorder_qty": "80",
             "sku": "LUM-21216-NO2",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           },
           {
@@ -749,7 +749,7 @@
             "reorder_point": "120",
             "reorder_qty": "300",
             "sku": "OSB-12",
-            "vendor": "Gable Building Supply",
+            "vendor": "Larkmere Building Products",
             "vendor_id": null
           }
         ],
