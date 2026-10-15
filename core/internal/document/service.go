@@ -23,6 +23,7 @@ import (
 	"github.com/johnfercher/maroto/v2"
 	mimage "github.com/johnfercher/maroto/v2/pkg/components/image"
 	"github.com/johnfercher/maroto/v2/pkg/components/page"
+	"github.com/johnfercher/maroto/v2/pkg/components/row"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
 	"github.com/johnfercher/maroto/v2/pkg/config"
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
@@ -250,8 +251,68 @@ func (b *branding) remitTo() string {
 	return strings.TrimSpace(b.dealer.RemitTo)
 }
 
-func newDoc() core.Maroto {
-	return maroto.New(config.NewBuilder().WithPageNumber().Build())
+// collector holds a document's rows until finish, so the last group of them
+// (the totals, then the foot) can be placed on one page: a rule maroto has no
+// call for. Rows have the fixed heights they were added with.
+type collector struct {
+	core.Maroto
+	rows    []core.Row
+	heights []float64
+	// keepFrom is the index of the first row of the closing group; -1 until
+	// a document marks it, when the closing group is the last row and the foot.
+	keepFrom int
+	// footFrom is the index of the foot's first row; -1 until it is written.
+	footFrom int
+}
+
+func newDoc() *collector {
+	return &collector{Maroto: maroto.New(config.NewBuilder().WithPageNumber().Build()), keepFrom: -1, footFrom: -1}
+}
+
+// AddRow buffers the row until finish.
+func (c *collector) AddRow(rowHeight float64, cols ...core.Col) core.Row {
+	r := row.New(rowHeight).Add(cols...)
+	c.rows = append(c.rows, r)
+	c.heights = append(c.heights, rowHeight)
+	return r
+}
+
+// keepTogether marks the rows added from here on as the closing group: they
+// and the foot go on one page.
+func (c *collector) keepTogether() { c.keepFrom = len(c.rows) }
+
+// maxGroupHeight is the tallest closing group moved to a page of its own; a
+// taller one (a page's worth of rows) is written as it comes.
+const maxGroupHeight = 200.0
+
+// groupSlack is the room kept beyond a group's own height when asking whether
+// it fits, for the rounding in maroto's own running height.
+const groupSlack = 2.0
+
+// flush writes every row, moving the closing group to a new page whole when
+// it does not fit on the current one. With no mark the group is the last row
+// and what follows it, so the foot never stands alone.
+func (c *collector) flush() {
+	start := c.keepFrom
+	if start < 0 || start > len(c.rows) {
+		// the last row before the foot, or the last row when there is none
+		start = len(c.rows) - 1
+		if c.footFrom > 0 {
+			start = c.footFrom - 1
+		}
+	}
+	if start < 0 {
+		return
+	}
+	c.Maroto.AddRows(c.rows[:start]...)
+	tail := 0.0
+	for _, h := range c.heights[start:] {
+		tail += h
+	}
+	if tail <= maxGroupHeight && !c.Maroto.FitlnCurrentPage(tail+groupSlack) {
+		c.Maroto.AddPages(page.New())
+	}
+	c.Maroto.AddRows(c.rows[start:]...)
 }
 
 // rowHeight is the height of one line of a block.
@@ -300,19 +361,8 @@ func (b *branding) header(m core.Maroto, title string, titleSize float64) {
 
 // foot closes every form the same way: the dealer's legal name once, labelled,
 // and the remit to beside it on the forms that ask for money.
-func (b *branding) foot(m core.Maroto, withRemit bool) {
-	// The legal name and the remit to are one block: when it does not fit on
-	// the page it moves whole to the next, so neither sits alone.
-	height := 0.0
-	if b.legalName() != "" {
-		height += 10
-	}
-	if withRemit && b.remitTo() != "" {
-		height += 10 + rowHeight*float64(len(joinLines(b.remitTo())))
-	}
-	if height > 0 && !m.FitlnCurrentPage(height) {
-		m.AddPages(page.New())
-	}
+func (b *branding) foot(m *collector, withRemit bool) {
+	m.footFrom = len(m.rows)
 	if legal := b.legalName(); legal != "" {
 		m.AddRow(10, text.NewCol(12, "Legal name: "+legal, props.Text{Size: 9, Top: 4}))
 	}
@@ -333,7 +383,8 @@ func (b *branding) remitRow(m core.Maroto) {
 	}
 }
 
-func finish(m core.Maroto) ([]byte, error) {
+func finish(m *collector) ([]byte, error) {
+	m.flush()
 	doc, err := m.Generate()
 	if err != nil {
 		return nil, err
@@ -393,6 +444,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 	// Subtotal and tax are shown separately, or the line extensions visibly do
 	// not add up to TOTAL DUE; the tax as its own line is also a statutory
 	// requirement in the GST/HST jurisdictions this product targets.
+	m.keepTogether()
 	m.AddRow(10,
 		text.NewCol(12, "SUBTOTAL: "+b.style.Money(inv.SubtotalCents), props.Text{Top: 5, Align: align.Right, Size: 10}),
 	)
