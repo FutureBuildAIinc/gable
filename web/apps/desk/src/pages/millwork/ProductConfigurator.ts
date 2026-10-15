@@ -9,6 +9,7 @@ import { ConfiguratorService } from '../../services/ConfiguratorService';
 import { icon } from '../../lib/icons.ts';
 import { ChevronRight, ChevronLeft, Check, AlertTriangle, Package, TreePine, Gauge, Ruler, Eye, Sparkles, X } from 'lucide';
 import { ToastService } from '../../lib/toast-service.ts';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 const STEP_ICONS = [Package, TreePine, Gauge, Ruler, Eye];
 
@@ -165,7 +166,7 @@ export class ProductConfigurator extends LitElement {
             @click=${() => opt.allowed && this._selectOption(key, opt.value)}
             ?disabled=${!opt.allowed}
             class="relative p-6 rounded-xl border-2 text-left transition-all duration-300 group ${this._selections[key] === opt.value
-              ? 'border-[#00FFA3] bg-[#00FFA3]/10 shadow-[0_0_30px_rgba(0,255,163,0.15)]'
+              ? 'border-gable-green bg-gable-green/10 shadow-glow-30-15'
               : opt.allowed
                 ? 'border-white/10 hover:border-white/30 hover:bg-white/5'
                 : 'border-white/5 opacity-40 cursor-not-allowed'
@@ -173,7 +174,7 @@ export class ProductConfigurator extends LitElement {
           >
             ${this._selections[key] === opt.value ? html`
               <div class="absolute top-3 right-3">
-                ${icon(Check, 16, 'text-[#00FFA3]')}
+                ${icon(Check, 16, 'text-gable-green')}
               </div>
             ` : nothing}
             <div class="font-semibold text-lg">${opt.value}</div>
@@ -200,7 +201,7 @@ export class ProductConfigurator extends LitElement {
                 @click=${() => opt.allowed && this._selectOption('Grade', opt.value)}
                 ?disabled=${!opt.allowed}
                 class="p-4 rounded-xl border-2 text-left transition-all duration-300 ${this._selections.Grade === opt.value
-                  ? 'border-[#00FFA3] bg-[#00FFA3]/10 shadow-[0_0_20px_rgba(0,255,163,0.1)]'
+                  ? 'border-gable-green bg-gable-green/10 shadow-glow-20-10'
                   : opt.allowed
                     ? 'border-white/10 hover:border-white/30'
                     : 'border-white/5 opacity-40 cursor-not-allowed'
@@ -221,7 +222,7 @@ export class ProductConfigurator extends LitElement {
             <button
               @click=${() => this._selectOption('Treatment', 'None')}
               class="p-4 rounded-xl border-2 text-left transition-all ${this._selections.Treatment === 'None'
-                ? 'border-[#00FFA3] bg-[#00FFA3]/10'
+                ? 'border-gable-green bg-gable-green/10'
                 : 'border-white/10 hover:border-white/30'
               }"
             >
@@ -233,7 +234,7 @@ export class ProductConfigurator extends LitElement {
                 @click=${() => opt.allowed && this._selectOption('Treatment', opt.value)}
                 ?disabled=${!opt.allowed}
                 class="p-4 rounded-xl border-2 text-left transition-all ${this._selections.Treatment === opt.value
-                  ? 'border-[#00FFA3] bg-[#00FFA3]/10'
+                  ? 'border-gable-green bg-gable-green/10'
                   : opt.allowed
                     ? 'border-white/10 hover:border-white/30'
                     : 'border-white/5 opacity-40 cursor-not-allowed'
@@ -263,7 +264,7 @@ export class ProductConfigurator extends LitElement {
               <button
                 @click=${() => { this._dimensionSize = dim; }}
                 class="p-4 rounded-xl border-2 text-center font-mono text-lg transition-all ${this._dimensionSize === dim
-                  ? 'border-[#00FFA3] bg-[#00FFA3]/10 text-[#00FFA3] shadow-[0_0_20px_rgba(0,255,163,0.1)]'
+                  ? 'border-gable-green bg-gable-green/10 text-gable-green shadow-glow-20-10'
                   : 'border-white/10 hover:border-white/30 text-gray-300'
                 }"
               >
@@ -280,7 +281,7 @@ export class ProductConfigurator extends LitElement {
               <button
                 @click=${() => { this._dimensionLength = len; }}
                 class="p-4 rounded-xl border-2 text-center font-mono text-lg transition-all ${this._dimensionLength === len
-                  ? 'border-[#00FFA3] bg-[#00FFA3]/10 text-[#00FFA3]'
+                  ? 'border-gable-green bg-gable-green/10 text-gable-green'
                   : 'border-white/10 hover:border-white/30 text-gray-300'
                 }"
               >
@@ -291,9 +292,9 @@ export class ProductConfigurator extends LitElement {
         </div>
 
         ${this._dimensionSize && this._dimensionLength ? html`
-          <div class="bg-[#161821] border border-white/10 rounded-xl p-4 text-center">
+          <div class="bg-slate-steel border border-white/10 rounded-xl p-4 text-center">
             <span class="text-gray-400">Selected: </span>
-            <span class="text-[#00FFA3] font-mono text-xl font-bold">
+            <span class="text-gable-green font-mono text-xl font-bold">
               ${this._dimensionSize} \u00d7 ${this._dimensionLength}'
             </span>
           </div>
@@ -306,7 +307,7 @@ export class ProductConfigurator extends LitElement {
     return html`
       <div class="space-y-6">
         <!-- Configuration Summary -->
-        <div class="bg-[#161821] border border-white/10 rounded-xl p-6">
+        <div class="bg-slate-steel border border-white/10 rounded-xl p-6">
           <h4 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Configuration Summary</h4>
           <div class="space-y-3">
             ${Object.entries(this._selections).map(([key, value]) =>
@@ -355,7 +356,7 @@ export class ProductConfigurator extends LitElement {
         ${this._validation?.valid && !this._skuResult ? html`
           <button
             @click=${() => this._handleBuildSKU()}
-            class="w-full bg-gradient-to-r from-[#00FFA3] to-emerald-400 text-black font-bold py-4 rounded-xl hover:shadow-[0_0_40px_rgba(0,255,163,0.3)] transition-all duration-300 flex items-center justify-center gap-2"
+            class="w-full bg-gradient-to-r from-gable-green to-emerald-400 text-black font-bold py-4 rounded-xl hover:shadow-glow-40-30 transition-all duration-300 flex items-center justify-center gap-2"
           >
             ${icon(Sparkles, 20)}
             Generate Non-Stock SKU
@@ -364,9 +365,9 @@ export class ProductConfigurator extends LitElement {
 
         <!-- SKU Result -->
         ${this._skuResult ? html`
-          <div class="bg-gradient-to-br from-[#00FFA3]/10 to-emerald-500/5 border-2 border-[#00FFA3]/40 rounded-xl p-6">
+          <div class="bg-gradient-to-br from-gable-green/10 to-emerald-500/5 border-2 border-gable-green/40 rounded-xl p-6">
             <div class="text-sm text-gray-400 uppercase tracking-wider mb-2">Generated SKU</div>
-            <div class="text-2xl font-mono font-bold text-[#00FFA3] mb-3 tracking-wide">
+            <div class="text-2xl font-mono font-bold text-gable-green mb-3 tracking-wide">
               ${this._skuResult.sku}
             </div>
             <div class="text-sm text-gray-300">${this._skuResult.description}</div>
@@ -395,7 +396,7 @@ export class ProductConfigurator extends LitElement {
     if (this._loading) {
       return html`
         <div class="flex items-center justify-center h-64">
-          <div class="w-8 h-8 border-2 border-[#00FFA3] border-t-transparent rounded-full animate-spin"></div>
+          <div class="w-8 h-8 border-2 border-gable-green border-t-transparent rounded-full animate-spin"></div>
         </div>
       `;
     }
@@ -405,7 +406,7 @@ export class ProductConfigurator extends LitElement {
         <div class="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-center">
           ${icon(AlertTriangle, 24, 'text-red-400 mx-auto mb-2')}
           <p class="text-red-300 text-sm">${this._error}</p>
-          <button @click=${() => this._fetchOptions()} class="mt-3 text-xs text-[#00FFA3] hover:text-white">
+          <button @click=${() => this._fetchOptions()} class="mt-3 text-xs text-gable-green hover:text-white">
             Retry
           </button>
         </div>
@@ -436,7 +437,7 @@ export class ProductConfigurator extends LitElement {
         <div class="flex gap-8">
           <!-- Stepper Sidebar -->
           <div class="w-72 shrink-0">
-            <div class="bg-[#161821] border border-white/10 rounded-xl p-6 sticky top-24">
+            <div class="bg-slate-steel border border-white/10 rounded-xl p-6 sticky top-24">
               <div class="space-y-1">
                 ${CONFIGURATOR_STEPS.map((s, index) => {
                   const stepIcon = STEP_ICONS[index];
@@ -449,14 +450,14 @@ export class ProductConfigurator extends LitElement {
                       @click=${() => index < this._currentStep && (this._currentStep = index)}
                       ?disabled=${isDisabled}
                       class="w-full flex items-center gap-3 p-3 rounded-lg transition-all text-left ${isActive
-                        ? 'bg-[#00FFA3]/10 text-[#00FFA3]'
+                        ? 'bg-gable-green/10 text-gable-green'
                         : isComplete
                           ? 'text-emerald-400 hover:bg-white/5 cursor-pointer'
                           : 'text-gray-600 cursor-not-allowed'
                       }"
                     >
                       <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0 border-2 transition-all ${isActive
-                        ? 'border-[#00FFA3] bg-[#00FFA3]/20'
+                        ? 'border-gable-green bg-gable-green/20'
                         : isComplete
                           ? 'border-emerald-500 bg-emerald-500/20'
                           : 'border-gray-700 bg-gray-800'
@@ -478,11 +479,11 @@ export class ProductConfigurator extends LitElement {
               ${(this._selections.ProductType || this._selections.Species) ? html`
                 <div class="mt-6 pt-6 border-t border-white/10">
                   <div class="text-xs text-gray-500 uppercase tracking-wider mb-3">Live Preview</div>
-                  <div class="bg-[#0A0B10] rounded-lg p-4 border border-white/5">
+                  <div class="bg-deep-space rounded-lg p-4 border border-white/5">
                     <div class="w-full aspect-square relative flex items-center justify-center">
                       <div
                         class="border-2 rounded-sm transition-all duration-500"
-                        style="width: 80%; height: 60%; border-color: ${this._selections.Treatment === 'Treatable' ? '#22c55e' : '#38BDF8'}; background-color: ${getSpeciesColor(this._selections.Species)}"
+                        style="width: 80%; height: 60%; border-color: ${this._selections.Treatment === 'Treatable' ? cssVarColor('green-500') : cssVarColor('blueprint-blue')}; background-color: ${getSpeciesColor(this._selections.Species)}"
                       >
                         <div class="absolute inset-0 flex flex-col items-center justify-center text-center p-2">
                           <div class="text-xs text-white/40 font-mono">
@@ -492,7 +493,7 @@ export class ProductConfigurator extends LitElement {
                             ${this._selections.Species || '\u2014'}
                           </div>
                           ${this._selections.Dimensions ? html`
-                            <div class="text-xs text-[#00FFA3] font-mono mt-1">
+                            <div class="text-xs text-gable-green font-mono mt-1">
                               ${this._selections.Dimensions}
                             </div>
                           ` : nothing}
@@ -507,10 +508,10 @@ export class ProductConfigurator extends LitElement {
 
           <!-- Main Content -->
           <div class="flex-1 min-w-0">
-            <div class="bg-[#161821] border border-white/10 rounded-xl p-8">
+            <div class="bg-slate-steel border border-white/10 rounded-xl p-8">
               <!-- Step Header -->
               <div class="mb-8">
-                <div class="text-xs text-[#00FFA3] font-semibold uppercase tracking-wider mb-1">
+                <div class="text-xs text-gable-green font-semibold uppercase tracking-wider mb-1">
                   Step ${this._currentStep + 1} of ${CONFIGURATOR_STEPS.length}
                 </div>
                 <h2 class="text-2xl font-bold text-white">${step.label}</h2>
@@ -541,7 +542,7 @@ export class ProductConfigurator extends LitElement {
                     @click=${() => this._handleNext()}
                     ?disabled=${!this._canProceed()}
                     class="flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all ${this._canProceed()
-                      ? 'bg-[#00FFA3] text-black hover:shadow-[0_0_20px_rgba(0,255,163,0.3)]'
+                      ? 'bg-gable-green text-black hover:shadow-glow-20-30'
                       : 'bg-gray-800 text-gray-600 cursor-not-allowed'
                     }"
                   >

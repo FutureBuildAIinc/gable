@@ -322,7 +322,7 @@ export class GableAppShell extends LitElement {
     return html`
       <div class="min-h-screen bg-deep-space text-foreground flex flex-col font-sans selection:bg-gable-green/30">
         <!-- Skip Navigation -->
-        <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:bg-[#00FFA3] focus:text-[#0A0B10] focus:rounded">
+        <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:top-4 focus:left-4 focus:px-4 focus:py-2 focus:bg-gable-green focus:text-deep-space focus:rounded">
           Skip to main content
         </a>
 
@@ -350,6 +350,7 @@ export class GableAppShell extends LitElement {
             <div class="text-xs text-zinc-500 font-medium hidden lg:block bg-white/5 px-2 py-1 rounded border border-white/5">
               ⌘K
             </div>
+            <gable-theme-toggle></gable-theme-toggle>
             ${this._renderUser()}
           </div>
         </header>

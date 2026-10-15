@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gablelbm/gable/internal/testutil"
 	"net/http"
 	"os"
 	"strings"
@@ -50,6 +51,9 @@ type walledTwins struct {
 // seedWalledTwins seeds the twin rows with their cleanup.
 func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 	t.Helper()
+	// the twins' documents are dated by the default branch's own day, which
+	// the dashboard reads; the day is held still for the test's life
+	testutil.LockBranchDay(t)
 	ctx := context.Background()
 	w := &walledTwins{
 		ordA: uuid.New(), ordB: uuid.New(), invA: uuid.New(), invB: uuid.New(),
@@ -84,13 +88,13 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 			t.Fatalf("seed order: %v", err)
 		}
 		if _, err := f.db.Pool.Exec(ctx,
-			`INSERT INTO invoices (id, order_id, customer_id, status, total_amount, branch_id)
-			 VALUES ($1, $2, $3, 'UNPAID', 10, $4)`, o.inv, o.id, o.cust, o.branch); err != nil {
+			`INSERT INTO invoices (id, order_id, customer_id, status, total_amount, branch_id, invoice_date, due_date)
+			 VALUES ($1, $2, $3, 'UNPAID', 10, $4, `+testutil.BranchDaySQL+`, `+testutil.BranchDaySQL+` + 30)`, o.inv, o.id, o.cust, o.branch); err != nil {
 			t.Fatalf("seed invoice: %v", err)
 		}
 		if _, err := f.db.Pool.Exec(ctx,
 			`INSERT INTO payments (id, customer_id, branch_id, currency, amount, method, status, received_on, amount_unapplied)
-			 VALUES ($1, $2, $3, 'USD', 5, 'CASH', 'POSTED', CURRENT_DATE, 5)`, o.pay, o.cust, o.branch); err != nil {
+			 VALUES ($1, $2, $3, 'USD', 5, 'CASH', 'POSTED', `+testutil.BranchDaySQL+`, 5)`, o.pay, o.cust, o.branch); err != nil {
 			t.Fatalf("seed payment: %v", err)
 		}
 		if _, err := f.db.Pool.Exec(ctx,
@@ -115,14 +119,14 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 		if _, err := f.db.Pool.Exec(ctx,
 			`INSERT INTO credit_memos (id, invoice_id, customer_id, branch_id, currency, reason_code, reason, amount, status, number,
 				 memo_date, subtotal, tax_amount, total_amount, tax_rate)
-			 VALUES ($1, $2, $3, $4, 'USD', 'OTHER', 'pin twin', 1, 'OPEN', credit_memo_next_number(), CURRENT_DATE, -1, 0, -1, 0)`,
+			 VALUES ($1, $2, $3, $4, 'USD', 'OTHER', 'pin twin', 1, 'OPEN', credit_memo_next_number(), `+testutil.BranchDaySQL+`, -1, 0, -1, 0)`,
 			m.id, m.inv, m.cust, m.branch); err != nil {
 			t.Fatalf("seed credit memo: %v", err)
 		}
 	}
 	for _, r := range []struct{ id uuid.UUID }{{w.routeA}, {w.routeB}} {
 		if _, err := f.db.Pool.Exec(ctx,
-			`INSERT INTO delivery_routes (id, status, scheduled_date) VALUES ($1, 'DRAFT', CURRENT_DATE)`, r.id); err != nil {
+			`INSERT INTO delivery_routes (id, status, scheduled_date) VALUES ($1, 'DRAFT', `+testutil.BranchDaySQL+`)`, r.id); err != nil {
 			t.Fatalf("seed route: %v", err)
 		}
 	}
@@ -183,7 +187,7 @@ func (f *keyPinFixture) seedWalledTwins(t *testing.T) *walledTwins {
 	} {
 		if _, err := f.db.Pool.Exec(ctx,
 			`INSERT INTO ar_applications (id, customer_id, currency, kind, payment_id, invoice_id, amount, applied_on, act_id)
-			 VALUES ($1, $2, 'USD', 'PAYMENT', $3, $4, 1, CURRENT_DATE, $1)`, a.id, a.cust, a.pay, a.inv); err != nil {
+			 VALUES ($1, $2, 'USD', 'PAYMENT', $3, $4, 1, `+testutil.BranchDaySQL+`, $1)`, a.id, a.cust, a.pay, a.inv); err != nil {
 			t.Fatalf("seed application: %v", err)
 		}
 	}

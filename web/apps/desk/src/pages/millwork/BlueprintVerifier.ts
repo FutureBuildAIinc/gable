@@ -76,7 +76,7 @@ export class BlueprintVerifier extends LitElement {
           <!-- Left: Input Panel -->
           <div class="space-y-6">
             <!-- Blueprint Text Input -->
-            <div class="bg-[#161821] border border-white/10 rounded-xl p-6">
+            <div class="bg-slate-steel border border-white/10 rounded-xl p-6">
               <div class="flex items-center justify-between mb-4">
                 <h3 class="font-semibold text-white flex items-center gap-2">
                   ${icon(FileText, 18, 'text-blue-400')}
@@ -84,7 +84,7 @@ export class BlueprintVerifier extends LitElement {
                 </h3>
                 <button
                   @click=${() => this._loadSample()}
-                  class="text-xs text-[#00FFA3] hover:text-[#00FFA3]/80 font-medium transition-colors"
+                  class="text-xs text-gable-green hover:text-gable-green/80 font-medium transition-colors"
                 >
                   Load Sample \u2192
                 </button>
@@ -96,7 +96,7 @@ export class BlueprintVerifier extends LitElement {
                 @dragleave=${() => { this._dragOver = false; }}
                 @drop=${(e: DragEvent) => { e.preventDefault(); this._dragOver = false; }}
                 class="border-2 border-dashed rounded-xl p-4 mb-4 text-center transition-all ${this._dragOver
-                  ? 'border-[#00FFA3] bg-[#00FFA3]/5'
+                  ? 'border-gable-green bg-gable-green/5'
                   : 'border-white/10 hover:border-white/20'
                 }"
               >
@@ -114,12 +114,12 @@ export class BlueprintVerifier extends LitElement {
                 @input=${(e: Event) => { this._blueprintText = (e.target as HTMLTextAreaElement).value; }}
                 placeholder="Paste blueprint specifications here..."
                 rows="10"
-                class="w-full bg-[#0A0B10] border border-white/10 rounded-lg p-4 text-sm font-mono text-gray-300 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 outline-none resize-none"
+                class="w-full bg-deep-space border border-white/10 rounded-lg p-4 text-sm font-mono text-gray-300 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/20 outline-none resize-none"
               ></textarea>
             </div>
 
             <!-- Current Config Selections -->
-            <div class="bg-[#161821] border border-white/10 rounded-xl p-6">
+            <div class="bg-slate-steel border border-white/10 rounded-xl p-6">
               <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
                 ${icon(Zap, 18, 'text-amber-400')}
                 Configurator Selections (to compare against)
@@ -131,7 +131,7 @@ export class BlueprintVerifier extends LitElement {
                     <input
                       .value=${value}
                       @input=${(e: Event) => { this._configSelections = { ...this._configSelections, [key]: (e.target as HTMLInputElement).value }; }}
-                      class="w-full bg-[#0A0B10] border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-[#00FFA3]/50 outline-none"
+                      class="w-full bg-deep-space border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-gable-green/50 outline-none"
                     />
                   </div>
                 `)}
@@ -143,12 +143,12 @@ export class BlueprintVerifier extends LitElement {
               @click=${() => this._handleScan()}
               ?disabled=${!this._blueprintText.trim() || this._scanning}
               class="w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all ${this._blueprintText.trim() && !this._scanning
-                ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white hover:shadow-[0_0_30px_rgba(59,130,246,0.3)]'
+                ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-plate hover:shadow-[0_0_30px_rgb(var(--gb-blue-500)/0.3)]'
                 : 'bg-gray-800 text-gray-600 cursor-not-allowed'
               }"
             >
               ${this._scanning ? html`
-                <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <div class="w-5 h-5 border-2 border-plate border-t-transparent rounded-full animate-spin"></div>
                 Analyzing Blueprint...
               ` : html`
                 ${icon(Eye, 20)}
@@ -192,7 +192,7 @@ export class BlueprintVerifier extends LitElement {
         </div>
 
         <!-- Extracted Dimensions -->
-        <div class="bg-[#161821] border border-white/10 rounded-xl p-6">
+        <div class="bg-slate-steel border border-white/10 rounded-xl p-6">
           <h3 class="font-semibold text-white mb-4">Extracted Dimensions</h3>
           <div class="space-y-2">
             ${Object.entries(result.extracted_dimensions).map(([key, value]) => html`
@@ -210,7 +210,7 @@ export class BlueprintVerifier extends LitElement {
 
         <!-- Mismatches -->
         ${result.mismatches.length > 0 ? html`
-          <div class="bg-[#161821] border border-white/10 rounded-xl p-6">
+          <div class="bg-slate-steel border border-white/10 rounded-xl p-6">
             <h3 class="font-semibold text-white mb-4 flex items-center gap-2">
               ${icon(AlertTriangle, 18, 'text-amber-400')}
               Mismatches (${result.mismatches.length})
@@ -232,11 +232,11 @@ export class BlueprintVerifier extends LitElement {
                   </div>
                   <div class="text-sm text-gray-300 mb-3">${m.message}</div>
                   <div class="grid grid-cols-2 gap-3 text-sm">
-                    <div class="bg-[#0A0B10] rounded p-2">
+                    <div class="bg-deep-space rounded p-2">
                       <div class="text-xs text-gray-500 mb-1">Blueprint</div>
                       <div class="font-mono text-blue-400">${m.blueprint_value}</div>
                     </div>
-                    <div class="bg-[#0A0B10] rounded p-2">
+                    <div class="bg-deep-space rounded p-2">
                       <div class="text-xs text-gray-500 mb-1">Configurator</div>
                       <div class="font-mono text-amber-400">${m.config_value}</div>
                     </div>
@@ -252,7 +252,7 @@ export class BlueprintVerifier extends LitElement {
 
   private _renderEmptyState() {
     return html`
-      <div class="bg-[#161821] border border-white/10 rounded-xl p-12 text-center">
+      <div class="bg-slate-steel border border-white/10 rounded-xl p-12 text-center">
         <div class="w-16 h-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center mx-auto mb-4">
           ${icon(Eye, 32, 'text-blue-400/50')}
         </div>

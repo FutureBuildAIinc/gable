@@ -10,22 +10,22 @@ import { makeStopIcon } from './RouteMap'
 // colour regardless of its real status. The icon's HTML is the contract.
 describe('makeStopIcon', () => {
   it.each([
-    ['pending', '#00FFA3'],
-    ['out_for_delivery', '#00FFA3'],
-    ['delivered', '#10b981'],
-    ['failed', '#ef4444'],
-    ['partial', '#ef4444'],
+    ['pending', 'rgb(var(--gb-gable-green))'],
+    ['out_for_delivery', 'rgb(var(--gb-gable-green))'],
+    ['delivered', 'rgb(var(--gb-emerald-500))'],
+    ['failed', 'rgb(var(--gb-red-500))'],
+    ['partial', 'rgb(var(--gb-red-500))'],
   ])('paints %s with the %s colour', (status, expected) => {
     const icon = makeStopIcon(0, status)
     const html = icon.options.html as string
     expect(html).toContain(`background:${expected}`)
   })
 
-  it('renders the open stops in dark text and the terminal stops in white', () => {
+  it('renders the open stops in the label colour on green and the terminal stops in plate white', () => {
     const open = makeStopIcon(0, 'pending').options.html as string
     const terminal = makeStopIcon(0, 'delivered').options.html as string
-    expect(open).toContain('color:#000')
-    expect(terminal).toContain('color:#fff')
+    expect(open).toContain('color:rgb(var(--gb-black))')
+    expect(terminal).toContain('color:rgb(var(--gb-plate))')
   })
 
   it('does not match the legacy uppercase storage spelling', () => {
@@ -33,6 +33,6 @@ describe('makeStopIcon', () => {
     // proves the function is not silently treating storage values as wire
     // values (the live failure).
     const upper = makeStopIcon(0, 'DELIVERED').options.html as string
-    expect(upper).toContain('background:#00FFA3')
+    expect(upper).toContain('background:rgb(var(--gb-gable-green))')
   })
 })

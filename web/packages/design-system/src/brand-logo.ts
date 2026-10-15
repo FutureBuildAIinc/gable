@@ -27,10 +27,10 @@ export class GableBrandLogo extends LitElement {
         <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg"
              class="${cn(this._sizeClass, 'w-auto', this.className)}">
           <path d="M4 36 L32 8 L60 36" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M32 16 V28" stroke="#00FFA3" stroke-width="4" stroke-linecap="round"/>
-          <path d="M22 28 C22 28 22 46 32 46 C42 46 42 28 42 28" stroke="#00FFA3" stroke-width="4" stroke-linecap="round" fill="none"/>
-          <rect x="28" y="46" width="8" height="6" rx="1" fill="#00FFA3"/>
-          <circle cx="32" cy="32" r="16" fill="#00FFA3" fill-opacity="0.1"/>
+          <path d="M32 16 V28" class="stroke-gable-green" stroke-width="4" stroke-linecap="round"/>
+          <path d="M22 28 C22 28 22 46 32 46 C42 46 42 28 42 28" class="stroke-gable-green" stroke-width="4" stroke-linecap="round" fill="none"/>
+          <rect x="28" y="46" width="8" height="6" rx="1" class="fill-gable-green"/>
+          <circle cx="32" cy="32" r="16" class="fill-gable-green" fill-opacity="0.1"/>
         </svg>
       `;
     }

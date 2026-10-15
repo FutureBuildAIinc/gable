@@ -81,7 +81,7 @@ export class GableMatrixGrid extends LitElement {
             ${flatCats.map(({ category, depth }) => html`
               <tr class="group hover:bg-white/[0.02] transition-colors">
                 <td
-                  class="sticky left-0 z-10 bg-slate-steel group-hover:bg-[#1a1c26] px-4 py-2.5 border-r border-white/5 transition-colors"
+                  class="sticky left-0 z-10 bg-slate-steel group-hover:bg-well-hover px-4 py-2.5 border-r border-white/5 transition-colors"
                   style="padding-left: ${16 + depth * 20}px"
                 >
                   <span class=${cn('text-sm', depth === 0 ? 'text-white font-medium' : 'text-slate-300')}>

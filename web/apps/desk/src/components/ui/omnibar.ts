@@ -83,8 +83,8 @@ export class GableOmnibar extends LitElement {
 
     return html`
       <div class="fixed inset-0 z-50" style="pointer-events: auto;">
-        <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" @click=${() => { this._open = false; }}></div>
-        <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[640px] max-w-[calc(100%-2rem)] bg-[#161821] border border-white/10 rounded-lg shadow-2xl overflow-hidden p-2 z-10">
+        <div class="fixed inset-0 bg-backdrop/50 backdrop-blur-sm" @click=${() => { this._open = false; }}></div>
+        <div class="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[640px] max-w-[calc(100%-2rem)] bg-slate-steel border border-white/10 rounded-lg shadow-2xl overflow-hidden p-2 z-10">
           <!-- Input -->
           <div class="flex items-center px-4 border-b border-white/5">
             <input
