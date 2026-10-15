@@ -948,7 +948,7 @@ func Run() {
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
 	if strings.EqualFold(cfg.AuthMode, "dev") {
-		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting Tarnwick demo customer claims")
+		logger.Warn("AUTH_MODE=dev: Portal auth bypassed - injecting Tarnwick demo customer claims")
 		// Look up the Tarnwick Construction demo account; fall back to the
 		// first customer in the table so a non-Kelowna fork can still boot.
 		var demoCustomerID uuid.UUID

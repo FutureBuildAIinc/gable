@@ -648,7 +648,7 @@ func Run() {
 	fmt.Println("Seed: Price Levels")
 
 	// =========================================================================
-	// 5. CUSTOMERS — 13 Okanagan accounts headlined by Tarnwick Construction.
+	// 5. CUSTOMERS - 13 Okanagan accounts headlined by Tarnwick Construction.
 	//
 	// Fixture rules for anything address- or contact-shaped in this file:
 	//   - Street NAMES are invented, in the trade-flavoured style used by the
@@ -1381,7 +1381,7 @@ func Run() {
 	// =========================================================================
 	// 21. PORTAL USERS
 	//    The demo portal account is `demo@tarnwick.example` (Sam Tarnwick), linked
-	//    to Tarnwick Construction — the persona referenced by the portal
+	//    to Tarnwick Construction - the persona referenced by the portal
 	//    dev-mode injection in internal/app/serve/serve.go.
 	// =========================================================================
 	pwHash, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
