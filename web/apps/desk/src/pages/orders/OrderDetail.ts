@@ -4,7 +4,10 @@
 import { LitElement, html, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
+import { formatDateTime } from '../../lib/dates.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { openAuthedPdf } from '../../lib/authedPdf.ts';
+import { confirmDialog, promptDialog } from '../../components/ui/app-dialog.ts';
 import { OrderService } from '../../services/OrderService.ts';
 import { InvoiceService } from '../../services/InvoiceService.ts';
 import { SalesTeamService } from '../../services/SalesTeamService.ts';
@@ -13,7 +16,6 @@ import type { SalesPerson } from '../../types/salesteam.ts';
 import { Check, Printer, User, DollarSign, Mail, Phone, XCircle, LockOpen } from 'lucide';
 import { formatCents, formatPrice4 } from '../../lib/utils.ts';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
 
 @customElement('gable-order-detail')
 export class GableOrderDetail extends LitElement {
@@ -78,6 +80,15 @@ export class GableOrderDetail extends LitElement {
         }
     }
 
+    private async handlePrintPickTicket(id: string) {
+        try {
+            const shown = await openAuthedPdf(`/api/v1/documents/print/pickticket/${id}`, 'Failed to read the pick ticket', 'pick-ticket.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the pick ticket was saved as a download', 'success');
+        } catch (err) {
+            ToastService.show(err instanceof Error ? err.message : 'Failed to print the pick ticket', 'error');
+        }
+    }
+
     /**
      * The confirm is the transition (ADR 0005 5.2). An over-the-limit
      * customer lands the order on the credit hold: the answer is the held
@@ -85,7 +96,7 @@ export class GableOrderDetail extends LitElement {
      */
     private async handleConfirm() {
         if (!this.order) return;
-        if (!confirm('Confirm this order?')) return;
+        if (!await confirmDialog({ title: 'Confirm this order?' })) return;
         this.processing = true;
         try {
             const updated = await OrderService.confirmOrder(this.order.id, this.order.revision);
@@ -173,7 +184,7 @@ export class GableOrderDetail extends LitElement {
 
     private async handleCancel() {
         if (!this.order) return;
-        const reason = prompt('Cancel this order. Reason:');
+        const reason = await promptDialog({ title: 'Cancel this order', label: 'Reason', required: true, confirmLabel: 'Cancel order', tone: 'danger' });
         if (!reason) return;
         this.processing = true;
         try {
@@ -221,7 +232,7 @@ export class GableOrderDetail extends LitElement {
                             </span>
                         </div>
                         <p class="text-muted-foreground">
-                            Created on ${new Date(order.created_at).toLocaleString()}
+                            Created on ${formatDateTime(order.created_at)}
                             · ${order.currency}
                             · ${order.delivery_type === 'pickup' ? 'Pickup' : 'Delivery'}
                             ${order.tax_rate_percent !== null ? html` · tax ${order.tax_rate_percent}%` : html` · tax by provider`}
@@ -275,7 +286,7 @@ export class GableOrderDetail extends LitElement {
                         ` : nothing}
                         ${(order.status === 'confirmed' || order.status === 'backordered' || order.status === 'fulfilled') ? html`
                             <button
-                                @click=${() => window.open(`${API_URL}/api/v1/documents/print/pickticket/${order.id}`, '_blank')}
+                                @click=${() => this.handlePrintPickTicket(order.id)}
                                 class="bg-white/10 text-white font-bold px-4 py-2 rounded whitespace-nowrap hover:bg-white/20 transition-colors flex items-center gap-2"
                             >
                                 ${icon(Printer, 18)} Pick Ticket

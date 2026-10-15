@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type Page } from '@playwright/test';
+import { answerAppDialog } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -18,9 +19,6 @@ const SHOTS_DIR = process.env.SHOTS_DIR ?? path.join('test-results', 'shots');
 fs.mkdirSync(SHOTS_DIR, { recursive: true });
 
 async function signIn(page: Page, name: string) {
-  // The desk guards destructive admin acts with native confirm() dialogs;
-  // accept them so the request behind each click actually fires.
-  page.on('dialog', (d) => d.accept());
   await page.goto('/');
   await page.getByLabel('Display name').fill(name);
   const catalog = page.waitForResponse((r) => new URL(r.url()).pathname === '/api/v1/apps' && r.ok());
@@ -58,6 +56,7 @@ test.describe('Tech admin flow on the new contract', () => {
       (r) => r.request().method() === 'DELETE' && r.url().includes('/api/v1/admin/keys/'),
     );
     await row.getByTitle('Revoke Key').click();
+    await answerAppDialog(page, 'Revoke key');
     expect((await revoked).status()).toBe(204);
     await expect(row).toContainText('Revoked', { ignoreCase: true });
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-key-revoked.png') });
@@ -70,18 +69,22 @@ test.describe('Tech admin flow on the new contract', () => {
 
     await page.getByRole('button', { name: /add key|update key/i }).click();
     await page.getByPlaceholder('sk-or-...').fill(`sk-or-e2e-${RUN}`);
-    await page.getByPlaceholder(/openrouter\.ai/).fill('https://openrouter.ai/api/v1');
+    await page.getByPlaceholder(/openrouter\.ai/).fill('http://127.0.0.1:9/api/v1');
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-ai-save.png') });
     await page.getByRole('button', { name: 'Save Key' }).click();
 
     // The saved state shows the admin override with its masked hint and the
     // base URL it stored; the save carried the revision it read, so it
-    // cannot have clobbered a second editor's write.
-    await expect(page.getByText('AI Features Active')).toBeVisible();
+    // cannot have clobbered a second editor's write. The save tested the
+    // key against the loopback address typed above, which nothing answers, so
+    // the test failed at once (item 130, N7) and the card reads off rather
+    // than active. No request left the machine.
+    await expect(page.getByText('AI Features Off')).toBeVisible();
     await expect(page.getByText('Admin configured')).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-ai-saved.png') });
 
     await page.getByRole('button', { name: 'Remove' }).click();
+    await answerAppDialog(page, 'Remove key');
     await expect(page.getByText('AI Features Inactive')).toBeVisible();
     await page.screenshot({ path: path.join(SHOTS_DIR, 'admin-ai-removed.png') });
   });

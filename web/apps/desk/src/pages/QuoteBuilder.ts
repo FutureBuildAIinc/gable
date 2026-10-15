@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../lib/icons.ts';
 import { router } from '../lib/router.ts';
@@ -17,6 +18,9 @@ import { QUOTE_UOM_CODES } from '../types/quote.ts';
 import type { QuoteRequest, QuoteLineRequest, QuoteDeliveryType } from '../types/quote.ts';
 import { formatCents, formatPrice4 } from '../lib/utils.ts';
 import { resolveLinePrice } from '../lib/line-price.ts';
+import { formatTime, todayDay, addDays } from '../lib/dates.ts';
+import '../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../components/ui/gable-date-field.ts';
 import {
     dollarsToCents,
     dollarsToTenThousandths,
@@ -74,8 +78,8 @@ const defaultEscalator = (): QuoteLineEscalator => ({
     enabled: false,
     escalation_type: 'PERCENTAGE',
     escalation_rate: 5,
-    effective_date: new Date().toISOString().split('T')[0],
-    target_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    effective_date: todayDay(),
+    target_date: addDays(todayDay(), 90),
 });
 
 @customElement('gable-quote-builder')
@@ -584,13 +588,12 @@ export class GableQuoteBuilder extends LitElement {
                 </td>
                 <td class="px-2 py-3">
                     ${line.uom === '' || err ? html`
-                        <select aria-label="Unit of measure"
-                            class="w-20 bg-deep-space border border-rose-500/40 rounded px-1 py-1 text-white font-mono text-xs outline-none"
-                            .value=${line.uom}
-                            @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}>
-                            <option value="" ?selected=${line.uom === ''}>Unit...</option>
-                            ${QUOTE_UOM_CODES.map(code => html`<option value=${code} ?selected=${line.uom === code}>${code}</option>`)}
-                        </select>
+                        <div class="w-20">
+                            <gable-select label="Unit of measure"
+                                .value=${line.uom}
+                                .options=${[{ value: '', label: 'Unit...' }, ...QUOTE_UOM_CODES.map(code => ({ value: code, label: code }))]}
+                                @change=${(e: Event) => this.handleUomInput(idx, (e.target as HTMLSelectElement).value)}></gable-select>
+                        </div>
                         ${line.uom === '' ? html`<div class="text-[10px] text-rose-400 mt-1">Unit of measure required</div>` : nothing}
                     ` : html`<span class="font-mono text-xs text-zinc-400">${line.uom}</span>`}
                 </td>
@@ -645,7 +648,7 @@ export class GableQuoteBuilder extends LitElement {
                         <span data-testid="quote-number" class="font-mono text-sm text-zinc-300">${this.quoteNumber ?? 'Number assigned on save'}</span>
                         <span class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-zinc-300 border border-white/10">${this.quoteStatus}</span>
                         ${this.yardName ? html`<span data-testid="quote-yard" class="text-xs text-zinc-300">${this.yardName}</span>` : nothing}
-                        <span class="font-mono text-xs text-zinc-500">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        <span class="font-mono text-xs text-zinc-500">${formatTime(new Date())}</span>
                     </div>
                     <div class="flex items-center gap-2">
                         <button type="button" class=${secondary} @click=${() => window.print()}>${icon(Printer, 16, 'mr-2')} Print</button>
@@ -720,9 +723,8 @@ export class GableQuoteBuilder extends LitElement {
                         <div class="${card} p-5">
                             <h2 class="text-lg font-medium text-white mb-4">Terms</h2>
                             <label class="block text-xs text-zinc-500 mb-1.5" for="quote-valid-until">Valid until</label>
-                            <input id="quote-valid-until" type="date" .value=${this.validUntil}
-                                @input=${(e: Event) => { this.validUntil = (e.target as HTMLInputElement).value; }}
-                                class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:ring-1 focus:ring-gable-green/50" />
+                            <gable-date-field id="quote-valid-until" label="Valid until" .value=${this.validUntil}
+                                @change=${(e: Event) => { this.validUntil = (e.target as GableDateField).value; }}></gable-date-field>
 
                             <div class="flex gap-1 bg-white/5 rounded-lg p-1 border border-white/10 mt-5 mb-4">
                                 <button type="button"
@@ -740,12 +742,9 @@ export class GableQuoteBuilder extends LitElement {
                                 <div class="space-y-4">
                                     <div>
                                         <label class="block text-xs text-zinc-500 mb-1.5">Assign truck</label>
-                                        <select .value=${this.selectedVehicleId || ''}
-                                            @change=${(e: Event) => { this.selectedVehicleId = (e.target as HTMLSelectElement).value || undefined; }}
-                                            class="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-blueprint-blue/50">
-                                            <option value="">Select a truck...</option>
-                                            ${this.vehicles.map(v => html`<option value="${v.id}">${v.name} — ${v.vehicle_type.replace(/_/g, ' ')} (${v.license_plate})</option>`)}
-                                        </select>
+                                        <gable-select .value=${this.selectedVehicleId || ''}
+                                            .options=${[{ value: '', label: 'Select a truck...' }, ...this.vehicles.map(v => ({ value: v.id, label: `${v.name} — ${v.vehicle_type.replace(/_/g, ' ')} (${v.license_plate})` }))]}
+                                            @change=${(e: Event) => { this.selectedVehicleId = (e.target as HTMLSelectElement).value || undefined; }}></gable-select>
                                         ${this.vehicles.length === 0 ? html`<p class="text-xs text-zinc-500 mt-1">No vehicles in fleet. Add vehicles in Fleet Management.</p>` : nothing}
                                     </div>
                                     <div>

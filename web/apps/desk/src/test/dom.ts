@@ -100,3 +100,44 @@ export function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+
+/**
+ * Choose a value on a mounted `gable-select` and fire its change event, the
+ * way a pick from its list reaches a page's handler. Prefer driving the real
+ * list (button click, then an option click) when the list itself is under
+ * test; this helper is for pages whose own state is what matters.
+ */
+export async function chooseOption(el: HTMLElement & { value: string }, value: string): Promise<void> {
+  el.value = value
+  el.dispatchEvent(new Event('change', { bubbles: true, composed: true }))
+  await flush()
+}
+
+/** The app's dialog currently open over the page, or null. */
+export function openAppDialog(): (LitElement & { updateComplete: Promise<boolean> }) | null {
+  return document.body.querySelector('gable-app-dialog')
+}
+
+/**
+ * Answer the open app dialog: `true` clicks its confirm, `false` its cancel.
+ * Fails loudly when no dialog is open, so a page that stopped asking breaks
+ * the leg that expected the question.
+ */
+export async function answerAppDialog(accept: boolean): Promise<void> {
+  const dialog = openAppDialog()
+  if (!dialog) throw new Error('no gable-app-dialog is open')
+  await dialog.updateComplete
+  q<HTMLButtonElement>(dialog, accept ? '[data-dialog-confirm]' : '[data-dialog-cancel]').click()
+  await flush()
+}
+
+/** Type into the open app dialog's prompt field. */
+export async function typeIntoAppDialog(value: string): Promise<void> {
+  const dialog = openAppDialog()
+  if (!dialog) throw new Error('no gable-app-dialog is open')
+  await dialog.updateComplete
+  const input = q<HTMLInputElement>(dialog, 'input')
+  input.value = value
+  input.dispatchEvent(new Event('input', { bubbles: true }))
+  await dialog.updateComplete
+}

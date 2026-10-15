@@ -40,8 +40,13 @@ func (f *fixture) openWalkInInvoice(t *testing.T, total int64) string {
 			0, 0, $5::bigint::numeric / 100, CURRENT_DATE + 30, CURRENT_DATE - 5)`, id, walkIn, f.branchID, number, total)
 	acct := account.NewService(f.db, gl.NewService(gl.NewRepository(f.db), nil, slog.Default()), slog.Default())
 	if err := f.db.RunInTx(context.Background(), func(ctx context.Context) error {
-		_, err := acct.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: id, CustomerID: uuid.MustParse(walkIn),
-			Number: number, Currency: "USD", TotalCents: total, On: time.Now(), Actor: "u-test",
+		// the branch's own day: the core refuses a day that has not come there
+		day, err := acct.LocalDate(ctx, f.branchID, time.Now())
+		if err != nil {
+			return err
+		}
+		_, err = acct.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: id, CustomerID: uuid.MustParse(walkIn),
+			Number: number, Currency: "USD", TotalCents: total, On: day, Actor: "u-test",
 			Legs: []gl.Leg{{AccountCode: "4010", Description: "Sales Revenue", Credit: total}}})
 		return err
 	}); err != nil {

@@ -4,6 +4,7 @@
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import type { RecentOrder } from '../../types/dashboard.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 function getStatusColor(status: string): string {
     switch (status.toLowerCase()) {
@@ -58,7 +59,11 @@ export class GableRecentOrdersFeed extends LitElement {
                         ${this.orders.length === 0
                             ? html`<div class="p-6 text-center text-zinc-500">No recent orders</div>`
                             : this.orders.map((order) => html`
-                                <a href="/orders/${order.order_id}" class="block p-4 hover:bg-white/5 transition-colors group">
+                                <a
+                                    href="/orders/${order.order_id}"
+                                    class="block p-4 hover:bg-white/5 transition-colors group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+                                >
+                                    <span class="sr-only">Open the order for ${order.customer_name}</span>
                                     <div class="flex justify-between items-start mb-1">
                                         <div class="font-medium text-white group-hover:text-gable-green transition-colors">
                                             ${order.customer_name}
@@ -68,7 +73,7 @@ export class GableRecentOrdersFeed extends LitElement {
                                         </span>
                                     </div>
                                     <div class="flex justify-between items-center text-xs text-zinc-500">
-                                        <div class="font-mono">${new Date(order.created_at).toLocaleDateString()}</div>
+                                        <div class="font-mono">${formatDate(order.created_at)}</div>
                                         <div class="font-mono text-zinc-400">
                                             $${(order.total_amount / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                         </div>

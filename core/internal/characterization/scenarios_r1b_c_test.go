@@ -502,11 +502,11 @@ func r1bCPOSGroups() []groupDef {
 					name: "pos.till.current.c", method: "GET", path: "/api/v1/pos/till/current?register_id=REG-01",
 					extract: map[string]string{"c_till": "/id"},
 				},
-				// Sales deduct stock at the unassigned location, so seed some there.
+				// Seed the sales stock at the yard: an adjustment names its location.
 				{name: "pos.setup.stock.product", method: "POST", path: "/api/v1/inventory/adjust",
-					body: map[string]any{"product_id": "{product}", "quantity": 50, "reason": "r1b c pos setup", "is_delta": true}},
+					body: map[string]any{"product_id": "{product}", "location_id": "{branch}", "quantity": 50, "reason": "r1b c pos setup", "is_delta": true}},
 				{name: "pos.setup.stock.sheet", method: "POST", path: "/api/v1/inventory/adjust",
-					body: map[string]any{"product_id": "{productSheet}", "quantity": 10, "reason": "r1b c pos setup", "is_delta": true}},
+					body: map[string]any{"product_id": "{productSheet}", "location_id": "{branch}", "quantity": 10, "reason": "r1b c pos setup", "is_delta": true}},
 				{name: "pos.till.open.c_duplicate", method: "POST", path: "/api/v1/pos/till/open",
 					body: map[string]any{"register_id": "REG-01", "opening_float_cents": 5000}},
 				{name: "pos.till.open.bad_body", method: "POST", path: "/api/v1/pos/till/open", body: "not an object"},
@@ -747,7 +747,10 @@ func r1bCPurchaseOrderGroups() []groupDef {
 	return []groupDef{{
 		name: "purchase_order_flow",
 		steps: []stepDef{
-			{name: "purchase_order.recommendations", method: "GET", path: "/api/v1/purchase-orders/recommendations"},
+			// Per yard rows over the demo seed carry each yard's sales, which the seed draws
+			// inside map iteration (differs per run): the status and content type are
+			// pinned here, and the per yard rows by the purchase_order and serve legs.
+			{name: "purchase_order.recommendations", method: "GET", path: "/api/v1/purchase-orders/recommendations", maskBody: true},
 			{name: "purchase_order.source_summary", method: "GET", path: "/api/v1/purchase-orders/source-summary"},
 			{name: "purchase_order.reorder_runs.before", method: "GET", path: "/api/v1/purchase-orders/reorder-runs"},
 			{name: "purchase_order.refresh_targets.default_dry_run", method: "POST", path: "/api/v1/purchase-orders/refresh-reorder-targets"},

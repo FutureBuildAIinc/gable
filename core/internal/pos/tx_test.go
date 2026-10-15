@@ -178,7 +178,7 @@ func TestThreeRegistersConsecutiveNumbersAgainstAWalkInPayment(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			r := f.do("POST", "/api/v1/payments", map[string]any{
 				"customer_id": walkIn, "method": "cash", "amount_cents": 100,
-				"received_on": "2030-01-01",
+				"received_on": "2020-01-01",
 			}, "X-Test-Role", "finance", "X-Test-Sub", mustUUID(t))
 			paymentStatuses[i] = r.status
 		}

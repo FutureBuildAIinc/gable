@@ -20,6 +20,8 @@ export interface InventoryAlert {
     reorder_qty: number;
     alert_type: 'LOW_STOCK' | 'OUT_OF_STOCK';
     location_id?: string;
+    /** The yard's name, so two rows for one SKU can be told apart. */
+    yard_name?: string;
 }
 
 export interface TopCustomer {

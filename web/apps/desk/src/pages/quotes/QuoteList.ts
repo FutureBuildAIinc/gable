@@ -11,6 +11,7 @@ import { QuoteService, QuoteApiError, quoteErrorMessage } from '../../services/Q
 import type { QuoteSummary, QuoteStatus } from '../../types/quote.ts';
 import { formatCents } from '../../lib/utils.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import { formatDate } from '../../lib/dates.ts';
 
 @customElement('gable-quote-view-tabs')
 export class GableQuoteViewTabs extends LitElement {
@@ -237,7 +238,7 @@ export class GableQuoteList extends LitElement {
                                 return html`
                                     <tr class="hover:bg-white/5 transition-colors cursor-pointer" @click=${() => router.navigate(`/quotes/${quote.id}`)}>
                                         <td class="p-4 font-mono text-white/80">${quote.number}</td>
-                                        <td class="p-4 text-white/80">${new Date(quote.created_at).toLocaleDateString()}</td>
+                                        <td class="p-4 text-white/80">${formatDate(quote.created_at)}</td>
                                         <td class="p-4 text-white font-medium">${quote.customer_name || quote.customer_id.slice(0, 8)}</td>
                                         <td class="p-4">
                                             ${quote.source === 'ai' ? html`

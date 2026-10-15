@@ -35,12 +35,22 @@ func NewService(repo Repository, tx TxRunner, a *audit.Logger) *Service {
 
 func (s *Service) Get(ctx context.Context) (*Profile, error) { return s.repo.Get(ctx) }
 
+// GetLocale reads only the locale, for the route every signed in person may
+// call (the profile read itself is held to the roles that print).
+func (s *Service) GetLocale(ctx context.Context) (string, error) {
+	p, err := s.repo.Get(ctx)
+	if err != nil {
+		return "", err
+	}
+	return p.Locale, nil
+}
+
 func (s *Service) GetLogo(ctx context.Context) (*Logo, error) { return s.repo.GetLogo(ctx) }
 
 func fields(p *Profile) map[string]any {
 	return map[string]any{
 		"legal_name": p.LegalName, "trading_name": p.TradingName, "phone": p.Phone,
-		"email": p.Email, "website": p.Website, "remit_to": p.RemitTo, "has_logo": p.LogoURL != nil,
+		"email": p.Email, "website": p.Website, "remit_to": p.RemitTo, "locale": p.Locale, "has_logo": p.LogoURL != nil,
 	}
 }
 
@@ -56,6 +66,9 @@ func (s *Service) Update(ctx context.Context, in Input, ifMatch string, bodyRevi
 		}
 		if err := httpx.CheckRevision(cur.Revision, ifMatch, bodyRevision); err != nil {
 			return err
+		}
+		if in.Locale == "" {
+			in.Locale = cur.Locale
 		}
 		next, err := s.repo.Update(ctx, in)
 		if err != nil {

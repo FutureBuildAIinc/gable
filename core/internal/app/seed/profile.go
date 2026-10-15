@@ -38,7 +38,10 @@ var demoLogoPNG = []byte{
 
 // seedDealerProfile sets the demo's invented dealer profile (migration 115's
 // single row) and logo. It writes only a profile that is still blank, so a
-// profile an operator has filled in is never overwritten by a re-seed.
+// profile an operator has filled in is never overwritten by a re-seed. The
+// locale is en-CA (the demo dealer is in British Columbia); a profile already
+// seeded by the demo that still sits on the migration's en-US default is
+// lifted to en-CA, while any other tag (an operator's own choice) is kept.
 func seedDealerProfile(db *sql.DB) {
 	res, err := db.Exec(`
 		UPDATE dealer_profile
@@ -48,6 +51,7 @@ func seedDealerProfile(db *sql.DB) {
 		       email = 'accounts@gablebuildingsupply.example',
 		       website = 'https://gablebuildingsupply.example',
 		       remit_to = 'Gable Building Supply, Accounts Receivable' || E'\n' || 'PO Box 4100, Kelowna BC V1Y 7R7',
+		       locale = 'en-CA',
 		       logo = $1, logo_content_type = 'image/png',
 		       revision = revision + 1, updated_at = NOW()
 		 WHERE id = 1 AND legal_name = '' AND trading_name = '' AND logo IS NULL`, demoLogo())
@@ -57,5 +61,11 @@ func seedDealerProfile(db *sql.DB) {
 	}
 	if n, _ := res.RowsAffected(); n > 0 {
 		fmt.Println("Seed: Dealer Profile (invented) and logo")
+		return
+	}
+	if _, err := db.Exec(`
+		UPDATE dealer_profile SET locale = 'en-CA', updated_at = NOW()
+		 WHERE id = 1 AND locale = 'en-US' AND trading_name = 'Gable Building Supply'`); err != nil {
+		log.Printf("seed: dealer profile locale: %v", err)
 	}
 }

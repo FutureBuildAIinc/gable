@@ -12,10 +12,10 @@ import { Plus, User, Truck, Clock, MapPin } from 'lucide';
 import type { Route, RouteStatus } from '../../types/delivery';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service';
+import { formatDay } from '../../lib/dates.ts';
 
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-};
+// A route's scheduled day, in the one style every page shares.
+const formatDate = (dateString: string) => formatDay(dateString);
 
 function statusBadgeClass(status: RouteStatus): string {
   switch (status) {

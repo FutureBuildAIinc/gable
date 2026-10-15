@@ -751,7 +751,7 @@ components:
           $ref: "#/components/schemas/ApiKey"
     AISettings:
       type: object
-      required: [configured, source, key_hint, base_url, revision, provider, model, anthropic_configured, anthropic_key_hint, vault_present]
+      required: [configured, source, key_hint, base_url, revision, provider, model, anthropic_configured, anthropic_key_hint, vault_present, test_status]
       description: >-
         Go type techadmin.AISettings. source is admin (a stored override),
         env (a key from the environment only) or none. key_hint and base_url
@@ -779,15 +779,28 @@ components:
           type: [string, "null"]
         vault_present:
           type: boolean
+        test_status:
+          type: string
+          enum: [none, untested, passed, refused, failed]
+          description: >-
+            The last test of the saved key: none with no key saved, untested
+            for a key never tested, passed, refused (the provider refused the
+            key) or failed (the test could not finish). A save runs the test.
+        test_message:
+          type: string
+          description: The plain sentence for refused and failed; absent otherwise.
     AdminTestAIResult:
       type: object
-      required: [ok, message]
+      required: [ok, message, status]
       description: Go type techadmin.TestResult. A provider failure is ok false with its words, never the key.
       properties:
         ok:
           type: boolean
         message:
           type: string
+        status:
+          type: string
+          enum: [passed, refused, failed]
     RoutingSettings:
       type: object
       required: [configured, source, key_hint, revision]

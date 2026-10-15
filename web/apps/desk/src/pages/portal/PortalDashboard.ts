@@ -6,6 +6,7 @@ import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { DollarSign, CreditCard, AlertTriangle, ShoppingCart, ArrowRight, RefreshCw } from 'lucide';
 import { PortalService } from '../../services/PortalService';
+import { formatDate } from '../../lib/dates.ts';
 import type { PortalDashboard as DashboardData } from '../../types/portal';
 import { cssVarColor } from '../../lib/theme-colors.ts';
 
@@ -146,7 +147,7 @@ export class PortalDashboard extends LitElement {
                                                     ${order.id.substring(0, 8).toUpperCase()}
                                                 </div>
                                                 <div class="text-xs text-zinc-500 mt-0.5">
-                                                    ${new Date(order.created_at).toLocaleDateString()} · ${order.lines.length} item${order.lines.length !== 1 ? 's' : ''}
+                                                    ${formatDate(order.created_at)} · ${order.lines.length} item${order.lines.length !== 1 ? 's' : ''}
                                                 </div>
                                             </div>
                                             <div class="text-right flex items-center gap-3">

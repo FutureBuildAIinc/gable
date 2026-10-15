@@ -5,14 +5,20 @@ import { LitElement, html, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
+import { openAuthedPdf } from '../../lib/authedPdf.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { ArService } from '../../services/ArService.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
+import { BRANCH_STORAGE_KEY } from '@gable/auth';
 import { FileText, Search } from 'lucide';
+
 
 @customElement('gable-customer-statement')
 export class CustomerStatementPage extends LitElement {
@@ -72,6 +78,19 @@ export class CustomerStatementPage extends LitElement {
         }
         // The statement read owns the loading state from here, in its own turn.
         await this._loadStatement();
+    }
+
+    /** Print opens the statement's own document for the period shown, as the invoice's print does. */
+    private async _printStatement() {
+        const st = this.statement;
+        if (!st || !this.customerId) return;
+        const params = new URLSearchParams({ from: st.from, to: st.to });
+        try {
+            const shown = await openAuthedPdf(`/api/v1/documents/print/statement/${this.customerId}?${params.toString()}`, 'Failed to read the statement document', 'statement.pdf');
+            if (shown.blocked) ToastService.show('Pop ups are blocked: the statement was saved as a download', 'success');
+        } catch (err) {
+            ToastService.show(err instanceof Error ? err.message : 'Failed to print the statement', 'error');
+        }
     }
 
     private _onSearchInput(e: Event) {
@@ -204,21 +223,19 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                         <div>
                             <label class="text-xs text-zinc-500 uppercase tracking-wider block mb-1">From</label>
-                            <input
-                                type="date"
+                            <gable-date-field
+                                label="From"
                                 .value=${this.startDate}
-                                @input=${(e: Event) => this.startDate = (e.target as HTMLInputElement).value}
-                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
-                            />
+                                @change=${(e: Event) => this.startDate = (e.target as GableDateField).value}
+                            ></gable-date-field>
                         </div>
                         <div>
                             <label class="text-xs text-zinc-500 uppercase tracking-wider block mb-1">To</label>
-                            <input
-                                type="date"
+                            <gable-date-field
+                                label="To"
                                 .value=${this.endDate}
-                                @input=${(e: Event) => this.endDate = (e.target as HTMLInputElement).value}
-                                class="bg-black/20 border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
-                            />
+                                @change=${(e: Event) => this.endDate = (e.target as GableDateField).value}
+                            ></gable-date-field>
                         </div>
                         <button
                             @click=${this._loadStatement}
@@ -231,7 +248,8 @@ export class CustomerStatementPage extends LitElement {
                         </button>
                         ${this.statement ? html`
                             <button
-                                @click=${() => window.print()}
+                                @click=${() => this._printStatement()}
+                                data-testid="print-statement"
                                 class="inline-flex items-center gap-2 border border-white/10 text-white px-4 py-2 rounded hover:bg-white/5 transition-colors"
                             >
                                 ${icon(FileText, 16, 'w-4 h-4')}
@@ -247,6 +265,17 @@ export class CustomerStatementPage extends LitElement {
         `;
     }
 
+    /** A yard is chosen: the open documents and unapplied payments follow it, the balances do not. */
+    private _scopedToYard(): boolean {
+        return !!localStorage.getItem(BRANCH_STORAGE_KEY);
+    }
+
+    /** Unapplied cash the listed payments do not cover: it sits at yards this one cannot see. */
+    private _unappliedElsewhere(cur: ArStatementCurrency): number {
+        const listed = cur.unapplied_payments.reduce((sum, p) => sum + p.unapplied_cents, 0);
+        return Math.max(0, cur.unapplied_cents - listed);
+    }
+
     /** One currency's statement: never mixed with another's amounts. */
     private _renderCurrency(cur: ArStatementCurrency) {
         const st = this.statement!;
@@ -257,7 +286,7 @@ export class CustomerStatementPage extends LitElement {
                         <div>
                             <h2 class="text-xl font-bold text-white">${st.customer_name}</h2>
                             <p class="text-sm text-zinc-400">
-                                Period: ${st.from} to ${st.to} · ${cur.currency}
+                                Period: ${formatDay(st.from)} to ${formatDay(st.to)} · ${cur.currency}
                             </p>
                         </div>
                         <div class="text-right">
@@ -285,7 +314,7 @@ export class CustomerStatementPage extends LitElement {
                                 </tr>
                             ` : cur.lines.map((line) => html`
                                 <tr class="hover:bg-white/5 transition-colors">
-                                    <td class="px-4 py-3 font-mono text-zinc-300">${line.date}</td>
+                                    <td class="px-4 py-3 font-mono text-zinc-300">${formatDay(line.date)}</td>
                                     <td class="px-4 py-3">
                                         <span class="px-2 py-0.5 rounded text-xs font-bold uppercase ${
                                             line.type === 'INVOICE' ? 'text-blue-400 bg-blue-500/10' :
@@ -325,8 +354,8 @@ export class CustomerStatementPage extends LitElement {
                                     ${cur.open_documents.map(doc => html`
                                         <tr>
                                             <td class="px-4 py-2 font-mono ${doc.kind === 'invoice' ? 'text-white' : 'text-teal-300'}">${doc.number}</td>
-                                            <td class="px-4 py-2 text-zinc-400">${doc.date}</td>
-                                            <td class="px-4 py-2 text-zinc-400">${doc.due_date || 'Not set'}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${formatDay(doc.date)}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${doc.due_date ? formatDay(doc.due_date) : 'Not set'}</td>
                                             <td class="px-4 py-2 text-right font-mono text-zinc-300">${formatCents(doc.total_cents)}</td>
                                             <td class="px-4 py-2 text-right font-mono text-amber-400">${formatCents(doc.open_cents)}</td>
                                         </tr>
@@ -336,11 +365,54 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                     ` : nothing}
 
-                    <div class="flex justify-end mt-4 pt-4 border-t border-white/10">
+                    ${cur.unapplied_payments.length > 0 ? html`
+                        <div class="mt-6" data-testid="statement-unapplied">
+                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">Unapplied cash</h3>
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
+                                    <tr>
+                                        <th class="px-4 py-2">Payment</th>
+                                        <th class="px-4 py-2">Received</th>
+                                        <th class="px-4 py-2 text-right">Unapplied</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-white/5">
+                                    ${cur.unapplied_payments.map(p => html`
+                                        <tr>
+                                            <td class="px-4 py-2 font-mono text-teal-300">${p.number}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${p.received_on}</td>
+                                            <td class="px-4 py-2 text-right font-mono text-emerald-400">${formatCents(p.unapplied_cents)}</td>
+                                        </tr>
+                                    `)}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : nothing}
+
+                    ${this._scopedToYard() || this._unappliedElsewhere(cur) > 0 ? html`
+                        <div class="mt-4 space-y-1">
+                            ${this._unappliedElsewhere(cur) > 0 ? html`
+                                <p class="text-sm text-zinc-400" data-testid="statement-unapplied-elsewhere">
+                                    Unapplied cash at other yards: <span class="font-mono">${formatCents(this._unappliedElsewhere(cur))}</span>
+                                </p>
+                            ` : nothing}
+                            ${this._scopedToYard() || this._unappliedElsewhere(cur) > 0 ? html`
+                                <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are ${this._scopedToYard() ? "this yard's" : 'those of your yards'}; the activity and the balances cover the whole account.</p>
+                            ` : nothing}
+                        </div>
+                    ` : nothing}
+
+                    <div class="flex justify-end gap-8 mt-4 pt-4 border-t border-white/10">
                         <div class="text-right">
                             <p class="text-xs text-zinc-500">Closing Balance</p>
                             <p class="text-2xl font-mono font-bold text-white">${formatCents(cur.closing_balance_cents)}</p>
                         </div>
+                        ${cur.unapplied_cents > 0 ? html`
+                            <div class="text-right" data-testid="statement-net-balance">
+                                <p class="text-xs text-zinc-500">Net balance (after unapplied cash)</p>
+                                <p class="text-2xl font-mono font-bold text-white">${formatCents(cur.net_balance_cents)}</p>
+                            </div>
+                        ` : nothing}
                     </div>
                 </div>
             </div>

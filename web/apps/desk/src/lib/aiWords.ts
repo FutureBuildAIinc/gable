@@ -9,11 +9,16 @@
 
 export type AIProvider = 'openrouter' | 'anthropic';
 
+/** The last test of the saved key, as the settings document reports it. */
+export type AITestStatus = 'none' | 'untested' | 'passed' | 'refused' | 'failed';
+
 /** The slice of the AI settings document the words read. */
 export interface AIState {
     provider: AIProvider;
     model: string;
     configured: boolean;
+    /** AI is on only after a passed test; absent reads as untested. */
+    test_status?: AITestStatus;
 }
 
 /** "Anthropic" or "OpenRouter". */
@@ -29,17 +34,43 @@ export function modelLabel(model: string): string {
     return m[3] !== undefined ? `${family} ${m[2]}.${m[3]}` : `${family} ${m[2]}`;
 }
 
-/** The Tech Admin status line: what is on, or what to enter. */
+/** True only for a saved key whose last test passed: the one state AI is on. */
+export function aiIsOn(s: AIState | null): boolean {
+    return !!s && s.configured && s.test_status === 'passed';
+}
+
+/** The Tech Admin status line: what is on, what was refused, or what to enter. */
 export function aiStatusLine(s: AIState | null): string {
     if (!s) return 'AI settings are loading.';
     const name = providerLabel(s.provider);
     if (!s.configured) return `Enter your ${name} API key to enable AI-powered features.`;
-    return s.provider === 'anthropic' ? `AI on: ${name}, ${modelLabel(s.model)}` : `AI on: ${name}`;
+    switch (s.test_status) {
+        case 'passed':
+            return s.provider === 'anthropic' ? `AI on: ${name}, ${modelLabel(s.model)}` : `AI on: ${name}`;
+        case 'refused':
+            return `AI off: ${name} refused the saved key`;
+        case 'failed':
+            return `AI off: the test of the saved ${name} key did not pass`;
+        default:
+            return 'Key saved, not tested yet. Press Test connection to turn AI on.';
+    }
 }
 
 /** The status card's headline. */
 export function aiHeadline(s: AIState | null): string {
-    return s?.configured ? 'AI Features Active' : 'AI Features Inactive';
+    if (aiIsOn(s)) return 'AI Features Active';
+    if (!s?.configured) return 'AI Features Inactive';
+    return s.test_status === 'refused' || s.test_status === 'failed' ? 'AI Features Off' : 'AI Features Not Tested';
+}
+
+/**
+ * The lead line over Tech Admin's AI settings. A key the provider refused (or
+ * whose test failed) is said once, in the status card, so the lead line names
+ * only the state; every other state keeps the full line.
+ */
+export function aiLeadLine(s: AIState | null): string {
+    if (s?.configured && (s.test_status === 'refused' || s.test_status === 'failed')) return 'AI off';
+    return aiStatusLine(s);
 }
 
 /** What PIM's image generation makes with the chosen provider. */
@@ -51,6 +82,8 @@ export interface ImageWords {
     feature: string;
     featureDescription: string;
     failed: string;
+    /** A generation the provider refused the saved key for: no retry can work. */
+    refused: string;
     empty: string;
 }
 
@@ -64,7 +97,8 @@ export function imageWords(provider: AIProvider | null | undefined): ImageWords 
             heading: 'AI Illustration',
             feature: 'Product Illustrations',
             featureDescription: 'Claude draws a flat product illustration in the catalog style for each product',
-            failed: 'The illustration could not be drawn or was refused. Please try again.',
+            failed: 'The illustration could not be drawn. If it keeps failing, an administrator checks the key in Tech Admin, AI Settings.',
+            refused: 'Anthropic refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.',
             empty: 'No images yet. Generate an illustration using AI above.',
         };
     }
@@ -75,7 +109,8 @@ export function imageWords(provider: AIProvider | null | undefined): ImageWords 
         heading: 'AI Image Generation',
         feature: 'Product Image Generation',
         featureDescription: 'Generate professional product images for your catalog',
-        failed: 'Image generation failed. Please try again.',
+        failed: 'Image generation failed. If it keeps failing, an administrator checks the key in Tech Admin, AI Settings.',
+        refused: 'OpenRouter refused the saved key. An administrator can enter it again in Tech Admin, AI Settings.',
         empty: 'No images yet. Generate one using AI above.',
     };
 }

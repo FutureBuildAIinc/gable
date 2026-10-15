@@ -13,7 +13,7 @@ interface Built {
     plugins: { legend: { labels: { color: string } } }
     scales: { y: { ticks: { color: string } } }
   }
-  data: { datasets: Array<{ borderColor: string; backgroundColor: string[] }> }
+  data: { labels: string[]; datasets: Array<{ borderColor: string; backgroundColor: string[] }> }
 }
 const built: Built[] = []
 const resized: number[] = []
@@ -61,6 +61,7 @@ import './RevenueTrendChart'
 import type { GableOrderStatusChart } from './OrderStatusChart'
 import type { GableRevenueTrendChart } from './RevenueTrendChart'
 import { setTheme } from '@gable/design-system'
+import { formatDay } from '../../lib/dates'
 import { mount } from '../../test/dom'
 
 const root = document.documentElement
@@ -205,5 +206,19 @@ describe('dashboard charts follow the mode', () => {
     await frame()
     expect(built.length).toBe(0)
     expect(observers.filter((o) => !o.disconnected).length).toBe(0)
+  })
+
+  it('the revenue trend axis reads its days the app\'s way, never year first with hyphens', async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    } as unknown as CanvasRenderingContext2D)
+    const el = await mount<GableRevenueTrendChart>('gable-revenue-trend-chart', {
+      data: [{ date: '2026-10-14', revenue: 1000 }],
+    })
+    await frame()
+    const labels = built.at(-1)!.data.labels
+    expect(labels).toEqual([formatDay('2026-10-14')])
+    expect(labels[0]).not.toMatch(/^\d{4}-/)
+    el.remove()
   })
 })

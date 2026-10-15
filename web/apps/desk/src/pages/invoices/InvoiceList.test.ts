@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './InvoiceList'
 import type { GableInvoiceList } from './InvoiceList'
-import { mountAsync, text, flush } from '../../test/dom'
+import { mountAsync, text, flush, chooseOption } from '../../test/dom'
 import { invoiceSummary, routedFetch } from '../../test/salesFixtures'
 
 describe('gable-invoice-list', () => {
@@ -85,9 +85,8 @@ describe('gable-invoice-list', () => {
 
   it('sends the status and overdue filters under their contract names', async () => {
     el = await mountAsync<GableInvoiceList>('gable-invoice-list')
-    const select = el.querySelector('select[aria-label="Status"]') as HTMLSelectElement
-    select.value = 'partial'
-    select.dispatchEvent(new Event('change'))
+    const select = el.querySelector('gable-select[label="Status"]') as HTMLElement & { value: string }
+    await chooseOption(select, 'partial')
     await flush()
     const overdue = el.querySelector('input[aria-label="Overdue only"]') as HTMLInputElement
     overdue.checked = true

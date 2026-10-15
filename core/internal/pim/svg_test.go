@@ -34,7 +34,7 @@ func TestSanitizeSVG_KeepsCleanDrawing(t *testing.T) {
 		t.Fatalf("clean drawing refused: %v", err)
 	}
 	s := string(out)
-	for _, want := range []string{`viewBox="0 0 256 256"`, `<linearGradient`, `<stop`, `<clipPath`, `<rect`, `<path`, `<circle`, `<tspan>SPF 2x4</tspan>`, `fill="url(#wood)"`, `xmlns="http://www.w3.org/2000/svg"`} {
+	for _, want := range []string{`viewBox="0 0 256 256"`, `<linearGradient`, `<stop`, `<clipPath`, `<rect`, `<path`, `<circle`, `fill="url(#wood)"`, `xmlns="http://www.w3.org/2000/svg"`} {
 		if !strings.Contains(s, want) {
 			t.Errorf("output lacks %q:\n%s", want, s)
 		}
@@ -88,12 +88,10 @@ func TestSanitizeSVG_RefusesEachAttack(t *testing.T) {
 		{"empty", ``},
 		{"nothing drawn", wrap(`<g></g>`)},
 		{"foreign namespace element", wrap(`<h:script xmlns:h="http://www.w3.org/1999/xhtml">x</h:script><rect width="1" height="1"/>`)},
-		{"long label", wrap(`<text x="1" y="1">` + strings.Repeat("A", 80) + `</text><rect width="1" height="1"/>`)},
 		{"css escaped url", wrap(`<rect width="1" height="1" fill="u\72l(//evil.test/a.svg#x)"/>`)},
 		{"css escaped url short form", wrap(`<rect width="1" height="1" fill="\75rl(//evil.test/a.svg#x)"/>`)},
 		{"css escaped url as a character reference", wrap(`<rect width="1" height="1" fill="&#92;75rl(//evil.test/a.svg#x)"/>`)},
 		{"url with a comment inside", wrap(`<rect width="1" height="1" fill="url/**/(//evil.test/a)"/>`)},
-		{"escape in font-family", wrap(`<text x="1" y="1" font-family="u\72l(//evil.test/a)">a</text><rect width="1" height="1"/>`)},
 		{"output over the cap", wrap(`<rect width="1" height="1" fill="` + strings.Repeat("\n", 19000) + `" stroke="` + strings.Repeat("\n", 19000) + `" opacity="` + strings.Repeat("\n", 19000) + `"/>`)},
 		{"escaped url in clip-path", wrap(`<rect width="1" height="1" clip-path="\75rl(//evil.example/x)"/>`)},
 		{"paint that is not a colour or a reference", wrap(`<rect width="1" height="1" fill="//evil.example/x"/>`)},

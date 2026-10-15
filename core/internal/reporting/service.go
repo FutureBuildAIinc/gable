@@ -51,26 +51,26 @@ func NewService(repo Repository) *Service {
 func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillReport, error) {
 	// Cache Key
 	key := "daily_till:" + reachKey(ctx) + ":" + dateStr
-	if dateStr == "" {
-		key += time.Now().Format("2006-01-02")
-	}
 
-	// Read Cache
-	s.cacheMutex.RLock()
-	if item, ok := s.cache[key]; ok {
-		if time.Since(item.timestamp) < 60*time.Second {
-			s.cacheMutex.RUnlock()
-			return item.data.(*DailyTillReport), nil
+	// Read Cache. An empty date is the branch's today, a day that can change
+	// under a cached answer at the branch's midnight and a till read a
+	// moment after a payment must show it: it is never served from the cache.
+	if dateStr != "" {
+		s.cacheMutex.RLock()
+		if item, ok := s.cache[key]; ok {
+			if time.Since(item.timestamp) < 60*time.Second {
+				s.cacheMutex.RUnlock()
+				return item.data.(*DailyTillReport), nil
+			}
 		}
+		s.cacheMutex.RUnlock()
 	}
-	s.cacheMutex.RUnlock()
 
-	// Parse date, default to today if empty
+	// Parse date; empty is the default branch's business day (a zero date),
+	// the day the dashboard's Collected today card is cut on.
 	var date time.Time
 	var err error
-	if dateStr == "" {
-		date = time.Now()
-	} else {
+	if dateStr != "" {
 		date, err = time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			return nil, err
@@ -81,19 +81,49 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 		return nil, err
 	}
 
-	// Write Cache
-	s.cacheMutex.Lock()
-	if len(s.cache) < maxCacheEntries {
-		s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+	// Write Cache (a dated read only)
+	if dateStr != "" {
+		s.cacheMutex.Lock()
+		if len(s.cache) < maxCacheEntries {
+			s.cache[key] = cachedReport{data: data, timestamp: time.Now()}
+		}
+		s.cacheMutex.Unlock()
 	}
-	s.cacheMutex.Unlock()
 
 	return data, nil
 }
 
 func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) (*SalesSummaryReport, error) {
+	// Validate the dates first: a bad date never reaches the repository.
+	var fromT, toT time.Time
+	var err error
+	if startStr != "" {
+		if fromT, err = time.Parse("2006-01-02", startStr); err != nil {
+			return nil, err
+		}
+	}
+	if endStr != "" {
+		if toT, err = time.Parse("2006-01-02", endStr); err != nil {
+			return nil, err
+		}
+	}
+
+	// The yard's business day, read once: the cache key and the default window
+	// both use it, and a failed read is an error, never a fall back to the
+	// server's clock (in the yard's evening west of UTC the server's date is
+	// the yard's tomorrow). A default bound is the day, or thirty days before.
+	var day string
+	if startStr == "" || endStr == "" {
+		if day, err = s.repo.BusinessDay(ctx); err != nil {
+			return nil, fmt.Errorf("could not read the yard's business day for the summary's window: %w", err)
+		}
+	}
+
 	// Cache Key
 	key := "sales_summary:" + reachKey(ctx) + ":" + startStr + ":" + endStr
+	if day != "" {
+		key += ":" + day
+	}
 
 	// Read Cache
 	s.cacheMutex.RLock()
@@ -105,27 +135,20 @@ func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) 
 	}
 	s.cacheMutex.RUnlock()
 
-	now := time.Now()
-	start := now.AddDate(0, 0, -30) // Default last 30 days
-	end := now
-
-	var err error
-	if startStr != "" {
-		start, err = time.Parse("2006-01-02", startStr)
-		if err != nil {
-			return nil, err
-		}
+	to := toT.Format("2006-01-02")
+	from := fromT.Format("2006-01-02")
+	if endStr == "" {
+		to = day
 	}
-	if endStr != "" {
-		end, err = time.Parse("2006-01-02", endStr)
-		if err != nil {
-			return nil, err
+	if startStr == "" {
+		dayT, perr := time.Parse("2006-01-02", day)
+		if perr != nil {
+			return nil, fmt.Errorf("the yard's business day %q is not a date: %w", day, perr)
 		}
-		// Move end to end of day
-		end = end.Add(24*time.Hour - time.Nanosecond)
+		from = dayT.AddDate(0, 0, -30).Format("2006-01-02")
 	}
 
-	data, err := s.repo.GetSalesSummary(ctx, start, end)
+	data, err := s.repo.GetSalesSummary(ctx, from, to)
 	if err != nil {
 		return nil, err
 	}

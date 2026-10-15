@@ -33,6 +33,9 @@ func (s *Service) PostInvoice(ctx context.Context, in PostInvoiceIn) (*Effects, 
 	if err := s.requireTx(ctx); err != nil {
 		return nil, err
 	}
+	if err := s.refuseDayToComeOf(ctx, "invoices", in.InvoiceID, in.On, "invoice_date"); err != nil {
+		return nil, err
+	}
 	fx := &Effects{}
 	if in.Number == "" || in.Currency == "" {
 		// The counter's account charge (until C2-5) leaves the number and the
@@ -91,6 +94,9 @@ func (s *Service) VoidInvoice(ctx context.Context, in VoidInvoiceIn) (*Effects, 
 	inv := rows[in.InvoiceID]
 	if inv.Status == invVoid {
 		return nil, httpx.InvalidStateTransition("the invoice is already void")
+	}
+	if err := s.refuseDayToCome(ctx, inv.BranchID, in.On, "voided_on"); err != nil {
+		return nil, err
 	}
 	var live int
 	if err := s.ex(ctx).QueryRow(ctx, `SELECT count(*) FROM ar_applications WHERE invoice_id = $1 AND reversed_at IS NULL`, inv.ID).Scan(&live); err != nil {
@@ -157,6 +163,9 @@ func (s *Service) PostCreditMemo(ctx context.Context, in PostCreditMemoIn) (*Eff
 	if m.Status != "DRAFT" {
 		return nil, httpx.InvalidStateTransition("only a draft credit memo can be posted: it is " + lower(m.Status))
 	}
+	if err := s.refuseDayToComeOf(ctx, "credit_memos", in.MemoID, in.MemoDate, "memo_date"); err != nil {
+		return nil, err
+	}
 	fx := &Effects{}
 	if _, err := s.lockCustomer(ctx, in.CustomerID); err != nil {
 		return nil, err
@@ -207,6 +216,11 @@ func (s *Service) VoidCreditMemo(ctx context.Context, in VoidCreditMemoIn) (*Eff
 	m, err := s.lockMemo(ctx, in.MemoID)
 	if err != nil {
 		return nil, err
+	}
+	if m.Status != "VOID" {
+		if err := s.refuseDayToCome(ctx, m.BranchID, in.On, "voided_on"); err != nil {
+			return nil, err
+		}
 	}
 	fx := &Effects{}
 	switch m.Status {

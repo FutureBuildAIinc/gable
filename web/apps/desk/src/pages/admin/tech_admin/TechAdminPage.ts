@@ -2,12 +2,15 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons.ts';
 import { cn } from '../../../lib/utils.ts';
 import './MarketCheckSettings.ts';
 import { techAdminService, ediService } from '../../../services/TechAdminService';
-import { aiHeadline, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
+import { confirmDialog } from '../../../components/ui/app-dialog.ts';
+import { aiHeadline, aiIsOn, aiLeadLine, aiStatusLine, imageWords, modelLabel, providerLabel } from '../../../lib/aiWords.ts';
+import { formatDate, formatTime } from '../../../lib/dates.ts';
 import type { APIKey, AISettings, RoutingSettings, EDITradingPartner, StaffMember, ModuleInfo, Readiness } from '../../../services/TechAdminService';
 import {
     Key, Globe, Activity, Plus, Trash2, Copy, Check, Eye, Sparkles,
@@ -121,7 +124,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleRevokeKey(id: string) {
-        if (!confirm('Are you sure you want to revoke this key? integrations using it will break immediately.')) return;
+        if (!await confirmDialog({
+            title: 'Revoke this API key?',
+            body: 'Integrations using it will break immediately. This cannot be undone.',
+            confirmLabel: 'Revoke key',
+            tone: 'danger',
+        })) return;
         try {
             this.keyError = null;
             await techAdminService.revokeKey(id);
@@ -168,8 +176,8 @@ export class TechAdminPage extends LitElement {
             this.aiNewKey = '';
             this.aiNewBaseUrl = '';
             this.aiShowInput = false;
-            this.aiSuccess = 'API key saved. All AI features are now active.';
             await this._loadAISettings();
+            this._noteSavedKey('API key saved');
         } catch (err) {
             this.aiError = err instanceof Error ? err.message : 'Failed to save';
         } finally {
@@ -184,12 +192,27 @@ export class TechAdminPage extends LitElement {
         try {
             await techAdminService.saveAIProvider(this.aiProvider, this.aiModel, this.aiAnthropicKey.trim() || undefined);
             this.aiAnthropicKey = '';
-            this.aiSuccess = 'AI provider saved.';
             await this._loadAISettings();
+            this._noteSavedKey('AI provider saved');
         } catch (err) {
             this.aiError = err instanceof Error ? err.message : 'Failed to save';
         } finally {
             this.aiSaving = false;
+        }
+    }
+
+    /** The saved key was tested by the save: say what that test found. */
+    private _noteSavedKey(saved: string) {
+        const s = this.aiSettings;
+        if (s?.test_status === 'passed') {
+            this.aiSuccess = `${saved} and tested. AI is on.`;
+        } else if (s?.test_status === 'refused' || s?.test_status === 'failed') {
+            // The card the save reloaded already says the refusal; no banner
+            // repeats the sentence.
+            this.aiSuccess = null;
+            this.aiError = null;
+        } else {
+            this.aiSuccess = `${saved}.`;
         }
     }
 
@@ -198,6 +221,7 @@ export class TechAdminPage extends LitElement {
         this.aiTestResult = null;
         try {
             this.aiTestResult = await techAdminService.testAIConnection();
+            await this._loadAISettings();
         } catch (err) {
             this.aiTestResult = { ok: false, message: err instanceof Error ? err.message : 'Test failed' };
         } finally {
@@ -213,23 +237,25 @@ export class TechAdminPage extends LitElement {
                 <h3 class="text-white font-medium">Provider</h3>
                 <p class="text-sm text-slate-400">Choose OpenRouter or the native Anthropic provider (Sonnet 5.5 or better). When no key is set for the chosen provider, AI is off and no feature fakes a result.</p>
                 <div class="grid grid-cols-2 gap-3">
-                    <select
-                        aria-label="AI provider"
+                    <gable-select
+                        label="AI provider"
                         .value=${this.aiProvider}
+                        .options=${[
+                            { value: 'openrouter', label: 'OpenRouter' },
+                            { value: 'anthropic', label: 'Anthropic (native)' },
+                        ]}
                         @change=${(e: Event) => this.aiProvider = (e.target as HTMLSelectElement).value as 'openrouter' | 'anthropic'}
-                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm">
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="anthropic">Anthropic (native)</option>
-                    </select>
-                    <select
-                        aria-label="Anthropic model"
+                    ></gable-select>
+                    <gable-select
+                        label="Anthropic model"
                         .value=${this.aiModel}
                         ?disabled=${this.aiProvider !== 'anthropic'}
+                        .options=${[
+                            { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+                            { value: 'claude-opus-5-5', label: 'Opus 5.5' },
+                        ]}
                         @change=${(e: Event) => this.aiModel = (e.target as HTMLSelectElement).value}
-                        class="bg-deep-space border border-white/10 rounded px-3 py-2.5 text-white text-sm disabled:opacity-50">
-                        <option value="claude-sonnet-5-5">Sonnet 5.5</option>
-                        <option value="claude-opus-5-5">Opus 5.5</option>
-                    </select>
+                    ></gable-select>
                 </div>
                 ${this.aiProvider === 'anthropic' ? html`
                     <input
@@ -245,7 +271,7 @@ export class TechAdminPage extends LitElement {
                     ${vaultMissing ? html`<p class="text-xs text-amber-400">This server has no vault key, so an Anthropic key cannot be stored. Set PAYMENT_VAULT_KEY and restart.</p>` : nothing}
                 ` : nothing}
                 <div class="flex gap-2 justify-end items-center">
-                    ${this.aiTestResult ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
+                    ${this.aiTestResult && (this.aiTestResult.ok || !this._testFailureOnCard()) ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
                     <button @click=${this._handleTestAI} ?disabled=${this.aiTesting} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 disabled:opacity-50">Test connection</button>
                     <button @click=${this._handleSaveProvider} ?disabled=${this.aiSaving} class="bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Save provider</button>
                 </div>
@@ -253,8 +279,18 @@ export class TechAdminPage extends LitElement {
         `;
     }
 
+    /** A failed test whose refusal the reloaded card already says: no red line repeats it. */
+    private _testFailureOnCard(): boolean {
+        return this.aiSettings?.test_status === 'refused' || this.aiSettings?.test_status === 'failed';
+    }
+
     private async _handleDeleteAIKey() {
-        if (!confirm('Remove the admin-configured API key? If an environment variable is set, it will be used as fallback.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured API key?',
+            body: 'If an environment variable is set, it will be used as fallback.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteAIKey();
             this.aiSuccess = 'Admin API key removed.';
@@ -295,7 +331,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeleteORSKey() {
-        if (!confirm('Remove the admin-configured OpenRouteService key? If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.')) return;
+        if (!await confirmDialog({
+            title: 'Remove the admin-configured OpenRouteService key?',
+            body: 'If an environment variable is set, it will be used as fallback; otherwise routing reverts to mock distances.',
+            confirmLabel: 'Remove key',
+            tone: 'danger',
+        })) return;
         try {
             await techAdminService.deleteORSKey();
             this.routingSuccess = 'Admin routing key removed.';
@@ -316,7 +357,7 @@ export class TechAdminPage extends LitElement {
             this.readiness = null;
             this.readinessError = err instanceof Error ? err.message : 'Readiness probe unreachable';
         } finally {
-            this.readinessCheckedAt = new Date().toLocaleTimeString();
+            this.readinessCheckedAt = formatTime(new Date());
             this.readinessLoading = false;
         }
     };
@@ -348,7 +389,12 @@ export class TechAdminPage extends LitElement {
     }
 
     private async _handleDeletePartner(id: string) {
-        if (!confirm('Are you sure you want to remove this EDI partner? This will disconnect their catalog sync.')) return;
+        if (!await confirmDialog({
+            title: 'Remove this EDI partner?',
+            body: 'This disconnects their catalog sync and cannot be undone.',
+            confirmLabel: 'Remove partner',
+            tone: 'danger',
+        })) return;
         try {
             this.ediError = null;
             await ediService.deletePartner(id);
@@ -534,9 +580,9 @@ export class TechAdminPage extends LitElement {
                                 <tr class="hover:bg-white/5 transition-colors group">
                                     <td class="px-4 py-3 font-medium text-white">${key.name}</td>
                                     <td class="px-4 py-3 font-mono text-slate-400">${key.prefix}...</td>
-                                    <td class="px-4 py-3 text-slate-400">${new Date(key.created_at).toLocaleDateString()}</td>
+                                    <td class="px-4 py-3 text-slate-400">${formatDate(key.created_at)}</td>
                                     <td class="px-4 py-3 text-slate-400">
-                                        ${key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : 'Never'}
+                                        ${key.last_used_at ? formatDate(key.last_used_at) : 'Never'}
                                     </td>
                                     <td class="px-4 py-3">
                                         ${key.revoked_at
@@ -592,16 +638,16 @@ export class TechAdminPage extends LitElement {
                         AI Provider
                     </h2>
                     <p class="text-slate-400 text-sm mt-1">Choose the provider and enter its key; the chosen provider's key powers all AI features across the ERP. OpenRouter can point at a self-hosted, OpenAI-compatible endpoint.</p>
-                    <p class="text-sm text-slate-300 mt-2" data-testid="ai-status-line">${aiStatusLine(this.aiSettings)}</p>
+                    <p class="text-sm text-slate-300 mt-2" data-testid="ai-status-line">${aiLeadLine(this.aiSettings)}</p>
                 </div>
 
                 ${this._renderProviderCard()}
 
-                <div class="${cn('border rounded-lg p-6', this.aiSettings?.configured ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
+                <div class="${cn('border rounded-lg p-6', aiIsOn(this.aiSettings) ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-amber-500/5 border-amber-500/20')}">
                     <div class="flex items-start justify-between">
                         <div class="flex items-start gap-4">
-                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', this.aiSettings?.configured ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
-                                ${this.aiSettings?.configured ? icon(Check, 20) : icon(AlertCircle, 20)}
+                            <div class="${cn('w-10 h-10 rounded-lg flex items-center justify-center', aiIsOn(this.aiSettings) ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400')}">
+                                ${aiIsOn(this.aiSettings) ? icon(Check, 20) : icon(AlertCircle, 20)}
                             </div>
                             <div>
                                 <h3 class="text-white font-medium">
@@ -612,6 +658,7 @@ export class TechAdminPage extends LitElement {
                                         <p>Provider: <span class="text-white">${providerLabel(savedProvider)}</span>${isAnthropic ? html`, model <span class="text-white">${modelLabel(this.aiSettings.model)}</span>` : nothing}</p>
                                         <p>Key: <code class="text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded text-xs">${isAnthropic ? this.aiSettings.anthropic_key_hint : this.aiSettings.key_hint}</code></p>
                                         <p>Source: <span class="${cn('text-xs font-medium px-2 py-0.5 rounded', this.aiSettings.source === 'admin' ? 'bg-violet-500/15 text-violet-400' : 'bg-zinc-500/15 text-zinc-400')}">${this.aiSettings.source === 'admin' ? 'Admin configured' : 'Environment variable'}</span></p>
+                                        ${this.aiSettings.test_status === 'refused' || this.aiSettings.test_status === 'failed' ? html`<p class="text-amber-400" data-testid="ai-test-message">${this.aiSettings.test_message}</p>` : nothing}
                                         ${this.aiSettings.base_url && !isAnthropic ? html`<p>Base URL: <code class="text-blueprint-blue bg-blueprint-blue/10 px-1.5 py-0.5 rounded text-xs">${this.aiSettings.base_url}</code></p>` : nothing}
                                     </div>
                                 ` : html`<p class="text-sm text-slate-400 mt-1">${aiStatusLine(this.aiSettings)}</p>`}
@@ -671,9 +718,9 @@ export class TechAdminPage extends LitElement {
                     <h3 class="text-sm font-medium text-slate-400 uppercase tracking-wider mb-4">Features Powered by AI</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         ${features.map((f) => html`
-                            <div class="${cn('border rounded-lg p-4 transition-colors', this.aiSettings?.configured ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
+                            <div class="${cn('border rounded-lg p-4 transition-colors', aiIsOn(this.aiSettings) ? 'bg-slate-steel border-white/5' : 'bg-slate-steel/50 border-white/5 opacity-60')}">
                                 <div class="flex items-center gap-2 mb-2">
-                                    ${icon(f.iconData, 16, cn('w-4 h-4', this.aiSettings?.configured ? 'text-violet-400' : 'text-slate-600'))}
+                                    ${icon(f.iconData, 16, cn('w-4 h-4', aiIsOn(this.aiSettings) ? 'text-violet-400' : 'text-slate-600'))}
                                     <span class="text-white text-sm font-medium">${f.name}</span>
                                 </div>
                                 <p class="text-xs text-slate-500">${f.description}</p>

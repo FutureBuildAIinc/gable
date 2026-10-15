@@ -4,7 +4,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './CreditMemoList'
 import type { GableCreditMemoList } from './CreditMemoList'
-import { mountAsync, text, flush } from '../../test/dom'
+import { mountAsync, text, flush, chooseOption } from '../../test/dom'
 import { creditMemoSummary, routedFetch } from '../../test/salesFixtures'
 
 describe('gable-credit-memo-list', () => {
@@ -50,9 +50,8 @@ describe('gable-credit-memo-list', () => {
     await el.updateComplete
     let last = state.calls.filter(c => c.url.pathname === '/api/v1/credit-memos').pop()!
     expect(last.url.searchParams.get('cursor')).toBe('more')
-    const select = el.querySelector('select[aria-label="Status"]') as HTMLSelectElement
-    select.value = 'draft'
-    select.dispatchEvent(new Event('change'))
+    const select = el.querySelector('gable-select[label="Status"]') as HTMLElement & { value: string }
+    await chooseOption(select, 'draft')
     await flush()
     await el.updateComplete
     last = state.calls.filter(c => c.url.pathname === '/api/v1/credit-memos').pop()!

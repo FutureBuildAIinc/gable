@@ -12,6 +12,7 @@ import { MapPin, Box, FileText, ArrowRight, ArrowUp, ArrowDown, RotateCcw, Navig
 import type { Delivery, RouteStatus } from '../../types/delivery';
 import { deliveryService } from '../../services/deliveryService';
 import { ToastService } from '../../lib/toast-service';
+import { formatTime } from '../../lib/dates.ts';
 
 @customElement('gable-delivery-list')
 export class GableDeliveryList extends LitElement {
@@ -278,7 +279,7 @@ export class GableDeliveryList extends LitElement {
                   ${delivery.estimated_arrival ? html`
                     <span class="flex items-center gap-1.5 text-sky-400">
                       ${icon(Clock, 12)}
-                      ETA ${new Date(delivery.estimated_arrival).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      ETA ${formatTime(delivery.estimated_arrival)}
                     </span>
                   ` : nothing}
                 </div>

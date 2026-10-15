@@ -859,7 +859,7 @@ func inventoryGroups() []groupDef {
 				method: "POST",
 				path:   "/api/v1/inventory/adjust",
 				body: map[string]any{
-					"product_id": "{productSheet}", "quantity": 25,
+					"product_id": "{productSheet}", "location_id": "{branch}", "quantity": 25,
 					"reason": "golden characterisation", "is_delta": true,
 				},
 			},

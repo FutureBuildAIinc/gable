@@ -2,11 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents, formatDay } from '../../lib/utils.ts';
+import { formatDate } from '../../lib/dates.ts';
 import { CustomerService } from '../../services/CustomerService.ts';
 import { ApiError, apiErrorMessage, fieldErrorMap } from '../../services/apiError.ts';
 import { keyed } from 'lit/directives/keyed.js';
@@ -367,13 +369,11 @@ export class GableAccountDetail extends LitElement {
                     <form @submit=${this.submitApply} class="space-y-4">
                         <div>
                             <label class="block text-sm font-medium text-zinc-400 mb-1">Invoice</label>
-                            <select
+                            <gable-select
                                 .value=${this.applyInvoiceId}
+                                .options=${this.openInvoices.map(i => ({ value: i.id, label: `${i.number} (${formatCents(i.open_cents)} open)` }))}
                                 @change=${(e: Event) => this.applyInvoiceId = (e.target as HTMLSelectElement).value}
-                                class="w-full bg-zinc-950 border border-zinc-700 rounded px-3 py-2 text-zinc-100"
-                            >
-                                ${this.openInvoices.map(i => html`<option value=${i.id}>${i.number} (${formatCents(i.open_cents)} open)</option>`)}
-                            </select>
+                            ></gable-select>
                             ${invoice ? html`<p class="mt-1 text-xs text-zinc-500">${invoice.number} has ${formatCents(invoice.open_cents)} open</p>` : nothing}
                         </div>
                         <div>
@@ -651,7 +651,7 @@ export class GableAccountDetail extends LitElement {
                                         ` : this.transactions.map(txn => html`
                                             <tr class="group hover:bg-white/5 transition-colors">
                                                 <td class="px-4 py-3 font-mono text-zinc-400">
-                                                    ${new Date(txn.created_at).toLocaleDateString()}
+                                                    ${formatDate(txn.created_at)}
                                                 </td>
                                                 <td class="px-4 py-3">
                                                     ${this.renderTxnTypeBadge(txn.type)}
