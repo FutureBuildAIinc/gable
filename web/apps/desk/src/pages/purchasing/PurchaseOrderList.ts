@@ -102,6 +102,15 @@ export class PurchaseOrderList extends LitElement {
         return Math.round((r / denom) * 100);
     }
 
+    /**
+     * Reorder is per yard: each row is one product at one yard. When the rows
+     * span several yards (no yard chosen) each row names its yard, so two rows
+     * for one SKU are not read as a contradiction.
+     */
+    private get _alertsSpanYards(): boolean {
+        return new Set(this.alerts.map(a => a.branch_id)).size > 1;
+    }
+
     private async _handleGenerateReorders() {
         this.loading = true;
         try {
@@ -177,6 +186,9 @@ export class PurchaseOrderList extends LitElement {
                                         <div>
                                             <span class="font-mono text-white text-sm">${alert.sku}</span>
                                             <p class="text-xs text-zinc-400 mt-0.5">${alert.description}</p>
+                                            ${this._alertsSpanYards && alert.branch_name ? html`
+                                                <p class="text-xs text-zinc-500 mt-0.5" data-testid="reorder-yard">${alert.branch_name}</p>
+                                            ` : nothing}
                                         </div>
                                         <span class="text-amber-400 font-mono text-sm font-bold">
                                             -${formatQuantity(alert.deficit)}

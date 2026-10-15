@@ -5655,8 +5655,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List products below their reorder point
-         * @description The envelope; quantities are decimal strings. The rows carry the deficit only.
+         * List products at or below their reorder point, per yard
+         * @description The envelope; quantities are decimal strings. One row per product and yard, at or below the reorder point, the comparison of the low stock alert. With a branch header that yard only; with none, every yard in the caller's reach, each row naming its yard. The rows carry the deficit only.
          */
         get: operations["productReorderAlerts"];
         put?: never;
@@ -13364,7 +13364,15 @@ export interface components {
             stackable: boolean | null;
             geometry_source: string | null;
         };
+        /** @description One product at one yard at or below its reorder point (FROM-PRINCIPAL item 135 b). current_stock is that yard's sum: its own row, its zones and its bins; a company wide total never appears here and drives nothing. */
         ReorderAlert: {
+            /**
+             * Format: uuid
+             * @description The yard this row is for.
+             */
+            branch_id: string;
+            /** @description The yard's name (its code when it has none). */
+            branch_name: string;
             /** Format: uuid */
             product_id: string;
             sku: string;

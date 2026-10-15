@@ -2782,7 +2782,7 @@
       "status": 200,
       "content_type": "application/json",
       "body": {
-        "count": 1,
+        "count": 4,
         "status": "success"
       }
     }
@@ -2810,7 +2810,7 @@
       "content_type": "application/json",
       "body": {
         "MANUAL": 16,
-        "REORDER": 1
+        "REORDER": 4
       }
     }
   }
