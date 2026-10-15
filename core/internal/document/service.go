@@ -587,7 +587,7 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 	block(m, left, joinLines(fmt.Sprintf("From: %s", b.style.Day(st.From)), fmt.Sprintf("To: %s", b.style.Day(st.To))), 10)
 	aging := s.statementAging(ctx, st)
 
-	for _, c := range st.Currencies {
+	for ci, c := range st.Currencies {
 		m.AddRow(10, text.NewCol(12, "Currency: "+c.Currency, props.Text{Style: fontstyle.Bold, Top: 3}))
 		m.AddRow(8, text.NewCol(12, "Opening balance: "+b.style.Money(c.OpeningBalanceCents), props.Text{Size: 10}))
 		m.AddRow(8,
@@ -603,6 +603,11 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 				text.NewCol(2, b.style.Money(l.AmountCents), props.Text{Size: 9, Align: align.Right}),
 				text.NewCol(3, b.style.Money(l.BalanceAfterCents), props.Text{Size: 9, Align: align.Right}),
 			)
+		}
+		if ci == len(st.Currencies)-1 {
+			// the closing balance, the aging, any unapplied cash and open
+			// documents go with the foot: the last currency's closing group
+			m.keepTogether()
 		}
 		m.AddRow(10, text.NewCol(12, "Closing balance: "+b.style.Money(c.ClosingBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
 		if t := aging[c.Currency]; t != nil {
