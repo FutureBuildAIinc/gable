@@ -178,8 +178,12 @@ func (w *txWorld) invoice(total int64) uuid.UUID {
 		VALUES ($1, $2, $3, 'UNPAID', 'POS', $4, 'USD', $5::bigint::numeric / 100, $5::bigint::numeric / 100,
 			0, 0, $5::bigint::numeric / 100, CURRENT_DATE + 30, CURRENT_DATE - 5)`, id, w.customer, w.branch, "IN-"+id.String()[:8], total)
 	err := w.db.RunInTx(context.Background(), func(ctx context.Context) error {
-		_, e := w.core.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: id, CustomerID: w.customer, Number: "IN-" + id.String()[:8],
-			Currency: "USD", TotalCents: total, On: time.Now(), Actor: "u-test",
+		day, e := w.core.LocalDate(ctx, w.branch, time.Now())
+		if e != nil {
+			return e
+		}
+		_, e = w.core.PostInvoice(ctx, account.PostInvoiceIn{InvoiceID: id, CustomerID: w.customer, Number: "IN-" + id.String()[:8],
+			Currency: "USD", TotalCents: total, On: day, Actor: "u-test",
 			Legs: []gl.Leg{{AccountCode: "4010", Description: "Sales Revenue", Credit: total}}})
 		return e
 	})
@@ -215,8 +219,12 @@ func (w *txWorld) memo(credit int64) uuid.UUID {
 			total_amount, status, memo_date)
 		VALUES ($1, $2, $3, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, id, w.customer, w.branch)
 	err := w.db.RunInTx(context.Background(), func(ctx context.Context) error {
-		_, e := w.core.PostCreditMemo(ctx, account.PostCreditMemoIn{MemoID: id, CustomerID: w.customer, Number: "CM-" + id.String()[:8],
-			Currency: "USD", MemoDate: time.Now(), SubtotalCents: -credit, TotalCents: -credit, Actor: "u-test",
+		day, e := w.core.LocalDate(ctx, w.branch, time.Now())
+		if e != nil {
+			return e
+		}
+		_, e = w.core.PostCreditMemo(ctx, account.PostCreditMemoIn{MemoID: id, CustomerID: w.customer, Number: "CM-" + id.String()[:8],
+			Currency: "USD", MemoDate: day, SubtotalCents: -credit, TotalCents: -credit, Actor: "u-test",
 			Legs: []gl.Leg{{AccountCode: "4010", Description: "Sales Revenue", Debit: credit}}})
 		return e
 	})
@@ -229,7 +237,11 @@ func (w *txWorld) memo(credit int64) uuid.UUID {
 func (w *txWorld) application(pay, inv uuid.UUID, cents int64) uuid.UUID {
 	w.t.Helper()
 	err := w.db.RunInTx(context.Background(), func(ctx context.Context) error {
-		_, e := w.core.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: inv, AmountCents: cents}}, On: time.Now(), Actor: "u-test"})
+		day, e := w.core.LocalDate(ctx, w.branch, time.Now())
+		if e != nil {
+			return e
+		}
+		_, e = w.core.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: inv, AmountCents: cents}}, On: day, Actor: "u-test"})
 		return e
 	})
 	if err != nil {

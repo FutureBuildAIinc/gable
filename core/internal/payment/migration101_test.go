@@ -1001,7 +1001,11 @@ func TestMigration101_MigratedApplicationsReverse(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			_, err = svc.Reverse(ctx, account.ReverseIn{ApplicationID: id, Reason: "migrated, undone", Actor: "u-finance", On: time.Now()})
+			var day time.Time
+			if err := db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+testutil.BranchDaySQL).Scan(&day); err != nil {
+				return err
+			}
+			_, err = svc.Reverse(ctx, account.ReverseIn{ApplicationID: id, Reason: "migrated, undone", Actor: "u-finance", On: day})
 			return err
 		})
 		if err != nil {

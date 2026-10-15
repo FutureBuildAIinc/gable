@@ -58,7 +58,11 @@ func outstandingARLeg(t *testing.T) {
 	yardA, yardB, customer := uuid.New(), uuid.New(), uuid.New()
 	for _, b := range []uuid.UUID{yardA, yardB} {
 		if _, err := db.Pool.Exec(ctx,
-			`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, b, "OAR-"+b.String()[:8]); err != nil {
+			// the yards sit in the default branch's zone: the AR core dates a
+			// payment by the payment's own branch's day
+			`INSERT INTO locations (id, type, code, timezone) VALUES ($1, 'BRANCH', $2,
+				COALESCE((SELECT l.timezone FROM locations l WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))`,
+			b, "OAR-"+b.String()[:8]); err != nil {
 			t.Fatalf("seed yard: %v", err)
 		}
 	}

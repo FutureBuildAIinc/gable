@@ -86,7 +86,8 @@ func TestARStatementDatesMemoRefundReversalAndLegacyRows(t *testing.T) {
 	})
 	// a legacy row: no source kind, no document, its stamp is its day
 	w.exec(`INSERT INTO customer_transactions (id, customer_id, type, amount, balance_after, description, currency, created_at)
-		VALUES ($1, $2, 'ADJUSTMENT', 0, 0, 'legacy', 'USD', $3::date + TIME '12:00')`, uuid.New(), w.customerID, date(today.AddDate(0, 0, -5)))
+		VALUES ($1, $2, 'ADJUSTMENT', 0, 0, 'legacy', 'USD', ($3::date + TIME '12:00') AT TIME ZONE
+			COALESCE((SELECT l.timezone FROM locations l WHERE l.id = `+arBranch+`), 'UTC'))`, uuid.New(), w.customerID, date(today.AddDate(0, 0, -5)))
 	// every stamp is the present, as the acts write them
 	w.exec(`UPDATE customer_transactions SET created_at = clock_timestamp() WHERE customer_id = $1 AND description <> 'legacy'`, w.customerID)
 
