@@ -113,6 +113,7 @@ describe('payPlan, the one rule for splits', () => {
       expect(plan.limitCents).toBe(8650);
     }
     const split = payPlan(8650, [t('card', 4000)], t('check', 5000));
+    expect(split.ok).toBe(false);
     if (!split.ok) expect(split.limitCents).toBe(4650);
   });
 });
