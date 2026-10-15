@@ -282,7 +282,8 @@ func (c *collector) AddRow(rowHeight float64, cols ...core.Col) core.Row {
 func (c *collector) keepTogether() { c.keepFrom = len(c.rows) }
 
 // maxGroupHeight is the tallest closing group moved to a page of its own; a
-// taller one (a page's worth of rows) is written as it comes.
+// taller one (a page's worth of rows) is written as it comes, with its last row
+// and the foot kept together.
 const maxGroupHeight = 200.0
 
 // groupSlack is the room kept beyond a group's own height when asking whether
@@ -304,11 +305,20 @@ func (c *collector) flush() {
 	if start < 0 {
 		return
 	}
-	c.Maroto.AddRows(c.rows[:start]...)
 	tail := 0.0
 	for _, h := range c.heights[start:] {
 		tail += h
 	}
+	// a marked group taller than the cap runs as it comes, but its last row
+	// stays with the foot: fall back to the default group
+	if tail > maxGroupHeight && c.footFrom > start {
+		start = c.footFrom - 1
+		tail = 0
+		for _, h := range c.heights[start:] {
+			tail += h
+		}
+	}
+	c.Maroto.AddRows(c.rows[:start]...)
 	if tail <= maxGroupHeight && !c.Maroto.FitlnCurrentPage(tail+groupSlack) {
 		c.Maroto.AddPages(page.New())
 	}
@@ -606,7 +616,11 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 		}
 		if ci == len(st.Currencies)-1 {
 			// the closing balance, the aging, any unapplied cash and open
-			// documents go with the foot: the last currency's closing group
+			// documents go with the foot: the last currency's closing group.
+			// Earlier currencies of a multi currency statement are not
+			// marked and still break where the page ends. A group past the
+			// cap (about 15 open documents) falls back to the last row with
+			// the foot.
 			m.keepTogether()
 		}
 		m.AddRow(10, text.NewCol(12, "Closing balance: "+b.style.Money(c.ClosingBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
