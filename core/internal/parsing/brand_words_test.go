@@ -12,7 +12,7 @@ import (
 // brandWords are real brands the intake's sample list and its tests never
 // carry: a sample line is named for what the product is.
 var brandWords = []string{
-	"quikrete", "tyvek", "simpson", "strong-tie", "proframe angle", "trueline",
+	"quikrete", "tyvek", "simpson", "strong-tie", "proframe", "trueline",
 	"hardie", "romex", "dryline", "firecode",
 }
 
@@ -32,6 +32,18 @@ func TestSampleListAndItsTestsHoldNoBrandWord(t *testing.T) {
 		for _, w := range brandWords {
 			if strings.Contains(lower, w) {
 				t.Errorf("%s holds the brand word %q", name, w)
+			}
+		}
+	}
+}
+
+// FROM-PRINCIPAL 135 a: the sample list names no maker's model designation.
+func TestSampleListHoldsNoModelDesignation(t *testing.T) {
+	lower := strings.ToLower(generateFallbackMaterialList())
+	for _, d := range []string{"a35", "h1", "hd88", "lus28", "lus210", "h10a", "tp35", "phd2", "cs16"} {
+		for _, f := range strings.FieldsFunc(lower, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') }) {
+			if f == d {
+				t.Errorf("the sample list holds the designation %q", d)
 			}
 		}
 	}

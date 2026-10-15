@@ -92,7 +92,7 @@ var bannedSeedWords = []string{
 	"simpson", "strong-tie", "hardie", "cemtrim", "channellock", "romex",
 	"dryline", "firecode", "brownwood", "turtle", "gable.com",
 	"nordstrom", "kellogg", "zellweger",
-	"quikrete", "tyvek", "proframe angle",
+	"quikrete", "tyvek", "proframe",
 	"simp-", "ice & water shield", "speed square",
 }
 
@@ -901,6 +901,69 @@ func getJSON(t *testing.T, mux http.Handler, path string, dst any) {
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), dst); err != nil {
 		t.Fatalf("GET %s: %v", path, err)
+	}
+}
+
+// removedDesignations are one maker's model designations the demo copied
+// (FROM-PRINCIPAL item 135 a). A product is named for its kind and size, so no
+// whole token of these appears in the import, the base seed, the picture keys
+// or the sample list, in any case.
+var removedDesignations = []string{
+	"h1", "h2.5", "hd88", "a35", "lus28", "lus210", "h10a", "tp35", "phd2", "cs16",
+	"ht1", "ht2", "tie-h1",
+}
+
+// holdsDesignation reports the first removed designation that appears in text
+// as a whole token (the characters around it are not letters or digits).
+func holdsDesignation(text string) (string, bool) {
+	lower := strings.ToLower(text)
+	for _, d := range removedDesignations {
+		for from := 0; ; {
+			i := strings.Index(lower[from:], d)
+			if i < 0 {
+				break
+			}
+			start, end := from+i, from+i+len(d)
+			isWord := func(b byte) bool { return b >= 'a' && b <= 'z' || b >= '0' && b <= '9' }
+			if (start == 0 || !isWord(lower[start-1])) && (end == len(lower) || !isWord(lower[end])) {
+				return d, true
+			}
+			from = start + 1
+		}
+	}
+	return "", false
+}
+
+// TestSeedDataHoldsNoModelDesignation reads the import, the base seed's own
+// source and its picture keys for a removed designation as a whole token.
+func TestSeedDataHoldsNoModelDesignation(t *testing.T) {
+	sources := map[string]string{
+		"catalog": string(catalogData), "vendors": string(vendorsData), "vendorkeys": string(vendorKeysData),
+	}
+	for _, name := range []string{"seed.go", "product_pictures.go", "dispatch_day.go", "demodata.go"} {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[name] = string(data)
+	}
+	for name, text := range sources {
+		if d, ok := holdsDesignation(text); ok {
+			t.Errorf("%s holds the model designation %q", name, d)
+		}
+	}
+}
+
+// TestSeedKeysAndVendorsNameNoProFrame: "proframe" in any field of the import,
+// the keys and the email domains (item 134), not only in descriptions.
+func TestSeedKeysAndVendorsNameNoProFrame(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"catalog": catalogData, "vendors": vendorsData, "vendorkeys": vendorKeysData,
+		"customers": customersData, "staff": staffData, "categories": categoriesData,
+	} {
+		if strings.Contains(strings.ToLower(string(data)), "proframe") {
+			t.Errorf("%s names ProFrame", name)
+		}
 	}
 }
 
