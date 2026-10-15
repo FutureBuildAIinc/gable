@@ -5,7 +5,7 @@
       "method": "POST",
       "path": "/api/portal/v1/login",
       "body": {
-        "email": "demo@kelbrook.example",
+        "email": "demo@tarnwick.example",
         "password": "password"
       }
     },
@@ -27,9 +27,9 @@
         "user": {
           "created_at": "<ts+0d>",
           "customer_id": "<id-2>",
-          "email": "demo@kelbrook.example",
+          "email": "demo@tarnwick.example",
           "id": "<id-3>",
-          "name": "Sam Kelbrook",
+          "name": "Sam Tarnwick",
           "role": "Admin",
           "status": "Active",
           "updated_at": "<ts+0d>"
@@ -161,7 +161,7 @@
         "created_at": "<ts+0d>",
         "currency": "USD",
         "customer_id": "<id-2>",
-        "customer_name": "Kelbrook Construction",
+        "customer_name": "Tarnwick Construction",
         "customer_po": null,
         "delivery_type": "pickup",
         "deposit_unapplied_cents": 0,
@@ -263,7 +263,7 @@
             "created_at": "<ts+0d>",
             "currency": "USD",
             "customer_id": "<id-2>",
-            "customer_name": "Kelbrook Construction",
+            "customer_name": "Tarnwick Construction",
             "delivery_id": null,
             "delivery_type": "pickup",
             "discount_due_date": null,
@@ -412,7 +412,7 @@
           {
             "address": "1885 Formwork Rd, Kelowna BC",
             "created_at": "<ts+0d>",
-            "customer_name": "Kelbrook Construction",
+            "customer_name": "Tarnwick Construction",
             "delivery_instructions": null,
             "estimated_arrival": null,
             "id": "<id-21>",

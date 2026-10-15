@@ -324,7 +324,7 @@ test.describe('Invoices and credit memos', () => {
   test('the portal lists the customer invoices with their numbers and the overdue badge', async ({ page }) => {
     // The seeded portal user (the repository seed documents the demo password).
     await page.goto('/portal/login');
-    await page.locator('#email').fill('demo@kelbrook.example');
+    await page.locator('#email').fill('demo@tarnwick.example');
     await page.locator('#password').fill('password');
     await page.locator('form button[type="submit"]').click();
     await expect(page).toHaveURL(/\/portal$/);

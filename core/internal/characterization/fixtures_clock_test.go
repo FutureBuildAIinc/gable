@@ -214,15 +214,15 @@ var dispatchRecencyOrder = []string{
 	"Peachland Framing Crew",
 	"Summerland Roofers",
 	"Snowfern Cabin Co",
-	"Kelbrook Construction",
+	"Tarnwick Construction",
 	"Larchwood Custom",
 	"Westbank Decks & Fence",
 	"Glenmore Heritage Reno",
 	"Vernon Valley Construction",
 	"Okanagan DIY Owner",
-	"Oakvale Builders",
+	"Alderfold Builders",
 	"Stonehollow Renos",
-	"Okanagan Homes Ltd",
+	"Thornmere Homes Ltd",
 	"Knox Mountain Landscapes",
 }
 

@@ -239,9 +239,9 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 	// an open quote there and the customer_branches row with its audit row, the
 	// shape the link follows trade rule writes.
 	crossYard := []struct{ Customer, Yard, SKU string }{
-		{"Kelbrook Construction", "WK", "LUM-2610-PREM"},
-		{"Okanagan Homes Ltd", "LK", "LUM-2612-PREM"},
-		{"Oakvale Builders", "KEL-MAIN", "LUM-448-PT"},
+		{"Tarnwick Construction", "WK", "LUM-2610-PREM"},
+		{"Thornmere Homes Ltd", "LK", "LUM-2612-PREM"},
+		{"Alderfold Builders", "KEL-MAIN", "LUM-448-PT"},
 	}
 	for _, c := range crossYard {
 		cid, ok := customerIDs[c.Customer]

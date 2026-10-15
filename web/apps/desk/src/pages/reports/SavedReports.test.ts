@@ -82,7 +82,7 @@ function stubFetch(execution: unknown, schedules: unknown[] = []): Stub {
       return jsonResponse({ schedules, execution })
     }
     if (url.includes('/reporting/saved') && url.endsWith('/run')) {
-      return jsonResponse([{ customer: 'Kelbrook Homes', total: 1200 }])
+      return jsonResponse([{ customer: 'Tarnwick Homes', total: 1200 }])
     }
     if (url.includes('/reporting/saved')) {
       return jsonResponse(SAVED_REPORTS)

@@ -264,7 +264,7 @@ type dispatchStop struct {
 //     24 000 lb flatbeds, the 18 000 lb boom truck and the 16 000 lb box truck.
 //     Stop count, not weight, is the robust lever here; see (3) for why.
 //
-//  2. ONE TRUCK STILL FILLS EARLY, ON WEIGHT. Okanagan Homes' drywall drop
+//  2. ONE TRUCK STILL FILLS EARLY, ON WEIGHT. Thornmere Homes' drywall drop
 //     (8 090 lb) does not fit on the boom truck behind Lake Country and
 //     Predator Ridge (80% of 18 000 = 14 400 lb), so it rolls to the box truck
 //     and takes Knox Mountain with it. That is a real capacity decision in the
@@ -382,7 +382,7 @@ var dispatchStops = []dispatchStop{
 		},
 	},
 	{
-		Customer: "Kelbrook Construction", Lat: 49.8990, Lng: -119.3830,
+		Customer: "Tarnwick Construction", Lat: 49.8990, Lng: -119.3830,
 		Instructions: "Framing package — stage on the north side, forklift on site.",
 		Lines: []dispatchLine{
 			{"LUM-248-PREM", 150},
@@ -432,7 +432,7 @@ var dispatchStops = []dispatchStop{
 	// --- North: the boom truck (18 000 lb) takes the two timber/deck stops -----
 	// Small timber drop: it rides on top and the 6x6 course seals the load.
 	{
-		Customer: "Oakvale Builders", Lat: 50.0503, Lng: -119.4098,
+		Customer: "Alderfold Builders", Lat: 50.0503, Lng: -119.4098,
 		Instructions: "Cottage build — timbers off first, keep them off the grass.",
 		Lines: []dispatchLine{
 			{"LUM-6612-PT", 12}, // non-stackable: seals the top tier
@@ -456,10 +456,10 @@ var dispatchStops = []dispatchStop{
 	},
 
 	// --- The box truck (16 000 lb) picks up what the boom truck could not ------
-	// Okanagan Homes is the heaviest stop of the day: it overflows the boom
+	// Thornmere Homes is the heaviest stop of the day: it overflows the boom
 	// truck's 14 400 lb working cap and pulls the box truck into the plan.
 	{
-		Customer: "Okanagan Homes Ltd", Lat: 49.9204, Lng: -119.4585,
+		Customer: "Thornmere Homes Ltd", Lat: 49.9204, Lng: -119.4585,
 		Instructions: "Building B drywall + insulation — loading bay, liftgate required.",
 		Lines: []dispatchLine{
 			{"DW-12-REG", 64},

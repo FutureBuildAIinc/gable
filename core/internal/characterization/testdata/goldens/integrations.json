@@ -695,7 +695,7 @@
         {
           "address": "1885 Formwork Rd, Kelowna BC",
           "branch_id": "<id-1>",
-          "customer_name": "Kelbrook Construction",
+          "customer_name": "Tarnwick Construction",
           "id": "<id-48>",
           "latitude": 49.899,
           "lines": [
@@ -743,7 +743,7 @@
         {
           "address": "1885 Formwork Rd, Kelowna BC",
           "branch_id": "<id-1>",
-          "customer_name": "Kelbrook Construction",
+          "customer_name": "Tarnwick Construction",
           "id": "<id-51>",
           "lines": [
             {
@@ -813,7 +813,7 @@
         {
           "address": "2100 Joist Rd, Lake Country BC",
           "branch_id": "<id-2>",
-          "customer_name": "Oakvale Builders",
+          "customer_name": "Alderfold Builders",
           "id": "<id-60>",
           "latitude": 50.0503,
           "lines": [
@@ -1095,7 +1095,7 @@
         {
           "address": "9000 Blueprint Pkwy, Kelowna BC",
           "branch_id": "<id-1>",
-          "customer_name": "Okanagan Homes Ltd",
+          "customer_name": "Thornmere Homes Ltd",
           "id": "<id-75>",
           "latitude": 49.9204,
           "lines": [

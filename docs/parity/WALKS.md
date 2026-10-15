@@ -70,12 +70,12 @@ offer and the server enforces no role; a real dealer signs in through its identi
    the desk and Point of Sale only, and the header names Jordan Pike, Cashier.
 2. **A counter sale on account (Jordan Pike).** Open Point of Sale: the Counter opens on Kelowna Main Yard's register,
    `REG-01`, with the till closed: nothing can be rung until it opens. Open Till with a float of $200.00: the till's
-   sale opens, `POS-000001`. In the Customer panel find "Kelbrook": Kelbrook Construction shows its credit available and
+   sale opens, `POS-000001`. In the Customer panel find "Tarnwick": Tarnwick Construction shows its credit available and
    its open balance; enter a purchase order (`KB-2219`) and pick the job Glenmore Lofts. Type a quantity of 12, search
    `LUM-248-PREM` (the result shows the stock on hand at this yard) and press Enter: twelve 2x4x8 SPF Premium at the
    customer's price. Then 4 of `OSB-12` (7/16 OSB 4x8). Choose Charge to account and Pay: "Sale POS-000001 complete",
    and the customer's credit available drops by the sale's total. The completed sale stays on screen, with Void and
-   Return, until New Sale. The sale posts an invoice to Kelbrook's account carrying the purchase order; Robin sees it in
+   Return, until New Sale. The sale posts an invoice to Tarnwick's account carrying the purchase order; Robin sees it in
    step 7.
 3. **A quote from a material list (Avery Brooks).** Open Quotes and the Quote Builder. Pick the customer. Open "From a
    material list", paste a list (for example `24 2x4x8 SPF`, `6 sheets 7/16 OSB`, `10 boxes 3 in deck screws`, `4
@@ -100,8 +100,8 @@ offer and the server enforces no role; a real dealer signs in through its identi
    tab: Kelowna Main Yard's stock. Switch the yard in the header to West Kelowna Satellite, then to Lake Country Outpost:
    the tab shows each yard's own stock.
 7. **AR and a statement (Robin Diaz).** Open Reporting and AR Aging: each Kelowna Main Yard customer's open balance by
-   age, with Kelbrook Construction carrying the counter's charge. Switch the yard in the header to Lake Country Outpost:
-   Snowfern Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
+   age, with Tarnwick Construction carrying the counter's charge. Switch the yard in the header to Lake Country Outpost:
+   Snowfern Cabin Co carries its Lake Country charge there. Open Customer Statement for Tarnwick Construction: each
    invoice and payment in the period with the running balance, and Print for the dealer's statement.
 8. **The manager's view (Morgan Hale).** Open the Dashboard: active orders, pending dispatch, outstanding AR (the
    counter's account charges included), the revenue trend over the recent days, the top customers, the stock alerts
@@ -176,7 +176,7 @@ Steps:
    Fernbank Hardware Distribution with two lines and nothing received, ready to receive.
 6. Credit: the customer directory shows `Glenmore Heritage Reno` over its credit limit (orders land on hold) and
    `Quillfield Formwork Ltd` close to its limit (a limit of $20,000.00 and $18,816.00 open).
-7. AR: the AR aging and `Kelbrook Construction`'s statement have open invoices at more than one yard.
+7. AR: the AR aging and `Tarnwick Construction`'s statement have open invoices at more than one yard.
 
 ### The cross yard sale (M1, ruling A)
 

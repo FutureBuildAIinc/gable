@@ -648,7 +648,7 @@ func Run() {
 	fmt.Println("Seed: Price Levels")
 
 	// =========================================================================
-	// 5. CUSTOMERS — 13 Okanagan accounts headlined by Kelbrook Construction.
+	// 5. CUSTOMERS — 13 Okanagan accounts headlined by Tarnwick Construction.
 	//
 	// Fixture rules for anything address- or contact-shaped in this file:
 	//   - Street NAMES are invented, in the trade-flavoured style used by the
@@ -664,9 +664,9 @@ func Run() {
 	//     IANA-reserved example.com. Never a real consumer ISP or provider.
 	// =========================================================================
 	customers := []demoCustomer{
-		{"Kelbrook Construction", "KELBROOK-001", "billing@kelbrook.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Larchwood Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
-		{"Okanagan Homes Ltd", "OKH-001", "ap@okanaganhomes.example", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
-		{"Oakvale Builders", "OVB-001", "admin@oakvalebuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
+		{"Tarnwick Construction", "TARNWICK-001", "billing@tarnwick.example", "250-555-2100", "1885 Formwork Rd, Kelowna BC", "GOLD", "NET30", "Contractor", 50000, kelMainID, []string{"Larchwood Custom Home", "Glenmore Lofts", "Knox Park Pavilion"}},
+		{"Thornmere Homes Ltd", "THH-001", "ap@thornmerehomes.example", "250-555-2400", "9000 Blueprint Pkwy, Kelowna BC", "PLATINUM", "NET45", "VIP Builder", 150000, kelMainID, []string{"Sage Creek Hotel Reno", "Lakeshore Apts Bld A", "Lakeshore Apts Bld B"}},
+		{"Alderfold Builders", "AFB-001", "admin@alderfoldbuilders.example", "250-555-2200", "2100 Joist Rd, Lake Country BC", "GOLD", "NET30", "Contractor", 80000, lkID, []string{"Wood Lake Cottage", "Carrs Landing Build"}},
 		{"Stonehollow Renos", "SHR-001", "office@stonehollowrenos.example", "250-555-2300", "1525 Trowel Dr, Vernon BC", "SILVER", "NET30", "Contractor", 25000, wkID, []string{"McKenzie Deck", "Kitchen Remodel - Glenmore", "Garage Addition - Rutland"}},
 		{"Snowfern Cabin Co", "SFC-001", "jim@snowferncabins.example", "250-555-2800", "5315 Snowload Way, Big White BC", "SILVER", "NET30", "Contractor", 15000, kelMainID, []string{"Black Forest Lodge Trim", "Whitefoot Library Shelves"}},
 		{"Larchwood Custom", "LWC-001", "invoices@larchwoodcustom.example", "250-555-2500", "3200 Cornice Rd, West Kelowna BC", "PLATINUM", "NET30", "VIP Builder", 75000, wkID, []string{"Predator Ridge Estate Lot 44", "Predator Ridge Estate Lot 45", "Predator Ridge Estate Lot 46"}},
@@ -736,19 +736,19 @@ func Run() {
 		Price    float64
 	}
 	contracts := []contract{
-		{"Okanagan Homes Ltd", "LUM-248-PREM", 4.25},
-		{"Okanagan Homes Ltd", "LUM-2610-PREM", 7.80},
-		{"Okanagan Homes Ltd", "PLY-34-CDX", 30.00},
-		{"Okanagan Homes Ltd", "OSB-34-TG", 27.50},
-		{"Okanagan Homes Ltd", "DW-12-REG", 12.80},
+		{"Thornmere Homes Ltd", "LUM-248-PREM", 4.25},
+		{"Thornmere Homes Ltd", "LUM-2610-PREM", 7.80},
+		{"Thornmere Homes Ltd", "PLY-34-CDX", 30.00},
+		{"Thornmere Homes Ltd", "OSB-34-TG", 27.50},
+		{"Thornmere Homes Ltd", "DW-12-REG", 12.80},
 		{"Larchwood Custom", "LUM-248-PREM", 4.50},
 		{"Larchwood Custom", "LUM-2612-PREM", 9.50},
 		{"Larchwood Custom", "DR-INT-3680-6P", 78.00},
 		{"Larchwood Custom", "DR-EXT-3680-STL", 220.00},
 		{"Larchwood Custom", "MLD-BASE-MDF", 15.00},
-		{"Kelbrook Construction", "LUM-248-PREM", 4.75},
-		{"Kelbrook Construction", "NAIL-16D-50", 55.00},
-		{"Kelbrook Construction", "HANGER-26", 1.10},
+		{"Tarnwick Construction", "LUM-248-PREM", 4.75},
+		{"Tarnwick Construction", "NAIL-16D-50", 55.00},
+		{"Tarnwick Construction", "HANGER-26", 1.10},
 		{"Peachland Framing Crew", "LUM-248-PREM", 4.50},
 		{"Peachland Framing Crew", "PLY-34-CDX", 31.00},
 	}
@@ -791,14 +791,14 @@ func Run() {
 	// Salesperson-to-customer assignments.
 	custSalesperson := make(map[uuid.UUID]string)
 	spAssignments := map[string]string{
-		"Okanagan Homes Ltd":         "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
+		"Thornmere Homes Ltd":        "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
 		"Larchwood Custom":           "a1b2c3d4-0001-4000-8000-000000000001", // Heather Macdonald - top account
-		"Kelbrook Construction":      "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
+		"Tarnwick Construction":      "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
 		"Peachland Framing Crew":     "a1b2c3d4-0003-4000-8000-000000000003", // Priya Brar
 		"Glenmore Heritage Reno":     "a1b2c3d4-0006-4000-8000-000000000006", // Amanda Wong
 		"Vernon Valley Construction": "a1b2c3d4-0006-4000-8000-000000000006", // Amanda Wong
 		"Stonehollow Renos":          "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
-		"Oakvale Builders":           "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
+		"Alderfold Builders":         "a1b2c3d4-0002-4000-8000-000000000002", // Ethan Gagnon
 		"Summerland Roofers":         "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
 		"Westbank Decks & Fence":     "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
 		"Snowfern Cabin Co":          "a1b2c3d4-0004-4000-8000-000000000004", // Cameron Fraser
@@ -959,9 +959,9 @@ func Run() {
 		Lines    int
 	}
 	quoteSpecs := []quoteSpec{
-		{"Okanagan Homes Ltd", "ACCEPTED", 12}, {"Okanagan Homes Ltd", "SENT", 8}, {"Okanagan Homes Ltd", "DRAFT", 6},
+		{"Thornmere Homes Ltd", "ACCEPTED", 12}, {"Thornmere Homes Ltd", "SENT", 8}, {"Thornmere Homes Ltd", "DRAFT", 6},
 		{"Larchwood Custom", "ACCEPTED", 15}, {"Larchwood Custom", "SENT", 10}, {"Larchwood Custom", "EXPIRED", 7},
-		{"Kelbrook Construction", "ACCEPTED", 8}, {"Kelbrook Construction", "SENT", 5}, {"Kelbrook Construction", "DRAFT", 4},
+		{"Tarnwick Construction", "ACCEPTED", 8}, {"Tarnwick Construction", "SENT", 5}, {"Tarnwick Construction", "DRAFT", 4},
 		{"Stonehollow Renos", "ACCEPTED", 6}, {"Stonehollow Renos", "SENT", 4},
 		{"Peachland Framing Crew", "ACCEPTED", 10}, {"Peachland Framing Crew", "SENT", 7},
 		{"Glenmore Heritage Reno", "ACCEPTED", 5}, {"Glenmore Heritage Reno", "DRAFT", 3},
@@ -1217,10 +1217,10 @@ func Run() {
 		Name     string
 		Status   string
 	}{
-		{"Kelbrook Construction", "Big White Lodge Reno Phase 1", "Active"},
-		{"Kelbrook Construction", "West Kelowna Medical Plaza", "Active"},
-		{"Okanagan Homes Ltd", "Mission Creek Townhomes Bldg A", "Active"},
-		{"Okanagan Homes Ltd", "Mission Creek Townhomes Bldg B", "Active"},
+		{"Tarnwick Construction", "Big White Lodge Reno Phase 1", "Active"},
+		{"Tarnwick Construction", "West Kelowna Medical Plaza", "Active"},
+		{"Thornmere Homes Ltd", "Mission Creek Townhomes Bldg A", "Active"},
+		{"Thornmere Homes Ltd", "Mission Creek Townhomes Bldg B", "Active"},
 		{"Larchwood Custom", "Predator Ridge Estate Lot 12", "Active"},
 		{"Stonehollow Renos", "Kitchen Remodel - McKenzie", "Completed"},
 	}
@@ -1380,8 +1380,8 @@ func Run() {
 
 	// =========================================================================
 	// 21. PORTAL USERS
-	//    The demo portal account is `demo@kelbrook.example` (Sam Kelbrook), linked
-	//    to Kelbrook Construction — the persona referenced by the portal
+	//    The demo portal account is `demo@tarnwick.example` (Sam Tarnwick), linked
+	//    to Tarnwick Construction — the persona referenced by the portal
 	//    dev-mode injection in internal/app/serve/serve.go.
 	// =========================================================================
 	pwHash, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.DefaultCost)
@@ -1398,8 +1398,8 @@ func Run() {
 		// GET /users, GET/POST /invites, PUT /users/{id}/role and /status —
 		// returned 403 to every demo login, and the role-update endpoint would
 		// have refused to set the role back to anything it recognised.
-		{"Kelbrook Construction", "demo@kelbrook.example", "Sam Kelbrook", "Admin"},
-		{"Okanagan Homes Ltd", "okhomes@gablebuildingsupply.example", "Olivia Homes", "Admin"},
+		{"Tarnwick Construction", "demo@tarnwick.example", "Sam Tarnwick", "Admin"},
+		{"Thornmere Homes Ltd", "thornmere@gablebuildingsupply.example", "Olivia Homes", "Admin"},
 		{"Larchwood Custom", "larchwood@gablebuildingsupply.example", "Marc Mission", "Buyer"},
 	}
 	for _, pu := range portalUsers {
@@ -1414,7 +1414,7 @@ func Run() {
 			VALUES ($1,$2,$3,$4,$5)
 			ON CONFLICT (email) DO UPDATE SET password_hash=$3, role=$5`, cid, pu.Email, string(pwHash), pu.Name, pu.Role)
 	}
-	fmt.Println("Seed: Portal Users (demo@kelbrook.example / okhomes@gablebuildingsupply.example / larchwood@gablebuildingsupply.example, password: 'password')")
+	fmt.Println("Seed: Portal Users (demo@tarnwick.example / thornmere@gablebuildingsupply.example / larchwood@gablebuildingsupply.example, password: 'password')")
 
 	// =========================================================================
 	// 22. POS REGISTERS + OFFLINE POS SYNC LOGS

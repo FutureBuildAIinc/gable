@@ -590,8 +590,8 @@ func importCatalog(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,
 // importCustomers reads demodata/customers.jsonl and upserts each row into
 // customers, keying on account_number. The home_yard code resolves to a
 // locations.id; yards_trades_at drives the customer_branches rows ruling A
-// (a customer trades at every yard it has a document at) reads. Customers the legacy seed already created (the 13 KELBROOK-001,
-// OKH-001, etc. accounts) are preserved: a row whose account_number exists
+// (a customer trades at every yard it has a document at) reads. Customers the legacy seed already created (the 13 TARNWICK-001,
+// THH-001, etc. accounts) are preserved: a row whose account_number exists
 // is left alone, the imported data only fills the address if the existing
 // row has none.
 func importCustomers(ctx context.Context, db *sql.DB, yards map[string]uuid.UUID,

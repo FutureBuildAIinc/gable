@@ -948,14 +948,14 @@ func Run() {
 	// Portal auth middleware
 	var portalMw func(http.Handler) http.Handler
 	if strings.EqualFold(cfg.AuthMode, "dev") {
-		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting Kelbrook demo customer claims")
-		// Look up the Kelbrook Construction demo account; fall back to the
+		logger.Warn("AUTH_MODE=dev: Portal auth bypassed — injecting Tarnwick demo customer claims")
+		// Look up the Tarnwick Construction demo account; fall back to the
 		// first customer in the table so a non-Kelowna fork can still boot.
 		var demoCustomerID uuid.UUID
 		row := db.Pool.QueryRow(context.Background(),
-			"SELECT id FROM customers WHERE account_number = 'KELBROOK-001' LIMIT 1")
+			"SELECT id FROM customers WHERE account_number = 'TARNWICK-001' LIMIT 1")
 		if err := row.Scan(&demoCustomerID); err != nil {
-			logger.Warn("Kelbrook demo customer not found, falling back to first customer", "error", err)
+			logger.Warn("Tarnwick demo customer not found, falling back to first customer", "error", err)
 			fallback := db.Pool.QueryRow(context.Background(), "SELECT id FROM customers LIMIT 1")
 			if err := fallback.Scan(&demoCustomerID); err != nil {
 				logger.Error("Failed to load demo customer", "error", err)
@@ -966,8 +966,8 @@ func Run() {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				claims := &middleware.PortalClaims{
 					CustomerID: demoCustomerID,
-					Email:      "demo@kelbrook.example",
-					Name:       "Sam Kelbrook",
+					Email:      "demo@tarnwick.example",
+					Name:       "Sam Tarnwick",
 					// Role is load-bearing and was previously left empty, so
 					// getPortalUserRole returned "" and requireAdmin refused
 					// every request: GET /users, GET/POST /invites and the
