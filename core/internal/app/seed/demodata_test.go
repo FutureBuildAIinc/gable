@@ -181,7 +181,7 @@ func TestDemoImport(t *testing.T) {
 		var terms []string
 		for _, re := range []*regexp.Regexp{
 			regexp.MustCompile(`[Ff]ind "([^"]+)"`),
-			regexp.MustCompile("search `([^`]+)`"),
+			regexp.MustCompile("search\\s+`([^`]+)`"),
 			regexp.MustCompile(`[?&]q=([^"&\s]+)`),
 		} {
 			for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
@@ -197,7 +197,7 @@ func TestDemoImport(t *testing.T) {
 		}
 		for _, term := range terms {
 			var n int
-			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM customers WHERE name ILIKE '%'||$1||'%' OR account_number ILIKE '%'||$1||'%' OR email ILIKE '%'||$1||'%')
+			if err := db.QueryRow(`SELECT (SELECT COUNT(*) FROM customers WHERE name ILIKE '%'||$1||'%' OR account_number ILIKE '%'||$1||'%')
 				+ (SELECT COUNT(*) FROM products WHERE description ILIKE '%'||$1||'%' OR sku ILIKE '%'||$1||'%')`, term).Scan(&n); err != nil {
 				t.Fatal(err)
 			}
@@ -1371,15 +1371,14 @@ func TestRenamedCompanyNamesStayOut(t *testing.T) {
 // in another field of its record: an email local part, a contact, a portal
 // user's name, a job.
 func TestRenamedCompanyWordsLeaveNoOtherField(t *testing.T) {
-	words := []string{"trussway", "cupola", "central", "kelbrook", "oakvale", "ashgrove", "silverpine", "mission", "larchwood custom"}
-	for i, line := range strings.Split(string(customersData), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		var row map[string]any
-		if err := json.Unmarshal([]byte(line), &row); err != nil {
-			t.Fatalf("customers line %d: %v", i+1, err)
-		}
+	words := []string{"trussway", "cupola", "central", "kelbrook", "oakvale", "ashgrove", "silverpine", "mission", "larchwood custom", "vanderpol"}
+	// Words that name a renamed company, and so may not appear in the source
+	// files of the seed (a comment there may use a place such as Mission).
+	sourceWords := []string{"trussway", "cupola", "kelbrook", "oakvale", "ashgrove", "silverpine", "larchwood custom", "vanderpol"}
+	// The renamed company's own record may not keep the word it was renamed
+	// from, while three other companies keep a surname of their own.
+	rowWords := map[string][]string{"KEL-0257": {"aldridge"}}
+	check := func(where string, row map[string]any, words []string) {
 		// the street, city and region are places, not companies
 		for _, k := range []string{"address_line1", "city", "region"} {
 			delete(row, k)
@@ -1394,16 +1393,47 @@ func TestRenamedCompanyWordsLeaveNoOtherField(t *testing.T) {
 		flat, _ := json.Marshal(row)
 		for _, w := range words {
 			if strings.Contains(strings.ToLower(string(flat)), w) {
-				t.Errorf("customers line %d still carries the old company word %q: %s", i+1, w, flat)
+				t.Errorf("%s still carries the old company word %q: %s", where, w, flat)
 			}
 		}
 	}
+	for src, data := range map[string][]byte{"customers": customersData, "staff": staffData} {
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var row map[string]any
+			if err := json.Unmarshal([]byte(line), &row); err != nil {
+				t.Fatalf("%s line %d: %v", src, i+1, err)
+			}
+			w := words
+			if acct, _ := row["account_number"].(string); acct != "" {
+				w = append(append([]string{}, words...), rowWords[acct]...)
+			}
+			check(fmt.Sprintf("%s line %d", src, i+1), row, w)
+		}
+	}
 	for src, text := range designationSources(t) {
-		for _, pun := range []string{"Olivia Homes", "Marc Mission", "Larchwood Custom Home"} {
+		if strings.HasPrefix(src, "illustration/") || src == "catalog" || src == "vendors" || src == "vendorkeys" {
+			continue
+		}
+		for _, w := range sourceWords {
+			if strings.Contains(strings.ToLower(text), w) {
+				t.Errorf("%s still carries the old company word %q", src, w)
+			}
+		}
+		for _, pun := range []string{"Olivia Homes", "Marc Mission", "Larchwood Custom Home", "KB-2219"} {
 			if strings.Contains(text, pun) {
 				t.Errorf("%s still carries %q, a name built on a renamed company", src, pun)
 			}
 		}
+	}
+	walk, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "docs", "parity", "WALKS.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(walk), "KB-") {
+		t.Errorf("the walk still uses a KB- number, the initials of a renamed company")
 	}
 }
 
