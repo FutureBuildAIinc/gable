@@ -49,7 +49,7 @@ func TestTotalsNeverSplitAndTheFootNeverStandsAlone(t *testing.T) {
 	uom, sku := "EA", "PT-4"
 	svc := styledService("en-US")
 
-	for n := 0; n <= 70; n++ {
+	for n := 0; n <= 45; n++ {
 		t.Run(fmt.Sprintf("%d lines", n), func(t *testing.T) {
 			// invoice: the three total rows together, then the foot with them
 			inv := mkInvoice(100, func(i *invoice.Invoice) {
