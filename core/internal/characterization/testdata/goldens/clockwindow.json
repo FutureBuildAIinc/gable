@@ -167,8 +167,8 @@
         "outstanding_ar": 11056347,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
-        "today_revenue": 31349485,
-        "today_revenue_change": 310260.21186021186
+        "today_revenue": 31344485,
+        "today_revenue_change": 310210.7118107118
       }
     }
   },
@@ -196,7 +196,7 @@
         },
         {
           "date": "<day+0>",
-          "revenue": 31349485
+          "revenue": 31344485
         }
       ]
     }
