@@ -16,9 +16,8 @@ func TestGetSalesSummary_PassesBusinessDatesNotInstants(t *testing.T) {
 	if _, err := svc.GetSalesSummary(context.Background(), "2026-03-01", "2026-03-31"); err != nil {
 		t.Fatal(err)
 	}
-	start, end := repo.salesCalls[0][0], repo.salesCalls[0][1]
-	if start.Format("2006-01-02 15:04:05") != "2026-03-01 00:00:00" || end.Format("2006-01-02 15:04:05.999999999") != "2026-03-31 00:00:00" {
-		t.Errorf("period = %v to %v, want the dates 2026-03-01 and 2026-03-31 at midnight", start, end)
+	if got := repo.salesCalls[0]; got != [2]string{"2026-03-01", "2026-03-31"} {
+		t.Errorf("period = %v, want the dates 2026-03-01 and 2026-03-31", got)
 	}
 }
 

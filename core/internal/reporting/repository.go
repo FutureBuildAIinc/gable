@@ -36,7 +36,11 @@ func reach(ctx context.Context) (*uuid.UUID, *string) {
 
 type Repository interface {
 	GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error)
-	GetSalesSummary(ctx context.Context, start, end time.Time) (*SalesSummaryReport, error)
+	// GetSalesSummary reads a period of business dates, from and to inclusive
+	// (YYYY-MM-DD), never instants.
+	GetSalesSummary(ctx context.Context, from, to string) (*SalesSummaryReport, error)
+	// BusinessDay is the default branch's business date now (YYYY-MM-DD).
+	BusinessDay(ctx context.Context) (string, error)
 	GetARAgingReport(ctx context.Context) (*ARAgingReport, error)
 	GetCustomerStatement(ctx context.Context, customerID string, start, end time.Time) (*CustomerStatement, error)
 
@@ -160,18 +164,14 @@ var salesOutstandingSQL = `
 	WHERE invoice_date BETWEEN $1::date AND $2::date AND status IN ('UNPAID', 'PARTIAL')
 	  AND ` + middleware.Wall("", 3, 4)
 
-func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end time.Time) (*SalesSummaryReport, error) {
-	report := &SalesSummaryReport{
-		StartDate: start.Format("2006-01-02"),
-		EndDate:   end.Format("2006-01-02"),
-	}
+func (r *PostgresRepository) GetSalesSummary(ctx context.Context, from, to string) (*SalesSummaryReport, error) {
+	report := &SalesSummaryReport{StartDate: from, EndDate: to}
 	branch, grants := reach(ctx)
 
 	// The period is business dates, the same on every half of the summary:
 	// invoices are cut on their own business date (invoice_date, as the
 	// statement reads it) and payments on received_on (pkg/collections), never
 	// on the instant a row was written.
-	from, to := start.Format("2006-01-02"), end.Format("2006-01-02")
 
 	// 1. Invoiced
 	err := r.db.GetExecutor(ctx).QueryRow(ctx, salesInvoicedSQL, from, to, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
@@ -211,7 +211,8 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 
 	// That might be negative if overpaid? unlikely.
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
-	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
+	// "Outstanding AR" = Total for Unpaid/Partial invoices dated in this period
+	// (their business date, invoice_date).
 
 	err = r.db.GetExecutor(ctx).QueryRow(ctx, salesOutstandingSQL, from, to, branch, grants).Scan(&report.OutstandingAR)
 	if err != nil {
