@@ -844,7 +844,14 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 
 	rng := rand.New(rand.NewSource(int64(hp.Seed)))
 	now := time.Now().UTC()
-	anchor := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.UTC)
+	// The history's today is the seed's business day, the default branch's
+	// calendar day: the AR core refuses a document dated past it, so between
+	// UTC's midnight and the branch's the UTC date is not today.
+	seedDay, err := seedToday(db)
+	if err != nil {
+		return err
+	}
+	anchor := time.Date(seedDay.Year(), seedDay.Month(), seedDay.Day(), 12, 0, 0, 0, time.UTC)
 	// Today trades too, so the dashboard's day is a real one: its documents are
 	// stamped from two hours before the run, never before the day began (the
 	// server's UTC day), and are left out while the day is too young to hold
@@ -854,6 +861,11 @@ func seedHistory(ctx context.Context, db *sql.DB, ar *receivables,
 		todayFrom = dayStart
 	}
 	withToday := now.Sub(todayFrom) >= 10*time.Minute
+	if dayOf(now) != dayOf(seedDay) {
+		// the server's UTC day is ahead of the branch's: the branch's today
+		// trades at its midday, which has passed
+		todayFrom, withToday = anchor, true
+	}
 
 	// The yards walk in code order (a map's order is random, and the history
 	// must be the same for the same day), each with its weekday mean from the
