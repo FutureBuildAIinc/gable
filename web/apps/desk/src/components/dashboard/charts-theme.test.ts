@@ -16,15 +16,45 @@ interface Built {
   data: { datasets: Array<{ borderColor: string; backgroundColor: string[] }> }
 }
 const built: Built[] = []
+const resized: number[] = []
+let chartCount = 0
 
 vi.mock('chart.js/auto', () => ({
   default: class {
+    readonly id: number
     constructor(_canvas: unknown, config: Built) {
       built.push(config)
+      this.id = ++chartCount
     }
     destroy() {}
+    resize() {
+      resized.push(this.id)
+    }
   },
 }))
+
+/** A ResizeObserver that records what it watches and lets a test fire it. */
+interface StubObserver {
+  callback: ResizeObserverCallback
+  observed: Element[]
+  disconnected: boolean
+}
+const observers: StubObserver[] = []
+class StubResizeObserver {
+  private readonly rec: StubObserver
+  constructor(callback: ResizeObserverCallback) {
+    this.rec = { callback, observed: [], disconnected: false }
+    observers.push(this.rec)
+  }
+  observe(el: Element) {
+    this.rec.observed.push(el)
+  }
+  unobserve() {}
+  disconnect() {
+    this.rec.disconnected = true
+  }
+}
+vi.stubGlobal('ResizeObserver', StubResizeObserver)
 
 import './OrderStatusChart'
 import './RevenueTrendChart'
@@ -112,5 +142,41 @@ describe('dashboard charts follow the mode', () => {
     // the card is not clipped: the donut, its legend and its centre are never cut
     expect(el.querySelector('.overflow-hidden')).toBeNull()
     el.remove()
+  })
+
+  // Chart.js's own resize did not reach the canvas on a real window resize
+  // (the wrapper shrank, the canvas kept its pixel width), so each chart
+  // watches its wrapper and resizes the chart itself.
+  it.each([
+    ['gable-order-status-chart', { statusBreakdown: { confirmed: 3, draft: 1 } }],
+    ['gable-revenue-trend-chart', { data: [{ date: 'd1', revenue: 1000 }] }],
+  ])('%s resizes its chart when its wrapper changes size', async (tag, props) => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+    } as unknown as CanvasRenderingContext2D)
+    observers.length = 0
+    resized.length = 0
+    const el = await mount<GableOrderStatusChart>(tag, props as never)
+    await frame()
+    const wrap = el.querySelector('[data-testid="chart-canvas-wrap"]') as HTMLElement
+    const live = () => observers.filter((o) => !o.disconnected && o.observed.includes(wrap))
+    expect(live().length).toBe(1)
+
+    // the wrapper changed size: the chart is resized
+    live()[0].callback([], {} as ResizeObserver)
+    expect(resized.length).toBe(1)
+
+    // a mode change rebuilds the chart: the new chart is watched, the old one is not
+    setTheme('light')
+    await frame()
+    expect(live().length).toBe(1)
+    expect(observers.filter((o) => !o.disconnected).length).toBe(1)
+    live()[0].callback([], {} as ResizeObserver)
+    expect(resized.length).toBe(2)
+    expect(resized[1]).not.toBe(resized[0])
+
+    // removed from the page: nothing is left watching
+    el.remove()
+    expect(observers.every((o) => o.disconnected)).toBe(true)
   })
 })

@@ -31,6 +31,7 @@ export class GableOrderStatusChart extends LitElement {
 
     private _chart: Chart<'doughnut'> | null = null;
     private _offTheme: (() => void) | null = null;
+    private _resizeObserver: ResizeObserver | null = null;
 
     connectedCallback() {
         super.connectedCallback();
@@ -55,7 +56,24 @@ export class GableOrderStatusChart extends LitElement {
         this._destroyChart();
     }
 
+    /**
+     * Chart.js's own responsive resize did not reach the canvas when the
+     * window narrowed (the wrapper shrank, the canvas kept its pixel width),
+     * so the wrapper is watched and the chart resized by hand. Re-observed
+     * each time the chart is rebuilt; disconnected when it is destroyed.
+     */
+    private _observeWrapper(canvas: HTMLCanvasElement) {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
+        const wrapper = canvas.parentElement;
+        if (!wrapper || typeof ResizeObserver === 'undefined') return;
+        this._resizeObserver = new ResizeObserver(() => { this._chart?.resize(); });
+        this._resizeObserver.observe(wrapper);
+    }
+
     private _destroyChart() {
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         if (this._chart) {
             this._chart.destroy();
             this._chart = null;
@@ -120,6 +138,7 @@ export class GableOrderStatusChart extends LitElement {
                     },
                 },
             });
+            this._observeWrapper(canvas);
         });
     }
 
