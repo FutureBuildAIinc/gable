@@ -25,6 +25,25 @@ import (
 //
 // Skips cleanly when Postgres is unreachable (testutil.RequireDB).
 func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
+	testutil.LockBranchDay(t)
+	outstandingARLeg(t)
+}
+
+// RULE: the same leg passes whichever zone the default branch is in, so the
+// fixture reads the branch's day throughout. Pacific/Kiritimati (UTC+14) and
+// Pacific/Pago_Pago (UTC-11) are on different days from each other for most
+// of every day, and at any moment one of them is on a day other than UTC's.
+func TestGetDashboardSummary_OutstandingARInAnyYardZone(t *testing.T) {
+	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago"} {
+		t.Run(zone, func(t *testing.T) {
+			testutil.SetBranchDayZone(t, testutil.RequireDB(t), zone)
+			outstandingARLeg(t)
+		})
+	}
+}
+
+func outstandingARLeg(t *testing.T) {
+	t.Helper()
 	db := testutil.RequireDB(t)
 	repo := NewRepository(db)
 	svc := account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
@@ -160,6 +179,7 @@ func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
 // With the server's clock two days behind the database's, an invoice dated the
 // branch's today still counts, and the figure still equals the aging's.
 func TestGetDashboardSummary_OutstandingARReadsTheBranchDay(t *testing.T) {
+	testutil.LockBranchDay(t)
 	db := testutil.RequireDB(t)
 	repo := NewRepository(db)
 	repo.now = func() time.Time { return time.Now().AddDate(0, 0, -2) }

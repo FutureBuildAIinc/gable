@@ -15,6 +15,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/gablelbm/gable/internal/testutil"
 	"io"
 	"math/rand"
 	"net/http"
@@ -455,6 +456,24 @@ func TestNoHeader_CreateWithNoBranchHoldsTheGrants(t *testing.T) {
 // trend, the inventory alerts and the order status breakdown each carry a
 // leg, so no single wall can be reverted unseen (r3 P2-2).
 func TestNoHeader_Dashboard(t *testing.T) {
+	noHeaderDashboardLeg(t)
+}
+
+// RULE: the same leg passes whichever zone the default branch is in, since
+// the fixtures date their documents by the branch's own day and the dashboard
+// reads that day. Pacific/Kiritimati (UTC+14) and Pacific/Pago_Pago (UTC-11)
+// are never both on UTC's day.
+func TestNoHeader_DashboardInAnyYardZone(t *testing.T) {
+	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago"} {
+		t.Run(zone, func(t *testing.T) {
+			testutil.SetBranchDayZone(t, testutil.RequireDB(t), zone)
+			noHeaderDashboardLeg(t)
+		})
+	}
+}
+
+func noHeaderDashboardLeg(t *testing.T) {
+	t.Helper()
 	f := newKeyPinFixture(t)
 	w := f.seedWalledTwins(t)
 	noheaderGrant(t, f, "pin-finance", f.branchA)
