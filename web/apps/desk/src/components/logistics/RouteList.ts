@@ -86,8 +86,8 @@ export class GableRouteListComponent extends LitElement {
               <div
                 @click=${() => this._selectRoute(route.id, route.vehicle_id, route.status, route.revision)}
                 class="p-4 rounded-lg border transition-all duration-200 cursor-pointer group relative overflow-hidden ${isSelected
-                  ? 'bg-gable-green/10 border-gable-green/50 shadow-[0_0_15px_rgba(0,255,163,0.1)]'
-                  : 'bg-[#161821] border-white/5 hover:border-white/20 hover:bg-white/5'
+                  ? 'bg-gable-green/10 border-gable-green/50 shadow-glow-soft'
+                  : 'bg-slate-steel border-white/5 hover:border-white/20 hover:bg-white/5'
                 }"
               >
                 ${isSelected ? html`<div class="absolute left-0 top-0 bottom-0 w-1 bg-gable-green"></div>` : nothing}

@@ -63,7 +63,7 @@ export class PickQueue extends LitElement {
                 <div class="space-y-3">
                     ${this.orders.map((order, idx) => html`
                         <div
-                            class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
+                            class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
                             @click=${() => router.navigate(`/yard/pick/${order.id}`)}
                         >
                             <div class="p-4">

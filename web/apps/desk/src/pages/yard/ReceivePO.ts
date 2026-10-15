@@ -129,7 +129,7 @@ export class ReceivePO extends LitElement {
                     <div class="space-y-2">
                         ${this.pos.map(po => html`
                             <div
-                                class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
+                                class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
                                 @click=${() => this._selectPO(po)}
                             >
                                 <div class="p-4">
@@ -208,7 +208,7 @@ export class ReceivePO extends LitElement {
                         ${(this.selectedPO.lines || []).map(line => {
                             const remaining = line.quantity - (line.qty_received || 0);
                             return html`
-                                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl border-white/5">
+                                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl border-white/5">
                                     <div class="p-4">
                                         <div class="flex items-center gap-3">
                                             <div class="flex-1 min-w-0">

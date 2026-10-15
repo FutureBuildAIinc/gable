@@ -103,79 +103,79 @@ export class PortalMyAccount extends LitElement {
         return html`
             <div class="max-w-3xl mx-auto space-y-6">
                 <div>
-                    <h1 class="text-2xl font-bold text-gray-900 mb-2">My Account</h1>
-                    <p class="text-gray-500 text-sm">Update your company's primary contact information and preferences.</p>
+                    <h1 class="text-2xl font-bold text-white mb-2">My Account</h1>
+                    <p class="text-zinc-400 text-sm">Update your company's primary contact information and preferences.</p>
                 </div>
 
-                <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                <div class="bg-slate-steel rounded-lg shadow-sm border border-white/10 overflow-hidden">
                     <form @submit=${(e: Event) => this._handleSubmit(e)} class="p-6">
-                        ${this.error ? html`<div class="mb-4 p-3 bg-red-50 text-red-700 rounded-md text-sm">${this.error}</div>` : nothing}
-                        ${this.successMsg ? html`<div class="mb-4 p-3 bg-green-50 text-green-700 rounded-md text-sm">${this.successMsg}</div>` : nothing}
+                        ${this.error ? html`<div class="mb-4 p-3 bg-red-500/10 text-red-400 rounded-md text-sm">${this.error}</div>` : nothing}
+                        ${this.successMsg ? html`<div class="mb-4 p-3 bg-green-500/10 text-green-400 rounded-md text-sm">${this.successMsg}</div>` : nothing}
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div class="col-span-2">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+                                <label class="block text-sm font-medium text-zinc-300 mb-1">Company Name</label>
                                 <input
                                     type="text"
                                     name="name"
                                     .value=${c.name}
                                     @input=${(e: InputEvent) => this._handleInputChange(e)}
                                     required
-                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    class="bg-zinc-800 text-white w-full px-3 py-2 border border-white/20 rounded focus:ring-blue-500 focus:border-blue-500"
                                 />
                             </div>
 
                             <div class="col-span-2 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Account Number</label>
+                                <label class="block text-sm font-medium text-zinc-300 mb-1">Account Number</label>
                                 <input
                                     type="text"
                                     .value=${c.account_number}
                                     readonly
-                                    class="w-full px-3 py-2 border border-gray-200 bg-gray-50 text-gray-500 rounded cursor-not-allowed"
+                                    class="w-full px-3 py-2 border border-white/10 bg-white/5 text-zinc-400 rounded cursor-not-allowed"
                                 />
-                                <p class="text-xs text-gray-500 mt-1">Account numbers cannot be changed.</p>
+                                <p class="text-xs text-zinc-400 mt-1">Account numbers cannot be changed.</p>
                             </div>
 
                             <div class="col-span-2 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Tier / Price Level</label>
+                                <label class="block text-sm font-medium text-zinc-300 mb-1">Tier / Price Level</label>
                                 <input
                                     type="text"
                                     .value=${c.price_level ? `(${c.price_level.name})` : ''}
                                     readonly
-                                    class="w-full px-3 py-2 border border-gray-200 bg-gray-50 text-gray-500 rounded cursor-not-allowed"
+                                    class="w-full px-3 py-2 border border-white/10 bg-white/5 text-zinc-400 rounded cursor-not-allowed"
                                 />
                             </div>
 
                             <div class="col-span-2 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Primary Email</label>
+                                <label class="block text-sm font-medium text-zinc-300 mb-1">Primary Email</label>
                                 <input
                                     type="email"
                                     name="email"
                                     .value=${c.email || ''}
                                     @input=${(e: InputEvent) => this._handleInputChange(e)}
-                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    class="bg-zinc-800 text-white w-full px-3 py-2 border border-white/20 rounded focus:ring-blue-500 focus:border-blue-500"
                                 />
                             </div>
 
                             <div class="col-span-2 md:col-span-1">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Primary Phone</label>
+                                <label class="block text-sm font-medium text-zinc-300 mb-1">Primary Phone</label>
                                 <input
                                     type="text"
                                     name="phone"
                                     .value=${c.phone || ''}
                                     @input=${(e: InputEvent) => this._handleInputChange(e)}
-                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    class="bg-zinc-800 text-white w-full px-3 py-2 border border-white/20 rounded focus:ring-blue-500 focus:border-blue-500"
                                 />
                             </div>
 
                             <div class="col-span-2">
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Billing Address</label>
+                                <label class="block text-sm font-medium text-zinc-300 mb-1">Billing Address</label>
                                 <input
                                     type="text"
                                     name="address"
                                     .value=${c.address || ''}
                                     @input=${(e: InputEvent) => this._handleInputChange(e)}
-                                    class="w-full px-3 py-2 border border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                    class="bg-zinc-800 text-white w-full px-3 py-2 border border-white/20 rounded focus:ring-blue-500 focus:border-blue-500"
                                 />
                             </div>
                         </div>
@@ -184,7 +184,7 @@ export class PortalMyAccount extends LitElement {
                             <button
                                 type="submit"
                                 ?disabled=${this.saving}
-                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                                class="bg-blue-600 hover:bg-blue-700 text-plate px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
                             >
                                 ${this.saving ? 'Saving...' : 'Save Changes'}
                             </button>
@@ -192,10 +192,10 @@ export class PortalMyAccount extends LitElement {
                     </form>
                 </div>
 
-                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200 text-sm text-gray-600 flex items-start gap-4">
+                <div class="bg-white/5 p-6 rounded-lg border border-white/10 text-sm text-zinc-400 flex items-start gap-4">
                     <div class="text-blue-500 mt-0.5">i</div>
                     <div>
-                        <p class="font-semibold text-gray-900 mb-1">Need to update individual contacts?</p>
+                        <p class="font-semibold text-white mb-1">Need to update individual contacts?</p>
                         <p>If you need to add or remove individual buyers or AP contacts, please reach out to your sales representative. We currently restrict adding secondary contacts from the portal to ensure account security.</p>
                     </div>
                 </div>

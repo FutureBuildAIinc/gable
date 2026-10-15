@@ -14,3 +14,17 @@
 export { cn } from './cn.ts';
 export { icon } from './icons.ts';
 export { GableBrandLogo } from './brand-logo.ts';
+export { GableThemeToggle } from './theme-toggle.ts';
+export {
+  currentTheme,
+  setTheme,
+  toggleTheme,
+  initTheme,
+  useThemeSubject,
+  onThemeChange,
+  themeColor,
+  themeKeyFor,
+  THEME_KEY,
+  THEME_EVENT,
+  type Theme,
+} from './theme.ts';

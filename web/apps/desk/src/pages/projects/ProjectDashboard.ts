@@ -176,7 +176,7 @@ export class ProjectDashboard extends LitElement {
 
                 <!-- Metrics -->
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-6">
                             <div class="flex items-center gap-4 mb-4">
                                 <div class="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
@@ -193,7 +193,7 @@ export class ProjectDashboard extends LitElement {
                         </div>
                     </div>
 
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-6">
                             <div class="flex items-center gap-4 mb-4">
                                 <div class="w-10 h-10 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400">
@@ -210,7 +210,7 @@ export class ProjectDashboard extends LitElement {
                         </div>
                     </div>
 
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl">
                         <div class="p-6">
                             <div class="flex items-center gap-4 mb-4">
                                 <div class="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-400">
@@ -230,7 +230,7 @@ export class ProjectDashboard extends LitElement {
 
                 <!-- Timelines / Lists -->
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
                         <div class="p-4 border-b border-white/5 border-[1px] border-b-white/10 flex items-center justify-between">
                             <h3 class="font-medium text-white flex items-center gap-2">
                                 ${icon(ShoppingCart, 16, 'text-blue-400')} Recent Orders
@@ -247,7 +247,7 @@ export class ProjectDashboard extends LitElement {
                         `}
                     </div>
 
-                    <div class="bg-[#161821]/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
+                    <div class="bg-slate-steel/60 backdrop-blur-sm border border-white/10 rounded-2xl flex flex-col">
                         <div class="p-4 border-b border-white/5 border-[1px] border-b-white/10 flex items-center justify-between">
                             <h3 class="font-medium text-white flex items-center gap-2">
                                 ${icon(FileText, 16, 'text-emerald-400')} Recent Invoices

@@ -361,7 +361,7 @@ export class GableAccountDetail extends LitElement {
         if (!this.applying) return nothing;
         const invoice = this.openInvoices.find(i => i.id === this.applyInvoiceId);
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="apply-dialog-title">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                     <h2 id="apply-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Apply unapplied cash</h2>
                     <p class="text-zinc-400 text-sm mb-6">${this.applying.number} holds ${formatCents(this.applying.unapplied_cents)} unapplied</p>
@@ -387,7 +387,7 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-8 flex justify-end gap-3">
                             <button type="button" @click=${() => { this.applying = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
-                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
+                            <button type="submit" ?disabled=${this.paymentBusy} class="px-4 py-2 bg-green-600 hover:bg-green-500 text-plate rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-apply">
                                 ${this.paymentBusy ? 'Applying...' : 'Apply'}
                             </button>
                         </div>
@@ -400,7 +400,7 @@ export class GableAccountDetail extends LitElement {
     private renderVoidDialog() {
         if (!this.voiding) return nothing;
         return html`
-            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
+            <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="void-dialog-title">
                 <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
                     <h2 id="void-dialog-title" class="text-xl font-bold text-zinc-100 mb-1">Void payment</h2>
                     <p class="text-zinc-400 text-sm mb-6">Voiding ${this.voiding.number} reverses every application of it and reopens its invoices${this.voiding.method === 'card' ? '; a card payment is refunded through the gateway instead' : ''}.</p>
@@ -416,7 +416,7 @@ export class GableAccountDetail extends LitElement {
                         </div>
                         <div class="mt-8 flex justify-end gap-3">
                             <button type="button" @click=${() => { this.voiding = null; }} class="px-4 py-2 text-sm text-zinc-300 hover:text-white">Cancel</button>
-                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
+                            <button type="submit" ?disabled=${this.paymentBusy || !this.voidReason.trim()} class="px-4 py-2 bg-red-600 hover:bg-red-500 text-plate rounded text-sm font-medium disabled:opacity-50" data-testid="confirm-void">
                                 ${this.paymentBusy ? 'Voiding...' : 'Void payment'}
                             </button>
                         </div>
@@ -720,7 +720,7 @@ export class GableAccountDetail extends LitElement {
                                                         <td class="px-4 py-3 text-right font-mono text-amber-400">${formatCents(pay.unapplied_cents)}</td>
                                                         <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                                                             <button
-                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-white font-medium"
+                                                                class="px-3 py-1.5 text-xs rounded bg-green-600 hover:bg-green-500 text-plate font-medium"
                                                                 data-testid="apply-payment"
                                                                 @click=${() => this.openApply(pay)}
                             ?disabled=${this.openInvoices.length === 0}

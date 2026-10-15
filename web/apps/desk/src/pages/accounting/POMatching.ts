@@ -8,6 +8,7 @@ import { formatCents } from '../../lib/utils.ts';
 import { formatDate } from '../../lib/dates.ts';
 import type { MatchResult, MatchException, MatchConfig } from '../../types/matching';
 import { runMatch, listExceptions, getMatchConfig, updateMatchConfig, getMatchResult } from '../../services/MatchingService';
+import { cssVarColor } from '../../lib/theme-colors.ts';
 
 @customElement('gable-po-matching')
 export class POMatching extends LitElement {
@@ -103,12 +104,12 @@ export class POMatching extends LitElement {
 
     private _statusBadgeClass(status: string) {
         const colors: Record<string, string> = {
-            MATCHED: '#22c55e',
-            PARTIAL: '#eab308',
-            EXCEPTION: '#ef4444',
-            PENDING: '#6b7280',
+            MATCHED: cssVarColor('green-500'),
+            PARTIAL: cssVarColor('yellow-500'),
+            EXCEPTION: cssVarColor('red-500'),
+            PENDING: cssVarColor('gray-500'),
         };
-        return colors[status] || '#6b7280';
+        return colors[status] || cssVarColor('gray-500');
     }
 
     render() {
@@ -141,7 +142,7 @@ export class POMatching extends LitElement {
                         />
                         <button
                             @click=${this._handleRunMatch}
-                            class="px-5 py-2 rounded-lg bg-blue-600 text-white font-semibold text-sm hover:bg-blue-500 transition-colors"
+                            class="px-5 py-2 rounded-lg bg-blue-600 text-plate font-semibold text-sm hover:bg-blue-500 transition-colors"
                         >
                             Run 3-Way Match
                         </button>
@@ -224,7 +225,7 @@ export class POMatching extends LitElement {
                                             <code class="text-xs text-slate-400">${e.po_id.substring(0, 8)}...</code>
                                         </td>
                                         <td class="px-3 py-2.5">
-                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${this._statusBadgeClass(e.status)}">
+                                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${this._statusBadgeClass(e.status)}">
                                                 ${e.status}
                                             </span>
                                         </td>
@@ -254,7 +255,7 @@ export class POMatching extends LitElement {
                             <h2 class="text-base font-semibold text-slate-200">
                                 Match Detail: PO ${this.selectedResult.po_id.substring(0, 8)}...
                             </h2>
-                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${this._statusBadgeClass(this.selectedResult.status)}">
+                            <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${this._statusBadgeClass(this.selectedResult.status)}">
                                 ${this.selectedResult.status}
                             </span>
                         </div>
@@ -291,7 +292,7 @@ export class POMatching extends LitElement {
                                                 ${this._formatPct(line.price_variance_pct)}
                                             </td>
                                             <td class="px-3 py-2.5">
-                                                <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-white" style="background:${this._statusBadgeClass(line.line_status)}">
+                                                <span class="inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold text-plate" style="background:${this._statusBadgeClass(line.line_status)}">
                                                     ${line.line_status}
                                                 </span>
                                             </td>
