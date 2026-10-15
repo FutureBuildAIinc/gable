@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -173,7 +172,7 @@ func seedMultiYard(ctx context.Context, db *sql.DB, ar *receivables, yards map[s
 			db.QueryRow(`SELECT COUNT(*) FROM invoices WHERE customer_id = $1`, cid).Scan(&invCount)
 			if invCount == 0 {
 				orderID, invID := uuid.New(), uuid.New()
-				on := time.Now().AddDate(0, 0, -12)
+				on := seedNow().AddDate(0, 0, -12)
 				seedExec(db, "Ridgeline order", `INSERT INTO orders (id, customer_id, branch_id, total_amount, subtotal, status, created_at, delivery_type, currency, tax_source)
 					VALUES ($1, $2, $3, 18816.00, 16800.00, 'FULFILLED', $4, 'PICKUP',
 						COALESCE((SELECT value FROM system_settings WHERE key = 'currency.default'), 'USD'), 'LEGACY')`, orderID, cid, branch, on)

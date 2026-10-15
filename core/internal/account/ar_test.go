@@ -48,6 +48,7 @@ func newARWorld(t *testing.T) *arWorld {
 
 func newARWorldOn(t *testing.T, db *database.DB) *arWorld {
 	t.Helper()
+	loadBranchZone(db)
 	w := &arWorld{t: t, db: db, customerID: uuid.New()}
 	w.svc = account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
@@ -245,8 +246,37 @@ func (w *arWorld) netOf(code string, debitMinusCredit bool, upTo *time.Time) int
 // The world's documents.
 // ---------------------------------------------------------------------------
 
+// daysFromNow is the business day n days from today in the default branch's
+// zone, as a UTC midnight date, read from the database as the production code
+// reads it (a POSIX zone name Go cannot load is read the same). The AR core
+// refuses money dated after the branch's own day, so a test that dated "today"
+// by the process clock would be refused in the hours between UTC's midnight
+// and the branch's.
 func daysFromNow(n int) time.Time {
-	return time.Now().UTC().AddDate(0, 0, n).Truncate(24 * time.Hour)
+	branchDayMu.Lock()
+	db := branchDayDB
+	branchDayMu.Unlock()
+	if db == nil {
+		panic("daysFromNow before a world was made")
+	}
+	var day time.Time
+	if err := db.Pool.QueryRow(context.Background(), `SELECT `+testutil.BranchDaySQL).Scan(&day); err != nil {
+		panic(fmt.Sprintf("the branch's day: %v", err))
+	}
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, n)
+}
+
+var (
+	branchDayMu sync.Mutex
+	branchDayDB *database.DB
+)
+
+// loadBranchZone remembers the test database of the world being made: the
+// pool of an earlier world is closed with its test.
+func loadBranchZone(db *database.DB) {
+	branchDayMu.Lock()
+	branchDayDB = db
+	branchDayMu.Unlock()
 }
 
 func date(t time.Time) string { return t.Format("2006-01-02") }
@@ -836,10 +866,12 @@ func TestARDiscountTakenAndReversed(t *testing.T) {
 	inv := w.invoice(10000, daysFromNow(-1), withDiscount(twoPct, daysFromNow(5)))
 	pay := w.payment(10000, daysFromNow(0), "CHECK")
 
-	// Past the due date: refused.
+	// Past the due date: refused (an invoice whose discount date has gone,
+	// applied today; money is never dated after the business day).
+	lateInv := w.invoice(10000, daysFromNow(-3), withDiscount(twoPct, daysFromNow(-1)))
 	_, err := w.act("discount late", func(ctx context.Context) (*account.Effects, error) {
-		return w.svc.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: inv.ID, AmountCents: 5000, DiscountCents: 100}},
-			On: daysFromNow(6), Actor: "u-test"})
+		return w.svc.Apply(ctx, account.ApplyIn{PaymentID: pay, Lines: []account.ApplyLine{{InvoiceID: lateInv.ID, AmountCents: 5000, DiscountCents: 100}},
+			On: daysFromNow(0), Actor: "u-test"})
 	})
 	if err == nil || !strings.Contains(err.Error(), "discount") {
 		t.Errorf("late discount = %v, want the discount refusal", err)

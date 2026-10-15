@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gablelbm/gable/internal/order"
 	"github.com/gablelbm/gable/internal/platform/httpx"
@@ -31,6 +32,8 @@ import (
 )
 
 type fixture struct {
+	// now, when set, is the clock the fixture's account service reads.
+	now        func() time.Time
 	t          *testing.T
 	db         *database.DB
 	srv        *httptest.Server

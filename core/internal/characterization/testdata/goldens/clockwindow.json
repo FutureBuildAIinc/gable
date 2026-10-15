@@ -148,7 +148,7 @@
         "invoice_count": 12,
         "outstanding_ar": 42140.76,
         "start_date": "<day-30>",
-        "total_collected": 315919.09,
+        "total_collected": 77355.25,
         "total_invoiced": 95207.14
       }
     }
@@ -164,11 +164,11 @@
       "content_type": "application/json",
       "body": {
         "active_orders": 21,
-        "outstanding_ar": 11056347,
+        "outstanding_ar": 10860244,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
-        "today_revenue": 31349485,
-        "today_revenue_change": 310260.21186021186
+        "today_revenue": 203603,
+        "today_revenue_change": -55.15411690594397
       }
     }
   },
@@ -188,15 +188,15 @@
         },
         {
           "date": "<day-2>",
-          "revenue": 20202
+          "revenue": 1259336
         },
         {
           "date": "<day-1>",
-          "revenue": 10101
+          "revenue": 454006
         },
         {
           "date": "<day+0>",
-          "revenue": 31349485
+          "revenue": 203603
         }
       ]
     }
@@ -355,14 +355,14 @@
           "account_type": "ASSET",
           "credit": 5000,
           "currency": "USD",
-          "debit": 31163382
+          "debit": 31359485
         },
         {
           "account_code": "1020",
           "account_id": "<id-13>",
           "account_name": "Accounts Receivable",
           "account_type": "ASSET",
-          "credit": 31190099,
+          "credit": 31386202,
           "currency": "USD",
           "debit": 40371158
         },
@@ -389,9 +389,9 @@
           "account_id": "<id-16>",
           "account_name": "Customer Deposits",
           "account_type": "LIABILITY",
-          "credit": 31156524,
+          "credit": 31352627,
           "currency": "USD",
-          "debit": 31154024
+          "debit": 31350127
         },
         {
           "account_code": "4010",
@@ -468,13 +468,13 @@
             "account_code": "1010",
             "account_id": "<id-12>",
             "account_name": "Cash",
-            "amount": 31158382
+            "amount": 31354485
           },
           {
             "account_code": "1020",
             "account_id": "<id-13>",
             "account_name": "Accounts Receivable",
-            "amount": 9181059
+            "amount": 8984956
           },
           {
             "account_code": "1030",

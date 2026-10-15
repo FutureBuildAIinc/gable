@@ -12,6 +12,7 @@ import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { LedgerOutsideYardError, ledgerYardNote } from '../../lib/ledgerYards.ts';
 import type { ArStatement, ArStatementCurrency } from '../../types/account.ts';
 import type { Customer } from '../../types/customer.ts';
+import { BRANCH_STORAGE_KEY } from '@gable/auth';
 import { FileText, Search } from 'lucide';
 
 @customElement('gable-customer-statement')
@@ -247,6 +248,17 @@ export class CustomerStatementPage extends LitElement {
         `;
     }
 
+    /** A yard is chosen: the open documents and unapplied payments follow it, the balances do not. */
+    private _scopedToYard(): boolean {
+        return !!localStorage.getItem(BRANCH_STORAGE_KEY);
+    }
+
+    /** Unapplied cash the listed payments do not cover: it sits at yards this one cannot see. */
+    private _unappliedElsewhere(cur: ArStatementCurrency): number {
+        const listed = cur.unapplied_payments.reduce((sum, p) => sum + p.unapplied_cents, 0);
+        return Math.max(0, cur.unapplied_cents - listed);
+    }
+
     /** One currency's statement: never mixed with another's amounts. */
     private _renderCurrency(cur: ArStatementCurrency) {
         const st = this.statement!;
@@ -336,11 +348,54 @@ export class CustomerStatementPage extends LitElement {
                         </div>
                     ` : nothing}
 
-                    <div class="flex justify-end mt-4 pt-4 border-t border-white/10">
+                    ${cur.unapplied_payments.length > 0 ? html`
+                        <div class="mt-6" data-testid="statement-unapplied">
+                            <h3 class="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-3">Unapplied cash</h3>
+                            <table class="w-full text-sm text-left">
+                                <thead class="bg-white/5 text-zinc-400 uppercase tracking-wider text-xs font-semibold">
+                                    <tr>
+                                        <th class="px-4 py-2">Payment</th>
+                                        <th class="px-4 py-2">Received</th>
+                                        <th class="px-4 py-2 text-right">Unapplied</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-white/5">
+                                    ${cur.unapplied_payments.map(p => html`
+                                        <tr>
+                                            <td class="px-4 py-2 font-mono text-teal-300">${p.number}</td>
+                                            <td class="px-4 py-2 text-zinc-400">${p.received_on}</td>
+                                            <td class="px-4 py-2 text-right font-mono text-emerald-400">${formatCents(p.unapplied_cents)}</td>
+                                        </tr>
+                                    `)}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : nothing}
+
+                    ${this._scopedToYard() || this._unappliedElsewhere(cur) > 0 ? html`
+                        <div class="mt-4 space-y-1">
+                            ${this._unappliedElsewhere(cur) > 0 ? html`
+                                <p class="text-sm text-zinc-400" data-testid="statement-unapplied-elsewhere">
+                                    Unapplied cash at other yards: <span class="font-mono">${formatCents(this._unappliedElsewhere(cur))}</span>
+                                </p>
+                            ` : nothing}
+                            ${this._scopedToYard() ? html`
+                                <p class="text-xs text-zinc-500" data-testid="statement-scope">Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account.</p>
+                            ` : nothing}
+                        </div>
+                    ` : nothing}
+
+                    <div class="flex justify-end gap-8 mt-4 pt-4 border-t border-white/10">
                         <div class="text-right">
                             <p class="text-xs text-zinc-500">Closing Balance</p>
                             <p class="text-2xl font-mono font-bold text-white">${formatCents(cur.closing_balance_cents)}</p>
                         </div>
+                        ${cur.unapplied_cents > 0 ? html`
+                            <div class="text-right" data-testid="statement-net-balance">
+                                <p class="text-xs text-zinc-500">Net balance (after unapplied cash)</p>
+                                <p class="text-2xl font-mono font-bold text-white">${formatCents(cur.net_balance_cents)}</p>
+                            </div>
+                        ` : nothing}
                     </div>
                 </div>
             </div>

@@ -286,7 +286,9 @@ func (h *Handler) HandleAging(w http.ResponseWriter, r *http.Request) {
 	next := ""
 	if more {
 		last := items[len(items)-1]
-		if next, err = httpx.MintCursor(agingCursorScope, last.CustomerName, last.CustomerID.String(), last.GroupID(), last.Currency); err != nil {
+		// The group id is empty for a customer row; a keyset part never is, so
+		// the part carries a marker before it.
+		if next, err = httpx.MintCursor(agingCursorScope, last.CustomerName, last.CustomerID.String(), agingGroupPart+last.GroupID(), last.Currency); err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
@@ -298,6 +300,9 @@ func (h *Handler) HandleAging(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteList(w, items, next, page.Limit, opts...)
 }
 
+// agingGroupPart marks the group id in the cursor's keyset.
+const agingGroupPart = "g:"
+
 // agingAfter reports whether the item sorts after the cursor's key
 // (customer name, customer id, group id, currency).
 func agingAfter(it *AgingItem, key []string) bool {
@@ -307,7 +312,7 @@ func agingAfter(it *AgingItem, key []string) bool {
 	if id := it.CustomerID.String(); id != key[1] {
 		return id > key[1]
 	}
-	if g := it.GroupID(); g != key[2] {
+	if g := agingGroupPart + it.GroupID(); g != key[2] {
 		return g > key[2]
 	}
 	return it.Currency > key[3]

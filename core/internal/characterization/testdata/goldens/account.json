@@ -478,6 +478,7 @@
                 "type": "REVERSAL"
               }
             ],
+            "net_balance_cents": 3142,
             "open_documents": [
               {
                 "date": "<day+0>",
@@ -490,7 +491,9 @@
                 "total_cents": 3142
               }
             ],
-            "opening_balance_cents": 0
+            "opening_balance_cents": 0,
+            "unapplied_cents": 0,
+            "unapplied_payments": []
           }
         ],
         "customer_id": "<id-1>",

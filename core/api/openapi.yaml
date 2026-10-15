@@ -16349,7 +16349,7 @@ components:
         open_cents: {type: integer, format: int64, description: "Negative for a credit memo."}
     ArStatementCurrency:
       type: object
-      required: [currency, opening_balance_cents, lines, closing_balance_cents, open_documents]
+      required: [currency, opening_balance_cents, lines, closing_balance_cents, open_documents, unapplied_payments, unapplied_cents, net_balance_cents]
       properties:
         currency: {type: string}
         opening_balance_cents: {type: integer, format: int64}
@@ -16360,6 +16360,23 @@ components:
         open_documents:
           type: array
           items: {$ref: "#/components/schemas/ArOpenDocument"}
+        unapplied_payments:
+          type: array
+          description: Payments received on or before the statement's last day that still hold unapplied cash on it.
+          items: {$ref: "#/components/schemas/ArUnappliedPayment"}
+        unapplied_cents: {type: integer, format: int64, description: "The sum of the unapplied payments."}
+        net_balance_cents:
+          type: integer
+          format: int64
+          description: The closing balance less unapplied cash; the aging's total for the customer on the statement's last day.
+    ArUnappliedPayment:
+      type: object
+      required: [id, number, received_on, unapplied_cents]
+      properties:
+        id: {type: string, format: uuid}
+        number: {type: string}
+        received_on: {type: string, format: date}
+        unapplied_cents: {type: integer, format: int64}
     ArStatement:
       type: object
       required: [customer_id, customer_name, from, to, job_id, currencies]
