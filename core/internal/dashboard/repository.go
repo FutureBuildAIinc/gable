@@ -6,6 +6,7 @@ package dashboard
 import (
 	"context"
 	"fmt"
+	"github.com/gablelbm/gable/pkg/yardstock"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/database"
@@ -188,7 +189,7 @@ func (r *PostgresRepository) GetInventoryAlerts(ctx context.Context, branchID *u
 		LEFT JOIN locations y ON y.id = l.branch_id
 		WHERE ` + middleware.Wall("l", 2, 3) + `
 		GROUP BY p.id, p.sku, p.description, p.reorder_point, l.branch_id, y.name, y.code
-		HAVING COALESCE(SUM(i.quantity), 0) <= COALESCE(p.reorder_point, 10)
+		HAVING ` + yardstock.AtOrBelow("COALESCE(SUM(i.quantity), 0)", "COALESCE(p.reorder_point, 10)") + `
 		ORDER BY COALESCE(SUM(i.quantity), 0) ASC, p.sku ASC, l.branch_id ASC
 		LIMIT $1
 	`
