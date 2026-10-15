@@ -30,11 +30,14 @@ func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
 }
 
 // RULE: the same leg passes whichever zone the default branch is in, so the
-// fixture reads the branch's day throughout. Pacific/Kiritimati (UTC+14) and
-// Pacific/Pago_Pago (UTC-11) are on different days from each other for most
-// of every day, and at any moment one of them is on a day other than UTC's.
+// fixture reads the branch's day throughout. A UTC dated fixture is wrong only
+// when it falls after the branch's day, that is when the branch is BEHIND UTC:
+// the row in testutil.AlwaysBehindUTC (UTC minus 25 hours) is on an earlier day
+// than UTC at every hour, so it fails a UTC dated fixture at any time of day.
+// Pacific/Pago_Pago (UTC-11) is behind UTC from 00:00 to 11:00 UTC only, and
+// Pacific/Kiritimati (UTC+14) is ahead of it, so it guards the other direction.
 func TestGetDashboardSummary_OutstandingARInAnyYardZone(t *testing.T) {
-	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago"} {
+	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago", testutil.AlwaysBehindUTC} {
 		t.Run(zone, func(t *testing.T) {
 			testutil.SetBranchDayZone(t, testutil.RequireDB(t), zone)
 			outstandingARLeg(t)
@@ -188,11 +191,7 @@ func TestGetDashboardSummary_OutstandingARReadsTheBranchDay(t *testing.T) {
 	svc := account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
 
-	var day time.Time
-	if err := db.Pool.QueryRow(ctx, `SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
-		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`).Scan(&day); err != nil {
-		t.Fatalf("the branch's day: %v", err)
-	}
+	day := testutil.BranchDay(t, db)
 
 	yard, customer, inv := uuid.New(), uuid.New(), uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, yard, "OAD-"+yard.String()[:8]); err != nil {

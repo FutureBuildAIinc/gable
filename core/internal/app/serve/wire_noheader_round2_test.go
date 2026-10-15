@@ -461,10 +461,11 @@ func TestNoHeader_Dashboard(t *testing.T) {
 
 // RULE: the same leg passes whichever zone the default branch is in, since
 // the fixtures date their documents by the branch's own day and the dashboard
-// reads that day. Pacific/Kiritimati (UTC+14) and Pacific/Pago_Pago (UTC-11)
-// are never both on UTC's day.
+// reads that day. A UTC dated fixture fails only when the branch is behind UTC,
+// and testutil.AlwaysBehindUTC (UTC minus 25 hours) is behind at every hour;
+// Pacific/Pago_Pago is behind from 00:00 to 11:00 UTC only.
 func TestNoHeader_DashboardInAnyYardZone(t *testing.T) {
-	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago"} {
+	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago", testutil.AlwaysBehindUTC} {
 		t.Run(zone, func(t *testing.T) {
 			testutil.SetBranchDayZone(t, testutil.RequireDB(t), zone)
 			noHeaderDashboardLeg(t)
