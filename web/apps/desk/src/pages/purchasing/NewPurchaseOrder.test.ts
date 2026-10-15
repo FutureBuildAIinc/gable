@@ -17,7 +17,7 @@ beforeEach(() => {
   posted = []
   localStorage.setItem('token', 'test-token')
   history.pushState({}, '', '/purchasing/new?from=recommendation&product_id=p1&description=HANGER-28&qty=40&cost=2'
-    + '&vendor_name=v1&branch_id=y2&branch_name=West%20Kelowna%20Satellite')
+    + '&vendor_id=11111111-2222-3333-4444-555555555555&vendor_name=Gable%20Building%20Supply&branch_id=y2&branch_name=West%20Kelowna%20Satellite')
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/api/v1/purchase-orders') && init?.method === 'POST') {
@@ -46,5 +46,24 @@ describe('new purchase order from a recommendation', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(posted.length).toBe(1)
     expect(posted[0].branch_id).toBe('y2')
+  })
+
+  it('shows the vendor\'s name and sends its id', async () => {
+    const el = await mountAsync<LitElement>('gable-new-purchase-order')
+    expect(text(el)).toContain('Gable Building Supply')
+    const save = Array.from(el.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Create PO')) as HTMLButtonElement
+    save.click()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(posted[0].vendor_id).toBe('11111111-2222-3333-4444-555555555555')
+  })
+
+  it('says in words when the product has no vendor, and never sends a name as an id', async () => {
+    history.pushState({}, '', '/purchasing/new?from=recommendation&product_id=p1&description=HANGER-28&qty=40&cost=2&branch_id=y2&branch_name=West%20Kelowna%20Satellite')
+    const el = await mountAsync<LitElement>('gable-new-purchase-order')
+    expect(text(el)).toContain('has no vendor')
+    const save = Array.from(el.querySelectorAll('button')).find((b) => (b.textContent ?? '').includes('Create PO')) as HTMLButtonElement
+    save.click()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(posted.length).toBe(0)
   })
 })

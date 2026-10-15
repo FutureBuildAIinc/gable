@@ -60,4 +60,28 @@ describe('purchasing recommendations', () => {
     expect(url.searchParams.get('branch_name')).toBe('West Kelowna Satellite')
     navigate.mockRestore()
   })
+
+  it('carries the vendor\'s id and name into the new order, and says when the product has no vendor', async () => {
+    const item = (extra: Record<string, unknown>) => ({
+      branch_id: 'y1', branch_name: 'Lake Country Outpost', product_id: 'p1', product_sku: 'HANGER-28', product_name: 'Joist Hanger 2x8',
+      current_stock: 10, avg_daily_sales: 2, std_dev_sales: 0.6, lead_time_days: 7, reorder_point: 20,
+      safety_stock: 4, suggested_qty: 40, estimated_cost: 100, urgency: 'HIGH', days_until_out: 5, ...extra,
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      total_items: 2, critical_count: 0, high_count: 2, medium_count: 0, low_count: 0, total_estimated_cost: 200,
+      items: [item({ vendor_id: 'v-123', vendor_name: 'Gable Building Supply' }), item({ product_sku: 'NOVENDOR-1' })],
+    })))
+    const navigate = vi.spyOn(router, 'navigate').mockImplementation(() => {})
+    const el = await mountAsync<LitElement>('gable-purchasing-recommendations')
+    const buttons = Array.from(el.querySelectorAll('button')).filter((b) => (b.textContent ?? '').trim() === 'Create PO')
+    buttons[0].click()
+    buttons[1].click()
+    const first = new URL(String(navigate.mock.calls[0][0]), 'http://x')
+    expect(first.searchParams.get('vendor_id')).toBe('v-123')
+    expect(first.searchParams.get('vendor_name')).toBe('Gable Building Supply')
+    const second = new URL(String(navigate.mock.calls[1][0]), 'http://x')
+    expect(second.searchParams.get('vendor_id')).toBeNull()
+    expect(second.searchParams.get('vendor_name')).toBeNull()
+    navigate.mockRestore()
+  })
 })
