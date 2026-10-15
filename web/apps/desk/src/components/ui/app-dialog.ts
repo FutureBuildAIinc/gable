@@ -78,11 +78,18 @@ export class GableAppDialog extends LitElement {
 
     private _ids = `gable-app-dialog-${++dialogSeq}`;
     private _returnFocus: HTMLElement | null = null;
+    private _onResize = () => this._coverModalBehind();
 
     connectedCallback() {
         super.connectedCallback();
         this._returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         this._value = this.initialValue;
+        window.addEventListener('resize', this._onResize);
+    }
+
+    disconnectedCallback() {
+        window.removeEventListener('resize', this._onResize);
+        super.disconnectedCallback();
     }
 
     firstUpdated() {
@@ -145,12 +152,16 @@ export class GableAppDialog extends LitElement {
      * A page modal that can sit under this dialog names its panel with
      * data-modal-panel (its own veil paints above this dialog's, so the plain
      * veil cannot dim it): draw a scrim over the panel's own box, at its own
-     * radius, under this dialog's top layer panel.
+     * radius, under this dialog's top layer panel. Measured again on a window
+     * resize, and dropped when the modal behind closes mid question.
      */
     private _coverModalBehind() {
         const panels = Array.from(document.querySelectorAll<HTMLElement>('[data-modal-panel]'));
         const panel = panels[panels.length - 1];
-        if (!panel) return;
+        if (!panel) {
+            this._scrim = null;
+            return;
+        }
         const r = panel.getBoundingClientRect();
         this._scrim = {
             top: r.top,
