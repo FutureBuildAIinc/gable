@@ -27,6 +27,10 @@ type cache[T any] struct {
 type reachKey struct {
 	branch uuid.UUID
 	sub    string
+	// day is the branch's business date for the figures that are a day's
+	// (the summary and the trend), so a cached answer is never served across
+	// the branch's midnight. Empty for the rest.
+	day string
 }
 
 // reachCache is a per-reach keyed cache.
@@ -104,9 +108,26 @@ func reach(ctx context.Context) (reachKey, *uuid.UUID, *string) {
 	return key, middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
 }
 
+// dayReader is the repository's optional read of the branch's business day.
+type dayReader interface {
+	BusinessDay(ctx context.Context) (string, error)
+}
+
+// withDay keys a reach by the branch's business day; a repository that cannot
+// read it (a test double) keeps the reach alone.
+func (s *Service) withDay(ctx context.Context, key reachKey) reachKey {
+	if d, ok := s.repo.(dayReader); ok {
+		if day, err := d.BusinessDay(ctx); err == nil {
+			key.day = day
+		}
+	}
+	return key
+}
+
 // GetSummary returns the dashboard summary with caching.
 func (s *Service) GetSummary(ctx context.Context) (*DashboardSummary, error) {
 	key, branchID, grantsSub := reach(ctx)
+	key = s.withDay(ctx, key)
 	if cached, ok := s.store.summary.get(key, s.store.ttl); ok {
 		return cached, nil
 	}
@@ -171,6 +192,7 @@ func (s *Service) GetOrderActivity(ctx context.Context) (*OrderActivity, error) 
 // GetRevenueTrend returns revenue trend for chart.
 func (s *Service) GetRevenueTrend(ctx context.Context) ([]RevenueTrendPoint, error) {
 	key, branchID, grantsSub := reach(ctx)
+	key = s.withDay(ctx, key)
 	if cached, ok := s.store.revenueTrend.get(key, s.store.ttl); ok {
 		return cached, nil
 	}

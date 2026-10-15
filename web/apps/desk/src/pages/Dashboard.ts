@@ -168,7 +168,7 @@ export class GableDashboard extends LitElement {
                 <!-- KPI Cards -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <gable-kpi-card
-                        card-title="Today's Revenue"
+                        card-title="Collected today"
                         .value=${this.summary ? this.formatCurrency(this.summary.today_revenue) : '$0.00'}
                         .trend=${this.summary?.today_revenue_change ?? undefined}
                         .iconHtml=${icon(DollarSign, 20, 'w-5 h-5')}
