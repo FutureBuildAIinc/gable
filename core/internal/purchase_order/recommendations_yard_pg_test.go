@@ -79,3 +79,45 @@ func TestRecommendations_TheChosenYardOnlyAndAShortYardIsNotHidden(t *testing.T)
 		t.Fatalf("rows by yard with no header = %v, want only the short yard A (yard B's 500 is well stocked)", all)
 	}
 }
+
+// A recommendation row names its product's vendor by id (the new purchase
+// order is created for that id), and a product with no vendor carries none.
+func TestRecommendations_ARowCarriesItsVendorsID(t *testing.T) {
+	s := seedCreateBranch(t)
+	if _, err := s.db.Pool.Exec(context.Background(),
+		`UPDATE inventory SET quantity = 2 WHERE product_id = $1 AND location_id = $2`, s.product, s.branchA); err != nil {
+		t.Fatal(err)
+	}
+	vendorOf := func() (any, bool) {
+		rs := purchase_order.NewRecommendationService(purchase_order.NewRepository(s.db),
+			inventory.NewService(inventory.NewRepository(s.db)),
+			product.NewService(product.NewRepository(s.db)),
+			vendor.NewService(vendor.NewRepository(s.db)))
+		sum, err := rs.GenerateRecommendations(branchctx.With(context.Background(), &branchctx.Context{UserSub: "boss", IsAdmin: true}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(sum)
+		var out struct {
+			Items []map[string]any `json:"items"`
+		}
+		_ = json.Unmarshal(raw, &out)
+		for _, it := range out.Items {
+			if it["product_id"] == s.product.String() {
+				return it["vendor_id"], true
+			}
+		}
+		return nil, false
+	}
+	got, ok := vendorOf()
+	if !ok || got != s.vendor.String() {
+		t.Fatalf("vendor_id = %v (row found %t), want the product's vendor %s", got, ok, s.vendor)
+	}
+	if _, err := s.db.Pool.Exec(context.Background(), `UPDATE products SET vendor_id = NULL, vendor = NULL WHERE id = $1`, s.product); err != nil {
+		t.Fatal(err)
+	}
+	got, ok = vendorOf()
+	if !ok || got != nil {
+		t.Fatalf("vendor_id = %v (row found %t), want none for a product with no vendor", got, ok)
+	}
+}
