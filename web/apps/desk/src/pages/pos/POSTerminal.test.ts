@@ -2617,3 +2617,27 @@ describe('the opening float field', () => {
     el.remove();
   });
 });
+
+describe('the blind count fields', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  it('hint in words in the till\'s muted tone, never a figure that reads as entered', async () => {
+    svc.tillReport.mockResolvedValue({
+      sale_count: 0, sales_total_cents: 0, tax_total_cents: 0, change_cents: 0, tendered_by_method: {},
+      expected_by_method: { CASH: 25000, CARD: 9000 },
+    });
+    const el = await mount(sale({ lines: [] }));
+    const close = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Close Till') as HTMLElement;
+    close.click();
+    await new Promise((r) => setTimeout(r, 0));
+    await el.updateComplete;
+    const fields = [...el.querySelectorAll('input[type="number"]')] as HTMLInputElement[];
+    expect(fields.length).toBe(2);
+    for (const f of fields) {
+      expect(f.placeholder.length).toBeGreaterThan(0);
+      expect(f.placeholder, 'a placeholder that is a figure reads as entered').not.toMatch(/\d/);
+      expect(f.className).toContain('placeholder:text-[rgb(var(--gb-till-muted))]');
+    }
+    el.remove();
+  });
+});
