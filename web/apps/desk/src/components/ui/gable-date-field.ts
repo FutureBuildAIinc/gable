@@ -21,30 +21,39 @@ import { formatDay, parseDay, todayDay, weekStart, weekdayNames, monthName } fro
 
 let nextId = 0;
 
-// The popover's box: w-64 is 256px; the grid with its header is about 320px.
+// The popover's box estimate for the first render (w-64 is 256px; the grid
+// with its header is about 320px); the measured size replaces it on the next.
 const POPOVER_W = 256;
 const POPOVER_H = 320;
 const POPOVER_GAP = 4;
 const VIEWPORT_MARGIN = 8;
 
+export interface PopoverSize {
+    width: number;
+    height: number;
+}
+
 /**
- * Where the calendar pops, from the field's box and the viewport: under the
- * field, clamped sideways into the screen, and flipped above the field when
- * the space below is short and the space above is longer. Fixed positioning,
- * so a modal's scroll or hidden overflow never clips it.
+ * Where the calendar pops, from the field's box, the popover's size and the
+ * viewport: under the field when there is room, otherwise directly above it
+ * (its bottom edge the gap over the field's top edge, so it never covers the
+ * field or its label), clamped inside the screen on every side. Fixed
+ * positioning, so a modal's scroll or hidden overflow never clips it.
  */
 export function placePopover(
     rect: { left: number; bottom: number; top: number },
+    size: PopoverSize,
     viewportW: number,
     viewportH: number,
 ): { top: number; left: number } {
-    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportW - POPOVER_W - VIEWPORT_MARGIN));
+    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, viewportW - size.width - VIEWPORT_MARGIN));
     const below = viewportH - rect.bottom;
-    if (below < POPOVER_H + POPOVER_GAP && rect.top > below) {
-        return { top: Math.max(VIEWPORT_MARGIN, rect.top - POPOVER_H - POPOVER_GAP), left };
+    const above = rect.top;
+    if (below >= size.height + POPOVER_GAP || below >= above) {
+        const top = Math.min(rect.bottom + POPOVER_GAP, viewportH - size.height - VIEWPORT_MARGIN);
+        return { top, left };
     }
-    const top = rect.bottom + POPOVER_GAP;
-    return { top: Math.min(top, viewportH - POPOVER_H - VIEWPORT_MARGIN), left };
+    return { top: Math.max(VIEWPORT_MARGIN, rect.top - POPOVER_GAP - size.height), left };
 }
 
 @customElement('gable-date-field')
@@ -70,6 +79,9 @@ export class GableDateField extends LitElement {
     @state() private _popLeft = 0;
 
     private _id = `gable-date-field-${++nextId}`;
+    // The size the open popover was last placed with: the estimate at open,
+    // then the measured box (updated() re-places on the first real measure).
+    private _placedSize: PopoverSize = { width: POPOVER_W, height: POPOVER_H };
     // True while the grid holds the keyboard focus, so a re-render that
     // replaces the focused cell's node (the month turned) knows to give the
     // focus to the day the move landed on.
@@ -174,6 +186,31 @@ export class GableDateField extends LitElement {
         }
     }
 
+    /**
+     * The box the calendar anchors to: the text box, extended over the field's
+     * own label when the page draws it as the sibling just before the field,
+     * so a flipped calendar covers neither.
+     */
+    private _anchorRect(): { left: number; top: number; bottom: number } | null {
+        const box = this.querySelector('input');
+        if (!box) return null;
+        const r = box.getBoundingClientRect();
+        let top = r.top;
+        const before = this.previousElementSibling;
+        if (before instanceof HTMLLabelElement) {
+            top = Math.min(top, before.getBoundingClientRect().top);
+        }
+        return { left: r.left, top, bottom: r.bottom };
+    }
+
+    private _place() {
+        const rect = this._anchorRect();
+        if (!rect) return;
+        const at = placePopover(rect, this._placedSize, window.innerWidth, window.innerHeight);
+        this._popTop = at.top;
+        this._popLeft = at.left;
+    }
+
     private _openCalendar() {
         if (this.disabled) return;
         const base = this.value && this._inBounds(this.value) ? this.value : todayDay();
@@ -181,12 +218,8 @@ export class GableDateField extends LitElement {
         this._viewYear = y;
         this._viewMonth = m;
         this._focusDay = base;
-        const rect = this.querySelector('input')?.getBoundingClientRect();
-        if (rect) {
-            const at = placePopover(rect, window.innerWidth, window.innerHeight);
-            this._popTop = at.top;
-            this._popLeft = at.left;
-        }
+        this._placedSize = { width: POPOVER_W, height: POPOVER_H };
+        this._place();
         this._open = true;
         this._watchViewport();
     }
@@ -413,6 +446,19 @@ export class GableDateField extends LitElement {
                     pop.showPopover();
                 } catch {
                     // already showing
+                }
+            }
+            // The first render placed the popover on the estimate; with the
+            // real box measured, place it again so a flipped calendar's
+            // bottom edge sits on the field, not a guess above it.
+            if (pop) {
+                const measured: PopoverSize = {
+                    width: pop.offsetWidth || POPOVER_W,
+                    height: pop.offsetHeight || POPOVER_H,
+                };
+                if (measured.width !== this._placedSize.width || measured.height !== this._placedSize.height) {
+                    this._placedSize = measured;
+                    this._place();
                 }
             }
             const btn = this.querySelector(`#${this._id}-grid button[tabindex="0"]`) as HTMLElement | null;
