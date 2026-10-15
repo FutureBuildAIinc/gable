@@ -505,7 +505,7 @@ export class FleetManagement extends LitElement {
     const isEdit = !!this._vehicleModalVehicle;
 
     return html`
-      <div class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" @click=${() => this._closeVehicleModal()}>
+      <div class="fixed inset-0 z-[60] bg-backdrop/60 backdrop-blur-sm flex items-center justify-center p-4" @click=${() => this._closeVehicleModal()}>
         <div class="bg-slate-steel border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" @click=${(e: Event) => e.stopPropagation()}>
           <div class="flex items-center justify-between p-5 border-b border-white/5">
             <h2 class="text-lg font-semibold text-white">${isEdit ? 'Edit Vehicle' : 'Add Vehicle'}</h2>
@@ -578,7 +578,7 @@ export class FleetManagement extends LitElement {
     const isEdit = !!this._driverModalDriver;
 
     return html`
-      <div class="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" @click=${() => this._closeDriverModal()}>
+      <div class="fixed inset-0 z-[60] bg-backdrop/60 backdrop-blur-sm flex items-center justify-center p-4" @click=${() => this._closeDriverModal()}>
         <div class="bg-slate-steel border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl" @click=${(e: Event) => e.stopPropagation()}>
           <div class="flex items-center justify-between p-5 border-b border-white/5">
             <h2 class="text-lg font-semibold text-white">${isEdit ? 'Edit Driver' : 'Add Driver'}</h2>

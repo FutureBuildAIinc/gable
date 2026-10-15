@@ -155,6 +155,25 @@ describe('gable-portal-layout — chrome and branding', () => {
     expect(el.querySelector('aside gable-brand-logo')).not.toBeNull()
   })
 
+  it('takes the Gable accent from the mode and again when the mode changes', async () => {
+    signIn()
+    at('/portal')
+    document.documentElement.style.setProperty('--gb-gable-green', '4 108 67')
+    try {
+      const el = await mount<GablePortalLayout>('gable-portal-layout')
+      const primary = () => q(el, 'div[style*="--portal-primary"]').getAttribute('style')
+      expect(primary()).toContain('--portal-primary: #046c43')
+      expect(q(el, 'aside').className).toContain('bg-portal-panel')
+
+      document.documentElement.style.setProperty('--gb-gable-green', '0 255 163')
+      window.dispatchEvent(new CustomEvent('gable-theme-changed', { detail: 'dark' }))
+      await el.updateComplete
+      expect(primary()).toContain('--portal-primary: #00ffa3')
+    } finally {
+      document.documentElement.style.removeProperty('--gb-gable-green')
+    }
+  })
+
   it('shows the signed-in contractor with initials, name and email', async () => {
     signIn()
     at('/portal')

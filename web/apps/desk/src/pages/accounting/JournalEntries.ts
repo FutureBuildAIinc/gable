@@ -170,7 +170,7 @@ export class JournalEntries extends LitElement {
                     </div>
                     <button
                         @click=${() => this.showCreate = true}
-                        class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded transition-colors"
+                        class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors"
                     >
                         ${icon(Plus, 16, 'w-4 h-4')}
                         New Entry
@@ -275,7 +275,7 @@ export class JournalEntries extends LitElement {
                                 <button
                                     @click=${this._handleCreate}
                                     ?disabled=${!this._isBalanced}
-                                    class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-2 rounded transition-colors disabled:opacity-50"
+                                    class="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-plate font-semibold px-4 py-2 rounded transition-colors disabled:opacity-50"
                                 >
                                     Create Entry (Draft)
                                 </button>

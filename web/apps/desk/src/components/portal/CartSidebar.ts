@@ -73,7 +73,7 @@ export class GableCartSidebar extends LitElement {
     return html`
       <!-- Backdrop -->
       ${this.isOpen ? html`
-        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click=${this._close}></div>
+        <div class="fixed inset-0 bg-backdrop/60 backdrop-blur-sm z-40" @click=${this._close}></div>
       ` : nothing}
 
       <!-- Sidebar -->

@@ -184,7 +184,7 @@ export class GableAppDialog extends LitElement {
         return html`
             <div class="relative z-50" @keydown=${this._onKeydown}>
                 <style>dialog::backdrop { background: transparent; }</style>
-                <div class="fixed inset-0 bg-black/80 backdrop-blur-sm" @click=${this._cancel}></div>
+                <div class="fixed inset-0 bg-backdrop/80 backdrop-blur-sm" @click=${this._cancel}></div>
                 <dialog
                     role=${this.mode === 'prompt' ? 'dialog' : 'alertdialog'}
                     aria-modal="true"

@@ -206,12 +206,11 @@ export class GableProductGeometryTab extends LitElement {
                         width=${boxW}
                         height=${boxH}
                         rx="2"
-                        fill="rgb(132 204 22 / 0.15)"
-                        stroke="rgb(132 204 22 / 0.7)"
+                        class="fill-lime-500/15 stroke-lime-500/70"
                         stroke-width="1.5"
                     />
-                    <text x="130" y="248" text-anchor="middle" fill="#a1a1aa" font-size="11">${l}" long</text>
-                    <text x="8" y="130" fill="#a1a1aa" font-size="11">${h}" high</text>
+                    <text x="130" y="248" text-anchor="middle" class="fill-zinc-400" font-size="11">${l}" long</text>
+                    <text x="8" y="130" class="fill-zinc-400" font-size="11">${h}" high</text>
                 </svg>
             </div>
         `;

@@ -256,7 +256,7 @@ export class TechAdminPage extends LitElement {
                 <div class="flex gap-2 justify-end items-center">
                     ${this.aiTestResult ? html`<span class="${cn('text-xs mr-auto', this.aiTestResult.ok ? 'text-emerald-400' : 'text-red-400')}">${this.aiTestResult.ok ? 'Connection ok' : this.aiTestResult.message}</span>` : nothing}
                     <button @click=${this._handleTestAI} ?disabled=${this.aiTesting} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 disabled:opacity-50">Test connection</button>
-                    <button @click=${this._handleSaveProvider} ?disabled=${this.aiSaving} class="bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Save provider</button>
+                    <button @click=${this._handleSaveProvider} ?disabled=${this.aiSaving} class="bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Save provider</button>
                 </div>
             </div>
         `;
@@ -492,7 +492,7 @@ export class TechAdminPage extends LitElement {
                     <button
                         @click=${() => this.isCreating = true}
                         ?disabled=${this.isCreating || !!this.generatedKey}
-                        class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded hover:shadow-[0_0_10px_rgba(0,255,163,0.3)] transition-all disabled:opacity-50"
+                        class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded hover:shadow-glow-10-30 transition-all disabled:opacity-50"
                     >
                         ${icon(Plus, 16)} New API Key
                     </button>
@@ -514,7 +514,7 @@ export class TechAdminPage extends LitElement {
                                 </div>
                                 <div class="flex gap-2">
                                     <button @click=${() => this.isCreating = false} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5 transition-colors">Cancel</button>
-                                    <button @click=${this._handleCreateKey} ?disabled=${!this.newKeyName} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Generate</button>
+                                    <button @click=${this._handleCreateKey} ?disabled=${!this.newKeyName} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">Generate</button>
                                 </div>
                             </div>
                         ` : html`
@@ -532,7 +532,7 @@ export class TechAdminPage extends LitElement {
                                     </button>
                                 </div>
                                 <div class="flex justify-end">
-                                    <button @click=${() => { this.generatedKey = null; this.isCreating = false; }} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded">Done</button>
+                                    <button @click=${() => { this.generatedKey = null; this.isCreating = false; }} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded">Done</button>
                                 </div>
                             </div>
                         `}
@@ -647,7 +647,7 @@ export class TechAdminPage extends LitElement {
                                     ${icon(Trash2, 14)} Remove
                                 </button>
                             ` : nothing}
-                            <button @click=${() => { this.aiShowInput = true; this.aiNewBaseUrl = this.aiSettings?.base_url ?? ''; }} ?disabled=${this.aiShowInput} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                            <button @click=${() => { this.aiShowInput = true; this.aiNewBaseUrl = this.aiSettings?.base_url ?? ''; }} ?disabled=${this.aiShowInput} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                 ${this.aiSettings?.configured ? 'Update Key' : 'Add Key'}
                             </button>`}
                         </div>
@@ -677,7 +677,7 @@ export class TechAdminPage extends LitElement {
                             </div>
                             <div class="flex gap-2 justify-end">
                                 <button @click=${() => { this.aiShowInput = false; this.aiNewKey = ''; this.aiNewBaseUrl = ''; }} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5">Cancel</button>
-                                <button @click=${this._handleSaveAIKey} ?disabled=${!this.aiNewKey.trim() || this.aiSaving} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                                <button @click=${this._handleSaveAIKey} ?disabled=${!this.aiNewKey.trim() || this.aiSaving} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                     Save Key
                                 </button>
                             </div>
@@ -751,7 +751,7 @@ export class TechAdminPage extends LitElement {
                                     ${icon(Trash2, 14)} Remove
                                 </button>
                             ` : nothing}
-                            <button @click=${() => { this.routingShowInput = true; }} ?disabled=${this.routingShowInput} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                            <button @click=${() => { this.routingShowInput = true; }} ?disabled=${this.routingShowInput} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                 ${this.routingSettings?.configured ? 'Update Key' : 'Add Key'}
                             </button>
                         </div>
@@ -771,7 +771,7 @@ export class TechAdminPage extends LitElement {
                             </div>
                             <div class="flex gap-2 justify-end">
                                 <button @click=${() => { this.routingShowInput = false; this.routingNewKey = ''; }} class="px-4 py-2 border border-white/10 text-white rounded hover:bg-white/5">Cancel</button>
-                                <button @click=${this._handleSaveORSKey} ?disabled=${!this.routingNewKey.trim() || this.routingSaving} class="inline-flex items-center gap-2 bg-[#00FFA3] text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
+                                <button @click=${this._handleSaveORSKey} ?disabled=${!this.routingNewKey.trim() || this.routingSaving} class="inline-flex items-center gap-2 bg-gable-green text-black font-semibold px-4 py-2 rounded disabled:opacity-50">
                                     Save Key
                                 </button>
                             </div>
@@ -844,7 +844,7 @@ export class TechAdminPage extends LitElement {
                             )}"
                             title=${enabled ? 'Disable AI_LM module' : 'Enable AI_LM module'}
                         >
-                            <span class="${cn('inline-block h-4 w-4 transform rounded-full bg-white transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')}"></span>
+                            <span class="${cn('inline-block h-4 w-4 transform rounded-full bg-plate transition-transform', enabled ? 'translate-x-6' : 'translate-x-1')}"></span>
                         </button>
                     </div>
                 </div>

@@ -141,7 +141,7 @@ export class CycleCount extends LitElement {
                         <p class="text-sm text-zinc-400">Select a zone to count:</p>
                         ${ZONES.map(z => html`
                             <div
-                                class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
+                                class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-all cursor-pointer border-white/5 hover:border-amber-400/30"
                                 @click=${() => { this.selectedZone = z.code; }}
                             >
                                 <div class="p-4 flex items-center justify-between">
@@ -226,7 +226,7 @@ export class CycleCount extends LitElement {
                                 const counted = parseFloat(item.counted);
                                 const hasDiscrep = !isNaN(counted) && counted !== item.expected;
                                 return html`
-                                    <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl transition-all ${hasDiscrep ? 'border-amber-400/30' : 'border-white/5'}">
+                                    <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl transition-all ${hasDiscrep ? 'border-amber-400/30' : 'border-white/5'}">
                                         <div class="p-4">
                                             <div class="flex items-center gap-3">
                                                 <div class="flex-1 min-w-0">

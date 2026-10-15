@@ -60,7 +60,7 @@ export class DriverRouteList extends LitElement {
                     </h1>
                 </div>
 
-                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                     <div class="p-4">
                         <label class="block text-xs font-mono uppercase tracking-wider text-zinc-500 mb-2 flex items-center gap-2">
                             ${icon(User, 12)}
@@ -83,7 +83,7 @@ export class DriverRouteList extends LitElement {
                     <h2 class="text-sm font-medium text-zinc-400 px-1">Assigned Routes</h2>
                     ${this.routes.map(route => html`
                         <div
-                            class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl active:scale-[0.98] transition-transform cursor-pointer border-white/5 hover:border-gable-green/30"
+                            class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl active:scale-[0.98] transition-transform cursor-pointer border-white/5 hover:border-gable-green/30"
                             @click=${() => router.navigate(`/driver/routes/${route.id}`)}
                         >
                             <div class="p-4">

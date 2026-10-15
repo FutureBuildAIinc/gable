@@ -37,7 +37,7 @@ export class GableShortcutsModal extends LitElement {
 
     return html`
       <div class="relative z-50">
-        <div class="fixed inset-0 bg-black/80 backdrop-blur-sm" @click=${this._close}></div>
+        <div class="fixed inset-0 bg-backdrop/80 backdrop-blur-sm" @click=${this._close}></div>
         <div class="fixed inset-0 flex items-center justify-center p-4">
           <div class="w-full max-w-2xl transform overflow-hidden rounded-2xl bg-slate-steel border border-white/10 p-6 text-left shadow-xl">
             <div class="flex items-center justify-between mb-6 border-b border-white/10 pb-4">

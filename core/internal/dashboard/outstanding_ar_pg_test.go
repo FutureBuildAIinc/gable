@@ -25,11 +25,35 @@ import (
 //
 // Skips cleanly when Postgres is unreachable (testutil.RequireDB).
 func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
+	testutil.LockBranchDay(t)
+	outstandingARLeg(t)
+}
+
+// RULE: the same leg passes whichever zone the default branch is in, so the
+// fixture reads the branch's day throughout. A UTC dated fixture is wrong only
+// when it falls after the branch's day, that is when the branch is BEHIND UTC:
+// the row in testutil.AlwaysBehindUTC (UTC minus 25 hours) is on an earlier day
+// than UTC at every hour, so it fails a UTC dated fixture at any time of day.
+// Pacific/Pago_Pago (UTC-11) is behind UTC from 00:00 to 11:00 UTC only, and
+// Pacific/Kiritimati (UTC+14) is ahead of it, so it guards the other direction.
+func TestGetDashboardSummary_OutstandingARInAnyYardZone(t *testing.T) {
+	for _, zone := range []string{"Pacific/Kiritimati", "Pacific/Pago_Pago", testutil.AlwaysBehindUTC} {
+		t.Run(zone, func(t *testing.T) {
+			testutil.SetBranchDayZone(t, testutil.RequireDB(t), zone)
+			outstandingARLeg(t)
+		})
+	}
+}
+
+func outstandingARLeg(t *testing.T) {
+	t.Helper()
 	db := testutil.RequireDB(t)
 	repo := NewRepository(db)
 	svc := account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
-	today := time.Now()
+	// every fixture is dated by the default branch's own day, which the
+	// dashboard and the aging read, never by the runner's UTC day
+	today := testutil.BranchDay(t, db)
 
 	yardA, yardB, customer := uuid.New(), uuid.New(), uuid.New()
 	for _, b := range []uuid.UUID{yardA, yardB} {
@@ -76,7 +100,7 @@ func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
 		if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, customer_id, branch_id, status, origin, number, currency,
 				total_amount, subtotal, tax_rate, tax_amount, amount_open, due_date, invoice_date)
 			VALUES ($1, $2, $3, 'UNPAID', 'POS', $4, 'USD', $5::bigint::numeric / 100, $5::bigint::numeric / 100,
-				0, 0, $5::bigint::numeric / 100, CURRENT_DATE + 30, CURRENT_DATE - 10)`,
+				0, 0, $5::bigint::numeric / 100, `+testutil.BranchDaySQL+` + 30, `+testutil.BranchDaySQL+` - 10)`,
 			id, customer, yard, "IN-"+id.String()[:8], totalCents); err != nil {
 			t.Fatalf("seed invoice: %v", err)
 		}
@@ -112,7 +136,7 @@ func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
 	memo := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, amount,
 			subtotal, tax_amount, total_amount, status, memo_date)
-		VALUES ($1, $2, $3, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, customer, yardA); err != nil {
+		VALUES ($1, $2, $3, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', `+testutil.BranchDaySQL+`)`, memo, customer, yardA); err != nil {
 		t.Fatalf("seed memo: %v", err)
 	}
 	err := db.RunInTx(ctx, func(ctx context.Context) error {
@@ -160,17 +184,14 @@ func TestGetDashboardSummary_OutstandingARIsNetOpenReceivable(t *testing.T) {
 // With the server's clock two days behind the database's, an invoice dated the
 // branch's today still counts, and the figure still equals the aging's.
 func TestGetDashboardSummary_OutstandingARReadsTheBranchDay(t *testing.T) {
+	testutil.LockBranchDay(t)
 	db := testutil.RequireDB(t)
 	repo := NewRepository(db)
 	repo.now = func() time.Time { return time.Now().AddDate(0, 0, -2) }
 	svc := account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
 
-	var day time.Time
-	if err := db.Pool.QueryRow(ctx, `SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
-		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`).Scan(&day); err != nil {
-		t.Fatalf("the branch's day: %v", err)
-	}
+	day := testutil.BranchDay(t, db)
 
 	yard, customer, inv := uuid.New(), uuid.New(), uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, yard, "OAD-"+yard.String()[:8]); err != nil {

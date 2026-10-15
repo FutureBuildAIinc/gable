@@ -124,7 +124,7 @@ export class GableCreditMemoList extends LitElement {
                     <p class="text-gray-400 text-sm mb-4">${this.error}</p>
                     <button
                         @click=${() => { this.error = null; this.loading = true; this.loadMemos(); }}
-                        class="px-4 py-2 bg-[#00FFA3] text-[#0A0B10] rounded font-medium hover:opacity-90"
+                        class="px-4 py-2 bg-gable-green text-deep-space rounded font-medium hover:opacity-90"
                     >
                         Retry
                     </button>

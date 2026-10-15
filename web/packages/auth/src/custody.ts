@@ -166,6 +166,18 @@ export class AuthCustody {
     return s !== null && s.kind === 'token' ? s.token : null;
   }
 
+  /**
+   * Who is signed in, as a stable key for per person settings (the theme
+   * choice): the token's sub claim (else its email), or `dev:<name>` for a
+   * dev session. Null when signed out.
+   */
+  get subject(): string | null {
+    const s = this.session;
+    if (s === null) return null;
+    if (s.kind === 'dev') return `dev:${s.name}`;
+    return s.claims.sub ?? s.claims.email ?? null;
+  }
+
   /** The signed-in user's display name, from the token or the dev record. */
   get displayName(): string | null {
     const s = this.session;

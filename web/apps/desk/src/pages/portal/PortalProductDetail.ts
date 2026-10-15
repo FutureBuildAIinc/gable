@@ -128,7 +128,7 @@ export class PortalProductDetail extends LitElement {
                         <p class="text-sm text-zinc-500 font-mono">${product.sku}</p>
 
                         <!-- Pricing -->
-                        <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                        <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                             <div class="p-5">
                                 <div class="flex items-baseline gap-3 mb-3">
                                     <span class="text-3xl font-bold text-white font-mono">
@@ -167,7 +167,7 @@ export class PortalProductDetail extends LitElement {
                             <div class="flex items-center border border-white/10 rounded-xl overflow-hidden">
                                 <button
                                     @click=${() => { this.quantity = Math.max(1, this.quantity - 1); }}
-                                    class="px-3 py-2.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                    class="px-3 py-2.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                 >
                                     ${icon(Minus, 16)}
                                 </button>
@@ -180,7 +180,7 @@ export class PortalProductDetail extends LitElement {
                                 />
                                 <button
                                     @click=${() => { this.quantity = this.quantity + 1; }}
-                                    class="px-3 py-2.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                    class="px-3 py-2.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                 >
                                     ${icon(Plus, 16)}
                                 </button>
@@ -197,7 +197,7 @@ export class PortalProductDetail extends LitElement {
 
                         <!-- Specs Table -->
                         ${specs.length > 0 ? html`
-                            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl overflow-hidden">
+                            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl overflow-hidden">
                                 <table class="w-full text-sm">
                                     <tbody>
                                         ${specs.map((spec, i) => html`

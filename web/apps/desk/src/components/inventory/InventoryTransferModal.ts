@@ -102,8 +102,8 @@ export class GableInventoryTransferModal extends LitElement {
     if (!this.isOpen || !this.product) return nothing;
 
     return html`
-      <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-stock-modal-title">
-        <div class="bg-[#161821] w-full max-w-lg rounded-xl border border-white/10 shadow-2xl">
+      <div class="fixed inset-0 bg-backdrop/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="transfer-stock-modal-title">
+        <div class="bg-slate-steel w-full max-w-lg rounded-xl border border-white/10 shadow-2xl">
           <div class="flex justify-between items-center p-6 border-b border-white/10">
             <h2 id="transfer-stock-modal-title" class="text-xl font-bold">Transfer Stock</h2>
             <button @click=${this._close} class="text-gray-400 hover:text-white" aria-label="Close transfer dialog">
@@ -149,7 +149,7 @@ export class GableInventoryTransferModal extends LitElement {
                 max=${this._maxQty}
                 .value=${this._quantity}
                 @input=${(e: InputEvent) => this._quantity = (e.target as HTMLInputElement).value}
-                class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white font-mono"
+                class="w-full bg-deep-space border border-white/20 rounded p-3 text-white font-mono"
                 required
               />
             </div>
@@ -161,7 +161,7 @@ export class GableInventoryTransferModal extends LitElement {
                 .value=${this._reason}
                 @input=${(e: InputEvent) => this._reason = (e.target as HTMLInputElement).value}
                 placeholder="Why move?"
-                class="w-full bg-[#0A0B10] border border-white/20 rounded p-3 text-white"
+                class="w-full bg-deep-space border border-white/20 rounded p-3 text-white"
               />
             </div>
 
@@ -179,7 +179,7 @@ export class GableInventoryTransferModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting || Number(this._quantity) > this._maxQty}
-                class="flex-1 py-3 bg-[#00FFA3] text-black rounded font-bold hover:bg-[#00FFA3]/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                class="flex-1 py-3 bg-gable-green text-black rounded font-bold hover:bg-gable-green/90 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ${this._isSubmitting ? 'MOVING...' : 'CONFIRM TRANSFER'}
               </button>

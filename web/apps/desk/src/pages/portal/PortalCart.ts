@@ -115,7 +115,7 @@ export class PortalCart extends LitElement {
                         <!-- Cart Items -->
                         <div class="lg:col-span-2 space-y-3">
                             ${this.cart.items.map(item => html`
-                                <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                                <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                                     <div class="p-4">
                                         <div class="flex items-start gap-4">
                                             <a
@@ -135,7 +135,7 @@ export class PortalCart extends LitElement {
                                             <div class="flex items-center border border-white/10 rounded-lg overflow-hidden">
                                                 <button
                                                     @click=${() => this._handleUpdateQty(item.id, item.quantity - 1)}
-                                                    class="px-2.5 py-1.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                                    class="px-2.5 py-1.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                                 >
                                                     ${icon(Minus, 14)}
                                                 </button>
@@ -144,7 +144,7 @@ export class PortalCart extends LitElement {
                                                 </span>
                                                 <button
                                                     @click=${() => this._handleUpdateQty(item.id, item.quantity + 1)}
-                                                    class="px-2.5 py-1.5 hover:bg-white/5 text-zinc-400 hover:text-white transition-colors"
+                                                    class="px-2.5 py-1.5 hover:bg-hover-row text-zinc-400 hover:text-white transition-colors"
                                                 >
                                                     ${icon(Plus, 14)}
                                                 </button>
@@ -170,7 +170,7 @@ export class PortalCart extends LitElement {
 
                         <!-- Order Summary -->
                         <div>
-                            <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl sticky top-6">
+                            <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl sticky top-6">
                                 <div class="p-5 space-y-4">
                                     <h3 class="text-lg font-semibold text-white">Order Summary</h3>
 
