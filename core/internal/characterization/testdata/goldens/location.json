@@ -814,7 +814,6 @@
           "active": true,
           "code": "GOLD",
           "id": "<id-4>",
-          "is_home": true,
           "name": "Golden Branch Renamed",
           "timezone": "America/Vancouver"
         },
