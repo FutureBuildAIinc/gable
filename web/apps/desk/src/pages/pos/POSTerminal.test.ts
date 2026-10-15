@@ -78,6 +78,12 @@ async function mount(s: Sale): Promise<POSTerminal> {
   return el;
 }
 const q = (el: Element, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement;
+// A tender is never assumed: a leg that is about the amount presses its tender
+// itself, with chooseCash or the tender's own button.
+const chooseCash = async (el: POSTerminal) => {
+  q(el, 'tender-cash').click();
+  await el.updateComplete;
+};
 const typeInto = async (el: POSTerminal, v: string) => {
   const input = el.querySelector('#pos-tender-amount') as HTMLInputElement;
   input.value = v;
@@ -104,6 +110,7 @@ describe('the counter as the Panels layout', () => {
     expect(q(el, 'panel-payment')).toBeTruthy();
     expect(q(el, 'panel-summary')).toBeTruthy();
     for (const n of ['customer', 'payment', 'summary']) expect(q(el, `progress-${n}`)).toBeTruthy();
+    await chooseCash(el);
     const pay = q(el, 'pos-pay');
     expect(el.querySelectorAll('[data-testid="pos-pay"]').length).toBe(1);
     expect(q(el, 'summary-total').textContent?.trim()).toBe('$86.50');
@@ -114,6 +121,7 @@ describe('the counter as the Panels layout', () => {
   it('pays in cash with the tendered amount, sending one cash tender on the sale revision', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed', change_cents: 1350 }));
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '100.00');
     expect(q(el, 'pos-change').textContent).toContain('$13.50');
     q(el, 'pos-pay').click();
@@ -124,6 +132,7 @@ describe('the counter as the Panels layout', () => {
   it('takes a split between two tenders as the added tender plus the entry', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '50.00');
     q(el, 'pos-add-tender').click();
     await el.updateComplete;
@@ -158,6 +167,7 @@ describe('the counter as the Panels layout', () => {
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
     (el as unknown as { _sale: Sale })._sale = sale();
     await el.updateComplete;
+    await chooseCash(el);
     await typeInto(el, '10.00');
     const pay = q(el, 'pos-pay') as HTMLButtonElement;
     expect(pay.disabled).toBe(true);
@@ -210,7 +220,7 @@ describe('the counter as the Panels layout', () => {
         expect((q(el, 'tender-account') as HTMLButtonElement).disabled).toBe(true);
         inner(el)._chooseMethod('account');
         await el.updateComplete;
-        expect(inner(el)._tenderMethod).toBe('cash');
+        expect(inner(el)._tenderMethod).toBeNull();
         expect(el.querySelector('[role="alert"]')).toBeTruthy();
         expect(svc.completeSale).not.toHaveBeenCalled();
       });
@@ -333,6 +343,7 @@ describe('the counter as the Panels layout', () => {
   it('does not start a second sale over the one the cashier began after a completion', async () => {
     svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '100.00');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -363,6 +374,7 @@ describe('the counter as the Panels layout', () => {
 
     it('with a till open and a payable sale, Pay is the one primary', async () => {
       const el = await mount(sale());
+      await chooseCash(el);
       const primaries = filled(el);
       expect(primaries.length).toBe(1);
       expect(primaries[0]).toBe(q(el, 'pos-pay'));
@@ -433,6 +445,7 @@ describe('the counter as the Panels layout', () => {
     it('draws Void as a plain secondary action, never a red outline', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '100.00');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -451,6 +464,7 @@ describe('the counter as the Panels layout', () => {
     it('leaves the completion to the card: no green band over the page, so nothing shifts', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000002', total_cents: 13810, change_cents: 0 }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '86.50');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -630,6 +644,7 @@ describe('the Panels board', () => {
 
   it('shows the payment value on a done Payment panel and the review on Summary', async () => {
     const el = await mount(sale());
+    await chooseCash(el);
     await typeInto(el, '100.00');
     q(el, 'pos-next-summary').click();
     await el.updateComplete;
@@ -641,6 +656,7 @@ describe('the Panels board', () => {
 
   it('changes no money when a panel opens or closes', async () => {
     const el = await mount(sale());
+    await chooseCash(el);
     for (const key of ['payment', 'summary', 'customer', 'customer', 'payment']) {
       toggle(el, key).click();
       await el.updateComplete;
@@ -663,6 +679,7 @@ describe('the Panels board', () => {
     expect(q(el, 'pos-order-summary').contains(q(el, 'pos-pay'))).toBe(true);
     expect(q(el, 'pos-order-summary').textContent).toContain('Item a');
     expect(q(el, 'pos-order-summary').textContent).toContain('1 EA at $50.00');
+    await chooseCash(el);
     await typeInto(el, '100.00');
     expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(false);
     const done = await mount(sale({ status: 'completed' }));
@@ -1182,6 +1199,7 @@ describe('the account customer after a charge', () => {
     const el = await mount(sale({ customer_id: 'cu1' }));
     (el as unknown as Inner)._customer = account;
     await el.updateComplete;
+    await chooseCash(el);
     await typeInto(el, '100.00');
     q(el, 'pos-pay').click();
     await new Promise((r) => setTimeout(r, 0));
@@ -1521,10 +1539,23 @@ describe('the counter before the till opens, and after a sale completes', () => 
     el.remove();
   });
 
+  it('cannot press a tender while no till is open', async () => {
+    const el = await mountNoTill();
+    (el as unknown as { _sale: Sale })._sale = sale();
+    await el.updateComplete;
+    for (const m of ['cash', 'check', 'card', 'account']) {
+      expect((q(el, `tender-${m}`) as HTMLButtonElement).disabled).toBe(true);
+    }
+    (el as unknown as { _chooseMethod(m: string): void })._chooseMethod('cash');
+    expect((el as unknown as { _tenderMethod: string | null })._tenderMethod).toBeNull();
+    el.remove();
+  });
+
   describe('a completed sale', () => {
     async function completeOne(): Promise<POSTerminal> {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '100.00');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -1535,6 +1566,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
     it('stays on screen past the old timer, with its band, Void and Return', async () => {
       svc.completeSale.mockResolvedValue(sale({ status: 'completed', number: 'POS-000001', change_cents: 1350 }));
       const el = await mount(sale());
+      await chooseCash(el);
       await typeInto(el, '100.00');
       // fake timers go in before Pay, so a timer the completion arms is one
       // this test advances
@@ -1653,6 +1685,7 @@ describe('the counter before the till opens, and after a sale completes', () => 
       const el = await mount(sale({ customer_id: 'cu1' }));
       (el as unknown as { _customer: CounterCustomer | null })._customer = withJob;
       await el.updateComplete;
+      await chooseCash(el);
       await typeInto(el, '100.00');
       q(el, 'pos-pay').click();
       await new Promise((r) => setTimeout(r, 0));
@@ -1763,6 +1796,195 @@ describe('closing the till', () => {
     expect([...el.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'New Sale')).toBe(false);
     expect(q(el, 'pos-till-state').textContent).toContain('No till');
     expect((el as unknown as { _sale: Sale | null })._sale).toBeNull();
+    el.remove();
+  });
+});
+
+describe('no tender until the cashier chooses one', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const pressed = (el: Element) => ['cash', 'check', 'card', 'account']
+    .filter((m) => q(el, `tender-${m}`)?.getAttribute('aria-pressed') === 'true');
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('starts a sale with a line and the till open with no tender pressed and Pay off', async () => {
+    const el = await mount(sale());
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'pos-pay').textContent).toContain('Choose how the customer pays');
+    expect((el.querySelector('#pos-tender-amount') as HTMLInputElement).disabled).toBe(true);
+    expect((q(el, 'pos-add-tender') as HTMLButtonElement).disabled).toBe(true);
+    expect(q(el, 'panel-summary-body').textContent).toContain('None yet');
+    el.remove();
+  });
+
+  it('does not complete the sale when Pay is pressed with no tender chosen', async () => {
+    const el = await mount(sale());
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    el.remove();
+  });
+
+  it('sends one account tender for a named account customer who chose Charge to account', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale({ customer_id: 'cu1' }));
+    (el as unknown as { _customer: CounterCustomer })._customer = account;
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    q(el, 'tender-account').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual(['account']);
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).toHaveBeenCalledTimes(1);
+    expect(svc.completeSale).toHaveBeenCalledWith('s1', 3, [{ method: 'account', amount_cents: 8650 }]);
+    el.remove();
+  });
+
+  it('asks for a tender again after a completed sale and New Sale', async () => {
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    q(el, 'pos-pay').click();
+    await settle();
+    await el.updateComplete;
+    svc.startSale.mockResolvedValue(sale({ id: 's2', lines: [line('c', 5000)] as unknown as Sale['lines'], total_cents: 5000 }));
+    const newSale = [...q(el, 'pos-header').querySelectorAll('button')].find((x) => x.textContent?.trim() === 'New Sale') as HTMLElement;
+    newSale.click();
+    await settle();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+
+  it('asks for the next tender again after Add as split tender', async () => {
+    const el = await mount(sale());
+    q(el, 'tender-cash').click();
+    await el.updateComplete;
+    await typeInto(el, '50.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+});
+
+describe('the resets after Clear tenders and Clear sale', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  const pressed = (el: Element) => ['cash', 'check', 'card', 'account']
+    .filter((m) => q(el, `tender-${m}`)?.getAttribute('aria-pressed') === 'true');
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('puts the chosen method back to none on Clear tenders', async () => {
+    const el = await mount(sale());
+    await chooseCash(el);
+    await typeInto(el, '50.00');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    q(el, 'tender-card').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual(['card']);
+    const clear = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Clear tenders') as HTMLElement;
+    clear.click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    el.remove();
+  });
+
+  it('puts a tender that was pressed but not added back to none on Clear sale', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    svc.removeItem
+      .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
+      .mockResolvedValueOnce(sale({ lines: [], subtotal_cents: 0, tax_cents: 0, total_cents: 0 }));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    q(el, 'tender-cash').click();
+    await el.updateComplete;
+    expect(pressed(el)).toEqual(['cash']);
+    q(el, 'pos-clear-sale').click();
+    await settle();
+    await el.updateComplete;
+    (el as unknown as { _sale: Sale })._sale = sale({
+      lines: [line('n', 5000)] as unknown as Sale['lines'], subtotal_cents: 5000, tax_cents: 0, total_cents: 5000,
+    });
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    confirm.mockRestore();
+    el.remove();
+  });
+
+  it('drops the added tenders on Clear sale, so the next lines are not paid on them', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    svc.removeItem
+      .mockResolvedValueOnce(sale({ lines: [line('b', 3000)] as unknown as Sale['lines'] }))
+      .mockResolvedValueOnce(sale({ lines: [], subtotal_cents: 0, tax_cents: 0, total_cents: 0 }));
+    svc.completeSale.mockResolvedValue(sale({ status: 'completed' }));
+    const el = await mount(sale());
+    await chooseCash(el);
+    await typeInto(el, '86.50');
+    q(el, 'pos-add-tender').click();
+    await el.updateComplete;
+    q(el, 'pos-clear-sale').click();
+    await settle();
+    await el.updateComplete;
+    // a new line lands on the emptied sale
+    (el as unknown as { _sale: Sale })._sale = sale({
+      lines: [line('n', 5000)] as unknown as Sale['lines'], subtotal_cents: 5000, tax_cents: 0, total_cents: 5000,
+    });
+    await el.updateComplete;
+    expect(pressed(el)).toEqual([]);
+    expect((q(el, 'pos-pay') as HTMLButtonElement).disabled).toBe(true);
+    q(el, 'pos-pay').click();
+    await settle();
+    expect(svc.completeSale).not.toHaveBeenCalled();
+    confirm.mockRestore();
+    el.remove();
+  });
+});
+
+describe('a changed customer starts the tender over', () => {
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); });
+
+  type Inner = {
+    _customer: CounterCustomer | null; _tenderMethod: string | null; _pendingTenders: unknown[];
+    _chooseCustomer(c: CounterCustomer): Promise<void>; _clearCustomer(): Promise<void>;
+  };
+  const inner = (el: POSTerminal) => el as unknown as Inner;
+  const withTender = async () => {
+    const el = await mount(sale({ lines: [], customer_id: 'cu1' }));
+    inner(el)._customer = account;
+    inner(el)._tenderMethod = 'account';
+    inner(el)._pendingTenders = [{ method: 'cash', amount_cents: 1000 }];
+    await el.updateComplete;
+    return el;
+  };
+
+  it('clears the chosen and the added tenders when another customer is named', async () => {
+    const el = await withTender();
+    svc.attachCustomer.mockResolvedValue(sale({ lines: [], customer_id: 'cu2' }));
+    await inner(el)._chooseCustomer({ ...account, id: 'cu2', name: 'Other Builders' } as CounterCustomer);
+    expect(inner(el)._tenderMethod).toBeNull();
+    expect(inner(el)._pendingTenders).toEqual([]);
+    el.remove();
+  });
+
+  it('clears them when the sale goes back to a walk in', async () => {
+    const el = await withTender();
+    svc.attachCustomer.mockResolvedValue(sale({ lines: [], customer_id: null }));
+    await inner(el)._clearCustomer();
+    expect(inner(el)._tenderMethod).toBeNull();
+    expect(inner(el)._pendingTenders).toEqual([]);
     el.remove();
   });
 });
