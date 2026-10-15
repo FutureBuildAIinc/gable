@@ -142,7 +142,7 @@ func TestGenerateInvoicePDF_TotalIsCentsRenderedAsDollars(t *testing.T) {
 		{"exact dollars", 10000, "TOTAL DUE: $100.00"},
 		{"one cent", 1, "TOTAL DUE: $0.01"},
 		{"zero", 0, "TOTAL DUE: $0.00"},
-		{"large invoice", 12845000, "TOTAL DUE: $128450.00"},
+		{"large invoice", 12845000, "TOTAL DUE: $128,450.00"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,7 +178,7 @@ func TestGenerateInvoicePDF_LineArithmetic(t *testing.T) {
 		{"two at $4.75", "2", 47500, 950, "$4.7500/PCS", "$9.50", "2 PCS"},
 		{"one at $128.45", "1", 1284500, 12845, "$128.4500/PCS", "$128.45", "1 PCS"},
 		{"fractional quantity", "2.5", 40000, 1000, "$4.0000/PCS", "$10.00", "2.5 PCS"},
-		{"a thousand board feet", "1000", 6850000, 68500000, "$685.0000/PCS", "$685000.00", "1000 PCS"},
+		{"a thousand board feet", "1000", 6850000, 68500000, "$685.0000/PCS", "$685,000.00", "1000 PCS"},
 		{"a sub cent price", "3", 100, 3, "$0.0100/PCS", "$0.03", "3 PCS"},
 	}
 	for _, tc := range tests {
@@ -247,7 +247,7 @@ func TestGenerateInvoicePDF_NumberDateNotesAndVoid(t *testing.T) {
 	}
 	assertPDF(t, doc)
 	mustContain(t, doc, "Invoice #: IN-000042")
-	mustContain(t, doc, "2026-03-04")
+	mustContain(t, doc, "Mar 4, 2026")
 	mustContain(t, doc, "Leave at the east gate")
 	mustContain(t, doc, "INVOICE - VOID")
 }
@@ -293,7 +293,7 @@ func TestGeneratePickTicketPDF_QuantityAndUOM(t *testing.T) {
 	mustContain(t, doc, "2X4-8 - SPF Stud")
 	mustContain(t, doc, "12.5 [MBF]")
 	mustContain(t, doc, "Acme Construction")
-	mustContain(t, doc, "2026-03-04")
+	mustContain(t, doc, "Mar 4, 2026")
 }
 
 // CORRECTNESS: a product with no configured UOM falls back to EA rather than
@@ -391,7 +391,7 @@ func TestGenerateInvoicePDF_IsDeterministicApartFromMetadata(t *testing.T) {
 
 	// The PDF trailer carries a creation timestamp, so the whole byte stream
 	// is not expected to match; the rendered content must.
-	for _, want := range []string{"TOTAL DUE: $9.50", "2X4-8 - SPF Stud", "$4.7500/PCS", "2026-03-04"} {
+	for _, want := range []string{"TOTAL DUE: $9.50", "2X4-8 - SPF Stud", "$4.7500/PCS", "Mar 4, 2026"} {
 		mustContain(t, first, want)
 		mustContain(t, second, want)
 	}

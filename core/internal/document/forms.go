@@ -28,9 +28,9 @@ func (s *Service) GenerateQuotePDF(ctx context.Context, q *quote.Quote, cust *cu
 	if n := s.jobName(ctx, q.JobID); n != "" {
 		left = append(left, "Job: "+n)
 	}
-	right := joinLines(fmt.Sprintf("Quote #: %s", q.Number), fmt.Sprintf("Date: %s", q.CreatedAt.Format("2006-01-02")))
+	right := joinLines(fmt.Sprintf("Quote #: %s", q.Number), fmt.Sprintf("Date: %s", b.style.Date(q.CreatedAt.Time)))
 	if q.ExpiresAt != nil {
-		right = append(right, "Valid until: "+q.ExpiresAt.Format("2006-01-02"))
+		right = append(right, "Valid until: "+b.style.Date(q.ExpiresAt.Time))
 	}
 	block(m, left, right, 10)
 
@@ -53,14 +53,14 @@ func (s *Service) GenerateQuotePDF(ctx context.Context, q *quote.Quote, cust *cu
 		m.AddRow(10,
 			text.NewCol(4, desc, props.Text{Size: 9}),
 			text.NewCol(2, l.Quantity.WireString()+" "+string(l.UOM), props.Text{Size: 9, Align: align.Center}),
-			text.NewCol(3, fmt.Sprintf("$%s%s", l.UnitPrice.DecimalString(), priceUOM), props.Text{Size: 9, Align: align.Right}),
-			text.NewCol(3, "$"+l.LineTotal.DecimalString(), props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, b.style.Money(l.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, b.style.Money(l.LineTotal), props.Text{Size: 9, Align: align.Right}),
 		)
 	}
 	if q.FreightCents != 0 {
-		m.AddRow(10, text.NewCol(12, "FREIGHT: $"+q.FreightCents.DecimalString(), props.Text{Align: align.Right, Size: 10, Top: 3}))
+		m.AddRow(10, text.NewCol(12, "FREIGHT: "+b.style.Money(q.FreightCents), props.Text{Align: align.Right, Size: 10, Top: 3}))
 	}
-	m.AddRow(15, text.NewCol(12, "TOTAL: $"+q.TotalCents.DecimalString(), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}))
+	m.AddRow(15, text.NewCol(12, "TOTAL: "+b.style.Money(q.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}))
 	return finish(m)
 }
 
@@ -82,7 +82,7 @@ func (s *Service) GeneratePurchaseOrderPDF(ctx context.Context, po *purchase_ord
 	b.header(m, "PURCHASE ORDER", 18)
 
 	block(m, joinLines(fmt.Sprintf("Vendor: %s", po.VendorName)),
-		joinLines(fmt.Sprintf("PO #: %s", PurchaseOrderNumber(po)), fmt.Sprintf("Date: %s", po.CreatedAt.Format("2006-01-02"))), 10)
+		joinLines(fmt.Sprintf("PO #: %s", PurchaseOrderNumber(po)), fmt.Sprintf("Date: %s", b.style.Date(po.CreatedAt))), 10)
 	m.AddRow(10,
 		text.NewCol(6, "Description", props.Text{Style: fontstyle.Bold}),
 		text.NewCol(2, "Qty", props.Text{Style: fontstyle.Bold, Align: align.Center}),
@@ -97,10 +97,10 @@ func (s *Service) GeneratePurchaseOrderPDF(ctx context.Context, po *purchase_ord
 		m.AddRow(10,
 			text.NewCol(6, l.Description, props.Text{Size: 9}),
 			text.NewCol(2, fmt.Sprintf("%g", l.Quantity), props.Text{Size: 9, Align: align.Center}),
-			text.NewCol(2, fmt.Sprintf("$%.2f", l.Cost), props.Text{Size: 9, Align: align.Right}),
-			text.NewCol(2, fmt.Sprintf("$%.2f", ext), props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(2, b.style.MoneyFloat(l.Cost), props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(2, b.style.MoneyFloat(ext), props.Text{Size: 9, Align: align.Right}),
 		)
 	}
-	m.AddRow(15, text.NewCol(12, fmt.Sprintf("TOTAL: $%.2f", total), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}))
+	m.AddRow(15, text.NewCol(12, "TOTAL: "+b.style.MoneyFloat(total), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}))
 	return finish(m)
 }

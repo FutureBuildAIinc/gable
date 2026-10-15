@@ -224,7 +224,7 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"STATEMENT", "South Yard", "2 Beta Street", "Remit Dept, PO Box 77, Testtown", "C-9", "2026-02-01", "Invoice IN-000007", "$10.00", "$65.00", "IN-000007", "-$22.70"} {
+	for _, want := range []string{"STATEMENT", "South Yard", "2 Beta Street", "Remit Dept, PO Box 77, Testtown", "C-9", "Feb 1, 2026", "Invoice IN-000007", "$10.00", "$65.00", "IN-000007", "-$22.70"} {
 		mustContain(t, doc, want)
 	}
 	mustNotContain(t, doc, "$-")
@@ -252,8 +252,8 @@ func TestStatementCarriesTheAgingAsOfThePeriodsEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Aging as of 2026-02-28", "Current", "1-30", "31-60", "61-90", "Over 90", "$1000.01", "$200.02", "$30.03", "$4.00", "$0.50",
-		"Unapplied", "-$50.00", "Total", "$1184.56", "Net balance", "PAY-000009", "2026-02-20"} {
+	for _, want := range []string{"Aging as of Feb 28, 2026", "Current", "1-30", "31-60", "61-90", "Over 90", "$1,000.01", "$200.02", "$30.03", "$4.00", "$0.50",
+		"Unapplied", "-$50.00", "Total", "$1,184.56", "Net balance", "PAY-000009", "Feb 20, 2026"} {
 		mustContain(t, doc, want)
 	}
 	// the aging is asked as of the period's last day, on the due date, for this customer
@@ -276,7 +276,7 @@ func TestStatementDrawsTheAgingForAPaidUpAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, doc, "Aging as of 2026-02-28")
+	mustContain(t, doc, "Aging as of Feb 28, 2026")
 	mustContain(t, doc, "$0.00")
 }
 

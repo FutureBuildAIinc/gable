@@ -116,15 +116,18 @@ type branding struct {
 	dealer *dealerprofile.Profile
 	logo   *dealerprofile.Logo
 	yard   *Yard
+	// style writes every amount and date the form prints, in the dealer's locale.
+	style style
 }
 
 func (s *Service) branding(ctx context.Context, branch uuid.UUID) *branding {
-	b := &branding{}
+	b := &branding{style: newStyle("")}
 	if s.profiles != nil {
 		if p, err := s.profiles.Get(ctx); err != nil {
 			slog.Warn("document: dealer profile unreadable", "error", err)
 		} else {
 			b.dealer = p
+			b.style = newStyle(p.Locale)
 		}
 		if b.dealer != nil && b.dealer.LogoURL != nil {
 			if l, err := s.profiles.GetLogo(ctx); err == nil && validLogo(l) {
@@ -273,15 +276,6 @@ func finish(m core.Maroto) ([]byte, error) {
 	return doc.GetBytes(), nil
 }
 
-// money renders an amount as a customer reads it: -$22.70, never $-22.70.
-func money(c interface{ DecimalString() string }) string {
-	d := c.DecimalString()
-	if strings.HasPrefix(d, "-") {
-		return "-$" + d[1:]
-	}
-	return "$" + d
-}
-
 func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, cust *customer.Customer) ([]byte, error) {
 	b := s.branding(ctx, inv.BranchID)
 	m := newDoc()
@@ -294,7 +288,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 
 	block(m,
 		joinLines(fmt.Sprintf("Bill To: %s", cust.Name), fmt.Sprintf("Account: %s", cust.AccountNumber), deref(cust.Address)),
-		joinLines(fmt.Sprintf("Invoice #: %s", inv.Number), fmt.Sprintf("Date: %s", inv.InvoiceDate)), 10)
+		joinLines(fmt.Sprintf("Invoice #: %s", inv.Number), fmt.Sprintf("Date: %s", b.style.Day(inv.InvoiceDate))), 10)
 
 	m.AddRow(10,
 		text.NewCol(4, "SKU / Description", props.Text{Style: fontstyle.Bold}),
@@ -326,8 +320,8 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		m.AddRow(10,
 			text.NewCol(4, desc, props.Text{Size: 9}),
 			text.NewCol(2, line.Quantity.WireString()+uom, props.Text{Size: 9, Align: align.Center}),
-			text.NewCol(3, fmt.Sprintf("$%s%s", line.UnitPrice.DecimalString(), priceUOM), props.Text{Size: 9, Align: align.Right}),
-			text.NewCol(3, "$"+line.LineTotal.DecimalString(), props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, b.style.Money(line.UnitPrice)+priceUOM, props.Text{Size: 9, Align: align.Right}),
+			text.NewCol(3, b.style.Money(line.LineTotal), props.Text{Size: 9, Align: align.Right}),
 		)
 	}
 
@@ -335,7 +329,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 	// not add up to TOTAL DUE; the tax as its own line is also a statutory
 	// requirement in the GST/HST jurisdictions this product targets.
 	m.AddRow(10,
-		text.NewCol(12, "SUBTOTAL: $"+inv.SubtotalCents.DecimalString(), props.Text{Top: 5, Align: align.Right, Size: 10}),
+		text.NewCol(12, "SUBTOTAL: "+b.style.Money(inv.SubtotalCents), props.Text{Top: 5, Align: align.Right, Size: 10}),
 	)
 
 	taxLabel := "TAX"
@@ -343,11 +337,11 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 		taxLabel = fmt.Sprintf("TAX @ %s%%", *inv.TaxRatePercent)
 	}
 	m.AddRow(10,
-		text.NewCol(12, fmt.Sprintf("%s: $%s", taxLabel, inv.TaxCents.DecimalString()), props.Text{Align: align.Right, Size: 10}),
+		text.NewCol(12, taxLabel+": "+b.style.Money(inv.TaxCents), props.Text{Align: align.Right, Size: 10}),
 	)
 
 	m.AddRow(15,
-		text.NewCol(12, "TOTAL DUE: $"+inv.TotalCents.DecimalString(), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
+		text.NewCol(12, "TOTAL DUE: "+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
 	)
 	b.remitRow(m)
 	return finish(m)
@@ -398,7 +392,7 @@ func (s *Service) GeneratePickTicketPDF(ctx context.Context, o *order.Order, cus
 	if site := shipToLine(o.ShipTo); site != "" {
 		left = append(left, "Site: "+site)
 	}
-	block(m, left, joinLines(fmt.Sprintf("Order #: %s", number), fmt.Sprintf("Date: %s", o.CreatedAt.Format("2006-01-02"))), 10)
+	block(m, left, joinLines(fmt.Sprintf("Order #: %s", number), fmt.Sprintf("Date: %s", b.style.Date(o.CreatedAt.Time))), 10)
 
 	m.AddRow(10,
 		text.NewCol(8, "SKU / Description", props.Text{Style: fontstyle.Bold}),
@@ -472,12 +466,12 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 	if n := s.jobName(ctx, st.JobID); n != "" {
 		left = append(left, "Job: "+n)
 	}
-	block(m, left, joinLines(fmt.Sprintf("From: %s", st.From), fmt.Sprintf("To: %s", st.To)), 10)
+	block(m, left, joinLines(fmt.Sprintf("From: %s", b.style.Day(st.From)), fmt.Sprintf("To: %s", b.style.Day(st.To))), 10)
 	aging := s.statementAging(ctx, st)
 
 	for _, c := range st.Currencies {
 		m.AddRow(10, text.NewCol(12, "Currency: "+c.Currency, props.Text{Style: fontstyle.Bold, Top: 3}))
-		m.AddRow(8, text.NewCol(12, "Opening balance: "+money(c.OpeningBalanceCents), props.Text{Size: 10}))
+		m.AddRow(8, text.NewCol(12, "Opening balance: "+b.style.Money(c.OpeningBalanceCents), props.Text{Size: 10}))
 		m.AddRow(8,
 			text.NewCol(2, "Date", props.Text{Style: fontstyle.Bold, Size: 9}),
 			text.NewCol(5, "Description", props.Text{Style: fontstyle.Bold, Size: 9}),
@@ -486,17 +480,17 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 		)
 		for _, l := range c.Lines {
 			m.AddRow(8,
-				text.NewCol(2, l.Date, props.Text{Size: 9}),
+				text.NewCol(2, b.style.Day(l.Date), props.Text{Size: 9}),
 				text.NewCol(5, l.Description, props.Text{Size: 9}),
-				text.NewCol(2, money(l.AmountCents), props.Text{Size: 9, Align: align.Right}),
-				text.NewCol(3, money(l.BalanceAfterCents), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(2, b.style.Money(l.AmountCents), props.Text{Size: 9, Align: align.Right}),
+				text.NewCol(3, b.style.Money(l.BalanceAfterCents), props.Text{Size: 9, Align: align.Right}),
 			)
 		}
-		m.AddRow(10, text.NewCol(12, "Closing balance: "+money(c.ClosingBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
+		m.AddRow(10, text.NewCol(12, "Closing balance: "+b.style.Money(c.ClosingBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
 		if t := aging[c.Currency]; t != nil {
 			right := props.Text{Size: 9, Align: align.Right}
 			rightBold := props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}
-			m.AddRow(10, text.NewCol(12, "Aging as of "+st.To, props.Text{Style: fontstyle.Bold, Top: 3}))
+			m.AddRow(10, text.NewCol(12, "Aging as of "+b.style.Day(st.To), props.Text{Style: fontstyle.Bold, Top: 3}))
 			m.AddRow(8,
 				text.NewCol(2, "Current", rightBold),
 				text.NewCol(2, "1-30", rightBold),
@@ -506,38 +500,38 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 				text.NewCol(2, "Unapplied", rightBold),
 			)
 			m.AddRow(8,
-				text.NewCol(2, money(t.CurrentCents), right),
-				text.NewCol(2, money(t.Days1To30), right),
-				text.NewCol(2, money(t.Days31To60), right),
-				text.NewCol(2, money(t.Days61To90), right),
-				text.NewCol(2, money(t.Over90), right),
-				text.NewCol(2, money(t.UnappliedCents), right),
+				text.NewCol(2, b.style.Money(t.CurrentCents), right),
+				text.NewCol(2, b.style.Money(t.Days1To30), right),
+				text.NewCol(2, b.style.Money(t.Days31To60), right),
+				text.NewCol(2, b.style.Money(t.Days61To90), right),
+				text.NewCol(2, b.style.Money(t.Over90), right),
+				text.NewCol(2, b.style.Money(t.UnappliedCents), right),
 			)
-			m.AddRow(8, text.NewCol(12, "Total: "+money(t.TotalCents), props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}))
+			m.AddRow(8, text.NewCol(12, "Total: "+b.style.Money(t.TotalCents), props.Text{Style: fontstyle.Bold, Size: 9, Align: align.Right}))
 		}
 		if len(c.UnappliedPayments) > 0 {
 			m.AddRow(10, text.NewCol(12, "Unapplied cash", props.Text{Style: fontstyle.Bold, Top: 3}))
 			for _, p := range c.UnappliedPayments {
 				m.AddRow(8,
 					text.NewCol(3, p.Number, props.Text{Size: 9}),
-					text.NewCol(3, p.ReceivedOn, props.Text{Size: 9}),
-					text.NewCol(6, money(p.UnappliedCents), props.Text{Size: 9, Align: align.Right}),
+					text.NewCol(3, b.style.Day(p.ReceivedOn), props.Text{Size: 9}),
+					text.NewCol(6, b.style.Money(p.UnappliedCents), props.Text{Size: 9, Align: align.Right}),
 				)
 			}
-			m.AddRow(10, text.NewCol(12, "Net balance: "+money(c.NetBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
+			m.AddRow(10, text.NewCol(12, "Net balance: "+b.style.Money(c.NetBalanceCents), props.Text{Style: fontstyle.Bold, Align: align.Right, Top: 2}))
 		}
 		if len(c.OpenDocuments) > 0 {
 			m.AddRow(10, text.NewCol(12, "Open documents", props.Text{Style: fontstyle.Bold, Top: 3}))
 			for _, d := range c.OpenDocuments {
 				due := ""
 				if d.DueDate != nil {
-					due = "due " + *d.DueDate
+					due = "due " + b.style.Day(*d.DueDate)
 				}
 				m.AddRow(8,
 					text.NewCol(3, d.Number, props.Text{Size: 9}),
-					text.NewCol(3, d.Date, props.Text{Size: 9}),
+					text.NewCol(3, b.style.Day(d.Date), props.Text{Size: 9}),
 					text.NewCol(3, due, props.Text{Size: 9}),
-					text.NewCol(3, money(d.OpenCents), props.Text{Size: 9, Align: align.Right}),
+					text.NewCol(3, b.style.Money(d.OpenCents), props.Text{Size: 9, Align: align.Right}),
 				)
 			}
 		}
@@ -558,7 +552,7 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 				if len(st.Currencies) > 1 {
 					label = "Unapplied cash at other yards (" + c.Currency + "): "
 				}
-				m.AddRow(8, text.NewCol(12, label+money(elsewhere), props.Text{Size: 9, Top: 3}))
+				m.AddRow(8, text.NewCol(12, label+b.style.Money(elsewhere), props.Text{Size: 9, Top: 3}))
 			}
 		}
 		whose := "this yard's"
