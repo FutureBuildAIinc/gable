@@ -385,6 +385,26 @@ describe('the popover stays inside the screen', () => {
   })
 })
 
+describe('required and invalid', () => {
+  it('a required field reads as required on its box', async () => {
+    const el = await mount<GableDateField>(TAG, { label: 'Scheduled Date', required: true } as Partial<GableDateField>)
+    expect(input(el).getAttribute('aria-required')).toBe('true')
+  })
+
+  it('an invalid field reads as invalid and carries the red edge', async () => {
+    const el = await mount<GableDateField>(TAG, { label: 'Scheduled Date', invalid: true } as Partial<GableDateField>)
+    expect(input(el).getAttribute('aria-invalid')).toBe('true')
+    expect(input(el).className).toContain('border-safety-red')
+  })
+
+  it('a plain field is neither required nor invalid', async () => {
+    const el = await mount<GableDateField>(TAG)
+    expect(input(el).getAttribute('aria-required')).toBeNull()
+    expect(input(el).getAttribute('aria-invalid')).toBe('false')
+    expect(input(el).className).toContain('border-white/10')
+  })
+})
+
 describe('the field follows its host surface', () => {
   it('token classes, so the theme follows the host', async () => {
     const el = await mount<GableDateField>(TAG)
