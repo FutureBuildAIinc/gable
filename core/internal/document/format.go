@@ -61,7 +61,9 @@ func newStyle(tag string) style {
 }
 
 // canonicalTag writes "en_gb" and "EN-gb" as "en-GB": the language and the
-// region, which is the second subtag when it is two letters or three digits.
+// region, which is the second subtag when it is two letters. A three digit
+// region ("en-150") is not in the table and falls back to en-US words, as the
+// desk's Intl gives for the tags this table lacks.
 // Variants and extensions after the region ("en-GB-oxendict") do not hide it;
 // a script in its place ("en-Latn-GB") is no region, and reads as en-US words
 // as the desk's Intl does.
