@@ -141,7 +141,7 @@ type vendorKeyCatalog struct {
 // resolves to the right-hand value, so the seed's vendor (preserved on a
 // conflict) is the row the catalogue's vendor_key references.
 var legacyVendorRename = map[string]string{
-	"Gable Lumber & Supply":          "Gable Building Supply",
+	"Larkmere Building Products":     "Larkmere Building Products",
 	"Fernbank Hardware Distribution": "Fernbank Hardware Distribution",
 	"BC Roofing Wholesale":           "BC Roofing Wholesale",
 	"Interior Millwork Co":           "Interior Millwork Co",
@@ -326,12 +326,10 @@ func importCategories(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, er
 // upserts the vendors by their unique name, and returns the vendor_key ->
 // vendors.id map the catalogue uses to resolve its vendor_key references.
 //
-// Eight of the vendor_keys.json rows are legacy seed vendors. The demo data
-// writes them under their pre-SEED-POLISH names ("Gable Lumber & Supply",
-// "@gablelumber.ca" etc.); legacyVendorRename maps each to the renamed row
-// the rest of this seed already writes ("Gable Building Supply" with the
-// reserved .example domain), so the legacy dealer-named vendor goes and the
-// catalogue's vendor_id references the canonical row.
+// Eight of the vendor_keys.json rows are legacy seed vendors. legacyVendorRename
+// maps each to the row the rest of this seed already writes (the lumber vendor
+// is the invented supplier "Larkmere Building Products", never a vendor named
+// after the dealer), so the catalogue's vendor_id references the canonical row.
 func importVendors(ctx context.Context, db *sql.DB) (map[string]uuid.UUID, error) {
 	var catalog vendorKeyCatalog
 	if err := json.Unmarshal(vendorKeysData, &catalog); err != nil {

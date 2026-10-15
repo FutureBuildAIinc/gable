@@ -433,7 +433,7 @@ func Run() {
 		LeadDays, FillRate, SpendYTD                      float64
 	}
 	vendors := []vendor{
-		{"Gable Building Supply", "orders@gablebuildingsupply.example", "250-555-1100", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "Net 30", 3, 97.5, 485000},
+		{"Larkmere Building Products", "orders@larkmerebuilding.example", "250-555-1100", "2450 Enterprise Way", "Kelowna", "BC", "V1X 7K2", "Net 30", 3, 97.5, 485000},
 		{"Fernbank Hardware Distribution", "sales@fernbankhardware.example", "250-555-1200", "1500 Fastener Way", "Kelowna", "BC", "V1Y 4R9", "Net 30", 5, 94.2, 128000},
 		{"BC Roofing Wholesale", "contact@bcroofing.example", "250-555-1300", "200 Shingle Ln", "Vernon", "BC", "V1T 2L8", "Net 45", 7, 91.0, 95000},
 		{"Interior Millwork Co", "info@interiormillwork.example", "250-555-1400", "75 Cabinet Ct", "Kelowna", "BC", "V1Z 1G2", "Net 30", 14, 88.5, 72000},
@@ -467,28 +467,28 @@ func Run() {
 		ReorderPt, ReorderQty            int
 	}
 	products := []product{
-		{"2x4x8 SPF Premium", "LUM-248-PREM", "PCS", "Gable Building Supply", "Lumber", 3.50, 5.50, 9.0, 200, 500},
-		{"2x4x10 SPF Premium", "LUM-2410-PREM", "PCS", "Gable Building Supply", "Lumber", 4.50, 7.25, 11.3, 150, 400},
-		{"2x4x12 SPF Premium", "LUM-2412-PREM", "PCS", "Gable Building Supply", "Lumber", 5.40, 8.75, 13.5, 100, 300},
-		{"2x4x92-5/8 SPF Stud", "LUM-2492-STUD", "PCS", "Gable Building Supply", "Lumber", 3.20, 5.10, 8.5, 300, 600},
-		{"2x6x10 SPF Premium", "LUM-2610-PREM", "PCS", "Gable Building Supply", "Lumber", 6.00, 9.80, 16.9, 120, 300},
-		{"2x6x12 SPF Premium", "LUM-2612-PREM", "PCS", "Gable Building Supply", "Lumber", 7.20, 11.75, 20.3, 100, 250},
-		{"2x6x16 SPF Premium", "LUM-2616-PREM", "PCS", "Gable Building Supply", "Lumber", 9.60, 15.60, 27.0, 80, 200},
-		{"2x8x10 Hem-Fir No.2", "LUM-2810-NO2", "PCS", "Gable Building Supply", "Lumber", 8.50, 13.90, 22.5, 80, 200},
-		{"2x8x16 Hem-Fir No.2", "LUM-2816-NO2", "PCS", "Gable Building Supply", "Lumber", 13.60, 22.25, 36.0, 50, 150},
-		{"2x10x12 Hem-Fir No.2", "LUM-21012-NO2", "PCS", "Gable Building Supply", "Lumber", 15.00, 24.50, 33.8, 60, 150},
-		{"2x12x16 Hem-Fir No.2", "LUM-21216-NO2", "PCS", "Gable Building Supply", "Lumber", 28.00, 45.00, 54.0, 30, 80},
-		{"4x4x8 Pressure Treated", "LUM-448-PT", "PCS", "Gable Building Supply", "Lumber", 8.00, 12.50, 22.0, 100, 200},
-		{"4x4x10 Pressure Treated", "LUM-4410-PT", "PCS", "Gable Building Supply", "Lumber", 10.00, 15.75, 27.5, 80, 150},
-		{"6x6x12 Pressure Treated", "LUM-6612-PT", "PCS", "Gable Building Supply", "Lumber", 35.00, 55.00, 72.0, 30, 60},
-		{"4x4x8 Western Red Cedar", "LUM-448-WRC", "PCS", "Gable Building Supply", "Lumber", 22.00, 34.00, 22.0, 40, 100},
-		{"1x6x6 Cedar Fence Board", "LUM-166-WRC", "PCS", "Gable Building Supply", "Lumber", 3.20, 5.10, 4.0, 200, 600},
-		{"3/4 Plywood G1S 4x8 (Fir)", "PLY-34-CDX", "PCS", "Gable Building Supply", "Sheet Goods", 24.00, 38.00, 70.0, 80, 200},
-		{"1/2 Plywood G1S 4x8 (Fir)", "PLY-12-CDX", "PCS", "Gable Building Supply", "Sheet Goods", 18.00, 28.50, 48.0, 80, 200},
-		{"3/4 OSB T&G 4x8", "OSB-34-TG", "PCS", "Gable Building Supply", "Sheet Goods", 22.00, 34.00, 65.0, 100, 250},
-		{"7/16 OSB 4x8", "OSB-12", "PCS", "Gable Building Supply", "Sheet Goods", 12.00, 19.50, 44.0, 120, 300},
-		{"1/2 Drywall Regular 4x8", "DW-12-REG", "PCS", "Gable Building Supply", "Sheet Goods", 11.00, 16.00, 57.0, 100, 250},
-		{"5/8 Drywall Type X 4x8", "DW-58-FC", "PCS", "Gable Building Supply", "Sheet Goods", 14.00, 21.00, 70.0, 60, 150},
+		{"2x4x8 SPF Premium", "LUM-248-PREM", "PCS", "Larkmere Building Products", "Lumber", 3.50, 5.50, 9.0, 200, 500},
+		{"2x4x10 SPF Premium", "LUM-2410-PREM", "PCS", "Larkmere Building Products", "Lumber", 4.50, 7.25, 11.3, 150, 400},
+		{"2x4x12 SPF Premium", "LUM-2412-PREM", "PCS", "Larkmere Building Products", "Lumber", 5.40, 8.75, 13.5, 100, 300},
+		{"2x4x92-5/8 SPF Stud", "LUM-2492-STUD", "PCS", "Larkmere Building Products", "Lumber", 3.20, 5.10, 8.5, 300, 600},
+		{"2x6x10 SPF Premium", "LUM-2610-PREM", "PCS", "Larkmere Building Products", "Lumber", 6.00, 9.80, 16.9, 120, 300},
+		{"2x6x12 SPF Premium", "LUM-2612-PREM", "PCS", "Larkmere Building Products", "Lumber", 7.20, 11.75, 20.3, 100, 250},
+		{"2x6x16 SPF Premium", "LUM-2616-PREM", "PCS", "Larkmere Building Products", "Lumber", 9.60, 15.60, 27.0, 80, 200},
+		{"2x8x10 Hem-Fir No.2", "LUM-2810-NO2", "PCS", "Larkmere Building Products", "Lumber", 8.50, 13.90, 22.5, 80, 200},
+		{"2x8x16 Hem-Fir No.2", "LUM-2816-NO2", "PCS", "Larkmere Building Products", "Lumber", 13.60, 22.25, 36.0, 50, 150},
+		{"2x10x12 Hem-Fir No.2", "LUM-21012-NO2", "PCS", "Larkmere Building Products", "Lumber", 15.00, 24.50, 33.8, 60, 150},
+		{"2x12x16 Hem-Fir No.2", "LUM-21216-NO2", "PCS", "Larkmere Building Products", "Lumber", 28.00, 45.00, 54.0, 30, 80},
+		{"4x4x8 Pressure Treated", "LUM-448-PT", "PCS", "Larkmere Building Products", "Lumber", 8.00, 12.50, 22.0, 100, 200},
+		{"4x4x10 Pressure Treated", "LUM-4410-PT", "PCS", "Larkmere Building Products", "Lumber", 10.00, 15.75, 27.5, 80, 150},
+		{"6x6x12 Pressure Treated", "LUM-6612-PT", "PCS", "Larkmere Building Products", "Lumber", 35.00, 55.00, 72.0, 30, 60},
+		{"4x4x8 Western Red Cedar", "LUM-448-WRC", "PCS", "Larkmere Building Products", "Lumber", 22.00, 34.00, 22.0, 40, 100},
+		{"1x6x6 Cedar Fence Board", "LUM-166-WRC", "PCS", "Larkmere Building Products", "Lumber", 3.20, 5.10, 4.0, 200, 600},
+		{"3/4 Plywood G1S 4x8 (Fir)", "PLY-34-CDX", "PCS", "Larkmere Building Products", "Sheet Goods", 24.00, 38.00, 70.0, 80, 200},
+		{"1/2 Plywood G1S 4x8 (Fir)", "PLY-12-CDX", "PCS", "Larkmere Building Products", "Sheet Goods", 18.00, 28.50, 48.0, 80, 200},
+		{"3/4 OSB T&G 4x8", "OSB-34-TG", "PCS", "Larkmere Building Products", "Sheet Goods", 22.00, 34.00, 65.0, 100, 250},
+		{"7/16 OSB 4x8", "OSB-12", "PCS", "Larkmere Building Products", "Sheet Goods", 12.00, 19.50, 44.0, 120, 300},
+		{"1/2 Drywall Regular 4x8", "DW-12-REG", "PCS", "Larkmere Building Products", "Sheet Goods", 11.00, 16.00, 57.0, 100, 250},
+		{"5/8 Drywall Type X 4x8", "DW-58-FC", "PCS", "Larkmere Building Products", "Sheet Goods", 14.00, 21.00, 70.0, 60, 150},
 		{"3-1/4\" Common Nails (25kg)", "NAIL-16D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Common Nails (25kg)", "NAIL-10D-50", "BOX", "Mountain Fastener Supply", "Hardware", 45.00, 65.00, 50.0, 20, 50},
 		{"3\" Deck Screws (2.5kg)", "SCR-DECK-3-5", "BOX", "Mountain Fastener Supply", "Hardware", 18.00, 29.99, 5.0, 40, 100},
@@ -521,24 +521,24 @@ func Run() {
 		{"Casing 2-1/4 MDF 14'", "MLD-CASE-MDF", "PCS", "Interior Millwork Co", "Millwork", 8.00, 13.50, 5.0, 50, 100},
 
 		// Cornice / Exterior Trim Materials
-		{"Flashing J 6 X 6 X 10", "CORN2006", "EA", "Gable Building Supply", "Cornice", 15.50, 23.25, 3.0, 20, 50},
-		{"Flashing Z Bar 3/4 X 10'", "CORN2009", "EA", "Gable Building Supply", "Cornice", 3.50, 5.25, 1.5, 30, 60},
+		{"Flashing J 6 X 6 X 10", "CORN2006", "EA", "Larkmere Building Products", "Cornice", 15.50, 23.25, 3.0, 20, 50},
+		{"Flashing Z Bar 3/4 X 10'", "CORN2009", "EA", "Larkmere Building Products", "Cornice", 3.50, 5.25, 1.5, 30, 60},
 		{"Silicone Clear Caulk", "CORNCLEAR", "EA", "Fernbank Hardware Distribution", "Cornice", 5.75, 8.65, 0.8, 40, 80},
-		{"Composite Trim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Gable Building Supply", "Cornice", 7.54, 11.31, 12.0, 50, 120},
-		{"Composite Trim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Gable Building Supply", "Cornice", 11.94, 17.91, 18.0, 30, 80},
-		{"Vinyl H Mold 1/4 X 12'", "CORNHMOLD14", "EA", "Gable Building Supply", "Cornice", 4.00, 6.00, 1.0, 30, 60},
+		{"Composite Trim Textured 7/16 X 4 X 12", "CORNCTRM412+", "EA", "Larkmere Building Products", "Cornice", 7.54, 11.31, 12.0, 50, 120},
+		{"Composite Trim Textured 7/16 X 6 X 12", "CORNCTRMG12+", "EA", "Larkmere Building Products", "Cornice", 11.94, 17.91, 18.0, 30, 80},
+		{"Vinyl H Mold 1/4 X 12'", "CORNHMOLD14", "EA", "Larkmere Building Products", "Cornice", 4.00, 6.00, 1.0, 30, 60},
 		{"Poly Black 18 X 300", "CORNPOLY18", "RL", "Fernbank Hardware Distribution", "Cornice", 23.12, 34.68, 25.0, 10, 25},
-		{"Solid Soffit Fibre Cement Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Gable Building Supply", "Cornice", 15.25, 22.88, 20.0, 30, 60},
-		{"Solid Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Gable Building Supply", "Cornice", 20.45, 30.68, 28.0, 20, 50},
-		{"Vented Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Gable Building Supply", "Cornice", 26.15, 39.23, 30.0, 25, 60},
-		{"Vented Soffit Fibre Cement Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Gable Building Supply", "Cornice", 17.50, 26.25, 22.0, 20, 50},
-		{"Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier", "CORNSHTGR49", "EA", "Gable Building Supply", "Cornice", 9.36, 14.04, 24.0, 40, 100},
+		{"Solid Soffit Fibre Cement Textured 1/4 X 12 X 12", "CORNSFT1212", "EA", "Larkmere Building Products", "Cornice", 15.25, 22.88, 20.0, 30, 60},
+		{"Solid Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612", "EA", "Larkmere Building Products", "Cornice", 20.45, 30.68, 28.0, 20, 50},
+		{"Vented Soffit Fibre Cement Textured 1/4 X 16 X 12", "CORNSFT1612V", "EA", "Larkmere Building Products", "Cornice", 26.15, 39.23, 30.0, 25, 60},
+		{"Vented Soffit Fibre Cement Textured 1/4 X 24 X 8", "CORNSFT2408V", "EA", "Larkmere Building Products", "Cornice", 17.50, 26.25, 22.0, 20, 50},
+		{"Sheathing 1/8 X 4 X 9 (Green) NSP Weather Barrier", "CORNSHTGR49", "EA", "Larkmere Building Products", "Cornice", 9.36, 14.04, 24.0, 40, 100},
 		{"Window Tape 6\" (100')", "CORNTAPE", "RL", "Fernbank Hardware Distribution", "Cornice", 22.00, 33.00, 3.0, 15, 30},
 
 		// Random-length / economy grade
-		{"1 X 4 RL #3 SPF", "LUMB14RLN3+", "LF", "Gable Building Supply", "Lumber", 0.34, 0.52, 0.3, 500, 2000},
-		{"2 X 4 RL #3 SPF", "LUMB24RLN3", "LF", "Gable Building Supply", "Lumber", 0.30, 0.46, 0.5, 1000, 5000},
-		{"2 X 4 RL Utility", "LUMBUT24RL", "LF", "Gable Building Supply", "Lumber", 0.29, 0.44, 0.5, 500, 2000},
+		{"1 X 4 RL #3 SPF", "LUMB14RLN3+", "LF", "Larkmere Building Products", "Lumber", 0.34, 0.52, 0.3, 500, 2000},
+		{"2 X 4 RL #3 SPF", "LUMB24RLN3", "LF", "Larkmere Building Products", "Lumber", 0.30, 0.46, 0.5, 1000, 5000},
+		{"2 X 4 RL Utility", "LUMBUT24RL", "LF", "Larkmere Building Products", "Lumber", 0.29, 0.44, 0.5, 500, 2000},
 	}
 
 	skuToID := make(map[string]uuid.UUID)
@@ -1257,7 +1257,7 @@ func Run() {
 		Name   string
 		Type   string
 	}{
-		{"Gable Building Supply", "2026 Volume Rebate", "VOLUME"},
+		{"Larkmere Building Products", "2026 Volume Rebate", "VOLUME"},
 		{"Fernbank Hardware Distribution", "Growth Incentive Q1", "GROWTH"},
 		{"BC Roofing Wholesale", "Product Mix Bonus", "PRODUCT_MIX"},
 	}
