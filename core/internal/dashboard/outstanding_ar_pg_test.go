@@ -48,7 +48,9 @@ func outstandingARLeg(t *testing.T) {
 	repo := NewRepository(db)
 	svc := account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
-	today := time.Now()
+	// every fixture is dated by the default branch's own day, which the
+	// dashboard and the aging read, never by the runner's UTC day
+	today := testutil.BranchDay(t, db)
 
 	yardA, yardB, customer := uuid.New(), uuid.New(), uuid.New()
 	for _, b := range []uuid.UUID{yardA, yardB} {
@@ -95,7 +97,7 @@ func outstandingARLeg(t *testing.T) {
 		if _, err := db.Pool.Exec(ctx, `INSERT INTO invoices (id, customer_id, branch_id, status, origin, number, currency,
 				total_amount, subtotal, tax_rate, tax_amount, amount_open, due_date, invoice_date)
 			VALUES ($1, $2, $3, 'UNPAID', 'POS', $4, 'USD', $5::bigint::numeric / 100, $5::bigint::numeric / 100,
-				0, 0, $5::bigint::numeric / 100, CURRENT_DATE + 30, CURRENT_DATE - 10)`,
+				0, 0, $5::bigint::numeric / 100, `+testutil.BranchDaySQL+` + 30, `+testutil.BranchDaySQL+` - 10)`,
 			id, customer, yard, "IN-"+id.String()[:8], totalCents); err != nil {
 			t.Fatalf("seed invoice: %v", err)
 		}
@@ -131,7 +133,7 @@ func outstandingARLeg(t *testing.T) {
 	memo := uuid.New()
 	if _, err := db.Pool.Exec(ctx, `INSERT INTO credit_memos (id, customer_id, branch_id, currency, reason_code, reason, amount,
 			subtotal, tax_amount, total_amount, status, memo_date)
-		VALUES ($1, $2, $3, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', CURRENT_DATE)`, memo, customer, yardA); err != nil {
+		VALUES ($1, $2, $3, 'USD', 'RETURN', 'returned goods', 0, 0, 0, 0, 'DRAFT', `+testutil.BranchDaySQL+`)`, memo, customer, yardA); err != nil {
 		t.Fatalf("seed memo: %v", err)
 	}
 	err := db.RunInTx(ctx, func(ctx context.Context) error {
