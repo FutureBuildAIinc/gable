@@ -174,12 +174,21 @@ func (b *branding) dealerBlock() []string {
 		return nil
 	}
 	d := b.dealer
-	name := d.DisplayName()
-	legal := ""
-	if strings.TrimSpace(d.LegalName) != "" && d.LegalName != name {
-		legal = d.LegalName
+	return joinLines(d.DisplayName(), d.Phone, d.Email, d.Website)
+}
+
+// legalName is the dealer's legal name when the lockup does not already say
+// it: the lockup leads with the trading name, so the legal name is its own
+// labelled line, never a second lockup line.
+func (b *branding) legalName() string {
+	if b.dealer == nil {
+		return ""
 	}
-	return joinLines(name, legal, d.Phone, d.Email, d.Website)
+	legal := strings.TrimSpace(b.dealer.LegalName)
+	if legal == "" || legal == b.dealer.DisplayName() {
+		return ""
+	}
+	return legal
 }
 
 func (b *branding) yardBlock() []string {
@@ -254,6 +263,17 @@ func (b *branding) header(m core.Maroto, title string, titleSize float64) {
 	}
 	block(m, b.dealerBlock(), b.yardBlock(), 9)
 	m.AddRow(16, text.NewCol(12, title, props.Text{Size: titleSize, Style: fontstyle.Bold, Align: align.Center, Top: 4}))
+}
+
+// foot closes every form the same way: the dealer's legal name once, labelled,
+// and the remit to beside it on the forms that ask for money.
+func (b *branding) foot(m core.Maroto, withRemit bool) {
+	if legal := b.legalName(); legal != "" {
+		m.AddRow(10, text.NewCol(12, "Legal name: "+legal, props.Text{Size: 9, Top: 4}))
+	}
+	if withRemit {
+		b.remitRow(m)
+	}
 }
 
 // remitRow writes the remit to block the documents that ask for money carry.
@@ -343,7 +363,7 @@ func (s *Service) GenerateInvoicePDF(ctx context.Context, inv *invoice.Invoice, 
 	m.AddRow(15,
 		text.NewCol(12, "TOTAL DUE: "+b.style.Money(inv.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}),
 	)
-	b.remitRow(m)
+	b.foot(m, true)
 	return finish(m)
 }
 
@@ -420,6 +440,7 @@ func (s *Service) GeneratePickTicketPDF(ctx context.Context, o *order.Order, cus
 			text.NewCol(4, fmt.Sprintf("%s [%s]", line.Quantity.WireString(), uom), props.Text{Size: 14, Style: fontstyle.Bold, Align: align.Center}),
 		)
 	}
+	b.foot(m, false)
 	return finish(m)
 }
 
@@ -561,6 +582,6 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 		}
 		m.AddRow(10, text.NewCol(12, "Open documents and unapplied payments are "+whose+"; the activity and the balances cover the whole account.", props.Text{Size: 8, Top: 3}))
 	}
-	b.remitRow(m)
+	b.foot(m, true)
 	return finish(m)
 }

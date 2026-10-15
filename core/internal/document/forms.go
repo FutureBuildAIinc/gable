@@ -61,6 +61,7 @@ func (s *Service) GenerateQuotePDF(ctx context.Context, q *quote.Quote, cust *cu
 		m.AddRow(10, text.NewCol(12, "FREIGHT: "+b.style.Money(q.FreightCents), props.Text{Align: align.Right, Size: 10, Top: 3}))
 	}
 	m.AddRow(15, text.NewCol(12, "TOTAL: "+b.style.Money(q.TotalCents), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}))
+	b.foot(m, false)
 	return finish(m)
 }
 
@@ -102,5 +103,6 @@ func (s *Service) GeneratePurchaseOrderPDF(ctx context.Context, po *purchase_ord
 		)
 	}
 	m.AddRow(15, text.NewCol(12, "TOTAL: "+b.style.MoneyFloat(total), props.Text{Top: 5, Style: fontstyle.Bold, Align: align.Right, Size: 12}))
+	b.foot(m, false)
 	return finish(m)
 }
