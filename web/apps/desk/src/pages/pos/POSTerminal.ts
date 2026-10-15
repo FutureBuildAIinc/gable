@@ -74,6 +74,8 @@ export class POSTerminal extends LitElement {
   @state() private _till: TillSession | null = null;
   @state() private _showTillOpen = false;
   @state() private _openingFloat = '';
+  // The empty float's refusal, in words inside the Open Till dialog.
+  @state() private _tillFloatError = '';
   @state() private _showTillClose = false;
   @state() private _tillReport: TillReport | null = null;
   @state() private _counts: Record<string, string> = {};
@@ -249,6 +251,14 @@ export class POSTerminal extends LitElement {
   }
 
   private async _openTill() {
+    if (this._openingFloat.trim() === '') {
+      // Nothing was counted: say what is missing in the dialog (the page's
+      // error band sits under this overlay) and put the focus in the field.
+      this._tillFloatError = 'Count the drawer and type the opening float first.';
+      await this.updateComplete;
+      (this.querySelector('[data-testid="till-float-amount"]') as HTMLInputElement | null)?.focus();
+      return;
+    }
     const cents = dollarsToCents(this._openingFloat);
     if (isNaN(cents) || cents < 0) {
       this._error = 'Enter a valid opening float';
@@ -259,6 +269,7 @@ export class POSTerminal extends LitElement {
       this._till = await posService.openTill(this._registerId, cents);
       this._showTillOpen = false;
       this._openingFloat = '';
+      this._tillFloatError = '';
       this._success = `Till opened with ${fmt(this._till.opening_float_cents)} float`;
       this._errorTimer = setTimeout(() => { this._success = null; }, 2500);
       // Re-start the sale so it attaches to the new session.
@@ -1133,11 +1144,12 @@ export class POSTerminal extends LitElement {
       <p style="margin:0 0 16px;font-size:13px;color:rgb(var(--gb-till-muted))">Count the starting cash in the drawer and enter the opening float.</p>
       <label style="display:block;font-size:12px;color:rgb(var(--gb-till-muted));margin-bottom:6px">Opening float ($)</label>
       <input type="number" step="0.01" .value=${this._openingFloat} data-testid="till-float-amount"
-        @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; }}
+        @input=${(e: Event) => { this._openingFloat = (e.target as HTMLInputElement).value; this._tillFloatError = ''; }}
         class="placeholder:font-normal placeholder:text-[rgb(var(--gb-till-muted))]"
         style="width:100%;box-sizing:border-box;padding:14px;background:rgb(var(--gb-till-field));border:2px solid rgb(var(--gb-till-accent));border-radius:8px;color:rgb(var(--gb-till-text));font-size:22px;font-weight:700;text-align:center;outline:none" placeholder="Type the counted amount" />
+      ${this._tillFloatError ? html`<p role="alert" data-testid="till-float-error" style="margin:8px 0 0;font-size:13px;color:rgb(var(--gb-till-bad))">${this._tillFloatError}</p>` : nothing}
       <div style="display:flex;gap:8px;margin-top:20px">
-        <button @click=${() => { this._showTillOpen = false; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
+        <button @click=${() => { this._showTillOpen = false; this._tillFloatError = ''; }} style="flex:1;padding:12px;background:transparent;border:1px solid rgb(var(--gb-till-edge));border-radius:8px;color:rgb(var(--gb-till-muted));font-size:14px;cursor:pointer">Cancel</button>
         <button @click=${() => this._openTill()} ?disabled=${this._tillBusy} style="flex:2;padding:12px;background:rgb(var(--gb-till-accent));border:none;border-radius:8px;color:rgb(var(--gb-plate));font-size:15px;font-weight:700;cursor:pointer">${this._tillBusy ? 'Opening\u2026' : 'Open Till'}</button>
       </div>
     `);
