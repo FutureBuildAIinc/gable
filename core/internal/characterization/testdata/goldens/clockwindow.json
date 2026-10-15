@@ -148,7 +148,7 @@
         "invoice_count": 12,
         "outstanding_ar": 42140.76,
         "start_date": "<day-30>",
-        "total_collected": 315919.09,
+        "total_collected": 75344.22,
         "total_invoiced": 95207.14
       }
     }
@@ -167,8 +167,8 @@
         "outstanding_ar": 11056347,
         "outstanding_ar_count": 16,
         "pending_dispatch": 28,
-        "today_revenue": 31344485,
-        "today_revenue_change": 310210.7118107118
+        "today_revenue": 2500,
+        "today_revenue_change": -99.4493464844077
       }
     }
   },
@@ -188,15 +188,15 @@
         },
         {
           "date": "<day-2>",
-          "revenue": 20202
+          "revenue": 1259336
         },
         {
           "date": "<day-1>",
-          "revenue": 10101
+          "revenue": 454006
         },
         {
           "date": "<day+0>",
-          "revenue": 31344485
+          "revenue": 2500
         }
       ]
     }

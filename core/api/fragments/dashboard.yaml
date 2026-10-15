@@ -145,9 +145,10 @@ components:
           type: integer
           format: int64
           description: >-
-            The branch's day net collections in cents at the caller's yard:
-            payments received (their own branch, never a voided payment) less
-            refunds paid out that day.
+            The branch's day net collections in cents at the caller's yard
+            (the card reads "Collected today"): payments received that day by
+            their business date received_on (their own branch, never a voided
+            payment) less refunds paid out that day by refunded_on.
         today_revenue_change:
           type: number
           description: Percentage change of the net against yesterday's net; 0 when yesterday's net is not above zero.

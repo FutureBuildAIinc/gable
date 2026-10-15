@@ -11,14 +11,14 @@
       "body": {
         "by_method": {
           "CASH": 20.19,
-          "CHECK": 313444.85
+          "CHECK": 25
         },
         "date": "<day+0>",
-        "net_collected": 313437.04,
-        "received": 313465.04,
+        "net_collected": 17.19,
+        "received": 45.19,
         "refunds": 28,
-        "total_collected": 313437.04,
-        "transaction_count": 42
+        "total_collected": 17.19,
+        "transaction_count": 3
       }
     }
   },

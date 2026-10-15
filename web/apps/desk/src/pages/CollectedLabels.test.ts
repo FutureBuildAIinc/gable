@@ -7,6 +7,7 @@
  * the card opens says "collected" too and prints a negative net as "-$4.00".
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import type { LitElement } from 'lit'
 import './Dashboard'
 import './DailyTill'
 import { mountAsync, text } from '../test/dom'
@@ -34,14 +35,14 @@ describe('the dashboard card', () => {
   })
 
   it('reads Collected today, not Today\'s Revenue', async () => {
-    const el = await mountAsync<HTMLElement>('gable-dashboard')
+    const el = await mountAsync<LitElement>('gable-dashboard')
     const body = text(el)
     expect(body).toContain('Collected today')
     expect(body).not.toContain("Today's Revenue")
   })
 
   it('names the trend as collected', async () => {
-    const el = await mountAsync<HTMLElement>('gable-dashboard')
+    const el = await mountAsync<LitElement>('gable-dashboard')
     expect(text(el)).toContain('Collected, last 7 days')
     expect(text(el)).not.toContain('Revenue Trend')
   })
@@ -60,7 +61,7 @@ describe('the Daily Till', () => {
 
   it('says collected and shows received, refunds and the net', async () => {
     stubTill({ date: '2026-10-14', total_collected: 36, received: 40, refunds: 4, net_collected: 36, by_method: { CASH: 40 }, transaction_count: 1 })
-    const el = await mountAsync<HTMLElement>('gable-daily-till')
+    const el = await mountAsync<LitElement>('gable-daily-till')
     const parts = text(el.querySelector('[data-testid="till-parts"]'))
     expect(parts).toContain('Received $40.00')
     expect(parts).toContain('refunds $4.00')
@@ -70,7 +71,7 @@ describe('the Daily Till', () => {
 
   it('prints a refund only day as -$4.00, never $-4.00', async () => {
     stubTill({ date: '2026-10-14', total_collected: -4, received: 0, refunds: 4, net_collected: -4, by_method: {}, transaction_count: 0 })
-    const el = await mountAsync<HTMLElement>('gable-daily-till')
+    const el = await mountAsync<LitElement>('gable-daily-till')
     const body = text(el)
     expect(body).toContain('-$4.00')
     expect(body).not.toContain('$-4.00')
