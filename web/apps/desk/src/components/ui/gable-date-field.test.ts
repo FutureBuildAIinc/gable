@@ -206,6 +206,19 @@ describe('the calendar', () => {
     expect(document.activeElement).toBe(landed)
   })
 
+  it('opened by mouse, the calendar commits a typed day first, as ArrowDown does', async () => {
+    // The calendar button keeps the box's focus (mousedown is prevented), so
+    // no blur commit happens: the click must commit the typed day itself.
+    const el = await mount<GableDateField>(TAG, { value: '2026-10-14' })
+    const box = input(el)
+    box.value = 'Sep 30, 2026'
+    box.dispatchEvent(new Event('input'))
+    q<HTMLButtonElement>(el, 'button[aria-label="Open the calendar"]').click()
+    await update(el, {})
+    expect(el.value).toBe('2026-09-30')
+    expect(el.textContent).toContain('September 2026')
+  })
+
   it('opened by keyboard, the calendar opens on the day the box shows, with that day focused', async () => {
     // The box holds a day typed but not yet committed (no blur, no Enter):
     // ArrowDown opens the calendar on that day's month, commits it, and puts
@@ -331,6 +344,16 @@ describe('the popover stays inside the screen', () => {
     // A field at the very top opens downward, never above the screen.
     const low = placePopover({ left: 100, bottom: 32, top: 8 } as DOMRect, size, 1024, 340)
     expect(low.top).toBe(36)
+  })
+
+  it('the room test counts the screen margin, so a near fit never covers the field', () => {
+    // 268px below the field: more than height plus gap (264) but less than
+    // height plus gap plus the 8px margin (272). Below is not room enough;
+    // clamping it there would lift the calendar over the field's bottom edge.
+    const size = { width: 256, height: 260 }
+    const at = placePopover({ left: 100, bottom: 400, top: 376 } as DOMRect, size, 1024, 668)
+    expect(at.top).toBe(376 - 260 - 4)
+    expect(at.top + size.height).toBe(376 - 4)
   })
 
   it('the open popover is fixed at the field, not clipped by a modal', async () => {
