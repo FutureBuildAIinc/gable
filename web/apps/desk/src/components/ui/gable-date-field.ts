@@ -196,7 +196,11 @@ export class GableDateField extends LitElement {
             this._onTextCommit();
         } else if (e.key === 'ArrowDown' && !this._open) {
             e.preventDefault();
-            this._openCalendar();
+            // A typed day not yet committed leads: the calendar opens on the
+            // day the box shows, committed first.
+            const typed = parseDay(this._text);
+            if (typed && this._inBounds(typed) && typed !== this.value) this._commit(typed);
+            this._openCalendar(true);
         }
         // Escape while the calendar is open is the document listener's: it
         // fires ahead of this one and keeps the key from the dialog behind.
@@ -227,13 +231,15 @@ export class GableDateField extends LitElement {
         this._popLeft = at.left;
     }
 
-    private _openCalendar() {
+    private _openCalendar(byKeyboard = false) {
         if (this.disabled) return;
         const base = this.value && this._inBounds(this.value) ? this.value : todayDay();
         const [y, m] = base.split('-').map(Number);
         this._viewYear = y;
         this._viewMonth = m;
         this._focusDay = base;
+        // Opened by keyboard, the day goes straight under the focus.
+        if (byKeyboard) this._refocus = true;
         this._placedSize = { width: POPOVER_W, height: POPOVER_H };
         this._place();
         this._open = true;
