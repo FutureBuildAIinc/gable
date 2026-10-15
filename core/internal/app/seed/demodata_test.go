@@ -944,12 +944,38 @@ func designationSources(t *testing.T) map[string]string {
 	sources := map[string]string{
 		"catalog": string(catalogData), "vendors": string(vendorsData), "vendorkeys": string(vendorKeysData),
 	}
-	for _, name := range []string{"seed.go", "product_pictures.go", "dispatch_day.go", "demodata.go"} {
-		data, err := os.ReadFile(name)
+	for _, dir := range []string{".", "../../../cmd/seed"} {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		sources[name] = string(data)
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := name
+			if dir != "." {
+				key = dir + "/" + name
+			}
+			sources[key] = string(data)
+		}
+	}
+	files, err := filepath.Glob(filepath.Join("..", "..", "..", "..", "web", "apps", "desk", "public", "catalog-illustrations", "*.svg"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no illustrations found: %v", err)
+	}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// the file's name is part of what a person can read of it
+		sources["illustration/"+filepath.Base(f)] = filepath.Base(f) + "\n" + string(data)
 	}
 	return sources
 }
