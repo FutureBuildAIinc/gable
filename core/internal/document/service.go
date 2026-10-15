@@ -22,6 +22,7 @@ import (
 
 	"github.com/johnfercher/maroto/v2"
 	mimage "github.com/johnfercher/maroto/v2/pkg/components/image"
+	"github.com/johnfercher/maroto/v2/pkg/components/page"
 	"github.com/johnfercher/maroto/v2/pkg/components/text"
 	"github.com/johnfercher/maroto/v2/pkg/config"
 	"github.com/johnfercher/maroto/v2/pkg/consts/align"
@@ -281,6 +282,18 @@ func (b *branding) header(m core.Maroto, title string, titleSize float64) {
 // foot closes every form the same way: the dealer's legal name once, labelled,
 // and the remit to beside it on the forms that ask for money.
 func (b *branding) foot(m core.Maroto, withRemit bool) {
+	// The legal name and the remit to are one block: when it does not fit on
+	// the page it moves whole to the next, so neither sits alone.
+	height := 0.0
+	if b.legalName() != "" {
+		height += 10
+	}
+	if withRemit && b.remitTo() != "" {
+		height += 10 + rowHeight*float64(len(joinLines(b.remitTo())))
+	}
+	if height > 0 && !m.FitlnCurrentPage(height) {
+		m.AddPages(page.New())
+	}
 	if legal := b.legalName(); legal != "" {
 		m.AddRow(10, text.NewCol(12, "Legal name: "+legal, props.Text{Size: 9, Top: 4}))
 	}
