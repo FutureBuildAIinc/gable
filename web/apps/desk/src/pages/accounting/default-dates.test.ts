@@ -38,7 +38,7 @@ describe('the accounting pages default today in the person\'s zone', () => {
         expect(el[prop], `${tag} ${prop}`).toBe('2026-10-14')
       }
     } finally {
-      process.env.TZ = tz
+      if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz
     }
   })
 })

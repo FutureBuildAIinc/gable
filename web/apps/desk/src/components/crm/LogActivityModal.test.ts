@@ -72,7 +72,7 @@ describe('Log Activity keeps a time', () => {
       expect(body.activity_date).toBe('2026-10-14T16:30:00.000Z')
       expect(body.activity_date).not.toContain('T12:00')
     } finally {
-      process.env.TZ = tz
+      if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz
     }
   })
 

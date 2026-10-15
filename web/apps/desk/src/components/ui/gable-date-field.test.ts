@@ -288,15 +288,9 @@ describe('the popover stays inside the screen', () => {
 })
 
 describe('the field follows its host surface', () => {
-  it('dark tokens by default', async () => {
+  it('token classes, so the theme follows the host', async () => {
     const el = await mount<GableDateField>(TAG)
     expect(input(el).className).toContain('text-white')
-  })
-  it('readable on a light card with tone light', async () => {
-    const el = await mount<GableDateField>(TAG, { tone: 'light' } as Partial<GableDateField>)
-    expect(input(el).className).toContain('text-zinc-900')
-    expect(input(el).className).not.toContain('text-white')
-    expect(input(el).className).toContain('border-zinc-300')
   })
 })
 
@@ -340,15 +334,14 @@ describe('the popover defaults are cleared', () => {
   it('inset and margin are cleared before top and left', async () => {
     // The browser gives every popover inset: 0 and margin: auto, which would
     // centre the calendar in the space below and right of its field. jsdom has
-    // no popover stylesheet, so the leg reads the inline styles: the clearing
-    // must be written, ahead of the placement.
+    // no popover stylesheet, so the leg reads the inline styles: every edge is
+    // written (the unused two auto), the margin cleared, ahead of nothing.
     const el = await mount<GableDateField>(TAG, { value: '2026-10-14' })
     await openCalendar(el)
     const pop = q<HTMLElement>(el, '[role="dialog"]')
     expect(pop.style.margin).toBe('0px')
-    const style = pop.getAttribute('style') ?? ''
-    expect(style).toContain('inset: auto')
-    expect(style.indexOf('inset: auto')).toBeLessThan(style.indexOf('top:'))
+    expect(pop.style.right).toBe('auto')
+    expect(pop.style.bottom).toBe('auto')
     expect(pop.style.top).toBe('4px')
     expect(pop.style.left).toBe('8px')
   })

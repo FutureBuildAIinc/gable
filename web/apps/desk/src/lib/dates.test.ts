@@ -72,7 +72,7 @@ describe('formatDay is a business day', () => {
       expect(new Date('2026-01-15').getDate()).toBe(14)
       expect(formatDay('2026-01-15')).toBe('Jan 15, 2026')
     } finally {
-      process.env.TZ = tz
+      if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz
     }
   })
   it('empty and non date pass through as before', () => {
@@ -96,7 +96,7 @@ describe('formatDay on a timestamp', () => {
       expect(new Date('2026-10-14T00:00:00Z').getDate()).toBe(13)
       expect(formatDay('2026-10-14T00:00:00Z')).toBe('Oct 14, 2026')
     } finally {
-      process.env.TZ = tz
+      if (tz === undefined) delete process.env.TZ; else process.env.TZ = tz
     }
   })
   it('never shows raw text for a value that parses', () => {
