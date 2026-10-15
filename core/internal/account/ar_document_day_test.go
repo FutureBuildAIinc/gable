@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gablelbm/gable/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -21,12 +22,9 @@ func TestBusinessDateIsTheBranchsThenTheDefaultBranchsDay(t *testing.T) {
 	branch := uuid.New()
 	w.exec(`INSERT INTO locations (id, type, code, timezone) VALUES ($1, 'BRANCH', $2, 'Pacific/Kiritimati')`, branch, "DZ-"+branch.String()[:8])
 	t.Cleanup(func() { w.exec(`DELETE FROM locations WHERE id = $1`, branch) })
-	var prior string
-	if err := w.db.Pool.QueryRow(ctx, `SELECT timezone FROM locations WHERE id = `+arBranch).Scan(&prior); err != nil {
-		t.Fatal(err)
-	}
-	w.exec(`UPDATE locations SET timezone = 'America/Vancouver' WHERE id = ` + arBranch)
-	t.Cleanup(func() { w.exec(`UPDATE locations SET timezone = $1 WHERE id = `+arBranch, prior) })
+	// the default branch is set under the branch day lock, which also puts the
+	// usual zone back and repairs a foreign one left by another package
+	testutil.SetBranchDayZone(t, w.db, "America/Vancouver")
 
 	day := func(b uuid.UUID, at time.Time) string {
 		t.Helper()
