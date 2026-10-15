@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
@@ -23,6 +23,9 @@ export class NewPurchaseOrder extends LitElement {
     createRenderRoot() { return this; }
 
     @state() private vendorId = '';
+    /** The yard a recommendation row is for; the order is created there. */
+    @state() private branchId = '';
+    @state() private branchName = '';
     @state() private lines: LineWithKey[] = [];
     @state() private products: Product[] = [];
     @state() private loading = false;
@@ -37,6 +40,8 @@ export class NewPurchaseOrder extends LitElement {
         const params = new URLSearchParams(window.location.search);
         const isFromRecommendation = params.get('from') === 'recommendation';
         if (isFromRecommendation) {
+            this.branchId = params.get('branch_id') || '';
+            this.branchName = params.get('branch_name') || '';
             const vendorName = params.get('vendor_name') || '';
             if (vendorName) this.vendorId = vendorName;
 
@@ -96,6 +101,7 @@ export class NewPurchaseOrder extends LitElement {
         try {
             const po = await PurchaseOrderService.createPO({
                 vendor_id: this.vendorId,
+                ...(this.branchId ? { branch_id: this.branchId } : {}),
                 lines: this.lines.map(({ product_id, description, quantity, cost }) => ({
                     product_id,
                     description,
@@ -126,6 +132,9 @@ export class NewPurchaseOrder extends LitElement {
                 <div class="flex-1">
                     <h1 class="text-2xl font-bold text-white">New Purchase Order</h1>
                     <p class="text-sm text-zinc-400">Create a PO for vendor replenishment</p>
+                    ${this.branchId ? html`
+                        <p data-testid="po-yard" class="text-sm text-zinc-300 mt-1">For yard: ${this.branchName || this.branchId}</p>
+                    ` : nothing}
                 </div>
                 <button
                     @click=${this._handleSave}

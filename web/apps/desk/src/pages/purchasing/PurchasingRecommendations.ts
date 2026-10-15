@@ -53,6 +53,9 @@ export class GablePurchasingRecommendations extends LitElement {
     private _handleCreatePO(rec: PurchaseRecommendation) {
         const params = new URLSearchParams({
             from: 'recommendation',
+            // The order is for this row's yard: stock and sales are its own.
+            branch_id: rec.branch_id,
+            branch_name: rec.branch_name,
             product_id: rec.product_id,
             description: `${rec.product_sku} - ${rec.product_name}`,
             qty: String(rec.suggested_qty),

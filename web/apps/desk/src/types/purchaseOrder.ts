@@ -45,6 +45,8 @@ export interface PurchaseOrderLine {
 
 export interface CreatePORequest {
     vendor_id: string;
+    /** The yard the order is bought for; with none the server settles it from the caller's grants. */
+    branch_id?: string;
     lines: CreatePOLine[];
 }
 
