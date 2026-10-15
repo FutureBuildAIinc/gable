@@ -41,6 +41,20 @@ describe('the dashboard card', () => {
     expect(body).not.toContain("Today's Revenue")
   })
 
+  it('prints a refund only day as -$5.00 on the card, never $-5.00', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/dashboard/summary')) {
+        return json({ today_revenue: -500, today_revenue_change: 0, active_orders: 0, pending_dispatch: 0, outstanding_ar: 0, outstanding_ar_count: 0 })
+      }
+      if (url.includes('/order-activity')) return json({ recent_orders: [], status_breakdown: {} })
+      return json([])
+    }))
+    const el = await mountAsync<LitElement>('gable-dashboard')
+    const body = text(el)
+    expect(body).toContain('-$5.00')
+    expect(body).not.toContain('$-5.00')
+  })
+
   it('names the trend as collected', async () => {
     const el = await mountAsync<LitElement>('gable-dashboard')
     expect(text(el)).toContain('Collected, last 7 days')
