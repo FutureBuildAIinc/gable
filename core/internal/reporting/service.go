@@ -48,6 +48,11 @@ func NewService(repo Repository) *Service {
 	}
 }
 
+// dayReader is the repository's optional read of the branch's business day.
+type dayReader interface {
+	BusinessDay(ctx context.Context) (string, error)
+}
+
 func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillReport, error) {
 	// Cache Key
 	key := "daily_till:" + reachKey(ctx) + ":" + dateStr
@@ -67,7 +72,7 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 	}
 
 	// Parse date; empty is the default branch's business day (a zero date),
-	// the day the dashboard's Today's Revenue card is cut on.
+	// the day the dashboard's Collected today card is cut on.
 	var date time.Time
 	var err error
 	if dateStr != "" {
@@ -96,6 +101,14 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) (*SalesSummaryReport, error) {
 	// Cache Key
 	key := "sales_summary:" + reachKey(ctx) + ":" + startStr + ":" + endStr
+	if startStr == "" || endStr == "" {
+		// A default bound moves with the yard's day: key it by that day.
+		if d, ok := s.repo.(dayReader); ok {
+			if day, err := d.BusinessDay(ctx); err == nil {
+				key += ":" + day
+			}
+		}
+	}
 
 	// Read Cache
 	s.cacheMutex.RLock()
@@ -107,9 +120,21 @@ func (s *Service) GetSalesSummary(ctx context.Context, startStr, endStr string) 
 	}
 	s.cacheMutex.RUnlock()
 
+	// The default window is the yard's business day (the default branch's,
+	// the day the dashboard's card is cut on) and the thirty days before it,
+	// never the server's clock: in the yard's evening west of UTC the server's
+	// date is the yard's tomorrow.
 	now := time.Now()
 	start := now.AddDate(0, 0, -30) // Default last 30 days
 	end := now
+	if d, ok := s.repo.(dayReader); ok {
+		if day, derr := d.BusinessDay(ctx); derr == nil {
+			if parsed, perr := time.Parse("2006-01-02", day); perr == nil {
+				start = parsed.AddDate(0, 0, -30)
+				end = parsed.Add(24*time.Hour - time.Nanosecond) // the whole of the yard's day
+			}
+		}
+	}
 
 	var err error
 	if startStr != "" {

@@ -6,7 +6,7 @@ package reporting
 type DailyTillReport struct {
 	Date string `json:"date"`
 	// TotalCollected is the day's NET collections at the yard: Received less
-	// Refunds, the figure Today's Revenue on the dashboard shows. ByMethod is
+	// Refunds, the figure Collected today on the dashboard shows. ByMethod is
 	// the payments received by method (before refunds), and
 	// TransactionCount their count.
 	TotalCollected   float64            `json:"total_collected"`
