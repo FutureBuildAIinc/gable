@@ -237,27 +237,44 @@ func TestAMomentsDayIsTheYardsDay(t *testing.T) {
 	cust := &customer.Customer{Name: "Acme"}
 	qty := httpx.Quantity(10000)
 	uom, sku := "EA", "PT-4"
+	// each document names its own yard for the day it prints
+	yardQuote, yardPO, yardOrder := uuid.New(), uuid.New(), uuid.New()
 	for _, c := range []struct {
 		at   time.Time
 		want string
 	}{{before, "Jun 30, 2026"}, {after, "Jul 1, 2026"}} {
-		svc := styledService("en-US").WithStatements(&fakeStatements{zone: zone})
-		qdoc, err := svc.GenerateQuotePDF(context.Background(), &quote.Quote{QuoteSummary: quote.QuoteSummary{ID: uuid.New(), Number: "QT-1",
+		fake := &fakeStatements{zone: zone}
+		svc := styledService("en-US").WithStatements(fake)
+		qdoc, err := svc.GenerateQuotePDF(context.Background(), &quote.Quote{QuoteSummary: quote.QuoteSummary{ID: uuid.New(), Number: "QT-1", BranchID: yardQuote,
 			CreatedAt: httpx.TimestampOf(c.at)}}, cust)
 		if err != nil {
 			t.Fatal(err)
 		}
 		mustContain(t, qdoc, "Date: "+c.want)
-		pdoc, err := svc.GeneratePurchaseOrderPDF(context.Background(), &purchase_order.PurchaseOrder{ID: uuid.New(), Number: "PO-1", VendorName: "Mill", CreatedAt: c.at})
+		pdoc, err := svc.GeneratePurchaseOrderPDF(context.Background(), &purchase_order.PurchaseOrder{ID: uuid.New(), Number: "PO-1", BranchID: yardPO, VendorName: "Mill", CreatedAt: c.at})
 		if err != nil {
 			t.Fatal(err)
 		}
 		mustContain(t, pdoc, "Date: "+c.want)
-		kdoc, err := svc.GeneratePickTicketPDF(context.Background(), &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), Number: "SO-1", CreatedAt: httpx.TimestampOf(c.at)},
+		kdoc, err := svc.GeneratePickTicketPDF(context.Background(), &order.Order{OrderSummary: order.OrderSummary{ID: uuid.New(), Number: "SO-1", BranchID: yardOrder, CreatedAt: httpx.TimestampOf(c.at)},
 			Lines: []order.OrderLine{{Line: salesdoc.Line{SKU: &sku, Description: "Post", Quantity: &qty, UOM: &uom, LineType: salesdoc.LineProduct}}}}, cust)
 		if err != nil {
 			t.Fatal(err)
 		}
 		mustContain(t, kdoc, "Date: "+c.want)
+		// the quote asks twice (its date and its valid until, when it has one),
+		// the other two once each, and always for their own yard
+		seen := map[uuid.UUID]bool{}
+		for _, b := range fake.dayBranches {
+			seen[b] = true
+		}
+		for name, yard := range map[string]uuid.UUID{"quote": yardQuote, "purchase order": yardPO, "pick ticket": yardOrder} {
+			if !seen[yard] {
+				t.Errorf("the %s did not ask for its own yard's day (asked for %v)", name, fake.dayBranches)
+			}
+		}
+		if seen[uuid.Nil] {
+			t.Errorf("a document asked for the day of no yard: %v", fake.dayBranches)
+		}
 	}
 }
