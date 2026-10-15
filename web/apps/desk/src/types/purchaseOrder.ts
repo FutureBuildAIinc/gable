@@ -45,6 +45,8 @@ export interface PurchaseOrderLine {
 
 export interface CreatePORequest {
     vendor_id: string;
+    /** The yard the order is bought for; with none the server settles it from the caller's grants. */
+    branch_id?: string;
     lines: CreatePOLine[];
 }
 
@@ -98,9 +100,14 @@ export interface FreightUploadResponse {
 export type UrgencyLevel = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
 
 export interface PurchaseRecommendation {
+    /** The yard this row is for: stock and sales are that yard's. */
+    branch_id: string;
+    branch_name: string;
     product_id: string;
     product_sku: string;
     product_name: string;
+    /** The product's vendor, by id; absent when the product has none. */
+    vendor_id?: string;
     vendor_name?: string;
     current_stock: number;
     avg_daily_sales: number;

@@ -285,8 +285,12 @@ func (g Geometry) HasDimensions() bool {
 // 'mesh' source (migration 080).
 const GeometrySourceParametric = "parametric"
 
-// ReorderAlert represents a product that's below its reorder point.
+// ReorderAlert represents a product at or below its reorder point at one yard.
 type ReorderAlert struct {
+	// BranchID and BranchName are the yard this row is for: reorder is per
+	// yard (FROM-PRINCIPAL item 135 b), one row per product and yard.
+	BranchID     uuid.UUID      `json:"branch_id"`
+	BranchName   string         `json:"branch_name"`
 	ProductID    uuid.UUID      `json:"product_id"`
 	SKU          string         `json:"sku"`
 	Description  string         `json:"description"`

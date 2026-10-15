@@ -53,12 +53,19 @@ export class GablePurchasingRecommendations extends LitElement {
     private _handleCreatePO(rec: PurchaseRecommendation) {
         const params = new URLSearchParams({
             from: 'recommendation',
+            // The order is for this row's yard: stock and sales are its own.
+            branch_id: rec.branch_id,
+            branch_name: rec.branch_name,
             product_id: rec.product_id,
             description: `${rec.product_sku} - ${rec.product_name}`,
             qty: String(rec.suggested_qty),
             cost: String(rec.estimated_cost / rec.suggested_qty),
         });
-        if (rec.vendor_name) params.set('vendor_name', rec.vendor_name);
+        // The order is created for the vendor's id; the name is for the form to show.
+        if (rec.vendor_id) {
+            params.set('vendor_id', rec.vendor_id);
+            if (rec.vendor_name) params.set('vendor_name', rec.vendor_name);
+        }
         router.navigate(`/purchasing/new?${params.toString()}`);
     }
 
@@ -197,6 +204,7 @@ export class GablePurchasingRecommendations extends LitElement {
                                                 <td class="py-3 px-4">
                                                     <div class="text-sm text-white font-medium">${rec.product_sku}</div>
                                                     <div class="text-xs text-zinc-500 truncate max-w-[200px]">${rec.product_name}</div>
+                                                    ${rec.branch_name ? html`<div data-testid="rec-yard" class="text-xs text-zinc-500">${rec.branch_name}</div>` : nothing}
                                                 </td>
                                                 <td class="py-3 px-4 text-sm text-zinc-400">${rec.vendor_name || '-'}</td>
                                                 <td class="py-3 px-4 text-right text-sm font-mono text-white">${rec.current_stock.toFixed(0)}</td>
