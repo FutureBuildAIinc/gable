@@ -378,26 +378,39 @@ func TestUnembeddableStoredLogoPrintsWithoutTheImage(t *testing.T) {
 	mustNotContain(t, doc, "/Subtype /Image")
 }
 
-// The open documents follow the printing yard's reach while the aging covers
-// the account: a statement printed under a yard says so.
-func TestStatementSaysItsOpenDocumentsFollowTheYard(t *testing.T) {
+// A statement printed under a yard says what follows the yard and what
+// covers the account, whether or not anything is listed, and names the
+// unapplied cash the yard cannot see.
+func TestStatementSaysItsListedDocumentsFollowTheYard(t *testing.T) {
 	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
 	st := &account.Statement{CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
 		Currencies: []account.StatementCurrency{{Currency: "CAD", Lines: []account.StatementLine{},
-			OpenDocuments: []account.OpenDocument{{Kind: "invoice", Number: "IN-000007", Date: "2026-02-10", TotalCents: 5500, OpenCents: 5500}}}}}
+			ClosingBalanceCents: 100000, UnappliedCents: 7700, NetBalanceCents: 92300}}}
 	svc := brandedService(t).WithStatements(&fakeStatements{st: st})
+	line := "Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account."
 
 	yard := yardSouth
-	scoped := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{BranchID: &yard, IsAdmin: true})
-	doc, err := svc.GenerateStatementPDF(scoped, st, cust)
+	pinned := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{BranchID: &yard, IsAdmin: true})
+	doc, err := svc.GenerateStatementPDF(pinned, st, cust)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustContain(t, doc, "Documents listed are those this yard can see; the balance covers the whole account")
+	mustContain(t, doc, line)
+	mustContain(t, doc, "Unapplied cash at other yards: $77.00")
 
+	// scoped by grants to several yards: "your yards"
+	granted := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{UserSub: "u-grants"})
+	doc, err = svc.GenerateStatementPDF(granted, st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "Open documents and unapplied payments are those of your yards; the activity and the balances cover the whole account.")
+
+	// unscoped: nothing was narrowed, nothing is said
 	doc, err = svc.GenerateStatementPDF(context.Background(), st, cust)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustNotContain(t, doc, "Documents listed are those this yard can see; the balance covers the whole account")
+	mustNotContain(t, doc, "cover the whole account")
+	mustNotContain(t, doc, "other yards")
 }
