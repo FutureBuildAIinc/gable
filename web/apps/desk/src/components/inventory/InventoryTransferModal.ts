@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../ui/gable-select';
 import { customElement, property, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons';
 import { X } from 'lucide';
@@ -24,6 +25,7 @@ export class GableInventoryTransferModal extends LitElement {
   @state() private _quantity = '';
   @state() private _reason = '';
   @state() private _isSubmitting = false;
+  @state() private _formError = '';
   @state() private _inventory: Inventory[] = [];
   @state() private _locations: Location[] = [];
 
@@ -33,6 +35,7 @@ export class GableInventoryTransferModal extends LitElement {
       this._quantity = '';
       this._reason = '';
       this._toLoc = '';
+      this._formError = '';
     }
   }
 
@@ -60,7 +63,12 @@ export class GableInventoryTransferModal extends LitElement {
 
   private async _handleSubmit(e: Event) {
     e.preventDefault();
-    if (!this.product || !this._fromLoc || !this._toLoc || !this._quantity) return;
+    if (!this.product) return;
+    if (!this._fromLoc || !this._toLoc || !this._quantity) {
+      this._formError = 'Choose a source and a destination, and enter a quantity.';
+      return;
+    }
+    this._formError = '';
 
     this._isSubmitting = true;
     try {
@@ -111,36 +119,24 @@ export class GableInventoryTransferModal extends LitElement {
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="block text-sm text-gray-400 mb-2">From Location</label>
-                <select
-                  .value=${this._fromLoc}
-                  @change=${(e: Event) => this._fromLoc = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-deep-space border border-white/20 rounded p-3 text-white"
+                <gable-select
                   required
-                >
-                  <option value="">Select Source...</option>
-                  ${this._inventory.filter(i => i.location_id).map(i => html`
-                    <option value=${i.location_id}>
-                      ${i.location_name} (${formatQuantity(i.quantity)})
-                    </option>
-                  `)}
-                </select>
+                  ?invalid=${this._formError !== '' && !this._fromLoc}
+                  .value=${this._fromLoc}
+                  .options=${[{ value: '', label: 'Select Source...' }, ...this._inventory.filter(i => i.location_id).map(i => ({ value: String(i.location_id), label: `${i.location_name} (${formatQuantity(i.quantity)})` }))]}
+                  @change=${(e: Event) => { this._fromLoc = (e.target as HTMLSelectElement).value; this._formError = ''; }}
+                ></gable-select>
               </div>
 
               <div>
                 <label class="block text-sm text-gray-400 mb-2">To Location</label>
-                <select
-                  .value=${this._toLoc}
-                  @change=${(e: Event) => this._toLoc = (e.target as HTMLSelectElement).value}
-                  class="w-full bg-deep-space border border-white/20 rounded p-3 text-white"
+                <gable-select
                   required
-                >
-                  <option value="">Select Dest...</option>
-                  ${this._locations
-                    .filter(l => l.id !== this._fromLoc)
-                    .map(l => html`
-                      <option value=${l.id}>${l.path || l.code}</option>
-                    `)}
-                </select>
+                  ?invalid=${this._formError !== '' && !this._toLoc}
+                  .value=${this._toLoc}
+                  .options=${[{ value: '', label: 'Select Dest...' }, ...this._locations.filter(l => l.id !== this._fromLoc).map(l => ({ value: l.id, label: l.path || l.code }))]}
+                  @change=${(e: Event) => { this._toLoc = (e.target as HTMLSelectElement).value; this._formError = ''; }}
+                ></gable-select>
               </div>
             </div>
 
@@ -169,6 +165,9 @@ export class GableInventoryTransferModal extends LitElement {
               />
             </div>
 
+            ${this._formError ? html`
+              <p class="text-sm text-safety-red" role="alert" data-testid="transfer-form-error">${this._formError}</p>
+            ` : nothing}
             <div class="flex gap-4 pt-4">
               <button
                 type="button"

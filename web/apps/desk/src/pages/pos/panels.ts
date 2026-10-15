@@ -10,7 +10,7 @@ import type { TenderIn } from '../../services/POSService';
 
 export type PayPlan =
     | { ok: true; tenders: TenderIn[]; changeCents: number }
-    | { ok: false; owedCents: number };
+    | { ok: false; owedCents: number; over?: 'added' | 'typed'; typedMethod?: TenderIn['method'] };
 
 const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents, 0);
 
@@ -20,8 +20,19 @@ const sum = (tenders: TenderIn[]) => tenders.reduce((s, t) => s + t.amount_cents
  * owed) when the tenders do not cover the total.
  */
 export function payPlan(totalCents: number, added: TenderIn[], entry: TenderIn | null): PayPlan {
+    // One rule: card, check and account tenders together never exceed the
+    // total, so the change never exceeds the cash tendered (the server's own
+    // change_from_cash). Everything else pays, with change from the cash.
+    const nonCash = (list: TenderIn[]) => sum(list.filter((t) => t.method !== 'cash'));
+    const addedNonCash = nonCash(added);
+    if (totalCents > 0 && addedNonCash > totalCents) {
+        return { ok: false, owedCents: 0, over: 'added' };
+    }
     let tenders = added;
-    if (sum(tenders) < totalCents && entry !== null && entry.amount_cents > 0) {
+    if (sum(added) < totalCents && entry !== null && entry.amount_cents > 0) {
+        if (entry.method !== 'cash' && addedNonCash + entry.amount_cents > totalCents) {
+            return { ok: false, owedCents: 0, over: 'typed', typedMethod: entry.method };
+        }
         tenders = [...added, entry];
     }
     const tendered = sum(tenders);

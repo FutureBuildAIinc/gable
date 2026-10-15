@@ -1219,7 +1219,7 @@ export interface paths {
         };
         /**
          * Products at or below their reorder point
-         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first. A product with no inventory row counts as zero stock. A reorder point of NULL counts as 10.
+         * @description Roles admin, owner, finance, branch scoped. At most 10 rows, lowest stock first, one row per product and yard. A yard's stock is its own row plus every zone and bin under it, and that sum is what is compared with the reorder point and reported. A product with no inventory row counts as zero stock (an administrator with no branch header sees that; a caller bound to a yard sees only products that yard holds a row of, so a product held only at another yard gives no alert here). A reorder point of NULL counts as 10.
          */
         get: operations["dashboardInventoryAlerts"];
         put?: never;
@@ -1304,9 +1304,29 @@ export interface paths {
         get: operations["dealerProfileGet"];
         /**
          * Replace the dealer profile
-         * @description Replaces the writable fields (the logo has its own route). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
+         * @description Replaces the writable fields (the logo has its own route; a locale left out keeps the stored one). Role gated admin and owner. The revision precondition applies: If-Match or the body revision, 428 without either, 409 stale_revision when stale. A branch bound machine key is refused. The write is audited with the before and after in one transaction.
          */
         put: operations["dealerProfilePut"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dealer-profile/locale": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the dealer's locale alone
+         * @description The locale alone, {"locale": "en-CA"}: every signed in desk person may call it (the profile read itself is held to the roles that print), so every page can format its dates for the dealer's locale.
+         */
+        get: operations["dealerProfileLocaleGet"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -2852,7 +2872,7 @@ export interface paths {
         put?: never;
         /**
          * Adjust inventory (cycle count)
-         * @description A result that would leave negative stock answers 500.
+         * @description A result that would leave negative stock answers 422 insufficient_stock. An adjustment that names no location (a count or a delta) answers 422 location_required where the caller has no branch context; an absolute count (is_delta false) that names none answers it too where the product is held in more than one location in the caller's reach: a count is for one location. An absolute count below the figure already allocated to orders at that location answers 422 below_allocated.
          */
         post: operations["inventoryAdjust"];
         delete?: never;
@@ -4103,7 +4123,7 @@ export interface paths {
         };
         /**
          * The dealer branding config
-         * @description Public. The one row of white-label branding the login page renders before any session exists.
+         * @description Public. The one row of white-label branding the login page renders before any session exists, with the dealer's locale for the portal's dates.
          */
         get: operations["portalGetConfig"];
         put?: never;
@@ -4851,7 +4871,11 @@ export interface paths {
         delete: operations["posTransactionRemoveItem"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change a line's quantity
+         * @description Sets the quantity of one line of an open sale. The line is priced again by the same step the add uses, at the new quantity (a quantity break, a kit's components and the sale's tax follow), keeps its id and its place, and the sale's subtotal, tax and total are summed again, so the result is what removing the line and adding it at the new quantity gives. A price the cashier overrode and a discount stay on the line. The body carries the sale's revision (or the request carries If-Match): a stale one is 409 stale_revision and none at all is 428. Only an open or held sale changes (409 invalid_state_transition), as the line add. A fixed cents discount stays the same cents at the new quantity (a percent discount scales), as it does when the line is removed and added again. A quantity of zero or less, or a line that has no quantity (a text line) or is a kit's component, is 400. A line that is not on this sale is 404. Roles, the branch wall and a bound key's pin are those of the line add.
+         */
+        patch: operations["posTransactionChangeItemQuantity"];
         trace?: never;
     };
     "/api/v1/pos/transactions/{id}/complete": {
@@ -5045,7 +5069,7 @@ export interface paths {
         put?: never;
         /**
          * Close the drawer
-         * @description Closes the session on the counted cash: the over or short (counted less expected, expected being the session's cash payments net of change plus the float less cash refunds) is booked to 5030 inside the close's own transaction, the Z report snapshot is written and till.closed is the last statement. counted_by_method names the counted cents per lowercase method (cash, check, card, account); a refusal rolls everything back. A session that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the session's branch is refused 403 by name.
+         * @description Closes the session on the counted cash: the over or short (counted less expected, expected being the session's cash payments net of change plus the float less cash refunds) is booked to 5030 inside the close's own transaction, the Z report snapshot is written and till.closed is the last statement. counted_by_method names the counted cents per lowercase method (cash, check, card); account is refused in the 400 envelope naming counted_by_method.account, since an account charge is not money in the drawer and counting it would book the whole charge as a shortage. A refusal rolls everything back. A session that does not exist, or that the caller's branch context or wall hides, answers 404, the same for both, and nothing is written; a caller with no branch in context who holds no grant for the session's branch is refused 403 by name.
          */
         post: operations["posTillClose"];
         delete?: never;
@@ -6687,8 +6711,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Payments collected on one day, by method
-         * @description Roles admin, owner, finance. The date defaults to today in the server's time zone. A date that is not YYYY-MM-DD is a 500. The report is cached for 60 seconds per date.
+         * Net collections on one day at the caller's yard, by method
+         * @description Roles admin, owner, finance. The date defaults to the default branch's business day, the day the dashboard's Collected today card is cut on; a date is that calendar day in the same zone. The day's figures are the card's: payments received at the caller's yard by their business date received_on (their own branch, never a voided payment), the refunds paid out that day by refunded_on, and the net of the two. A dated report is cached for 60 seconds per date; one with no date never is. A date that is not YYYY-MM-DD is a 500.
          */
         get: operations["reportsDailyTill"];
         put?: never;
@@ -6708,7 +6732,7 @@ export interface paths {
         };
         /**
          * Invoiced, collected and outstanding totals for a period
-         * @description Roles admin, owner, finance. start defaults to 30 days ago and end to now; end is inclusive of its whole day. A date that is not YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
+         * @description Roles admin, owner, finance. start defaults to 30 days ago and end to now; end is inclusive of its whole day. total_collected is the period's net collections, counted as the dashboard card and the Daily Till count them (payments by received_on at the caller's yard, voided payments out, refunds paid out in the period less). A date that is not YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
          */
         get: operations["reportsSalesSummary"];
         put?: never;
@@ -7325,6 +7349,27 @@ export interface components {
             /** Format: int64 */
             closing_balance_cents: number;
             open_documents: components["schemas"]["ArOpenDocument"][];
+            /** @description Payments received on or before the statement's last day that still hold unapplied cash on it. */
+            unapplied_payments: components["schemas"]["ArUnappliedPayment"][];
+            /**
+             * Format: int64
+             * @description The sum of the unapplied payments.
+             */
+            unapplied_cents: number;
+            /**
+             * Format: int64
+             * @description The closing balance less unapplied cash; the aging's total for the customer on the statement's last day.
+             */
+            net_balance_cents: number;
+        };
+        ArUnappliedPayment: {
+            /** Format: uuid */
+            id: string;
+            number: string;
+            /** Format: date */
+            received_on: string;
+            /** Format: int64 */
+            unapplied_cents: number;
         };
         ArStatement: {
             /** Format: uuid */
@@ -7487,11 +7532,20 @@ export interface components {
             anthropic_configured: boolean;
             anthropic_key_hint: string | null;
             vault_present: boolean;
+            /**
+             * @description The last test of the saved key: none with no key saved, untested for a key never tested, passed, refused (the provider refused the key) or failed (the test could not finish). A save runs the test.
+             * @enum {string}
+             */
+            test_status: "none" | "untested" | "passed" | "refused" | "failed";
+            /** @description The plain sentence for refused and failed; absent otherwise. */
+            test_message?: string;
         };
         /** @description Go type techadmin.TestResult. A provider failure is ok false with its words, never the key. */
         AdminTestAIResult: {
             ok: boolean;
             message: string;
+            /** @enum {string} */
+            status: "passed" | "refused" | "failed";
         };
         /** @description Go type techadmin.RoutingSettings, the AI settings' shape without the base URL. */
         RoutingSettings: {
@@ -8505,10 +8559,10 @@ export interface components {
         DashboardSummary: {
             /**
              * Format: int64
-             * @description Cents collected today.
+             * @description The branch's day net collections in cents at the caller's yard (the card reads "Collected today"): payments received that day by their business date received_on (their own branch, never a voided payment) less refunds paid out that day by refunded_on.
              */
             today_revenue: number;
-            /** @description Percentage change against yesterday; 0 when yesterday collected nothing. */
+            /** @description Percentage change of the net against yesterday's net; 0 when yesterday's net is not above zero. */
             today_revenue_change: number;
             active_orders: number;
             pending_dispatch: number;
@@ -8532,9 +8586,11 @@ export interface components {
             alert_type: "LOW_STOCK" | "OUT_OF_STOCK";
             /**
              * Format: uuid
-             * @description Absent when the product has no inventory row.
+             * @description The yard (the branch) the stock sum is for. Absent when the product has no inventory row.
              */
             location_id?: string;
+            /** @description The yard's name (its code when it has none). Absent with no yard. */
+            yard_name?: string;
         };
         /** @description dashboard.TopCustomer. Money is int64 cents. */
         DashboardTopCustomer: {
@@ -8580,6 +8636,10 @@ export interface components {
              */
             revenue: number;
         };
+        DealerProfileLocale: {
+            /** @description The dealer's locale (a BCP 47 tag). */
+            locale: string;
+        };
         DealerProfile: {
             legal_name: string;
             trading_name: string;
@@ -8588,6 +8648,8 @@ export interface components {
             website: string;
             /** @description The address payments are sent to; invoices and statements print it. */
             remit_to: string;
+            /** @description The dealer's locale (a BCP 47 tag, default en-US); every date the app shows is formatted for it. */
+            locale: string;
             /** @description /api/v1/dealer-profile/logo when a logo is set, otherwise null. */
             logo_url: string | null;
             /** Format: int64 */
@@ -8603,6 +8665,8 @@ export interface components {
             /** @description An http or https address, or empty. */
             website?: string;
             remit_to?: string;
+            /** @description A BCP 47 tag (en-US, en-CA), refused in words otherwise. Leave it out to keep the stored one. */
+            locale?: string;
             /**
              * Format: int64
              * @description The precondition, beside If-Match.
@@ -11628,6 +11692,8 @@ export interface components {
             primary_color: string;
             support_email: string;
             support_phone: string;
+            /** @description The dealer profile's locale (a BCP 47 tag); the portal's pages format their dates for it. */
+            locale: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -12064,6 +12130,12 @@ export interface components {
         };
         PosAddLineRequest: {
             line: components["schemas"]["PosLineRequest"];
+        };
+        PosChangeQuantityRequest: {
+            /** @description The line's new quantity, a decimal string greater than zero. */
+            quantity: string;
+            /** @description The sale's revision the change is made on. */
+            revision: number;
         };
         PosCompleteRequest: {
             tenders: components["schemas"]["PosTenderRequest"][];
@@ -13367,8 +13439,11 @@ export interface components {
             alt_text: string;
             sort_order: number;
             is_primary: boolean;
-            /** @enum {string} */
-            status: "generating" | "ready" | "failed";
+            /**
+             * @description refused is a generation the provider refused for the saved key (a retry cannot work; an administrator enters the key again in Tech Admin, AI Settings).
+             * @enum {string}
+             */
+            status: "generating" | "ready" | "failed" | "refused";
             gen_model: string;
             gen_prompt: string;
             gen_style: string;
@@ -14217,10 +14292,20 @@ export interface components {
         };
         /** @description reporting.DailyTillReport. Amounts are float dollars. */
         ReportingDailyTill: {
-            /** Format: date */
+            /**
+             * Format: date
+             * @description The business day the figures are for.
+             */
             date: string;
+            /** @description The day's net collections, the same figure as net_collected. */
             total_collected: number;
-            /** @description Dollars collected per payment method. */
+            /** @description Payments received that day at the yard, before refunds. */
+            received: number;
+            /** @description Refunds paid out that day. */
+            refunds: number;
+            /** @description Received less refunds, equal to the dashboard's Collected today. */
+            net_collected: number;
+            /** @description Dollars received per payment method, before refunds. */
             by_method: {
                 [key: string]: number;
             };
@@ -14662,6 +14747,15 @@ export interface components {
         };
         /** @description The file is of a type the chosen AI provider cannot read (code unsupported_type). The message names what it reads, for example JPEG, PNG, GIF or WebP pictures and PDF files with the Anthropic provider. Nothing answers a canned result for it. ADR 0001 envelope. */
         UnsupportedType: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["WireError"];
+            };
+        };
+        /** @description The AI provider refused the saved key (code ai_refused; a 401 or 403 from the provider). It is not AI off: a key is saved and was not accepted. The message names the provider and says an administrator can enter the key again in Tech Admin, AI Settings. Nothing answers a canned result for it. ADR 0001 envelope. */
+        AIRefused: {
             headers: {
                 [name: string]: unknown;
             };
@@ -17996,6 +18090,30 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["WireConflict"];
             428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["WireInternalError"];
+        };
+    };
+    dealerProfileLocaleGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The dealer's locale. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DealerProfileLocale"];
+                };
+            };
+            400: components["responses"]["WireBadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             500: components["responses"]["WireInternalError"];
         };
     };
@@ -23297,6 +23415,7 @@ export interface operations {
             415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     partnerDashboard: {
@@ -25102,6 +25221,45 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    posTransactionChangeItemQuantity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Branch scope for modules registered behind the branch middleware (quote, customer, order, invoice in this fragment set). A missing header passes for admins and in dev mode; with default_branch_required on, a non admin without it is refused. A non UUID value is a 400 and a branch the caller has no grant for is a 403. */
+                "X-Branch-Id"?: components["parameters"]["XBranchId"];
+            };
+            path: {
+                id: string;
+                itemId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PosChangeQuantityRequest"];
+            };
+        };
+        responses: {
+            /** @description The whole sale with the line repriced. */
+            200: {
+                headers: {
+                    /** @description The document's new revision. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PosTransaction"];
+                };
+            };
+            400: components["responses"]["BadRequestEither"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["ForbiddenEither"];
+            404: components["responses"]["WireNotFound"];
+            409: components["responses"]["ConflictEither"];
+            428: components["responses"]["WirePreconditionRequired"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     posTransactionComplete: {
         parameters: {
             query?: never;
@@ -26891,6 +27049,7 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     productPimGenerateDescriptions: {
@@ -26929,6 +27088,7 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     productPimGenerateImage: {
@@ -27005,6 +27165,7 @@ export interface operations {
             413: components["responses"]["PayloadTooLarge"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     productUpdateMargins: {
@@ -27731,6 +27892,7 @@ export interface operations {
             415: components["responses"]["UnsupportedType"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
+            502: components["responses"]["AIRefused"];
         };
     };
     purchaseOrderFreightApply: {

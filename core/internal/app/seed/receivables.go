@@ -5,6 +5,7 @@ package seed
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"log/slog"
@@ -33,7 +34,7 @@ func newReceivables(dbURL string) (*receivables, error) {
 		return nil, fmt.Errorf("the seed's AR core could not connect: %w", err)
 	}
 	logger := slog.Default()
-	return &receivables{db: pdb, acct: account.NewService(pdb, gl.NewService(gl.NewRepository(pdb), nil, logger), logger)}, nil
+	return &receivables{db: pdb, acct: account.NewService(pdb, gl.NewService(gl.NewRepository(pdb), nil, logger), logger).WithClockForTest(seedNow)}, nil
 }
 
 func (r *receivables) close() { r.db.Close() }
@@ -77,8 +78,18 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 				}}); err != nil {
 				return err
 			}
-			if in.Paid <= 0 {
-				return nil
+			today, err := r.acct.LocalDate(ctx, in.BranchID, r.acct.Now())
+			if err != nil {
+				return err
+			}
+			// An invoice dated after the seed's day is left unpaid: no check
+			// is received before the invoice it pays or after the day the
+			// seed runs.
+			if in.Paid <= 0 || dayOf(in.Date) > dayOf(today) {
+				if !in.Stamp.IsZero() {
+					return nil
+				}
+				return r.stampInvoice(ctx, in, uuid.Nil, time.Time{})
 			}
 			var currency string
 			if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT currency FROM invoices WHERE id = $1`, in.ID).Scan(&currency); err != nil {
@@ -95,6 +106,11 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 			if receivedOn.IsZero() {
 				receivedOn = in.Date.AddDate(0, 0, 7)
 			}
+			// The seed never dates money after the day it runs: a check the
+			// rule would date later is received on the seed's own day.
+			if dayOf(receivedOn) > dayOf(today) {
+				receivedOn = today
+			}
 			var orderID *uuid.UUID
 			if in.OrderID != uuid.Nil {
 				orderID = &in.OrderID
@@ -107,7 +123,7 @@ func (r *receivables) post(ctx context.Context, invoices []seedInvoice) int {
 				return err
 			}
 			if in.Stamp.IsZero() {
-				return nil
+				return r.stampInvoice(ctx, in, payID, receivedOn)
 			}
 			return r.stampDay(ctx, in, payID)
 		})
@@ -159,6 +175,46 @@ func (r *receivables) postParallel(ctx context.Context, invoices []seedInvoice) 
 // the same transaction as the acts.
 func (r *receivables) stampDay(ctx context.Context, in seedInvoice, payID uuid.UUID) error {
 	return r.acct.RestampHistory(ctx, in.ID, payID, in.Stamp, in.Stamp.Add(time.Second))
+}
+
+// dayOf is the calendar day of a moment, the form days compare in.
+func dayOf(t time.Time) string { return t.Format("2006-01-02") }
+
+// seedToday is the seed's own business day: the default branch's calendar day
+// now, in its time zone (the day the AR core refuses money past).
+func seedToday(db *sql.DB) (time.Time, error) {
+	var d time.Time
+	err := db.QueryRow(`SELECT ($1::timestamptz AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+		WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`, seedNow()).Scan(&d)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("the seed's business day was not read: %w", err)
+	}
+	return d, nil
+}
+
+// stampInvoice puts the documents' own days on the rows the base seed's acts
+// wrote with the present: the invoice's rows take the invoice's day, the
+// payment's the day it was received, so a seeded ledger reads like a real one.
+// The stamps sit at midday and never after the present.
+func (r *receivables) stampInvoice(ctx context.Context, in seedInvoice, payID uuid.UUID, receivedOn time.Time) error {
+	now := r.acct.Now()
+	at := func(d time.Time) time.Time {
+		t := time.Date(d.Year(), d.Month(), d.Day(), 12, 0, 0, 0, time.UTC)
+		if t.After(now.Add(-time.Second)) {
+			t = now.Add(-time.Second)
+		}
+		return t
+	}
+	invoicedAt, paidAt := at(in.Date), invoicedAtOr(at(receivedOn), at(in.Date))
+	return r.acct.RestampDay(ctx, in.ID, payID, invoicedAt, paidAt)
+}
+
+// invoicedAtOr answers the payment's moment, never before the invoice's.
+func invoicedAtOr(paid, invoiced time.Time) time.Time {
+	if paid.Before(invoiced) {
+		return invoiced
+	}
+	return paid
 }
 
 // postMemo posts a draft credit memo the seed inserted (one ADJUST line, no

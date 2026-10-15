@@ -7,9 +7,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/gablelbm/gable/pkg/branchctx"
+	"github.com/gablelbm/gable/pkg/collections"
 	"github.com/gablelbm/gable/pkg/database"
 	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
@@ -34,7 +36,11 @@ func reach(ctx context.Context) (*uuid.UUID, *string) {
 
 type Repository interface {
 	GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error)
-	GetSalesSummary(ctx context.Context, start, end time.Time) (*SalesSummaryReport, error)
+	// GetSalesSummary reads a period of business dates, from and to inclusive
+	// (YYYY-MM-DD), never instants.
+	GetSalesSummary(ctx context.Context, from, to string) (*SalesSummaryReport, error)
+	// BusinessDay is the default branch's business date now (YYYY-MM-DD).
+	BusinessDay(ctx context.Context) (string, error)
 	GetARAgingReport(ctx context.Context) (*ARAgingReport, error)
 	GetCustomerStatement(ctx context.Context, customerID string, start, end time.Time) (*CustomerStatement, error)
 
@@ -71,33 +77,48 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// BusinessDay is the default branch's business date now: the day the till, the
+// dashboard's card and the Sales Summary's default window are for.
+func (r *PostgresRepository) BusinessDay(ctx context.Context) (string, error) {
+	var day string
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx, `SELECT `+collections.TodaySQL+`::text`).Scan(&day); err != nil {
+		return "", fmt.Errorf("failed to read the business day: %w", err)
+	}
+	return day, nil
+}
+
+// GetDailyTill reads one business day's collections in the default branch's
+// zone. A zero date is the branch's today (the day the dashboard's Today's
+// Revenue card is cut on); a date is that calendar day in the same zone. The
+// day's figures are the card's: payments received at the caller's yard (their
+// own branch_id, never a voided payment), the refunds paid out that day, and
+// their net, all from pkg/collections.
 func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error) {
-	// Truncate to day
-	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	dayEnd := dayStart.Add(24 * time.Hour)
+	var asked *string
+	if !date.IsZero() {
+		d := date.Format("2006-01-02")
+		asked = &d
+	}
 	branch, grants := reach(ctx)
+	ex := r.db.GetExecutor(ctx)
 
-	query := `
-		SELECT method, COALESCE(SUM(amount), 0), COUNT(*)
-		FROM payments
-		WHERE created_at >= $1 AND created_at < $2
-		  AND ` + middleware.Wall("", 3, 4) + `
-		GROUP BY method
-	`
+	// The day first, so a day with no collections still names itself.
+	var day string
+	if err := ex.QueryRow(ctx,
+		`SELECT COALESCE($1::date, `+collections.TodaySQL+`)::text`, asked).Scan(&day); err != nil {
+		return nil, fmt.Errorf("failed to read the till day: %w", err)
+	}
 
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd, branch, grants)
+	rows, err := ex.Query(ctx, `
+		SELECT p.method, COALESCE(SUM(p.amount), 0), COUNT(*)
+		FROM `+collections.ReceivedFrom("$1::date", 2, 3)+`
+		GROUP BY p.method`, day, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily till: %w", err)
 	}
 	defer rows.Close()
 
-	report := &DailyTillReport{
-		Date:             dayStart.Format("2006-01-02"),
-		ByMethod:         make(map[string]float64),
-		TransactionCount: 0,
-		TotalCollected:   0,
-	}
-
+	report := &DailyTillReport{Date: day, ByMethod: make(map[string]float64)}
 	for rows.Next() {
 		var method string
 		var amount float64
@@ -106,40 +127,63 @@ func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (
 			return nil, fmt.Errorf("failed to scan till row: %w", err)
 		}
 		report.ByMethod[method] = amount
-		report.TotalCollected += amount
+		report.Received += amount
 		report.TransactionCount += count
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
 
+	var refunds float64
+	if err := ex.QueryRow(ctx, `
+		SELECT COALESCE(SUM(r.amount), 0)::float8
+		FROM `+collections.RefundedFrom("$1::date", 2, 3), day, branch, grants).Scan(&refunds); err != nil {
+		return nil, fmt.Errorf("failed to query daily till refunds: %w", err)
+	}
+	report.Refunds = refunds
+	// Cents, so the sum of two dollar floats carries no binary dust.
+	report.Received = math.Round(report.Received*100) / 100
+	report.NetCollected = math.Round((report.Received-refunds)*100) / 100
+	report.TotalCollected = report.NetCollected
 	return report, nil
 }
 
-func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end time.Time) (*SalesSummaryReport, error) {
-	report := &SalesSummaryReport{
-		StartDate: start.Format("2006-01-02"),
-		EndDate:   end.Format("2006-01-02"),
-	}
+// salesInvoicedSQL and salesOutstandingSQL are the Sales Summary's invoice
+// reads, over a period of business dates ($1 and $2) at the caller's reach ($3
+// and $4): invoices are cut on their own business date (invoice_date).
+var salesInvoicedSQL = `
+	SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
+	FROM invoices
+	WHERE invoice_date BETWEEN $1::date AND $2::date AND status != 'VOID'
+	  AND ` + middleware.Wall("", 3, 4)
+
+var salesOutstandingSQL = `
+	SELECT COALESCE(SUM(total_amount), 0)
+	FROM invoices
+	WHERE invoice_date BETWEEN $1::date AND $2::date AND status IN ('UNPAID', 'PARTIAL')
+	  AND ` + middleware.Wall("", 3, 4)
+
+func (r *PostgresRepository) GetSalesSummary(ctx context.Context, from, to string) (*SalesSummaryReport, error) {
+	report := &SalesSummaryReport{StartDate: from, EndDate: to}
 	branch, grants := reach(ctx)
 
+	// The period is business dates, the same on every half of the summary:
+	// invoices are cut on their own business date (invoice_date, as the
+	// statement reads it) and payments on received_on (pkg/collections), never
+	// on the instant a row was written.
+
 	// 1. Invoiced
-	queryInvoiced := `
-		SELECT COALESCE(SUM(total_amount), 0), COUNT(*)
-		FROM invoices
-		WHERE created_at >= $1 AND created_at < $2 AND status != 'VOID'
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, queryInvoiced, start, end, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, salesInvoicedSQL, from, to, branch, grants).Scan(&report.TotalInvoiced, &report.InvoiceCount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query invoiced total: %w", err)
 	}
 
-	// 2. Collected
-	queryCollected := `
-		SELECT COALESCE(SUM(amount), 0)
-		FROM payments
-		WHERE created_at >= $1 AND created_at < $2
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, start, end, branch, grants).Scan(&report.TotalCollected)
+	// 2. Collected: the day's net collections over the period, counted as the
+	// dashboard's card and the Daily Till count them (pkg/collections: by the
+	// payment's received_on and own yard, voided payments out, refunds in).
+	queryCollected := `SELECT ` + collections.NetCentsBetween("$1::date", "$2::date", 3, 4) + `::float8 / 100`
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryCollected, from, to, branch, grants).Scan(&report.TotalCollected)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query collected total: %w", err)
 	}
@@ -156,12 +200,6 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 	// Let's just do: Total Invoiced - Paid (where invoice is fully paid).
 	// Simplification: OutstandingAR = SUM(total_amount) of invoices in period where status != PAID.
 
-	queryOutstanding := `
-		SELECT COALESCE(SUM(total_amount), 0)
-		FROM invoices
-		WHERE created_at >= $1 AND created_at < $2 AND status IN ('UNPAID', 'PARTIAL')
-		  AND ` + middleware.Wall("", 3, 4) + `
-	`
 	// Note: accurate AR needs to subtract partial payments.
 	// Let's refine: Total Invoiced in Period - Total Payments applied to *those* invoices (even if payment is outside period? Mixed bag).
 	// Let's stick to: Total Invoiced in Period - Total Paid against those invoices.
@@ -173,9 +211,10 @@ func (r *PostgresRepository) GetSalesSummary(ctx context.Context, start, end tim
 
 	// That might be negative if overpaid? unlikely.
 	// Actually, just keep it simple: "Total Invoiced" vs "Total Collected (Cash in hand)".
-	// "Outstanding AR" = Total for Unpaid/Partial invoices created in this period.
+	// "Outstanding AR" = Total for Unpaid/Partial invoices dated in this period
+	// (their business date, invoice_date).
 
-	err = r.db.GetExecutor(ctx).QueryRow(ctx, queryOutstanding, start, end, branch, grants).Scan(&report.OutstandingAR)
+	err = r.db.GetExecutor(ctx).QueryRow(ctx, salesOutstandingSQL, from, to, branch, grants).Scan(&report.OutstandingAR)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query outstanding: %w", err)
 	}

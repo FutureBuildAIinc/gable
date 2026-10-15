@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -345,6 +346,16 @@ func (s *Service) GenerateImage(ctx context.Context, productID uuid.UUID, style,
 	return media, nil
 }
 
+// failureStatus is the settled status of a media row whose generation failed
+// with err: "refused" when the provider refused the saved key (a retry cannot
+// work and the page says what to do), else "failed".
+func failureStatus(err error) string {
+	if errors.Is(err, ai.ErrKeyRefused) {
+		return "refused"
+	}
+	return "failed"
+}
+
 // generateImageAsync runs on a DETACHED context (the request context is canceled
 // once GenerateImage returns) and finalizes the placeholder media row.
 func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, style, prompt, kind string) {
@@ -364,7 +375,7 @@ func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, styl
 		dataURI, model, err = s.generateIllustrationDataURI(ctx, p, style, prompt)
 		if err != nil {
 			slog.Error("illustration generation failed", "media_id", mediaID, "error", err)
-			_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
+			_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, failureStatus(err))
 			return
 		}
 	} else {
@@ -376,7 +387,11 @@ func (s *Service) generateImageAsync(mediaID uuid.UUID, p *product.Product, styl
 			svgURI, svgModel, svgErr := s.generateIllustrationDataURI(ctx, p, style, prompt)
 			if svgErr != nil {
 				slog.Error("image generation failed (image model + illustration fallback)", "media_id", mediaID, "image_error", genErr, "svg_error", svgErr)
-				_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, "failed")
+				status := failureStatus(svgErr)
+				if status == "failed" {
+					status = failureStatus(genErr)
+				}
+				_ = s.repo.UpdateMediaResult(context.Background(), mediaID, "", "", style, status)
 				return
 			}
 			dataURI, model = svgURI, svgModel
@@ -427,8 +442,8 @@ House style, one consistent set:
 - Flat illustration with gentle shading: two or three tones per material, a soft ground shadow, no outline heavier than 2 units.
 - Transparent background: no full canvas rectangle. The object's own colours carry it (warm natural wood, neutral greys for metal, one accent colour for a tool body).
 - One clear silhouette that reads small, the obvious angle, the whole object inside the canvas with at least 16 units of margin.
-- No text, except one invented brand word where a label is natural (a box, a bag, a can, a tool body). Never a real brand or logo.
-- Use only svg, g, path, rect, circle, ellipse, line, polyline, polygon, defs, linearGradient, radialGradient, stop, clipPath, text and tspan, with plain presentation attributes (fill, stroke, opacity and the like). A gradient has at most two stops.
+- No words, labels, brand names or logos anywhere on the product or the canvas: no lettering, no numbers, no marks that read as a brand.
+- Use only svg, g, path, rect, circle, ellipse, line, polyline, polygon, defs, linearGradient, radialGradient, stop and clipPath, with plain presentation attributes (fill, stroke, opacity and the like). A gradient has at most two stops.
 - Never use style, script, image, use, filter, animation, links or any external reference.
 - Keep it under 12 KB.`
 

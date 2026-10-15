@@ -23,6 +23,7 @@ import (
 	"github.com/gablelbm/gable/internal/purchase_order"
 	"github.com/gablelbm/gable/internal/quote"
 	"github.com/gablelbm/gable/internal/salesdoc"
+	"github.com/gablelbm/gable/pkg/middleware"
 	"github.com/google/uuid"
 )
 
@@ -63,14 +64,27 @@ func (f fakeJobs) JobName(_ context.Context, id uuid.UUID) (string, error) {
 	return n, nil
 }
 
-type fakeStatements struct{ st *account.Statement }
+type fakeStatements struct {
+	st      *account.Statement
+	aging   *account.AgingSummary
+	queries []account.AgingQuery
+}
 
-func (fakeStatements) LocalDate(_ context.Context, _ uuid.UUID, at time.Time) (time.Time, error) {
+// AgingSummary answers the canned aging and records what it was asked.
+func (f *fakeStatements) AgingSummary(_ context.Context, q account.AgingQuery) (*account.AgingSummary, error) {
+	f.queries = append(f.queries, q)
+	if f.aging == nil {
+		return &account.AgingSummary{AsOf: q.AsOf.Format("2006-01-02"), Basis: q.Basis, Totals: []account.AgingTotal{}}, nil
+	}
+	return f.aging, nil
+}
+
+func (*fakeStatements) LocalDate(_ context.Context, _ uuid.UUID, at time.Time) (time.Time, error) {
 	return at, nil
 }
-func (fakeStatements) Now() time.Time { return time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC) }
+func (*fakeStatements) Now() time.Time { return time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC) }
 
-func (f fakeStatements) Statement(context.Context, account.StatementQuery) (*account.Statement, error) {
+func (f *fakeStatements) Statement(context.Context, account.StatementQuery) (*account.Statement, error) {
 	return f.st, nil
 }
 
@@ -205,7 +219,7 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 			OpenDocuments: []account.OpenDocument{{Kind: "invoice", Number: "IN-000007", Date: "2026-02-10", TotalCents: 5500, OpenCents: 5500}},
 		}},
 	}
-	svc := brandedService(t).WithStatements(fakeStatements{st})
+	svc := brandedService(t).WithStatements(&fakeStatements{st: st})
 	doc, err := svc.GenerateStatementPDF(context.Background(), st, cust)
 	if err != nil {
 		t.Fatal(err)
@@ -215,6 +229,71 @@ func TestStatementShowsYardRemitToAndTheAccount(t *testing.T) {
 	}
 	mustNotContain(t, doc, "$-")
 	mustNotContain(t, doc, "North Yard")
+}
+
+// The statement carries the account's aging as of the period's last day: the
+// buckets the AR Aging page reads, in the statement's own currency.
+func TestStatementCarriesTheAgingAsOfThePeriodsEnd(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
+	st := &account.Statement{
+		CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
+		Currencies: []account.StatementCurrency{{Currency: "CAD", OpeningBalanceCents: 0, ClosingBalanceCents: 123456,
+			Lines:             []account.StatementLine{{Date: "2026-02-10", Type: "INVOICE", Description: "Invoice IN-000007", AmountCents: 123456, BalanceAfterCents: 123456}},
+			UnappliedPayments: []account.UnappliedPayment{{ID: uuid.New(), Number: "PAY-000009", ReceivedOn: "2026-02-20", UnappliedCents: 5000}},
+			UnappliedCents:    5000, NetBalanceCents: 118456}},
+	}
+	// the buckets and the credits and unapplied cash add up to the total
+	aging := &account.AgingSummary{AsOf: "2026-02-28", Basis: "due_date", Totals: []account.AgingTotal{{
+		Currency: "CAD", CurrentCents: 100001, Days1To30: 20002, Days31To60: 3003, Days61To90: 400, Over90: 50,
+		UnappliedCents: -5000, TotalCents: 118456}}}
+	fake := &fakeStatements{st: st, aging: aging}
+	svc := brandedService(t).WithStatements(fake)
+	doc, err := svc.GenerateStatementPDF(context.Background(), st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Aging as of 2026-02-28", "Current", "1-30", "31-60", "61-90", "Over 90", "$1000.01", "$200.02", "$30.03", "$4.00", "$0.50",
+		"Unapplied", "-$50.00", "Total", "$1184.56", "Net balance", "PAY-000009", "2026-02-20"} {
+		mustContain(t, doc, want)
+	}
+	// the aging is asked as of the period's last day, on the due date, for this customer
+	if len(fake.queries) != 1 {
+		t.Fatalf("%d aging reads, want 1", len(fake.queries))
+	}
+	q := fake.queries[0]
+	if q.AsOf.Format("2006-01-02") != "2026-02-28" || q.Basis != "due_date" || q.CustomerID == nil || *q.CustomerID != st.CustomerID {
+		t.Errorf("aging asked %+v, want as of 2026-02-28 on the due date for the statement's customer", q)
+	}
+}
+
+// A statement that owes nothing still draws its aging, with zeros.
+func TestStatementDrawsTheAgingForAPaidUpAccount(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
+	st := &account.Statement{CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
+		Currencies: []account.StatementCurrency{{Currency: "CAD", Lines: []account.StatementLine{}}}}
+	svc := brandedService(t).WithStatements(&fakeStatements{st: st})
+	doc, err := svc.GenerateStatementPDF(context.Background(), st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "Aging as of 2026-02-28")
+	mustContain(t, doc, "$0.00")
+}
+
+// A statement for one job carries no aging: the aging is the account's.
+func TestStatementForAJobMakesNoAgingRead(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
+	job := uuid.New()
+	st := &account.Statement{CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28", JobID: &job,
+		Currencies: []account.StatementCurrency{{Currency: "CAD", Lines: []account.StatementLine{}}}}
+	fake := &fakeStatements{st: st}
+	svc := brandedService(t).WithStatements(fake)
+	if _, err := svc.GenerateStatementPDF(context.Background(), st, cust); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.queries) != 0 {
+		t.Errorf("a job statement read the aging %d times", len(fake.queries))
+	}
 }
 
 func TestQuoteForm(t *testing.T) {
@@ -297,4 +376,41 @@ func TestUnembeddableStoredLogoPrintsWithoutTheImage(t *testing.T) {
 	}
 	mustContain(t, doc, "Test Yard")
 	mustNotContain(t, doc, "/Subtype /Image")
+}
+
+// A statement printed under a yard says what follows the yard and what
+// covers the account, whether or not anything is listed, and names the
+// unapplied cash the yard cannot see.
+func TestStatementSaysItsListedDocumentsFollowTheYard(t *testing.T) {
+	cust := &customer.Customer{Name: "Acme", AccountNumber: "C-9", PrimaryBranchID: yardSouth}
+	st := &account.Statement{CustomerID: uuid.New(), CustomerName: "Acme", From: "2026-02-01", To: "2026-02-28",
+		Currencies: []account.StatementCurrency{{Currency: "CAD", Lines: []account.StatementLine{},
+			ClosingBalanceCents: 100000, UnappliedCents: 7700, NetBalanceCents: 92300}}}
+	svc := brandedService(t).WithStatements(&fakeStatements{st: st})
+	line := "Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account."
+
+	yard := yardSouth
+	pinned := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{BranchID: &yard, IsAdmin: true})
+	doc, err := svc.GenerateStatementPDF(pinned, st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, line)
+	mustContain(t, doc, "Unapplied cash at other yards: $77.00")
+
+	// scoped by grants to several yards: "your yards"
+	granted := middleware.WithBranchContext(context.Background(), &middleware.BranchContext{UserSub: "u-grants"})
+	doc, err = svc.GenerateStatementPDF(granted, st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustContain(t, doc, "Open documents and unapplied payments are those of your yards; the activity and the balances cover the whole account.")
+
+	// unscoped: nothing was narrowed, nothing is said
+	doc, err = svc.GenerateStatementPDF(context.Background(), st, cust)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustNotContain(t, doc, "cover the whole account")
+	mustNotContain(t, doc, "other yards")
 }

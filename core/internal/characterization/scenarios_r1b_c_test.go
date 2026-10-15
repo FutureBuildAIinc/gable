@@ -502,11 +502,11 @@ func r1bCPOSGroups() []groupDef {
 					name: "pos.till.current.c", method: "GET", path: "/api/v1/pos/till/current?register_id=REG-01",
 					extract: map[string]string{"c_till": "/id"},
 				},
-				// Sales deduct stock at the unassigned location, so seed some there.
+				// Seed the sales stock at the yard: an adjustment names its location.
 				{name: "pos.setup.stock.product", method: "POST", path: "/api/v1/inventory/adjust",
-					body: map[string]any{"product_id": "{product}", "quantity": 50, "reason": "r1b c pos setup", "is_delta": true}},
+					body: map[string]any{"product_id": "{product}", "location_id": "{branch}", "quantity": 50, "reason": "r1b c pos setup", "is_delta": true}},
 				{name: "pos.setup.stock.sheet", method: "POST", path: "/api/v1/inventory/adjust",
-					body: map[string]any{"product_id": "{productSheet}", "quantity": 10, "reason": "r1b c pos setup", "is_delta": true}},
+					body: map[string]any{"product_id": "{productSheet}", "location_id": "{branch}", "quantity": 10, "reason": "r1b c pos setup", "is_delta": true}},
 				{name: "pos.till.open.c_duplicate", method: "POST", path: "/api/v1/pos/till/open",
 					body: map[string]any{"register_id": "REG-01", "opening_float_cents": 5000}},
 				{name: "pos.till.open.bad_body", method: "POST", path: "/api/v1/pos/till/open", body: "not an object"},

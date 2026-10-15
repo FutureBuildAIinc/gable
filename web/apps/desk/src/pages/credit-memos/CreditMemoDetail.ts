@@ -17,6 +17,7 @@ import {
 import { Check, Ban, Pencil } from 'lucide';
 import { formatCents, formatDay } from '../../lib/utils.ts';
 import { creditTextClass } from '../../lib/credit-display.ts';
+import { formatDateTime } from '../../lib/dates.ts';
 import { chipClass } from '../../components/invoices/chips.ts';
 import { renderSalesLines } from '../../components/invoices/lines-table.ts';
 
@@ -153,7 +154,7 @@ export class GableCreditMemoDetail extends LitElement {
                     <div class="rounded-lg border border-red-500/50 bg-red-500/10 p-4 text-red-300" data-testid="void-banner">
                         <div class="text-lg font-bold tracking-wide text-red-400">VOID</div>
                         <div class="text-sm mt-1">
-                            This credit memo was voided${cm.voided_at ? html` on ${new Date(cm.voided_at).toLocaleString()}` : nothing}.
+                            This credit memo was voided${cm.voided_at ? html` on ${formatDateTime(cm.voided_at)}` : nothing}.
                             ${cm.void_reason ? html`<span class="block mt-1">Reason: <span class="text-white">${cm.void_reason}</span></span>` : nothing}
                         </div>
                     </div>

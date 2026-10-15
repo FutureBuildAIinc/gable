@@ -126,6 +126,8 @@ describe('gable-activity-feed — Log Activity', () => {
 
     const modal = q<HTMLElement>(el, 'gable-log-activity-modal')
     expect(modal.getAttribute('customer-id')).toBe(CUSTOMER)
+    q<HTMLButtonElement>(modal, '#log-activity-contact button').click()
+    await flush()
     expect(text(modal)).toContain('Dana Ramirez')
   })
 

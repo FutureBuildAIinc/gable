@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { AlertTriangle, Package } from 'lucide';
@@ -58,13 +58,17 @@ export class GableInventoryAlertsWidget extends LitElement {
                                 </div>
                             `
                             : this.alerts.map((alert) => html`
-                                <div class="p-4 hover:bg-white/5 transition-colors group">
+                                <a
+                                    href=${`/inventory/${alert.product_id}`}
+                                    class="block p-4 hover:bg-white/5 transition-colors group focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-gable-green"
+                                >
                                     <h4 class="text-sm font-medium text-white mb-1 group-hover:text-amber-400 transition-colors">
                                         ${alert.name}
                                     </h4>
                                     <div class="flex items-center justify-between text-xs">
                                         <span class="text-zinc-500">
                                             SKU: <span class="font-mono">${alert.sku}</span>
+                                            ${alert.yard_name ? html` &middot; <span data-testid="alert-yard">${alert.yard_name}</span>` : nothing}
                                         </span>
                                         <div class="flex items-center gap-3">
                                             <span class="text-zinc-400">
@@ -75,7 +79,8 @@ export class GableInventoryAlertsWidget extends LitElement {
                                             </span>
                                         </div>
                                     </div>
-                                </div>
+                                    <span class="sr-only">Open the stock for ${alert.name}</span>
+                                </a>
                             `)
                         }
                     </div>

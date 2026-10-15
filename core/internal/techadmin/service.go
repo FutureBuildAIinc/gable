@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -461,7 +462,108 @@ func (s *Service) GetAISettings(ctx context.Context) (*AISettings, error) {
 	if hasBase {
 		out.BaseURL = &baseURL
 	}
+	if err := s.readAITest(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// aiTestRow is the stored last test of the saved key.
+type aiTestRow struct {
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+	// Revision is the AI settings revision the test ran on. A result from an
+	// older revision belongs to a key that may have changed since, so it
+	// reads as untested.
+	Revision int64 `json:"revision"`
+}
+
+// saveTestTimeout bounds the test a save runs, so a provider that does not
+// answer cannot hold the save's response for the client's whole timeout.
+const saveTestTimeout = 20 * time.Second
+
+// readAITest fills the document's test status from the stored last test:
+// "none" when no key is saved for the chosen provider, "untested" when one is
+// saved and was never tested, else the stored result.
+func (s *Service) readAITest(ctx context.Context, out *AISettings) error {
+	out.TestStatus, out.TestMessage = AITestNone, ""
+	if !out.Configured {
+		return nil
+	}
+	out.TestStatus = AITestUntested
+	raw, ok, err := s.repo.ReadSetting(ctx, settingAITest)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	var row aiTestRow
+	if json.Unmarshal([]byte(raw), &row) != nil {
+		return nil
+	}
+	if row.Revision != out.Revision {
+		return nil
+	}
+	switch row.Status {
+	case AITestPassed, AITestRefused, AITestFailed:
+		out.TestStatus, out.TestMessage = row.Status, row.Message
+	}
+	return nil
+}
+
+// runAITest calls the provider once and stores the result for the settings
+// document. A provider failure is an answer, not an error; only a storage
+// failure is returned. The message is the provider's refusal in words, never
+// the key.
+func (s *Service) runAITest(ctx context.Context, fromSave bool) (TestResult, error) {
+	// The revision the test runs on is read BEFORE the provider is asked: the
+	// result belongs to that revision, whenever the provider answers.
+	var rev int64
+	if s.aiTester != nil && s.repo != nil {
+		r, err := s.repo.ReadRevision(ctx, ResourceAISettings)
+		if err != nil {
+			return TestResult{}, err
+		}
+		rev = r
+	}
+	res := TestResult{OK: true, Status: AITestPassed, Message: "The provider answered."}
+	switch {
+	case s.aiTester == nil:
+		res = TestResult{Status: AITestFailed, Message: "AI is off: the AI client is not available on this server"}
+	default:
+		if err := s.aiTester.TestConnection(ctx); err != nil {
+			if words, refused := ai.RefusedMessage(err); refused {
+				res = TestResult{Status: AITestRefused, Message: words}
+			} else if unreachable := unreachableProvider(err); unreachable != "" {
+				res = TestResult{Status: AITestFailed, Message: unreachableWords(unreachable, fromSave)}
+			} else if errors.Is(err, context.DeadlineExceeded) {
+				res = TestResult{Status: AITestFailed, Message: unreachableWords(s.aiProviderLabel(ctx), fromSave)}
+			} else {
+				res = TestResult{Status: AITestFailed, Message: err.Error()}
+			}
+		}
+	}
+	if s.aiTester == nil || s.repo == nil {
+		return res, nil
+	}
+	stored := aiTestRow{Status: res.Status, Message: res.Message, Revision: rev}
+	if res.Status == AITestPassed {
+		stored.Message = ""
+	}
+	// A result of an older revision never replaces one of a later revision:
+	// two tests that finish out of order leave the later key's result.
+	if raw, ok, rerr := s.repo.ReadSetting(ctx, settingAITest); rerr == nil && ok {
+		var prev aiTestRow
+		if json.Unmarshal([]byte(raw), &prev) == nil && prev.Revision > rev {
+			return res, nil
+		}
+	}
+	row, err := json.Marshal(stored)
+	if err != nil {
+		return res, err
+	}
+	return res, s.repo.WriteSetting(ctx, settingAITest, string(row))
 }
 
 // SaveAISettings writes the OpenRouter key and, when the body names it, the
@@ -574,19 +676,34 @@ func (s *Service) SaveAISettingsFull(ctx context.Context, in AISave, pre Precond
 		return nil, err
 	}
 	s.invalidateAI()
+	// Saving a key tests it with the provider (N7), so the document the
+	// admin reads says whether the key works, not only that one is saved. The
+	// test is the provider's answer, never a reason to refuse the save.
+	if out.Configured && s.aiTester != nil {
+		tctx, cancel := context.WithTimeout(ctx, saveTestTimeout)
+		_, terr := s.runAITest(tctx, true)
+		cancel()
+		if terr != nil {
+			// The save is committed: a result that could not be stored is
+			// logged, never answered as a failed save.
+			slog.Error("failed to store the AI test result after a save", "error", terr)
+		}
+		if fresh, gerr := s.GetAISettings(ctx); gerr == nil {
+			return fresh, nil
+		}
+	}
 	return out, nil
 }
 
-// TestAIConnection runs the test connection action. A provider failure is an
-// answer (ok false and its words), not an error.
+// TestAIConnection runs the test connection action and stores its result as
+// the last test of the saved key. A provider failure is an answer (ok false
+// and its words), not an error.
 func (s *Service) TestAIConnection(ctx context.Context) TestResult {
-	if s.aiTester == nil {
-		return TestResult{OK: false, Message: "AI is off: the AI client is not available on this server"}
+	res, err := s.runAITest(ctx, false)
+	if err != nil {
+		slog.Error("failed to store the AI test result", "error", err)
 	}
-	if err := s.aiTester.TestConnection(ctx); err != nil {
-		return TestResult{OK: false, Message: err.Error()}
-	}
-	return TestResult{OK: true, Message: "The provider answered."}
+	return res
 }
 
 // SealLegacySettings seals any AI key row still stored in plain text, the
@@ -635,7 +752,7 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		if err := s.repo.DeleteSetting(ctx, settingAIBaseURL); err != nil {
 			return err
 		}
-		for _, k := range []string{ai.SettingAnthropicKey, ai.SettingProvider, ai.SettingAnthropicModel} {
+		for _, k := range []string{ai.SettingAnthropicKey, ai.SettingProvider, ai.SettingAnthropicModel, settingAITest} {
 			if err := s.repo.DeleteSetting(ctx, k); err != nil {
 				return err
 			}
@@ -661,6 +778,33 @@ func (s *Service) DeleteAISettings(ctx context.Context, pre Precondition) error 
 		s.invalidateAI()
 	}
 	return err
+}
+
+// unreachableProvider is the provider's name when err is an unreachable
+// provider, else "".
+func unreachableProvider(err error) string {
+	var ue *ai.UnreachableError
+	if errors.As(err, &ue) {
+		return ue.ProviderName()
+	}
+	return ""
+}
+
+// unreachableWords is the sentence for a test that could not reach provider: a
+// save says the key is saved, a pressed test does not.
+func unreachableWords(provider string, fromSave bool) string {
+	if fromSave {
+		return ai.UnreachableWords(provider)
+	}
+	return ai.PressedUnreachableWords(provider)
+}
+
+// aiProviderLabel is the display name of the chosen provider.
+func (s *Service) aiProviderLabel(ctx context.Context) string {
+	if p, _, err := s.repo.ReadSetting(ctx, ai.SettingProvider); err == nil && p == ai.ProviderAnthropic {
+		return "Anthropic"
+	}
+	return "OpenRouter"
 }
 
 // invalidateAI drops the AI client's cached settings after a committed save

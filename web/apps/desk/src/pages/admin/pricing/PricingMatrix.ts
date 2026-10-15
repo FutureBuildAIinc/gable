@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../../lib/icons';
 import { LayoutGrid, RefreshCw, ChevronDown, ChevronRight, AlertTriangle, Plus, User, Grid3X3, X } from 'lucide';
@@ -373,16 +374,11 @@ export class GablePricingMatrix extends LitElement {
             <span class="text-sm text-gable-green font-medium">
               ${this._selectedCells.size} cell${this._selectedCells.size !== 1 ? 's' : ''} selected
             </span>
-            <select
+            <gable-select
               .value=${this._bulkRuleType}
+              .options=${['markdown', 'markup', 'margin', 'fixed'].map(t => ({ value: t, label: t.toUpperCase() }))}
               @change=${(e: Event) => { this._bulkRuleType = (e.target as HTMLSelectElement).value as CategoryRuleType; }}
-              class="bg-deep-space border border-white/10 rounded px-2 py-1.5 text-white text-sm"
-            >
-              <option value="markdown">MARKDOWN</option>
-              <option value="markup">MARKUP</option>
-              <option value="margin">MARGIN</option>
-              <option value="fixed">FIXED</option>
-            </select>
+            ></gable-select>
             <input
               type="number"
               step="0.0001"

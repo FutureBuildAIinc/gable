@@ -9,6 +9,7 @@ import { PIMService } from '../../../services/PIMService.ts';
 import { ToastService } from '../../../lib/toast-service.ts';
 import { apiErrorMessage } from '../../../services/apiError';
 import type { PIMContent } from '../../../types/pim.ts';
+import { aiRefusalWords, renderAiNotice } from '../../../components/inventory/PimAiNotice.ts';
 
 @customElement('gable-product-seo-tab')
 export class GableProductSEOTab extends LitElement {
@@ -18,6 +19,7 @@ export class GableProductSEOTab extends LitElement {
     @property({ attribute: false }) content: PIMContent | null = null;
 
     @state() private generating = false;
+    @state() private aiNotice: string | null = null;
     @state() private saving = false;
     @state() private _seoTitle = '';
     @state() private _seoDescription = '';
@@ -39,12 +41,14 @@ export class GableProductSEOTab extends LitElement {
 
     private async _handleGenerate() {
         this.generating = true;
+        this.aiNotice = null;
         try {
             const result = await PIMService.generateSEO(this.productId, { target_keywords: this.keywords.length > 0 ? this.keywords : [] });
             this.dispatchEvent(new CustomEvent('content-update', { detail: result, bubbles: true, composed: true }));
         } catch (err) {
             console.error('Generate SEO failed:', err);
-            ToastService.show(apiErrorMessage(err, 'Failed to generate SEO content'), 'error');
+            this.aiNotice = aiRefusalWords(err);
+            if (!this.aiNotice) ToastService.show(apiErrorMessage(err, 'Failed to generate SEO content'), 'error');
         } finally {
             this.generating = false;
         }
@@ -83,6 +87,7 @@ export class GableProductSEOTab extends LitElement {
     render() {
         return html`
             <div class="space-y-6">
+                ${renderAiNotice(this.aiNotice)}
                 <!-- Generate Button -->
                 <div class="bg-zinc-900 border border-white/10 rounded-xl p-5">
                     <div class="flex items-center justify-between">

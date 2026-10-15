@@ -63,6 +63,9 @@ function statement(customerId: string) {
         closing_balance_cents: 0,
         lines: [],
         open_documents: [],
+        unapplied_payments: [] as { id: string; number: string; received_on: string; unapplied_cents: number }[],
+        unapplied_cents: 0,
+        net_balance_cents: 0,
       },
     ],
   }
@@ -199,3 +202,186 @@ describe('customer statement preselect via ?customer=<id>', () => {
     }
   })
 })
+
+describe('customer statement print', () => {
+  it('fetches the statement document with the token for the period shown and never prints the page', async () => {
+    localStorage.setItem('token', 'test-token')
+    const tab = { location: { href: '' }, close: vi.fn() }
+    const open = vi.fn(() => tab)
+    const print = vi.fn()
+    URL.createObjectURL = vi.fn(() => 'blob:statement')
+    URL.revokeObjectURL = vi.fn()
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/documents/print/statement/')) return new Response('%PDF', { status: 200 })
+      const routes: Record<string, unknown> = {
+        [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+        [`/ar/customers/${CUSTOMER_ID}/statement`]: statement(CUSTOMER_ID),
+      }
+      for (const [fragment, body] of Object.entries(routes)) if (String(url).includes(fragment)) return jsonResponse(body)
+      return jsonResponse([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('open', open)
+    vi.stubGlobal('print', print)
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).trim() === 'Print') as HTMLButtonElement
+      expect(button, 'expected a Print button once the statement is shown').toBeDefined()
+      button.click()
+      for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0))
+
+      expect(print).not.toHaveBeenCalled()
+      // the tab is opened empty during the click: never a bare tab on the API's address
+      expect(open).toHaveBeenCalledTimes(1)
+      expect(open.mock.calls[0]).toEqual(['', '_blank'])
+      const call = fetchMock.mock.calls.find(([u]) => String(u).includes('/documents/print/statement/'))
+      expect(call, 'expected the statement document to be fetched').toBeDefined()
+      const url = String(call![0])
+      expect(url).toContain(`/api/v1/documents/print/statement/${CUSTOMER_ID}`)
+      expect(url).toContain('from=2031-01-01')
+      expect(url).toContain('to=2031-12-31')
+      const init = (call as unknown as [string, RequestInit])[1]
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer test-token')
+      expect(tab.location.href).toBe('blob:statement')
+    } finally {
+      history.replaceState(null, '', '/')
+      localStorage.removeItem('token')
+    }
+  })
+})
+
+describe('customer statement unapplied cash', () => {
+  it('lists the payments still unapplied and states the net balance beside the closing balance', async () => {
+    const st = statement(CUSTOMER_ID)
+    st.currencies[0] = {
+      ...st.currencies[0],
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 50000,
+      net_balance_cents: 50000,
+    }
+    stubRoutes({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+      [`/ar/customers/${CUSTOMER_ID}/statement`]: st,
+    })
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      const body = textOf(el)
+      expect(body).toContain('PAY-000042')
+      expect(body).toContain('2031-12-20')
+      expect(body).toContain('$500.00')
+      expect(body).toMatch(/net balance/i)
+    } finally {
+      history.replaceState(null, '', '/')
+    }
+  })
+})
+
+describe('customer statement print when the tab is blocked', () => {
+  it('saves the document as a download instead of dropping it', async () => {
+    localStorage.setItem('token', 'test-token')
+    URL.createObjectURL = vi.fn(() => 'blob:statement')
+    URL.revokeObjectURL = vi.fn()
+    const saved: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      saved.push(`${this.getAttribute('href')}|${this.download}`)
+    })
+    vi.stubGlobal('open', vi.fn(() => null))
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).includes('/documents/print/statement/')) return new Response('%PDF', { status: 200 })
+      if (String(url).includes(`/api/v1/customers/${CUSTOMER_ID}`)) return jsonResponse(customer({ id: CUSTOMER_ID }))
+      if (String(url).includes('/statement')) return jsonResponse(statement(CUSTOMER_ID))
+      return jsonResponse([])
+    }))
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    try {
+      const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+      for (let i = 0; i < 4; i++) {
+        await new Promise((r) => setTimeout(r, 0))
+        await el.updateComplete
+      }
+      const button = Array.from(el.querySelectorAll('button')).find((b) => textOf(b).trim() === 'Print') as HTMLButtonElement
+      button.click()
+      for (let i = 0; i < 4; i++) await new Promise((r) => setTimeout(r, 0))
+      expect(saved).toEqual(['blob:statement|statement.pdf'])
+    } finally {
+      click.mockRestore()
+      history.replaceState(null, '', '/')
+      localStorage.removeItem('token')
+    }
+  })
+})
+
+describe('customer statement scope at a yard', () => {
+  const BRANCH_KEY = 'gable_current_branch_id'
+  afterEach(() => localStorage.removeItem(BRANCH_KEY))
+
+  async function shown(cur: Record<string, unknown>) {
+    const st = statement(CUSTOMER_ID)
+    st.currencies[0] = { ...st.currencies[0], ...cur } as never
+    stubRoutes({
+      [`/api/v1/customers/${CUSTOMER_ID}`]: customer({ id: CUSTOMER_ID }),
+      [`/ar/customers/${CUSTOMER_ID}/statement`]: st,
+    })
+    history.replaceState(null, '', `?customer=${CUSTOMER_ID}`)
+    const el = await mountAsync<CustomerStatementPage>('gable-customer-statement')
+    for (let i = 0; i < 4; i++) {
+      await new Promise((r) => setTimeout(r, 0))
+      await el.updateComplete
+    }
+    history.replaceState(null, '', '/')
+    return textOf(el)
+  }
+
+  it('says the scope and names the unapplied cash at other yards when this yard sees none of it', async () => {
+    localStorage.setItem(BRANCH_KEY, 'b-yard-a')
+    const body = await shown({ closing_balance_cents: 100000, unapplied_payments: [], unapplied_cents: 7700, net_balance_cents: 92300, open_documents: [] })
+    expect(body).toContain("Open documents and unapplied payments are this yard's; the activity and the balances cover the whole account")
+    expect(body.split('the balances cover the whole account').length - 1, 'said once').toBe(1)
+    expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
+    expect(body).toContain('$923.00')
+  })
+
+  it('names only the part of the unapplied cash this yard cannot list', async () => {
+    localStorage.setItem(BRANCH_KEY, 'b-yard-a')
+    const body = await shown({
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 57700, net_balance_cents: 42300,
+    })
+    expect(body).toContain('PAY-000042')
+    expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
+  })
+
+  it('names the unapplied cash at other yards for a caller scoped by grants with no yard chosen', async () => {
+    const body = await shown({
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 57700, net_balance_cents: 42300,
+    })
+    expect(body).toMatch(/Unapplied cash at other yards:?\s*\$77\.00/)
+    expect(body).not.toContain('are this yard')
+    expect(body).toContain("Open documents and unapplied payments are those of your yards; the activity and the balances cover the whole account")
+  })
+
+  it('has no other yards row when everything is listed, and no scope line without a yard', async () => {
+    const body = await shown({
+      closing_balance_cents: 100000,
+      unapplied_payments: [{ id: '00000000-0000-4000-8000-0000000000p1', number: 'PAY-000042', received_on: '2031-12-20', unapplied_cents: 50000 }],
+      unapplied_cents: 50000, net_balance_cents: 50000,
+    })
+    expect(body).not.toMatch(/other yards/i)
+    expect(body).not.toContain('are this yard')
+  })
+})
+

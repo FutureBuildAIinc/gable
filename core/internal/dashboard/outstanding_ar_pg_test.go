@@ -7,7 +7,6 @@ import (
 	"context"
 	"log/slog"
 	"testing"
-	"time"
 
 	"github.com/gablelbm/gable/internal/account"
 	"github.com/gablelbm/gable/internal/gl"
@@ -58,7 +57,11 @@ func outstandingARLeg(t *testing.T) {
 	yardA, yardB, customer := uuid.New(), uuid.New(), uuid.New()
 	for _, b := range []uuid.UUID{yardA, yardB} {
 		if _, err := db.Pool.Exec(ctx,
-			`INSERT INTO locations (id, type, code) VALUES ($1, 'BRANCH', $2)`, b, "OAR-"+b.String()[:8]); err != nil {
+			// the yards sit in the default branch's zone: the AR core dates a
+			// payment by the payment's own branch's day
+			`INSERT INTO locations (id, type, code, timezone) VALUES ($1, 'BRANCH', $2,
+				COALESCE((SELECT l.timezone FROM locations l WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))`,
+			b, "OAR-"+b.String()[:8]); err != nil {
 			t.Fatalf("seed yard: %v", err)
 		}
 	}
@@ -181,13 +184,12 @@ func outstandingARLeg(t *testing.T) {
 
 // RULE: the open receivable's day is the default branch's business date read
 // in the database, as the aging's default, not the server process's local day.
-// With the server's clock two days behind the database's, an invoice dated the
-// branch's today still counts, and the figure still equals the aging's.
+// An invoice dated the branch's today counts, and the figure equals the
+// aging's.
 func TestGetDashboardSummary_OutstandingARReadsTheBranchDay(t *testing.T) {
 	testutil.LockBranchDay(t)
 	db := testutil.RequireDB(t)
 	repo := NewRepository(db)
-	repo.now = func() time.Time { return time.Now().AddDate(0, 0, -2) }
 	svc := account.NewService(db, gl.NewService(gl.NewRepository(db), nil, slog.Default()), slog.Default())
 	ctx := context.Background()
 

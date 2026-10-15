@@ -16,10 +16,12 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gablelbm/gable/internal/account"
+	"github.com/gablelbm/gable/internal/dashboard"
 	"github.com/gablelbm/gable/internal/testutil"
 )
 
@@ -90,6 +92,7 @@ var bannedSeedWords = []string{
 	"simpson", "strong-tie", "hardie", "cemtrim", "channellock", "romex",
 	"dryline", "firecode", "brownwood", "turtle", "gable.com",
 	"nordstrom", "kellogg", "zellweger",
+	"quikrete", "tyvek", "proframe angle",
 	"simp-", "ice & water shield", "speed square",
 }
 
@@ -312,6 +315,14 @@ func TestDemoImport(t *testing.T) {
 		if now.Weekday() == time.Sunday || now.Sub(dayStart) < 30*time.Minute {
 			t.Skip("the yards are closed today, or the day is too young for the history to hold it")
 		}
+		var branchDay string
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date::text`).Scan(&branchDay); err != nil {
+			t.Fatal(err)
+		}
+		if branchDay != now.Format("2006-01-02") {
+			t.Skip("the server's UTC day is ahead of the branch's: the history trades the branch's day, which this check does not read")
+		}
 		keys := jsonlKeys(t, customersData, "account_number")
 		var today int64
 		var future int
@@ -521,6 +532,173 @@ func TestDemoImport(t *testing.T) {
 		}
 	})
 
+	t.Run("no money is dated after the seed's day and the aging agrees with the documents", func(t *testing.T) {
+		var today string
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date::text`).Scan(&today); err != nil {
+			t.Fatal(err)
+		}
+		var later, laterApps int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM payments WHERE received_on > $1::date`, today).Scan(&later); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow(`SELECT COUNT(*) FROM ar_applications WHERE applied_on > $1::date`, today).Scan(&laterApps); err != nil {
+			t.Fatal(err)
+		}
+		if later != 0 || laterApps != 0 {
+			t.Errorf("%d payments are received and %d applications applied after the seed's day %s", later, laterApps, today)
+		}
+
+		// Each customer's aging total as of the seed's day is its open
+		// invoices less its open credits and unapplied cash, read from the
+		// documents themselves.
+		want := map[string]int64{}
+		rows, err := db.Query(`
+			SELECT customer_id::text, SUM(cents)::bigint FROM (
+				SELECT customer_id, ROUND(amount_open * 100) AS cents FROM invoices WHERE status <> 'VOID'
+				UNION ALL
+				SELECT customer_id, ROUND(amount_open * 100) FROM credit_memos WHERE status NOT IN ('DRAFT', 'VOID')
+				UNION ALL
+				SELECT customer_id, -ROUND(amount_unapplied * 100) FROM payments WHERE status = 'POSTED'
+			) d GROUP BY customer_id`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id string
+			var cents int64
+			if err := rows.Scan(&id, &cents); err != nil {
+				t.Fatal(err)
+			}
+			want[id] = cents
+		}
+		rows.Close()
+		var aging struct {
+			Items []account.AgingItem `json:"items"`
+		}
+		mux := accountMux(t, dbURL)
+		got := map[string]int64{}
+		cursor := ""
+		for {
+			var page struct {
+				Items      []account.AgingItem `json:"items"`
+				NextCursor *string             `json:"next_cursor"`
+			}
+			next := "/api/v1/ar/aging?group_by=customer&basis=due_date&as_of=" + today
+			if cursor != "" {
+				next += "&cursor=" + url.QueryEscape(cursor)
+			}
+			getJSON(t, mux, next, &page)
+			aging.Items = append(aging.Items, page.Items...)
+			if page.NextCursor == nil || *page.NextCursor == "" {
+				break
+			}
+			cursor = *page.NextCursor
+		}
+		for _, it := range aging.Items {
+			got[it.CustomerID.String()] += int64(it.TotalCents)
+		}
+		for id, w := range want {
+			if got[id] != w {
+				t.Errorf("customer %s: the aging totals %d, its documents say %d", id, got[id], w)
+			}
+		}
+		for id, g := range got {
+			if _, ok := want[id]; !ok && g != 0 {
+				t.Errorf("customer %s: the aging totals %d, it has no document", id, g)
+			}
+		}
+	})
+
+	t.Run("every customer's statement net balance equals its aging total", func(t *testing.T) {
+		var today string
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date::text`).Scan(&today); err != nil {
+			t.Fatal(err)
+		}
+		mux := accountMux(t, dbURL)
+		rows, err := db.Query(`SELECT DISTINCT customer_id::text FROM customer_transactions`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if len(ids) == 0 {
+			t.Fatal("no customer has subledger rows")
+		}
+		for _, id := range ids {
+			var st account.Statement
+			getJSON(t, mux, fmt.Sprintf("/api/v1/ar/customers/%s/statement?from=2000-01-01&to=%s", id, today), &st)
+			var net int64
+			for _, c := range st.Currencies {
+				net += int64(c.NetBalanceCents)
+			}
+			var ag account.AgingSummary
+			getJSON(t, mux, fmt.Sprintf("/api/v1/ar/aging/summary?customer_id=%s&as_of=%s", id, today), &ag)
+			var total int64
+			for _, c := range ag.Totals {
+				total += int64(c.TotalCents)
+			}
+			if net != total {
+				t.Errorf("customer %s: the statement's net balance %d, the aging's total %d", id, net, total)
+			}
+		}
+	})
+
+	t.Run("the dashboard's Outstanding AR equals the aging summary's total", func(t *testing.T) {
+		ar, err := newReceivables(dbURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ar.close()
+		ctx := context.Background()
+		var today time.Time
+		if err := db.QueryRow(`SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
+			WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date`).Scan(&today); err != nil {
+			t.Fatal(err)
+		}
+		aging, err := ar.acct.AgingSummary(ctx, account.AgingQuery{AsOf: today, Basis: "due_date"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var total int64
+		for _, c := range aging.Totals {
+			total += int64(c.TotalCents)
+		}
+		// The seed's invoices and the aging both read the document day; the
+		// dashboard must read the same receivable the aging does.
+		summary, err := dashboard.NewRepository(ar.db).GetDashboardSummary(ctx, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if summary.OutstandingAR != total {
+			t.Errorf("Outstanding AR %d, aging summary total %d", summary.OutstandingAR, total)
+		}
+		// And both equal the documents: open invoices less open credits and
+		// unapplied cash.
+		var docs int64
+		if err := db.QueryRow(`
+			SELECT COALESCE(SUM(cents), 0)::bigint FROM (
+				SELECT ROUND(amount_open * 100) AS cents FROM invoices WHERE status <> 'VOID'
+				UNION ALL
+				SELECT ROUND(amount_open * 100) FROM credit_memos WHERE status NOT IN ('DRAFT', 'VOID')
+				UNION ALL
+				SELECT -ROUND(amount_unapplied * 100) FROM payments WHERE status = 'POSTED'
+			) d`).Scan(&docs); err != nil {
+			t.Fatal(err)
+		}
+		if docs <= 0 || summary.OutstandingAR != docs {
+			t.Errorf("Outstanding AR %d, the documents say %d", summary.OutstandingAR, docs)
+		}
+	})
+
 	t.Run("the tenant's currency is on every imported customer and history document", func(t *testing.T) {
 		keys := jsonlKeys(t, customersData, "account_number")
 		var bad int
@@ -620,6 +798,21 @@ func demoImportDB(t *testing.T) (*sql.DB, string) {
 	return db, scratch.String()
 }
 
+const demoSeedInstantEnv = "SEED_NOW"
+
+var demoInstant struct {
+	sync.Once
+	at string
+}
+
+// demoSeedInstant is the one instant the package's seed runs read: the first
+// time a test asks.
+func demoSeedInstant(t *testing.T) string {
+	t.Helper()
+	demoInstant.Do(func() { demoInstant.at = time.Now().UTC().Format(time.RFC3339) })
+	return demoInstant.at
+}
+
 // runCommand runs one of the repository's commands (by its package path
 // under core/, where the commands run so migrate finds migrations/) on the
 // scratch database with the demo seed and its import asked for.
@@ -628,6 +821,9 @@ func runCommand(t *testing.T, dbURL, pkg string) {
 	cmd := exec.Command("go", "run", pkg)
 	cmd.Dir = "../../.."
 	cmd.Env = append(os.Environ(),
+		// every seed run of one test reads the same instant, so a boundary
+		// between two runs cannot move the second history
+		demoSeedInstantEnv+"="+demoSeedInstant(t),
 		"DATABASE_URL="+dbURL,
 		demoSeedEnv+"=1",
 		demoImportEnv+"=1",
@@ -705,5 +901,26 @@ func getJSON(t *testing.T, mux http.Handler, path string, dst any) {
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), dst); err != nil {
 		t.Fatalf("GET %s: %v", path, err)
+	}
+}
+
+// FROM-PRINCIPAL 118 a (review round 1): a product is named for what it is, so
+// no product description in the import names a maker. The invented vendor
+// records and their keys stay; only the descriptions are checked.
+func TestImportDescriptionsNameNoMaker(t *testing.T) {
+	for i, line := range strings.Split(string(catalogData), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var row struct {
+			SKU         string `json:"sku"`
+			Description string `json:"description"`
+		}
+		if err := json.Unmarshal([]byte(line), &row); err != nil {
+			t.Fatalf("catalog line %d: %v", i+1, err)
+		}
+		if strings.Contains(strings.ToLower(row.Description), "proframe") {
+			t.Errorf("%s: description %q names a maker", row.SKU, row.Description)
+		}
 	}
 }

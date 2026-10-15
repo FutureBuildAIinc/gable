@@ -10,6 +10,7 @@ import { PurchaseOrderService } from '../../services/PurchaseOrderService';
 import type { PurchaseOrder } from '../../types/purchaseOrder';
 import '../../components/BarcodeScanner.ts';
 import { poLabel } from '../../lib/utils';
+import { formatDate } from '../../lib/dates.ts';
 
 @customElement('gable-receive-po')
 export class ReceivePO extends LitElement {
@@ -149,7 +150,7 @@ export class ReceivePO extends LitElement {
                                         </div>
                                     </div>
                                     <div class="text-xs text-zinc-500">
-                                        ${po.lines?.length || '?'} line items &middot; ${new Date(po.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                        ${po.lines?.length || '?'} line items &middot; ${formatDate(po.created_at)}
                                     </div>
                                 </div>
                             </div>

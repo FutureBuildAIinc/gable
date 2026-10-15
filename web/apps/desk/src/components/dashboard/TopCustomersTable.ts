@@ -3,6 +3,7 @@
 
 import { LitElement, html } from 'lit';
 import { customElement, property } from 'lit/decorators.js';
+import { router } from '../../lib/router.ts';
 import type { TopCustomer } from '../../types/dashboard.ts';
 
 @customElement('gable-top-customers-table')
@@ -11,6 +12,20 @@ export class GableTopCustomersTable extends LitElement {
 
     @property({ attribute: false }) customers: TopCustomer[] = [];
     @property({ type: Boolean }) loading = false;
+
+    /** A click anywhere on the row follows the row's link; a click on the
+     *  link itself is the router's anchor interception, which navigates. A
+     *  Ctrl, Cmd or middle click opens the account in a new tab, as the
+     *  link itself would. */
+    private _openAccount(e: Event, customerId: string) {
+        if ((e.target as HTMLElement).closest('a')) return;
+        const url = `/accounts/${customerId}`;
+        if (e instanceof MouseEvent && (e.ctrlKey || e.metaKey || e.button === 1)) {
+            window.open(url, '_blank');
+            return;
+        }
+        router.navigate(url);
+    }
 
     render() {
         if (this.loading) {
@@ -61,14 +76,22 @@ export class GableTopCustomersTable extends LitElement {
                                         </tr>
                                     `
                                     : this.customers.map((customer) => html`
-                                        <tr class="group hover:bg-white/5 transition-colors">
+                                        <tr
+                                            class="group hover:bg-white/5 transition-colors cursor-pointer"
+                                            @click=${(e: Event) => this._openAccount(e, customer.customer_id)}
+                                            @auxclick=${(e: Event) => this._openAccount(e, customer.customer_id)}
+                                        >
                                             <td class="px-6 py-3 font-medium text-white">
-                                                <div class="flex items-center gap-3">
+                                                <a
+                                                    href=${`/accounts/${customer.customer_id}`}
+                                                    aria-label="Open ${customer.customer_name}'s account"
+                                                    class="flex items-center gap-3 rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green"
+                                                >
                                                     <div class="h-8 w-8 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-800 flex items-center justify-center text-xs font-bold text-white border border-white/10 shadow-sm group-hover:scale-105 transition-transform">
                                                         ${customer.customer_name.substring(0, 2).toUpperCase()}
                                                     </div>
-                                                    ${customer.customer_name}
-                                                </div>
+                                                    <span class="group-hover:text-gable-green transition-colors">${customer.customer_name}</span>
+                                                </a>
                                             </td>
                                             <td class="px-6 py-3 text-right font-mono text-zinc-400">
                                                 ${customer.order_count}

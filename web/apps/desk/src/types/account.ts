@@ -108,6 +108,18 @@ export interface ArStatementCurrency {
     lines: ArStatementLine[];
     closing_balance_cents: number;
     open_documents: ArOpenDocument[];
+    /** Payments received by the statement's last day that still hold unapplied cash on it. */
+    unapplied_payments: ArUnappliedPayment[];
+    unapplied_cents: number;
+    /** The closing balance less unapplied cash: the aging's total for the customer on that day. */
+    net_balance_cents: number;
+}
+
+export interface ArUnappliedPayment {
+    id: string;
+    number: string;
+    received_on: string;
+    unapplied_cents: number;
 }
 
 export interface ArStatement {

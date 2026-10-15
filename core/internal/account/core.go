@@ -56,6 +56,11 @@ func NewService(db *database.DB, glSvc *gl.Service, logger *slog.Logger) *Servic
 	return &Service{db: db, gl: glSvc, logger: logger, now: time.Now}
 }
 
+// WithClockForTest sets the clock the business day of the acts is read on (the
+// service reads time.Now otherwise); a test that moves the time of a whole
+// flow sets the same clock on every service of the flow.
+func (s *Service) WithClockForTest(now func() time.Time) *Service { s.now = now; return s }
+
 // conflict is a 409 with a blocker, the shape the refusals of section 9 take.
 func conflict(code, message string) *httpx.Error {
 	return &httpx.Error{Status: http.StatusConflict, Code: httpx.CodeConflict, Message: message,
@@ -65,6 +70,38 @@ func conflict(code, message string) *httpx.Error {
 func invalidField(field, message string) *httpx.Error {
 	return &httpx.Error{Status: http.StatusBadRequest, Code: httpx.CodeValidationFailed, Message: "the request is not valid",
 		Details: []httpx.FieldError{{Field: field, Message: message}}}
+}
+
+// refuseDayToCome refuses a money day after the business day of the branch
+// the act belongs to, in the branch's time zone (the aging's own rule for today):
+// cash is never received, applied or refunded on a day that has not come.
+func (s *Service) refuseDayToCome(ctx context.Context, branchID uuid.UUID, on time.Time, field string) error {
+	if on.IsZero() {
+		return nil
+	}
+	today, err := s.LocalDate(ctx, branchID, s.now())
+	if err != nil {
+		return err
+	}
+	if date(on) > date(today) {
+		return invalidField(field, fmt.Sprintf("%s has not come yet: money is dated no later than today, %s", date(on), date(today)))
+	}
+	return nil
+}
+
+// refuseDayToComeOf is refuseDayToCome for an act that names a document, not
+// a branch: the day is the document's own branch's. A document that is not
+// there is left to the act's own refusal.
+func (s *Service) refuseDayToComeOf(ctx context.Context, table string, id uuid.UUID, on time.Time, field string) error {
+	var branch uuid.UUID
+	err := s.ex(ctx).QueryRow(ctx, `SELECT branch_id FROM `+table+` WHERE id = $1`, id).Scan(&branch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("failed to read the document's branch: %w", err)
+	}
+	return s.refuseDayToCome(ctx, branch, on, field)
 }
 
 // ErrNoTransaction is the refusal to run an act with no transaction open.
@@ -483,6 +520,57 @@ func (s *Service) RestampHistory(ctx context.Context, invoiceID, paymentID uuid.
 	if !settled {
 		return conflict("not_settled", "only a paid invoice and a payment applied to it take a history day")
 	}
+	return s.restampRows(ctx, invoiceID, paymentID, invoicedAt, paidAt)
+}
+
+// RestampDay is RestampHistory for the base seed, whose invoices are unpaid or
+// part paid as often as paid: it puts the documents' days on the rows an
+// invoice's posting and, when a payment is named, that payment's act stamped
+// with the present. The same writes and the same limits (a transaction, a
+// payment day not before the invoice's or after the present, a payment with a
+// live application to the invoice), without the settled invoice guard.
+// uuid.Nil names no payment.
+func (s *Service) RestampDay(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
+	if err := s.requireTx(ctx); err != nil {
+		return err
+	}
+	if invoicedAt.IsZero() {
+		return invalidField("invoiced_at", "a day is given for the invoice")
+	}
+	if paymentID == uuid.Nil {
+		paidAt = invoicedAt
+	}
+	if paidAt.Before(invoicedAt) {
+		return invalidField("paid_at", "a payment is not made before its invoice")
+	}
+	if invoicedAt.After(s.now()) {
+		return invalidField("invoiced_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil && !paidAt.After(invoicedAt) {
+		// a payment received the invoice's own day follows it by a second, so
+		// a statement orders the application behind its invoice
+		paidAt = invoicedAt.Add(time.Second)
+	}
+	if paidAt.After(s.now()) {
+		return invalidField("paid_at", "a day is not in the future")
+	}
+	if paymentID != uuid.Nil {
+		var applied bool
+		if err := s.ex(ctx).QueryRow(ctx, `
+			SELECT EXISTS (SELECT 1 FROM ar_applications WHERE invoice_id = $1 AND payment_id = $2 AND reversed_at IS NULL)`,
+			invoiceID, paymentID).Scan(&applied); err != nil {
+			return fmt.Errorf("the invoice's payment was not read: %w", err)
+		}
+		if !applied {
+			return conflict("not_settled", "only a payment applied to the invoice takes its day")
+		}
+	}
+	return s.restampRows(ctx, invoiceID, paymentID, invoicedAt, paidAt)
+}
+
+// restampRows writes the stamps and the payment's link in the caller's
+// transaction.
+func (s *Service) restampRows(ctx context.Context, invoiceID, paymentID uuid.UUID, invoicedAt, paidAt time.Time) error {
 	// One statement: each update is a CTE over the rows the acts just wrote, so
 	// a history invoice costs one more round trip, not seven. Each is scoped to
 	// what the payment settled, so the guard above and the writes agree.

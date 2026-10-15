@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -181,16 +182,11 @@ export class NewPurchaseOrder extends LitElement {
                                             <div class="flex gap-3">
                                                 <div class="flex-1">
                                                     <label class="text-xs text-zinc-500">Product</label>
-                                                    <select
+                                                    <gable-select
                                                         .value=${line.product_id}
+                                                        .options=${[{ value: '', label: 'Select product...' }, ...this.products.map(p => ({ value: p.id, label: `${p.sku} - ${p.description}` }))]}
                                                         @change=${(e: Event) => this._updateLine(line.key, 'product_id', (e.target as HTMLSelectElement).value)}
-                                                        class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none mt-1"
-                                                    >
-                                                        <option value="">Select product...</option>
-                                                        ${this.products.map(p => html`
-                                                            <option value="${p.id}">${p.sku} - ${p.description}</option>
-                                                        `)}
-                                                    </select>
+                                                    ></gable-select>
                                                 </div>
                                                 <button @click=${() => this._removeLine(line.key)} class="text-rose-400 hover:text-rose-300 self-end pb-2">
                                                     ${icon(Trash2, 16, 'w-4 h-4')}

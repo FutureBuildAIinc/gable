@@ -436,11 +436,15 @@ paths:
     get:
       operationId: reportsDailyTill
       tags: [reporting]
-      summary: Payments collected on one day, by method
+      summary: Net collections on one day at the caller's yard, by method
       description: >-
-        Roles admin, owner, finance. The date defaults to today in the server's
-        time zone. A date that is not YYYY-MM-DD is a 500. The report is cached
-        for 60 seconds per date.
+        Roles admin, owner, finance. The date defaults to the default branch's
+        business day, the day the dashboard's Collected today card is cut on; a
+        date is that calendar day in the same zone. The day's figures are the
+        card's: payments received at the caller's yard by their business date
+        received_on (their own branch, never a voided payment), the refunds
+        paid out that day by refunded_on, and the net of the two. A dated report is cached for 60 seconds per date; one with no
+        date never is. A date that is not YYYY-MM-DD is a 500.
       parameters:
         - name: date
           in: query
@@ -468,8 +472,11 @@ paths:
       summary: Invoiced, collected and outstanding totals for a period
       description: >-
         Roles admin, owner, finance. start defaults to 30 days ago and end to
-        now; end is inclusive of its whole day. A date that is not YYYY-MM-DD
-        is a 500. Cached for 60 seconds per start and end pair.
+        now; end is inclusive of its whole day. total_collected is the period's
+        net collections, counted as the dashboard card and the Daily Till count
+        them (payments by received_on at the caller's yard, voided payments
+        out, refunds paid out in the period less). A date that is not
+        YYYY-MM-DD is a 500. Cached for 60 seconds per start and end pair.
       parameters:
         - name: start
           in: query
@@ -833,16 +840,27 @@ components:
     ReportingDailyTill:
       type: object
       description: reporting.DailyTillReport. Amounts are float dollars.
-      required: [date, total_collected, by_method, transaction_count]
+      required: [date, total_collected, received, refunds, net_collected, by_method, transaction_count]
       properties:
         date:
           type: string
           format: date
+          description: The business day the figures are for.
         total_collected:
           type: number
+          description: The day's net collections, the same figure as net_collected.
+        received:
+          type: number
+          description: Payments received that day at the yard, before refunds.
+        refunds:
+          type: number
+          description: Refunds paid out that day.
+        net_collected:
+          type: number
+          description: Received less refunds, equal to the dashboard's Collected today.
         by_method:
           type: object
-          description: Dollars collected per payment method.
+          description: Dollars received per payment method, before refunds.
           additionalProperties:
             type: number
         transaction_count:

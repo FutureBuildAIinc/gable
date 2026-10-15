@@ -23,9 +23,23 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// seedBranchZoneEnv names the time zone the seed gives the branches it writes.
+// The production seed leaves it unset and keeps its own zone; the
+// characterization run sets it to the zone its server reads, so the seed's
+// business day (the branch's calendar day) and the server's day cut are the
+// same day at every hour, not only outside the hours when UTC's date is ahead.
+const seedBranchZoneEnv = "SEED_BRANCH_TIMEZONE"
+
+func seedBranchZone() string {
+	if z := os.Getenv(seedBranchZoneEnv); z != "" {
+		return z
+	}
+	return "America/Vancouver"
+}
+
 // recentDate returns a timestamp drawn from the last `daysBack` days.
 func recentDate(daysBack int) time.Time {
-	return time.Now().AddDate(0, 0, -rand.Intn(daysBack))
+	return seedNow().AddDate(0, 0, -rand.Intn(daysBack))
 }
 
 // dedupeBranches resets the locations hierarchy when prior seed runs left
@@ -238,6 +252,9 @@ func demoHistoryRequested() bool {
 // entry point: without DEMO_SEED set it logs and returns without touching
 // any database.
 func Run() {
+	if err := checkSeedEnv(); err != nil {
+		log.Fatalf("Seed: %v", err)
+	}
 	// Checked before anything else, so an install that did not ask for demo
 	// data needs no database and no credentials.
 	//
@@ -327,6 +344,7 @@ func Run() {
 	// because parent_id is NULL for branches and NULL != NULL in unique indexes.
 	// Pre-select instead: if a BRANCH with this code exists, UPDATE it; else INSERT.
 	branchIDs := make(map[string]uuid.UUID)
+	branchZone := seedBranchZone()
 	for _, b := range branches {
 		var id string
 		err := db.QueryRow(`SELECT id FROM locations WHERE type='BRANCH' AND code=$1 LIMIT 1`, b.Code).Scan(&id)
@@ -334,9 +352,9 @@ func Run() {
 			// Not found → insert.
 			err = db.QueryRow(`INSERT INTO locations
 				(id, code, type, description, path, name, address, city, state, zip, phone, tax_jurisdiction_code, default_tax_rate, timezone, active)
-				VALUES (gen_random_uuid(), $1, 'BRANCH', $2, $1, $2, $3, $4, $5, $6, $7, $8, $9, 'America/Vancouver', TRUE)
+				VALUES (gen_random_uuid(), $1, 'BRANCH', $2, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, TRUE)
 				RETURNING id`,
-				b.Code, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate).Scan(&id)
+				b.Code, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate, branchZone).Scan(&id)
 			if err != nil {
 				log.Printf("Branch %s insert: %v", b.Code, err)
 				continue
@@ -345,10 +363,10 @@ func Run() {
 			// Found → update in place.
 			_, err = db.Exec(`UPDATE locations SET
 				description=$2, name=$2, address=$3, city=$4, state=$5, zip=$6, phone=$7,
-				tax_jurisdiction_code=$8, default_tax_rate=$9, timezone='America/Vancouver',
+				tax_jurisdiction_code=$8, default_tax_rate=$9, timezone=$10,
 				active=TRUE, updated_at=NOW()
 				WHERE id=$1`,
-				id, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate)
+				id, b.Name, b.Addr, b.City, b.State, b.Zip, b.Phone, b.TaxJur, b.TaxRate, branchZone)
 			if err != nil {
 				log.Printf("Branch %s update: %v", b.Code, err)
 			}
@@ -814,6 +832,10 @@ func Run() {
 		if branchID == uuid.Nil {
 			branchID = kelMainID
 		}
+		seedDay, err := seedToday(db)
+		if err != nil {
+			log.Fatalf("Seed: %v", err)
+		}
 		for i := 0; i < numOrders; i++ {
 			status := "FULFILLED"
 			r := rand.Float32()
@@ -874,6 +896,11 @@ func Run() {
 					paidShare = 0.4
 				}
 				dueDate := orderDate.AddDate(0, 1, 0)
+				// the day after the order, never after the day the seed runs
+				invoiceDay := orderDate.AddDate(0, 0, 1)
+				if dayOf(invoiceDay) > dayOf(seedDay) {
+					invoiceDay = seedDay
+				}
 				taxRate := 0.12 // BC: GST 5% + PST 7% on building materials.
 				subCents := cents(orderTotal)
 				taxCents := cents(float64(subCents) / 100 * taxRate)
@@ -884,7 +911,7 @@ func Run() {
 				_, err = db.Exec(`INSERT INTO invoices (id, order_id, customer_id, branch_id, status, total_amount, subtotal, tax_rate, tax_amount,
 						due_date, payment_terms_id, invoice_date, created_at)
 					VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::date,(SELECT payment_terms_id FROM customers WHERE id = $3),$11::date,$11)`,
-					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, orderDate.AddDate(0, 0, 1))
+					invID, orderID, custID, branchID, invStatus, total, subtotal, taxRate, taxAmt, dueDate, invoiceDay)
 				if err == nil {
 					invoiceIDs = append(invoiceIDs, invID)
 					// the billed lines: the order's, in the shared line shape
@@ -893,7 +920,7 @@ func Run() {
 						SELECT $1, ol.id, ol.product_id, ol.line_type, ol.position, ol.description, ol.sku,
 							ol.quantity, ol.uom, ol.price_uom, ol.uom_qty, ol.price_uom_qty, ol.unit_price, ol.unit_price, ol.price_source, ol.line_total, ol.taxable
 						FROM order_lines ol WHERE ol.order_id = $2 AND ol.line_type = 'PRODUCT'`, invID, orderID)
-					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: orderDate.AddDate(0, 0, 1),
+					seeded = append(seeded, seedInvoice{ID: invID, CustomerID: custID, BranchID: branchID, Date: invoiceDay,
 						Subtotal: subCents, Tax: taxCents, Paid: int64(math.Round(float64(subCents+taxCents) * paidShare))})
 				}
 			}
@@ -1064,7 +1091,7 @@ func Run() {
 	if len(vehicleIDs) > 0 && len(driverIDs) > 0 && len(orderIDs) > 0 {
 		for i := 0; i < 15; i++ {
 			rStatus := routeStatuses[rand.Intn(len(routeStatuses))]
-			sDate := time.Now().AddDate(0, 0, -(1 + rand.Intn(60)))
+			sDate := seedNow().AddDate(0, 0, -(1 + rand.Intn(60)))
 			vid := vehicleIDs[rand.Intn(len(vehicleIDs))]
 			did := driverIDs[rand.Intn(len(driverIDs))]
 			var rid string

@@ -33,17 +33,18 @@ const (
 )
 
 // svgElements is the allowlist of elements that are kept. Drawing elements
-// carry the picture; text and tspan only carry a short label.
+// carry the picture. text and tspan are not kept: a drawn product carries no
+// words (FROM-PRINCIPAL 118 a), and the prompt's ask is not the only guard.
 var svgElements = map[string]bool{
 	"svg": true, "g": true, "path": true, "rect": true, "circle": true, "ellipse": true,
 	"line": true, "polyline": true, "polygon": true, "defs": true, "linearGradient": true,
-	"radialGradient": true, "stop": true, "clipPath": true, "text": true, "tspan": true,
+	"radialGradient": true, "stop": true, "clipPath": true,
 }
 
 // drawing elements: at least one must survive, or nothing was drawn.
 var svgDrawing = map[string]bool{
 	"path": true, "rect": true, "circle": true, "ellipse": true, "line": true,
-	"polyline": true, "polygon": true, "text": true,
+	"polyline": true, "polygon": true,
 }
 
 // svgAttributes is the allowlist of attributes that are kept: geometry,

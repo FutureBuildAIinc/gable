@@ -20,7 +20,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import './ProductGeometryTab'
 import type { GableProductGeometryTab } from './ProductGeometryTab'
-import { mountAsync, update, flush, q, jsonResponse } from '../../../test/dom'
+import { mountAsync, update, flush, q, jsonResponse, chooseOption } from '../../../test/dom'
+import type { GableSelect } from '../../../components/ui/gable-select.ts'
 
 const PRODUCT_ID = '33333333-3333-4333-8333-333333333333'
 
@@ -188,7 +189,7 @@ describe('ProductGeometryTab: stackable is tri-state', () => {
   it('keeps "unknown" as null rather than defaulting it to true', async () => {
     const { el, stub } = await mountTab(productRow({ stackable: null }))
 
-    const select = q<HTMLSelectElement>(el, 'select[aria-label="Stackable in a load"]')
+    const select = q<GableSelect>(el, 'gable-select#geometry-stackable')
     expect(select.value).toBe('')
 
     await save(el)
@@ -198,9 +199,8 @@ describe('ProductGeometryTab: stackable is tri-state', () => {
   it('distinguishes an explicit "no" from "unknown"', async () => {
     const { el, stub } = await mountTab(productRow({ stackable: null }))
 
-    const select = q<HTMLSelectElement>(el, 'select[aria-label="Stackable in a load"]')
-    select.value = 'false'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const select = q<GableSelect>(el, 'gable-select#geometry-stackable')
+    await chooseOption(select, 'false')
     await update(el, {})
     await save(el)
 

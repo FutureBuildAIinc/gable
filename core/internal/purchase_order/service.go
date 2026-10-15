@@ -740,7 +740,22 @@ func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, file
 		return nil, ai.ErrAIOff
 	}
 
-	// Save the file to disk
+	// Detect content type for AI if needed
+	aiContentType := contentType
+	if aiContentType == "" || aiContentType == "application/octet-stream" {
+		aiContentType = http.DetectContentType(fileBytes)
+	}
+
+	// Extract freight data via AI. The degradation contract (unconfigured AI is a
+	// hard error so the user enters the total manually) lives in extractFreight,
+	// which is unit-tested independently of the DB-backed PO lookup above.
+	result, aiRaw, err := s.extractFreight(ctx, fileBytes, aiContentType)
+	if err != nil {
+		return nil, err
+	}
+
+	// Keep the file only for a read that succeeded: a refused or failed
+	// read leaves nothing behind.
 	ext := strings.ToLower(filepath.Ext(filename))
 	if ext == "" {
 		ext = ".bin"
@@ -755,19 +770,6 @@ func (s *Service) UploadFreightInvoice(ctx context.Context, poID uuid.UUID, file
 		return nil, fmt.Errorf("failed to save freight file: %w", err)
 	}
 
-	// Detect content type for AI if needed
-	aiContentType := contentType
-	if aiContentType == "" || aiContentType == "application/octet-stream" {
-		aiContentType = http.DetectContentType(fileBytes)
-	}
-
-	// Extract freight data via AI. The degradation contract — unconfigured AI is a
-	// hard error so the user enters the total manually — lives in extractFreight,
-	// which is unit-tested independently of the DB-backed PO lookup above.
-	result, aiRaw, err := s.extractFreight(ctx, fileBytes, aiContentType)
-	if err != nil {
-		return nil, err
-	}
 	carrierName := result.CarrierName
 	invoiceNumber := result.InvoiceNumber
 	totalAmountCents := int64(math.Round(result.TotalAmount * 100))

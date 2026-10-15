@@ -37,9 +37,13 @@ func (f *fixture) deposit(orderID string, cents int64) uuid.UUID {
 	acct := account.NewService(f.db, gl.NewService(gl.NewRepository(f.db), nil, slog.Default()), slog.Default())
 	var id uuid.UUID
 	err := f.db.RunInTx(ctx, func(ctx context.Context) error {
-		var e error
+		// the branch's own day: the core refuses a day that has not come there
+		day, e := acct.LocalDate(ctx, branch, time.Now())
+		if e != nil {
+			return e
+		}
 		id, _, e = acct.RecordPayment(ctx, account.RecordPaymentIn{CustomerID: f.customerID, BranchID: branch, Currency: "USD",
-			Method: "CASH", AmountCents: cents, ReceivedOn: time.Now(), OrderID: &oid, Actor: "u-test"})
+			Method: "CASH", AmountCents: cents, ReceivedOn: day, OrderID: &oid, Actor: "u-test"})
 		return e
 	})
 	if err != nil {

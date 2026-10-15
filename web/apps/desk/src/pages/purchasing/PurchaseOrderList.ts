@@ -16,6 +16,7 @@ import { formatDollars } from '../../lib/utils.ts';
 import { Package, AlertTriangle, Plus, Truck } from 'lucide';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
 import { poLabel } from '../../lib/utils';
+import { formatDate } from '../../lib/dates.ts';
 
 const statusColors: Record<string, string> = {
     DRAFT: 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20',
@@ -257,7 +258,7 @@ export class PurchaseOrderList extends LitElement {
                                             ${formatDollars(po.total_cost)}
                                         </td>
                                         <td class="px-6 py-4 text-zinc-400">
-                                            ${new Date(po.created_at).toLocaleDateString()}
+                                            ${formatDate(po.created_at)}
                                         </td>
                                     </tr>
                                 `;})}

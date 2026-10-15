@@ -597,8 +597,10 @@ func noHeaderDashboardLeg(t *testing.T) {
 	if trendTotal != 500 {
 		t.Errorf("no header revenue trend sums %d cents, want A's 500", trendTotal)
 	}
-	// The inventory alerts arm: A's yard row only, through the stocking
-	// location's branch.
+	// The inventory alerts arm: A's yard only, through the stocking
+	// location's branch; an alert is one row per product and yard, and its
+	// location is the yard (the branch), the sum of the yard's own row and
+	// every zone and bin under it (item 130, N20).
 	status, buf = f.userAs(t, "finance", "GET", "/api/v1/dashboard/inventory-alerts", "", nil)
 	if status != http.StatusOK {
 		t.Fatalf("no header inventory alerts: %d %s", status, buf)
@@ -615,7 +617,7 @@ func noHeaderDashboardLeg(t *testing.T) {
 	for _, a := range alerts {
 		if a.ProductID == f.posProd.String() {
 			rows++
-			if a.LocationID != f.yardA.String() {
+			if a.LocationID != f.branchA.String() {
 				t.Errorf("no header inventory alert for the product sits at %s, want A's yard", a.LocationID)
 			}
 		}

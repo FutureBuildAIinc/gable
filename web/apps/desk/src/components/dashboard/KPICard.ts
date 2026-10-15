@@ -16,6 +16,10 @@ export class GableKPICard extends LitElement {
     @property({ attribute: false }) iconHtml?: TemplateResult;
     @property({ type: Boolean }) loading = false;
     @property({ type: String }) valueColor = 'text-white';
+    /** Where the card drills in; unset renders a plain card. */
+    @property({ type: String }) href?: string;
+    /** The link's spoken name ("Open today's sales"). */
+    @property({ type: String, attribute: 'link-label' }) linkLabel?: string;
 
     private getTrendColor(): string {
         if (this.trend === undefined || this.trend === null) return 'text-zinc-500';
@@ -48,25 +52,21 @@ export class GableKPICard extends LitElement {
             `;
         }
 
-        // Parse numeric value if string starts with $
-        const numericValue = typeof this.value === 'string' && this.value.startsWith('$')
-            ? parseFloat(this.value.replace(/[^0-9.-]+/g, ''))
+        // A currency string is "$1,234.50" or "-$5.00": the sign comes before the dollar mark.
+        const isCurrency = typeof this.value === 'string' && /^-?\$/.test(this.value);
+        const negative = isCurrency && (this.value as string).startsWith('-');
+        const numericValue = isCurrency
+            ? Math.abs(parseFloat((this.value as string).replace(/[^0-9.]+/g, '')))
             : typeof this.value === 'number' ? this.value : 0;
-
-        const isCurrency = typeof this.value === 'string' && this.value.startsWith('$');
 
         const displayValue = typeof this.value === 'number'
             ? this.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })
             : isCurrency
-                ? numericValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                ? `${negative && numericValue !== 0 ? '-' : ''}$${numericValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : this.value;
 
-        return html`
-            <div class="rounded-xl border border-white/10 bg-slate-steel/50 hover:bg-slate-steel/70 hover:border-white/20 transition-all duration-300 cursor-pointer group relative overflow-hidden">
-                <div class="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity duration-300 transform group-hover:scale-110">
-                    ${this.iconHtml ? html`<div class="text-current scale-150">${this.iconHtml}</div>` : nothing}
-                </div>
-
+        const card = html`
+            <div class="rounded-xl border border-white/10 bg-slate-steel/50 hover:bg-slate-steel/70 hover:border-white/20 transition-all duration-300 cursor-pointer group relative overflow-hidden h-full">
                 <div class="p-6 relative z-10">
                     <div class="flex items-center justify-between mb-2">
                         <h3 class="text-sm font-medium text-zinc-400 font-sans tracking-wide">${this.cardTitle}</h3>
@@ -78,7 +78,6 @@ export class GableKPICard extends LitElement {
                     </div>
 
                     <div class="text-3xl font-mono font-bold tracking-tight ${this.valueColor} flex items-baseline gap-1">
-                        ${isCurrency ? html`<span>$</span>` : nothing}
                         <span>${displayValue}</span>
                     </div>
 
@@ -96,6 +95,17 @@ export class GableKPICard extends LitElement {
                 <!-- Hover Glow Effect -->
                 <div class="absolute -bottom-4 -right-4 w-24 h-24 bg-gable-green/20 blur-3xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
             </div>
+        `;
+
+        if (!this.href) return card;
+        return html`
+            <a
+                href=${this.href}
+                class="block rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-gable-green focus-visible:ring-offset-2 focus-visible:ring-offset-deep-space"
+            >
+                ${card}
+                <span class="sr-only">${this.linkLabel ?? this.cardTitle}</span>
+            </a>
         `;
     }
 }

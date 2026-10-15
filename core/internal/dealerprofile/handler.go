@@ -16,10 +16,13 @@ import (
 )
 
 // Guards are the role guards the routes mount behind: Read for the profile
-// and logo reads (every role that prints), Write for the two writes.
+// and logo reads (every role that prints), Write for the two writes, Locale
+// for the locale alone (every signed in desk person: the pages format their
+// dates for it).
 type Guards struct {
-	Read  func(http.Handler) http.Handler
-	Write func(http.Handler) http.Handler
+	Read   func(http.Handler) http.Handler
+	Write  func(http.Handler) http.Handler
+	Locale func(http.Handler) http.Handler
 }
 
 type Handler struct{ svc *Service }
@@ -36,6 +39,7 @@ func guarded(g func(http.Handler) http.Handler, h http.HandlerFunc) http.Handler
 func (h *Handler) RegisterRoutes(mux *http.ServeMux, g Guards) {
 	mux.HandleFunc("GET /api/v1/dealer-profile", guarded(g.Read, h.Get))
 	mux.HandleFunc("PUT /api/v1/dealer-profile", guarded(g.Write, h.Put))
+	mux.HandleFunc("GET /api/v1/dealer-profile/locale", guarded(g.Locale, h.GetLocale))
 	mux.HandleFunc("GET /api/v1/dealer-profile/logo", guarded(g.Read, h.GetLogo))
 	mux.HandleFunc("PUT /api/v1/dealer-profile/logo", guarded(g.Write, h.PutLogo))
 }
@@ -60,14 +64,30 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// GetLocale answers the locale alone, {"locale": "en-CA"}, for the pages
+// that format dates.
+func (h *Handler) GetLocale(w http.ResponseWriter, r *http.Request) {
+	if _, err := httpx.StrictQuery(r); err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	locale, err := h.svc.GetLocale(r.Context())
+	if err != nil {
+		httpx.WriteError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"locale": locale})
+}
+
 type putRequest struct {
-	LegalName   string `json:"legal_name"`
-	TradingName string `json:"trading_name"`
-	Phone       string `json:"phone"`
-	Email       string `json:"email"`
-	Website     string `json:"website"`
-	RemitTo     string `json:"remit_to"`
-	Revision    *int64 `json:"revision"`
+	LegalName   string  `json:"legal_name"`
+	TradingName string  `json:"trading_name"`
+	Phone       string  `json:"phone"`
+	Email       string  `json:"email"`
+	Website     string  `json:"website"`
+	RemitTo     string  `json:"remit_to"`
+	Locale      *string `json:"locale"`
+	Revision    *int64  `json:"revision"`
 }
 
 func (req putRequest) parse() (Input, error) {
@@ -92,6 +112,14 @@ func (req putRequest) parse() (Input, error) {
 	if in.Website != "" {
 		u, err := url.Parse(in.Website)
 		v.Check(err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "", "website", "must be an http or https address")
+	}
+	if req.Locale != nil {
+		locale := strings.TrimSpace(*req.Locale)
+		if err := CheckLocale(locale); err != nil {
+			v.Check(false, "locale", err.Error())
+		} else {
+			in.Locale = locale
+		}
 	}
 	return in, v.Err()
 }

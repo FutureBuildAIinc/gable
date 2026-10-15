@@ -8,7 +8,7 @@ import { FolderGit2, Plus, ArrowRight, RefreshCw, AlertTriangle, Briefcase } fro
 import { ProjectService } from '../../services/ProjectService.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { router } from '../../lib/router.ts';
-import { format } from 'date-fns';
+import { formatDate } from '../../lib/dates.ts';
 import type { Project } from '../../types/project.ts';
 
 @customElement('gable-project-list')
@@ -164,7 +164,7 @@ export class ProjectList extends LitElement {
                                         <div>
                                             <h3 class="font-medium text-white">${project.name}</h3>
                                             <div class="text-sm text-zinc-500 mt-1 flex items-center gap-2">
-                                                <span>Created ${format(new Date(project.created_at), 'MMM d, yyyy')}</span>
+                                                <span>Created ${formatDate(project.created_at)}</span>
                                                 <span>&middot;</span>
                                                 <span class="text-[10px] uppercase font-semibold tracking-wider px-1.5 py-0.5 rounded border ${project.status === 'active'
                                                     ? 'bg-blue-500/10 text-blue-400 border-blue-500/20'

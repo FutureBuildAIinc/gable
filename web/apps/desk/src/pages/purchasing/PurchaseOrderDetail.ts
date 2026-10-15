@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state, property, query } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
 import { router } from '../../lib/router.ts';
@@ -27,6 +28,9 @@ export class PurchaseOrderDetail extends LitElement {
     @state() private receiving = false;
     @state() private receiveData: Record<string, { qty: number; locationId: string }> = {};
     @state() private isSubmitting = false;
+    /** The receipt just confirmed on this page: what came in, how much of
+     *  each line, into which bin. Kept so the page says it in words. */
+    @state() private lastReceipt: { description: string; sku?: string; qty: number; bin: string }[] | null = null;
 
     @state() private freightCharges: FreightCharge[] = [];
     @state() private freightUploading = false;
@@ -117,13 +121,14 @@ export class PurchaseOrderDetail extends LitElement {
     /** Receive bins only: locations under the PO's own yard, no top-level
      *  branch rows. `branch_id` on a Location is the link, and `type === 'branch'`
      *  rows are skipped because a stray top-level location would let a user
-     *  receive into another yard by accident. */
+     *  receive into another yard by accident. Listed by their path, first bin
+     *  first, whatever order the wire serves. */
     private get _receiveLocations(): Location[] {
         const po = this.po;
         if (!po?.branch_id) return [];
-        return this.locations.filter(
-            (loc) => loc.branch_id === po.branch_id && loc.type !== 'branch',
-        );
+        return this.locations
+            .filter((loc) => loc.branch_id === po.branch_id && loc.type !== 'branch')
+            .sort((a, b) => (a.path || a.code).localeCompare(b.path || b.code, undefined, { numeric: true }));
     }
 
     private async _handleSubmitPO() {
@@ -160,7 +165,19 @@ export class PurchaseOrderDetail extends LitElement {
             }
 
             await PurchaseOrderService.receivePO(this.po.id, { lines });
-            ToastService.show('Items received into inventory', 'success');
+            const binLabel = (id: string) => {
+                const loc = this.locations.find((l) => l.id === id);
+                return loc ? loc.path || loc.code : id;
+            };
+            this.lastReceipt = lines.map((l) => {
+                const poLine = (this.po?.lines || []).find((pl) => pl.id === l.line_id);
+                return {
+                    description: poLine?.description ?? '',
+                    sku: poLine?.sku,
+                    qty: l.qty_received,
+                    bin: binLabel(l.location_id),
+                };
+            });
             this.receiving = false;
             this._loadPO(this.po.id);
         } catch (err) {
@@ -218,6 +235,48 @@ export class PurchaseOrderDetail extends LitElement {
             ...this.receiveData,
             [lineId]: { ...this.receiveData[lineId], locationId },
         };
+    }
+
+    /** The receipt, in words, on the page: what came in, how much of each
+     *  line, into which bin, and that the order is now received. The bins
+     *  are named only for the receipt this page just confirmed (the wire
+     *  does not carry a line's bin); a reloaded received order lists each
+     *  line's received count instead. */
+    private _renderReceipt() {
+        const po = this.po;
+        if (!po) return nothing;
+        const receivedLines = (po.lines || []).filter((l) => l.qty_received > 0);
+        if (!this.lastReceipt && receivedLines.length === 0) return nothing;
+        if (po.status !== 'RECEIVED' && po.status !== 'PARTIAL') return nothing;
+
+        const statusWords = po.status === 'RECEIVED'
+            ? 'This purchase order is now received.'
+            : 'This purchase order is partially received.';
+
+        return html`
+            <div class="mb-6 rounded-xl border border-gable-green/30 bg-gable-green/5 p-4">
+                <div class="flex items-center gap-2 mb-1">
+                    ${icon(CheckCircle, 20, 'w-5 h-5 text-gable-green')}
+                    <h2 class="text-sm font-semibold text-white">${this.lastReceipt ? 'Receipt confirmed' : 'Received into inventory'}</h2>
+                </div>
+                <p class="text-sm text-zinc-300">${statusWords}</p>
+                <ul class="mt-2 space-y-1 text-sm text-zinc-300 list-none">
+                    ${this.lastReceipt
+                        ? this.lastReceipt.map((r) => html`
+                            <li>
+                                <span class="font-mono text-white">${r.qty}</span> × ${r.description}${r.sku ? html` <span class="text-zinc-500">(${r.sku})</span>` : nothing} into <span class="font-mono text-white">${r.bin}</span>
+                            </li>
+                        `)
+                        : receivedLines.map((l) => html`
+                            <li>
+                                ${l.description}${l.sku ? html` <span class="text-zinc-500">(${l.sku})</span>` : nothing}:
+                                <span class="font-mono text-white">${l.qty_received}</span> of
+                                <span class="font-mono text-white">${l.quantity}</span> received
+                            </li>
+                        `)}
+                </ul>
+            </div>
+        `;
     }
 
     render() {
@@ -278,6 +337,8 @@ export class PurchaseOrderDetail extends LitElement {
                 </div>
             </div>
 
+            ${this._renderReceipt()}
+
             <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl">
                 <div class="p-0">
                     <table class="w-full text-sm text-left">
@@ -329,17 +390,14 @@ export class PurchaseOrderDetail extends LitElement {
                                         ` : nothing}
                                         ${this.receiving ? html`
                                             <td class="px-6 py-4">
-                                                <select
-                                                    .value=${this.receiveData[line.id]?.locationId || ''}
-                                                    @change=${(e: Event) => this._updateReceiveLocation(line.id, (e.target as HTMLSelectElement).value)}
-                                                    class="w-40 bg-black/20 border border-white/10 rounded px-2 py-1 text-white focus:border-gable-green outline-none"
-                                                    ?disabled=${remaining <= 0}
-                                                >
-                                                    <option value="">Select...</option>
-                                                    ${this._receiveLocations.map(loc => html`
-                                                        <option value="${loc.id}">${loc.path || loc.code}</option>
-                                                    `)}
-                                                </select>
+                                                <div class="w-40">
+                                                    <gable-select
+                                                        .value=${this.receiveData[line.id]?.locationId || ''}
+                                                        .options=${[{ value: '', label: 'Select...' }, ...this._receiveLocations.map(loc => ({ value: loc.id, label: loc.path || loc.code }))]}
+                                                        ?disabled=${remaining <= 0}
+                                                        @change=${(e: Event) => this._updateReceiveLocation(line.id, (e.target as HTMLSelectElement).value)}
+                                                    ></gable-select>
+                                                </div>
                                             </td>
                                         ` : nothing}
                                     </tr>

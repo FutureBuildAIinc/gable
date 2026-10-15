@@ -91,7 +91,7 @@ func (v keyValidator) ValidateKey(ctx context.Context, rawKey string) (middlewar
 // each test starts from the same settings and leaves nothing behind.
 func (f *fixture) cleanup() {
 	ctx := context.Background()
-	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model')`)
+	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model','ai_last_test')`)
 	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM admin_revisions WHERE resource LIKE 'admin.settings.%'`)
 	_, _ = f.db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'admin_settings'`)
 }

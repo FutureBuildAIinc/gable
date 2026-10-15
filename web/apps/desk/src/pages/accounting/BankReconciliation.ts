@@ -2,9 +2,13 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { LitElement, html, nothing } from 'lit';
+import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { ToastService } from '../../lib/toast-service.ts';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import type { BankAccount, BankTransaction, ReconciliationSession } from '../../types/bankrecon';
 import {
     listBankAccounts,
@@ -298,7 +302,7 @@ export class BankReconciliation extends LitElement {
                                 ${s.transactions.map((txn: BankTransaction) => html`
                                     <tr class="border-b border-slate-800 ${this.selectedBankTxn === txn.id ? 'bg-blue-500/10' : ''}">
                                         <td class="px-3 py-2.5 text-slate-300">
-                                            ${new Date(txn.transaction_date).toLocaleDateString()}
+                                            ${formatDay(txn.transaction_date)}
                                         </td>
                                         <td class="px-3 py-2.5 font-mono font-semibold ${txn.amount >= 0 ? 'text-emerald-400' : 'text-red-400'}">
                                             ${this._formatBalance(txn.amount)}
@@ -375,26 +379,21 @@ export class BankReconciliation extends LitElement {
                     <div class="grid grid-cols-4 gap-3">
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Bank Account</label>
-                            <select
+                            <gable-select
                                 .value=${this.newSessionAcctId}
+                                .options=${[{ value: '', label: 'Select account...' }, ...this.accounts.map(a => ({ value: a.id, label: a.name }))]}
                                 @change=${(e: Event) => this.newSessionAcctId = (e.target as HTMLSelectElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none"
-                            >
-                                <option value="">Select account...</option>
-                                ${this.accounts.map(a => html`<option value="${a.id}">${a.name}</option>`)}
-                            </select>
+                            ></gable-select>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Period Start</label>
-                            <input type="date" .value=${this.newSessionStart}
-                                @input=${(e: Event) => this.newSessionStart = (e.target as HTMLInputElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none" />
+                            <gable-date-field label="Period Start" .value=${this.newSessionStart}
+                                @change=${(e: Event) => this.newSessionStart = (e.target as GableDateField).value}></gable-date-field>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Period End</label>
-                            <input type="date" .value=${this.newSessionEnd}
-                                @input=${(e: Event) => this.newSessionEnd = (e.target as HTMLInputElement).value}
-                                class="w-full px-2.5 py-1.5 rounded border border-slate-600 bg-slate-900 text-slate-200 text-sm focus:border-blue-500 outline-none" />
+                            <gable-date-field label="Period End" .value=${this.newSessionEnd}
+                                @change=${(e: Event) => this.newSessionEnd = (e.target as GableDateField).value}></gable-date-field>
                         </div>
                         <div>
                             <label class="text-xs text-slate-400 block mb-1">Statement Ending Balance ($)</label>
@@ -433,7 +432,7 @@ export class BankReconciliation extends LitElement {
                                     <tr class="border-b border-slate-800">
                                         <td class="px-3 py-2.5 text-slate-300">${s.bank_account_name || 'N/A'}</td>
                                         <td class="px-3 py-2.5 text-slate-300">
-                                            ${new Date(s.period_start).toLocaleDateString()} - ${new Date(s.period_end).toLocaleDateString()}
+                                            ${formatDay(s.period_start)} - ${formatDay(s.period_end)}
                                         </td>
                                         <td class="px-3 py-2.5 text-slate-300 font-mono">${this._formatBalance(s.statement_balance)}</td>
                                         <td class="px-3 py-2.5 font-mono font-semibold ${s.difference === 0 ? 'text-emerald-400' : 'text-red-400'}">

@@ -47,15 +47,10 @@ export function formatPrice4(tenThousandths: number | null | undefined): string 
     return `${negative && abs !== 0 ? '-' : ''}$${wholeText}.${frac}`;
 }
 
-// A business date (YYYY-MM-DD, no time zone) rendered in the user's locale. Built
-// from its parts so a west-of-UTC machine never shows the day before; anything
-// that is not a plain date is returned as it came.
-export function formatDay(day: string | null | undefined): string {
-    if (!day) return '—';
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
-    if (!m) return day;
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])).toLocaleDateString();
-}
+// formatDay MOVED to ./dates.ts (the one date module, G1 walk note N15); it
+// is re-exported here so the existing `import { formatDay } from './utils'`
+// callers keep working.
+export { formatDay } from './dates.ts';
 
 // Money rendering for endpoints that already answer in float dollars (the
 // purchase order wire). Sits beside `formatCents` rather than replacing it:

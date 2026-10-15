@@ -3,6 +3,7 @@
 
 import type { Inventory } from '../types/product';
 import { fetchWithAuth } from './fetchClient';
+import { parseApiError } from './apiError';
 
 export interface StockAdjustmentRequest {
     product_id: string;
@@ -40,7 +41,9 @@ export const InventoryService = {
             body: JSON.stringify(data),
         });
         if (!response.ok) {
-            throw new Error('Failed to adjust stock');
+            // The route answers a refusal in words (a count needing its location, stock below zero, a count
+            // under the allocated figure) in the wire envelope.
+            throw await parseApiError(response, 'Failed to adjust stock');
         }
     },
 

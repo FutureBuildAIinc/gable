@@ -104,9 +104,9 @@ offer and the server enforces no role; a real dealer signs in through its identi
    Big White Cabin Co carries its Lake Country charge there. Open Customer Statement for Kelbrook Construction: each
    invoice and payment in the period with the running balance, and Print for the dealer's statement.
 8. **The manager's view (Morgan Hale).** Open the Dashboard: active orders, pending dispatch, outstanding AR (the
-   counter's account charges included), the revenue trend over the recent days, the top customers, the stock alerts
-   and the recent activity, with the order converted in step 3 on top. Today's revenue counts the money taken at the
-   yard today against yesterday's; the walk's sales went on account, so they show in outstanding AR instead.
+   counter's account charges included), the collected trend (the chart headed "Collected, last 7 days"), the top customers, the stock alerts
+   and the recent activity, with the order converted in step 3 on top. Collected today counts the cash received at the
+   yard today, less refunds, against yesterday's; the walk's sales went on account, so they show in outstanding AR instead.
 
 ### Not in this demo
 
@@ -114,8 +114,7 @@ offer and the server enforces no role; a real dealer signs in through its identi
 - AI unless an administrator enters an Anthropic key in Tech Admin, AI (and tests it there): with a key, the material
   list intake also reads photos and PDFs; without one, pasted lists, text files and spreadsheets are read without AI and
   every AI feature says plainly that AI is off.
-- Deposits and parked sales at the counter; changing the quantity of a line already on a sale (remove it and add it
-  again); a printed counter receipt.
+- Deposits and parked sales at the counter; a printed counter receipt.
 - One screen of every yard's stock or AR at once (steps 6 and 7 switch yards).
 - A void or a return of an earlier sale: the counter voids or returns the sale on its screen; there is no sale lookup
   yet.

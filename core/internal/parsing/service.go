@@ -70,6 +70,16 @@ func (s *Service) ExtractItemsWithAI(ctx context.Context, fileBytes []byte, cont
 			// the provider cannot read.
 			return nil, false, aiErr
 		}
+		if errors.Is(aiErr, ai.ErrKeyRefused) {
+			// The provider refused the saved key: a text list is still read
+			// by the rule-based reader, and anything else is refused in words,
+			// never answered with the canned list.
+			slog.Error("AI provider refused the saved key", "error", aiErr, "content_type", contentType)
+			if isTextContent(contentType) {
+				return s.ExtractItems(string(fileBytes)), false, nil
+			}
+			return nil, false, aiErr
+		}
 		slog.Error("AI extraction failed; returning the canned demo material list, NOT the uploaded file's contents",
 			"error", aiErr, "content_type", contentType, "bytes_discarded", len(fileBytes))
 		return s.ExtractItems(generateFallbackMaterialList()), true, nil
@@ -138,11 +148,11 @@ func generateFallbackMaterialList() string {
 10 sheets - CDX Plywood 1/2 4x8
 15 pcs - 2x10x16 Hem Fir
 8 pcs - 2x12x20
-20 bags - Quikrete 80lb
-4 rolls - Tyvek House Wrap
+20 bags - Concrete mix 80lb
+4 rolls - House wrap
 100 lf - 2x4 Pressure Treated
 Custom powder-coat railing 12ft bronze
-6 pcs - Simpson Strong-Tie A35
+6 pcs - Framing angle A35
 Specialty glass panel 48x72 frosted`
 }
 

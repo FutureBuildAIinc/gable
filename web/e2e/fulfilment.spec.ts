@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { answerAppDialog } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -70,8 +71,8 @@ test.describe('Fulfilment and will-call', () => {
     await page.goto(`/orders/${order.id}`);
     await expect(page.getByRole('heading', { name: order.number })).toBeVisible();
     const confirm = page.waitForResponse((r) => r.url().endsWith(`/api/v1/orders/${order.id}/transitions`));
-    page.once('dialog', (dialog) => dialog.accept());
     await page.getByRole('button', { name: /Confirm Order/i }).click();
+    await answerAppDialog(page);
     const confirmRes = await confirm;
     expect(confirmRes.status(), await confirmRes.text()).toBe(200);
     const confirmed = await confirmRes.json();

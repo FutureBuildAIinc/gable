@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { pickOption } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -111,7 +112,7 @@ test.describe('Invoices and credit memos', () => {
     await expect(page.getByTestId('invoice-total')).toBeVisible();
     await expect(page.locator('tbody tr', { hasText: invoice.number })).toHaveCount(1);
     await page.screenshot({ path: path.join(SHOTS_DIR, 'invoice-list.png') });
-    await page.getByLabel('Customer', { exact: true }).selectOption({ label: customer.name });
+    await pickOption(page.getByLabel('Customer', { exact: true }), customer.name);
     const row = page.locator('tbody tr', { hasText: invoice.number });
     await expect(row).toHaveCount(1);
     await expect(page.locator('tbody tr')).toHaveCount(1);
@@ -191,16 +192,16 @@ test.describe('Invoices and credit memos', () => {
     await expect(forInvoice).toContainText('-$');
     await page.goto('/credit-memos');
     await expect(page.getByRole('heading', { name: 'Credit Memos', exact: true })).toBeVisible();
-    await page.getByLabel('Customer', { exact: true }).selectOption({ label: customer.name });
+    await pickOption(page.getByLabel('Customer', { exact: true }), customer.name);
     const memoRow = page.locator('tbody tr', { hasText: memo.number });
     await expect(memoRow).toHaveCount(1);
     await expect(memoRow).toContainText('Return');
     await expect(memoRow).toContainText(dollars(memo.total_cents));
-    await page.getByLabel('Status', { exact: true }).selectOption('open');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Open');
     await expect(page.locator('tbody tr', { hasText: memo.number })).toHaveCount(1);
-    await page.getByLabel('Status', { exact: true }).selectOption('draft');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Draft');
     await expect(page.locator('tbody tr', { hasText: memo.number })).toHaveCount(0);
-    await page.getByLabel('Status', { exact: true }).selectOption('all');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'All');
     await expect(page.locator('tbody tr', { hasText: memo.number })).toHaveCount(1);
     await page.screenshot({ path: path.join(SHOTS_DIR, 'credit-memo-list.png') });
 
@@ -271,7 +272,7 @@ test.describe('Invoices and credit memos', () => {
 
     // The list shows it as Void.
     await page.goto('/invoices');
-    await page.getByLabel('Status', { exact: true }).selectOption('void');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Void');
     await expect(page.locator('tbody tr', { hasText: invoice.number })).toContainText('Void');
   });
 
@@ -281,14 +282,14 @@ test.describe('Invoices and credit memos', () => {
     await expect(page.getByRole('heading', { name: 'Invoices', exact: true })).toBeVisible();
 
     // The status filter: only that status in the table.
-    await page.getByLabel('Status', { exact: true }).selectOption('partial');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'Partial');
     await expect(page.getByText('Updating...')).toHaveCount(0);
     const partialRows = page.locator('tbody tr');
     await expect.poll(async () => partialRows.count()).toBeGreaterThan(0);
     for (const text of await partialRows.allInnerTexts()) expect(text).toContain('Partial');
 
     // The overdue toggle: every row carries the Overdue badge (the seed has overdue invoices).
-    await page.getByLabel('Status', { exact: true }).selectOption('all');
+    await pickOption(page.getByLabel('Status', { exact: true }), 'All');
     await page.getByLabel('Overdue only').check();
     await expect(page.getByText('Updating...')).toHaveCount(0);
     const overdueRows = page.locator('tbody tr');

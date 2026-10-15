@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { answerAppDialog, fillAppDialogPrompt } from './app-controls';
 import path from 'path';
 import fs from 'fs';
 
@@ -148,8 +149,9 @@ test('the counter: split tender, return and void', async ({ page, request }) => 
   await expect(page.getByTestId('pos-complete')).toContainText(/change \$\d/, { timeout: 15000 });
   await expect(page.getByTestId('pos-order-summary')).toContainText('Change given');
 
-  page.once('dialog', (dialog) => void dialog.accept('e2e: wrong customer'));
   await page.getByRole('button', { name: 'Void', exact: true }).click();
+  await fillAppDialogPrompt(page, 'e2e: wrong customer');
+  await answerAppDialog(page, 'Void sale');
   await expect(page.getByText(/POS-\d+ voided/)).toBeVisible({ timeout: 15000 });
   await page.screenshot({ path: path.join(SHOTS_DIR, 'pos-void.png'), fullPage: true });
 

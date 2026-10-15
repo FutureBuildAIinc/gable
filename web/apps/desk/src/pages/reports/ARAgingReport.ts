@@ -7,7 +7,10 @@ import { icon } from '../../lib/icons.ts';
 import { ToastService } from '../../lib/toast-service.ts';
 import { WalkTruncatedError } from '../../lib/cursorWalk';
 import { formatCents } from '../../lib/utils.ts';
+import { formatDay } from '../../lib/dates.ts';
 import { onBranchChanged } from '../../lib/branch-listener.ts';
+import '../../components/ui/gable-date-field.ts';
+import type { GableDateField } from '../../components/ui/gable-date-field.ts';
 import { ArService } from '../../services/ArService.ts';
 import type { ArAgingItem, ArAgingTotal, AgingGroupBy } from '../../types/account.ts';
 import { DollarSign } from 'lucide';
@@ -80,9 +83,14 @@ export class ARAgingReportPage extends LitElement {
         this._load();
     }
 
-    private _setAsOf(e: InputEvent) {
-        this.asOf = (e.target as HTMLInputElement).value;
+    private _setAsOf(e: Event) {
+        this.asOf = (e.target as GableDateField).value;
         this._load();
+    }
+
+    /** A zero is quiet: the muted label text; colour only for an amount that is there. */
+    private _tone(cents: number, colour: string): string {
+        return cents === 0 ? 'text-zinc-500' : colour;
     }
 
     /** A row's group label: the customer, the job, or the ship-to code. */
@@ -116,7 +124,7 @@ export class ARAgingReportPage extends LitElement {
                     AR Aging Report
                 </h1>
                 <p class="text-zinc-500 mt-1">
-                    Accounts receivable aging as of ${this.asOf || 'today'}, never adding two currencies
+                    Accounts receivable aging as of ${this.asOf ? formatDay(this.asOf) : 'today'}, never adding two currencies
                 </p>
             </div>
 
@@ -141,8 +149,7 @@ export class ARAgingReportPage extends LitElement {
                 </div>
                 <label class="flex items-center gap-2 text-sm text-zinc-400">
                     As of
-                    <input type="date" .value=${this.asOf} @input=${this._setAsOf}
-                        class="bg-zinc-950 border border-zinc-700 rounded px-2 py-1.5 text-zinc-100" />
+                    <gable-date-field label="As of" .value=${this.asOf} @change=${this._setAsOf}></gable-date-field>
                 </label>
             </div>
 
@@ -159,7 +166,7 @@ export class ARAgingReportPage extends LitElement {
                         <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl">
                             <div class="p-4 text-center">
                                 <p class="text-xs text-zinc-500 uppercase tracking-wider mb-1">${item.label}</p>
-                                <p class="text-xl font-mono font-bold ${item.color}">${formatCents(item.value)}</p>
+                                <p class="text-xl font-mono font-bold ${this._tone(item.value, item.color)}">${formatCents(item.value)}</p>
                             </div>
                         </div>
                     `)}
@@ -191,13 +198,13 @@ export class ARAgingReportPage extends LitElement {
                                             ${this._groupLabel(row)}
                                             <span class="text-zinc-500 text-xs ml-2">${this._rowSubtitle(row)}</span>
                                         </td>
-                                        <td class="px-6 py-4 text-right font-mono text-emerald-400">${formatCents(row.current_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-amber-400">${formatCents(row.days_1_30_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-orange-400">${formatCents(row.days_31_60_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-orange-400">${formatCents(row.days_61_90_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-rose-400">${formatCents(row.over_90_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-teal-300">${formatCents(row.unapplied_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-white font-bold">${formatCents(row.total_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.current_cents, 'text-emerald-400')}">${formatCents(row.current_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.days_1_30_cents, 'text-amber-400')}">${formatCents(row.days_1_30_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.days_31_60_cents, 'text-orange-400')}">${formatCents(row.days_31_60_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.days_61_90_cents, 'text-orange-400')}">${formatCents(row.days_61_90_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.over_90_cents, 'text-rose-400')}">${formatCents(row.over_90_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.unapplied_cents, 'text-teal-300')}">${formatCents(row.unapplied_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(row.total_cents, 'text-white')} font-bold">${formatCents(row.total_cents)}</td>
                                     </tr>
                                 `)}
                             </tbody>
@@ -205,13 +212,13 @@ export class ARAgingReportPage extends LitElement {
                                 ${this.totals.map(t => html`
                                     <tr class="font-bold">
                                         <td class="px-6 py-4 text-zinc-400 uppercase text-xs">Totals ${t.currency}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-emerald-400">${formatCents(t.current_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-amber-400">${formatCents(t.days_1_30_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-orange-400">${formatCents(t.days_31_60_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-orange-400">${formatCents(t.days_61_90_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-rose-400">${formatCents(t.over_90_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-teal-300">${formatCents(t.unapplied_cents)}</td>
-                                        <td class="px-6 py-4 text-right font-mono text-white">${formatCents(t.total_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.current_cents, 'text-emerald-400')}">${formatCents(t.current_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.days_1_30_cents, 'text-amber-400')}">${formatCents(t.days_1_30_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.days_31_60_cents, 'text-orange-400')}">${formatCents(t.days_31_60_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.days_61_90_cents, 'text-orange-400')}">${formatCents(t.days_61_90_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.over_90_cents, 'text-rose-400')}">${formatCents(t.over_90_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.unapplied_cents, 'text-teal-300')}">${formatCents(t.unapplied_cents)}</td>
+                                        <td class="px-6 py-4 text-right font-mono ${this._tone(t.total_cents, 'text-white')}">${formatCents(t.total_cents)}</td>
                                     </tr>
                                 `)}
                             </tfoot>

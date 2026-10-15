@@ -11,7 +11,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import './PaymentModal'
 import type { GablePaymentModal } from './PaymentModal'
-import { mount, update, q } from '../../test/dom'
+import { mount, update, q, chooseOption } from '../../test/dom'
 import type { CreatePaymentRequest } from '../../types/payment'
 
 function open(amountDueCents: number) {
@@ -113,9 +113,8 @@ describe('gable-payment-modal — cents out', () => {
 
   it('carries the method and reference through, lowercase as the route takes them', async () => {
     const el = await open(2500)
-    const select = q<HTMLSelectElement>(el, 'select')
-    select.value = 'check'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+    const select = q<HTMLElement & { value: string }>(el, 'gable-select')
+    await chooseOption(select, 'check')
     await update(el, {})
 
     const payload = submit(el)

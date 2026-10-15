@@ -182,7 +182,7 @@ func (c *Client) anthropicMessages(ctx context.Context, req anthropicRequest) (*
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("Anthropic request failed: %s", scrub(err.Error()))
+		return nil, &UnreachableError{Provider: "Anthropic", Detail: "Anthropic request failed: " + scrub(err.Error())}
 	}
 	defer resp.Body.Close()
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
@@ -195,6 +195,9 @@ func (c *Client) anthropicMessages(ctx context.Context, req anthropicRequest) (*
 		msg := string(respBody)
 		if parsed && ar.Error != nil && ar.Error.Message != "" {
 			msg = ar.Error.Message
+		}
+		if refused := refusedIfAuth("Anthropic", resp.StatusCode, scrub(msg)); refused != nil {
+			return nil, refused
 		}
 		return nil, fmt.Errorf("Anthropic API error (%d): %s", resp.StatusCode, scrub(msg))
 	}

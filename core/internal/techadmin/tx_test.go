@@ -60,11 +60,11 @@ func countRows(t *testing.T, db *database.DB, sql string, args ...any) int {
 func cleanSettings(t *testing.T, db *database.DB) {
 	t.Helper()
 	ctx := context.Background()
-	_, _ = db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model')`)
+	_, _ = db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model','ai_last_test')`)
 	_, _ = db.Pool.Exec(ctx, `DELETE FROM admin_revisions WHERE resource LIKE 'admin.settings.%'`)
 	_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'admin_settings'`)
 	t.Cleanup(func() {
-		_, _ = db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model')`)
+		_, _ = db.Pool.Exec(ctx, `DELETE FROM system_settings WHERE key IN ('openrouter_api_key','openrouter_base_url','openrouteservice_api_key','anthropic_api_key','ai.provider','ai.anthropic.model','ai_last_test')`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM admin_revisions WHERE resource LIKE 'admin.settings.%'`)
 		_, _ = db.Pool.Exec(ctx, `DELETE FROM events_outbox WHERE entity_type = 'admin_settings'`)
 	})

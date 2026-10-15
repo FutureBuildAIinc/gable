@@ -38,11 +38,15 @@ export interface AISettings {
     anthropic_configured: boolean;
     anthropic_key_hint: string | null;
     vault_present: boolean;
+    /** The last test of the saved key; a save runs the test. */
+    test_status: 'none' | 'untested' | 'passed' | 'refused' | 'failed';
+    test_message?: string;
 }
 
 export interface AITestResult {
     ok: boolean;
     message: string;
+    status?: 'passed' | 'refused' | 'failed';
 }
 
 export interface RoutingSettings {

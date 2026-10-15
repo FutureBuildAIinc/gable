@@ -40,8 +40,13 @@ paths:
       summary: Products at or below their reorder point
       description: >-
         Roles admin, owner, finance, branch scoped. At most 10 rows, lowest
-        stock first. A product with no inventory row counts as zero stock. A
-        reorder point of NULL counts as 10.
+        stock first, one row per product and yard. A yard's stock is its own
+        row plus every zone and bin under it, and that sum is what is
+        compared with the reorder point and reported. A product with no
+        inventory row counts as zero stock (an administrator with no branch
+        header sees that; a caller bound to a yard sees only products that
+        yard holds a row of, so a product held only at another yard gives no
+        alert here). A reorder point of NULL counts as 10.
       parameters:
         - $ref: "#/components/parameters/XBranchId"
       responses:
@@ -144,10 +149,14 @@ components:
         today_revenue:
           type: integer
           format: int64
-          description: Cents collected today.
+          description: >-
+            The branch's day net collections in cents at the caller's yard
+            (the card reads "Collected today"): payments received that day by
+            their business date received_on (their own branch, never a voided
+            payment) less refunds paid out that day by refunded_on.
         today_revenue_change:
           type: number
-          description: Percentage change against yesterday; 0 when yesterday collected nothing.
+          description: Percentage change of the net against yesterday's net; 0 when yesterday's net is not above zero.
         active_orders:
           type: integer
         pending_dispatch:
@@ -181,7 +190,10 @@ components:
         location_id:
           type: string
           format: uuid
-          description: Absent when the product has no inventory row.
+          description: The yard (the branch) the stock sum is for. Absent when the product has no inventory row.
+        yard_name:
+          type: string
+          description: The yard's name (its code when it has none). Absent with no yard.
     DashboardTopCustomer:
       type: object
       description: dashboard.TopCustomer. Money is int64 cents.
