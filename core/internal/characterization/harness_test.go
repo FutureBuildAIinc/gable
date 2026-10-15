@@ -259,6 +259,10 @@ func newHarness(t *testing.T, freshURL string) *harness {
 		"DEMO_SEED":    "1",
 		"GODEBUG":      "randautoseed=0",
 		"TZ":           "Etc/UTC",
+		// The seed's business day is its branches' calendar day: the branches
+		// take the zone the server reads, so the seeded days and the server's
+		// day cut agree at every hour of the UTC day.
+		"SEED_BRANCH_TIMEZONE": "Etc/UTC",
 	}), buildDir+"/core", "", "seed")
 
 	pinBranchZonesToUTC(t, freshURL)
