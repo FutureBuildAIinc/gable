@@ -139,7 +139,7 @@ export class GableAddProductModal extends LitElement {
     if (!this.isOpen) return nothing;
 
     return html`
-      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="add-product-modal-title">
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="add-product-modal-title">
         <div class="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl p-6">
           <div class="mb-6">
             <h2 id="add-product-modal-title" class="text-xl font-bold text-zinc-100">Add Product to Pile</h2>
@@ -250,7 +250,7 @@ export class GableAddProductModal extends LitElement {
               <button
                 type="submit"
                 ?disabled=${this._isSubmitting}
-                class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-sm font-medium transition-colors disabled:opacity-50"
+                class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-plate rounded text-sm font-medium transition-colors disabled:opacity-50"
               >
                 ${this._isSubmitting ? 'Saving...' : 'Create Product'}
               </button>

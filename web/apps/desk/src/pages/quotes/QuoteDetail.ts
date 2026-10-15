@@ -37,7 +37,7 @@ export class GableQuoteDetail extends LitElement {
     @state() private originalFile: { quoteId: string; url: string | null } | null = null;
 
     private stateColors: Record<string, string> = {
-        draft: 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30',
+        draft: 'bg-voice-fill/20 text-voice-text border-voice-fill/30',
         sent: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
         accepted: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
         rejected: 'bg-red-500/20 text-red-400 border-red-500/30',
@@ -593,7 +593,7 @@ export class GableQuoteDetail extends LitElement {
                                 ${quote.status}
                             </span>
                             ${quote.source === 'ai' ? html`
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-white/5 text-zinc-300 border border-white/10">
+                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-voice/5 text-voice-soft border border-voice/10">
                                     ${icon(ListChecks, 12, 'w-3 h-3')} Material list
                                 </span>
                             ` : nothing}
@@ -605,13 +605,13 @@ export class GableQuoteDetail extends LitElement {
                     <div class="flex gap-2">
                         ${quote.status === 'draft' ? html`
                             <button @click=${() => this.handleStateChange('sent')} ?disabled=${this.processing}
-                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                class="bg-blue-600 text-plate px-4 py-2 rounded hover:bg-blue-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Send, 14)} Mark Sent
                             </button>
                         ` : nothing}
                         ${(quote.status === 'draft' || quote.status === 'sent') ? html`
                             <button @click=${() => this.handleStateChange('accepted')} ?disabled=${this.processing}
-                                class="bg-emerald-600 text-white px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
+                                class="bg-emerald-600 text-plate px-4 py-2 rounded hover:bg-emerald-500 transition-colors flex items-center gap-2 text-sm font-medium disabled:opacity-50">
                                 ${icon(Check, 14)} Accept
                             </button>
                             <button @click=${() => this.handleStateChange('rejected')} ?disabled=${this.processing}

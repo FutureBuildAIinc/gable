@@ -90,22 +90,22 @@ export class GableActivityFeed extends LitElement {
 
     render() {
         return html`
-            <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-6 w-full">
-                <div class="flex justify-between items-center mb-6 border-b border-gray-200 pb-4">
-                    <h3 class="text-lg font-semibold text-gray-900">Activity History</h3>
+            <div class="bg-slate-steel rounded-lg border border-white/10 shadow-sm p-6 w-full">
+                <div class="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
+                    <h3 class="text-lg font-semibold text-white">Activity History</h3>
                     <button
                         @click=${this._openLogModal}
-                        class="px-4 py-2 bg-blue-600 text-white font-medium rounded-md hover:bg-blue-700 transition shadow-sm"
+                        class="px-4 py-2 bg-blue-600 text-plate font-medium rounded-md hover:bg-blue-700 transition shadow-sm"
                     >
                         + Log Activity
                     </button>
                 </div>
 
                 ${this.loading
-                    ? html`<div class="py-8 text-center text-gray-500">Loading timeline...</div>`
+                    ? html`<div class="py-8 text-center text-zinc-400">Loading timeline...</div>`
                     : this.activities.length === 0
                         ? html`
-                            <div class="py-8 text-center text-gray-500 bg-gray-50 rounded-lg border border-dashed border-gray-300">
+                            <div class="py-8 text-center text-zinc-400 bg-white/5 rounded-lg border border-dashed border-white/20">
                                 No activities logged yet.
                             </div>
                         `
@@ -116,28 +116,28 @@ export class GableActivityFeed extends LitElement {
                                         <li>
                                             <div class="relative pb-8">
                                                 ${activityIdx !== this.activities.length - 1
-                                                    ? html`<span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>`
+                                                    ? html`<span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-white/10" aria-hidden="true"></span>`
                                                     : nothing
                                                 }
                                                 <div class="relative flex space-x-3">
                                                     <div>
-                                                        <span class="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center ring-8 ring-white border border-gray-200">
+                                                        <span class="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center ring-8 ring-slate-steel border border-white/10">
                                                             ${this._getActivityIcon(activity.activity_type)}
                                                         </span>
                                                     </div>
                                                     <div class="flex min-w-0 flex-1 justify-between space-x-4 pt-1.5">
                                                         <div>
-                                                            <p class="text-sm text-gray-500">
-                                                                <span class="font-medium text-gray-900">${this._activityLabel(activity.activity_type)}</span>
+                                                            <p class="text-sm text-zinc-400">
+                                                                <span class="font-medium text-white">${this._activityLabel(activity.activity_type)}</span>
                                                                 ${activity.contact_id ? html`
-                                                                    with <span class="font-medium text-gray-900">${this._getContactName(activity.contact_id)}</span>
+                                                                    with <span class="font-medium text-white">${this._getContactName(activity.contact_id)}</span>
                                                                 ` : nothing}
                                                             </p>
-                                                            <p class="mt-2 text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-3 rounded-md border border-gray-100">
+                                                            <p class="mt-2 text-sm text-zinc-300 whitespace-pre-wrap bg-white/5 p-3 rounded-md border border-white/5">
                                                                 ${activity.description}
                                                             </p>
                                                         </div>
-                                                        <div class="whitespace-nowrap text-right text-sm text-gray-500">
+                                                        <div class="whitespace-nowrap text-right text-sm text-zinc-400">
                                                             <time datetime="${activity.activity_date}">
                                                                 ${format(new Date(activity.activity_date), 'MMM d, yyyy h:mm a')}
                                                             </time>

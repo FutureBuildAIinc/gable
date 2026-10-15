@@ -204,7 +204,7 @@ export class GableProductStockTab extends LitElement {
 
                 <!-- Adjust Modal -->
                 ${this.adjustModal ? html`
-                    <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" @click=${() => this._closeAdjustModal()}>
+                    <div class="fixed inset-0 bg-backdrop/60 flex items-center justify-center z-50" @click=${() => this._closeAdjustModal()}>
                         <div class="bg-zinc-900 border border-white/10 rounded-xl p-6 w-full max-w-sm" @click=${(e: Event) => e.stopPropagation()}>
                             <h3 class="text-white font-medium mb-1">Adjust Stock</h3>
                             <p class="text-zinc-500 text-sm mb-4">${this.productDescription} @ ${this.adjustModal.locationName}</p>

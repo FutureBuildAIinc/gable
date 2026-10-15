@@ -134,7 +134,7 @@ export class PortalCheckout extends LitElement {
 
                 <form @submit=${(e: Event) => this._handleSubmit(e)} class="space-y-6">
                     <!-- Order Summary -->
-                    <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                    <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                         <div class="p-5">
                             <h3 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">Order Summary</h3>
                             <div class="space-y-2 text-sm">
@@ -155,7 +155,7 @@ export class PortalCheckout extends LitElement {
                     </div>
 
                     <!-- Delivery Method -->
-                    <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                    <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                         <div class="p-5">
                             <h3 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Delivery Method</h3>
                             <div class="grid grid-cols-2 gap-3">
@@ -199,7 +199,7 @@ export class PortalCheckout extends LitElement {
                     </div>
 
                     <!-- Payment Method -->
-                    <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                    <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                         <div class="p-5">
                             <h3 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Payment Method</h3>
                             <div class="grid grid-cols-2 gap-3">
@@ -228,7 +228,7 @@ export class PortalCheckout extends LitElement {
                     </div>
 
                     <!-- Order Notes -->
-                    <div class="rounded-2xl border border-white/[0.06] bg-[#161821]/80 backdrop-blur-xl">
+                    <div class="rounded-2xl border border-white/[0.06] bg-slate-steel/80 backdrop-blur-xl">
                         <div class="p-5">
                             <h3 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">Order Notes</h3>
                             <textarea

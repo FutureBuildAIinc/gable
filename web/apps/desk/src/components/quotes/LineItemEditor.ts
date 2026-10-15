@@ -99,7 +99,7 @@ export class GableLineItemEditor extends LitElement {
     // Room for a thumb on every result only while some product carries a picture.
     const pictures = this.products.some(p => isDrawablePath(p.image_url));
     return html`
-      <div class="bg-[#161821] border border-white/10 p-4 rounded-lg mb-4">
+      <div class="bg-slate-steel border border-white/10 p-4 rounded-lg mb-4">
         <h3 class="text-sm font-medium text-gray-400 mb-3 uppercase tracking-wider">Add Line Item</h3>
         <div class="grid grid-cols-12 gap-4 items-end">
           <!-- Product Search -->
@@ -108,7 +108,7 @@ export class GableLineItemEditor extends LitElement {
             <div class="relative">
               <input
                 type="text"
-                class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white focus:border-[#00FFA3] outline-none"
+                class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white focus:border-gable-green outline-none"
                 placeholder="Search SKU or Desc..."
                 .value=${this._searchTerm}
                 @input=${(e: InputEvent) => {
@@ -119,10 +119,10 @@ export class GableLineItemEditor extends LitElement {
                 @focus=${() => this._isSearchOpen = true}
               />
               ${this._isSearchOpen && this._searchTerm ? html`
-                <div class="absolute z-50 w-full mt-1 bg-[#0A0B10] border border-white/10 rounded shadow-xl max-h-48 overflow-auto">
+                <div class="absolute z-50 w-full mt-1 bg-deep-space border border-white/10 rounded shadow-xl max-h-48 overflow-auto">
                   ${this._filteredProducts.map(p => html`
                     <div
-                      class="px-3 py-2 hover:bg-[#00FFA3]/10 cursor-pointer text-sm flex items-center gap-3"
+                      class="px-3 py-2 hover:bg-gable-green/10 cursor-pointer text-sm flex items-center gap-3"
                       @click=${() => this._handleSelectProduct(p)}
                     >
                       ${pictures ? html`<gable-product-thumb .src=${p.image_url} .size=${24} reserve></gable-product-thumb>` : nothing}
@@ -146,7 +146,7 @@ export class GableLineItemEditor extends LitElement {
             <label class="block text-xs font-medium text-gray-500 mb-1">Qty</label>
             <input
               type="number"
-              class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
+              class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-gable-green outline-none"
               .value=${this._quantity}
               @input=${(e: InputEvent) => this._quantity = (e.target as HTMLInputElement).value}
               min="1"
@@ -161,13 +161,13 @@ export class GableLineItemEditor extends LitElement {
               type="text"
               inputmode="decimal"
               aria-label="Unit price"
-              class="w-full bg-[#0A0B10] border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-[#00FFA3] outline-none"
+              class="w-full bg-deep-space border border-white/10 rounded px-3 py-2 text-white text-right font-mono focus:border-gable-green outline-none"
               .value=${this._price}
               @input=${(e: InputEvent) => this._price = (e.target as HTMLInputElement).value}
               @change=${this._normalisePrice}
             />
             ${this._priceDetails && this._priceDetails.price_basis !== 'retail' ? html`
-              <div class="text-[10px] text-[#00FFA3] whitespace-nowrap mt-1">${this._priceDetails.details}</div>
+              <div class="text-[10px] text-gable-green whitespace-nowrap mt-1">${this._priceDetails.details}</div>
             ` : nothing}
           </div>
 
@@ -176,7 +176,7 @@ export class GableLineItemEditor extends LitElement {
             <button
               @click=${this._handleAdd}
               ?disabled=${!this._canAdd}
-              class="w-full flex items-center justify-center bg-[#00FFA3] text-black font-medium py-2 rounded hover:bg-[#00FFA3]/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="w-full flex items-center justify-center bg-gable-green text-black font-medium py-2 rounded hover:bg-gable-green/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               ${icon(Plus, 16, 'mr-1')} Add
             </button>

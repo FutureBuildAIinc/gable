@@ -130,7 +130,7 @@ export class ARAgingReportPage extends LitElement {
                 <div class="flex rounded-lg overflow-hidden border border-white/10" role="group" aria-label="Group by">
                     ${GROUPS.map(g => html`
                         <button
-                            class="px-4 py-2 text-sm font-medium transition-colors ${this.groupBy === g.id ? 'bg-gable-green text-white' : 'text-zinc-400 hover:text-white bg-white/5'}"
+                            class="px-4 py-2 text-sm font-medium transition-colors ${this.groupBy === g.id ? 'bg-gable-green text-plate' : 'text-zinc-400 hover:text-white bg-white/5'}"
                             data-testid="group-by-${g.id}"
                             @click=${() => this._setGroup(g.id)}
                         >${g.label}</button>

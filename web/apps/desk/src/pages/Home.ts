@@ -76,7 +76,7 @@ export class GableHome extends LitElement {
         class="${cn(
           'flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all',
           active
-            ? 'text-gable-green bg-gable-green/10 shadow-[inset_0_0_0_1px_rgba(0,255,163,0.25)]'
+            ? 'text-gable-green bg-gable-green/10 ring-1 ring-inset ring-gable-green/25'
             : 'text-zinc-400 hover:text-white hover:bg-white/5',
         )}"
       >

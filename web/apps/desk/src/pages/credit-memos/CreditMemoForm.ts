@@ -351,7 +351,7 @@ export class GableCreditMemoForm extends LitElement {
                                                         aria-label="Restock ${r.line.sku || r.line.description}"
                                                         .checked=${r.restock}
                                                         @change=${(e: Event) => this.setReturn(i, { restock: (e.target as HTMLInputElement).checked })}
-                                                        class="accent-[#00FFA3]"
+                                                        class="accent-gable-green"
                                                     />
                                                 ` : html`<span class="text-zinc-600">-</span>`}
                                             </td>
