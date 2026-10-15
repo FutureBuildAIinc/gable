@@ -71,28 +71,45 @@ func NewRepository(db *database.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// defaultBranchZoneSQL is the default branch's IANA zone (UTC when it has
+// none): the zone of the business day the dashboard cuts today on.
+const defaultBranchZoneSQL = `COALESCE((SELECT l.timezone FROM locations l
+	WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`
+
+// GetDailyTill reads one business day's collections in the default branch's
+// zone. A zero date is the branch's today (the day the dashboard's Today's
+// Revenue card is cut on, so the card and this page agree); a date is that
+// calendar day in the same zone.
 func (r *PostgresRepository) GetDailyTill(ctx context.Context, date time.Time) (*DailyTillReport, error) {
-	// Truncate to day
-	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	dayEnd := dayStart.Add(24 * time.Hour)
+	var asked *string
+	if !date.IsZero() {
+		d := date.Format("2006-01-02")
+		asked = &d
+	}
 	branch, grants := reach(ctx)
+
+	// The day first, so a day with no collections still names itself.
+	var day string
+	if err := r.db.GetExecutor(ctx).QueryRow(ctx,
+		`SELECT COALESCE($1::date, (NOW() AT TIME ZONE `+defaultBranchZoneSQL+`)::date)::text`, asked).Scan(&day); err != nil {
+		return nil, fmt.Errorf("failed to read the till day: %w", err)
+	}
 
 	query := `
 		SELECT method, COALESCE(SUM(amount), 0), COUNT(*)
 		FROM payments
-		WHERE created_at >= $1 AND created_at < $2
-		  AND ` + middleware.Wall("", 3, 4) + `
+		WHERE (created_at AT TIME ZONE ` + defaultBranchZoneSQL + `)::date = $1::date
+		  AND ` + middleware.Wall("", 2, 3) + `
 		GROUP BY method
 	`
-
-	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, dayStart, dayEnd, branch, grants)
+	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, day, branch, grants)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query daily till: %w", err)
 	}
 	defer rows.Close()
 
 	report := &DailyTillReport{
-		Date:             dayStart.Format("2006-01-02"),
+		Date:             day,
 		ByMethod:         make(map[string]float64),
 		TransactionCount: 0,
 		TotalCollected:   0,

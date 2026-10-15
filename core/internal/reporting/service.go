@@ -51,9 +51,6 @@ func NewService(repo Repository) *Service {
 func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillReport, error) {
 	// Cache Key
 	key := "daily_till:" + reachKey(ctx) + ":" + dateStr
-	if dateStr == "" {
-		key += time.Now().Format("2006-01-02")
-	}
 
 	// Read Cache
 	s.cacheMutex.RLock()
@@ -65,12 +62,11 @@ func (s *Service) GetDailyTill(ctx context.Context, dateStr string) (*DailyTillR
 	}
 	s.cacheMutex.RUnlock()
 
-	// Parse date, default to today if empty
+	// Parse date; empty is the default branch's business day (a zero date),
+	// the day the dashboard's Today's Revenue card is cut on.
 	var date time.Time
 	var err error
-	if dateStr == "" {
-		date = time.Now()
-	} else {
+	if dateStr != "" {
 		date, err = time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			return nil, err

@@ -303,7 +303,7 @@ func TestGetCustomerStatement_DateWindow(t *testing.T) {
 	}
 }
 
-// CORRECTNESS: an omitted till date means today, and an explicit date is used
+// CORRECTNESS: an omitted till date means the branch's today, and an explicit date is used
 // verbatim rather than being shifted by a timezone conversion.
 func TestGetDailyTill_DateResolution(t *testing.T) {
 	repo := newFakeRepo()
@@ -318,8 +318,11 @@ func TestGetDailyTill_DateResolution(t *testing.T) {
 	if _, err := NewService(repo2).GetDailyTill(context.Background(), ""); err != nil {
 		t.Fatalf("GetDailyTill(\"\"): %v", err)
 	}
-	if got := repo2.tillCalls[0].Format("2006-01-02"); got != time.Now().Format("2006-01-02") {
-		t.Errorf("queried %s, want today", got)
+	// An omitted date is a zero date: the repository resolves the default
+	// branch's business day, the day the dashboard's card is cut on, never the
+	// server's.
+	if got := repo2.tillCalls[0]; !got.IsZero() {
+		t.Errorf("queried %s, want the zero date (the branch's today)", got.Format("2006-01-02"))
 	}
 
 	repo3 := newFakeRepo()

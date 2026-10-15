@@ -30,9 +30,9 @@ type Repository interface {
 // PostgresRepository implements Repository for Postgres.
 type PostgresRepository struct {
 	db *database.DB
-	// now is the server's clock (time.Now unless a test sets it); the
-	// revenue days read it, while the open receivable's day is the default
-	// branch's business date read in the database, as the aging's default.
+	// now is the server's clock (time.Now unless a test sets it). No figure
+	// is cut on it any more: today, yesterday, the trend's days and the open
+	// receivable all read the default branch's business date in the database.
 	now func() time.Time
 }
 
@@ -42,6 +42,11 @@ func (r *PostgresRepository) clock() time.Time {
 	}
 	return time.Now()
 }
+
+// defaultBranchZoneSQL is the default branch's IANA zone (UTC when it has
+// none): the zone of the business day the dashboard and the aging read.
+const defaultBranchZoneSQL = `COALESCE((SELECT l.timezone FROM locations l
+	WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC')`
 
 // NewRepository creates a new dashboard repository.
 func NewRepository(db *database.DB) *PostgresRepository {
@@ -59,28 +64,22 @@ func NewRepository(db *database.DB) *PostgresRepository {
 func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *uuid.UUID, grantsSub *string) (*DashboardSummary, error) {
 	summary := &DashboardSummary{}
 
-	now := r.clock()
-	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	todayEnd := todayStart.Add(24 * time.Hour)
-	yesterdayStart := todayStart.AddDate(0, 0, -1)
-
 	// Payments are joined to invoices→orders so the reach covers the payment
 	// through either document's branch, the pair the header rule read before.
-	paymentWall := "(" + middleware.Wall("o", 4, 5) + " OR " + middleware.Wall("i", 4, 5) + ")"
+	paymentWall := "(" + middleware.Wall("o", 1, 2) + " OR " + middleware.Wall("i", 1, 2) + ")"
 	query := `
 		WITH asof AS (
 			-- The open receivable's day: the default branch's business date,
 			-- the aging's default (account.todayInDefaultBranch), never the
 			-- server process's local day.
-			SELECT (NOW() AT TIME ZONE COALESCE((SELECT l.timezone FROM locations l
-			        WHERE l.id::text = (SELECT value FROM system_settings WHERE key = 'default_branch_id')), 'UTC'))::date AS d
+			SELECT (NOW() AT TIME ZONE ` + defaultBranchZoneSQL + `)::date AS d, ` + defaultBranchZoneSQL + ` AS tz
 		),
 		today_rev AS (
 			SELECT (COALESCE(SUM(p.amount), 0) * 100)::bigint AS val
 			FROM payments p
 			LEFT JOIN invoices i ON i.id = p.invoice_id
 			LEFT JOIN orders o ON o.id = i.order_id
-			WHERE p.created_at >= $1 AND p.created_at < $2
+			WHERE (p.created_at AT TIME ZONE (SELECT tz FROM asof))::date = (SELECT d FROM asof)
 			  AND ` + paymentWall + `
 		),
 		yesterday_rev AS (
@@ -88,28 +87,28 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			FROM payments p
 			LEFT JOIN invoices i ON i.id = p.invoice_id
 			LEFT JOIN orders o ON o.id = i.order_id
-			WHERE p.created_at >= $3 AND p.created_at < $1
+			WHERE (p.created_at AT TIME ZONE (SELECT tz FROM asof))::date = (SELECT d FROM asof) - 1
 			  AND ` + paymentWall + `
 		),
 		active_ord AS (
 			SELECT COUNT(*) AS val
 			FROM orders
 			WHERE status IN ('PENDING', 'CONFIRMED', 'PROCESSING', 'READY', 'ALLOCATED')
-			  AND ` + middleware.Wall("", 4, 5) + `
+			  AND ` + middleware.Wall("", 1, 2) + `
 		),
 		pending_disp AS (
 			SELECT COUNT(*) AS val
 			FROM deliveries d
 			LEFT JOIN orders o ON o.id = d.order_id
 			WHERE d.status IN ('PENDING', 'ASSIGNED')
-			  AND ` + middleware.Wall("o", 4, 5) + `
+			  AND ` + middleware.Wall("o", 1, 2) + `
 		),
 		open_docs AS (
 			SELECT ROUND(i.total_amount * 100)::bigint - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
 			            WHERE a.invoice_id = i.id AND a.applied_on <= (SELECT d FROM asof) AND (a.reversed_on IS NULL OR a.reversed_on > (SELECT d FROM asof))), 0) AS amt
 			FROM invoices i
 			WHERE i.invoice_date <= (SELECT d FROM asof) AND (i.voided_on IS NULL OR i.voided_on > (SELECT d FROM asof))
-			  AND ` + middleware.Wall("i", 4, 5) + `
+			  AND ` + middleware.Wall("i", 1, 2) + `
 			UNION ALL
 			SELECT ROUND(m.total_amount * 100)::bigint
 			       + COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
@@ -117,7 +116,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			       + COALESCE((SELECT SUM(ROUND(f.amount * 100)::bigint) FROM payment_refunds f WHERE f.credit_memo_id = m.id AND f.refunded_on <= (SELECT d FROM asof)), 0)
 			FROM credit_memos m
 			WHERE m.number IS NOT NULL AND m.memo_date <= (SELECT d FROM asof) AND (m.voided_on IS NULL OR m.voided_on > (SELECT d FROM asof))
-			  AND ` + middleware.Wall("m", 4, 5) + `
+			  AND ` + middleware.Wall("m", 1, 2) + `
 			UNION ALL
 			SELECT -GREATEST(0, ROUND(p.amount * 100)::bigint
 			       - COALESCE((SELECT SUM(ROUND(a.amount * 100)::bigint) FROM ar_applications a
@@ -126,13 +125,13 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 			       - ROUND(p.migrated_excess * 100)::bigint)
 			FROM payments p
 			WHERE p.received_on <= (SELECT d FROM asof) AND (p.voided_on IS NULL OR p.voided_on > (SELECT d FROM asof))
-			  AND ` + middleware.Wall("p", 4, 5) + `
+			  AND ` + middleware.Wall("p", 1, 2) + `
 		),
 		outstanding AS (
 			SELECT (SELECT COALESCE(SUM(amt), 0)::bigint FROM open_docs) AS amount,
 			       (SELECT COUNT(*) FROM invoices
 			         WHERE status IN ('UNPAID', 'PARTIAL')
-			           AND ` + middleware.Wall("", 4, 5) + `) AS cnt
+			           AND ` + middleware.Wall("", 1, 2) + `) AS cnt
 		)
 		SELECT
 			(SELECT val FROM today_rev),
@@ -144,7 +143,7 @@ func (r *PostgresRepository) GetDashboardSummary(ctx context.Context, branchID *
 	`
 
 	var todayRevenue, yesterdayRevenue int64
-	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, todayStart, todayEnd, yesterdayStart, branchID, grantsSub).Scan(
+	err := r.db.GetExecutor(ctx).QueryRow(ctx, query, branchID, grantsSub).Scan(
 		&todayRevenue,
 		&yesterdayRevenue,
 		&summary.ActiveOrders,
@@ -317,16 +316,19 @@ func (r *PostgresRepository) GetOrderActivity(ctx context.Context, branchID *uui
 // GetRevenueTrend returns daily revenue for the last N days, walled to the
 // caller's reach through the order or the invoice each payment settles.
 func (r *PostgresRepository) GetRevenueTrend(ctx context.Context, branchID *uuid.UUID, grantsSub *string, days int) ([]RevenueTrendPoint, error) {
+	// The days are the default branch's business days, in its zone, the day
+	// Today's Revenue is cut on: the last N days are today and the N-1 before it.
 	query := `
 		SELECT
-			DATE(p.created_at) as date,
+			(p.created_at AT TIME ZONE ` + defaultBranchZoneSQL + `)::date as date,
 			(COALESCE(SUM(p.amount), 0) * 100)::bigint as revenue
 		FROM payments p
 		LEFT JOIN invoices i ON i.id = p.invoice_id
 		LEFT JOIN orders o ON o.id = i.order_id
-		WHERE p.created_at >= NOW() - MAKE_INTERVAL(days => $1)
+		WHERE (p.created_at AT TIME ZONE ` + defaultBranchZoneSQL + `)::date
+		        >= (NOW() AT TIME ZONE ` + defaultBranchZoneSQL + `)::date - ($1::int - 1)
 		  AND (` + middleware.Wall("o", 2, 3) + " OR " + middleware.Wall("i", 2, 3) + `)
-		GROUP BY DATE(p.created_at)
+		GROUP BY 1
 		ORDER BY date ASC
 	`
 	rows, err := r.db.GetExecutor(ctx).Query(ctx, query, days, branchID, grantsSub)
