@@ -75,7 +75,10 @@ export class GableProductMediaTab extends LitElement {
     private _newestRefused(): boolean {
         const settled = this.media.filter(m => m.status !== 'generating');
         if (settled.length === 0) return false;
-        const newest = settled.reduce((a, b) => (b.created_at > a.created_at ? b : a));
+        // Compare the moments: timestamps that fall on a whole second omit the fraction,
+        // and their text sorts after a later moment that carries one.
+        const at = (m: PIMMedia) => Date.parse(m.created_at) || 0;
+        const newest = settled.reduce((a, b) => (at(b) > at(a) ? b : a));
         return newest.status === 'refused';
     }
 
