@@ -5655,8 +5655,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List products below their reorder point
-         * @description The envelope; quantities are decimal strings. The rows carry the deficit only.
+         * List products at or below their reorder point, per yard
+         * @description The envelope; quantities are decimal strings. One row per product and yard, at or below the reorder point, the comparison of the low stock alert. With a branch header that yard only; with none, every yard in the caller's reach, each row naming its yard. The rows carry the deficit only.
          */
         get: operations["productReorderAlerts"];
         put?: never;
@@ -6076,7 +6076,7 @@ export interface paths {
         };
         /**
          * Purchasing recommendations
-         * @description Roles admin, owner, purchasing. Velocity based reorder suggestions. 503 when the recommendation service is not wired.
+         * @description Roles admin, owner, purchasing. Velocity based reorder suggestions, one row per product and yard (the yard's own stock and sales). With a branch header that yard; with none, every yard in the caller's reach, each row naming its yard. A product held at no yard in reach has no row. total_estimated_cost is a total of the rows' estimates and drives nothing. 503 when the recommendation service is not wired.
          */
         get: operations["purchaseOrderRecommendations"];
         put?: never;
@@ -13364,7 +13364,15 @@ export interface components {
             stackable: boolean | null;
             geometry_source: string | null;
         };
+        /** @description One product at one yard at or below its reorder point (FROM-PRINCIPAL item 135 b). current_stock is that yard's sum: its own row, its zones and its bins; a company wide total never appears here and drives nothing. */
         ReorderAlert: {
+            /**
+             * Format: uuid
+             * @description The yard this row is for.
+             */
+            branch_id: string;
+            /** @description The yard's name (its code when it has none). */
+            branch_name: string;
             /** Format: uuid */
             product_id: string;
             sku: string;
@@ -13682,10 +13690,21 @@ export interface components {
             error_message?: string;
         };
         PurchaseOrderRecommendation: {
+            /**
+             * Format: uuid
+             * @description The yard this row is for; stock and sales are that yard's.
+             */
+            branch_id: string;
+            branch_name: string;
             /** Format: uuid */
             product_id: string;
             product_sku: string;
             product_name: string;
+            /**
+             * Format: uuid
+             * @description The product's vendor; absent when the product has none.
+             */
+            vendor_id?: string;
             vendor_name?: string;
             current_stock: number;
             avg_daily_sales: number;
@@ -27727,7 +27746,10 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         status: "success";
+                        /** @description Draft orders created; a vendor and yard group with no line writes none. */
                         count: number;
+                        /** @description SKUs the run left alone because they carry no reorder quantity and no deficit (a yard exactly at its point). */
+                        no_reorder_qty: string[];
                     };
                 };
             };

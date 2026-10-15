@@ -375,6 +375,14 @@ func TestReorderAlertsEnvelope(t *testing.T) {
 	}
 	id := str(res.body["id"])
 	defer f.deleteProduct(id)
+	// Reorder is per yard (item 135 b): the product is signalled where a yard
+	// holds it, here an empty row at the default branch's yard.
+	if _, err := f.db.Pool.Exec(context.Background(),
+		`INSERT INTO inventory (product_id, location_id, location, quantity, allocated)
+		 VALUES ($1, (SELECT value::uuid FROM system_settings WHERE key = 'default_branch_id'), 'row', 0, 0)`, id); err != nil {
+		t.Fatalf("seed stock: %v", err)
+	}
+	defer f.db.Pool.Exec(context.Background(), `DELETE FROM inventory WHERE product_id = $1`, id)
 
 	alerts := f.do("GET", "/api/v1/products/reorder-alerts", nil)
 	if alerts.status != http.StatusOK {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LicenseRef-OpenLBM-Surface-1.0
 // SPDX-FileCopyrightText: 2026 FutureBuild, Inc. and OpenLBM contributors
 
-import { LitElement, html } from 'lit';
+import { LitElement, html, nothing } from 'lit';
 import '../../components/ui/gable-select.ts';
 import { customElement, state } from 'lit/decorators.js';
 import { icon } from '../../lib/icons.ts';
@@ -23,6 +23,13 @@ export class NewPurchaseOrder extends LitElement {
     createRenderRoot() { return this; }
 
     @state() private vendorId = '';
+    /** The yard a recommendation row is for; the order is created there. */
+    @state() private branchId = '';
+    @state() private branchName = '';
+    /** The vendor's name, shown beside the id a recommendation carried. */
+    @state() private vendorName = '';
+    /** True when a recommendation's product has no vendor: the person chooses one. */
+    @state() private noVendor = false;
     @state() private lines: LineWithKey[] = [];
     @state() private products: Product[] = [];
     @state() private loading = false;
@@ -37,8 +44,16 @@ export class NewPurchaseOrder extends LitElement {
         const params = new URLSearchParams(window.location.search);
         const isFromRecommendation = params.get('from') === 'recommendation';
         if (isFromRecommendation) {
-            const vendorName = params.get('vendor_name') || '';
-            if (vendorName) this.vendorId = vendorName;
+            this.branchId = params.get('branch_id') || '';
+            this.branchName = params.get('branch_name') || '';
+            // The vendor is the id the row carried; a name is never sent as an id.
+            const vendorId = params.get('vendor_id') || '';
+            if (vendorId) {
+                this.vendorId = vendorId;
+                this.vendorName = params.get('vendor_name') || '';
+            } else {
+                this.noVendor = true;
+            }
 
             const productId = params.get('product_id') || '';
             const description = params.get('description') || '';
@@ -84,7 +99,7 @@ export class NewPurchaseOrder extends LitElement {
 
     private async _handleSave() {
         if (!this.vendorId.trim()) {
-            ToastService.show('Enter a vendor ID', 'error');
+            ToastService.show(this.noVendor ? 'This product has no vendor. Enter the vendor ID first.' : 'Enter a vendor ID', 'error');
             return;
         }
         if (this.lines.length === 0) {
@@ -96,6 +111,7 @@ export class NewPurchaseOrder extends LitElement {
         try {
             const po = await PurchaseOrderService.createPO({
                 vendor_id: this.vendorId,
+                ...(this.branchId ? { branch_id: this.branchId } : {}),
                 lines: this.lines.map(({ product_id, description, quantity, cost }) => ({
                     product_id,
                     description,
@@ -126,6 +142,9 @@ export class NewPurchaseOrder extends LitElement {
                 <div class="flex-1">
                     <h1 class="text-2xl font-bold text-white">New Purchase Order</h1>
                     <p class="text-sm text-zinc-400">Create a PO for vendor replenishment</p>
+                    ${this.branchId ? html`
+                        <p data-testid="po-yard" class="text-sm text-zinc-300 mt-1">For yard: ${this.branchName || this.branchId}</p>
+                    ` : nothing}
                 </div>
                 <button
                     @click=${this._handleSave}
@@ -142,6 +161,14 @@ export class NewPurchaseOrder extends LitElement {
                     <div class="backdrop-blur-md bg-white/5 border border-white/10 rounded-xl">
                         <div class="p-6">
                             <h2 class="text-lg font-medium text-white mb-4">Vendor</h2>
+                            ${this.vendorName ? html`
+                                <p data-testid="po-vendor" class="text-sm text-white mb-2">${this.vendorName}</p>
+                            ` : nothing}
+                            ${this.noVendor && !this.vendorId ? html`
+                                <p data-testid="po-no-vendor" class="text-sm text-amber-400 mb-2">
+                                    This product has no vendor set, so no vendor is filled in. Enter the vendor ID below to create the order.
+                                </p>
+                            ` : nothing}
                             <input
                                 type="text"
                                 placeholder="Vendor UUID"
