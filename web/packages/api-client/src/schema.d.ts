@@ -3370,7 +3370,7 @@ export interface paths {
         };
         /**
          * List the caller's branches
-         * @description The caller's grants with the home flag. Without auth claims (dev mode) every active branch is returned with the first marked home.
+         * @description The caller's grants with the home flag. Without auth claims (dev mode) every active branch is returned and none is marked home.
          */
         get: operations["myBranches"];
         put?: never;

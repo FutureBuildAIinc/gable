@@ -105,7 +105,7 @@ the route census (`core/api/ROUTES.txt`) lists each one under
 | DELETE | `/api/v1/branches/{id}` | Archive the branch (active=false) at the revision; a non branch id is a 404; answers 204. |
 | GET | `/api/v1/branches/{id}/tree` | The branch row plus every descendant, ordered by path; behind the branch wall (a tree of a branch the caller may not target is a 403); one page; archived descendants are included. |
 | GET | `/api/v1/branches/{id}/users` | The users granted to a branch; admin or owner. |
-| GET | `/api/v1/me/branches` | The caller's grants with the home flag (a bare array, `[]` when none; inactive branches are left out; no paging); the role guard below, and user only for keys. In dev mode with no claims it returns every active branch with the first marked home. |
+| GET | `/api/v1/me/branches` | The caller's grants with the home flag (a bare array, `[]` when none; inactive branches are left out; no paging); the role guard below, and user only for keys. In dev mode with no claims it returns every active branch and marks none home. |
 | GET | `/api/v1/users` | The union of distinct user subjects from `user_locations` and `audit_log` (feeds the admin user picker); admin or owner. |
 | GET | `/api/v1/users/{sub}/branches` | One user's grants; admin or owner. |
 | POST | `/api/v1/users/{sub}/branches` | Grant a branch to a user (sets `is_home`; an existing grant is updated, and `is_home` true clears the user's other home flag); admin or owner; answers 204; `Idempotency-Key` rides the standard header. |

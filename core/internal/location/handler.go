@@ -762,19 +762,21 @@ func (h *Handler) ListMyBranches(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.ClaimsFromContext(r.Context())
 	if claims == nil {
 		// Dev mode without auth: return all active branches so the UI is usable.
+		// No branch is anyone's home here: the local caller is no one in
+		// particular, so marking the first branch home misled every persona.
 		all, _, err := h.service.ListBranchesPage(r.Context(), false, nil, nil, 200)
 		if err != nil {
 			httpx.WriteError(w, r, err)
 			return
 		}
 		out := make([]BranchSummary, 0, len(all))
-		for i, b := range all {
+		for _, b := range all {
 			out = append(out, BranchSummary{
 				ID:       b.ID,
 				Code:     b.Code,
 				Name:     deref(b.Name),
 				Active:   b.Active,
-				IsHome:   i == 0,
+				IsHome:   false,
 				Timezone: deref(b.Timezone),
 			})
 		}
