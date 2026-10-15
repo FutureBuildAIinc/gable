@@ -50,8 +50,8 @@ export function saveBlobUrl(url: string, filename: string): void {
  * url: an image or a pdf the page shows, or a file it saves. A plain `src` or
  * `href` on the API's address carries no token. The caller revokes the url.
  */
-export async function fetchAuthedBlobUrl(path: string, fallback: string): Promise<string> {
-    const response = await fetchWithAuth(`${API_URL}${path}`);
+export async function fetchAuthedBlobUrl(path: string, fallback: string, signal?: AbortSignal): Promise<string> {
+    const response = await fetchWithAuth(`${API_URL}${path}`, { signal });
     if (!response.ok) throw await parseApiError(response, fallback);
     return URL.createObjectURL(await response.blob());
 }

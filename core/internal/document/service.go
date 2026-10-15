@@ -542,16 +542,30 @@ func (s *Service) GenerateStatementPDF(ctx context.Context, st *account.Statemen
 			}
 		}
 	}
-	// The documents listed follow the printing yard's reach; the balance and the
-	// aging cover the whole account (FROM-PRINCIPAL 117): one line says so.
-	if branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx); branch != nil || grants != nil {
-		listed := false
+	// The open documents and unapplied payments follow the caller's reach; the
+	// activity and the balances cover the whole account (FROM-PRINCIPAL 117):
+	// whenever the caller is scoped, a line says so, and names the unapplied
+	// cash the caller's yards cannot see.
+	branch, grants := middleware.BranchIDForQuery(ctx), middleware.GrantsSubForQuery(ctx)
+	if branch != nil || grants != nil {
 		for _, c := range st.Currencies {
-			listed = listed || len(c.OpenDocuments) > 0 || len(c.UnappliedPayments) > 0
+			elsewhere := c.UnappliedCents
+			for _, p := range c.UnappliedPayments {
+				elsewhere -= p.UnappliedCents
+			}
+			if elsewhere > 0 {
+				label := "Unapplied cash at other yards: "
+				if len(st.Currencies) > 1 {
+					label = "Unapplied cash at other yards (" + c.Currency + "): "
+				}
+				m.AddRow(8, text.NewCol(12, label+money(elsewhere), props.Text{Size: 9, Top: 3}))
+			}
 		}
-		if listed {
-			m.AddRow(10, text.NewCol(12, "Documents listed are those this yard can see; the balance covers the whole account.", props.Text{Size: 8, Top: 3}))
+		whose := "this yard's"
+		if branch == nil {
+			whose = "those of your yards"
 		}
+		m.AddRow(10, text.NewCol(12, "Open documents and unapplied payments are "+whose+"; the activity and the balances cover the whole account.", props.Text{Size: 8, Top: 3}))
 	}
 	b.remitRow(m)
 	return finish(m)

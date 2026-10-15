@@ -46,6 +46,7 @@ export class GableQuoteDetail extends LitElement {
 
     connectedCallback() {
         super.connectedCallback();
+        this.gone = false;
         if (this.routeId) this.loadQuote(this.routeId);
     }
 
@@ -57,6 +58,8 @@ export class GableQuoteDetail extends LitElement {
     }
 
     private async loadQuote(quoteId: string) {
+        // another quote's original is let go as soon as this one is asked for
+        this.releaseOriginal(quoteId);
         try {
             const data = await QuoteService.get(quoteId);
             this.quote = data;
@@ -70,19 +73,60 @@ export class GableQuoteDetail extends LitElement {
         }
     }
 
-    /** The original is fetched with the token once per quote; its blob url is revoked when it is replaced. */
-    private async originalFileUrl(quote: Quote): Promise<string | null> {
-        if (this.originalFile?.quoteId === quote.id) return this.originalFile.url;
-        let url: string | null = null;
-        try {
-            url = await fetchAuthedBlobUrl(QuoteService.originalFilePath(quote.id), 'Failed to fetch the original list');
-        } catch (error) {
-            console.error(error);
-            ToastService.show(quoteErrorMessage(error, 'Failed to fetch the original list'), 'error');
+    /** The fetch of an original in flight: one per quote, aborted when another quote is asked for. */
+    private originalInFlight: { quoteId: string; promise: Promise<string | null>; abort: AbortController } | null = null;
+    private gone = false;
+
+    /** Lets go of the blob url held for a quote and of any fetch in flight for another. */
+    private releaseOriginal(except?: string) {
+        if (this.originalInFlight && this.originalInFlight.quoteId !== except) {
+            this.originalInFlight.abort.abort();
+            this.originalInFlight = null;
         }
-        if (this.originalFile?.url) URL.revokeObjectURL(this.originalFile.url);
-        this.originalFile = { quoteId: quote.id, url };
-        return url;
+        if (this.originalFile && this.originalFile.quoteId !== except) {
+            if (this.originalFile.url) URL.revokeObjectURL(this.originalFile.url);
+            this.originalFile = null;
+        }
+    }
+
+    /**
+     * The original is fetched with the token once per quote. An overlapping ask
+     * awaits the fetch in flight; a url that answers after the page has gone or
+     * the quote has moved on is revoked at once; a url in use is never revoked
+     * by a later fetch.
+     */
+    private originalFileUrl(quote: Quote): Promise<string | null> {
+        if (this.originalFile?.quoteId === quote.id) return Promise.resolve(this.originalFile.url);
+        if (this.originalInFlight?.quoteId === quote.id) return this.originalInFlight.promise;
+        this.releaseOriginal(quote.id);
+        const abort = new AbortController();
+        const run = async (): Promise<string | null> => {
+            let url: string | null = null;
+            try {
+                url = await fetchAuthedBlobUrl(QuoteService.originalFilePath(quote.id), 'Failed to fetch the original list', abort.signal);
+            } catch (error) {
+                if (!abort.signal.aborted) {
+                    console.error(error);
+                    ToastService.show(quoteErrorMessage(error, 'Failed to fetch the original list'), 'error');
+                }
+            }
+            if (this.originalInFlight?.abort !== abort) {
+                // the quote moved on, or the page went: nobody shows this url
+                if (url) URL.revokeObjectURL(url);
+                return null;
+            }
+            this.originalInFlight = null;
+            if (this.gone) {
+                if (url) URL.revokeObjectURL(url);
+                return null;
+            }
+            this.originalFile = { quoteId: quote.id, url };
+            return url;
+        };
+        const flight = { quoteId: quote.id, abort, promise: Promise.resolve(null) as Promise<string | null> };
+        this.originalInFlight = flight;
+        flight.promise = run();
+        return flight.promise;
     }
 
     private async downloadOriginal(quote: Quote) {
@@ -97,8 +141,8 @@ export class GableQuoteDetail extends LitElement {
 
     disconnectedCallback() {
         super.disconnectedCallback();
-        if (this.originalFile?.url) URL.revokeObjectURL(this.originalFile.url);
-        this.originalFile = null;
+        this.gone = true;
+        this.releaseOriginal();
     }
 
     /** A pasted or csv list is shown as its own text; any other type keeps the download link. */
