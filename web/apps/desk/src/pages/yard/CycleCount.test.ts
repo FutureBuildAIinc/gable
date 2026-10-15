@@ -23,15 +23,22 @@ const LOC = (id: string, path: string, branch: string) => ({ id, path, code: pat
 let levels = [ROW('i2', 'loc-zone', 'KEL-MAIN/KEL-A', '300.0000'), ROW('i1', 'loc-yard', 'KEL-MAIN', '112.0000')]
 
 let posts: Array<Record<string, unknown>>
+// Location ids whose write the server refuses in words.
+let refused: string[]
 
 beforeEach(() => {
   localStorage.setItem('token', 'test-token')
   levels = [ROW('i2', 'loc-zone', 'KEL-MAIN/KEL-A', '300.0000'), ROW('i1', 'loc-yard', 'KEL-MAIN', '112.0000')]
   posts = []
+  refused = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.includes('/api/v1/inventory/adjust')) {
-      posts.push(JSON.parse(String(init?.body)))
+      const body = JSON.parse(String(init?.body))
+      posts.push(body)
+      if (refused.includes(body.location_id)) {
+        return jsonResponse({ error: { code: 'below_allocated', message: 'Name the location you counted.' } }, 422)
+      }
       return jsonResponse({ status: 'ok' })
     }
     if (url.includes('/api/v1/inventory')) {
@@ -136,5 +143,33 @@ describe('Cycle count by location', () => {
     expect(text(q(el, '[data-testid="count-allocated-warning"]'))).toContain('40 allocated to orders')
     const submit = Array.from(el.querySelectorAll('button')).find((b) => text(b).startsWith('Submit Count')) as HTMLButtonElement
     expect(submit.disabled).toBe(true)
+  })
+
+  it('keeps a refused location on the page with its words, and shows done only when every count was written', async () => {
+    refused = ['loc-zone']
+    const el = await openZone()
+    const set = (name: string, value: string) => {
+      const i = Array.from(el.querySelectorAll<HTMLInputElement>('[data-testid="count-input"]'))
+        .find((x) => x.getAttribute('aria-label')?.endsWith(name)) as HTMLInputElement
+      i.value = value
+      i.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    set('KEL-MAIN', '110')
+    set('KEL-A', '290')
+    await update(el, {})
+    const submit = Array.from(el.querySelectorAll('button')).find((b) => text(b).startsWith('Submit Count')) as HTMLButtonElement
+    submit.click()
+    await flush()
+    await flush()
+    await update(el, {})
+    expect(posts.length).toBe(2)
+    expect(el.querySelector('[data-testid="count-done"]')).toBeNull()
+    const failed = q(el, '[data-testid="count-failed"]')
+    expect(text(failed)).toContain('KEL-MAIN/KEL-A')
+    expect(text(failed)).toContain('Name the location you counted.')
+    // The refused count is still in its box, so it can be corrected and sent again.
+    const zoneInput = Array.from(el.querySelectorAll<HTMLInputElement>('[data-testid="count-input"]'))
+      .find((x) => x.getAttribute('aria-label')?.endsWith('KEL-A')) as HTMLInputElement
+    expect(zoneInput.value).toBe('290')
   })
 })
